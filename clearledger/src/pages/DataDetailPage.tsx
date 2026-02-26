@@ -6,6 +6,7 @@ import { HistoryTimeline } from '@/components/data/HistoryTimeline'
 import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DetailPageSkeleton } from '@/components/common/Skeletons'
 import { toast } from 'sonner'
 
 export function DataDetailPage() {
@@ -16,13 +17,7 @@ export function DataDetailPage() {
   const transferEntries = useTransferEntries()
   const deleteEntry = useDeleteEntry()
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-[50vh]">
-        <p className="text-muted-foreground">Загрузка...</p>
-      </div>
-    )
-  }
+  if (isLoading) return <DetailPageSkeleton />
 
   if (!entry) {
     return (

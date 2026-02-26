@@ -44,7 +44,7 @@ export function KpiCards() {
   ]
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
       {cards.map((card) => {
         const Icon = card.icon
         return (

@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table'
 import { StatusBadge } from '@/components/data/StatusBadge'
 import { useEntries } from '@/hooks/useEntries'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { useMemo } from 'react'
 
 function formatTime(iso: string): string {
@@ -31,6 +32,7 @@ const actionLabels: Record<string, string> = {
 
 export function RecentActivity() {
   const { data: entries = [] } = useEntries()
+  const isMobile = useIsMobile()
 
   const recentEntries = useMemo(
     () => [...entries].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 7),
@@ -45,6 +47,21 @@ export function RecentActivity() {
       <CardContent>
         {recentEntries.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center">Нет данных</p>
+        ) : isMobile ? (
+          <div className="space-y-2">
+            {recentEntries.map((entry) => (
+              <div key={entry.id} className="flex items-center gap-3 p-2 rounded-md border">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{entry.title}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-muted-foreground">{formatTime(entry.updatedAt)}</span>
+                    <span className="text-xs text-muted-foreground">{actionLabels[entry.status] ?? entry.status}</span>
+                  </div>
+                </div>
+                <StatusBadge status={entry.status} />
+              </div>
+            ))}
+          </div>
         ) : (
           <Table>
             <TableHeader>

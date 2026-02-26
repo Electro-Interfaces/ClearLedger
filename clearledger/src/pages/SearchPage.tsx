@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, FileText } from 'lucide-react'
+import { SearchSkeleton } from '@/components/common/Skeletons'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -44,11 +45,7 @@ export function SearchPage() {
         </div>
       )}
 
-      {query.length >= 2 && isLoading && (
-        <div className="text-center py-12 text-muted-foreground">
-          Поиск...
-        </div>
-      )}
+      {query.length >= 2 && isLoading && <SearchSkeleton />}
 
       {query.length >= 2 && !isLoading && results.length === 0 && (
         <div className="text-center py-12 text-muted-foreground">

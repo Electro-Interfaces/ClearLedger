@@ -13,6 +13,7 @@ import {
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { useConnector, useUpdateConnector, useDeleteConnector } from '@/hooks/useConnectors'
+import { DetailPageSkeleton } from '@/components/common/Skeletons'
 import { toast } from 'sonner'
 
 interface EmailConfig {
@@ -82,9 +83,7 @@ export function ConnectorDetailPage() {
     }
   }, [connector])
 
-  if (isLoading) {
-    return <div className="text-center py-12 text-muted-foreground">Загрузка...</div>
-  }
+  if (isLoading) return <DetailPageSkeleton />
 
   if (!connector) {
     return (

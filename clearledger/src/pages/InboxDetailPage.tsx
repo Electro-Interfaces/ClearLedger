@@ -7,6 +7,7 @@ import { InboxNavigation } from '@/components/inbox/InboxNavigation'
 import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
+import { SplitViewSkeleton } from '@/components/common/Skeletons'
 import { toast } from 'sonner'
 
 export function InboxDetailPage() {
@@ -126,13 +127,7 @@ export function InboxDetailPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentIndex, inboxEntries.length])
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-[50vh]">
-        <p className="text-muted-foreground">Загрузка...</p>
-      </div>
-    )
-  }
+  if (isLoading) return <SplitViewSkeleton />
 
   if (!entry) {
     return (

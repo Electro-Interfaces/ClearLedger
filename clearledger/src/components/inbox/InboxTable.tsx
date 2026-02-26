@@ -4,6 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/data/StatusBadge'
 import { SourceBadge } from '@/components/data/SourceBadge'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { Check, Pencil, X, ArrowUpDown } from 'lucide-react'
 import type { DataEntry } from '@/types'
 
@@ -32,6 +33,7 @@ export function InboxTable({
   onVerify,
   onReject,
 }: InboxTableProps) {
+  const isMobile = useIsMobile()
   const [sortField, setSortField] = useState<SortField>('createdAt')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
 
@@ -107,6 +109,63 @@ export function InboxTable({
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
         Нет записей для обработки
+      </div>
+    )
+  }
+
+  if (isMobile) {
+    return (
+      <div className="space-y-2">
+        {sortedEntries.map((entry) => (
+          <div
+            key={entry.id}
+            className="p-3 rounded-lg border bg-card"
+          >
+            <button
+              type="button"
+              onClick={() => onRowClick(entry.id)}
+              className="w-full text-left"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-sm font-medium leading-tight line-clamp-2">{entry.title}</span>
+                <StatusBadge status={entry.status} />
+              </div>
+              <div className="flex items-center gap-2 mt-1.5">
+                <SourceBadge source={entry.source} />
+                <span className="text-xs text-muted-foreground ml-auto">{formatDate(entry.createdAt)}</span>
+              </div>
+            </button>
+            <div className="flex items-center gap-1 mt-2 pt-2 border-t">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onVerify(entry.id)}
+                className="flex-1 text-green-500 hover:text-green-400 hover:bg-green-500/10 h-9"
+              >
+                <Check className="size-4" />
+                Принять
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onRowClick(entry.id)}
+                className="flex-1 h-9"
+              >
+                <Pencil className="size-4" />
+                Открыть
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onReject(entry.id)}
+                className="flex-1 text-red-500 hover:text-red-400 hover:bg-red-500/10 h-9"
+              >
+                <X className="size-4" />
+                Отклонить
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
     )
   }

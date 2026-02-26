@@ -20,6 +20,7 @@ import { CompanyEditPage } from '@/pages/CompanyEditPage'
 import { InboxPage } from '@/pages/InboxPage'
 import { InboxDetailPage } from '@/pages/InboxDetailPage'
 import { LoginPage } from '@/pages/LoginPage'
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Loader2 } from 'lucide-react'
 
 /** Защищённый роут — редирект на /login если не авторизован */
@@ -63,16 +64,18 @@ function NotFoundPage() {
 
 function Providers() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <CompanyProvider>
-          <TooltipProvider>
-            <Outlet />
-            <Toaster position="bottom-right" richColors closeButton />
-          </TooltipProvider>
-        </CompanyProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <CompanyProvider>
+            <TooltipProvider>
+              <Outlet />
+              <Toaster position="bottom-right" richColors closeButton />
+            </TooltipProvider>
+          </CompanyProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   )
 }
 

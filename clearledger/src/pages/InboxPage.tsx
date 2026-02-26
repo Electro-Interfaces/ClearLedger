@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useInbox, useVerifyEntry, useRejectEntry } from '@/hooks/useEntries'
 import { InboxTable } from '@/components/inbox/InboxTable'
 import { InboxToolbar, type InboxFilters } from '@/components/inbox/InboxToolbar'
+import { TableSkeleton } from '@/components/common/Skeletons'
 import { Button } from '@/components/ui/button'
 import { Check, X, Inbox } from 'lucide-react'
 
@@ -59,8 +60,9 @@ export function InboxPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[50vh]">
-        <p className="text-muted-foreground">Загрузка...</p>
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight">Входящие</h1>
+        <TableSkeleton rows={6} />
       </div>
     )
   }
