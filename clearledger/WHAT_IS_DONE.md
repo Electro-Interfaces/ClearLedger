@@ -1,4 +1,4 @@
-# ClearLedger v0.2 — что реализовано
+# ClearLedger — что реализовано
 
 ## Идея
 
@@ -577,6 +577,81 @@ __cl.export(companyId?) — экспорт данных компании
 |-----------|-----------|
 | max-width 1400px | Ограничение контента для ultra-wide мониторов |
 | AppBreadcrumb | Авто-breadcrumbs из URL, resolve названий записей/коннекторов |
+
+---
+
+## v0.4.0 — Аудит, отчёты, экспорт, расширенный Dashboard
+
+### Аудит-лог
+
+Полноценный журнал изменений: кто, когда, что сделал. Fire-and-forget запись во всех mutation hooks (created, verified, rejected, transferred, archived, restored, excluded, included, updated). localStorage с лимитом 5000 событий, dual-mode ready для API.
+
+- `auditService.ts` — CRUD аудит-событий (logEvent, getEvents, getEventsForEntry)
+- `useAudit.ts` — React Query хуки (useAuditEvents, useEntryAudit)
+- Секция «Журнал изменений» в MetadataPanel — expandable, последние 5 событий
+- HistoryTimeline — реальные таймстемпы из аудита вместо приблизительных
+
+### Отчёты (/reports)
+
+Страница ReportsPage с выбором периода (сегодня/неделя/месяц/квартал/произвольный):
+
+| Секция | Описание |
+|--------|----------|
+| KPI-карточки | Загружено, проверено, отклонено, передано, ср. время верификации |
+| Топ контрагентов | Таблица: контрагент, всего, проверено, отклонено |
+| По источникам | PieChart (recharts) с легендой |
+| Анализ ошибок | Горизонтальный BarChart по причинам отклонения |
+
+Сервисы: `reportService.ts` (generatePeriodReport, getCounterpartyStats, getSourceStats, getErrorAnalysis).
+
+### Расширенный Dashboard
+
+8 KPI-карточек (5 базовых + 3 новых):
+
+| KPI | Описание |
+|-----|----------|
+| За неделю | Документов за 7 дней |
+| Процент отклонений | rejected / (verified + transferred + rejected) × 100 |
+| Ср. верификация | Среднее время от создания до верификации |
+
+Новые виджеты: топ-5 контрагентов, распределение по источникам (PieChart), последние ошибки.
+
+Сервис: `dashboardService.ts` (computeExtendedKpi, getTopCounterparties, getSourceDistribution, getRecentErrors).
+
+### Экспорт
+
+3 формата экспорта через ExportModal:
+
+| Формат | Описание |
+|--------|----------|
+| Excel (.xlsx) | Через библиотеку xlsx, выбор колонок |
+| CSV | UTF-8 с BOM, разделитель `;` |
+| 1С XML | Упрощённый CommerceML с реквизитами документов |
+
+Выбор колонок (15 полей), формата даты (ДД.ММ.ГГГГ / ГГГГ-ММ-ДД). Аудит экспорта.
+
+### Пагинация и фильтры
+
+- `PaginationWrapper` — переиспользуемый компонент с выбором размера страницы (25/50/100), ellipsis для >7 страниц, текст «Показано X–Y из Z»
+- `AdvancedFilters` — сворачиваемая панель с чипами активных фильтров: диапазон дат, диапазон сумм, контрагент (autocomplete), статус, источник
+- SearchPage — расширенные фильтры + подсветка поисковых терминов (`<mark>`) + PaginationWrapper
+- DataCategoryPage — PaginationWrapper вместо inline-пагинации + кнопка «Экспорт» → ExportModal
+
+### Навигация
+
+- Группа «Аналитика» в сайдбаре с иконкой BarChart3 → /reports
+- Lazy-load маршрут /reports в App.tsx
+
+### E2E тесты
+
+`e2e/audit-reports-export.spec.ts` — Playwright тесты для:
+- Аудит-лог в MetadataPanel (появление после верификации)
+- Страница /reports (загрузка, селектор периода, ссылка в сайдбаре, модалка экспорта)
+- ExportModal на DataCategoryPage
+- PaginationWrapper с селектором размера
+- AdvancedFilters (сворачивание, подсветка терминов)
+
+---
 
 ### Запланировано
 
