@@ -24,6 +24,7 @@ const CompaniesPage = lazy(() => import('@/pages/CompaniesPage').then((m) => ({ 
 const CompanyEditPage = lazy(() => import('@/pages/CompanyEditPage').then((m) => ({ default: m.CompanyEditPage })))
 const InboxPage = lazy(() => import('@/pages/InboxPage').then((m) => ({ default: m.InboxPage })))
 const InboxDetailPage = lazy(() => import('@/pages/InboxDetailPage').then((m) => ({ default: m.InboxDetailPage })))
+const ReportsPage = lazy(() => import('@/pages/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 
 function PageLoader() {
@@ -120,6 +121,7 @@ const router = createBrowserRouter([
               { path: '/data/:category', element: <LazyPage><DataCategoryPage /></LazyPage> },
               { path: '/data/:category/:id', element: <LazyPage><DataDetailPage /></LazyPage> },
               { path: '/search', element: <LazyPage><SearchPage /></LazyPage> },
+              { path: '/reports', element: <LazyPage><ReportsPage /></LazyPage> },
               { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
               { path: '/settings/companies', element: <LazyPage><CompaniesPage /></LazyPage> },
               { path: '/settings/companies/:id', element: <LazyPage><CompanyEditPage /></LazyPage> },

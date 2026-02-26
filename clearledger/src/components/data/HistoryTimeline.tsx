@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatDateTime } from '@/lib/formatDate'
-import type { DataEntry } from '@/types'
+import type { DataEntry, AuditEvent } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 
 const statusOrder: EntryStatus[] = ['new', 'recognized', 'verified', 'transferred']
@@ -13,6 +13,14 @@ const statusLabels: Record<EntryStatus, string> = {
   archived: 'В архиве',
 }
 
+const auditActionToStatus: Record<string, EntryStatus> = {
+  created: 'new',
+  verified: 'verified',
+  transferred: 'transferred',
+  rejected: 'error',
+  archived: 'archived',
+}
+
 interface TimelineEvent {
   status: EntryStatus
   label: string
@@ -20,11 +28,41 @@ interface TimelineEvent {
   active: boolean
 }
 
-function buildTimeline(entry: DataEntry): TimelineEvent[] {
+function buildTimeline(entry: DataEntry, auditEvents?: AuditEvent[]): TimelineEvent[] {
+  // If we have audit events, use real timestamps
+  if (auditEvents && auditEvents.length > 0) {
+    const events: TimelineEvent[] = []
+    const seen = new Set<string>()
+
+    for (const ev of auditEvents) {
+      const status = auditActionToStatus[ev.action]
+      if (!status || seen.has(status)) continue
+      seen.add(status)
+      events.push({
+        status,
+        label: statusLabels[status] ?? ev.action,
+        date: ev.timestamp,
+        active: true,
+      })
+    }
+
+    // Ensure at least 'new' event exists
+    if (!seen.has('new')) {
+      events.unshift({
+        status: 'new',
+        label: statusLabels.new,
+        date: entry.createdAt,
+        active: true,
+      })
+    }
+
+    return events
+  }
+
+  // Fallback: approximate timeline from entry status
   const events: TimelineEvent[] = []
   const currentIndex = statusOrder.indexOf(entry.status)
 
-  // "new" always happened at createdAt
   events.push({
     status: 'new',
     label: statusLabels.new,
@@ -32,7 +70,6 @@ function buildTimeline(entry: DataEntry): TimelineEvent[] {
     active: true,
   })
 
-  // For error status, show the error event
   if (entry.status === 'error') {
     events.push({
       status: 'error',
@@ -43,7 +80,6 @@ function buildTimeline(entry: DataEntry): TimelineEvent[] {
     return events
   }
 
-  // For each subsequent status up to current, show as active with updatedAt
   for (let i = 1; i < statusOrder.length; i++) {
     const s = statusOrder[i]
     if (i <= currentIndex) {
@@ -61,10 +97,11 @@ function buildTimeline(entry: DataEntry): TimelineEvent[] {
 
 interface HistoryTimelineProps {
   entry: DataEntry
+  auditEvents?: AuditEvent[]
 }
 
-export function HistoryTimeline({ entry }: HistoryTimelineProps) {
-  const events = buildTimeline(entry)
+export function HistoryTimeline({ entry, auditEvents }: HistoryTimelineProps) {
+  const events = buildTimeline(entry, auditEvents)
 
   return (
     <Card>

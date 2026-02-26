@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -9,9 +10,26 @@ import {
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { formatDateTime } from '@/lib/formatDate'
-import { Check, Trash2, Send, Archive, ArchiveRestore, EyeOff, Eye } from 'lucide-react'
-import type { DataEntry } from '@/types'
+import { Check, Trash2, Send, Archive, ArchiveRestore, EyeOff, Eye, ChevronDown, ChevronUp, History } from 'lucide-react'
+import { useEntryAudit } from '@/hooks/useAudit'
+import type { DataEntry, AuditAction } from '@/types'
 import type { ValidationResult } from '@/services/validationService'
+
+const auditActionLabels: Record<AuditAction, string> = {
+  created: 'Создан',
+  verified: 'Верифицирован',
+  rejected: 'Отклонён',
+  transferred: 'Передан',
+  archived: 'Архивирован',
+  restored: 'Восстановлен',
+  excluded: 'Исключён',
+  included: 'Возвращён',
+  updated: 'Обновлён',
+  version_created: 'Новая версия',
+  exported: 'Экспортирован',
+  bulk_archived: 'Массовая архивация',
+  bulk_excluded: 'Массовое исключение',
+}
 
 interface MetadataPanelProps {
   entry: DataEntry
@@ -31,6 +49,9 @@ export function MetadataPanel({
   validation,
 }: MetadataPanelProps) {
   const metadataEntries = Object.entries(entry.metadata).filter(([k]) => k !== 'rejectReason' && !k.startsWith('_'))
+  const { data: auditEvents = [] } = useEntryAudit(entry.id)
+  const [auditOpen, setAuditOpen] = useState(false)
+  const recentAudit = auditEvents.slice(-5).reverse()
   const rejectReason = entry.metadata.rejectReason
   const isExcluded = entry.metadata._excluded === 'true'
 
@@ -120,6 +141,36 @@ export function MetadataPanel({
             </div>
           </div>
         </div>
+
+        {/* Audit journal */}
+        {recentAudit.length > 0 && (
+          <>
+            <Separator />
+            <div className="space-y-2">
+              <button
+                className="flex items-center gap-2 text-sm font-medium text-muted-foreground w-full hover:text-foreground transition-colors"
+                onClick={() => setAuditOpen(!auditOpen)}
+              >
+                <History className="size-4" />
+                <span className="flex-1 text-left">Журнал изменений</span>
+                {auditOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              </button>
+              {auditOpen && (
+                <div className="space-y-1.5 text-xs">
+                  {recentAudit.map((ev) => (
+                    <div key={ev.id} className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="font-medium">{auditActionLabels[ev.action] ?? ev.action}</span>
+                        {ev.details && <span className="text-muted-foreground ml-1">({ev.details})</span>}
+                      </div>
+                      <span className="text-muted-foreground whitespace-nowrap">{formatDateTime(ev.timestamp)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         <Separator />
 

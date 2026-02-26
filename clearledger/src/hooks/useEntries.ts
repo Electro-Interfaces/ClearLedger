@@ -6,6 +6,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as svc from '@/services/dataEntryService'
+import { logEvent } from '@/services/auditService'
 import type { DataEntry, FilterState } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 import { useMemo, useState, useEffect } from 'react'
@@ -103,7 +104,10 @@ export function useCreateEntry() {
   return useMutation({
     mutationFn: (input: Omit<svc.CreateEntryInput, 'companyId'>) =>
       svc.createEntry({ ...input, companyId }),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (entry) => {
+      logEvent({ companyId, entryId: entry.id, action: 'created', details: entry.title })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -113,7 +117,10 @@ export function useUpdateEntry() {
   return useMutation({
     mutationFn: ({ id, updates }: { id: string; updates: Partial<DataEntry> }) =>
       svc.updateEntry(companyId, id, updates),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (_data, vars) => {
+      logEvent({ companyId, entryId: vars.id, action: 'updated', details: vars.id })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -131,7 +138,10 @@ export function useVerifyEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => svc.verifyEntry(companyId, id),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (entry, id) => {
+      logEvent({ companyId, entryId: id, action: 'verified', details: entry?.title })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -141,7 +151,10 @@ export function useRejectEntry() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
       svc.rejectEntry(companyId, id, reason),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (_data, vars) => {
+      logEvent({ companyId, entryId: vars.id, action: 'rejected', details: vars.reason })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -150,7 +163,10 @@ export function useTransferEntries() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (ids: string[]) => svc.transferEntries(companyId, ids),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (count, ids) => {
+      logEvent({ companyId, action: 'transferred', details: `${count} из ${ids.length}` })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -159,7 +175,10 @@ export function useArchiveEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => svc.archiveEntry(companyId, id),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (_data, id) => {
+      logEvent({ companyId, entryId: id, action: 'archived', details: id })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -168,7 +187,10 @@ export function useRestoreEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => svc.restoreEntry(companyId, id),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (_data, id) => {
+      logEvent({ companyId, entryId: id, action: 'restored', details: id })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -177,7 +199,10 @@ export function useExcludeEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => svc.excludeEntry(companyId, id),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (_data, id) => {
+      logEvent({ companyId, entryId: id, action: 'excluded', details: id })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 
@@ -186,7 +211,10 @@ export function useIncludeEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => svc.includeEntry(companyId, id),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (_data, id) => {
+      logEvent({ companyId, entryId: id, action: 'included', details: id })
+      invalidateAll(qc, companyId)
+    },
   })
 }
 

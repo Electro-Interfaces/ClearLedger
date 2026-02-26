@@ -3,48 +3,80 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, FileText, SearchX } from 'lucide-react'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SearchSkeleton } from '@/components/common/Skeletons'
+import { PaginationWrapper } from '@/components/common/PaginationWrapper'
+import { AdvancedFilters } from '@/components/common/AdvancedFilters'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/data/StatusBadge'
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationPrevious,
-  PaginationNext,
-} from '@/components/ui/pagination'
 import { useSearchEntries } from '@/hooks/useEntries'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
 import { formatDate } from '@/lib/formatDate'
+import type { AdvancedFilters as AdvancedFiltersType } from '@/types'
 
-const PAGE_SIZE = 15
+const STATUSES = [
+  { value: 'new', label: 'Новый' },
+  { value: 'recognized', label: 'Распознан' },
+  { value: 'verified', label: 'Проверен' },
+  { value: 'transferred', label: 'Передан' },
+  { value: 'error', label: 'Ошибка' },
+]
 
 export function SearchPage() {
   const [searchParams] = useSearchParams()
   const initialQuery = searchParams.get('q') ?? ''
   const [query, setQuery] = useState(initialQuery)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [advFilters, setAdvFilters] = useState<AdvancedFiltersType>({})
   const { company } = useCompany()
   const navigate = useNavigate()
   const { data: results = [], isLoading } = useSearchEntries(query)
 
-  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE))
+  // Apply advanced filters
+  const filtered = useMemo(() => {
+    let r = results
+    if (advFilters.dateFrom) r = r.filter((e) => e.createdAt.slice(0, 10) >= advFilters.dateFrom!)
+    if (advFilters.dateTo) r = r.filter((e) => e.createdAt.slice(0, 10) <= advFilters.dateTo!)
+    if (advFilters.status && advFilters.status !== 'all') r = r.filter((e) => e.status === advFilters.status)
+    if (advFilters.source && advFilters.source !== 'all') r = r.filter((e) => e.source === advFilters.source)
+    if (advFilters.counterparty) {
+      const cp = advFilters.counterparty.toLowerCase()
+      r = r.filter((e) => (e.metadata.counterparty || '').toLowerCase().includes(cp) || (e.metadata.inn || '').includes(cp))
+    }
+    if (advFilters.amountMin !== undefined) {
+      r = r.filter((e) => Number(e.metadata.amount || 0) >= advFilters.amountMin!)
+    }
+    if (advFilters.amountMax !== undefined) {
+      r = r.filter((e) => Number(e.metadata.amount || 0) <= advFilters.amountMax!)
+    }
+    return r
+  }, [results, advFilters])
+
   const paginatedResults = useMemo(
-    () => results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [results, page],
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize],
   )
 
-  // Синхронизируем с URL при навигации из Header
+  // Sync with URL
   useEffect(() => {
     const q = searchParams.get('q')
     if (q && q !== query) setQuery(q)
   }, [searchParams])
 
-  // Сброс пагинации при смене запроса
-  useEffect(() => { setPage(1) }, [query])
+  // Reset pagination on query/filter change
+  useEffect(() => { setPage(1) }, [query, advFilters])
+
+  /** Highlight search terms in text */
+  function highlight(text: string): React.ReactNode {
+    if (!query || query.length < 2) return text
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+    const parts = text.split(regex)
+    return parts.map((part, i) =>
+      regex.test(part) ? <mark key={i} className="bg-yellow-500/30 rounded px-0.5">{part}</mark> : part,
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -61,6 +93,13 @@ export function SearchPage() {
         />
       </div>
 
+      {/* Advanced filters */}
+      <AdvancedFilters
+        filters={advFilters}
+        onFiltersChange={setAdvFilters}
+        statuses={STATUSES}
+      />
+
       {query.length < 2 && (
         <div className="text-center py-12 text-muted-foreground">
           Введите минимум 2 символа для поиска
@@ -69,7 +108,7 @@ export function SearchPage() {
 
       {query.length >= 2 && isLoading && <SearchSkeleton />}
 
-      {query.length >= 2 && !isLoading && results.length === 0 && (
+      {query.length >= 2 && !isLoading && filtered.length === 0 && (
         <EmptyState
           icon={SearchX}
           title="Ничего не найдено"
@@ -77,9 +116,9 @@ export function SearchPage() {
         />
       )}
 
-      {results.length > 0 && (
+      {filtered.length > 0 && (
         <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Найдено: {results.length}</p>
+          <p className="text-sm text-muted-foreground">Найдено: {filtered.length}</p>
           {paginatedResults.map((entry) => {
             const category = getCategoryById(company.profileId, entry.categoryId)
             return (
@@ -93,7 +132,7 @@ export function SearchPage() {
                     <FileText className="h-5 w-5 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate">{entry.title}</div>
+                    <div className="font-medium truncate">{highlight(entry.title)}</div>
                     <div className="text-sm text-muted-foreground">
                       {category?.label} &middot; {formatDate(entry.createdAt)}
                     </div>
@@ -107,37 +146,13 @@ export function SearchPage() {
             )
           })}
 
-          {totalPages > 1 && (
-            <Pagination>
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    aria-disabled={page === 1}
-                    className={page === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                  />
-                </PaginationItem>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                  <PaginationItem key={p}>
-                    <PaginationLink
-                      isActive={p === page}
-                      onClick={() => setPage(p)}
-                      className="cursor-pointer"
-                    >
-                      {p}
-                    </PaginationLink>
-                  </PaginationItem>
-                ))}
-                <PaginationItem>
-                  <PaginationNext
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    aria-disabled={page === totalPages}
-                    className={page === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
-          )}
+          <PaginationWrapper
+            total={filtered.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </div>
       )}
     </div>

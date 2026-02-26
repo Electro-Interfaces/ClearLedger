@@ -198,3 +198,74 @@ export interface KpiData {
   errors: number
 }
 
+// ---- Audit ----
+
+export type AuditAction =
+  | 'created' | 'verified' | 'rejected' | 'transferred'
+  | 'archived' | 'restored' | 'excluded' | 'included'
+  | 'updated' | 'version_created' | 'exported'
+  | 'bulk_archived' | 'bulk_excluded'
+
+export interface AuditEvent {
+  id: string
+  entryId?: string
+  companyId: string
+  userId: string
+  userName: string
+  action: AuditAction
+  details?: string
+  timestamp: string
+}
+
+// ---- Reports ----
+
+export interface PeriodReport {
+  dateFrom: string
+  dateTo: string
+  uploaded: number
+  verified: number
+  rejected: number
+  transferred: number
+  archived: number
+  avgVerificationTimeMs?: number
+}
+
+export interface CounterpartyStat {
+  counterparty: string
+  count: number
+  verified: number
+  rejected: number
+}
+
+export interface SourceStat {
+  source: string
+  label: string
+  count: number
+}
+
+export interface ErrorStat {
+  reason: string
+  count: number
+}
+
+// ---- Pagination / Filters ----
+
+export interface PaginatedResult<T> {
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface AdvancedFilters {
+  dateFrom?: string
+  dateTo?: string
+  amountMin?: number
+  amountMax?: number
+  counterparty?: string
+  status?: string
+  categoryId?: string
+  source?: string
+  docTypeId?: string
+}
+

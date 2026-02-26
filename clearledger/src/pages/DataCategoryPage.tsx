@@ -7,27 +7,21 @@ import { DataTableToolbar } from '@/components/data/DataTableToolbar'
 import { CategoryTabs } from '@/components/data/CategoryTabs'
 import { DataTable } from '@/components/data/DataTable'
 import { BulkActionsBar } from '@/components/data/BulkActionsBar'
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationPrevious,
-  PaginationNext,
-} from '@/components/ui/pagination'
+import { PaginationWrapper } from '@/components/common/PaginationWrapper'
+import { ExportModal } from '@/components/common/ExportModal'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
 import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
+import { Download } from 'lucide-react'
 import type { FilterState } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
-
-const PAGE_SIZE = 10
 
 export function DataCategoryPage() {
   const { category } = useParams<{ category: string }>()
   const navigate = useNavigate()
-  const { company } = useCompany()
+  const { company, companyId } = useCompany()
 
   const categoryConfig = category ? getCategoryById(company.profileId, category) : undefined
 
@@ -41,6 +35,8 @@ export function DataCategoryPage() {
   const [activeSubcategory, setActiveSubcategory] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, subcategory: activeSubcategory }),
@@ -65,8 +61,10 @@ export function DataCategoryPage() {
     setPage(1)
   }, [])
 
-  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE))
-  const paginatedEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const paginatedEntries = useMemo(
+    () => entries.slice((page - 1) * pageSize, page * pageSize),
+    [entries, page, pageSize],
+  )
 
   function handleRowClick(id: string) {
     navigate(`/data/${category}/${id}`)
@@ -145,7 +143,13 @@ export function DataCategoryPage() {
 
   return (
     <div className="space-y-4 pb-16">
-      <h1 className="text-2xl font-bold tracking-tight">{categoryConfig.label}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold tracking-tight">{categoryConfig.label}</h1>
+        <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}>
+          <Download className="size-4" />
+          Экспорт
+        </Button>
+      </div>
 
       <DataTableToolbar filters={filters} onFiltersChange={handleFiltersChange} />
 
@@ -202,38 +206,13 @@ export function DataCategoryPage() {
         onSelectionChange={setSelectedIds}
       />
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <Pagination>
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                aria-disabled={page === 1}
-                className={page === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-              />
-            </PaginationItem>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <PaginationItem key={p}>
-                <PaginationLink
-                  isActive={p === page}
-                  onClick={() => setPage(p)}
-                  className="cursor-pointer"
-                >
-                  {p}
-                </PaginationLink>
-              </PaginationItem>
-            ))}
-            <PaginationItem>
-              <PaginationNext
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                aria-disabled={page === totalPages}
-                className={page === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-      )}
+      <PaginationWrapper
+        total={entries.length}
+        page={page}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
 
       <BulkActionsBar
         selectedCount={selectedIds.size}
@@ -245,6 +224,8 @@ export function DataCategoryPage() {
         onArchive={handleBulkArchive}
         onExclude={handleBulkExclude}
       />
+
+      <ExportModal open={exportOpen} onOpenChange={setExportOpen} entries={entries} companyId={companyId} />
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useEntry, useVerifyEntry, useTransferEntries, useDeleteEntry, useArchiveEntry, useRestoreEntry, useExcludeEntry, useIncludeEntry } from '@/hooks/useEntries'
+import { useEntryAudit } from '@/hooks/useAudit'
 import { DocumentPreview } from '@/components/data/DocumentPreview'
 import { MetadataPanel } from '@/components/data/MetadataPanel'
 import { HistoryTimeline } from '@/components/data/HistoryTimeline'
@@ -25,6 +26,7 @@ export function DataDetailPage() {
   const restoreEntry = useRestoreEntry()
   const excludeEntry = useExcludeEntry()
   const includeEntry = useIncludeEntry()
+  const { data: auditEvents } = useEntryAudit(id ?? '')
 
   if (isLoading) return <DetailPageSkeleton />
   if (isError) return <QueryError onRetry={() => refetch()} />
@@ -143,7 +145,7 @@ export function DataDetailPage() {
           />
           <VersionHistory entryId={entry.id} />
           <DocumentLinks entryId={entry.id} allowAdd />
-          <HistoryTimeline entry={entry} />
+          <HistoryTimeline entry={entry} auditEvents={auditEvents} />
         </div>
       </div>
     </div>

@@ -25,6 +25,7 @@ import {
   Settings,
   Inbox,
   LogOut,
+  BarChart3,
   type LucideIcon,
 } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -136,6 +137,15 @@ export function AppSidebar() {
             {dataItems.map((item) => (
               <SidebarNavItem key={item.path} item={item} />
             ))}
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarSeparator />
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Аналитика</SidebarGroupLabel>
+          <SidebarMenu>
+            <SidebarNavItem item={{ title: 'Отчёты', path: '/reports', icon: BarChart3 }} />
           </SidebarMenu>
         </SidebarGroup>
 
