@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, FileText } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -10,10 +10,18 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
 
 export function SearchPage() {
-  const [query, setQuery] = useState('')
+  const [searchParams] = useSearchParams()
+  const initialQuery = searchParams.get('q') ?? ''
+  const [query, setQuery] = useState(initialQuery)
   const { company } = useCompany()
   const navigate = useNavigate()
   const { data: results = [], isLoading } = useSearchEntries(query)
+
+  // Синхронизируем с URL при навигации из Header
+  useEffect(() => {
+    const q = searchParams.get('q')
+    if (q && q !== query) setQuery(q)
+  }, [searchParams])
 
   return (
     <div className="space-y-6">

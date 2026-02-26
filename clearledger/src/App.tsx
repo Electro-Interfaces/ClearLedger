@@ -1,9 +1,10 @@
-import { createBrowserRouter, RouterProvider, Outlet, Navigate } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet, Navigate, Link } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { CompanyProvider } from '@/contexts/CompanyContext'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { Toaster } from '@/components/ui/sonner'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { Dashboard } from '@/pages/Dashboard'
 import { IntakePage } from '@/pages/IntakePage'
@@ -47,6 +48,19 @@ function LoginRoute() {
   return <LoginPage />
 }
 
+/** 404 страница */
+function NotFoundPage() {
+  return (
+    <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
+      <h1 className="text-6xl font-bold text-muted-foreground">404</h1>
+      <p className="text-lg text-muted-foreground">Страница не найдена</p>
+      <Link to="/" className="text-primary hover:underline">
+        На главную
+      </Link>
+    </div>
+  )
+}
+
 function Providers() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -54,6 +68,7 @@ function Providers() {
         <CompanyProvider>
           <TooltipProvider>
             <Outlet />
+            <Toaster position="bottom-right" richColors closeButton />
           </TooltipProvider>
         </CompanyProvider>
       </AuthProvider>
@@ -90,6 +105,7 @@ const router = createBrowserRouter([
               { path: '/settings', element: <SettingsPage /> },
               { path: '/settings/companies', element: <CompaniesPage /> },
               { path: '/settings/companies/:id', element: <CompanyEditPage /> },
+              { path: '*', element: <NotFoundPage /> },
             ],
           },
         ],

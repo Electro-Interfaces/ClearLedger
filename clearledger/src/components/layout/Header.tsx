@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, User, Menu, Settings, LogOut } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -18,6 +19,7 @@ interface HeaderProps {
 
 export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const [searchQuery, setSearchQuery] = useState('')
 
   const handleSearch = (e: React.FormEvent) => {
@@ -56,7 +58,7 @@ export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
           </div>
           <div>
             <h1 className="font-semibold text-white text-lg tracking-tight">ClearLedger</h1>
-            <p className="text-xs" style={{ color: 'hsl(215 15% 50%)' }}>v0.1.0</p>
+            <p className="text-xs" style={{ color: 'hsl(215 15% 50%)' }}>v0.3.1</p>
           </div>
         </div>
 
@@ -200,6 +202,7 @@ export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
               {/* Footer — logout */}
               <div className="p-2" style={{ borderTop: '1px solid hsl(217 32% 20% / 0.5)' }}>
                 <DropdownMenuItem
+                  onClick={() => { logout(); navigate('/login') }}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 text-red-400 hover:text-red-300 group"
                 >
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-200"

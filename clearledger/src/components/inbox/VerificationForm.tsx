@@ -20,9 +20,15 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { getSubcategories } from '@/config/categories'
 import type { DataEntry } from '@/types'
 
+export interface VerifyPayload {
+  categoryId: string
+  subcategoryId: string
+  comment?: string
+}
+
 interface VerificationFormProps {
   entry: DataEntry
-  onVerify: () => void
+  onVerify: (payload: VerifyPayload) => void
   onPostpone: () => void
   onReject: (reason: string) => void
   isLoading?: boolean
@@ -211,7 +217,7 @@ export function VerificationForm({
         {/* Действия */}
         <div className="flex flex-col gap-2 pt-2">
           <Button
-            onClick={onVerify}
+            onClick={() => onVerify({ categoryId, subcategoryId, comment: comment || undefined })}
             disabled={isLoading}
             className="w-full bg-green-600 hover:bg-green-700 text-white"
           >

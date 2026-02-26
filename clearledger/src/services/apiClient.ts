@@ -27,12 +27,13 @@ export function clearToken(): void {
 }
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public detail: string,
-  ) {
+  status: number
+  detail: string
+  constructor(status: number, detail: string) {
     super(detail)
     this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
   }
 }
 

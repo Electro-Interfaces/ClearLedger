@@ -9,7 +9,6 @@ import type { IntakeItem, DataEntry, EntrySource, SourceRecord, ExtractRecord, E
 import type { ProfileId } from '@/config/profiles'
 import { detectFileType, detectPasteType, refineFileType } from './detect'
 import { extractText, extractFromPaste } from './extract'
-import type { EmailParseResult } from './parsers/emailParser'
 import { classify } from './classify'
 import { computeFingerprint, computeTextHash, checkDuplicate } from './dedup'
 import { saveSource, saveExtract } from '@/services/sourceStore'
@@ -86,7 +85,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     opts.onUpdate({ ...item })
 
     item.fingerprint = await computeFingerprint(file)
-    const existingEntries = getEntries(opts.companyId)
+    const existingEntries = await getEntries(opts.companyId)
     const dedupResult = checkDuplicate(
       item.fingerprint,
       existingEntries,
@@ -137,7 +136,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     await saveExtract(extractRecord)
 
     const entrySource: EntrySource = mapFileTypeToSource(item.fileType)
-    const entry = createEntry({
+    const entry = await createEntry({
       title: item.classification.title,
       categoryId: item.classification.categoryId,
       subcategoryId: item.classification.subcategoryId,
@@ -163,8 +162,11 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     if (item.fileType === 'email' && emailAttachments && emailAttachments.length > 0) {
       item.childItems = []
       for (const att of emailAttachments) {
+        const attData: BlobPart = att.content instanceof Uint8Array
+          ? new Uint8Array(att.content) as unknown as BlobPart
+          : att.content as BlobPart
         const attFile = new File(
-          [att.content],
+          [attData],
           att.filename,
           { type: att.mimeType },
         )
@@ -247,7 +249,7 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
     opts.onUpdate({ ...item })
 
     item.fingerprint = await computeTextHash(text)
-    const existingEntries = getEntries(opts.companyId)
+    const existingEntries = await getEntries(opts.companyId)
     const dedupResult = checkDuplicate(
       item.fingerprint,
       existingEntries,
@@ -300,7 +302,7 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
     await saveExtract(extractRecord)
 
     const entrySource: EntrySource = pasteType === 'email' ? 'email' : 'paste'
-    const entry = createEntry({
+    const entry = await createEntry({
       title: item.classification.title,
       categoryId: item.classification.categoryId,
       subcategoryId: item.classification.subcategoryId,
@@ -386,7 +388,7 @@ export async function forceSaveDuplicate(
     ? mapFileTypeToSource(item.fileType ?? 'unknown')
     : 'paste'
 
-  const entry = createEntry({
+  const entry = await createEntry({
     title: item.classification.title,
     categoryId: item.classification.categoryId,
     subcategoryId: item.classification.subcategoryId,

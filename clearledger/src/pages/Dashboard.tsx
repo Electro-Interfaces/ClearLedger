@@ -4,6 +4,7 @@ import { RecentActivity } from '@/components/dashboard/RecentActivity'
 import { QuickActions } from '@/components/dashboard/QuickActions'
 import { ConnectorsStatus } from '@/components/dashboard/ConnectorsStatus'
 import { CategoryChart } from '@/components/dashboard/CategoryChart'
+import { StatusFunnel } from '@/components/dashboard/StatusFunnel'
 import { useInboxCount } from '@/hooks/useEntries'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -61,7 +62,10 @@ export function Dashboard() {
         </div>
       </div>
 
-      <CategoryChart />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <CategoryChart />
+        <StatusFunnel />
+      </div>
     </div>
   )
 }

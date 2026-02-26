@@ -87,11 +87,11 @@ export function clearAllData(): void {
 }
 
 /** Генерация N записей с рандомными данными */
-export function generateEntries(
+export async function generateEntries(
   companyId: string,
   profileId: ProfileId,
   count: number = 50,
-): DataEntry[] {
+): Promise<DataEntry[]> {
   const docTypes = getAllDocumentTypes(profileId)
   if (docTypes.length === 0) return []
 
@@ -104,7 +104,7 @@ export function generateEntries(
     const amount = `${randomInt(1000, 500000)}`
     const createdAt = randomDate(30)
 
-    const entry = createEntry({
+    const entry = await createEntry({
       title: `${dt.label} №${docNumber}`,
       categoryId: dt.categoryId,
       subcategoryId: dt.subcategoryId,
@@ -143,7 +143,7 @@ export interface StorageStats {
   connectorsByCompany: Record<string, number>
 }
 
-export function getStorageStats(): StorageStats {
+export async function getStorageStats(): Promise<StorageStats> {
   const keys = getAllClearledgerKeys()
   let totalSize = 0
   for (const key of keys) {
@@ -155,7 +155,7 @@ export function getStorageStats(): StorageStats {
   const connectorsByCompany: Record<string, number> = {}
 
   for (const company of defaultCompanies) {
-    const entries = getEntries(company.id)
+    const entries = await getEntries(company.id)
     if (entries.length > 0) entriesByCompany[company.id] = entries.length
     const connectors = getConnectors(company.id)
     if (connectors.length > 0) connectorsByCompany[company.id] = connectors.length
@@ -166,7 +166,7 @@ export function getStorageStats(): StorageStats {
     if (key.startsWith('clearledger-entries-')) {
       const cid = key.replace('clearledger-entries-', '')
       if (!(cid in entriesByCompany)) {
-        const entries = getEntries(cid)
+        const entries = await getEntries(cid)
         if (entries.length > 0) entriesByCompany[cid] = entries.length
       }
     }
@@ -197,8 +197,8 @@ export function setAllStatuses(companyId: string, status: EntryStatus): number {
 }
 
 /** Удаление всех записей одной компании */
-export function deleteAllEntries(companyId: string): number {
-  const entries = getEntries(companyId)
+export async function deleteAllEntries(companyId: string): Promise<number> {
+  const entries = await getEntries(companyId)
   const count = entries.length
   removeItem(entriesKey(companyId))
   return count

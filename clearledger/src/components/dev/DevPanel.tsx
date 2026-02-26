@@ -38,9 +38,9 @@ export function DevPanel() {
   const queryClient = useQueryClient()
   const { company, companyId, companies, setCompanyId } = useCompany()
 
-  const refreshStats = useCallback(() => {
-    setStats(getStorageStats())
-    const entries = getEntries(companyId)
+  const refreshStats = useCallback(async () => {
+    setStats(await getStorageStats())
+    const entries = await getEntries(companyId)
     const dist: Record<string, number> = {}
     for (const e of entries) {
       dist[e.status] = (dist[e.status] || 0) + 1
@@ -67,8 +67,8 @@ export function DevPanel() {
     invalidateAndRefresh()
   }
 
-  const handleGenerate = (count: number) => {
-    generateEntries(companyId, company.profileId, count)
+  const handleGenerate = async (count: number) => {
+    await generateEntries(companyId, company.profileId, count)
     invalidateAndRefresh()
   }
 
@@ -77,8 +77,8 @@ export function DevPanel() {
     invalidateAndRefresh()
   }
 
-  const handleDeleteEntries = () => {
-    deleteAllEntries(companyId)
+  const handleDeleteEntries = async () => {
+    await deleteAllEntries(companyId)
     invalidateAndRefresh()
   }
 

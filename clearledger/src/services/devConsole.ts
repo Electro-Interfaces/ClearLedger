@@ -24,6 +24,7 @@ import { getEntries } from './dataEntryService'
 import { exportAllData } from './exportService'
 import { defaultCompanies } from '@/config/companies'
 import type { EntryStatus } from '@/config/statuses'
+import type { DataEntry } from '@/types'
 
 function getCurrentCompanyId(): string {
   try {
@@ -51,26 +52,26 @@ const cl = {
     location.reload()
   },
 
-  generate(count: number = 50) {
+  async generate(count: number = 50) {
     const companyId = getCurrentCompanyId()
     const profileId = getProfileId(companyId)
-    const entries = generateEntries(companyId, profileId, count)
+    const entries = await generateEntries(companyId, profileId, count)
     console.log(`[ClearLedger] Создано ${entries.length} записей для ${companyId}`)
     return entries
   },
 
-  stats() {
-    const stats = getStorageStats()
+  async stats() {
+    const stats = await getStorageStats()
     console.table(stats.entriesByCompany)
     console.log(`Всего ключей: ${stats.totalKeys}, размер: ~${stats.totalSizeKB} KB`)
     return stats
   },
 
-  entries(companyId?: string) {
+  async entries(companyId?: string) {
     const cid = companyId ?? getCurrentCompanyId()
-    const entries = getEntries(cid)
+    const entries = await getEntries(cid)
     console.table(
-      entries.map((e) => ({
+      entries.map((e: DataEntry) => ({
         id: e.id,
         title: e.title,
         status: e.status,
@@ -89,9 +90,9 @@ const cl = {
     return count
   },
 
-  deleteEntries(companyId?: string) {
+  async deleteEntries(companyId?: string) {
     const cid = companyId ?? getCurrentCompanyId()
-    const count = deleteAllEntries(cid)
+    const count = await deleteAllEntries(cid)
     console.log(`[ClearLedger] Удалено ${count} записей для ${cid}`)
     return count
   },

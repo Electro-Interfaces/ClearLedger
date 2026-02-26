@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -15,7 +16,6 @@ import type { AppSettings } from '@/services/settingsService'
 export function SettingsPage() {
   const { companies, companyId } = useCompany()
   const [settings, setSettings] = useState<AppSettings>(getSettings)
-  const [saved, setSaved] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
@@ -24,8 +24,7 @@ export function SettingsPage() {
 
   function handleSaveProfile() {
     saveSettings({ userName: settings.userName, userEmail: settings.userEmail })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    toast.success('Профиль сохранён')
   }
 
   function handleSaveApp() {
@@ -35,14 +34,16 @@ export function SettingsPage() {
       theme: settings.theme,
       defaultCompanyId: settings.defaultCompanyId,
     })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    toast.success('Настройки сохранены')
   }
 
   async function handleExport() {
     setExporting(true)
     try {
       await exportAllData(companyId)
+      toast.success('Данные экспортированы')
+    } catch {
+      toast.error('Ошибка экспорта')
     } finally {
       setExporting(false)
     }
@@ -100,7 +101,6 @@ export function SettingsPage() {
               <Input defaultValue="Администратор" readOnly className="text-muted-foreground" />
             </div>
             <Button onClick={handleSaveProfile}>Сохранить</Button>
-            {saved && <span className="text-sm text-green-500 ml-3">Сохранено</span>}
           </CardContent>
         </Card>
 
@@ -122,6 +122,7 @@ export function SettingsPage() {
                   <SelectItem value="en">English</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">Будет доступно в следующей версии</p>
             </div>
             <div className="space-y-2">
               <Label>Формат даты</Label>
@@ -149,6 +150,7 @@ export function SettingsPage() {
                   <SelectItem value="dark">Тёмная</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">Будет доступно в следующей версии</p>
             </div>
             <Separator />
             <div className="space-y-2">

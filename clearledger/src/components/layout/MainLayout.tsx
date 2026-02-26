@@ -1,10 +1,10 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { AppSidebar } from './AppSidebar'
 import { Header } from './Header'
 import { MobileBottomNav } from './MobileBottomNav'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
 
 const DevPanel = import.meta.env.DEV
@@ -14,6 +14,19 @@ const DevPanel = import.meta.env.DEV
 export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
+
+  // Ctrl+K → глобальный поиск
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault()
+        navigate('/search')
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [navigate])
 
   return (
     <SidebarProvider>

@@ -3,7 +3,7 @@
  * Показывает список связанных документов с типом связи и возможностью навигации.
  */
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getLinksForEntry, createLink, removeLink } from '@/services/linkService'
@@ -35,10 +35,14 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
   const { companyId } = useCompany()
   const [refreshKey, setRefreshKey] = useState(0)
 
+  const [allEntries, setAllEntries] = useState<DataEntry[]>([])
+  useEffect(() => {
+    getEntries(companyId).then(setAllEntries)
+  }, [companyId, refreshKey])
+
   const { links, linkedEntries } = useMemo(() => {
     const allLinks = getLinksForEntry(entryId)
-    const allEntries = getEntries(companyId)
-    const entryMap = new Map(allEntries.map((e) => [e.id, e]))
+    const entryMap = new Map(allEntries.map((e: DataEntry) => [e.id, e]))
 
     const linked: Array<{ link: DocumentLink; entry: DataEntry; direction: 'from' | 'to' }> = []
     for (const link of allLinks) {
@@ -54,26 +58,24 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
     }
 
     return { links: allLinks, linkedEntries: linked }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entryId, companyId, refreshKey])
+  }, [entryId, allEntries, refreshKey])
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
   const availableEntries = useMemo(() => {
     if (!showAddForm) return []
-    const allEntries = getEntries(companyId)
     const linkedIds = new Set(linkedEntries.map((l) => l.entry.id))
     linkedIds.add(entryId)
     return allEntries
-      .filter((e) => !linkedIds.has(e.id))
-      .filter((e) =>
+      .filter((e: DataEntry) => !linkedIds.has(e.id))
+      .filter((e: DataEntry) =>
         !searchQuery ||
         e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         e.id.includes(searchQuery),
       )
       .slice(0, 10)
-  }, [showAddForm, companyId, linkedEntries, entryId, searchQuery])
+  }, [showAddForm, allEntries, linkedEntries, entryId, searchQuery])
 
   function handleAddLink(targetId: string) {
     createLink(entryId, targetId, 'manual')

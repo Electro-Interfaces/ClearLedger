@@ -1,4 +1,4 @@
-import { Upload, Camera, PenLine } from 'lucide-react'
+import { Upload, PenLine, Search } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,9 +9,9 @@ import {
 } from '@/components/ui/card'
 
 const actions = [
-  { label: 'Загрузить файл', icon: Upload, path: '/input/upload' },
-  { label: 'Сделать фото', icon: Camera, path: '/input/photo' },
+  { label: 'Загрузить файлы', icon: Upload, path: '/input' },
   { label: 'Ручная запись', icon: PenLine, path: '/input/manual' },
+  { label: 'Поиск', icon: Search, path: '/search' },
 ]
 
 export function QuickActions() {

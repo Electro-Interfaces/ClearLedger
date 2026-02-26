@@ -6,6 +6,7 @@ import { HistoryTimeline } from '@/components/data/HistoryTimeline'
 import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
 
 export function DataDetailPage() {
   const { category, id } = useParams<{ category: string; id: string }>()
@@ -33,18 +34,28 @@ export function DataDetailPage() {
 
   function handleVerify() {
     if (!id) return
-    verifyEntry.mutate(id)
+    verifyEntry.mutate(id, {
+      onSuccess: () => toast.success('Запись верифицирована'),
+      onError: () => toast.error('Ошибка верификации'),
+    })
   }
 
   function handleTransfer() {
     if (!id) return
-    transferEntries.mutate([id])
+    transferEntries.mutate([id], {
+      onSuccess: () => toast.success('Запись передана в 1С'),
+      onError: () => toast.error('Ошибка передачи'),
+    })
   }
 
   function handleDelete() {
     if (!id) return
     deleteEntry.mutate(id, {
-      onSuccess: () => navigate(`/data/${category}`),
+      onSuccess: () => {
+        toast.success('Запись удалена')
+        navigate(`/data/${category}`)
+      },
+      onError: () => toast.error('Ошибка удаления'),
     })
   }
 

@@ -1,6 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { Check, Trash2, Send } from 'lucide-react'
@@ -98,15 +103,32 @@ export function MetadataPanel({ entry, onVerify, onTransfer, onDelete }: Metadat
             </Button>
           )}
           {onDelete && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full justify-start text-destructive hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 />
-              Удалить
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start text-destructive hover:text-destructive"
+                >
+                  <Trash2 />
+                  Удалить
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Удалить запись?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Запись &laquo;{entry.title}&raquo; будет удалена. Это действие нельзя отменить.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Отмена</AlertDialogCancel>
+                  <AlertDialogAction onClick={onDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Удалить
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
         </div>
       </CardContent>

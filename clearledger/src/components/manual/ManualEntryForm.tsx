@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -25,6 +25,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
+import { toast } from 'sonner'
 
 const baseSchema = z.object({
   categoryId: z.string().min(1, 'Выберите категорию'),
@@ -54,7 +55,6 @@ const typeLabels: Record<string, string> = {
 export function ManualEntryForm({ entryType }: ManualEntryFormProps) {
   const { company, categories } = useCompany()
   const createEntry = useCreateEntry()
-  const [saved, setSaved] = useState(false)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(baseSchema),
@@ -105,12 +105,15 @@ export function ManualEntryForm({ entryType }: ManualEntryFormProps) {
       docTypeId: data.docTypeId || undefined,
       source: 'manual',
       sourceLabel: 'Ручной',
-      status: entryType === 'note' ? 'new' : 'new',
+      status: 'new',
       metadata,
+    }, {
+      onSuccess: () => {
+        toast.success('Запись сохранена и добавлена во Входящие')
+        form.reset()
+      },
+      onError: () => toast.error('Ошибка сохранения'),
     })
-    setSaved(true)
-    form.reset()
-    setTimeout(() => setSaved(false), 3000)
   }
 
   return (
@@ -364,11 +367,6 @@ export function ManualEntryForm({ entryType }: ManualEntryFormProps) {
             <Button type="submit" className="mt-2" disabled={createEntry.isPending}>
               {createEntry.isPending ? 'Сохранение...' : 'Сохранить'}
             </Button>
-            {saved && (
-              <p className="text-sm text-green-500 font-medium">
-                Запись сохранена и добавлена во Входящие
-              </p>
-            )}
           </form>
         </Form>
       </CardContent>

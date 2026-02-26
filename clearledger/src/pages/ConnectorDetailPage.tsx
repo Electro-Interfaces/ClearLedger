@@ -7,7 +7,13 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { useConnector, useUpdateConnector, useDeleteConnector } from '@/hooks/useConnectors'
+import { toast } from 'sonner'
 
 const statusConfig = {
   active: { label: 'Активен', className: 'bg-green-600/20 text-green-400 border-green-600/30' },
@@ -23,7 +29,6 @@ export function ConnectorDetailPage() {
   const deleteConnector = useDeleteConnector()
 
   const [form, setForm] = useState({ name: '', url: '', type: '', interval: '', categoryId: '' })
-  const [saved, setSaved] = useState(false)
 
   useEffect(() => {
     if (connector) {
@@ -65,9 +70,10 @@ export function ConnectorDetailPage() {
         interval: Number(form.interval) || 60,
         categoryId: form.categoryId,
       },
+    }, {
+      onSuccess: () => toast.success('Коннектор сохранён'),
+      onError: () => toast.error('Ошибка сохранения'),
     })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
   }
 
   function handleToggle() {
@@ -75,12 +81,18 @@ export function ConnectorDetailPage() {
     updateConnector.mutate({
       id: connector!.id,
       updates: { status: newStatus },
+    }, {
+      onSuccess: () => toast.success(newStatus === 'active' ? 'Коннектор включён' : 'Коннектор отключён'),
     })
   }
 
   function handleDelete() {
     deleteConnector.mutate(connector!.id, {
-      onSuccess: () => navigate('/connectors'),
+      onSuccess: () => {
+        toast.success('Коннектор удалён')
+        navigate('/connectors')
+      },
+      onError: () => toast.error('Ошибка удаления'),
     })
   }
 
@@ -102,10 +114,28 @@ export function ConnectorDetailPage() {
               <><PowerOff className="mr-2 h-4 w-4" />Отключить</>
             )}
           </Button>
-          <Button variant="outline" size="sm" className="text-destructive" onClick={handleDelete}>
-            <Trash2 className="mr-2 h-4 w-4" />
-            Удалить
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" />
+                Удалить
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Удалить коннектор?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Коннектор &laquo;{connector.name}&raquo; будет удалён. Это действие нельзя отменить.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Отмена</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Удалить
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
 
@@ -145,13 +175,10 @@ export function ConnectorDetailPage() {
             <Label>Категория</Label>
             <Input value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} />
           </div>
-          <div className="flex items-center gap-3">
-            <Button onClick={handleSave}>
-              <Save className="mr-2 h-4 w-4" />
-              Сохранить
-            </Button>
-            {saved && <span className="text-sm text-green-500">Сохранено</span>}
-          </div>
+          <Button onClick={handleSave}>
+            <Save className="mr-2 h-4 w-4" />
+            Сохранить
+          </Button>
         </CardContent>
       </Card>
 
