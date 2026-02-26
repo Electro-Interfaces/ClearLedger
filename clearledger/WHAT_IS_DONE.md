@@ -464,6 +464,52 @@ __cl.export(companyId?) — экспорт данных компании
 | Frontend: 401 race condition (множественные редиректы) | HIGH | Guard `isRedirecting` flag |
 | WHAT_IS_DONE: ложные "Готово" | MEDIUM | Статусы уточнены с TODO-пометками |
 
+#### UI/UX аудит и исправления (v0.3.1)
+
+Комплексная проверка пользовательского опыта. Оценка: 6.3/10 → ~8/10 после исправлений.
+
+**P0 — Критичные баги функциональности:**
+
+| Проблема | Исправление |
+|----------|------------|
+| VerificationForm теряет изменения categoryId/subcategoryId при верификации | `onVerify` передаёт `VerifyPayload`, `updateEntry` перед `verifyEntry` |
+| Header: кнопка «Выход» ничего не делает | `logout()` + `navigate('/login')` |
+| MobileBottomNav: пути ведут на удалённые страницы | Новые пути: `/input`, `/inbox`, `/data/documents`, `/settings` |
+| SearchPage: ?q= параметр из Header игнорируется | `useSearchParams()` + `useEffect` для синхронизации |
+| Удаление без подтверждения (коннекторы, записи) | `AlertDialog` с подтверждением для всех деструктивных действий |
+
+**P1 — Критичный UX:**
+
+| Улучшение | Реализация |
+|-----------|-----------|
+| Toast-уведомления для всех мутаций | Библиотека `sonner`, toast на каждом CRUD-действии |
+| Клавиатурные сочетания в Inbox | J/↓=следующая, K/↑=предыдущая, S=пропустить |
+| Страница 404 | Catch-all route `*` → `NotFoundPage` |
+| Версия в Header | `v0.3.1` (была `v0.1.0`) |
+
+**P2 — Улучшения:**
+
+| Улучшение | Реализация |
+|-----------|-----------|
+| StatusFunnel на дашборде | Визуальная воронка по статусам с прогресс-барами |
+| Ctrl+K глобальный поиск | `useEffect` + `navigate('/search')` в MainLayout |
+| QuickActions: битые пути | Исправлены на `/input`, `/search` |
+
+**P3 — Полировка:**
+
+| Улучшение | Реализация |
+|-----------|-----------|
+| Удаление мёртвого кода | ProcessingQueue, ClassificationPreview, DuplicateWarning (заменены IntakeQueue) |
+
+**TypeScript-фиксы (build):**
+
+| Проблема | Исправление |
+|----------|------------|
+| `getEntries()`/`createEntry()` не awaited (~30 мест в 8 файлах) | Каскадное исправление async/await |
+| DocumentLinks: sync useMemo с async функцией | Конвертация в useEffect+useState |
+| apiClient: TS 5.9 `erasableSyntaxOnly` (public parameter properties) | Явные свойства класса |
+| pipeline: Uint8Array BlobPart несовместимость | Cast через `as unknown as BlobPart` |
+
 ### Запланировано
 
 - Полнотекстовый поиск (PostgreSQL FTS)

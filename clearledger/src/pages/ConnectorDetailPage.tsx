@@ -15,6 +15,41 @@ import {
 import { useConnector, useUpdateConnector, useDeleteConnector } from '@/hooks/useConnectors'
 import { toast } from 'sonner'
 
+interface EmailConfig {
+  emailHost: string
+  emailPort: string
+  emailUser: string
+  emailPassword: string
+  emailFolder: string
+  emailTls: boolean
+}
+
+function parseEmailConfig(url: string): EmailConfig | null {
+  try {
+    if (!url.startsWith('imap://') && !url.startsWith('imaps://')) return null
+    const parsed = new URL(url)
+    return {
+      emailHost: parsed.hostname,
+      emailPort: parsed.port || '993',
+      emailUser: decodeURIComponent(parsed.username),
+      emailPassword: decodeURIComponent(parsed.password),
+      emailFolder: parsed.pathname.replace(/^\//, '') || 'INBOX',
+      emailTls: url.startsWith('imaps://') || parsed.searchParams.get('tls') === '1',
+    }
+  } catch {
+    return null
+  }
+}
+
+function buildEmailConfig(form: EmailConfig): string {
+  const proto = form.emailTls ? 'imaps' : 'imap'
+  const user = encodeURIComponent(form.emailUser)
+  const pass = encodeURIComponent(form.emailPassword)
+  const port = form.emailPort || '993'
+  const folder = form.emailFolder || 'INBOX'
+  return `${proto}://${user}:${pass}@${form.emailHost}:${port}/${folder}`
+}
+
 const statusConfig = {
   active: { label: 'Активен', className: 'bg-green-600/20 text-green-400 border-green-600/30' },
   error: { label: 'Ошибка', className: 'bg-red-600/20 text-red-400 border-red-600/30' },
@@ -28,16 +63,21 @@ export function ConnectorDetailPage() {
   const updateConnector = useUpdateConnector()
   const deleteConnector = useDeleteConnector()
 
-  const [form, setForm] = useState({ name: '', url: '', type: '', interval: '', categoryId: '' })
+  const [form, setForm] = useState({
+    name: '', url: '', type: '', interval: '', categoryId: '',
+    emailHost: '', emailPort: '993', emailUser: '', emailPassword: '', emailFolder: 'INBOX', emailTls: true,
+  })
 
   useEffect(() => {
     if (connector) {
+      const emailConfig = parseEmailConfig(connector.url)
       setForm({
         name: connector.name,
         url: connector.url,
         type: connector.type,
         interval: String(connector.interval),
         categoryId: connector.categoryId,
+        ...(emailConfig ?? { emailHost: '', emailPort: '993', emailUser: '', emailPassword: '', emailFolder: 'INBOX', emailTls: true }),
       })
     }
   }, [connector])
@@ -61,11 +101,14 @@ export function ConnectorDetailPage() {
   const status = statusConfig[connector.status]
 
   function handleSave() {
+    const url = form.type === 'email'
+      ? buildEmailConfig(form)
+      : form.url
     updateConnector.mutate({
       id: connector!.id,
       updates: {
         name: form.name,
-        url: form.url,
+        url,
         type: form.type,
         interval: Number(form.interval) || 60,
         categoryId: form.categoryId,
@@ -149,10 +192,6 @@ export function ConnectorDetailPage() {
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
           <div className="space-y-2">
-            <Label>URL</Label>
-            <Input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} />
-          </div>
-          <div className="space-y-2">
             <Label>Тип</Label>
             <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
               <SelectTrigger>
@@ -167,6 +206,58 @@ export function ConnectorDetailPage() {
               </SelectContent>
             </Select>
           </div>
+
+          {/* Поля зависят от типа коннектора */}
+          {form.type === 'email' ? (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>IMAP сервер</Label>
+                  <Input placeholder="imap.example.com" value={form.emailHost} onChange={(e) => setForm({ ...form, emailHost: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Порт</Label>
+                  <Input type="number" value={form.emailPort} onChange={(e) => setForm({ ...form, emailPort: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Пользователь</Label>
+                  <Input placeholder="user@example.com" value={form.emailUser} onChange={(e) => setForm({ ...form, emailUser: e.target.value })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Пароль</Label>
+                  <Input type="password" placeholder="••••••••" value={form.emailPassword} onChange={(e) => setForm({ ...form, emailPassword: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Папка</Label>
+                  <Input placeholder="INBOX" value={form.emailFolder} onChange={(e) => setForm({ ...form, emailFolder: e.target.value })} />
+                </div>
+                <div className="flex items-center gap-2 pt-6">
+                  <input
+                    type="checkbox"
+                    id="emailTls"
+                    checked={form.emailTls}
+                    onChange={(e) => setForm({ ...form, emailTls: e.target.checked })}
+                    className="size-4 rounded border-input"
+                  />
+                  <Label htmlFor="emailTls" className="cursor-pointer">SSL/TLS</Label>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <Label>{form.type === 'ftp' ? 'Хост' : 'URL'}</Label>
+              <Input
+                placeholder={form.type === 'ftp' ? 'ftp.example.com:/path' : 'https://api.example.com/v1'}
+                value={form.url}
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>Интервал синхронизации (сек.)</Label>
             <Input type="number" value={form.interval} onChange={(e) => setForm({ ...form, interval: e.target.value })} />

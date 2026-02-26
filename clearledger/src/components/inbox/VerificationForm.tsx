@@ -24,6 +24,7 @@ export interface VerifyPayload {
   categoryId: string
   subcategoryId: string
   comment?: string
+  metadata?: Record<string, string>
 }
 
 interface VerificationFormProps {
@@ -64,10 +65,16 @@ export function VerificationForm({
   const [showRejectInput, setShowRejectInput] = useState(false)
   const [categoryId, setCategoryId] = useState(entry.categoryId)
   const [subcategoryId, setSubcategoryId] = useState(entry.subcategoryId)
+  const [editedMetadata, setEditedMetadata] = useState<Record<string, string>>(() => ({ ...entry.metadata }))
 
   const subcategories = getSubcategories(company.profileId, categoryId)
-  const metadataEntries = Object.entries(entry.metadata).filter(([k]) => k !== 'rejectReason')
+  const metadataEntries = Object.entries(editedMetadata).filter(([k]) => k !== 'rejectReason' && !k.startsWith('_'))
+  const systemEntries = Object.entries(editedMetadata).filter(([k]) => k.startsWith('_'))
   const ocrFields = entry.ocrData?.fields ?? []
+
+  function updateMetaField(key: string, value: string) {
+    setEditedMetadata((prev) => ({ ...prev, [key]: value }))
+  }
 
   function handleRejectConfirm() {
     onReject(rejectReason || 'Отклонено менеджером')
@@ -118,18 +125,34 @@ export function VerificationForm({
 
         <Separator />
 
-        {/* Метаданные */}
+        {/* Метаданные (редактируемые) */}
         {metadataEntries.length > 0 && (
           <div className="space-y-2">
             <h4 className="text-sm font-medium text-muted-foreground">Метаданные</h4>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {metadataEntries.map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground capitalize">{key}</span>
-                  <span className="font-medium text-right max-w-[60%] truncate">{value}</span>
+                <div key={key} className="flex items-center gap-2">
+                  <Label className="min-w-[100px] text-xs text-muted-foreground capitalize shrink-0">{key}</Label>
+                  <Input
+                    value={value}
+                    onChange={(e) => updateMetaField(key, e.target.value)}
+                    className="flex-1 h-8 text-sm"
+                  />
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Системные поля (read-only) */}
+        {systemEntries.length > 0 && (
+          <div className="space-y-1.5">
+            {systemEntries.map(([key, value]) => (
+              <div key={key} className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground/60">{key}</span>
+                <span className="text-muted-foreground/60 max-w-[60%] truncate">{value}</span>
+              </div>
+            ))}
           </div>
         )}
 
@@ -217,7 +240,7 @@ export function VerificationForm({
         {/* Действия */}
         <div className="flex flex-col gap-2 pt-2">
           <Button
-            onClick={() => onVerify({ categoryId, subcategoryId, comment: comment || undefined })}
+            onClick={() => onVerify({ categoryId, subcategoryId, comment: comment || undefined, metadata: editedMetadata })}
             disabled={isLoading}
             className="w-full bg-green-600 hover:bg-green-700 text-white"
           >

@@ -6,6 +6,7 @@ import { Header } from './Header'
 import { MobileBottomNav } from './MobileBottomNav'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { AppBreadcrumb } from './AppBreadcrumb'
 
 const DevPanel = import.meta.env.DEV
   ? lazy(() => import('@/components/dev/DevPanel').then((m) => ({ default: m.DevPanel })))
@@ -53,6 +54,7 @@ export function MainLayout() {
               style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
             >
               <div className="px-4 md:px-6 w-full max-w-none pt-4 pb-20">
+                <AppBreadcrumb />
                 <Outlet />
               </div>
             </main>
@@ -65,6 +67,7 @@ export function MainLayout() {
 
             <main className="flex-1 min-w-0 w-full max-w-none overflow-y-auto">
               <div className="px-4 md:px-6 lg:px-8 w-full max-w-none py-6">
+                <AppBreadcrumb />
                 <Outlet />
               </div>
             </main>

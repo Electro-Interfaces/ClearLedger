@@ -3,6 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
+import { useIsMobile } from '@/hooks/use-mobile'
 import type { DataEntry } from '@/types'
 import { ArrowUpDown } from 'lucide-react'
 
@@ -22,6 +23,7 @@ function formatDate(iso: string): string {
 }
 
 export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange }: DataTableProps) {
+  const isMobile = useIsMobile()
   const [sortField, setSortField] = useState<SortField>('createdAt')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
@@ -101,6 +103,31 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
         Нет данных для отображения
+      </div>
+    )
+  }
+
+  // Мобильный card layout
+  if (isMobile) {
+    return (
+      <div className="space-y-2">
+        {sortedEntries.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            onClick={() => onRowClick(entry.id)}
+            className="w-full text-left p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="text-sm font-medium leading-tight line-clamp-2">{entry.title}</span>
+              <StatusBadge status={entry.status} />
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <SourceBadge source={entry.source} />
+              <span className="text-xs text-muted-foreground ml-auto">{formatDate(entry.createdAt)}</span>
+            </div>
+          </button>
+        ))}
       </div>
     )
   }

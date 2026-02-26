@@ -49,7 +49,15 @@ export function InboxDetailPage() {
     const updates: Record<string, unknown> = {}
     if (payload.categoryId !== entry.categoryId) updates.categoryId = payload.categoryId
     if (payload.subcategoryId !== entry.subcategoryId) updates.subcategoryId = payload.subcategoryId
-    if (payload.comment) updates.metadata = { ...entry.metadata, verifyComment: payload.comment }
+
+    // Мержим метаданные: отредактированные + комментарий
+    const metaChanged = payload.metadata && JSON.stringify(payload.metadata) !== JSON.stringify(entry.metadata)
+    if (metaChanged || payload.comment) {
+      updates.metadata = {
+        ...(payload.metadata ?? entry.metadata),
+        ...(payload.comment ? { verifyComment: payload.comment } : {}),
+      }
+    }
 
     const doVerify = () => {
       verifyEntry.mutate(id, {

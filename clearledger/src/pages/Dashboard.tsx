@@ -5,10 +5,10 @@ import { QuickActions } from '@/components/dashboard/QuickActions'
 import { ConnectorsStatus } from '@/components/dashboard/ConnectorsStatus'
 import { CategoryChart } from '@/components/dashboard/CategoryChart'
 import { StatusFunnel } from '@/components/dashboard/StatusFunnel'
-import { useInboxCount } from '@/hooks/useEntries'
+import { useInboxCount, useKpi } from '@/hooks/useEntries'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Inbox } from 'lucide-react'
+import { Inbox, Upload, FileText, Settings } from 'lucide-react'
 
 function InboxWidget() {
   const navigate = useNavigate()
@@ -43,10 +43,45 @@ function InboxWidget() {
   )
 }
 
+function OnboardingBanner() {
+  const navigate = useNavigate()
+  return (
+    <Card className="border-dashed border-2">
+      <CardContent className="py-8">
+        <div className="text-center space-y-4">
+          <h2 className="text-xl font-semibold">Добро пожаловать в ClearLedger</h2>
+          <p className="text-muted-foreground max-w-md mx-auto">
+            Начните работу — загрузите первые документы или настройте компанию.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button onClick={() => navigate('/input')}>
+              <Upload className="size-4" />
+              Загрузить документы
+            </Button>
+            <Button variant="outline" onClick={() => navigate('/input')}>
+              <FileText className="size-4" />
+              Ручной ввод
+            </Button>
+            <Button variant="outline" onClick={() => navigate('/settings')}>
+              <Settings className="size-4" />
+              Настройки
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function Dashboard() {
+  const { data: kpi } = useKpi()
+  const isEmpty = kpi && kpi.uploadedToday === 0 && kpi.totalVerified === 0 && kpi.inProcessing === 0 && kpi.errors === 0
+
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold tracking-tight">Панель управления</h1>
+
+      {isEmpty && <OnboardingBanner />}
 
       <KpiCards />
 
