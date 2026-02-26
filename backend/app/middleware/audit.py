@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 
@@ -35,7 +35,7 @@ async def log_audit(
                 "action": action,
                 "entity_type": entity_type,
                 "entity_id": entity_id,
-                "details": str(details or {}),
+                "details": json.dumps(details or {}, ensure_ascii=False, default=str),
                 "ip": ip_address,
             },
         )

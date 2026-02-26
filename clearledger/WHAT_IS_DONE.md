@@ -425,9 +425,32 @@ __cl.export(companyId?) — экспорт данных компании
 - **dataEntryService**: все CRUD async, dual-mode (API или localStorage)
 - Переключение через `VITE_API_URL` env variable
 
+#### Аудит кода и исправления (v0.3.1)
+
+Полная проверка бэкенда, фронтенда и архитектуры. Найдено и исправлено:
+
+| Баг | Критичность | Исправление |
+|-----|-------------|-------------|
+| nginx `daemon off;` блокирует uvicorn — API 502 | CRITICAL | Убран `daemon off;`, nginx в daemon mode |
+| EntryOut.metadata конфликт с SQLAlchemy | CRITICAL | `validation_alias="metadata_"` + `populate_by_name` |
+| email_connector: str вместо UUID в запросе | CRITICAL | Конвертация `UUID(connector_id)` |
+| email_connector: new event loop на каждое вложение | CRITICAL | Batch-обработка в одной async-сессии |
+| datetime→str в 4 Pydantic-схемах | SERIOUS | Заменено на `datetime` в ConnectorOut, LinkOut, SettingOut, AuditOut |
+| audit middleware: str() вместо json.dumps() для JSONB | SERIOUS | `json.dumps(details, ensure_ascii=False, default=str)` |
+| audit middleware нигде не вызывался | SERIOUS | Интегрирован в entries CRUD, auth login, intake upload |
+| sync.py: unused imports (SyncQueue, Source) | MINOR | Очищены |
+| stats.py, seed.py: unused imports | MINOR | Очищены |
+| datetime.utcnow() deprecated (storage, export) | MINOR | `datetime.now(timezone.utc)` |
+| Frontend: 401 redirect игнорирует basename | MODERATE | `import.meta.env.BASE_URL` |
+| Frontend: register() не сохраняет токен | MODERATE | Добавлен `setToken()` |
+
 ### Запланировано
 
 - Полнотекстовый поиск (PostgreSQL FTS)
 - PWA (offline + push-уведомления)
 - Интеграции: банковские API, ЭДО, ОФД
 - Dashboard: графики трендов, сравнение периодов
+- Rate limiting (API)
+- Мониторинг (metrics endpoint)
+- OCR в облачном сервере
+- Нормализация + fuzzy match в cloud classifier

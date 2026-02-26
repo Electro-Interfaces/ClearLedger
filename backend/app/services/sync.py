@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
-from app.models.models import RawEntry, AiResult, SyncQueue, Entry, Source
+from app.models.models import RawEntry, AiResult, Entry
 
 logger = logging.getLogger("sync")
 

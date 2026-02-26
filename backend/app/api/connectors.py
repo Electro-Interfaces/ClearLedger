@@ -1,5 +1,6 @@
 """CRUD для коннекторов."""
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -45,10 +46,10 @@ class ConnectorOut(BaseModel):
     status: str
     category_id: str
     interval_sec: int
-    last_sync: str | None
+    last_sync: datetime | None
     records_count: int
     errors_count: int
-    created_at: str
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 

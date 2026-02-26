@@ -1,5 +1,7 @@
 """CRUD для настроек (key-value store)."""
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -19,7 +21,7 @@ class SettingValue(BaseModel):
 class SettingOut(BaseModel):
     key: str
     value: dict
-    updated_at: str
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 

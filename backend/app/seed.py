@@ -5,7 +5,7 @@ import asyncio
 from passlib.hash import bcrypt
 from sqlalchemy import select
 
-from app.database import engine, async_session, Base
+from app.database import async_session
 from app.models.models import User, Company
 
 

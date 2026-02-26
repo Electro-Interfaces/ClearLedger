@@ -2,7 +2,7 @@
 
 import hashlib
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -21,7 +21,7 @@ def store_file(
     Returns:
         (file_path, fingerprint, file_size)
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     source_uuid = uuid4().hex[:8]
 
     # Безопасное имя файла

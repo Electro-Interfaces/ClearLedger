@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import APIRouter, Depends, Query
@@ -36,7 +36,7 @@ async def export_1c_xml(
     # CommerceML-подобный XML
     root = Element("КоммерческаяИнформация", attrib={
         "ВерсияСхемы": "2.10",
-        "ДатаФормирования": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"),
+        "ДатаФормирования": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
     })
 
     catalog = SubElement(root, "Каталог")

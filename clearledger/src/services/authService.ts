@@ -33,6 +33,7 @@ export async function register(data: {
   role?: string
 }): Promise<TokenResponse> {
   const result = await api.post<TokenResponse>('/api/auth/register', data)
+  api.setToken(result.access_token)
   return result
 }
 

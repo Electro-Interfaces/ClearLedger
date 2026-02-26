@@ -1,5 +1,6 @@
 """Просмотр аудит-лога (только admin)."""
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -22,7 +23,7 @@ class AuditOut(BaseModel):
     entity_id: str | None
     details: dict
     ip_address: str | None
-    created_at: str
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 

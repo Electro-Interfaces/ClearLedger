@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ---------- Source ----------
@@ -58,14 +58,14 @@ class EntryOut(BaseModel):
     status: str
     source_type: str
     source_label: str
-    metadata: dict[str, Any]
+    metadata: dict[str, Any] = Field(validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
     verified_at: datetime | None
     verified_by: UUID | None
     transferred_at: datetime | None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class EntryList(BaseModel):

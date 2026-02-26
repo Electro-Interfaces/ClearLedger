@@ -10,7 +10,7 @@ python -m app.seed
 echo "Starting cron (бэкапы)..."
 cron
 
-echo "Starting nginx..."
+echo "Starting nginx (daemon mode)..."
 nginx
 
 echo "Starting FastAPI..."

@@ -1,8 +1,6 @@
 """Загрузка файлов → Layer 1 + Layer 1a (staging)."""
 
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -11,18 +9,20 @@ from app.schemas.entries import SourceOut
 from app.api.deps import get_current_user
 from app.services.storage import store_file
 from app.services.parser import parse_file
+from app.middleware.audit import log_audit
 
 router = APIRouter(prefix="/intake", tags=["intake"])
 
 
 @router.post("", response_model=SourceOut, status_code=201)
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     company_id: str = Form(...),
     category_id: str = Form("uncategorized"),
     subcategory_id: str = Form("other"),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Загрузка файла: сохранение в Layer 1 + парсинг в Layer 1a.
 
@@ -75,6 +75,7 @@ async def upload_file(
 
     await db.commit()
     await db.refresh(source)
+    await log_audit(user.id, "upload", "source", str(source.id), details={"file_name": file.filename}, ip_address=request.client.host if request.client else None)
 
     return SourceOut.model_validate(source)
 

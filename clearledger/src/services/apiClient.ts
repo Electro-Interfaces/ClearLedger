@@ -46,7 +46,8 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
     if (res.status === 401) {
       clearToken()
-      window.location.href = '/login'
+      const base = import.meta.env.BASE_URL ?? '/'
+      window.location.href = `${base}login`
     }
 
     throw new ApiError(res.status, detail)

@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.models import Entry, User
 from app.schemas.entries import EntryCreate, EntryUpdate, EntryOut, EntryList
 from app.api.deps import get_current_user
+from app.middleware.audit import log_audit
 
 router = APIRouter(prefix="/entries", tags=["entries"])
 
@@ -68,8 +69,9 @@ async def get_entry(
 @router.post("", response_model=EntryOut, status_code=201)
 async def create_entry(
     data: EntryCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Создание записи (ручной ввод)."""
     entry = Entry(
@@ -85,6 +87,7 @@ async def create_entry(
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
+    await log_audit(user.id, "create", "entry", str(entry.id), ip_address=request.client.host if request.client else None)
     return EntryOut.model_validate(entry)
 
 
@@ -92,8 +95,9 @@ async def create_entry(
 async def update_entry(
     entry_id: UUID,
     data: EntryUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Обновление записи."""
     result = await db.execute(select(Entry).where(Entry.id == entry_id))
@@ -109,14 +113,16 @@ async def update_entry(
 
     await db.commit()
     await db.refresh(entry)
+    await log_audit(user.id, "update", "entry", str(entry_id), details=data.model_dump(exclude_unset=True), ip_address=request.client.host if request.client else None)
     return EntryOut.model_validate(entry)
 
 
 @router.delete("/{entry_id}", status_code=204)
 async def delete_entry(
     entry_id: UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Удаление записи."""
     result = await db.execute(select(Entry).where(Entry.id == entry_id))
@@ -126,3 +132,4 @@ async def delete_entry(
 
     await db.delete(entry)
     await db.commit()
+    await log_audit(user.id, "delete", "entry", str(entry_id), ip_address=request.client.host if request.client else None)

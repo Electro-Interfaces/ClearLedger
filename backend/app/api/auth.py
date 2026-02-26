@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.hash import bcrypt
@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.models import User
 from app.schemas.auth import UserCreate, UserLogin, UserOut, TokenResponse
 from app.api.deps import get_current_user, require_role
+from app.middleware.audit import log_audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -49,7 +50,7 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
+async def login(data: UserLogin, request: Request, db: AsyncSession = Depends(get_db)):
     """Вход по email + пароль."""
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
@@ -64,6 +65,7 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     token = _create_token(str(user.id))
+    await log_audit(user.id, "login", "user", str(user.id), ip_address=request.client.host if request.client else None)
     return TokenResponse(access_token=token, user=UserOut.model_validate(user))
 
 
