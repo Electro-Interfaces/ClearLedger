@@ -510,13 +510,80 @@ __cl.export(companyId?) — экспорт данных компании
 | apiClient: TS 5.9 `erasableSyntaxOnly` (public parameter properties) | Явные свойства класса |
 | pipeline: Uint8Array BlobPart несовместимость | Cast через `as unknown as BlobPart` |
 
+#### Волна полировки (v0.3.3)
+
+**Структурные улучшения:**
+
+| Улучшение | Реализация |
+|-----------|-----------|
+| ErrorBoundary | Глобальная обёртка App, кнопки «Повторить» / «На главную» |
+| Skeleton loading | 4 варианта: DetailPage, SplitView, Table, Search — вместо текстовой «Загрузка...» |
+| Мобильные карточки | InboxTable, DataTable, RecentActivity — card layout на <768px |
+| Responsive grid | KpiCards: `md:3 lg:5` вместо `md:5` |
+
+**Dashboard:**
+
+| Виджет | Реализация |
+|--------|-----------|
+| ActivityChart | 14-дневный bar chart (uploaded/verified), CSS-бары |
+| OnboardingBanner | Приветствие + кнопки для пустого состояния |
+
+**Batch-операции:**
+
+| Действие | Реализация |
+|----------|-----------|
+| Массовое удаление | BulkActionsBar + AlertDialog подтверждение |
+| CSV экспорт выделенных | UTF-8 BOM, скачивание через blob URL |
+
+**Code splitting & бандл:**
+
+| Оптимизация | Результат |
+|------------|-----------|
+| React.lazy() для 13 страниц | Dashboard eager, остальные lazy + Suspense |
+| Vite manualChunks | vendor-react (100KB), vendor-radix (112KB), vendor-query (36KB), vendor-pdf (404KB), vendor-xlsx (429KB) |
+| Основной бандл | 939KB → 698KB (gzip 210KB) |
+
+**Тема light/dark:**
+
+| Элемент | Реализация |
+|---------|-----------|
+| CSS-переменные | `:root` = light, `.dark` = dark (TradeFrame design) |
+| useTheme хук | localStorage-персистенция, toggle(), system media query |
+| Flash prevention | Inline-скрипт в index.html до React |
+| Header, MobileBottomNav, CompanySelector, .sel | Переведены с hardcoded HSL на CSS-переменные |
+| SettingsPage | Селектор темы (system/light/dark) применяется реально |
+| Toggle в Header | Кнопка Sun/Moon рядом с профилем |
+
+**UX-компоненты:**
+
+| Компонент | Реализация |
+|-----------|-----------|
+| EmptyState | Универсальный: icon + title + description + action. Используется в InboxPage, SearchPage, ConnectorGrid |
+| KeyboardHelp | Модал по `?` со списком горячих клавиш (Ctrl+K, J/K, S, Ctrl+Enter) |
+| QueryError | Inline-ошибка с кнопкой «Повторить» |
+| Пагинация SearchPage | 15 результатов/страница, shadcn/ui Pagination |
+
+**Error handling:**
+
+| Элемент | Реализация |
+|---------|-----------|
+| QueryCache.onError | Глобальный toast при failed background refetch |
+| MutationCache.onError | Глобальный toast при ошибке мутации |
+| isError + QueryError | InboxPage, InboxDetailPage, DataCategoryPage, DataDetailPage, ConnectorsPage, ConnectorDetailPage |
+
+**Прочее:**
+
+| Улучшение | Реализация |
+|-----------|-----------|
+| max-width 1400px | Ограничение контента для ultra-wide мониторов |
+| AppBreadcrumb | Авто-breadcrumbs из URL, resolve названий записей/коннекторов |
+
 ### Запланировано
 
 - Полнотекстовый поиск (PostgreSQL FTS)
 - PWA (offline + push-уведомления)
 - Интеграции: банковские API, ЭДО, ОФД
-- Dashboard: графики трендов, сравнение периодов
-- Rate limiting (API)
+- Dashboard: сравнение периодов
 - Мониторинг (metrics endpoint)
 - OCR в облачном сервере
 - Нормализация + fuzzy match в cloud classifier
