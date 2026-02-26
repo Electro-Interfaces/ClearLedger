@@ -14,6 +14,7 @@ import { classify } from './classify'
 import { computeFingerprint, computeTextHash, checkDuplicate } from './dedup'
 import { saveSource, saveExtract } from '@/services/sourceStore'
 import { createEntry, getEntries } from '@/services/dataEntryService'
+import { createLink } from '@/services/linkService'
 
 export type PipelineCallback = (item: IntakeItem) => void
 
@@ -179,6 +180,10 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
             opts.onUpdate(child)
           },
         })
+        // Создаём связь email → вложение
+        if (childItem.entryId) {
+          createLink(entry.id, childItem.entryId, 'email-attachment', att.filename)
+        }
         item.childItems.push(childItem)
       }
     }
@@ -398,6 +403,11 @@ export async function forceSaveDuplicate(
       ...(item.duplicateOf?.id ? { _duplicateOf: item.duplicateOf.id } : {}),
     },
   })
+
+  // Связь с оригиналом (дубликат)
+  if (item.duplicateOf?.id) {
+    createLink(item.duplicateOf.id, entry.id, 'duplicate')
+  }
 
   return entry
 }

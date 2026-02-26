@@ -4,6 +4,7 @@ import { useInbox, useEntry, useVerifyEntry, useRejectEntry } from '@/hooks/useE
 import { DocumentPreview } from '@/components/data/DocumentPreview'
 import { VerificationForm } from '@/components/inbox/VerificationForm'
 import { InboxNavigation } from '@/components/inbox/InboxNavigation'
+import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 
@@ -110,7 +111,10 @@ export function InboxDetailPage() {
 
       {/* Split view: 60% preview / 40% form */}
       <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4">
-        <DocumentPreview entry={entry} />
+        <div className="space-y-4">
+          <DocumentPreview entry={entry} />
+          <DocumentLinks entryId={entry.id} />
+        </div>
         <VerificationForm
           entry={entry}
           onVerify={handleVerify}

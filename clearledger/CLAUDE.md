@@ -146,7 +146,8 @@ lib/            — queryClient, cn() утилита
 | `src/services/sourceStore.ts` | IndexedDB для файлов (sources + extracts) |
 | `src/contexts/CompanyContext.tsx` | Контекст компании, профиль, кастомизация |
 | `src/services/intake/pipeline.ts` | Intake pipeline оркестратор |
-| `src/services/intake/classify.ts` | 10 правил классификации документов |
+| `src/services/intake/classify.ts` | 27 правил классификации документов |
+| `src/services/linkService.ts` | CRUD связей между документами (DocumentLink) |
 | `src/types/index.ts` | Все TypeScript типы |
 
 ---

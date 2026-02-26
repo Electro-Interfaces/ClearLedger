@@ -151,6 +151,24 @@ export interface IntakeClassification {
   metadata: Record<string, string>
 }
 
+// ---- Document Links (граф связей) ----
+
+export type LinkType =
+  | 'email-attachment'   // email → вложение
+  | 'duplicate'          // дубликат (dedup)
+  | 'related'            // связанные (один контрагент / номер / дата)
+  | 'correction'         // исправление / дополнение
+  | 'manual'             // ручная связь пользователя
+
+export interface DocumentLink {
+  id: string
+  sourceEntryId: string   // откуда
+  targetEntryId: string   // куда
+  type: LinkType
+  label?: string          // описание связи
+  createdAt: string
+}
+
 export interface UploadItem {
   id: string
   file: File

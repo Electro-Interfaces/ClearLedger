@@ -3,6 +3,7 @@ import { useEntry, useVerifyEntry, useTransferEntries, useDeleteEntry } from '@/
 import { DocumentPreview } from '@/components/data/DocumentPreview'
 import { MetadataPanel } from '@/components/data/MetadataPanel'
 import { HistoryTimeline } from '@/components/data/HistoryTimeline'
+import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -70,6 +71,7 @@ export function DataDetailPage() {
             onTransfer={entry.status === 'verified' ? handleTransfer : undefined}
             onDelete={entry.status !== 'transferred' ? handleDelete : undefined}
           />
+          <DocumentLinks entryId={entry.id} allowAdd />
           <HistoryTimeline entry={entry} />
         </div>
       </div>
