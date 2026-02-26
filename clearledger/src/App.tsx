@@ -5,6 +5,7 @@ import { CompanyProvider } from '@/contexts/CompanyContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { Dashboard } from '@/pages/Dashboard'
+import { IntakePage } from '@/pages/IntakePage'
 import { UploadPage } from '@/pages/UploadPage'
 import { PhotoScanPage } from '@/pages/PhotoScanPage'
 import { ManualEntryPage } from '@/pages/ManualEntryPage'
@@ -43,6 +44,7 @@ const router = createBrowserRouter([
           { path: '/', element: <Dashboard /> },
           { path: '/inbox', element: <InboxPage /> },
           { path: '/inbox/:id', element: <InboxDetailPage /> },
+          { path: '/input', element: <IntakePage /> },
           { path: '/input/upload', element: <UploadPage /> },
           { path: '/input/photo', element: <PhotoScanPage /> },
           { path: '/input/manual', element: <ManualEntryPage /> },

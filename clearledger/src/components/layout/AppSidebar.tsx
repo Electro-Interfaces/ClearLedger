@@ -13,9 +13,7 @@ import {
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
-  Upload,
-  Camera,
-  PenLine,
+  PackageOpen,
   FileText,
   Wallet,
   Activity,
@@ -48,9 +46,7 @@ const dashboardItem: NavItem = {
 }
 
 const inputItems: NavItem[] = [
-  { title: 'Загрузка', path: '/input/upload', icon: Upload },
-  { title: 'Фото/Скан', path: '/input/photo', icon: Camera },
-  { title: 'Ручной ввод', path: '/input/manual', icon: PenLine },
+  { title: 'Приём', path: '/input', icon: PackageOpen },
 ]
 
 const integrationItems: NavItem[] = [

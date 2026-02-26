@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge'
-import type { DataEntry } from '@/types'
+import type { EntrySource } from '@/types'
 
-const sourceConfig: Record<DataEntry['source'], { label: string; className: string }> = {
+const sourceConfig: Record<EntrySource, { label: string; className: string }> = {
   upload: {
     label: 'Загрузка',
     className: 'border-blue-500 text-blue-400',
@@ -40,8 +40,8 @@ const sourceConfig: Record<DataEntry['source'], { label: string; className: stri
   },
 }
 
-export function SourceBadge({ source }: { source: DataEntry['source'] }) {
-  const config = sourceConfig[source]
+export function SourceBadge({ source }: { source: EntrySource }) {
+  const config = sourceConfig[source] ?? sourceConfig.upload
   return (
     <Badge variant="outline" className={config.className}>
       {config.label}
