@@ -74,7 +74,7 @@ export function MainLayout() {
             <AppSidebar />
 
             <main className="flex-1 min-w-0 w-full max-w-none overflow-y-auto">
-              <div className="px-4 md:px-6 lg:px-8 w-full max-w-none py-6">
+              <div className="px-4 md:px-6 lg:px-8 w-full max-w-[1400px] py-6">
                 <AppBreadcrumb />
                 <Outlet />
               </div>

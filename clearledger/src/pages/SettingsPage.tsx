@@ -9,12 +9,14 @@ import { Separator } from '@/components/ui/separator'
 import { NavLink } from 'react-router-dom'
 import { Building2, ChevronRight, Download } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useTheme } from '@/hooks/useTheme'
 import { getSettings, saveSettings } from '@/services/settingsService'
 import { exportAllData } from '@/services/exportService'
 import type { AppSettings } from '@/services/settingsService'
 
 export function SettingsPage() {
   const { companies, companyId } = useCompany()
+  const { theme: activeTheme, setTheme: applyTheme } = useTheme()
   const [settings, setSettings] = useState<AppSettings>(getSettings)
   const [exporting, setExporting] = useState(false)
 
@@ -34,6 +36,12 @@ export function SettingsPage() {
       theme: settings.theme,
       defaultCompanyId: settings.defaultCompanyId,
     })
+    // Применяем тему реально
+    if (settings.theme === 'system') {
+      applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    } else {
+      applyTheme(settings.theme as 'light' | 'dark')
+    }
     toast.success('Настройки сохранены')
   }
 
@@ -150,7 +158,9 @@ export function SettingsPage() {
                   <SelectItem value="dark">Тёмная</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Будет доступно в следующей версии</p>
+              <p className="text-xs text-muted-foreground">
+                Текущая: {activeTheme === 'dark' ? 'тёмная' : 'светлая'}
+              </p>
             </div>
             <Separator />
             <div className="space-y-2">
