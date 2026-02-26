@@ -1,5 +1,9 @@
 import type { EntryStatus } from '@/config/statuses'
 
+export type EntrySource =
+  | 'upload' | 'photo' | 'manual' | 'api'
+  | 'email' | 'oneC' | 'whatsapp' | 'telegram' | 'paste'
+
 export interface DataEntry {
   id: string
   title: string
@@ -8,7 +12,7 @@ export interface DataEntry {
   docTypeId?: string
   companyId: string
   status: EntryStatus
-  source: 'upload' | 'photo' | 'manual' | 'api'
+  source: EntrySource
   sourceLabel: string
   fileUrl?: string
   fileType?: string
@@ -18,6 +22,19 @@ export interface DataEntry {
   createdAt: string
   updatedAt: string
 }
+
+/**
+ * Специальные ключи metadata для intake pipeline:
+ * _blobId — ссылка на blob в IndexedDB
+ * _fingerprint — SHA-256 hash файла
+ * _duplicateOf — ID оригинала если дубль
+ * _confidence — уверенность классификации (0-100)
+ * _sourceType — детальный тип источника
+ * _extractedText — извлечённый текст (для поиска)
+ * _email.from, _email.subject, _email.messageId
+ * _1c.guid, _1c.docType, _1c.number
+ * _links — JSON-строка массива связей
+ */
 
 export interface OcrResult {
   text: string
@@ -53,6 +70,47 @@ export interface SyncLog {
   status: 'success' | 'error'
   recordsProcessed: number
   message?: string
+}
+
+// ---- Intake Pipeline Types ----
+
+export type IntakeFileType =
+  | 'pdf' | 'image' | 'excel' | 'csv' | 'xml' | 'email'
+  | 'text' | 'json' | 'dbf' | 'word' | 'unknown'
+
+export type IntakeStage = 'detect' | 'extract' | 'classify' | 'dedup' | 'save'
+
+export interface IntakeItem {
+  id: string
+  fileName: string
+  file?: File
+  pastedText?: string
+  mimeType: string
+  size: number
+  stage: IntakeStage
+  progress: number // 0-100
+  status: 'processing' | 'done' | 'error' | 'duplicate'
+  error?: string
+  /** Результат detect */
+  fileType?: IntakeFileType
+  /** Результат extract */
+  extractedText?: string
+  /** Результат classify */
+  classification?: IntakeClassification
+  /** Результат dedup */
+  duplicateOf?: { id: string; title: string } | null
+  fingerprint?: string
+  /** Сохранённая запись */
+  entryId?: string
+}
+
+export interface IntakeClassification {
+  categoryId: string
+  subcategoryId: string
+  docTypeId?: string
+  confidence: number // 0-100
+  title: string
+  metadata: Record<string, string>
 }
 
 export interface UploadItem {

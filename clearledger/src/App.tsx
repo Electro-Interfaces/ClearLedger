@@ -31,6 +31,8 @@ function Providers() {
   )
 }
 
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
+
 const router = createBrowserRouter([
   {
     element: <Providers />,
@@ -56,7 +58,7 @@ const router = createBrowserRouter([
       },
     ],
   },
-])
+], { basename })
 
 export default function App() {
   return <RouterProvider router={router} />

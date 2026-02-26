@@ -7,6 +7,16 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // GitHub Pages SPA route restore
+      (function() {
+        var q = new URLSearchParams(window.location.search);
+        var route = q.get('route');
+        if (route) {
+          history.replaceState(null, '', '/ClearLedger' + decodeURIComponent(route));
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
