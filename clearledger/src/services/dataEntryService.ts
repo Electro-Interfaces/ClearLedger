@@ -6,6 +6,7 @@
 import type { DataEntry, OcrResult } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 import { getItem, setItem, nextId, entriesKey } from './storage'
+import { deleteSource } from './sourceStore'
 import { mockEntries } from './mockData'
 
 // ---- Helpers ----
@@ -64,6 +65,7 @@ export interface CreateEntryInput {
   fileSize?: number
   ocrData?: OcrResult
   metadata: Record<string, string>
+  sourceId?: string
 }
 
 export function createEntry(input: CreateEntryInput): DataEntry {
@@ -83,6 +85,7 @@ export function createEntry(input: CreateEntryInput): DataEntry {
     fileSize: input.fileSize,
     ocrData: input.ocrData,
     metadata: input.metadata,
+    sourceId: input.sourceId,
     createdAt: now,
     updatedAt: now,
   }
@@ -107,9 +110,17 @@ export function updateEntry(
 
 export function deleteEntry(companyId: string, id: string): boolean {
   const entries = loadEntries(companyId)
+  const entry = entries.find((e) => e.id === id)
+  if (!entry) return false
+
   const filtered = entries.filter((e) => e.id !== id)
-  if (filtered.length === entries.length) return false
   saveEntries(companyId, filtered)
+
+  // Cleanup: удалить source + extract из IndexedDB
+  if (entry.sourceId) {
+    deleteSource(entry.sourceId).catch(() => { /* best effort */ })
+  }
+
   return true
 }
 

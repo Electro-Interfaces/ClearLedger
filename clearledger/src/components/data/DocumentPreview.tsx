@@ -1,8 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { ZoomIn, ZoomOut, RotateCw, FileText, Image, FileSpreadsheet, File } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { DataEntry } from '@/types'
+import { getSourceBlobUrl } from '@/services/sourceStore'
 
 function getFileIcon(fileType?: string) {
   if (!fileType) return File
@@ -35,7 +36,24 @@ interface DocumentPreviewProps {
 export function DocumentPreview({ entry }: DocumentPreviewProps) {
   const [zoom, setZoom] = useState(100)
   const [rotation, setRotation] = useState(0)
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
 
+  // Загрузить blob через sourceId из IndexedDB
+  useEffect(() => {
+    let revoked = false
+    if (entry.sourceId) {
+      getSourceBlobUrl(entry.sourceId).then((url) => {
+        if (!revoked && url) setBlobUrl(url)
+      })
+    }
+    return () => {
+      revoked = true
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.sourceId])
+
+  const previewUrl = blobUrl ?? entry.fileUrl
   const FileIcon = getFileIcon(entry.fileType)
   const label = getFileLabel(entry.fileType)
   const isImage = entry.fileType?.startsWith('image/')
@@ -74,7 +92,21 @@ export function DocumentPreview({ entry }: DocumentPreviewProps) {
         </div>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-[300px]">
-        {isImage ? (
+        {isImage && previewUrl ? (
+          <div
+            className="flex items-center justify-center w-full overflow-hidden"
+            style={{
+              transform: `scale(${zoom / 100}) rotate(${rotation}deg)`,
+              transition: 'transform 0.2s ease',
+            }}
+          >
+            <img
+              src={previewUrl}
+              alt={entry.title}
+              className="max-w-full max-h-[500px] object-contain rounded-lg"
+            />
+          </div>
+        ) : isImage ? (
           <div
             className="flex items-center justify-center bg-muted/50 rounded-lg w-full h-[400px] border border-dashed border-muted-foreground/25"
             style={{
@@ -89,6 +121,21 @@ export function DocumentPreview({ entry }: DocumentPreviewProps) {
                 <span className="text-xs">{formatFileSize(entry.fileSize)}</span>
               )}
             </div>
+          </div>
+        ) : isPdf && previewUrl ? (
+          <div
+            className="w-full h-[500px]"
+            style={{
+              transform: `scale(${zoom / 100}) rotate(${rotation}deg)`,
+              transition: 'transform 0.2s ease',
+              transformOrigin: 'top center',
+            }}
+          >
+            <iframe
+              src={previewUrl}
+              title={entry.title}
+              className="w-full h-full rounded-lg border"
+            />
           </div>
         ) : isPdf ? (
           <div

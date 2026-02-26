@@ -10,14 +10,13 @@ import type { IntakeItem } from '@/types'
 import { processFile, processPaste, forceSaveDuplicate } from '@/services/intake/pipeline'
 import { UniversalDropZone } from '@/components/intake/UniversalDropZone'
 import { PasteZone } from '@/components/intake/PasteZone'
-import { ProcessingQueue } from '@/components/intake/ProcessingQueue'
-import { ClassificationPreview } from '@/components/intake/ClassificationPreview'
-import { DuplicateWarning } from '@/components/intake/DuplicateWarning'
+import { IntakeQueue } from '@/components/intake/IntakeQueue'
+import { ManualEntryForm } from '@/components/manual/ManualEntryForm'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, ClipboardPaste } from 'lucide-react'
+import { Upload, ClipboardPaste, PenLine } from 'lucide-react'
 
 export function IntakePage() {
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
   const queryClient = useQueryClient()
   const [items, setItems] = useState<IntakeItem[]>([])
 
@@ -40,6 +39,7 @@ export function IntakePage() {
       for (const file of files) {
         processFile(file, {
           companyId,
+          profileId: company.profileId,
           onUpdate: (item) => {
             updateItem(item)
             if (item.status === 'done') invalidateEntries()
@@ -47,20 +47,21 @@ export function IntakePage() {
         })
       }
     },
-    [companyId, updateItem, invalidateEntries],
+    [companyId, company.profileId, updateItem, invalidateEntries],
   )
 
   const handlePaste = useCallback(
     (text: string) => {
       processPaste(text, {
         companyId,
+        profileId: company.profileId,
         onUpdate: (item) => {
           updateItem(item)
           if (item.status === 'done') invalidateEntries()
         },
       })
     },
-    [companyId, updateItem, invalidateEntries],
+    [companyId, company.profileId, updateItem, invalidateEntries],
   )
 
   const handleForceSave = useCallback(
@@ -95,7 +96,7 @@ export function IntakePage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Приём документов</h1>
         <p className="text-muted-foreground mt-1">
-          Загрузите файлы или вставьте текст — система автоматически определит тип и классифицирует
+          Загрузите файлы, вставьте текст или создайте запись вручную
         </p>
       </div>
 
@@ -109,6 +110,10 @@ export function IntakePage() {
             <ClipboardPaste className="size-4" />
             Вставка текста
           </TabsTrigger>
+          <TabsTrigger value="manual" className="gap-1.5">
+            <PenLine className="size-4" />
+            Ручной ввод
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="files" className="mt-4">
@@ -118,17 +123,18 @@ export function IntakePage() {
         <TabsContent value="paste" className="mt-4">
           <PasteZone onPaste={handlePaste} disabled={isProcessing} />
         </TabsContent>
+
+        <TabsContent value="manual" className="mt-4">
+          <ManualEntryForm entryType="new" />
+        </TabsContent>
       </Tabs>
 
-      <ProcessingQueue items={items.filter((i) => i.status === 'processing')} />
-
-      <DuplicateWarning
+      <IntakeQueue
         items={items}
         onForceSave={handleForceSave}
         onDismiss={handleDismiss}
+        onClear={handleClear}
       />
-
-      <ClassificationPreview items={items} onClear={handleClear} />
     </div>
   )
 }

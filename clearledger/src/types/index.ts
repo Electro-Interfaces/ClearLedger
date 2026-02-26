@@ -19,21 +19,57 @@ export interface DataEntry {
   fileSize?: number
   ocrData?: OcrResult
   metadata: Record<string, string>
+  /** Ссылка на Source+Extract в IndexedDB (sourceStore) */
+  sourceId?: string
   createdAt: string
   updatedAt: string
 }
 
+// ---- Source / Extract (IndexedDB, структурированное хранилище) ----
+
+/** Оригинальный файл, immutable */
+export interface SourceRecord {
+  id: string           // nanoid
+  blob: Blob
+  fileName: string
+  mimeType: string
+  size: number
+  fingerprint: string  // SHA-256
+  createdAt: string    // ISO
+}
+
+/** Результат pipeline, может перезапускаться */
+export interface ExtractRecord {
+  id: string           // = sourceId (1:1)
+  sourceId: string
+  fullText: string     // ВЕСЬ текст, без обрезки
+  fields: ExtractedField[]
+  classification: {
+    categoryId: string
+    subcategoryId: string
+    docTypeId?: string
+    confidence: number
+  }
+  extractedAt: string
+}
+
+export interface ExtractedField {
+  key: string          // docNumber, docDate, amount, inn, counterparty
+  value: string
+  confidence: number   // 0-100
+  source: 'regex' | 'ocr' | 'parser'
+}
+
 /**
- * Специальные ключи metadata для intake pipeline:
- * _blobId — ссылка на blob в IndexedDB
- * _fingerprint — SHA-256 hash файла
+ * Специальные ключи metadata:
+ * _fingerprint — SHA-256 hash файла (для dedup)
  * _duplicateOf — ID оригинала если дубль
- * _confidence — уверенность классификации (0-100)
- * _sourceType — детальный тип источника
- * _extractedText — извлечённый текст (для поиска)
  * _email.from, _email.subject, _email.messageId
  * _1c.guid, _1c.docType, _1c.number
  * _links — JSON-строка массива связей
+ *
+ * DEPRECATED (перенесены в SourceRecord/ExtractRecord):
+ * _blobId, _extractedText, _confidence, _sourceType
  */
 
 export interface OcrResult {
