@@ -4,8 +4,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from sqlalchemy import text
 
 from app.api import auth, entries, companies, intake, files, connectors, document_links, settings_api, stats, audit, export, connector_actions
@@ -14,6 +17,9 @@ from app.database import async_session
 from app.services.sync import sync_loop
 
 logging.basicConfig(level=logging.INFO)
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address, default_limits=[app_settings.rate_limit])
 
 
 @asynccontextmanager
@@ -39,14 +45,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ClearLedger API",
-    version="0.3.0",
+    version="0.3.1",
     description="Документооборот: приём, классификация, хранение",
     lifespan=lifespan,
 )
 
+# Rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — конкретные origins вместо wildcard
+origins = [o.strip() for o in app_settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,6 +93,6 @@ async def health():
     status = "ok" if db_ok else "degraded"
     return {
         "status": status,
-        "version": "0.3.0",
+        "version": "0.3.1",
         "database": "connected" if db_ok else "unavailable",
     }

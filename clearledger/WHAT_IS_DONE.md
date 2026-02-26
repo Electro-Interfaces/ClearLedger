@@ -393,12 +393,12 @@ __cl.export(companyId?) — экспорт данных компании
 | 2 | FastAPI: auth + CRUD public.entries | Готово |
 | 3 | Файловое хранилище: upload → папочная структура | Готово |
 | 4 | Парсинг: PyMuPDF, openpyxl → staging.raw_entries | Готово |
-| 5 | Sync: staging → облако → staging → promote | Готово |
+| 5 | Sync: staging → облако → staging → promote | Готово (sync_queue не задействован, retry backoff — TODO) |
 | 6 | Миграция React SPA: API-клиент вместо localStorage | Готово |
-| 7 | Аудит, роли, rate limiting | Готово |
-| 8 | Бэкапы, мониторинг, health checks | Готово |
-| 9 | Облачный сервер: AI pipeline | Готово |
-| 10 | Интеграции: 1С XML-выгрузка, email-коннектор, CSV export | Готово |
+| 7 | Аудит, роли, rate limiting | Готово (slowapi rate limiting добавлен) |
+| 8 | Бэкапы, health checks | Готово (мониторинг/metrics — TODO) |
+| 9 | Облачный сервер: AI pipeline | Готово (OCR, нормализация — TODO) |
+| 10 | Интеграции: 1С XML-выгрузка, email-коннектор, CSV export | Готово (реальный обмен с 1С — TODO) |
 
 #### Бэкенд (backend/)
 
@@ -443,6 +443,26 @@ __cl.export(companyId?) — экспорт данных компании
 | datetime.utcnow() deprecated (storage, export) | MINOR | `datetime.now(timezone.utc)` |
 | Frontend: 401 redirect игнорирует basename | MODERATE | `import.meta.env.BASE_URL` |
 | Frontend: register() не сохраняет токен | MODERATE | Добавлен `setToken()` |
+
+#### Аудит v2 и исправления (v0.3.2)
+
+Повторная глубокая проверка: бэкенд, фронтенд, архитектура.
+
+| Баг | Критичность | Исправление |
+|-----|-------------|-------------|
+| CORS `allow_origins=["*"]` + `allow_credentials=True` | CRITICAL | Конкретные origins через `CORS_ORIGINS` env |
+| Rate limiting полностью отсутствовал | CRITICAL | slowapi + rate_limit конфиг + лимит на /login |
+| SECRET_KEY дефолтный публично известный | CRITICAL | Warning при запуске если не изменён |
+| GIN-индекс на entries.metadata отсутствует | HIGH | Миграция 002: `USING GIN (metadata jsonb_path_ops)` |
+| Staging FK отсутствуют (ai_results, sync_queue) | HIGH | Миграция 002: FK с ON DELETE CASCADE |
+| Frontend: exportService без await — экспорт `{}` | HIGH | `await getEntries(companyId)` |
+| Frontend: Inbox API = only `new`, demo = `new`+`recognized` | HIGH | Два параллельных запроса (new + recognized) |
+| classify.ts: `operations` вместо `operational` | HIGH | Исправлено на `operational` |
+| classify.ts: опечатка `ФайлОбwormen` | MINOR | Исправлено на `ФайлОбмен` |
+| promote_to_public: source_type hardcoded `upload` | MEDIUM | Определение из extracted_fields (email/upload) |
+| Cloud API: нет company_profile | MEDIUM | Добавлена подгрузка profile_id из Company |
+| Frontend: 401 race condition (множественные редиректы) | HIGH | Guard `isRedirecting` flag |
+| WHAT_IS_DONE: ложные "Готово" | MEDIUM | Статусы уточнены с TODO-пометками |
 
 ### Запланировано
 

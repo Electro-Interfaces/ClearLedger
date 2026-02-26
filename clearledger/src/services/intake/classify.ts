@@ -278,7 +278,7 @@ const rules: Rule[] = [
   // XML ФНС (УПД, электронные СФ)
   {
     test: ({ fileType, text }) =>
-      fileType === 'xml' && /СвСчФакт|ФайлОбwormen|format="FNS"|_xml\.format.*FNS/i.test(text),
+      fileType === 'xml' && /СвСчФакт|ФайлОбмен|format="FNS"|_xml\.format.*FNS/i.test(text),
     result: {
       categoryId: 'primary',
       subcategoryId: 'invoices',
@@ -332,7 +332,7 @@ const rules: Rule[] = [
       /транзакц|терминал|z-отчёт|z-отчет|смен.*касс/i.test(text),
     profiles: ['fuel', 'trade', 'retail'],
     result: {
-      categoryId: 'operations',
+      categoryId: 'operational',
       subcategoryId: 'sales',
       confidence: 65,
       title: 'Реестр транзакций',
@@ -349,7 +349,7 @@ const rules: Rule[] = [
       /остат.*резервуар|резервуар.*остат|остат.*ёмкост|остат.*емкост/i.test(text),
     profiles: ['fuel'],
     result: {
-      categoryId: 'operations',
+      categoryId: 'operational',
       subcategoryId: 'inventory',
       confidence: 70,
       title: 'Остатки в резервуарах',

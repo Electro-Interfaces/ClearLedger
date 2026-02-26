@@ -36,6 +36,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Guard от множественных 401 редиректов (race condition при параллельных запросах) */
+let isRedirecting = false
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText
@@ -44,7 +47,8 @@ async function handleResponse<T>(res: Response): Promise<T> {
       detail = body.detail ?? JSON.stringify(body)
     } catch { /* ignore */ }
 
-    if (res.status === 401) {
+    if (res.status === 401 && !isRedirecting) {
+      isRedirecting = true
       clearToken()
       const base = import.meta.env.BASE_URL ?? '/'
       window.location.href = `${base}login`

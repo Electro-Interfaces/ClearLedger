@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session
-from app.models.models import RawEntry, AiResult, Entry
+from app.models.models import RawEntry, AiResult, Entry, Company
 
 logger = logging.getLogger("sync")
 
@@ -89,6 +89,16 @@ async def process_pending_batch():
 
 async def send_to_cloud(raw_entries: list[RawEntry]) -> list[dict]:
     """Отправляет batch в облачный API."""
+    # Подгружаем profile_id компаний для контекстной классификации
+    company_ids = list({e.company_id for e in raw_entries})
+    company_profiles: dict[str, str] = {}
+    async with async_session() as db:
+        result = await db.execute(
+            select(Company.id, Company.profile_id).where(Company.id.in_(company_ids))
+        )
+        for row in result.all():
+            company_profiles[row.id] = row.profile_id
+
     batch = []
     for e in raw_entries:
         batch.append({
@@ -98,6 +108,7 @@ async def send_to_cloud(raw_entries: list[RawEntry]) -> list[dict]:
             "extracted_text": e.extracted_text[:50000],  # лимит
             "extracted_fields": e.extracted_fields,
             "company_id": e.company_id,
+            "company_profile": company_profiles.get(e.company_id, "general"),
         })
 
     async with httpx.AsyncClient(timeout=120) as client:
@@ -157,6 +168,10 @@ async def promote_to_public(db: AsyncSession, raw_entry_id: UUID, result: dict):
     classification = result.get("classification", {})
     metadata = result.get("normalized_metadata", {})
 
+    # Определяем source_type из extracted_fields (email, 1c, etc.) или fallback upload
+    extracted = raw.extracted_fields or {}
+    source_type = "email" if extracted.get("_email_sender") else "upload"
+
     entry = Entry(
         company_id=raw.company_id,
         source_id=raw.source_id,
@@ -165,7 +180,7 @@ async def promote_to_public(db: AsyncSession, raw_entry_id: UUID, result: dict):
         subcategory_id=classification.get("subcategory_id", "other"),
         doc_type_id=classification.get("doc_type_id"),
         status="new",
-        source_type="upload",
+        source_type=source_type,
         source_label=raw.file_name,
         metadata_=metadata,
     )

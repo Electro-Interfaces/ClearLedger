@@ -3,6 +3,8 @@
  * JSON dump всех DataEntry + metadata.
  */
 
+import type { DataEntry } from '@/types'
+import type { Connector } from '@/types'
 import { getEntries } from './dataEntryService'
 import { getConnectors } from './connectorService'
 
@@ -10,8 +12,8 @@ export interface ExportPayload {
   version: '1.0'
   exportedAt: string
   companyId: string
-  entries: ReturnType<typeof getEntries>
-  connectors: ReturnType<typeof getConnectors>
+  entries: DataEntry[]
+  connectors: Connector[]
 }
 
 export async function exportAllData(companyId: string): Promise<void> {
@@ -19,7 +21,7 @@ export async function exportAllData(companyId: string): Promise<void> {
     version: '1.0',
     exportedAt: new Date().toISOString(),
     companyId,
-    entries: getEntries(companyId),
+    entries: await getEntries(companyId),
     connectors: getConnectors(companyId),
   }
 

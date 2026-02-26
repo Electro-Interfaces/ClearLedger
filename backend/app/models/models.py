@@ -195,7 +195,7 @@ class AiResult(Base):
     __table_args__ = {"schema": "staging"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    raw_entry_id = Column(UUID(as_uuid=True), nullable=False)
+    raw_entry_id = Column(UUID(as_uuid=True), ForeignKey("staging.raw_entries.id", ondelete="CASCADE"), nullable=False)
     category_id = Column(String)
     subcategory_id = Column(String)
     doc_type_id = Column(String)
@@ -213,7 +213,7 @@ class SyncQueue(Base):
     __table_args__ = {"schema": "staging"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    raw_entry_id = Column(UUID(as_uuid=True), nullable=False)
+    raw_entry_id = Column(UUID(as_uuid=True), ForeignKey("staging.raw_entries.id", ondelete="CASCADE"), nullable=False)
     direction = Column(String, nullable=False)
     payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     status = Column(String, nullable=False, default="pending")

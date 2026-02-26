@@ -274,12 +274,19 @@ export async function transferEntries(companyId: string, ids: string[]): Promise
 
 export async function getInboxEntries(companyId: string): Promise<DataEntry[]> {
   if (isApiEnabled()) {
-    const res = await get<{ items: ApiEntry[]; total: number }>('/api/entries', {
-      company_id: companyId,
-      status: 'new',
-      limit: 200,
-    })
-    return res.items.map(apiToEntry)
+    const [resNew, resRecognized] = await Promise.all([
+      get<{ items: ApiEntry[]; total: number }>('/api/entries', {
+        company_id: companyId,
+        status: 'new',
+        limit: 200,
+      }),
+      get<{ items: ApiEntry[]; total: number }>('/api/entries', {
+        company_id: companyId,
+        status: 'recognized',
+        limit: 200,
+      }),
+    ])
+    return [...resNew.items, ...resRecognized.items].map(apiToEntry)
   }
   return loadEntries(companyId).filter(
     (e) => e.status === 'new' || e.status === 'recognized',

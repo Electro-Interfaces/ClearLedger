@@ -13,9 +13,12 @@ services:
       - DATABASE_URL_SYNC=postgresql://cl:${DB_PASS:-clearledger}@db:5432/clearledger
       - STORAGE_ROOT=/data/storage
       - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://localhost:8080}
       - CLOUD_API_URL=${CLOUD_API_URL:-}
       - CLOUD_API_KEY=${CLOUD_API_KEY:-}
       - INSTANCE_ID=${INSTANCE_ID:-dev-local}
+      - RATE_LIMIT=${RATE_LIMIT:-60/minute}
+      - RATE_LIMIT_AUTH=${RATE_LIMIT_AUTH:-10/minute}
     depends_on:
       db:
         condition: service_healthy

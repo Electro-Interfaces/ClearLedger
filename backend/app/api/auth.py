@@ -8,12 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from passlib.hash import bcrypt
 import jwt
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 from app.config import settings
 from app.database import get_db
 from app.models.models import User
 from app.schemas.auth import UserCreate, UserLogin, UserOut, TokenResponse
 from app.api.deps import get_current_user, require_role
 from app.middleware.audit import log_audit
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -50,7 +55,8 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: UserLogin, request: Request, db: AsyncSession = Depends(get_db)):
+@limiter.limit(settings.rate_limit_auth)
+async def login(request: Request, data: UserLogin, db: AsyncSession = Depends(get_db)):
     """Вход по email + пароль."""
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
