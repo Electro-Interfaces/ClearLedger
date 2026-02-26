@@ -71,7 +71,67 @@
 
 @layer base {
   :root {
-    /* Core dark theme — TradeFrame design system */
+    /* Light theme */
+    --background: 0 0% 100%;
+    --foreground: 215 28% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+    --primary: 217 91% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 20% 93%;
+    --secondary-foreground: 215 28% 17%;
+    --muted: 217 20% 96%;
+    --muted-foreground: 215 15% 47%;
+    --accent: 217 20% 94%;
+    --accent-foreground: 215 28% 17%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 217 20% 88%;
+    --input: 217 20% 90%;
+    --ring: 217 91% 55%;
+    --radius: 0.75rem;
+
+    /* Chart colors */
+    --chart-1: 217 91% 55%;
+    --chart-2: 160 60% 40%;
+    --chart-3: 30 80% 50%;
+    --chart-4: 280 65% 55%;
+    --chart-5: 340 75% 50%;
+
+    /* Sidebar */
+    --sidebar-background: 217 20% 97%;
+    --sidebar-foreground: 215 28% 17%;
+    --sidebar-primary: 217 91% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 20% 93%;
+    --sidebar-accent-foreground: 215 28% 17%;
+    --sidebar-border: 217 20% 88%;
+    --sidebar-ring: 217 91% 55%;
+
+    /* Platform accent colors */
+    --accent-blue: 217 91% 55%;
+    --accent-purple: 280 100% 65%;
+    --accent-green: 120 80% 35%;
+    --accent-orange: 25 100% 50%;
+
+    /* Status colors */
+    --success: 120 80% 35%;
+    --warning: 45 100% 50%;
+    --error: 0 84% 55%;
+
+    /* Layout */
+    --header-height: 5rem;
+
+    /* Shadows */
+    --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-medium: 0 4px 16px rgba(0, 0, 0, 0.1);
+    --shadow-large: 0 8px 32px rgba(0, 0, 0, 0.15);
+  }
+
+  .dark {
+    /* Dark theme — TradeFrame design system */
     --background: 215 28% 12%;
     --foreground: 0 0% 95%;
     --card: 217 32% 17%;
@@ -91,7 +151,6 @@
     --border: 217 32% 22%;
     --input: 217 32% 17%;
     --ring: 217 91% 60%;
-    --radius: 0.75rem;
 
     /* Chart colors */
     --chart-1: 217 91% 60%;
@@ -120,9 +179,6 @@
     --success: 120 100% 40%;
     --warning: 45 100% 55%;
     --error: 0 84% 60%;
-
-    /* Layout */
-    --header-height: 5rem;
 
     /* Shadows */
     --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.25);

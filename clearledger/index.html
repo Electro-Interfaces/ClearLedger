@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" class="dark">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,6 +8,13 @@
   <body>
     <div id="root"></div>
     <script>
+      // Theme: apply dark class before paint to prevent flash
+      (function() {
+        var t = localStorage.getItem('clearledger-theme');
+        if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
       // GitHub Pages SPA route restore
       (function() {
         var q = new URLSearchParams(window.location.search);

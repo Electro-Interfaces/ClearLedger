@@ -4,6 +4,7 @@ import { useInbox, useVerifyEntry, useRejectEntry } from '@/hooks/useEntries'
 import { InboxTable } from '@/components/inbox/InboxTable'
 import { InboxToolbar, type InboxFilters } from '@/components/inbox/InboxToolbar'
 import { TableSkeleton } from '@/components/common/Skeletons'
+import { EmptyState } from '@/components/common/EmptyState'
 import { Button } from '@/components/ui/button'
 import { Check, X, Inbox } from 'lucide-react'
 
@@ -116,10 +117,11 @@ export function InboxPage() {
       )}
 
       {filteredEntries.length === 0 && !isLoading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
-          <Inbox className="size-12 opacity-30" />
-          <p>Очередь пуста — все записи обработаны</p>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="Очередь пуста"
+          description="Все записи обработаны. Загрузите новые документы для обработки."
+        />
       ) : (
         <InboxTable
           entries={filteredEntries}

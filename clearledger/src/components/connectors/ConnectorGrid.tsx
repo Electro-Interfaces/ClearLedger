@@ -1,4 +1,6 @@
+import { Plug } from 'lucide-react'
 import { ConnectorCard } from './ConnectorCard'
+import { EmptyState } from '@/components/common/EmptyState'
 import type { Connector } from '@/types'
 
 interface ConnectorGridProps {
@@ -8,9 +10,11 @@ interface ConnectorGridProps {
 export function ConnectorGrid({ connectors }: ConnectorGridProps) {
   if (connectors.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground">
-        Нет настроенных коннекторов
-      </div>
+      <EmptyState
+        icon={Plug}
+        title="Нет коннекторов"
+        description="Создайте первый API-коннектор для автоматического получения данных."
+      />
     )
   }
 

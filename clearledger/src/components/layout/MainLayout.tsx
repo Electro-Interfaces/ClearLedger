@@ -7,6 +7,7 @@ import { MobileBottomNav } from './MobileBottomNav'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { AppBreadcrumb } from './AppBreadcrumb'
+import { KeyboardHelp } from '@/components/common/KeyboardHelp'
 
 const DevPanel = import.meta.env.DEV
   ? lazy(() => import('@/components/dev/DevPanel').then((m) => ({ default: m.DevPanel })))
@@ -14,15 +15,22 @@ const DevPanel = import.meta.env.DEV
 
 export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false)
   const isMobile = useIsMobile()
   const navigate = useNavigate()
 
-  // Ctrl+K → глобальный поиск
+  // Ctrl+K → глобальный поиск, ? → справка по горячим клавишам
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault()
         navigate('/search')
+      }
+      const target = e.target as HTMLElement
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+      if (e.key === '?' && !isInput && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault()
+        setShowKeyboardHelp(true)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -79,6 +87,8 @@ export function MainLayout() {
             <DevPanel />
           </Suspense>
         )}
+
+        <KeyboardHelp open={showKeyboardHelp} onOpenChange={setShowKeyboardHelp} />
       </div>
     </SidebarProvider>
   )
