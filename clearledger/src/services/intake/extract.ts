@@ -8,17 +8,22 @@
  */
 
 import type { IntakeFileType } from '@/types'
+import type { EmailParseResult } from './parsers/emailParser'
 
 export interface ExtractResult {
   text: string
   metadata: Record<string, string>
 }
 
+export interface ExtractResultWithAttachments extends ExtractResult {
+  attachments?: Array<{ filename: string; mimeType: string; size: number; content: Uint8Array }>
+}
+
 /** Извлечь текст из файла в зависимости от типа */
 export async function extractText(
   file: File,
   fileType: IntakeFileType,
-): Promise<ExtractResult> {
+): Promise<ExtractResultWithAttachments> {
   switch (fileType) {
     case 'pdf':
       return extractPdf(file)
@@ -51,12 +56,15 @@ export function extractFromPaste(text: string): ExtractResult {
 
 // ---- Email (.eml) — postal-mime ----
 
-async function extractEmail(file: File): Promise<ExtractResult> {
+async function extractEmail(file: File): Promise<ExtractResultWithAttachments> {
   try {
     const { parseEmail } = await import('./parsers/emailParser')
-    const result = await parseEmail(file)
-    // EmailParseResult extends ExtractResult, attachments хранятся для будущего использования
-    return { text: result.text, metadata: result.metadata }
+    const result: EmailParseResult = await parseEmail(file)
+    return {
+      text: result.text,
+      metadata: result.metadata,
+      attachments: result.attachments,
+    }
   } catch (err) {
     console.error('Email extraction error:', err)
     return extractPlainText(file)

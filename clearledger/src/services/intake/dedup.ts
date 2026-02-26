@@ -68,6 +68,34 @@ export function checkDuplicate(
     }
   }
 
+  // 2. Email Message-ID — точное совпадение
+  if (metadata?.['_email.messageId']) {
+    const messageId = metadata['_email.messageId']
+    for (const entry of entries) {
+      if (entry.metadata['_email.messageId'] && entry.metadata['_email.messageId'] === messageId) {
+        return {
+          isDuplicate: true,
+          duplicateOf: { id: entry.id, title: entry.title },
+          fingerprint,
+        }
+      }
+    }
+  }
+
+  // 3. 1С GUID — точное совпадение
+  if (metadata?.['_1c.guid']) {
+    const guid = metadata['_1c.guid']
+    for (const entry of entries) {
+      if (entry.metadata['_1c.guid'] && entry.metadata['_1c.guid'] === guid) {
+        return {
+          isDuplicate: true,
+          duplicateOf: { id: entry.id, title: entry.title },
+          fingerprint,
+        }
+      }
+    }
+  }
+
   // 4. Семантический ключ
   if (metadata) {
     const semanticKey = buildSemanticKey(metadata, docTypeId)

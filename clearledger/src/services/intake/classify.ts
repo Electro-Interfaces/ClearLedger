@@ -218,6 +218,156 @@ const rules: Rule[] = [
       title: 'Паспорт качества',
     },
   },
+  // ---- Email-правила ----
+
+  // Email со счётом/актом во вложении или теме
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'email' && /счёт|счет|invoice|акт|act/i.test(text),
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'invoices',
+      confidence: 60,
+      title: 'Email: документ',
+      metaExtractors: [...commonExtractors, extractEmailFields],
+    },
+  },
+  // Email общий
+  {
+    test: ({ fileType }) => fileType === 'email',
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'unclassified',
+      confidence: 30,
+      title: 'Email',
+      metaExtractors: [extractEmailFields],
+    },
+  },
+
+  // ---- 1С XML правила ----
+
+  // CommerceML — накладная / поступление
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'xml' &&
+      /CommerceML|КоммерческаяИнформация/i.test(text) &&
+      /приходн|поступлен|накладн/i.test(text),
+    profiles: ['fuel', 'trade', 'general'],
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'ttn',
+      confidence: 75,
+      title: '1С: Накладная',
+      profileOverrides: {
+        trade: { subcategoryId: 'torg' },
+      },
+    },
+  },
+  // CommerceML / EnterpriseData — счёт-фактура
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'xml' && /СчётФактура|СчетФактура|счёт-фактур|счет-фактур/i.test(text),
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'invoices',
+      docTypeId: 'invoice-factura',
+      confidence: 80,
+      title: '1С: Счёт-фактура',
+    },
+  },
+  // XML ФНС (УПД, электронные СФ)
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'xml' && /СвСчФакт|ФайлОбwormen|format="FNS"|_xml\.format.*FNS/i.test(text),
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'invoices',
+      docTypeId: 'upd',
+      confidence: 85,
+      title: 'ФНС: Электронный документ',
+    },
+  },
+  // CommerceML / EnterpriseData — платёжное поручение
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'xml' && /ПлатежноеПоручение|платёжн|платежн/i.test(text),
+    result: {
+      categoryId: 'financial',
+      subcategoryId: 'payments',
+      confidence: 75,
+      title: '1С: Платёжное поручение',
+    },
+  },
+  // CommerceML / EnterpriseData — акт
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'xml' && /АктВыполненныхРабот|акт\s+выполнен/i.test(text),
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'acts',
+      docTypeId: 'act-work',
+      confidence: 75,
+      title: '1С: Акт выполненных работ',
+    },
+  },
+  // XML общий (1С формат, но тип не определён)
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'xml' &&
+      /CommerceML|КоммерческаяИнформация|EnterpriseData|v8:/i.test(text),
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'unclassified',
+      confidence: 40,
+      title: '1С: Документ',
+    },
+  },
+
+  // ---- Excel-правила ----
+
+  // Excel: реестр транзакций / Z-отчёт
+  {
+    test: ({ fileType, text }) =>
+      (fileType === 'excel' || fileType === 'csv') &&
+      /транзакц|терминал|z-отчёт|z-отчет|смен.*касс/i.test(text),
+    profiles: ['fuel', 'trade', 'retail'],
+    result: {
+      categoryId: 'operations',
+      subcategoryId: 'sales',
+      confidence: 65,
+      title: 'Реестр транзакций',
+      profileOverrides: {
+        fuel: { subcategoryId: 'sales' },
+        retail: { subcategoryId: 'sales' },
+      },
+    },
+  },
+  // Excel: остатки
+  {
+    test: ({ fileType, text }) =>
+      (fileType === 'excel' || fileType === 'csv') &&
+      /остат.*резервуар|резервуар.*остат|остат.*ёмкост|остат.*емкост/i.test(text),
+    profiles: ['fuel'],
+    result: {
+      categoryId: 'operations',
+      subcategoryId: 'inventory',
+      confidence: 70,
+      title: 'Остатки в резервуарах',
+    },
+  },
+  // Excel: банковская выписка
+  {
+    test: ({ fileType, text }) =>
+      (fileType === 'excel' || fileType === 'csv') &&
+      /дебет.*кредит|кредит.*дебет|сальдо|выписк/i.test(text),
+    result: {
+      categoryId: 'financial',
+      subcategoryId: 'payments',
+      confidence: 65,
+      title: 'Банковская выписка',
+    },
+  },
+
   // Изображения → медиа/фото (все профили)
   {
     test: ({ fileType }) => fileType === 'image',
@@ -229,6 +379,19 @@ const rules: Rule[] = [
     },
   },
 ]
+
+// ---- Email-специфичные экстракторы ----
+
+function extractEmailFields(text: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  const subjectMatch = text.match(/^Тема:\s*(.+)$/m)
+  if (subjectMatch) result['_email.subject'] = subjectMatch[1].trim()
+  const fromMatch = text.match(/^От:\s*(.+)$/m)
+  if (fromMatch) result['_email.from'] = fromMatch[1].trim()
+  const dateMatch = text.match(/^Дата:\s*(.+)$/m)
+  if (dateMatch) result['_email.date'] = dateMatch[1].trim()
+  return result
+}
 
 /** Получить fallback: подкатегория 'unclassified' в primary */
 function getFallback(profileId: ProfileId): { categoryId: string; subcategoryId: string } {

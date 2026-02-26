@@ -9,6 +9,7 @@ import type { IntakeItem, DataEntry, EntrySource, SourceRecord, ExtractRecord, E
 import type { ProfileId } from '@/config/profiles'
 import { detectFileType, detectPasteType } from './detect'
 import { extractText, extractFromPaste } from './extract'
+import type { EmailParseResult } from './parsers/emailParser'
 import { classify } from './classify'
 import { computeFingerprint, computeTextHash, checkDuplicate } from './dedup'
 import { saveSource, saveExtract } from '@/services/sourceStore'
@@ -51,6 +52,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
 
     const extracted = await extractText(file, item.fileType)
     item.extractedText = extracted.text
+    const emailAttachments = extracted.attachments
     item.progress = 50
     opts.onUpdate({ ...item })
 
@@ -154,6 +156,32 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     item.status = 'done'
     item.progress = 100
     opts.onUpdate({ ...item })
+
+    // Рекурсивная обработка вложений email
+    if (item.fileType === 'email' && emailAttachments && emailAttachments.length > 0) {
+      item.childItems = []
+      for (const att of emailAttachments) {
+        const attFile = new File(
+          [att.content],
+          att.filename,
+          { type: att.mimeType },
+        )
+        const childItem = await processFile(attFile, {
+          ...opts,
+          onUpdate: (child) => {
+            // Пробрасываем metadata связи
+            if (child.classification) {
+              child.classification.metadata['_email.parentEntryId'] = entry.id
+              child.classification.metadata['_email.parentSubject'] =
+                extracted.metadata['_email.subject'] ?? ''
+            }
+            opts.onUpdate(child)
+          },
+        })
+        item.childItems.push(childItem)
+      }
+    }
+
     return item
   } catch (err) {
     item.status = 'error'
@@ -388,14 +416,29 @@ function mapFileTypeToSource(fileType: string): EntrySource {
 /** Конвертировать metadata-ключи в ExtractedField[] для структурированного хранения */
 function buildExtractedFields(metadata: Record<string, string>): ExtractedField[] {
   const fields: ExtractedField[] = []
-  const knownKeys = ['docNumber', 'docDate', 'amount', 'inn', 'counterparty']
-  for (const key of knownKeys) {
+  const regexKeys = ['docNumber', 'docDate', 'amount', 'inn', 'counterparty']
+  for (const key of regexKeys) {
     if (metadata[key]) {
       fields.push({
         key,
         value: metadata[key],
         confidence: 70,
         source: 'regex',
+      })
+    }
+  }
+  // Email-поля (из парсера)
+  const parserKeys = [
+    '_email.from', '_email.to', '_email.subject', '_email.date', '_email.messageId',
+    '_1c.guid', '_xml.format', '_xml.docType',
+  ]
+  for (const key of parserKeys) {
+    if (metadata[key]) {
+      fields.push({
+        key,
+        value: metadata[key],
+        confidence: 95,
+        source: 'parser',
       })
     }
   }

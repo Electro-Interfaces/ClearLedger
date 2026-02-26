@@ -138,6 +138,8 @@ export interface IntakeItem {
   fingerprint?: string
   /** Сохранённая запись */
   entryId?: string
+  /** Вложения email, обработанные через pipeline */
+  childItems?: IntakeItem[]
 }
 
 export interface IntakeClassification {
