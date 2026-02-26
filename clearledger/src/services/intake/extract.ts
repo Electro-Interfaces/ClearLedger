@@ -35,13 +35,16 @@ export async function extractText(
       return extractExcel(file)
     case 'csv':
       return extractCsv(file)
+    case 'whatsapp':
+      return extractWhatsApp(file)
+    case 'telegram':
+      return extractTelegram(file)
     case 'text':
       return extractPlainText(file)
     case 'json':
       return extractPlainText(file)
     case 'image':
-      // Фаза 3: OCR (tesseract.js)
-      return { text: '', metadata: { _note: 'OCR не подключён (фаза 3)' } }
+      return extractImage(file)
     case 'word':
       return extractWord(file)
     default:
@@ -153,6 +156,43 @@ async function extractWord(file: File): Promise<ExtractResult> {
   } catch (err) {
     console.error('Word extraction error:', err)
     return { text: '', metadata: { _extractError: `Word: ${String(err)}` } }
+  }
+}
+
+// ---- Image OCR (tesseract.js) ----
+
+async function extractImage(file: File): Promise<ExtractResult> {
+  try {
+    const { parseImage } = await import('./parsers/ocrParser')
+    const result = await parseImage(file)
+    return { text: result.text, metadata: result.metadata }
+  } catch (err) {
+    console.error('OCR extraction error:', err)
+    return { text: '', metadata: { _ocrError: `OCR: ${String(err)}` } }
+  }
+}
+
+// ---- WhatsApp (.txt chat export) ----
+
+async function extractWhatsApp(file: File): Promise<ExtractResult> {
+  try {
+    const { parseWhatsApp } = await import('./parsers/whatsappParser')
+    return parseWhatsApp(file)
+  } catch (err) {
+    console.error('WhatsApp extraction error:', err)
+    return extractPlainText(file)
+  }
+}
+
+// ---- Telegram (result.json export) ----
+
+async function extractTelegram(file: File): Promise<ExtractResult> {
+  try {
+    const { parseTelegram } = await import('./parsers/telegramParser')
+    return parseTelegram(file)
+  } catch (err) {
+    console.error('Telegram extraction error:', err)
+    return extractPlainText(file)
   }
 }
 

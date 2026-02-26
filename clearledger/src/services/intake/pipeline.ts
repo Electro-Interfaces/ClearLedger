@@ -7,7 +7,7 @@
 import { nanoid } from 'nanoid'
 import type { IntakeItem, DataEntry, EntrySource, SourceRecord, ExtractRecord, ExtractedField } from '@/types'
 import type { ProfileId } from '@/config/profiles'
-import { detectFileType, detectPasteType } from './detect'
+import { detectFileType, detectPasteType, refineFileType } from './detect'
 import { extractText, extractFromPaste } from './extract'
 import type { EmailParseResult } from './parsers/emailParser'
 import { classify } from './classify'
@@ -42,7 +42,8 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     // 1. DETECT
     item.stage = 'detect'
     item.progress = 10
-    item.fileType = detectFileType(file)
+    const baseType = detectFileType(file)
+    item.fileType = await refineFileType(file, baseType)
     opts.onUpdate({ ...item })
 
     // 2. EXTRACT
@@ -407,7 +408,9 @@ function mapFileTypeToSource(fileType: string): EntrySource {
     case 'image': return 'photo'
     case 'email': return 'email'
     case 'xml': return 'oneC'
-    case 'json': return 'telegram'
+    case 'telegram': return 'telegram'
+    case 'whatsapp': return 'whatsapp'
+    case 'json': return 'upload'
     case 'text': return 'paste'
     default: return 'upload'
   }

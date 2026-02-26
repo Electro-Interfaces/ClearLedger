@@ -112,7 +112,7 @@ export interface SyncLog {
 
 export type IntakeFileType =
   | 'pdf' | 'image' | 'excel' | 'csv' | 'xml' | 'email'
-  | 'text' | 'json' | 'dbf' | 'word' | 'unknown'
+  | 'text' | 'json' | 'dbf' | 'word' | 'whatsapp' | 'telegram' | 'unknown'
 
 export type IntakeStage = 'detect' | 'extract' | 'classify' | 'dedup' | 'save'
 

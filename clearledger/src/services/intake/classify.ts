@@ -368,17 +368,93 @@ const rules: Rule[] = [
     },
   },
 
-  // Изображения → медиа/фото (все профили)
+  // ---- Чат-правила ----
+
+  // WhatsApp/Telegram с упоминанием документов (счёт, акт, договор)
+  {
+    test: ({ fileType, text }) =>
+      (fileType === 'whatsapp' || fileType === 'telegram') &&
+      /счёт|счет|акт|договор|накладн|оплат|invoice/i.test(text),
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'unclassified',
+      confidence: 35,
+      title: 'Чат: обсуждение документов',
+      metaExtractors: [...commonExtractors, extractChatFields],
+    },
+  },
+  // WhatsApp общий
+  {
+    test: ({ fileType }) => fileType === 'whatsapp',
+    result: {
+      categoryId: 'media',
+      subcategoryId: 'photos',
+      confidence: 25,
+      title: 'Чат WhatsApp',
+      metaExtractors: [extractChatFields],
+    },
+  },
+  // Telegram общий
+  {
+    test: ({ fileType }) => fileType === 'telegram',
+    result: {
+      categoryId: 'media',
+      subcategoryId: 'photos',
+      confidence: 25,
+      title: 'Чат Telegram',
+      metaExtractors: [extractChatFields],
+    },
+  },
+
+  // ---- OCR: изображение с текстом документа ----
+
+  // Изображение с распознанным документом (ТТН, счёт, акт)
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'image' && text.length > 50 &&
+      /товарно-транспортная|счёт-фактура|счет-фактура|акт\s+(сверки|выполненных|приёма)|упд|универсальный\s+передаточный/i.test(text),
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'unclassified',
+      confidence: 55,
+      title: 'Скан документа (OCR)',
+    },
+  },
+  // Изображение с текстом (OCR распознал что-то)
+  {
+    test: ({ fileType, text }) =>
+      fileType === 'image' && text.length > 50,
+    result: {
+      categoryId: 'primary',
+      subcategoryId: 'unclassified',
+      confidence: 35,
+      title: 'Скан (OCR)',
+    },
+  },
+  // Изображение без текста
   {
     test: ({ fileType }) => fileType === 'image',
     result: {
       categoryId: 'media',
       subcategoryId: 'photos',
       confidence: 40,
-      title: 'Скан документа',
+      title: 'Фото',
     },
   },
 ]
+
+// ---- Chat-специфичные экстракторы ----
+
+function extractChatFields(text: string): Record<string, string> {
+  const result: Record<string, string> = {}
+  const chatTypeMatch = text.match(/^Чат (WhatsApp|Telegram)/m)
+  if (chatTypeMatch) result['_chat.type'] = chatTypeMatch[1].toLowerCase()
+  const participantsMatch = text.match(/(\d+) участников?/m)
+  if (participantsMatch) result['_chat.participantCount'] = participantsMatch[1]
+  const messagesMatch = text.match(/(\d+) сообщений/m)
+  if (messagesMatch) result['_chat.messageCount'] = messagesMatch[1]
+  return result
+}
 
 // ---- Email-специфичные экстракторы ----
 

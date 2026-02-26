@@ -129,7 +129,7 @@ lib/            — queryClient, cn() утилита
 `src/services/intake/pipeline.ts` — оркестратор. Стадии:
 1. **detect** — тип файла по расширению/MIME
 2. **extract** — текст из PDF/Excel/XML/Word/email (с вложениями)
-3. **classify** — rule-based, 22 правила в `classify.ts` (документы, email, 1С XML, Excel)
+3. **classify** — rule-based, 27 правил в `classify.ts` (документы, email, 1С XML, Excel, чаты, OCR)
 4. **dedup** — SHA-256 + Email Message-ID + 1С GUID + семантический ключ
 5. **save** — Blob → IndexedDB, DataEntry → localStorage
 6. **attachments** — email-вложения рекурсивно через pipeline
