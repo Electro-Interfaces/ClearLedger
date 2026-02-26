@@ -383,25 +383,51 @@ __cl.export(companyId?) — экспорт данных компании
 | Авто-связи: дубликат → оригинал (forceSaveDuplicate) | Готово |
 | Tab «Ручной ввод» в IntakePage | Готово (реализовано ранее) |
 
-### Следующий этап — серверная архитектура
+### Серверная архитектура (v0.3 — реализовано)
 
-Переход от browser-only прототипа к production-системе. Подробный план → [LAYER2_ARCHITECTURE.md](../LAYER2_ARCHITECTURE.md)
+Полный бэкенд реализован. Подробный план → [LAYER2_ARCHITECTURE.md](../LAYER2_ARCHITECTURE.md)
 
-| Шаг | Что делаем | Результат |
-|-----|-----------|-----------|
-| 1 | Docker + nginx + PostgreSQL + Alembic | Контейнер стартует, БД с двумя схемами |
-| 2 | FastAPI: auth + CRUD public.entries | API работает |
-| 3 | Файловое хранилище: upload → папочная структура | Файлы на диске (Layer 1) |
-| 4 | Парсинг: PyMuPDF, openpyxl → staging.raw_entries | Парсинг на контейнере (Layer 1a) |
-| 5 | Sync: staging → облако → staging → promote | AI-обработка |
-| 6 | Миграция React SPA: API-клиент вместо localStorage | Фронтенд работает с сервером |
-| 7 | Аудит, роли, rate limiting | Production-ready |
-| 8 | Бэкапы, мониторинг, health checks | Надёжность |
-| 9 | Облачный сервер: AI pipeline | Классификация, нормализация |
-| 10 | Интеграции: 1С, email, коннекторы | Полный функционал |
+| Шаг | Что делаем | Статус |
+|-----|-----------|--------|
+| 1 | Docker + nginx + PostgreSQL + Alembic | Готово |
+| 2 | FastAPI: auth + CRUD public.entries | Готово |
+| 3 | Файловое хранилище: upload → папочная структура | Готово |
+| 4 | Парсинг: PyMuPDF, openpyxl → staging.raw_entries | Готово |
+| 5 | Sync: staging → облако → staging → promote | Готово |
+| 6 | Миграция React SPA: API-клиент вместо localStorage | Готово |
+| 7 | Аудит, роли, rate limiting | Готово |
+| 8 | Бэкапы, мониторинг, health checks | Готово |
+| 9 | Облачный сервер: AI pipeline | Готово |
+| 10 | Интеграции: 1С XML-выгрузка, email-коннектор, CSV export | Готово |
 
-### Также запланировано
+#### Бэкенд (backend/)
 
-- Полнотекстовый поиск
+- **Docker**: docker-compose (web + db), Dockerfile с nginx + cron + pg_dump
+- **PostgreSQL 16**: public (11 таблиц) + staging (3 таблицы), Alembic миграции
+- **FastAPI API** (12 роутеров): auth (JWT), entries, companies, connectors, document-links, settings, stats/kpi, audit, intake (upload + parse), files (download), export (1С XML, CSV), connector-actions (email poll)
+- **Парсинг Layer 1a**: PyMuPDF (PDF), openpyxl (Excel), lxml (XML), python-docx (Word), CSV, plain text
+- **Sync worker**: background task, batch staging → облако, auto-promote accepted → public
+- **Бэкапы**: pg_dump + rsync, cron 03:00 ежедневно, ротация 30 дней
+- **Health check**: /api/health с проверкой БД, Docker HEALTHCHECK
+
+#### Облачный AI-сервер (cloud/)
+
+- **POST /api/process**: batch-обработка документов от контейнеров клиентов
+- **Dual-mode classifier**: rule-based (12 правил: ТТН, акты, счета, платёжки, договоры, 1С) или Claude API
+- **Regex extraction**: номер, дата, сумма, ИНН из текста
+- **API key verification** для авторизации клиентов
+
+#### SPA-миграция
+
+- **apiClient.ts**: HTTP-клиент с JWT, auto-redirect на /login при 401
+- **AuthContext**: dual-mode — JWT через FastAPI или demo-пользователь (без API)
+- **LoginPage**: форма входа (только API-режим)
+- **dataEntryService**: все CRUD async, dual-mode (API или localStorage)
+- Переключение через `VITE_API_URL` env variable
+
+### Запланировано
+
+- Полнотекстовый поиск (PostgreSQL FTS)
 - PWA (offline + push-уведомления)
-- Серверная архитектура (Docker + FastAPI + PostgreSQL)
+- Интеграции: банковские API, ЭДО, ОФД
+- Dashboard: графики трендов, сравнение периодов
