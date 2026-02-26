@@ -38,15 +38,22 @@ export async function computeTextHash(text: string): Promise<string> {
 }
 
 /** Построить семантический ключ для дедупликации */
-function buildSemanticKey(metadata: Record<string, string>, docTypeId?: string): string | null {
+function buildSemanticKey(
+  metadata: Record<string, string>,
+  docTypeId?: string,
+  companyId?: string,
+): string | null {
   const parts: string[] = []
+  // Namespace по компании — один и тот же номер документа от разных контрагентов != дубль
+  if (companyId) parts.push(companyId)
   if (docTypeId) parts.push(docTypeId)
   if (metadata.docNumber) parts.push(metadata.docNumber.trim())
   if (metadata.docDate) parts.push(metadata.docDate.trim())
   if (metadata.counterparty) parts.push(metadata.counterparty.trim().toLowerCase())
 
-  // Нужно минимум 2 поля кроме docType для семантической дедупликации
-  if (parts.length < 3) return null
+  // Нужно минимум 3 значимых поля (без companyId) для семантической дедупликации
+  const significantParts = parts.length - (companyId ? 1 : 0)
+  if (significantParts < 3) return null
   return 'sem-' + parts.join('|')
 }
 
@@ -56,14 +63,18 @@ export function checkDuplicate(
   entries: DataEntry[],
   metadata?: Record<string, string>,
   docTypeId?: string,
+  companyId?: string,
 ): DedupResult {
   // 1. Прямое совпадение fingerprint (SHA-256)
-  for (const entry of entries) {
-    if (entry.metadata._fingerprint && entry.metadata._fingerprint === fingerprint) {
-      return {
-        isDuplicate: true,
-        duplicateOf: { id: entry.id, title: entry.title },
-        fingerprint,
+  // Защита: пустой fingerprint не должен матчить (оба файла без хеша ≠ дубль)
+  if (fingerprint) {
+    for (const entry of entries) {
+      if (entry.metadata._fingerprint && entry.metadata._fingerprint === fingerprint) {
+        return {
+          isDuplicate: true,
+          duplicateOf: { id: entry.id, title: entry.title },
+          fingerprint,
+        }
       }
     }
   }
@@ -96,12 +107,12 @@ export function checkDuplicate(
     }
   }
 
-  // 4. Семантический ключ
+  // 4. Семантический ключ (с namespace по компании)
   if (metadata) {
-    const semanticKey = buildSemanticKey(metadata, docTypeId)
+    const semanticKey = buildSemanticKey(metadata, docTypeId, companyId)
     if (semanticKey) {
       for (const entry of entries) {
-        const entryKey = buildSemanticKey(entry.metadata, entry.docTypeId)
+        const entryKey = buildSemanticKey(entry.metadata, entry.docTypeId, entry.companyId)
         if (entryKey && entryKey === semanticKey) {
           return {
             isDuplicate: true,

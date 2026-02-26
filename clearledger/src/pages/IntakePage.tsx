@@ -3,11 +3,14 @@
  * «Бросай всё сюда» — заменяет upload/photo/manual.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { IntakeItem } from '@/types'
 import { processFile, processPaste, forceSaveDuplicate } from '@/services/intake/pipeline'
+
+/** Макс. файлов, обрабатываемых одновременно */
+const MAX_CONCURRENT = 3
 import { UniversalDropZone } from '@/components/intake/UniversalDropZone'
 import { PasteZone } from '@/components/intake/PasteZone'
 import { IntakeQueue } from '@/components/intake/IntakeQueue'
@@ -19,6 +22,8 @@ export function IntakePage() {
   const { companyId, company } = useCompany()
   const queryClient = useQueryClient()
   const [items, setItems] = useState<IntakeItem[]>([])
+  const activeCount = useRef(0)
+  const pendingQueue = useRef<File[]>([])
 
   const updateItem = useCallback((updated: IntakeItem) => {
     setItems((prev) => {
@@ -34,20 +39,31 @@ export function IntakePage() {
     queryClient.invalidateQueries({ queryKey: ['entries', companyId] })
   }, [queryClient, companyId])
 
+  const processNext = useCallback(() => {
+    while (activeCount.current < MAX_CONCURRENT && pendingQueue.current.length > 0) {
+      const file = pendingQueue.current.shift()!
+      activeCount.current++
+      processFile(file, {
+        companyId,
+        profileId: company.profileId,
+        onUpdate: (item) => {
+          updateItem(item)
+          if (item.status === 'done' || item.status === 'error' || item.status === 'duplicate') {
+            activeCount.current--
+            processNext()
+            if (item.status === 'done') invalidateEntries()
+          }
+        },
+      })
+    }
+  }, [companyId, company.profileId, updateItem, invalidateEntries])
+
   const handleFiles = useCallback(
     (files: File[]) => {
-      for (const file of files) {
-        processFile(file, {
-          companyId,
-          profileId: company.profileId,
-          onUpdate: (item) => {
-            updateItem(item)
-            if (item.status === 'done') invalidateEntries()
-          },
-        })
-      }
+      pendingQueue.current.push(...files)
+      processNext()
     },
-    [companyId, company.profileId, updateItem, invalidateEntries],
+    [processNext],
   )
 
   const handlePaste = useCallback(

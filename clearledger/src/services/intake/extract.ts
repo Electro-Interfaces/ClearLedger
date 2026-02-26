@@ -135,12 +135,20 @@ async function extractPdf(file: File): Promise<ExtractResult> {
       textParts.push(pageText)
     }
 
-    return {
-      text: textParts.join('\n'),
-      metadata: {
-        _pdfPages: String(pdf.numPages),
-      },
+    const fullText = textParts.join('\n')
+    const metadata: Record<string, string> = {
+      _pdfPages: String(pdf.numPages),
     }
+    // Предупреждение если PDF обрезан
+    if (pdf.numPages > maxPages) {
+      metadata['_pdf.truncated'] = `Обработано ${maxPages} из ${pdf.numPages} страниц`
+    }
+    // Hint: если текст пустой — возможно скан, нужен OCR
+    if (fullText.trim().length === 0 && pdf.numPages > 0) {
+      metadata['_pdf.noText'] = 'Текст не извлечён (возможно, скан)'
+    }
+
+    return { text: fullText, metadata }
   } catch (err) {
     console.error('PDF extraction error:', err)
     return { text: '', metadata: { _extractError: String(err) } }

@@ -21,7 +21,14 @@ interface PipelineOptions {
   companyId: string
   profileId?: ProfileId
   onUpdate: PipelineCallback
+  /** Глубина рекурсии email-вложений (по умолчанию 0, макс MAX_EMAIL_DEPTH) */
+  _depth?: number
 }
+
+/** Макс. глубина рекурсии email → attachment → email → ... */
+const MAX_EMAIL_DEPTH = 3
+/** Макс. размер одного вложения для обработки (10 МБ) */
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
 
 /** Обработать файл через pipeline */
 export async function processFile(file: File, opts: PipelineOptions): Promise<IntakeItem> {
@@ -91,6 +98,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
       existingEntries,
       item.classification.metadata,
       item.classification.docTypeId,
+      opts.companyId,
     )
 
     if (dedupResult.isDuplicate) {
@@ -158,10 +166,14 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     item.progress = 100
     opts.onUpdate({ ...item })
 
-    // Рекурсивная обработка вложений email
-    if (item.fileType === 'email' && emailAttachments && emailAttachments.length > 0) {
+    // Рекурсивная обработка вложений email (с лимитом глубины и размера)
+    const depth = opts._depth ?? 0
+    if (item.fileType === 'email' && emailAttachments && emailAttachments.length > 0 && depth < MAX_EMAIL_DEPTH) {
       item.childItems = []
       for (const att of emailAttachments) {
+        // Пропускаем слишком большие вложения
+        if (att.size > MAX_ATTACHMENT_SIZE) continue
+
         const attData: BlobPart = att.content instanceof Uint8Array
           ? new Uint8Array(att.content) as unknown as BlobPart
           : att.content as BlobPart
@@ -172,6 +184,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
         )
         const childItem = await processFile(attFile, {
           ...opts,
+          _depth: depth + 1,
           onUpdate: (child) => {
             // Пробрасываем metadata связи
             if (child.classification) {
@@ -255,6 +268,7 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
       existingEntries,
       item.classification.metadata,
       item.classification.docTypeId,
+      opts.companyId,
     )
 
     if (dedupResult.isDuplicate) {

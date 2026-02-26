@@ -522,7 +522,7 @@ export function classify(input: ClassifyInput): IntakeClassification {
       const fallback = getFallback(profileId)
       categoryId = fallback.categoryId
       subcategoryId = fallback.subcategoryId
-      docTypeId = undefined
+      // docTypeId сохраняем — он уже установлен правилом/override
     }
 
     // Обогащаем title номером и датой если есть
