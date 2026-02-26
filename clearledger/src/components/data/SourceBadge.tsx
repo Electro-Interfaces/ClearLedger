@@ -18,6 +18,26 @@ const sourceConfig: Record<DataEntry['source'], { label: string; className: stri
     label: 'API',
     className: 'border-orange-500 text-orange-400',
   },
+  email: {
+    label: 'Email',
+    className: 'border-cyan-500 text-cyan-400',
+  },
+  paste: {
+    label: 'Вставка',
+    className: 'border-gray-500 text-gray-400',
+  },
+  oneC: {
+    label: '1С',
+    className: 'border-yellow-500 text-yellow-400',
+  },
+  whatsapp: {
+    label: 'WhatsApp',
+    className: 'border-emerald-500 text-emerald-400',
+  },
+  telegram: {
+    label: 'Telegram',
+    className: 'border-sky-500 text-sky-400',
+  },
 }
 
 export function SourceBadge({ source }: { source: DataEntry['source'] }) {
