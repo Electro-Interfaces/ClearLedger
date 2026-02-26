@@ -1,0 +1,40 @@
+services:
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    volumes:
+      - storage:/data/storage
+      - backups:/data/backups
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://cl:${DB_PASS:-clearledger}@db:5432/clearledger
+      - DATABASE_URL_SYNC=postgresql://cl:${DB_PASS:-clearledger}@db:5432/clearledger
+      - STORAGE_ROOT=/data/storage
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-production}
+      - CLOUD_API_URL=${CLOUD_API_URL:-}
+      - CLOUD_API_KEY=${CLOUD_API_KEY:-}
+      - INSTANCE_ID=${INSTANCE_ID:-dev-local}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=clearledger
+      - POSTGRES_USER=cl
+      - POSTGRES_PASSWORD=${DB_PASS:-clearledger}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cl -d clearledger"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  storage:
+  pgdata:
+  backups:

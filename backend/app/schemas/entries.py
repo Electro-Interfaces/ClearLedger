@@ -1,0 +1,73 @@
+"""Pydantic-схемы записей и источников."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from pydantic import BaseModel
+
+
+# ---------- Source ----------
+
+class SourceOut(BaseModel):
+    id: UUID
+    company_id: str
+    file_name: str
+    mime_type: str
+    file_size: int
+    file_path: str
+    fingerprint: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------- Entry ----------
+
+class EntryCreate(BaseModel):
+    company_id: str
+    title: str
+    category_id: str
+    subcategory_id: str
+    doc_type_id: str | None = None
+    source_type: str
+    source_label: str = ""
+    metadata: dict[str, Any] = {}
+
+
+class EntryUpdate(BaseModel):
+    title: str | None = None
+    category_id: str | None = None
+    subcategory_id: str | None = None
+    doc_type_id: str | None = None
+    status: str | None = None
+    source_label: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class EntryOut(BaseModel):
+    id: UUID
+    company_id: str
+    source_id: UUID | None
+    title: str
+    category_id: str
+    subcategory_id: str
+    doc_type_id: str | None
+    status: str
+    source_type: str
+    source_label: str
+    metadata: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+    verified_at: datetime | None
+    verified_by: UUID | None
+    transferred_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class EntryList(BaseModel):
+    items: list[EntryOut]
+    total: int
