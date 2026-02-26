@@ -1,0 +1,3 @@
+# ClearLedger cron jobs
+# Бэкап ежедневно в 03:00
+0 3 * * * /app/scripts/backup.sh >> /var/log/backup.log 2>&1

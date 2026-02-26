@@ -7,6 +7,9 @@ alembic upgrade head
 echo "Running seed (если первый запуск)..."
 python -m app.seed
 
+echo "Starting cron (бэкапы)..."
+cron
+
 echo "Starting nginx..."
 nginx
 
