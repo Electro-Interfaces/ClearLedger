@@ -1,14 +1,4 @@
-import type { DataEntry, RecentAction } from '@/types'
-
-export const mockRecentActions: RecentAction[] = [
-  { id: '1', time: '14:32', fileName: 'ТТН_2026-02-25.pdf', action: 'Загружен', status: 'new' },
-  { id: '2', time: '14:15', fileName: 'Акт_сверки_янв.xlsx', action: 'Распознан', status: 'recognized' },
-  { id: '3', time: '13:50', fileName: 'Договор_поставки.pdf', action: 'Проверен', status: 'verified' },
-  { id: '4', time: '13:22', fileName: 'Счёт-фактура_128.pdf', action: 'Передан', status: 'transferred' },
-  { id: '5', time: '12:45', fileName: 'Накладная_ГСМ.csv', action: 'Ошибка OCR', status: 'error' },
-  { id: '6', time: '12:10', fileName: 'Фото_чек_АЗС.jpg', action: 'Загружен', status: 'new' },
-  { id: '7', time: '11:30', fileName: 'Реестр_платежей.xlsx', action: 'Проверен', status: 'verified' },
-]
+import type { DataEntry } from '@/types'
 
 /**
  * Seed-записи с правильными categoryId/subcategoryId из профилей.

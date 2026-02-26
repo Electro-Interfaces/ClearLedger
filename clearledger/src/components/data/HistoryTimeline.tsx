@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatDateTime } from '@/lib/formatDate'
 import type { DataEntry } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 
@@ -9,17 +10,6 @@ const statusLabels: Record<EntryStatus, string> = {
   verified: 'Проверен',
   transferred: 'Передан',
   error: 'Ошибка',
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 interface TimelineEvent {

@@ -18,6 +18,7 @@ import {
 import { useSearchEntries } from '@/hooks/useEntries'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
+import { formatDate } from '@/lib/formatDate'
 
 const PAGE_SIZE = 15
 
@@ -94,7 +95,7 @@ export function SearchPage() {
                   <div className="flex-1 min-w-0">
                     <div className="font-medium truncate">{entry.title}</div>
                     <div className="text-sm text-muted-foreground">
-                      {category?.label} &middot; {new Date(entry.createdAt).toLocaleDateString('ru-RU')}
+                      {category?.label} &middot; {formatDate(entry.createdAt)}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

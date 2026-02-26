@@ -195,10 +195,3 @@ export interface KpiData {
   errors: number
 }
 
-export interface RecentAction {
-  id: string
-  time: string
-  fileName: string
-  action: string
-  status: EntryStatus
-}

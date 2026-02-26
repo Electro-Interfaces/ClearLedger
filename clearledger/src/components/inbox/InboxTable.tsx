@@ -6,15 +6,11 @@ import { StatusBadge } from '@/components/data/StatusBadge'
 import { SourceBadge } from '@/components/data/SourceBadge'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Check, Pencil, X, ArrowUpDown } from 'lucide-react'
+import { formatDate } from '@/lib/formatDate'
 import type { DataEntry } from '@/types'
 
 type SortField = 'title' | 'createdAt' | 'source' | 'status'
 type SortDirection = 'asc' | 'desc'
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
 
 interface InboxTableProps {
   entries: DataEntry[]

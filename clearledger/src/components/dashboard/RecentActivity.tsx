@@ -15,12 +15,8 @@ import {
 import { StatusBadge } from '@/components/data/StatusBadge'
 import { useEntries } from '@/hooks/useEntries'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { formatTime } from '@/lib/formatDate'
 import { useMemo } from 'react'
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-}
 
 const actionLabels: Record<string, string> = {
   new: 'Загружен',

@@ -4,6 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { formatDate } from '@/lib/formatDate'
 import type { DataEntry } from '@/types'
 import { ArrowUpDown } from 'lucide-react'
 
@@ -15,11 +16,6 @@ interface DataTableProps {
   onRowClick: (id: string) => void
   selectedIds?: Set<string>
   onSelectionChange?: (ids: Set<string>) => void
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange }: DataTableProps) {

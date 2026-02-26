@@ -15,6 +15,7 @@ import {
 import { useConnector, useUpdateConnector, useDeleteConnector } from '@/hooks/useConnectors'
 import { DetailPageSkeleton } from '@/components/common/Skeletons'
 import { QueryError } from '@/components/common/QueryError'
+import { formatDateTime } from '@/lib/formatDate'
 import { toast } from 'sonner'
 
 interface EmailConfig {
@@ -292,7 +293,7 @@ export function ConnectorDetailPage() {
               <span className="text-muted-foreground">Последняя синхронизация:</span>
               <span className="ml-2 font-medium">
                 {connector.lastSync
-                  ? new Date(connector.lastSync).toLocaleString('ru-RU')
+                  ? formatDateTime(connector.lastSync)
                   : 'Не выполнялась'}
               </span>
             </div>

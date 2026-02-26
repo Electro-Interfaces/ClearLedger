@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useConnectors } from '@/hooks/useConnectors'
+import { formatDate } from '@/lib/formatDate'
 
 const statusDotColor: Record<string, string> = {
   active: 'bg-green-500',
@@ -25,7 +26,7 @@ function formatLastSync(lastSync?: string): string {
   if (minutes < 1) return 'Только что'
   if (minutes < 60) return `${minutes} мин. назад`
   if (hours < 24) return `${hours} ч. назад`
-  return new Date(lastSync).toLocaleDateString('ru-RU')
+  return formatDate(lastSync)
 }
 
 export function ConnectorsStatus() {

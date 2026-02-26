@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { StatusBadge } from '@/components/data/StatusBadge'
 import { SourceBadge } from '@/components/data/SourceBadge'
+import { formatDateTime } from '@/lib/formatDate'
 import { Check, Clock, X } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getSubcategories } from '@/config/categories'
@@ -33,13 +34,6 @@ interface VerificationFormProps {
   onPostpone: () => void
   onReject: (reason: string) => void
   isLoading?: boolean
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('ru-RU', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
 }
 
 function getConfidenceBadge(confidence: number) {

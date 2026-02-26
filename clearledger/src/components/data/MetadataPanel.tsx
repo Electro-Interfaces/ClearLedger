@@ -8,19 +8,9 @@ import {
 } from '@/components/ui/alert-dialog'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
+import { formatDateTime } from '@/lib/formatDate'
 import { Check, Trash2, Send } from 'lucide-react'
 import type { DataEntry } from '@/types'
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 interface MetadataPanelProps {
   entry: DataEntry
