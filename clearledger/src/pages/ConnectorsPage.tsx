@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Loader2 } from 'lucide-react'
+import { QueryError } from '@/components/common/QueryError'
 import { Button } from '@/components/ui/button'
 import { ConnectorGrid } from '@/components/connectors/ConnectorGrid'
 import { useConnectors, useCreateConnector } from '@/hooks/useConnectors'
@@ -18,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 export function ConnectorsPage() {
   const { company } = useCompany()
-  const { data: connectors = [] } = useConnectors()
+  const { data: connectors = [], isLoading, isError, refetch } = useConnectors()
   const createConnector = useCreateConnector()
   const [showNew, setShowNew] = useState(false)
   const [form, setForm] = useState({ name: '', type: 'rest', url: '', categoryId: '', interval: '60' })
@@ -62,7 +63,15 @@ export function ConnectorsPage() {
         </Button>
       </div>
 
-      <ConnectorGrid connectors={connectors} />
+      {isLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : isError ? (
+        <QueryError onRetry={() => refetch()} />
+      ) : (
+        <ConnectorGrid connectors={connectors} />
+      )}
 
       <Dialog open={showNew} onOpenChange={setShowNew}>
         <DialogContent>

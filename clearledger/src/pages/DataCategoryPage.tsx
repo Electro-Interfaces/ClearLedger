@@ -15,6 +15,7 @@ import {
   PaginationPrevious,
   PaginationNext,
 } from '@/components/ui/pagination'
+import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
 import type { FilterState } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
@@ -44,7 +45,7 @@ export function DataCategoryPage() {
     [filters, activeSubcategory],
   )
 
-  const { data: entries = [] } = useEntriesByCategory(category ?? '', effectiveFilters)
+  const { data: entries = [], isError, refetch } = useEntriesByCategory(category ?? '', effectiveFilters)
   const transferEntries = useTransferEntries()
   const verifyEntry = useVerifyEntry()
   const deleteEntry = useDeleteEntry()
@@ -109,6 +110,15 @@ export function DataCategoryPage() {
     return (
       <div className="flex items-center justify-center h-[50vh]">
         <p className="text-muted-foreground text-lg">Категория не найдена</p>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight">{categoryConfig.label}</h1>
+        <QueryError onRetry={() => refetch()} />
       </div>
     )
   }

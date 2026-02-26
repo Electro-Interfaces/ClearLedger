@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useConnector, useUpdateConnector, useDeleteConnector } from '@/hooks/useConnectors'
 import { DetailPageSkeleton } from '@/components/common/Skeletons'
+import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
 
 interface EmailConfig {
@@ -60,7 +61,7 @@ const statusConfig = {
 export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { data: connector, isLoading } = useConnector(id ?? '')
+  const { data: connector, isLoading, isError, refetch } = useConnector(id ?? '')
   const updateConnector = useUpdateConnector()
   const deleteConnector = useDeleteConnector()
 
@@ -84,6 +85,7 @@ export function ConnectorDetailPage() {
   }, [connector])
 
   if (isLoading) return <DetailPageSkeleton />
+  if (isError) return <QueryError onRetry={() => refetch()} />
 
   if (!connector) {
     return (

@@ -8,12 +8,13 @@ import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 import { SplitViewSkeleton } from '@/components/common/Skeletons'
+import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
 
 export function InboxDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { data: entry, isLoading } = useEntry(id ?? '')
+  const { data: entry, isLoading, isError, refetch } = useEntry(id ?? '')
   const { data: inboxEntries = [] } = useInbox()
   const updateEntry = useUpdateEntry()
   const verifyEntry = useVerifyEntry()
@@ -128,6 +129,7 @@ export function InboxDetailPage() {
   }, [currentIndex, inboxEntries.length])
 
   if (isLoading) return <SplitViewSkeleton />
+  if (isError) return <QueryError onRetry={() => refetch()} />
 
   if (!entry) {
     return (

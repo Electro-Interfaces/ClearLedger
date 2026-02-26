@@ -5,12 +5,13 @@ import { InboxTable } from '@/components/inbox/InboxTable'
 import { InboxToolbar, type InboxFilters } from '@/components/inbox/InboxToolbar'
 import { TableSkeleton } from '@/components/common/Skeletons'
 import { EmptyState } from '@/components/common/EmptyState'
+import { QueryError } from '@/components/common/QueryError'
 import { Button } from '@/components/ui/button'
 import { Check, X, Inbox } from 'lucide-react'
 
 export function InboxPage() {
   const navigate = useNavigate()
-  const { data: inboxEntries = [], isLoading } = useInbox()
+  const { data: inboxEntries = [], isLoading, isError, refetch } = useInbox()
   const verifyEntry = useVerifyEntry()
   const rejectEntry = useRejectEntry()
 
@@ -64,6 +65,15 @@ export function InboxPage() {
       <div className="space-y-4">
         <h1 className="text-2xl font-bold tracking-tight">Входящие</h1>
         <TableSkeleton rows={6} />
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight">Входящие</h1>
+        <QueryError onRetry={() => refetch()} />
       </div>
     )
   }

@@ -7,17 +7,19 @@ import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DetailPageSkeleton } from '@/components/common/Skeletons'
+import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
 
 export function DataDetailPage() {
   const { category, id } = useParams<{ category: string; id: string }>()
   const navigate = useNavigate()
-  const { data: entry, isLoading } = useEntry(id ?? '')
+  const { data: entry, isLoading, isError, refetch } = useEntry(id ?? '')
   const verifyEntry = useVerifyEntry()
   const transferEntries = useTransferEntries()
   const deleteEntry = useDeleteEntry()
 
   if (isLoading) return <DetailPageSkeleton />
+  if (isError) return <QueryError onRetry={() => refetch()} />
 
   if (!entry) {
     return (
