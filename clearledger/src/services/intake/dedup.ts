@@ -126,3 +126,39 @@ export function checkDuplicate(
 
   return { isDuplicate: false, fingerprint }
 }
+
+/**
+ * Level 5: Текстовый hash — ловит одинаковый контент в разных форматах
+ * (PDF и DOCX с идентичным текстом, но разный SHA-256 файлов).
+ * Вызывается отдельно, т.к. async (нужен crypto.subtle).
+ */
+export async function checkTextDuplicate(
+  extractedText: string,
+  entries: DataEntry[],
+  fingerprint: string,
+): Promise<DedupResultExt> {
+  // Текст должен быть достаточно длинным (>100 символов) для осмысленного сравнения
+  const normalized = extractedText.replace(/\s+/g, ' ').trim()
+  if (normalized.length < 100) {
+    return { isDuplicate: false, fingerprint }
+  }
+
+  const textHash = await computeTextHash(extractedText)
+
+  for (const entry of entries) {
+    if (entry.metadata._textHash && entry.metadata._textHash === textHash) {
+      return {
+        isDuplicate: true,
+        duplicateOf: { id: entry.id, title: entry.title },
+        fingerprint,
+      }
+    }
+  }
+
+  return { isDuplicate: false, fingerprint, textHash }
+}
+
+/** Расширенный результат dedup с текстовым хешом */
+export interface DedupResultExt extends DedupResult {
+  textHash?: string
+}

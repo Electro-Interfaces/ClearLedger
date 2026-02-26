@@ -113,6 +113,16 @@ export async function parseEmail(file: File): Promise<EmailParseResult> {
   }
 }
 
+/** Именованные HTML-сущности (частые в русских email) */
+const HTML_ENTITIES: Record<string, string> = {
+  '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"',
+  '&apos;': "'", '&ndash;': '–', '&mdash;': '—', '&laquo;': '«', '&raquo;': '»',
+  '&lsquo;': '\u2018', '&rsquo;': '\u2019', '&ldquo;': '\u201C', '&rdquo;': '\u201D',
+  '&bull;': '•', '&hellip;': '…', '&trade;': '™', '&copy;': '©', '&reg;': '®',
+  '&minus;': '−', '&times;': '×', '&divide;': '÷', '&plusmn;': '±',
+  '&euro;': '€', '&pound;': '£', '&yen;': '¥',
+}
+
 /** Убрать HTML-теги, оставить текст */
 function stripHtml(html: string): string {
   return html
@@ -124,12 +134,9 @@ function stripHtml(html: string): string {
     .replace(/<\/tr>/gi, '\n')
     .replace(/<\/li>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
+    .replace(/&[a-z]+;/gi, (m) => HTML_ENTITIES[m.toLowerCase()] ?? m)
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }

@@ -5,7 +5,19 @@
 
 import type { ExtractResult } from '../extract'
 
+/** Макс. размер файла для парсинга (50 МБ) — защита от OOM в браузере */
+const MAX_EXCEL_SIZE = 50 * 1024 * 1024
+
 export async function parseExcel(file: File): Promise<ExtractResult> {
+  if (file.size > MAX_EXCEL_SIZE) {
+    return {
+      text: '',
+      metadata: {
+        _extractError: `Файл слишком большой для обработки (${(file.size / 1024 / 1024).toFixed(1)} МБ, лимит 50 МБ)`,
+      },
+    }
+  }
+
   try {
     const XLSX = await import('xlsx')
     const arrayBuffer = await file.arrayBuffer()

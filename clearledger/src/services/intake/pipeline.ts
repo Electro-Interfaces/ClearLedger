@@ -10,7 +10,7 @@ import type { ProfileId } from '@/config/profiles'
 import { detectFileType, detectPasteType, refineFileType } from './detect'
 import { extractText, extractFromPaste } from './extract'
 import { classify } from './classify'
-import { computeFingerprint, computeTextHash, checkDuplicate } from './dedup'
+import { computeFingerprint, computeTextHash, checkDuplicate, checkTextDuplicate } from './dedup'
 import { saveSource, saveExtract } from '@/services/sourceStore'
 import { createEntry, getEntries } from '@/services/dataEntryService'
 import { createLink } from '@/services/linkService'
@@ -109,6 +109,24 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
       return item
     }
 
+    // Level 5: text hash dedup (разный формат файла, одинаковый текст)
+    let textHash: string | undefined
+    if (extracted.text) {
+      const textDedupResult = await checkTextDuplicate(
+        extracted.text,
+        existingEntries,
+        item.fingerprint,
+      )
+      if (textDedupResult.isDuplicate) {
+        item.duplicateOf = textDedupResult.duplicateOf ?? null
+        item.status = 'duplicate'
+        item.progress = 100
+        opts.onUpdate({ ...item })
+        return item
+      }
+      textHash = textDedupResult.textHash
+    }
+
     item.duplicateOf = null
     item.progress = 90
     opts.onUpdate({ ...item })
@@ -158,6 +176,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
       metadata: {
         ...item.classification.metadata,
         _fingerprint: item.fingerprint,
+        ...(textHash ? { _textHash: textHash } : {}),
       },
     })
 
@@ -284,6 +303,7 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
     opts.onUpdate({ ...item })
 
     // SAVE — для текста нет blob, но сохраняем extract
+    // Для paste fingerprint уже textHash (computeTextHash), сохраняем как _textHash тоже
     item.stage = 'save'
 
     // Для вставленного текста создаём Source с текстовым blob
@@ -328,6 +348,7 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
       metadata: {
         ...item.classification.metadata,
         _fingerprint: item.fingerprint,
+        _textHash: item.fingerprint, // для paste fingerprint === textHash
       },
     })
 

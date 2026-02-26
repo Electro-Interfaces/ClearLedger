@@ -11,6 +11,7 @@
 import type { ExtractResult } from '../extract'
 
 const MAX_OCR_SIZE = 10 * 1024 * 1024 // 10 MB
+const OCR_TIMEOUT_MS = 30_000 // 30 секунд
 
 export interface OcrParseResult extends ExtractResult {
   confidence: number
@@ -28,9 +29,14 @@ export async function parseImage(file: File): Promise<OcrParseResult> {
   try {
     const Tesseract = await import('tesseract.js')
 
-    const result = await Tesseract.recognize(file, 'rus+eng', {
-      logger: () => { /* suppress progress logs */ },
-    })
+    const result = await Promise.race([
+      Tesseract.recognize(file, 'rus+eng', {
+        logger: () => { /* suppress progress logs */ },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('OCR таймаут (30 сек.)')), OCR_TIMEOUT_MS),
+      ),
+    ])
 
     const text = result.data.text.trim()
     const confidence = Math.round(result.data.confidence)
