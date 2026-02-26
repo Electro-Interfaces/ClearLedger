@@ -45,7 +45,7 @@ export function CategoryChart() {
                 borderRadius: '8px',
                 color: 'hsl(var(--popover-foreground))',
               }}
-              formatter={(value: number) => [value.toLocaleString('ru-RU'), 'Записей']}
+              formatter={(value) => [(value ?? 0).toLocaleString('ru-RU'), 'Записей']}
             />
             <Bar dataKey="count" radius={[0, 6, 6, 0]} barSize={28}>
               {mockCategoryChartData.map((entry, index) => (

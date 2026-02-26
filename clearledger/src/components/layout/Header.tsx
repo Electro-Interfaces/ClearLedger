@@ -7,11 +7,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CompanySelector } from '@/components/company/CompanySelector'
-import { SidebarTrigger } from '@/components/ui/sidebar'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void

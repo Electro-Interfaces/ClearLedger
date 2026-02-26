@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react'
 import { defaultCompanies, defaultCompanyId, emptyCustomization, type Company, type CompanyCustomization } from '@/config/companies'
-import { getProfile, type ProfileId, type CompanyProfile } from '@/config/profiles'
+import { getProfile, type CompanyProfile } from '@/config/profiles'
 import { getCategoriesForProfile, type Category } from '@/config/categories'
 import { useQueryClient } from '@tanstack/react-query'
 

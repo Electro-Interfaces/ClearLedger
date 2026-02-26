@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
-import { profiles, getProfile, type ProfileId, type Category, type SubCategory, type ConnectorTemplate } from '@/config/profiles'
+import { profiles, getProfile, type ProfileId, type Category, type SubCategory } from '@/config/profiles'
 import { emptyCustomization, type CompanyCustomization } from '@/config/companies'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
