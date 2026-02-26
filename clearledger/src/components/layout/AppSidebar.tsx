@@ -10,7 +10,7 @@ import {
   SidebarMenuButton,
   SidebarSeparator,
 } from '@/components/ui/sidebar'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   PackageOpen,
@@ -24,9 +24,11 @@ import {
   ShieldCheck,
   Settings,
   Inbox,
+  LogOut,
   type LucideIcon,
 } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { useInboxCount } from '@/hooks/useEntries'
 
 interface NavItem {
@@ -91,6 +93,8 @@ function InboxNavItem() {
 
 export function AppSidebar() {
   const { effectiveCategories } = useCompany()
+  const { isApiMode, user, logout } = useAuth()
+  const navigate = useNavigate()
 
   const dataItems: NavItem[] = effectiveCategories.map((cat) => ({
     title: cat.label,
@@ -150,6 +154,17 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarNavItem item={{ title: 'Настройки', path: '/settings', icon: Settings }} />
+          {isApiMode && user && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Выйти"
+                onClick={() => { logout(); navigate('/login') }}
+              >
+                <LogOut className="size-4" />
+                <span>{user.name}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>

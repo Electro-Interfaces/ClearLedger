@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider, Outlet, Navigate } from 'react-rou
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { CompanyProvider } from '@/contexts/CompanyContext'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { Dashboard } from '@/pages/Dashboard'
@@ -17,15 +18,45 @@ import { CompaniesPage } from '@/pages/CompaniesPage'
 import { CompanyEditPage } from '@/pages/CompanyEditPage'
 import { InboxPage } from '@/pages/InboxPage'
 import { InboxDetailPage } from '@/pages/InboxDetailPage'
+import { LoginPage } from '@/pages/LoginPage'
+import { Loader2 } from 'lucide-react'
+
+/** Защищённый роут — редирект на /login если не авторизован */
+function ProtectedRoute() {
+  const { isAuthenticated, isLoading, isApiMode } = useAuth()
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (isApiMode && !isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+
+  return <Outlet />
+}
+
+/** Роут логина — редирект на / если уже залогинен */
+function LoginRoute() {
+  const { isAuthenticated, isApiMode } = useAuth()
+  if (!isApiMode || isAuthenticated) return <Navigate to="/" replace />
+  return <LoginPage />
+}
 
 function Providers() {
   return (
     <QueryClientProvider client={queryClient}>
-      <CompanyProvider>
-        <TooltipProvider>
-          <Outlet />
-        </TooltipProvider>
-      </CompanyProvider>
+      <AuthProvider>
+        <CompanyProvider>
+          <TooltipProvider>
+            <Outlet />
+          </TooltipProvider>
+        </CompanyProvider>
+      </AuthProvider>
     </QueryClientProvider>
   )
 }
@@ -36,25 +67,31 @@ const router = createBrowserRouter([
   {
     element: <Providers />,
     children: [
+      { path: '/login', element: <LoginRoute /> },
       {
-        element: <MainLayout />,
+        element: <ProtectedRoute />,
         children: [
-          { path: '/', element: <Dashboard /> },
-          { path: '/inbox', element: <InboxPage /> },
-          { path: '/inbox/:id', element: <InboxDetailPage /> },
-          { path: '/input', element: <IntakePage /> },
-          { path: '/input/upload', element: <Navigate to="/input" replace /> },
-          { path: '/input/photo', element: <Navigate to="/input" replace /> },
-          { path: '/input/manual', element: <ManualEntryPage /> },
-          { path: '/connectors', element: <ConnectorsPage /> },
-          { path: '/connectors/new', element: <ConnectorDetailPage /> },
-          { path: '/connectors/:id', element: <ConnectorDetailPage /> },
-          { path: '/data/:category', element: <DataCategoryPage /> },
-          { path: '/data/:category/:id', element: <DataDetailPage /> },
-          { path: '/search', element: <SearchPage /> },
-          { path: '/settings', element: <SettingsPage /> },
-          { path: '/settings/companies', element: <CompaniesPage /> },
-          { path: '/settings/companies/:id', element: <CompanyEditPage /> },
+          {
+            element: <MainLayout />,
+            children: [
+              { path: '/', element: <Dashboard /> },
+              { path: '/inbox', element: <InboxPage /> },
+              { path: '/inbox/:id', element: <InboxDetailPage /> },
+              { path: '/input', element: <IntakePage /> },
+              { path: '/input/upload', element: <Navigate to="/input" replace /> },
+              { path: '/input/photo', element: <Navigate to="/input" replace /> },
+              { path: '/input/manual', element: <ManualEntryPage /> },
+              { path: '/connectors', element: <ConnectorsPage /> },
+              { path: '/connectors/new', element: <ConnectorDetailPage /> },
+              { path: '/connectors/:id', element: <ConnectorDetailPage /> },
+              { path: '/data/:category', element: <DataCategoryPage /> },
+              { path: '/data/:category/:id', element: <DataDetailPage /> },
+              { path: '/search', element: <SearchPage /> },
+              { path: '/settings', element: <SettingsPage /> },
+              { path: '/settings/companies', element: <CompaniesPage /> },
+              { path: '/settings/companies/:id', element: <CompanyEditPage /> },
+            ],
+          },
         ],
       },
     ],

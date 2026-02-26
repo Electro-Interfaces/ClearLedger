@@ -1,5 +1,6 @@
 /**
  * React Query хуки для DataEntry — CRUD + workflow.
+ * Работают одинаково в API и demo режимах (сервис абстрагирует).
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -101,7 +102,7 @@ export function useCreateEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: Omit<svc.CreateEntryInput, 'companyId'>) =>
-      Promise.resolve(svc.createEntry({ ...input, companyId })),
+      svc.createEntry({ ...input, companyId }),
     onSuccess: () => invalidateAll(qc, companyId),
   })
 }
@@ -111,7 +112,7 @@ export function useUpdateEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, updates }: { id: string; updates: Partial<DataEntry> }) =>
-      Promise.resolve(svc.updateEntry(companyId, id, updates)),
+      svc.updateEntry(companyId, id, updates),
     onSuccess: () => invalidateAll(qc, companyId),
   })
 }
@@ -120,7 +121,7 @@ export function useDeleteEntry() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => Promise.resolve(svc.deleteEntry(companyId, id)),
+    mutationFn: (id: string) => svc.deleteEntry(companyId, id),
     onSuccess: () => invalidateAll(qc, companyId),
   })
 }
@@ -129,7 +130,7 @@ export function useVerifyEntry() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => Promise.resolve(svc.verifyEntry(companyId, id)),
+    mutationFn: (id: string) => svc.verifyEntry(companyId, id),
     onSuccess: () => invalidateAll(qc, companyId),
   })
 }
@@ -139,7 +140,7 @@ export function useRejectEntry() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
-      Promise.resolve(svc.rejectEntry(companyId, id, reason)),
+      svc.rejectEntry(companyId, id, reason),
     onSuccess: () => invalidateAll(qc, companyId),
   })
 }
@@ -148,14 +149,14 @@ export function useTransferEntries() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (ids: string[]) => Promise.resolve(svc.transferEntries(companyId, ids)),
+    mutationFn: (ids: string[]) => svc.transferEntries(companyId, ids),
     onSuccess: () => invalidateAll(qc, companyId),
   })
 }
 
 // ---- Search ----
 
-/** Поиск с debounce по реальным данным из localStorage */
+/** Поиск с debounce */
 export function useSearchEntries(query: string, debounceMs = 300) {
   const { companyId } = useCompany()
   const [debouncedQuery, setDebouncedQuery] = useState(query)
