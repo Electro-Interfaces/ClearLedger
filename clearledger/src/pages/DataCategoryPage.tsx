@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
-import { useEntriesByCategory, useTransferEntries, useVerifyEntry } from '@/hooks/useEntries'
+import { useEntriesByCategory, useTransferEntries, useVerifyEntry, useDeleteEntry } from '@/hooks/useEntries'
 import { DataTableToolbar } from '@/components/data/DataTableToolbar'
 import { CategoryTabs } from '@/components/data/CategoryTabs'
 import { DataTable } from '@/components/data/DataTable'
@@ -15,6 +15,7 @@ import {
   PaginationPrevious,
   PaginationNext,
 } from '@/components/ui/pagination'
+import { toast } from 'sonner'
 import type { FilterState } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 
@@ -46,6 +47,7 @@ export function DataCategoryPage() {
   const { data: entries = [] } = useEntriesByCategory(category ?? '', effectiveFilters)
   const transferEntries = useTransferEntries()
   const verifyEntry = useVerifyEntry()
+  const deleteEntry = useDeleteEntry()
 
   const handleSubcategoryChange = useCallback((value: string) => {
     setActiveSubcategory(value)
@@ -77,6 +79,30 @@ export function DataCategoryPage() {
   function handleTransfer() {
     transferEntries.mutate([...selectedIds])
     setSelectedIds(new Set())
+  }
+
+  function handleBulkDelete() {
+    for (const id of selectedIds) {
+      deleteEntry.mutate(id)
+    }
+    toast.success(`Удалено ${selectedIds.size} записей`)
+    setSelectedIds(new Set())
+  }
+
+  function handleExportCsv() {
+    const selected = entries.filter((e) => selectedIds.has(e.id))
+    const header = 'ID,Название,Категория,Подкатегория,Статус,Источник,Дата создания\n'
+    const rows = selected.map((e) =>
+      [e.id, `"${e.title}"`, e.categoryId, e.subcategoryId, e.status, e.source, e.createdAt].join(','),
+    ).join('\n')
+    const blob = new Blob(['\uFEFF' + header + rows], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${category ?? 'export'}_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success(`Экспортировано ${selected.length} записей`)
   }
 
   if (!categoryConfig) {
@@ -144,6 +170,8 @@ export function DataCategoryPage() {
         onClearSelection={() => setSelectedIds(new Set())}
         onChangeStatus={handleChangeStatus}
         onTransfer={handleTransfer}
+        onDelete={handleBulkDelete}
+        onExportCsv={handleExportCsv}
       />
     </div>
   )

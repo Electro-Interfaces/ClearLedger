@@ -5,6 +5,7 @@ import { QuickActions } from '@/components/dashboard/QuickActions'
 import { ConnectorsStatus } from '@/components/dashboard/ConnectorsStatus'
 import { CategoryChart } from '@/components/dashboard/CategoryChart'
 import { StatusFunnel } from '@/components/dashboard/StatusFunnel'
+import { ActivityChart } from '@/components/dashboard/ActivityChart'
 import { useInboxCount, useKpi } from '@/hooks/useEntries'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -96,6 +97,8 @@ export function Dashboard() {
           <ConnectorsStatus />
         </div>
       </div>
+
+      <ActivityChart />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <CategoryChart />

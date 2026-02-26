@@ -5,7 +5,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { X, ChevronDown, Send } from 'lucide-react'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { X, ChevronDown, Send, Trash2, Download } from 'lucide-react'
 import type { EntryStatus } from '@/config/statuses'
 import { statuses } from '@/config/statuses'
 
@@ -14,6 +19,8 @@ interface BulkActionsBarProps {
   onClearSelection: () => void
   onChangeStatus: (status: EntryStatus) => void
   onTransfer: () => void
+  onDelete?: () => void
+  onExportCsv?: () => void
 }
 
 export function BulkActionsBar({
@@ -21,6 +28,8 @@ export function BulkActionsBar({
   onClearSelection,
   onChangeStatus,
   onTransfer,
+  onDelete,
+  onExportCsv,
 }: BulkActionsBarProps) {
   if (selectedCount === 0) return null
 
@@ -49,12 +58,44 @@ export function BulkActionsBar({
 
         <Button variant="outline" size="sm" onClick={onTransfer}>
           <Send />
-          Передать на Слой 2
+          Передать
         </Button>
 
-        <Button variant="ghost" size="sm" onClick={onClearSelection}>
+        {onExportCsv && (
+          <Button variant="outline" size="sm" onClick={onExportCsv}>
+            <Download />
+            CSV
+          </Button>
+        )}
+
+        {onDelete && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="text-destructive">
+                <Trash2 />
+                Удалить
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Удалить {selectedCount} записей?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Выбранные записи будут удалены. Это действие нельзя отменить.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Отмена</AlertDialogCancel>
+                <AlertDialogAction onClick={onDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Удалить
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+
+        <Button variant="ghost" size="sm" onClick={onClearSelection} className="ml-auto">
           <X />
-          Снять выделение
+          Снять
         </Button>
       </div>
     </div>
