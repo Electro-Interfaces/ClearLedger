@@ -29,12 +29,8 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-50 md:hidden mobile-safe-bottom"
-      style={{
-        background: 'hsl(215 28% 8%)',
-        borderTop: '1px solid hsl(217 32% 20% / 0.5)',
-        boxShadow: '0 -4px 16px rgba(0, 0, 0, 0.35)',
-      }}
+      className="fixed inset-x-0 bottom-0 z-50 md:hidden mobile-safe-bottom border-t bg-card"
+      style={{ boxShadow: 'var(--shadow-medium)' }}
     >
       <div className="flex h-14 items-center justify-around">
         {items.map((item) => (

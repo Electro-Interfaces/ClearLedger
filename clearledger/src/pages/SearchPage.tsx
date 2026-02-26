@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, FileText, SearchX } from 'lucide-react'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -7,23 +7,43 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/data/StatusBadge'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationPrevious,
+  PaginationNext,
+} from '@/components/ui/pagination'
 import { useSearchEntries } from '@/hooks/useEntries'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
+
+const PAGE_SIZE = 15
 
 export function SearchPage() {
   const [searchParams] = useSearchParams()
   const initialQuery = searchParams.get('q') ?? ''
   const [query, setQuery] = useState(initialQuery)
+  const [page, setPage] = useState(1)
   const { company } = useCompany()
   const navigate = useNavigate()
   const { data: results = [], isLoading } = useSearchEntries(query)
+
+  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE))
+  const paginatedResults = useMemo(
+    () => results.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [results, page],
+  )
 
   // Синхронизируем с URL при навигации из Header
   useEffect(() => {
     const q = searchParams.get('q')
     if (q && q !== query) setQuery(q)
   }, [searchParams])
+
+  // Сброс пагинации при смене запроса
+  useEffect(() => { setPage(1) }, [query])
 
   return (
     <div className="space-y-6">
@@ -59,7 +79,7 @@ export function SearchPage() {
       {results.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Найдено: {results.length}</p>
-          {results.map((entry) => {
+          {paginatedResults.map((entry) => {
             const category = getCategoryById(company.profileId, entry.categoryId)
             return (
               <Card
@@ -85,6 +105,38 @@ export function SearchPage() {
               </Card>
             )
           })}
+
+          {totalPages > 1 && (
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    aria-disabled={page === 1}
+                    className={page === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                  />
+                </PaginationItem>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                  <PaginationItem key={p}>
+                    <PaginationLink
+                      isActive={p === page}
+                      onClick={() => setPage(p)}
+                      className="cursor-pointer"
+                    >
+                      {p}
+                    </PaginationLink>
+                  </PaginationItem>
+                ))}
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    aria-disabled={page === totalPages}
+                    className={page === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          )}
         </div>
       )}
     </div>

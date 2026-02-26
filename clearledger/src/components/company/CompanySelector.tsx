@@ -23,12 +23,7 @@ export function CompanySelector() {
   return (
     <Select value={companyId} onValueChange={setCompanyId}>
       <SelectTrigger
-        className="sel h-10 w-[200px] text-sm font-medium"
-        style={{
-          background: 'hsl(217 32% 15% / 0.6)',
-          borderColor: 'hsl(217 32% 25%)',
-          color: 'hsl(0 0% 85%)',
-        }}
+        className="h-10 w-[200px] text-sm font-medium bg-secondary border-border"
       >
         <div className="flex items-center gap-2 min-w-0">
           <div
@@ -39,11 +34,7 @@ export function CompanySelector() {
         </div>
       </SelectTrigger>
       <SelectContent
-        style={{
-          background: 'hsl(215 28% 8%)',
-          borderColor: 'hsl(217 32% 20% / 0.5)',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.45)',
-        }}
+        style={{ boxShadow: 'var(--shadow-large)' }}
       >
         {companies.map((c) => (
           <SelectItem key={c.id} value={c.id}>

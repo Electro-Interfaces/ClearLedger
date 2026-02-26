@@ -273,13 +273,11 @@
   .sel {
     @apply h-10 min-w-56 rounded-lg border text-sm font-medium transition-colors;
     @apply flex items-center justify-between px-3;
-    background: hsl(217 32% 15% / 0.6);
-    border-color: hsl(217 32% 25%);
-    color: hsl(0 0% 85%);
+    @apply bg-secondary border-border text-foreground;
   }
 
   .sel:hover {
-    background: hsl(217 32% 17%);
+    @apply bg-accent;
   }
 
   /* Panel */
