@@ -1,37 +1,56 @@
 import { useState, useEffect, useCallback } from 'react'
+import { getSettings, saveSettings } from '@/services/settingsService'
 
-type Theme = 'light' | 'dark'
+export type ThemePreference = 'light' | 'dark' | 'system'
+type ResolvedTheme = 'light' | 'dark'
 
-const STORAGE_KEY = 'clearledger-theme'
+/** Ключ для index.html inline-скрипта (предотвращает flash) */
+const RESOLVED_KEY = 'clearledger-theme'
 
-function getInitialTheme(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY) as Theme | null
-  if (stored === 'light' || stored === 'dark') return stored
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+function resolveTheme(pref: ThemePreference): ResolvedTheme {
+  if (pref === 'system') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return pref
 }
 
-function applyTheme(theme: Theme) {
-  document.documentElement.classList.toggle('dark', theme === 'dark')
+function getInitialPreference(): ThemePreference {
+  return getSettings().theme
 }
 
-// Apply theme immediately to prevent flash
-applyTheme(getInitialTheme())
+function apply(resolved: ResolvedTheme) {
+  document.documentElement.classList.toggle('dark', resolved === 'dark')
+  localStorage.setItem(RESOLVED_KEY, resolved)
+}
+
+// Применяем тему до React — предотвращаем flash
+apply(resolveTheme(getInitialPreference()))
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>(getInitialTheme)
+  const [preference, setPreference] = useState<ThemePreference>(getInitialPreference)
+  const resolved = resolveTheme(preference)
 
   useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
+    apply(resolved)
+  }, [resolved])
 
-  const setTheme = useCallback((t: Theme) => {
-    localStorage.setItem(STORAGE_KEY, t)
-    setThemeState(t)
+  // Слушаем изменение системной темы при preference === 'system'
+  useEffect(() => {
+    if (preference !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => apply(resolveTheme('system'))
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [preference])
+
+  const setTheme = useCallback((pref: ThemePreference) => {
+    saveSettings({ theme: pref })
+    setPreference(pref)
   }, [])
 
   const toggle = useCallback(() => {
-    setTheme(theme === 'dark' ? 'light' : 'dark')
-  }, [theme, setTheme])
+    setTheme(resolved === 'dark' ? 'light' : 'dark')
+  }, [resolved, setTheme])
 
-  return { theme, setTheme, toggle }
+  return { theme: resolved, preference, setTheme, toggle }
 }

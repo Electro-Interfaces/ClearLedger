@@ -16,7 +16,7 @@ import type { AppSettings } from '@/services/settingsService'
 
 export function SettingsPage() {
   const { companies, companyId } = useCompany()
-  const { theme: activeTheme, setTheme: applyTheme } = useTheme()
+  const { theme: activeTheme, setTheme } = useTheme()
   const [settings, setSettings] = useState<AppSettings>(getSettings)
   const [exporting, setExporting] = useState(false)
 
@@ -33,15 +33,10 @@ export function SettingsPage() {
     saveSettings({
       language: settings.language,
       dateFormat: settings.dateFormat,
-      theme: settings.theme,
       defaultCompanyId: settings.defaultCompanyId,
     })
-    // Применяем тему реально
-    if (settings.theme === 'system') {
-      applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-    } else {
-      applyTheme(settings.theme as 'light' | 'dark')
-    }
+    // Тема сохраняется и применяется через useTheme
+    setTheme(settings.theme)
     toast.success('Настройки сохранены')
   }
 
