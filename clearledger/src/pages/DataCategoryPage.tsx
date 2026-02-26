@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
-import { useEntriesByCategory, useTransferEntries, useVerifyEntry, useDeleteEntry } from '@/hooks/useEntries'
+import { useEntriesByCategory, useTransferEntries, useVerifyEntry, useDeleteEntry, useArchiveEntry, useExcludeEntry } from '@/hooks/useEntries'
 import { DataTableToolbar } from '@/components/data/DataTableToolbar'
 import { CategoryTabs } from '@/components/data/CategoryTabs'
 import { DataTable } from '@/components/data/DataTable'
@@ -15,6 +15,8 @@ import {
   PaginationPrevious,
   PaginationNext,
 } from '@/components/ui/pagination'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
 import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
 import type { FilterState } from '@/types'
@@ -49,6 +51,8 @@ export function DataCategoryPage() {
   const transferEntries = useTransferEntries()
   const verifyEntry = useVerifyEntry()
   const deleteEntry = useDeleteEntry()
+  const archiveEntry = useArchiveEntry()
+  const excludeEntry = useExcludeEntry()
 
   const handleSubcategoryChange = useCallback((value: string) => {
     setActiveSubcategory(value)
@@ -90,6 +94,22 @@ export function DataCategoryPage() {
     setSelectedIds(new Set())
   }
 
+  function handleBulkArchive() {
+    for (const id of selectedIds) {
+      archiveEntry.mutate(id)
+    }
+    toast.success(`Архивировано ${selectedIds.size} записей`)
+    setSelectedIds(new Set())
+  }
+
+  function handleBulkExclude() {
+    for (const id of selectedIds) {
+      excludeEntry.mutate(id)
+    }
+    toast.success(`Исключено из анализа: ${selectedIds.size} записей`)
+    setSelectedIds(new Set())
+  }
+
   function handleExportCsv() {
     const selected = entries.filter((e) => selectedIds.has(e.id))
     const header = 'ID,Название,Категория,Подкатегория,Статус,Источник,Дата создания\n'
@@ -128,6 +148,46 @@ export function DataCategoryPage() {
       <h1 className="text-2xl font-bold tracking-tight">{categoryConfig.label}</h1>
 
       <DataTableToolbar filters={filters} onFiltersChange={handleFiltersChange} />
+
+      {/* Фильтры: архив, исключённые, версии */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="show-archived"
+            checked={filters.showArchived ?? false}
+            onCheckedChange={(checked) =>
+              setFilters((prev) => ({ ...prev, showArchived: !!checked }))
+            }
+          />
+          <Label htmlFor="show-archived" className="text-sm text-muted-foreground cursor-pointer">
+            Показать архив
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="show-excluded"
+            checked={filters.showExcluded ?? false}
+            onCheckedChange={(checked) =>
+              setFilters((prev) => ({ ...prev, showExcluded: !!checked }))
+            }
+          />
+          <Label htmlFor="show-excluded" className="text-sm text-muted-foreground cursor-pointer">
+            Показать исключённые
+          </Label>
+        </div>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="show-all-versions"
+            checked={filters.showAllVersions ?? false}
+            onCheckedChange={(checked) =>
+              setFilters((prev) => ({ ...prev, showAllVersions: !!checked }))
+            }
+          />
+          <Label htmlFor="show-all-versions" className="text-sm text-muted-foreground cursor-pointer">
+            Показать все версии
+          </Label>
+        </div>
+      </div>
 
       <CategoryTabs
         categoryId={category!}
@@ -182,6 +242,8 @@ export function DataCategoryPage() {
         onTransfer={handleTransfer}
         onDelete={handleBulkDelete}
         onExportCsv={handleExportCsv}
+        onArchive={handleBulkArchive}
+        onExclude={handleBulkExclude}
       />
     </div>
   )

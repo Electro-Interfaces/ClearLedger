@@ -10,7 +10,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { X, ChevronDown, Send, Trash2, Download } from 'lucide-react'
+import { X, ChevronDown, Send, Trash2, Download, Archive, EyeOff } from 'lucide-react'
 import type { EntryStatus } from '@/config/statuses'
 import { statuses } from '@/config/statuses'
 
@@ -21,6 +21,8 @@ interface BulkActionsBarProps {
   onTransfer: () => void
   onDelete?: () => void
   onExportCsv?: () => void
+  onArchive?: () => void
+  onExclude?: () => void
 }
 
 export function BulkActionsBar({
@@ -30,6 +32,8 @@ export function BulkActionsBar({
   onTransfer,
   onDelete,
   onExportCsv,
+  onArchive,
+  onExclude,
 }: BulkActionsBarProps) {
   if (selectedCount === 0) return null
 
@@ -48,7 +52,7 @@ export function BulkActionsBar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            {(Object.keys(statuses) as EntryStatus[]).map((key) => (
+            {(Object.keys(statuses) as EntryStatus[]).filter((k) => k !== 'archived').map((key) => (
               <DropdownMenuItem key={key} onClick={() => onChangeStatus(key)}>
                 {statuses[key].label}
               </DropdownMenuItem>
@@ -60,6 +64,36 @@ export function BulkActionsBar({
           <Send />
           Передать
         </Button>
+
+        {onArchive && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Archive />
+                В архив
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Архивировать {selectedCount} записей?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Выбранные записи будут перемещены в архив. Их можно восстановить позже.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Отмена</AlertDialogCancel>
+                <AlertDialogAction onClick={onArchive}>В архив</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+
+        {onExclude && (
+          <Button variant="outline" size="sm" className="text-yellow-500" onClick={onExclude}>
+            <EyeOff />
+            Исключить
+          </Button>
+        )}
 
         {onExportCsv && (
           <Button variant="outline" size="sm" onClick={onExportCsv}>

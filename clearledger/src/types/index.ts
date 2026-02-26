@@ -186,6 +186,9 @@ export interface FilterState {
   dateFrom?: string
   dateTo?: string
   subcategory: string
+  showArchived?: boolean
+  showExcluded?: boolean
+  showAllVersions?: boolean
 }
 
 export interface KpiData {

@@ -70,9 +70,9 @@ const unclassifiedSubcategory: SubCategory = {
 // ─── Общие метаполя (переиспользуемые) ─────────────
 
 const f = {
-  docNumber:    { key: 'docNumber', label: 'Номер документа', type: 'text' as const, placeholder: '№' },
+  docNumber:    { key: 'docNumber', label: 'Номер документа', type: 'text' as const, placeholder: '№', required: true },
   docDate:      { key: 'docDate', label: 'Дата документа', type: 'date' as const, required: true },
-  counterparty: { key: 'counterparty', label: 'Контрагент', type: 'text' as const, placeholder: 'Название организации' },
+  counterparty: { key: 'counterparty', label: 'Контрагент', type: 'text' as const, placeholder: 'Название организации', required: true },
   amount:       { key: 'amount', label: 'Сумма', type: 'number' as const, placeholder: '0.00', unit: '₽' },
   period:       { key: 'period', label: 'Период', type: 'text' as const, placeholder: 'Январь 2026' },
   date:         { key: 'date', label: 'Дата', type: 'date' as const },

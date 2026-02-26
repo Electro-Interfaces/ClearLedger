@@ -269,6 +269,49 @@ export async function transferEntries(companyId: string, ids: string[]): Promise
 }
 
 // ============================================================
+// Lifecycle: archive / restore / exclude / include
+// ============================================================
+
+export async function archiveEntry(companyId: string, id: string): Promise<DataEntry | undefined> {
+  const entry = await getEntry(companyId, id)
+  if (!entry || entry.status === 'archived') return entry
+  return updateEntry(companyId, id, {
+    status: 'archived',
+    metadata: { ...entry.metadata, _prevStatus: entry.status },
+  })
+}
+
+export async function restoreEntry(companyId: string, id: string): Promise<DataEntry | undefined> {
+  const entry = await getEntry(companyId, id)
+  if (!entry || entry.status !== 'archived') return entry
+  const prevStatus = (entry.metadata._prevStatus as EntryStatus) || 'new'
+  const metadata = { ...entry.metadata }
+  delete metadata._prevStatus
+  return updateEntry(companyId, id, { status: prevStatus, metadata })
+}
+
+export async function excludeEntry(companyId: string, id: string): Promise<DataEntry | undefined> {
+  const entry = await getEntry(companyId, id)
+  if (!entry) return undefined
+  return updateEntry(companyId, id, {
+    metadata: { ...entry.metadata, _excluded: 'true' },
+  })
+}
+
+export async function includeEntry(companyId: string, id: string): Promise<DataEntry | undefined> {
+  const entry = await getEntry(companyId, id)
+  if (!entry) return undefined
+  const metadata = { ...entry.metadata }
+  delete metadata._excluded
+  return updateEntry(companyId, id, { metadata })
+}
+
+export async function replaceWithCorrected(companyId: string, originalId: string): Promise<string> {
+  await archiveEntry(companyId, originalId)
+  return originalId
+}
+
+// ============================================================
 // Inbox
 // ============================================================
 
@@ -337,7 +380,10 @@ export interface CategoryStat {
 }
 
 export async function computeCategoryStats(companyId: string): Promise<CategoryStat[]> {
-  const entries = await getEntries(companyId)
+  const allEntries = await getEntries(companyId)
+  const entries = allEntries.filter(
+    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false',
+  )
   const countMap = new Map<string, number>()
   for (const e of entries) {
     countMap.set(e.categoryId, (countMap.get(e.categoryId) || 0) + 1)
@@ -350,7 +396,11 @@ export async function computeCategoryStats(companyId: string): Promise<CategoryS
 }
 
 export async function computeKpi(companyId: string): Promise<ComputedKpi> {
-  const entries = await getEntries(companyId)
+  const allEntries = await getEntries(companyId)
+  // Исключаем archived, excluded и старые версии из KPI
+  const entries = allEntries.filter(
+    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false',
+  )
   const today = new Date().toISOString().slice(0, 10)
   return {
     uploadedToday: entries.filter((e) => e.createdAt.startsWith(today)).length,

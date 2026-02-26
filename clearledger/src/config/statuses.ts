@@ -1,4 +1,4 @@
-export type EntryStatus = 'new' | 'recognized' | 'verified' | 'transferred' | 'error'
+export type EntryStatus = 'new' | 'recognized' | 'verified' | 'transferred' | 'error' | 'archived'
 
 export interface StatusConfig {
   id: EntryStatus
@@ -37,5 +37,11 @@ export const statuses: Record<EntryStatus, StatusConfig> = {
     label: 'Ошибка',
     variant: 'destructive',
     className: '',
+  },
+  archived: {
+    id: 'archived',
+    label: 'В архиве',
+    variant: 'secondary',
+    className: 'border-zinc-500 text-zinc-400',
   },
 }

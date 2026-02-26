@@ -9,19 +9,30 @@ import {
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { formatDateTime } from '@/lib/formatDate'
-import { Check, Trash2, Send } from 'lucide-react'
+import { Check, Trash2, Send, Archive, ArchiveRestore, EyeOff, Eye } from 'lucide-react'
 import type { DataEntry } from '@/types'
+import type { ValidationResult } from '@/services/validationService'
 
 interface MetadataPanelProps {
   entry: DataEntry
   onVerify?: () => void
   onTransfer?: () => void
   onDelete?: () => void
+  onArchive?: () => void
+  onRestore?: () => void
+  onExclude?: () => void
+  onInclude?: () => void
+  validation?: ValidationResult
 }
 
-export function MetadataPanel({ entry, onVerify, onTransfer, onDelete }: MetadataPanelProps) {
-  const metadataEntries = Object.entries(entry.metadata).filter(([k]) => k !== 'rejectReason')
+export function MetadataPanel({
+  entry, onVerify, onTransfer, onDelete,
+  onArchive, onRestore, onExclude, onInclude,
+  validation,
+}: MetadataPanelProps) {
+  const metadataEntries = Object.entries(entry.metadata).filter(([k]) => k !== 'rejectReason' && !k.startsWith('_'))
   const rejectReason = entry.metadata.rejectReason
+  const isExcluded = entry.metadata._excluded === 'true'
 
   return (
     <Card>
@@ -32,11 +43,45 @@ export function MetadataPanel({ entry, onVerify, onTransfer, onDelete }: Metadat
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Excluded banner */}
+        {isExcluded && (
+          <div className="p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 text-sm">
+            <span className="text-yellow-400 font-medium">Исключён из анализа</span>
+          </div>
+        )}
+
         {/* Reject reason */}
         {rejectReason && (
           <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/5 text-sm">
             <span className="text-red-400 font-medium">Причина отклонения:</span>{' '}
             <span>{rejectReason}</span>
+          </div>
+        )}
+
+        {/* Validation badge */}
+        {validation && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">Валидация</span>
+              {validation.issues.length === 0 ? (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/30">Корректен</span>
+              ) : validation.issues.some((i) => i.severity === 'error') ? (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/30">Ошибки ({validation.issues.filter((i) => i.severity === 'error').length})</span>
+              ) : (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/30">Предупреждения ({validation.issues.length})</span>
+              )}
+              <span className="text-xs text-muted-foreground ml-auto">{validation.completeness}%</span>
+            </div>
+            {validation.issues.length > 0 && (
+              <div className="space-y-1 text-xs">
+                {validation.issues.map((issue, idx) => (
+                  <div key={idx} className={`flex gap-1 ${issue.severity === 'error' ? 'text-red-400' : 'text-yellow-400'}`}>
+                    <span>{issue.severity === 'error' ? '✗' : '⚠'}</span>
+                    <span>{issue.label}: {issue.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -92,6 +137,53 @@ export function MetadataPanel({ entry, onVerify, onTransfer, onDelete }: Metadat
               Передать на Слой 2
             </Button>
           )}
+
+          {/* Exclude / Include toggle */}
+          {onExclude && !isExcluded && (
+            <Button variant="outline" size="sm" className="w-full justify-start text-yellow-500 hover:text-yellow-400" onClick={onExclude}>
+              <EyeOff />
+              Исключить из анализа
+            </Button>
+          )}
+          {onInclude && isExcluded && (
+            <Button variant="outline" size="sm" className="w-full justify-start text-yellow-500 hover:text-yellow-400" onClick={onInclude}>
+              <Eye />
+              Вернуть в анализ
+            </Button>
+          )}
+
+          {/* Archive (replaces hard-delete as primary action) */}
+          {onArchive && entry.status !== 'archived' && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="w-full justify-start">
+                  <Archive />
+                  В архив
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Архивировать запись?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Запись &laquo;{entry.title}&raquo; будет перемещена в архив. Её можно восстановить позже.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Отмена</AlertDialogCancel>
+                  <AlertDialogAction onClick={onArchive}>В архив</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
+
+          {/* Restore from archive */}
+          {onRestore && entry.status === 'archived' && (
+            <Button variant="outline" size="sm" className="w-full justify-start" onClick={onRestore}>
+              <ArchiveRestore />
+              Восстановить из архива
+            </Button>
+          )}
+
           {onDelete && (
             <AlertDialog>
               <AlertDialogTrigger asChild>

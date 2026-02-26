@@ -1,13 +1,19 @@
 /**
  * IntakePage — универсальная страница приёма документов.
  * «Бросай всё сюда» — заменяет upload/photo/manual.
+ *
+ * Поддерживает параметры:
+ * - ?newVersionOf=XXX — загрузка новой версии документа
  */
 
 import { useState, useCallback, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { IntakeItem } from '@/types'
 import { processFile, processPaste, forceSaveDuplicate } from '@/services/intake/pipeline'
+import { prepareNewVersionMetadata, finalizeNewVersion } from '@/services/versionService'
+import { getEntry, updateEntry } from '@/services/dataEntryService'
 
 /** Макс. файлов, обрабатываемых одновременно */
 const MAX_CONCURRENT = 3
@@ -16,11 +22,14 @@ import { PasteZone } from '@/components/intake/PasteZone'
 import { IntakeQueue } from '@/components/intake/IntakeQueue'
 import { ManualEntryForm } from '@/components/manual/ManualEntryForm'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Upload, ClipboardPaste, PenLine } from 'lucide-react'
+import { Upload, ClipboardPaste, PenLine, Info } from 'lucide-react'
+import { toast } from 'sonner'
 
 export function IntakePage() {
   const { companyId, company } = useCompany()
   const queryClient = useQueryClient()
+  const [searchParams] = useSearchParams()
+  const newVersionOf = searchParams.get('newVersionOf')
   const [items, setItems] = useState<IntakeItem[]>([])
   const activeCount = useRef(0)
   const pendingQueue = useRef<File[]>([])
@@ -39,6 +48,27 @@ export function IntakePage() {
     queryClient.invalidateQueries({ queryKey: ['entries', companyId] })
   }, [queryClient, companyId])
 
+  /**
+   * После сохранения записи — если это новая версия, проставляем metadata и создаём link.
+   */
+  const handlePostSave = useCallback(async (entryId: string) => {
+    if (!newVersionOf) return
+    try {
+      const versionMeta = await prepareNewVersionMetadata(companyId, newVersionOf)
+      const entry = await getEntry(companyId, entryId)
+      if (entry) {
+        await updateEntry(companyId, entryId, {
+          metadata: { ...entry.metadata, ...versionMeta },
+        })
+        await finalizeNewVersion(companyId, entryId, newVersionOf)
+        toast.success(`Создана версия v${versionMeta._version}`)
+      }
+    } catch {
+      // best effort
+    }
+    invalidateEntries()
+  }, [companyId, newVersionOf, invalidateEntries])
+
   const processNext = useCallback(() => {
     while (activeCount.current < MAX_CONCURRENT && pendingQueue.current.length > 0) {
       const file = pendingQueue.current.shift()!
@@ -51,12 +81,18 @@ export function IntakePage() {
           if (item.status === 'done' || item.status === 'error' || item.status === 'duplicate') {
             activeCount.current--
             processNext()
-            if (item.status === 'done') invalidateEntries()
+            if (item.status === 'done') {
+              if (item.entryId) {
+                handlePostSave(item.entryId)
+              } else {
+                invalidateEntries()
+              }
+            }
           }
         },
       })
     }
-  }, [companyId, company.profileId, updateItem, invalidateEntries])
+  }, [companyId, company.profileId, updateItem, invalidateEntries, handlePostSave])
 
   const handleFiles = useCallback(
     (files: File[]) => {
@@ -73,11 +109,17 @@ export function IntakePage() {
         profileId: company.profileId,
         onUpdate: (item) => {
           updateItem(item)
-          if (item.status === 'done') invalidateEntries()
+          if (item.status === 'done') {
+            if (item.entryId) {
+              handlePostSave(item.entryId)
+            } else {
+              invalidateEntries()
+            }
+          }
         },
       })
     },
-    [companyId, company.profileId, updateItem, invalidateEntries],
+    [companyId, company.profileId, updateItem, invalidateEntries, handlePostSave],
   )
 
   const handleForceSave = useCallback(
@@ -91,10 +133,14 @@ export function IntakePage() {
               : i,
           ),
         )
-        invalidateEntries()
+        if (newVersionOf) {
+          await handlePostSave(entry.id)
+        } else {
+          invalidateEntries()
+        }
       }
     },
-    [companyId, invalidateEntries],
+    [companyId, invalidateEntries, newVersionOf, handlePostSave],
   )
 
   const handleDismiss = useCallback((itemId: string) => {
@@ -110,11 +156,22 @@ export function IntakePage() {
   return (
     <div className="flex flex-col gap-6 p-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Приём документов</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {newVersionOf ? 'Загрузка новой версии' : 'Приём документов'}
+        </h1>
         <p className="text-muted-foreground mt-1">
-          Загрузите файлы, вставьте текст или создайте запись вручную
+          {newVersionOf
+            ? 'Загрузите исправленную версию документа'
+            : 'Загрузите файлы, вставьте текст или создайте запись вручную'}
         </p>
       </div>
+
+      {newVersionOf && (
+        <div className="flex items-center gap-2 p-3 rounded-lg border border-blue-500/30 bg-blue-500/5 text-sm">
+          <Info className="size-4 text-blue-400 shrink-0" />
+          <span>Новая версия для записи #{newVersionOf}. После загрузки предыдущая версия будет помечена как устаревшая.</span>
+        </div>
+      )}
 
       <Tabs defaultValue="files" className="w-full">
         <TabsList>
@@ -126,10 +183,12 @@ export function IntakePage() {
             <ClipboardPaste className="size-4" />
             Вставка текста
           </TabsTrigger>
-          <TabsTrigger value="manual" className="gap-1.5">
-            <PenLine className="size-4" />
-            Ручной ввод
-          </TabsTrigger>
+          {!newVersionOf && (
+            <TabsTrigger value="manual" className="gap-1.5">
+              <PenLine className="size-4" />
+              Ручной ввод
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="files" className="mt-4">
@@ -140,9 +199,11 @@ export function IntakePage() {
           <PasteZone onPaste={handlePaste} disabled={isProcessing} />
         </TabsContent>
 
-        <TabsContent value="manual" className="mt-4">
-          <ManualEntryForm entryType="new" />
-        </TabsContent>
+        {!newVersionOf && (
+          <TabsContent value="manual" className="mt-4">
+            <ManualEntryForm entryType="new" />
+          </TabsContent>
+        )}
       </Tabs>
 
       <IntakeQueue

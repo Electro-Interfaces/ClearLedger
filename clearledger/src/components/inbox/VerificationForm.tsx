@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -13,12 +14,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { StatusBadge } from '@/components/data/StatusBadge'
 import { SourceBadge } from '@/components/data/SourceBadge'
 import { formatDateTime } from '@/lib/formatDate'
-import { Check, Clock, X } from 'lucide-react'
+import { Check, Clock, X, AlertCircle, AlertTriangle } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getSubcategories } from '@/config/categories'
+import { validateEntry } from '@/services/validationService'
 import type { DataEntry } from '@/types'
 
 export interface VerifyPayload {
@@ -66,6 +74,23 @@ export function VerificationForm({
   const systemEntries = Object.entries(editedMetadata).filter(([k]) => k.startsWith('_'))
   const ocrFields = entry.ocrData?.fields ?? []
 
+  // Валидация — вычисляем на лету при изменении metadata
+  const validation = useMemo(() => {
+    const virtualEntry: DataEntry = { ...entry, metadata: editedMetadata, categoryId, subcategoryId }
+    return validateEntry(virtualEntry, company.profileId)
+  }, [entry, editedMetadata, categoryId, subcategoryId, company.profileId])
+
+  // Поля с ошибками (для подсветки)
+  const fieldIssues = useMemo(() => {
+    const map = new Map<string, { severity: 'error' | 'warning'; message: string }>()
+    for (const issue of validation.issues) {
+      if (!map.has(issue.field) || issue.severity === 'error') {
+        map.set(issue.field, { severity: issue.severity, message: issue.message })
+      }
+    }
+    return map
+  }, [validation])
+
   function updateMetaField(key: string, value: string) {
     setEditedMetadata((prev) => ({ ...prev, [key]: value }))
   }
@@ -84,6 +109,17 @@ export function VerificationForm({
         </div>
       </CardHeader>
       <CardContent className="space-y-4 overflow-y-auto">
+        {/* Прогресс валидации */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Заполненность</span>
+            <span className={`font-medium ${validation.completeness >= 70 ? 'text-green-400' : validation.completeness >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>
+              {validation.completeness}%
+            </span>
+          </div>
+          <Progress value={validation.completeness} className="h-1.5" />
+        </div>
+
         {/* Категория / Подкатегория */}
         <div className="space-y-3">
           <div className="grid gap-2">
@@ -119,21 +155,40 @@ export function VerificationForm({
 
         <Separator />
 
-        {/* Метаданные (редактируемые) */}
+        {/* Метаданные (редактируемые) с валидацией */}
         {metadataEntries.length > 0 && (
           <div className="space-y-2">
             <h4 className="text-sm font-medium text-muted-foreground">Метаданные</h4>
             <div className="space-y-2">
-              {metadataEntries.map(([key, value]) => (
-                <div key={key} className="flex items-center gap-2">
-                  <Label className="min-w-[100px] text-xs text-muted-foreground capitalize shrink-0">{key}</Label>
-                  <Input
-                    value={value}
-                    onChange={(e) => updateMetaField(key, e.target.value)}
-                    className="flex-1 h-8 text-sm"
-                  />
-                </div>
-              ))}
+              {metadataEntries.map(([key, value]) => {
+                const issue = fieldIssues.get(key)
+                return (
+                  <div key={key} className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <Label className="min-w-[100px] text-xs text-muted-foreground capitalize shrink-0">{key}</Label>
+                      <Input
+                        value={value}
+                        onChange={(e) => updateMetaField(key, e.target.value)}
+                        className={`flex-1 h-8 text-sm ${issue?.severity === 'error' ? 'border-red-500/50' : issue?.severity === 'warning' ? 'border-yellow-500/50' : ''}`}
+                      />
+                      {issue && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              {issue.severity === 'error'
+                                ? <AlertCircle className="size-4 text-red-400 shrink-0" />
+                                : <AlertTriangle className="size-4 text-yellow-400 shrink-0" />}
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p className="text-xs">{issue.message}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
@@ -233,14 +288,27 @@ export function VerificationForm({
 
         {/* Действия */}
         <div className="flex flex-col gap-2 pt-2">
-          <Button
-            onClick={() => onVerify({ categoryId, subcategoryId, comment: comment || undefined, metadata: editedMetadata })}
-            disabled={isLoading}
-            className="w-full bg-green-600 hover:bg-green-700 text-white"
-          >
-            <Check className="size-4" />
-            Верифицировать
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="w-full">
+                  <Button
+                    onClick={() => onVerify({ categoryId, subcategoryId, comment: comment || undefined, metadata: editedMetadata })}
+                    disabled={isLoading || !validation.isValid}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    <Check className="size-4" />
+                    Верифицировать
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!validation.isValid && (
+                <TooltipContent>
+                  <p className="text-xs">Заполните обязательные поля ({validation.issues.filter((i) => i.severity === 'error').length} ошибок)</p>
+                </TooltipContent>
+              )}
+            </Tooltip>
+          </TooltipProvider>
           <div className="flex gap-2">
             <Button
               variant="outline"

@@ -10,6 +10,7 @@ const statusLabels: Record<EntryStatus, string> = {
   verified: 'Проверен',
   transferred: 'Передан',
   error: 'Ошибка',
+  archived: 'В архиве',
 }
 
 interface TimelineEvent {

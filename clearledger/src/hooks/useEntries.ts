@@ -154,6 +154,42 @@ export function useTransferEntries() {
   })
 }
 
+export function useArchiveEntry() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => svc.archiveEntry(companyId, id),
+    onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
+export function useRestoreEntry() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => svc.restoreEntry(companyId, id),
+    onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
+export function useExcludeEntry() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => svc.excludeEntry(companyId, id),
+    onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
+export function useIncludeEntry() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => svc.includeEntry(companyId, id),
+    onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
 // ---- Search ----
 
 /** Поиск с debounce */
@@ -192,6 +228,12 @@ function invalidateAll(qc: ReturnType<typeof useQueryClient>, companyId: string)
 
 function applyFilters(entries: DataEntry[], filters: Partial<FilterState>): DataEntry[] {
   return entries.filter((e) => {
+    // По умолчанию скрываем archived
+    if (!filters.showArchived && e.status === 'archived') return false
+    // По умолчанию скрываем excluded
+    if (!filters.showExcluded && e.metadata._excluded === 'true') return false
+    // По умолчанию показываем только последние версии
+    if (!filters.showAllVersions && e.metadata._isLatestVersion === 'false') return false
     if (filters.search && !e.title.toLowerCase().includes(filters.search.toLowerCase())) return false
     if (filters.status && filters.status !== 'all' && e.status !== (filters.status as EntryStatus)) return false
     if (filters.source && filters.source !== 'all' && e.source !== filters.source) return false
