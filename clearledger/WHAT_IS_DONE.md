@@ -653,6 +653,91 @@ __cl.export(companyId?) — экспорт данных компании
 
 ---
 
+---
+
+## v0.5.0 — Storage Guard + Import + Connectors + Backend + OCR
+
+### Storage Guard
+
+Мониторинг использования localStorage с автоматическими предупреждениями:
+
+| Компонент | Описание |
+|-----------|----------|
+| `storageMonitor.ts` | `getStorageUsage()`, `isStorageWarning(80%)`, `isStorageCritical(95%)`, `getStorageBreakdown()`, `cleanupOldAudit()` |
+| `StorageWarning.tsx` | Жёлтая плашка при >80%, красная при >95%. Кнопки: «Очистить аудит», «Экспорт + Очистка» |
+| `storage.ts` | try/catch на `setItem()` с toast при QuotaExceededError |
+| Header | Интеграция `<StorageWarning />` |
+
+### Импорт из JSON
+
+Обратный импорт данных из формата ExportPayload:
+
+| Компонент | Описание |
+|-----------|----------|
+| `importService.ts` | `importFromJson(file, companyId)` → `{ imported, skipped, errors }`. Валидация, дедупликация по id, merge-стратегия |
+| SettingsPage | Секция «Данные»: экспорт + импорт, drag-n-drop для JSON, прогресс, информация о хранилище |
+
+### AuditJournal
+
+Переиспользуемый компонент журнала аудита для конкретной записи:
+
+| Компонент | Описание |
+|-----------|----------|
+| `AuditJournal.tsx` | Принимает `entryId`, показывает события с бейджами действий, ScrollArea max-h-64 |
+| InboxDetailPage | `<AuditJournal>` добавлен рядом с VerificationForm |
+
+### Рабочие коннекторы (demo-sync)
+
+Коннекторы теперь могут генерировать тестовые записи:
+
+| Компонент | Описание |
+|-----------|----------|
+| `connectorService.ts` | `simulateSync()` — генерирует 2-5 DataEntry через localStorage, обновляет lastSyncAt/syncStatus |
+| `useConnectors.ts` | `useSyncConnector()` — mutation hook с инвалидацией entries + connectors |
+| ConnectorDetailPage | Кнопка «Синхронизировать» (с анимацией), отображение syncStatus и lastSyncAt |
+| `types/index.ts` | Connector: `lastSyncAt?`, `syncStatus?`; AuditAction: `connector_synced` |
+
+### FastAPI Backend MVP (server/)
+
+Полный бэкенд для production-режима — 21 файл:
+
+```
+server/
+  app/
+    config.py          — Pydantic BaseSettings (.env, CORS, OCR, JWT)
+    database.py        — AsyncSession + asyncpg, create_all при старте
+    models.py          — SQLAlchemy 2.0: Company, User, DataEntry, AuditEvent, Connector (UUID PK, JSONB)
+    schemas.py         — Pydantic v2 Request/Response схемы
+    auth.py            — JWT (PyJWT) 30min, bcrypt (passlib), get_current_user
+    seed.py            — 5 компаний + admin@clearledger.ru / admin123
+    main.py            — FastAPI + CORS + lifespan + /api prefix
+    routers/
+      auth_router.py       — POST /login, POST /register, GET /me
+      entries_router.py    — CRUD + verify/reject/transfer/archive/restore/exclude/include
+      audit_router.py      — GET /audit (фильтры), GET /audit/entry/{id}
+      connectors_router.py — CRUD коннекторов
+      export_router.py     — GET /export/json, /export/excel, /export/csv
+      reports_router.py    — GET /reports/period, /counterparties, /sources, /errors
+      ocr_router.py        — POST /ocr (Tesseract rus+eng, 10MB, 30s timeout)
+  Dockerfile             — python:3.12-slim + tesseract-ocr + tesseract-ocr-rus
+  docker-compose.yml     — app + postgres:16 + nginx
+  nginx/nginx.conf       — /api → app:8000, / → SPA static, gzip, cache
+  .env.example           — DATABASE_URL, SECRET_KEY, CORS_ORIGINS, OCR_ENABLED
+  requirements.txt       — fastapi, uvicorn, sqlalchemy, asyncpg, pyjwt, bcrypt, openpyxl
+```
+
+### Cloud OCR
+
+Серверный OCR через Tesseract CLI с fallback на browser Tesseract.js:
+
+| Компонент | Описание |
+|-----------|----------|
+| `ocr_router.py` | POST /ocr — subprocess.run tesseract, rus+eng, 10MB лимит, 30s timeout |
+| `extract.ts` | При `isApiEnabled()` → POST /api/ocr, fallback на Tesseract.js |
+| Dockerfile | `apt-get install tesseract-ocr tesseract-ocr-rus` |
+
+---
+
 ### Запланировано
 
 - Полнотекстовый поиск (PostgreSQL FTS)
@@ -660,5 +745,5 @@ __cl.export(companyId?) — экспорт данных компании
 - Интеграции: банковские API, ЭДО, ОФД
 - Dashboard: сравнение периодов
 - Мониторинг (metrics endpoint)
-- OCR в облачном сервере
 - Нормализация + fuzzy match в cloud classifier
+- Alembic миграции (сейчас create_all при старте)

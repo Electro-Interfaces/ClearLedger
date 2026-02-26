@@ -29,6 +29,7 @@ const auditActionLabels: Record<AuditAction, string> = {
   exported: 'Экспортирован',
   bulk_archived: 'Массовая архивация',
   bulk_excluded: 'Массовое исключение',
+  connector_synced: 'Синхронизация',
 }
 
 interface MetadataPanelProps {

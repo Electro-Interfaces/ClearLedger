@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CompanySelector } from '@/components/company/CompanySelector'
+import { StorageWarning } from '@/components/common/StorageWarning'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -55,7 +56,7 @@ export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
           </div>
           <div>
             <h1 className="font-semibold text-foreground text-lg tracking-tight">ClearLedger</h1>
-            <p className="text-xs text-muted-foreground">v0.3.1</p>
+            <p className="text-xs text-muted-foreground">v0.5.0</p>
           </div>
         </div>
 
@@ -70,6 +71,11 @@ export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
           >
             <Menu className="h-5 w-5" />
           </Button>
+        </div>
+
+        {/* Storage Warning */}
+        <div className="hidden md:block shrink-0">
+          <StorageWarning />
         </div>
 
         {/* Content area — выровнена с рабочей областью */}

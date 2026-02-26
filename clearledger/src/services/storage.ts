@@ -14,7 +14,14 @@ export function getItem<T>(key: string, fallback: T): T {
 export function setItem(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value))
-  } catch { /* quota exceeded — ignore */ }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'QuotaExceededError') {
+      // Ленивый импорт sonner чтобы избежать циклических зависимостей при инициализации
+      import('sonner').then(({ toast }) => {
+        toast.error('Хранилище переполнено! Экспортируйте данные и очистите аудит в Настройках.')
+      }).catch(() => { /* ignore */ })
+    }
+  }
 }
 
 export function removeItem(key: string): void {

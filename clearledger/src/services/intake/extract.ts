@@ -9,6 +9,7 @@
 
 import type { IntakeFileType } from '@/types'
 import type { EmailParseResult } from './parsers/emailParser'
+import { isApiEnabled, upload } from '../apiClient'
 
 export interface ExtractResult {
   text: string
@@ -167,13 +168,34 @@ async function extractWord(file: File): Promise<ExtractResult> {
   }
 }
 
-// ---- Image OCR (tesseract.js) ----
+// ---- Image OCR (server-side or tesseract.js fallback) ----
+
+interface OcrApiResponse {
+  text: string
+  metadata: Record<string, string>
+}
+
+async function extractImageViaApi(file: File): Promise<ExtractResult> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const result = await upload<OcrApiResponse>('/api/ocr', formData)
+  return { text: result.text, metadata: { ...result.metadata, _ocrSource: 'server' } }
+}
 
 async function extractImage(file: File): Promise<ExtractResult> {
+  // Если API доступен — используем серверный OCR (Tesseract CLI, быстрее)
+  if (isApiEnabled()) {
+    try {
+      return await extractImageViaApi(file)
+    } catch (err) {
+      console.warn('Server OCR failed, falling back to browser:', err)
+    }
+  }
+  // Fallback: browser-side Tesseract.js
   try {
     const { parseImage } = await import('./parsers/ocrParser')
     const result = await parseImage(file)
-    return { text: result.text, metadata: result.metadata }
+    return { text: result.text, metadata: { ...result.metadata, _ocrSource: 'browser' } }
   } catch (err) {
     console.error('OCR extraction error:', err)
     return { text: '', metadata: { _ocrError: `OCR: ${String(err)}` } }

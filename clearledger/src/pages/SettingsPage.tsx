@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -7,22 +7,67 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { NavLink } from 'react-router-dom'
-import { Building2, ChevronRight, Download } from 'lucide-react'
+import { Building2, ChevronRight, Download, Upload, FileJson, HardDrive } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useTheme } from '@/hooks/useTheme'
+import { useQueryClient } from '@tanstack/react-query'
 import { getSettings, saveSettings } from '@/services/settingsService'
 import { exportAllData } from '@/services/exportService'
+import { importFromJson } from '@/services/importService'
+import { getStorageUsage, formatBytes, type StorageUsage } from '@/services/storageMonitor'
 import type { AppSettings } from '@/services/settingsService'
 
 export function SettingsPage() {
   const { companies, companyId } = useCompany()
   const { theme: activeTheme, setTheme } = useTheme()
+  const queryClient = useQueryClient()
   const [settings, setSettings] = useState<AppSettings>(getSettings)
   const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [storageUsage, setStorageUsage] = useState<StorageUsage | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setSettings(getSettings())
+    setStorageUsage(getStorageUsage())
   }, [])
+
+  const handleImportFile = useCallback(async (file: File) => {
+    if (!file.name.endsWith('.json')) {
+      toast.error('Поддерживается только формат JSON')
+      return
+    }
+    setImporting(true)
+    try {
+      const result = await importFromJson(file, companyId)
+      if (result.errors.length > 0) {
+        toast.error(result.errors[0])
+      } else {
+        toast.success(`Импортировано: ${result.imported}, пропущено: ${result.skipped}`)
+        queryClient.invalidateQueries({ queryKey: ['entries'] })
+        queryClient.invalidateQueries({ queryKey: ['connectors'] })
+        setStorageUsage(getStorageUsage())
+      }
+    } catch {
+      toast.error('Ошибка импорта')
+    } finally {
+      setImporting(false)
+    }
+  }, [companyId, queryClient])
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleImportFile(file)
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) handleImportFile(file)
+    e.target.value = ''
+  }
 
   function handleSaveProfile() {
     saveSettings({ userName: settings.userName, userEmail: settings.userEmail })
@@ -178,14 +223,60 @@ export function SettingsPage() {
 
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Экспорт данных</CardTitle>
-            <CardDescription>Выгрузка данных текущей компании для передачи в Слой 2 или резервного копирования</CardDescription>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <HardDrive className="size-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>Данные</CardTitle>
+                <CardDescription>
+                  Экспорт, импорт и хранилище
+                  {storageUsage && (
+                    <span className="ml-2 text-xs">
+                      ({formatBytes(storageUsage.usedBytes)} / {formatBytes(storageUsage.totalBytes)}, {storageUsage.percent}%)
+                    </span>
+                  )}
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent>
-            <Button variant="outline" onClick={handleExport} disabled={exporting}>
-              <Download className="mr-2 h-4 w-4" />
-              {exporting ? 'Экспорт...' : 'Скачать JSON'}
-            </Button>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-3">
+              <Button variant="outline" onClick={handleExport} disabled={exporting}>
+                <Download className="mr-2 h-4 w-4" />
+                {exporting ? 'Экспорт...' : 'Экспорт JSON'}
+              </Button>
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importing}>
+                <Upload className="mr-2 h-4 w-4" />
+                {importing ? 'Импорт...' : 'Импорт JSON'}
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+            </div>
+
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                dragOver
+                  ? 'border-primary bg-primary/5'
+                  : 'border-muted-foreground/25 hover:border-muted-foreground/50'
+              }`}
+            >
+              <FileJson className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">
+                Перетащите JSON-файл для импорта данных
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Формат: экспорт ClearLedger (.json)
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>

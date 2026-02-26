@@ -7,6 +7,7 @@ import { InboxNavigation } from '@/components/inbox/InboxNavigation'
 import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
+import { AuditJournal } from '@/components/common/AuditJournal'
 import { SplitViewSkeleton } from '@/components/common/Skeletons'
 import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
@@ -177,6 +178,7 @@ export function InboxDetailPage() {
           <DocumentPreview entry={entry} />
           <DocumentLinks entryId={entry.id} />
         </div>
+        <div className="space-y-4">
         <VerificationForm
           entry={entry}
           onVerify={handleVerify}
@@ -184,6 +186,8 @@ export function InboxDetailPage() {
           onReject={handleReject}
           isLoading={updateEntry.isPending || verifyEntry.isPending || rejectEntry.isPending}
         />
+        <AuditJournal entryId={entry.id} />
+        </div>
       </div>
     </div>
   )

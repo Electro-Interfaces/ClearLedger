@@ -57,3 +57,15 @@ export function useDeleteConnector() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['connectors', companyId] }),
   })
 }
+
+export function useSyncConnector() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (connectorId: string) => Promise.resolve(svc.simulateSync(companyId, connectorId)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['connectors', companyId] })
+      qc.invalidateQueries({ queryKey: ['entries'] })
+    },
+  })
+}

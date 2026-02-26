@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Trash2, Power, PowerOff } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Power, PowerOff, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -12,7 +12,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { useConnector, useUpdateConnector, useDeleteConnector } from '@/hooks/useConnectors'
+import { useConnector, useUpdateConnector, useDeleteConnector, useSyncConnector } from '@/hooks/useConnectors'
 import { DetailPageSkeleton } from '@/components/common/Skeletons'
 import { QueryError } from '@/components/common/QueryError'
 import { formatDateTime } from '@/lib/formatDate'
@@ -65,6 +65,7 @@ export function ConnectorDetailPage() {
   const { data: connector, isLoading, isError, refetch } = useConnector(id ?? '')
   const updateConnector = useUpdateConnector()
   const deleteConnector = useDeleteConnector()
+  const syncConnector = useSyncConnector()
 
   const [form, setForm] = useState({
     name: '', url: '', type: '', interval: '', categoryId: '',
@@ -152,6 +153,26 @@ export function ConnectorDetailPage() {
           <Badge variant="outline" className={status.className}>{status.label}</Badge>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={connector.status === 'disabled' || syncConnector.isPending}
+            onClick={() => {
+              syncConnector.mutate(connector.id, {
+                onSuccess: (result) => {
+                  if (result.error) {
+                    toast.error(result.error)
+                  } else {
+                    toast.success(`Синхронизировано: ${result.entries.length} записей`)
+                  }
+                },
+                onError: () => toast.error('Ошибка синхронизации'),
+              })
+            }}
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${syncConnector.isPending ? 'animate-spin' : ''}`} />
+            {syncConnector.isPending ? 'Синхронизация...' : 'Синхронизировать'}
+          </Button>
           <Button variant="outline" size="sm" onClick={handleToggle}>
             {connector.status === 'disabled' ? (
               <><Power className="mr-2 h-4 w-4" />Включить</>
@@ -292,14 +313,25 @@ export function ConnectorDetailPage() {
             <div>
               <span className="text-muted-foreground">Последняя синхронизация:</span>
               <span className="ml-2 font-medium">
-                {connector.lastSync
-                  ? formatDateTime(connector.lastSync)
-                  : 'Не выполнялась'}
+                {connector.lastSyncAt
+                  ? formatDateTime(connector.lastSyncAt)
+                  : connector.lastSync
+                    ? formatDateTime(connector.lastSync)
+                    : 'Не выполнялась'}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Статус синхронизации:</span>
+              <span className="ml-2 font-medium">
+                {connector.syncStatus === 'synced' && 'Синхронизирован'}
+                {connector.syncStatus === 'syncing' && 'Синхронизация...'}
+                {connector.syncStatus === 'error' && 'Ошибка'}
+                {(!connector.syncStatus || connector.syncStatus === 'idle') && 'Ожидание'}
               </span>
             </div>
           </div>
           <p className="mt-4 text-xs text-muted-foreground">
-            Реальная синхронизация доступна в Слое 2 (Python + cron). Слой 1 хранит конфигурацию.
+            Demo-режим: кнопка «Синхронизировать» генерирует тестовые записи. Реальная синхронизация — в Слое 2.
           </p>
         </CardContent>
       </Card>

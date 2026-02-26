@@ -92,6 +92,8 @@ export interface Connector {
   url: string
   status: 'active' | 'error' | 'disabled'
   lastSync?: string
+  lastSyncAt?: string
+  syncStatus?: 'idle' | 'syncing' | 'synced' | 'error'
   recordsCount: number
   errorsCount: number
   categoryId: string
@@ -204,7 +206,7 @@ export type AuditAction =
   | 'created' | 'verified' | 'rejected' | 'transferred'
   | 'archived' | 'restored' | 'excluded' | 'included'
   | 'updated' | 'version_created' | 'exported'
-  | 'bulk_archived' | 'bulk_excluded'
+  | 'bulk_archived' | 'bulk_excluded' | 'connector_synced'
 
 export interface AuditEvent {
   id: string
