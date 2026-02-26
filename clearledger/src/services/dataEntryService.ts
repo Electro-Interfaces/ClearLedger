@@ -190,6 +190,27 @@ export interface ComputedKpi {
   transferredToday: number
 }
 
+// ---- Category Stats (for Dashboard chart) ----
+
+export interface CategoryStat {
+  categoryId: string
+  label: string
+  count: number
+}
+
+export function computeCategoryStats(companyId: string): CategoryStat[] {
+  const entries = loadEntries(companyId)
+  const countMap = new Map<string, number>()
+  for (const e of entries) {
+    countMap.set(e.categoryId, (countMap.get(e.categoryId) || 0) + 1)
+  }
+  return Array.from(countMap.entries()).map(([categoryId, count]) => ({
+    categoryId,
+    label: categoryId,
+    count,
+  }))
+}
+
 export function computeKpi(companyId: string): ComputedKpi {
   const entries = loadEntries(companyId)
   const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD

@@ -7,7 +7,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import * as svc from '@/services/dataEntryService'
 import type { DataEntry, FilterState } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 
 // ---- Keys ----
 
@@ -150,6 +150,36 @@ export function useTransferEntries() {
   return useMutation({
     mutationFn: (ids: string[]) => Promise.resolve(svc.transferEntries(companyId, ids)),
     onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
+// ---- Search ----
+
+/** Поиск с debounce по реальным данным из localStorage */
+export function useSearchEntries(query: string, debounceMs = 300) {
+  const { companyId } = useCompany()
+  const [debouncedQuery, setDebouncedQuery] = useState(query)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), debounceMs)
+    return () => clearTimeout(timer)
+  }, [query, debounceMs])
+
+  return useQuery({
+    queryKey: [...keys.all(companyId), 'search', debouncedQuery],
+    queryFn: () => svc.searchEntries(companyId, debouncedQuery),
+    enabled: debouncedQuery.length >= 2,
+  })
+}
+
+// ---- Category Stats ----
+
+/** Распределение записей по категориям (для CategoryChart) */
+export function useCategoryStats() {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: [...keys.all(companyId), 'category-stats'],
+    queryFn: () => svc.computeCategoryStats(companyId),
   })
 }
 

@@ -6,6 +6,10 @@ import './index.css'
 
 seedIfNeeded()
 
+if (import.meta.env.DEV) {
+  import('./services/devConsole')
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

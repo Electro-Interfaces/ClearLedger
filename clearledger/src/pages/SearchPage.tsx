@@ -1,29 +1,19 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, FileText } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from '@/components/data/StatusBadge'
-import { mockEntries } from '@/services/mockData'
+import { useSearchEntries } from '@/hooks/useEntries'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
 
 export function SearchPage() {
   const [query, setQuery] = useState('')
-  const { company, companyId } = useCompany()
+  const { company } = useCompany()
   const navigate = useNavigate()
-
-  const results = useMemo(() => {
-    if (query.length < 2) return []
-    const q = query.toLowerCase()
-    return mockEntries
-      .filter((e) => (e.companyId === companyId || companyId === 'npk'))
-      .filter((e) =>
-        e.title.toLowerCase().includes(q) ||
-        Object.values(e.metadata).some((v) => v.toLowerCase().includes(q))
-      )
-  }, [query, companyId])
+  const { data: results = [], isLoading } = useSearchEntries(query)
 
   return (
     <div className="space-y-6">
@@ -46,7 +36,13 @@ export function SearchPage() {
         </div>
       )}
 
-      {query.length >= 2 && results.length === 0 && (
+      {query.length >= 2 && isLoading && (
+        <div className="text-center py-12 text-muted-foreground">
+          Поиск...
+        </div>
+      )}
+
+      {query.length >= 2 && !isLoading && results.length === 0 && (
         <div className="text-center py-12 text-muted-foreground">
           Ничего не найдено по запросу &laquo;{query}&raquo;
         </div>

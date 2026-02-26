@@ -1,10 +1,13 @@
+import { Link } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { mockConnectors } from '@/services/mockData'
+import { Button } from '@/components/ui/button'
+import { useConnectors } from '@/hooks/useConnectors'
 
 const statusDotColor: Record<string, string> = {
   active: 'bg-green-500',
@@ -26,14 +29,39 @@ function formatLastSync(lastSync?: string): string {
 }
 
 export function ConnectorsStatus() {
+  const { data: connectors = [] } = useConnectors()
+
+  if (connectors.length === 0) {
+    return (
+      <Card style={{ boxShadow: 'var(--shadow-soft)' }}>
+        <CardHeader>
+          <CardTitle>Коннекторы</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center gap-3 py-6">
+          <p className="text-sm text-muted-foreground">Не настроены</p>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/connectors">
+              <Plus className="mr-2 h-4 w-4" />
+              Настроить
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <Card style={{ boxShadow: 'var(--shadow-soft)' }}>
       <CardHeader>
         <CardTitle>Коннекторы</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {mockConnectors.map((connector) => (
-          <div key={connector.id} className="flex items-center gap-3">
+        {connectors.map((connector) => (
+          <Link
+            key={connector.id}
+            to={`/connectors/${connector.id}`}
+            className="flex items-center gap-3 hover:bg-accent/30 rounded-md p-1 -m-1 transition-colors"
+          >
             <span
               className={`h-2.5 w-2.5 shrink-0 rounded-full ${statusDotColor[connector.status] ?? 'bg-gray-500'}`}
             />
@@ -45,7 +73,7 @@ export function ConnectorsStatus() {
                   : formatLastSync(connector.lastSync)}
               </p>
             </div>
-          </div>
+          </Link>
         ))}
       </CardContent>
     </Card>

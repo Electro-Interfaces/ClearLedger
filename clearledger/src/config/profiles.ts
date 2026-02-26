@@ -55,6 +55,18 @@ export interface CompanyProfile {
   connectorTemplates: ConnectorTemplate[]
 }
 
+// ─── Подкатегория для нераспознанных документов ─────
+
+const unclassifiedSubcategory: SubCategory = {
+  id: 'unclassified',
+  label: 'Нераспознанные',
+  documentTypes: [{
+    id: 'unclassified-doc',
+    label: 'Нераспознанный документ',
+    metadataFields: [],
+  }],
+}
+
 // ─── Общие метаполя (переиспользуемые) ─────────────
 
 const f = {
@@ -156,6 +168,7 @@ const fuelProfile: CompanyProfile = {
             ],
           }],
         },
+        unclassifiedSubcategory,
       ],
     },
     {
@@ -377,6 +390,7 @@ const tradeProfile: CompanyProfile = {
             ],
           }],
         },
+        unclassifiedSubcategory,
       ],
     },
     {
@@ -486,6 +500,7 @@ const retailProfile: CompanyProfile = {
             { id: 'contract', label: 'Договор поставки', metadataFields: [f.docNumber, f.docDate, f.counterparty, { key: 'validUntil', label: 'Действует до', type: 'date' }] },
           ],
         },
+        unclassifiedSubcategory,
       ],
     },
     {
@@ -594,6 +609,7 @@ const energyProfile: CompanyProfile = {
             { id: 'invoice', label: 'Счёт на оплату', ocrEnabled: true, metadataFields: [f.docNumber, f.docDate, f.counterparty, f.amount] },
           ],
         },
+        unclassifiedSubcategory,
       ],
     },
     {
@@ -663,6 +679,7 @@ const generalProfile: CompanyProfile = {
         { id: 'contracts', label: 'Договоры', documentTypes: [{ id: 'contract', label: 'Договор', metadataFields: [f.docNumber, f.docDate, f.counterparty, f.amount] }] },
         { id: 'acts', label: 'Акты', documentTypes: [{ id: 'act', label: 'Акт', metadataFields: [f.docNumber, f.docDate, f.counterparty, f.amount] }] },
         { id: 'invoices', label: 'Счета', documentTypes: [{ id: 'invoice', label: 'Счёт', ocrEnabled: true, metadataFields: [f.docNumber, f.docDate, f.counterparty, f.amount] }] },
+        unclassifiedSubcategory,
       ],
     },
     {

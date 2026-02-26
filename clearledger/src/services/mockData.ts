@@ -1,11 +1,4 @@
-import type { DataEntry, Connector, SyncLog, KpiData, RecentAction } from '@/types'
-
-export const mockKpi: KpiData = {
-  uploadedToday: 24,
-  totalVerified: 1847,
-  inProcessing: 12,
-  errors: 3,
-}
+import type { DataEntry, RecentAction } from '@/types'
 
 export const mockRecentActions: RecentAction[] = [
   { id: '1', time: '14:32', fileName: 'ТТН_2026-02-25.pdf', action: 'Загружен', status: 'new' },
@@ -17,11 +10,15 @@ export const mockRecentActions: RecentAction[] = [
   { id: '7', time: '11:30', fileName: 'Реестр_платежей.xlsx', action: 'Проверен', status: 'verified' },
 ]
 
+/**
+ * Seed-записи с правильными categoryId/subcategoryId из профилей.
+ * npk, rti = fuel; ts94 = trade; ofptk = retail
+ */
 export const mockEntries: DataEntry[] = [
   {
     id: '1',
     title: 'ТТН №245 от 25.02.2026',
-    categoryId: 'documents',
+    categoryId: 'primary',
     subcategoryId: 'ttn',
     docTypeId: 'ttn-gsm',
     companyId: 'npk',
@@ -38,8 +35,8 @@ export const mockEntries: DataEntry[] = [
   {
     id: '2',
     title: 'Акт сверки за январь 2026',
-    categoryId: 'financial',
-    subcategoryId: 'reconciliation',
+    categoryId: 'primary',
+    subcategoryId: 'acts',
     docTypeId: 'act-reconciliation',
     companyId: 'npk',
     status: 'recognized',
@@ -54,7 +51,7 @@ export const mockEntries: DataEntry[] = [
   {
     id: '3',
     title: 'Договор поставки №18',
-    categoryId: 'documents',
+    categoryId: 'primary',
     subcategoryId: 'contracts',
     docTypeId: 'contract',
     companyId: 'rti',
@@ -70,8 +67,8 @@ export const mockEntries: DataEntry[] = [
   {
     id: '4',
     title: 'Счёт-фактура №128',
-    categoryId: 'financial',
-    subcategoryId: 'payments',
+    categoryId: 'primary',
+    subcategoryId: 'invoices',
     docTypeId: 'invoice-factura',
     companyId: 'ts94',
     status: 'transferred',
@@ -119,7 +116,7 @@ export const mockEntries: DataEntry[] = [
     id: '7',
     title: 'Реестр платежей за неделю',
     categoryId: 'financial',
-    subcategoryId: 'reports',
+    subcategoryId: 'reconciliation',
     docTypeId: 'financial-report',
     companyId: 'rti',
     status: 'verified',
@@ -131,10 +128,10 @@ export const mockEntries: DataEntry[] = [
   },
   {
     id: '8',
-    title: 'Акт выполненных работ №34',
-    categoryId: 'documents',
-    subcategoryId: 'acts',
-    docTypeId: 'act-work',
+    title: 'Приходная накладная №34',
+    categoryId: 'primary',
+    subcategoryId: 'supply',
+    docTypeId: 'supply-invoice',
     companyId: 'ofptk',
     status: 'new',
     source: 'upload',
@@ -148,7 +145,7 @@ export const mockEntries: DataEntry[] = [
   {
     id: '9',
     title: 'Счёт на оплату №56',
-    categoryId: 'documents',
+    categoryId: 'primary',
     subcategoryId: 'invoices',
     docTypeId: 'invoice',
     companyId: 'ts94',
@@ -175,73 +172,4 @@ export const mockEntries: DataEntry[] = [
     createdAt: '2026-02-25T08:00:00Z',
     updatedAt: '2026-02-25T08:05:00Z',
   },
-]
-
-export const mockConnectors: Connector[] = [
-  {
-    id: '1',
-    name: '1C Бухгалтерия',
-    type: '1c',
-    url: 'https://1c.example.com/api',
-    status: 'active',
-    lastSync: '2026-02-25T14:00:00Z',
-    recordsCount: 1245,
-    errorsCount: 0,
-    categoryId: 'financial',
-    interval: 60,
-    companyId: 'npk',
-  },
-  {
-    id: '2',
-    name: 'Процессинг ТС-94',
-    type: 'rest',
-    url: 'https://processing.ts94.ru/api/v2',
-    status: 'active',
-    lastSync: '2026-02-25T13:55:00Z',
-    recordsCount: 8540,
-    errorsCount: 2,
-    categoryId: 'operational',
-    interval: 30,
-    companyId: 'ts94',
-  },
-  {
-    id: '3',
-    name: 'Email Incoming',
-    type: 'email',
-    url: 'imap://mail.example.com',
-    status: 'error',
-    lastSync: '2026-02-25T10:00:00Z',
-    recordsCount: 320,
-    errorsCount: 15,
-    categoryId: 'documents',
-    interval: 300,
-    companyId: 'npk',
-  },
-  {
-    id: '4',
-    name: 'ГПН Агрегатор',
-    type: 'rest',
-    url: 'https://api.gpnbonus.ru/v1',
-    status: 'disabled',
-    recordsCount: 0,
-    errorsCount: 0,
-    categoryId: 'operational',
-    interval: 120,
-    companyId: 'rti',
-  },
-]
-
-export const mockSyncLogs: SyncLog[] = [
-  { id: '1', connectorId: '1', timestamp: '2026-02-25T14:00:00Z', status: 'success', recordsProcessed: 12 },
-  { id: '2', connectorId: '1', timestamp: '2026-02-25T13:00:00Z', status: 'success', recordsProcessed: 8 },
-  { id: '3', connectorId: '2', timestamp: '2026-02-25T13:55:00Z', status: 'success', recordsProcessed: 45 },
-  { id: '4', connectorId: '3', timestamp: '2026-02-25T10:00:00Z', status: 'error', recordsProcessed: 0, message: 'Connection timeout' },
-  { id: '5', connectorId: '2', timestamp: '2026-02-25T13:25:00Z', status: 'error', recordsProcessed: 0, message: 'Invalid response format' },
-]
-
-export const mockCategoryChartData = [
-  { name: 'Документы', count: 542, fill: 'hsl(217, 91%, 60%)' },
-  { name: 'Финансы', count: 389, fill: 'hsl(160, 60%, 45%)' },
-  { name: 'Операционные', count: 724, fill: 'hsl(30, 80%, 55%)' },
-  { name: 'Медиа', count: 192, fill: 'hsl(280, 65%, 60%)' },
 ]

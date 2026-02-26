@@ -38,8 +38,7 @@ export async function extractText(
       // Фаза 3: OCR (tesseract.js)
       return { text: '', metadata: { _note: 'OCR не подключён (фаза 3)' } }
     case 'word':
-      // Фаза 3: mammoth.js
-      return { text: '', metadata: { _note: 'Word парсер не подключён (фаза 3)' } }
+      return extractWord(file)
     default:
       return { text: '', metadata: {} }
   }
@@ -134,6 +133,18 @@ async function extractPdf(file: File): Promise<ExtractResult> {
   } catch (err) {
     console.error('PDF extraction error:', err)
     return { text: '', metadata: { _extractError: String(err) } }
+  }
+}
+
+// ---- Word (.docx) — mammoth.js ----
+
+async function extractWord(file: File): Promise<ExtractResult> {
+  try {
+    const { parseWord } = await import('./parsers/wordParser')
+    return parseWord(file)
+  } catch (err) {
+    console.error('Word extraction error:', err)
+    return { text: '', metadata: { _extractError: `Word: ${String(err)}` } }
   }
 }
 

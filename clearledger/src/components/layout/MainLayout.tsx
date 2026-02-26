@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { AppSidebar } from './AppSidebar'
@@ -6,6 +6,10 @@ import { Header } from './Header'
 import { MobileBottomNav } from './MobileBottomNav'
 import { Outlet } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
+
+const DevPanel = import.meta.env.DEV
+  ? lazy(() => import('@/components/dev/DevPanel').then((m) => ({ default: m.DevPanel })))
+  : null
 
 export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -52,6 +56,12 @@ export function MainLayout() {
               </div>
             </main>
           </div>
+        )}
+
+        {DevPanel && (
+          <Suspense>
+            <DevPanel />
+          </Suspense>
         )}
       </div>
     </SidebarProvider>

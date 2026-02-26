@@ -230,14 +230,20 @@ const rules: Rule[] = [
   },
 ]
 
-/** Получить fallback: первая подкатегория первой категории профиля */
+/** Получить fallback: подкатегория 'unclassified' в primary */
 function getFallback(profileId: ProfileId): { categoryId: string; subcategoryId: string } {
   const profile = getProfile(profileId)
+  // Ищем подкатегорию 'unclassified' в категории 'primary'
+  const primaryCat = profile.categories.find((c) => c.id === 'primary')
+  if (primaryCat?.subcategories.some((s) => s.id === 'unclassified')) {
+    return { categoryId: 'primary', subcategoryId: 'unclassified' }
+  }
+  // Fallback на первую подкатегорию первой категории (если unclassified не найден)
   const firstCat = profile.categories[0]
   if (firstCat && firstCat.subcategories.length > 0) {
     return { categoryId: firstCat.id, subcategoryId: firstCat.subcategories[0].id }
   }
-  return { categoryId: 'primary', subcategoryId: 'contracts' }
+  return { categoryId: 'primary', subcategoryId: 'unclassified' }
 }
 
 /** Проверить, что subcategoryId существует в профиле */
