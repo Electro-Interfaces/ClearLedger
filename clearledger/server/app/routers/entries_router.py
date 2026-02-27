@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import AuditEvent, DataEntry, User
+from app.utils import resolve_company_id, resolve_company_id_optional
 from app.schemas import (
     DataEntryCreate,
     DataEntryResponse,
@@ -43,7 +44,7 @@ def _entry_response(entry: DataEntry) -> DataEntryResponse:
         file_url=entry.file_url,
         file_type=entry.file_type,
         file_size=entry.file_size,
-        metadata=entry.metadata or {},
+        metadata=entry.meta or {},
         ocr_data=entry.ocr_data,
         source_id=entry.source_id,
         created_at=entry.created_at,
@@ -112,14 +113,10 @@ async def list_entries(
     query = select(DataEntry)
     count_query = select(func.count(DataEntry.id))
 
-    # Фильтры
-    if company_id:
-        try:
-            cid = uuid.UUID(company_id)
-            query = query.where(DataEntry.company_id == cid)
-            count_query = count_query.where(DataEntry.company_id == cid)
-        except ValueError:
-            pass
+    # Фильтр по компании (обязательный — изоляция данных)
+    cid = await resolve_company_id_optional(company_id, db) or current_user.company_id
+    query = query.where(DataEntry.company_id == cid)
+    count_query = count_query.where(DataEntry.company_id == cid)
 
     if status_filter and status_filter != "all":
         query = query.where(DataEntry.status == status_filter)
@@ -187,10 +184,7 @@ async def create_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Создать новую запись."""
-    try:
-        cid = uuid.UUID(body.company_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Невалидный company_id")
+    cid = await resolve_company_id(body.company_id, db)
 
     entry = DataEntry(
         title=body.title,
@@ -204,7 +198,7 @@ async def create_entry(
         file_url=body.file_url,
         file_type=body.file_type,
         file_size=body.file_size,
-        metadata=body.metadata,
+        meta=body.metadata,
         ocr_data=body.ocr_data,
         source_id=body.source_id,
     )
@@ -227,8 +221,10 @@ async def update_entry(
     entry = await _get_entry_or_404(entry_id, db)
 
     update_data = body.model_dump(exclude_unset=True)
+    # Схема: metadata → модель: meta
+    field_map = {"metadata": "meta"}
     for field, value in update_data.items():
-        setattr(entry, field, value)
+        setattr(entry, field_map.get(field, field), value)
 
     entry.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -366,9 +362,9 @@ async def exclude_entry(
     entry = await _get_entry_or_404(entry_id, db)
     # Сохраняем предыдущий статус в metadata
     prev_status = entry.status
-    meta = dict(entry.metadata or {})
+    meta = dict(entry.meta or {})
     meta["_excluded_from"] = prev_status
-    entry.metadata = meta
+    entry.meta = meta
     entry.status = "archived"
     entry.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -387,9 +383,9 @@ async def include_entry(
 ):
     """Вернуть ранее исключённую запись."""
     entry = await _get_entry_or_404(entry_id, db)
-    meta = dict(entry.metadata or {})
+    meta = dict(entry.meta or {})
     restore_to = meta.pop("_excluded_from", "new")
-    entry.metadata = meta
+    entry.meta = meta
     entry.status = restore_to
     entry.updated_at = datetime.now(timezone.utc)
     await db.flush()

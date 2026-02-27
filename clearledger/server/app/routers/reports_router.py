@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import DataEntry, User
+from app.utils import resolve_company_id
 from app.schemas import CounterpartyStat, ErrorStat, PeriodReport, SourceStat
 
 router = APIRouter(prefix="/reports", tags=["Отчёты"])
@@ -40,10 +41,7 @@ async def report_period(
     current_user: User = Depends(get_current_user),
 ):
     """Отчёт по периоду: количество по статусам."""
-    try:
-        cid = uuid.UUID(company_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Невалидный company_id")
+    cid = await resolve_company_id(company_id, db)
 
     query = (
         select(DataEntry)
@@ -78,10 +76,7 @@ async def report_counterparties(
     current_user: User = Depends(get_current_user),
 ):
     """Статистика по контрагентам (из metadata._counterparty или metadata.counterparty)."""
-    try:
-        cid = uuid.UUID(company_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Невалидный company_id")
+    cid = await resolve_company_id(company_id, db)
 
     query = select(DataEntry).where(DataEntry.company_id == cid)
     if date_from:
@@ -94,7 +89,7 @@ async def report_counterparties(
 
     stats: dict[str, dict] = defaultdict(lambda: {"count": 0, "verified": 0, "rejected": 0})
     for entry in entries:
-        meta = entry.metadata or {}
+        meta = entry.meta or {}
         counterparty = (
             meta.get("counterparty")
             or meta.get("_counterparty")
@@ -126,10 +121,7 @@ async def report_sources(
     current_user: User = Depends(get_current_user),
 ):
     """Статистика по источникам документов."""
-    try:
-        cid = uuid.UUID(company_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Невалидный company_id")
+    cid = await resolve_company_id(company_id, db)
 
     query = select(DataEntry).where(DataEntry.company_id == cid)
     if date_from:
@@ -163,10 +155,7 @@ async def report_errors(
     current_user: User = Depends(get_current_user),
 ):
     """Статистика по ошибкам (записи со статусом error)."""
-    try:
-        cid = uuid.UUID(company_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Невалидный company_id")
+    cid = await resolve_company_id(company_id, db)
 
     query = (
         select(DataEntry)
@@ -183,8 +172,8 @@ async def report_errors(
 
     counter: Counter = Counter()
     for entry in entries:
-        meta = entry.metadata or {}
-        # Причина ошибки может быть в metadata._error или в source_label
+        meta = entry.meta or {}
+        # Причина ошибки может быть в meta._error или в source_label
         reason = meta.get("_error") or meta.get("_reject_reason") or entry.source_label or "Не указана"
         counter[reason] += 1
 
