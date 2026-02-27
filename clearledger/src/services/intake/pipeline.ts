@@ -14,6 +14,7 @@ import { computeFingerprint, computeTextHash, checkDuplicate, checkTextDuplicate
 import { saveSource, saveExtract } from '@/services/sourceStore'
 import { createEntry, getEntries } from '@/services/dataEntryService'
 import { createLink } from '@/services/linkService'
+import { logEvent } from '@/services/auditService'
 
 export type PipelineCallback = (item: IntakeItem) => void
 
@@ -23,6 +24,8 @@ interface PipelineOptions {
   onUpdate: PipelineCallback
   /** Глубина рекурсии email-вложений (по умолчанию 0, макс MAX_EMAIL_DEPTH) */
   _depth?: number
+  /** Дополнительные метаданные для inject при сохранении (email parent и т.д.) */
+  _extraMeta?: Record<string, string>
 }
 
 /** Макс. глубина рекурсии email → attachment → email → ... */
@@ -175,6 +178,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
       sourceId,
       metadata: {
         ...item.classification.metadata,
+        ...(opts._extraMeta ?? {}),
         _fingerprint: item.fingerprint,
         ...(textHash ? { _textHash: textHash } : {}),
       },
@@ -184,6 +188,15 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     item.status = 'done'
     item.progress = 100
     opts.onUpdate({ ...item })
+
+    // Аудит-лог
+    logEvent({
+      companyId: opts.companyId,
+      entryId: entry.id,
+      action: 'created',
+      details: `Intake: ${file.name}`,
+      userName: 'Intake Pipeline',
+    })
 
     // Рекурсивная обработка вложений email (с лимитом глубины и размера)
     const depth = opts._depth ?? 0
@@ -201,22 +214,27 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
           att.filename,
           { type: att.mimeType },
         )
+        // Передаём metadata связи через _extraMeta (inject в save-фазу)
+        const emailMeta = {
+          '_email.parentEntryId': entry.id,
+          '_email.parentSubject': extracted.metadata['_email.subject'] ?? '',
+        }
         const childItem = await processFile(attFile, {
           ...opts,
           _depth: depth + 1,
-          onUpdate: (child) => {
-            // Пробрасываем metadata связи
-            if (child.classification) {
-              child.classification.metadata['_email.parentEntryId'] = entry.id
-              child.classification.metadata['_email.parentSubject'] =
-                extracted.metadata['_email.subject'] ?? ''
-            }
-            opts.onUpdate(child)
-          },
+          _extraMeta: emailMeta,
+          onUpdate: (child) => opts.onUpdate(child),
         })
         // Создаём связь email → вложение
         if (childItem.entryId) {
           createLink(entry.id, childItem.entryId, 'email-attachment', att.filename)
+          logEvent({
+            companyId: opts.companyId,
+            entryId: childItem.entryId,
+            action: 'created',
+            details: `Email вложение: ${att.filename}`,
+            userName: 'Intake Pipeline',
+          })
         }
         item.childItems.push(childItem)
       }
@@ -280,10 +298,11 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
     item.progress = 80
     opts.onUpdate({ ...item })
 
-    item.fingerprint = await computeTextHash(text)
+    const pasteTextHash = await computeTextHash(text)
+    item.fingerprint = pasteTextHash
     const existingEntries = await getEntries(opts.companyId)
     const dedupResult = checkDuplicate(
-      item.fingerprint,
+      pasteTextHash,
       existingEntries,
       item.classification.metadata,
       item.classification.docTypeId,
@@ -347,8 +366,7 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
       sourceId,
       metadata: {
         ...item.classification.metadata,
-        _fingerprint: item.fingerprint,
-        _textHash: item.fingerprint, // для paste fingerprint === textHash
+        _textHash: pasteTextHash,
       },
     })
 
@@ -356,6 +374,16 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
     item.status = 'done'
     item.progress = 100
     opts.onUpdate({ ...item })
+
+    // Аудит-лог
+    logEvent({
+      companyId: opts.companyId,
+      entryId: entry.id,
+      action: 'created',
+      details: `Intake paste: ${pasteType}`,
+      userName: 'Intake Pipeline',
+    })
+
     return item
   } catch (err) {
     item.status = 'error'
@@ -439,6 +467,15 @@ export async function forceSaveDuplicate(
       _fingerprint: item.fingerprint ?? '',
       ...(item.duplicateOf?.id ? { _duplicateOf: item.duplicateOf.id } : {}),
     },
+  })
+
+  // Аудит-лог
+  logEvent({
+    companyId,
+    entryId: entry.id,
+    action: 'created',
+    details: `Дубликат сохранён: ${item.fileName}${item.duplicateOf?.id ? ` (оригинал: ${item.duplicateOf.id})` : ''}`,
+    userName: 'Intake Pipeline',
   })
 
   // Связь с оригиналом (дубликат)
