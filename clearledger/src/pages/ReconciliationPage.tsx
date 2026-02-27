@@ -18,7 +18,7 @@ import {
   useUnmatch,
 } from '@/hooks/useAccountingDocs'
 import { useEntries } from '@/hooks/useEntries'
-import type { AccountingDoc, DataEntry } from '@/types'
+import type { AccountingDoc } from '@/types'
 
 export function ReconciliationPage() {
   const { data: summary } = useReconciliationSummary()

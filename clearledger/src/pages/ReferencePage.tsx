@@ -1,5 +1,5 @@
 /**
- * Страница "Справочники" — табы: Контрагенты | Организации | Номенклатура | Договоры.
+ * Страница "Справочники" — табы: Контрагенты | Организации | Номенклатура | Договоры | Склады | Банк. счета | Документы 1С.
  */
 
 import { useState } from 'react'
@@ -10,14 +10,18 @@ import { Input } from '@/components/ui/input'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Upload, Users, Building2, Package, FileSignature, Trash2, Search } from 'lucide-react'
+import { Upload, Users, Building2, Package, FileSignature, Trash2, Search, Warehouse as WarehouseIcon, Landmark, FileText } from 'lucide-react'
 import { CounterpartyTable } from '@/components/reference/CounterpartyTable'
 import { ImportDialog } from '@/components/reference/ImportDialog'
+import { AccountingDocsTab } from '@/components/reference/AccountingDocsTab'
 import {
   useCounterparties, useOrganizations, useNomenclature, useContracts,
+  useWarehouses, useBankAccounts,
   useDeleteCounterparty, useDeleteOrganization, useDeleteNomenclature, useDeleteContract,
+  useDeleteWarehouse, useDeleteBankAccount,
   useReferenceStats,
 } from '@/hooks/useReferences'
+import { useAccountingDocs } from '@/hooks/useAccountingDocs'
 import { useMemo } from 'react'
 
 export function ReferencePage() {
@@ -69,6 +73,25 @@ export function ReferencePage() {
               <Badge variant="secondary" className="ml-1 text-xs">{stats.contracts}</Badge>
             )}
           </TabsTrigger>
+          <TabsTrigger value="warehouses" className="gap-1.5">
+            <WarehouseIcon className="size-4" />
+            Склады
+            {stats && stats.warehouses > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">{stats.warehouses}</Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="bank-accounts" className="gap-1.5">
+            <Landmark className="size-4" />
+            Банк. счета
+            {stats && stats.bankAccounts > 0 && (
+              <Badge variant="secondary" className="ml-1 text-xs">{stats.bankAccounts}</Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="accounting-docs" className="gap-1.5">
+            <FileText className="size-4" />
+            Документы 1С
+            <AccDocsCountBadge />
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="counterparties" className="mt-4">
@@ -82,6 +105,15 @@ export function ReferencePage() {
         </TabsContent>
         <TabsContent value="contracts" className="mt-4">
           <ContractsTab />
+        </TabsContent>
+        <TabsContent value="warehouses" className="mt-4">
+          <WarehousesTab />
+        </TabsContent>
+        <TabsContent value="bank-accounts" className="mt-4">
+          <BankAccountsTab />
+        </TabsContent>
+        <TabsContent value="accounting-docs" className="mt-4">
+          <AccountingDocsTab />
         </TabsContent>
       </Tabs>
 
@@ -302,6 +334,154 @@ function ContractsTab() {
                 </TableCell>
                 <TableCell>
                   <Button variant="ghost" size="icon" className="size-7" onClick={() => deleteMut.mutate(c.id)}>
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <p className="text-xs text-muted-foreground">Показано {filtered.length} из {data.length}</p>
+    </div>
+  )
+}
+
+// ---- Badge для количества документов 1С ----
+
+function AccDocsCountBadge() {
+  const { data = [] } = useAccountingDocs()
+  if (data.length === 0) return null
+  return <Badge variant="secondary" className="ml-1 text-xs">{data.length}</Badge>
+}
+
+// ---- Вкладка "Склады" ----
+
+function WarehousesTab() {
+  const { data = [], isLoading } = useWarehouses()
+  const deleteMut = useDeleteWarehouse()
+  const [search, setSearch] = useState('')
+
+  const filtered = useMemo(() => {
+    if (!search) return data
+    const q = search.toLowerCase()
+    return data.filter(
+      (w) => w.name.toLowerCase().includes(q) || w.code.toLowerCase().includes(q),
+    )
+  }, [data, search])
+
+  if (isLoading) return <TableSkeleton />
+
+  const typeLabels: Record<string, string> = {
+    warehouse: 'Склад',
+    station: 'АЗС',
+    office: 'Офис',
+    other: 'Прочее',
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+        <Input placeholder="Поиск..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+      </div>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[100px]">Код</TableHead>
+              <TableHead>Наименование</TableHead>
+              <TableHead>Адрес</TableHead>
+              <TableHead className="w-[80px]">Тип</TableHead>
+              <TableHead className="w-[50px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground h-24">
+                  {data.length === 0 ? 'Справочник пуст' : 'Ничего не найдено'}
+                </TableCell>
+              </TableRow>
+            )}
+            {filtered.map((w) => (
+              <TableRow key={w.id}>
+                <TableCell className="font-mono text-sm">{w.code}</TableCell>
+                <TableCell className="font-medium">{w.name}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{w.address || '—'}</TableCell>
+                <TableCell>
+                  <Badge variant="outline">{typeLabels[w.type] || w.type}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="icon" className="size-7" onClick={() => deleteMut.mutate(w.id)}>
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <p className="text-xs text-muted-foreground">Показано {filtered.length} из {data.length}</p>
+    </div>
+  )
+}
+
+// ---- Вкладка "Банковские счета" ----
+
+function BankAccountsTab() {
+  const { data = [], isLoading } = useBankAccounts()
+  const deleteMut = useDeleteBankAccount()
+  const [search, setSearch] = useState('')
+
+  const filtered = useMemo(() => {
+    if (!search) return data
+    const q = search.toLowerCase()
+    return data.filter(
+      (b) =>
+        b.number.includes(q) ||
+        b.bankName.toLowerCase().includes(q) ||
+        b.bik.includes(q),
+    )
+  }, [data, search])
+
+  if (isLoading) return <TableSkeleton />
+
+  return (
+    <div className="space-y-4">
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+        <Input placeholder="Поиск..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+      </div>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Номер счёта</TableHead>
+              <TableHead>Банк</TableHead>
+              <TableHead className="w-[100px]">БИК</TableHead>
+              <TableHead>Корр. счёт</TableHead>
+              <TableHead className="w-[60px]">Валюта</TableHead>
+              <TableHead className="w-[50px]" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground h-24">
+                  {data.length === 0 ? 'Справочник пуст' : 'Ничего не найдено'}
+                </TableCell>
+              </TableRow>
+            )}
+            {filtered.map((b) => (
+              <TableRow key={b.id}>
+                <TableCell className="font-mono text-sm">{b.number}</TableCell>
+                <TableCell className="font-medium">{b.bankName}</TableCell>
+                <TableCell className="font-mono text-sm">{b.bik}</TableCell>
+                <TableCell className="font-mono text-sm">{b.corrAccount || '—'}</TableCell>
+                <TableCell>{b.currency}</TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="icon" className="size-7" onClick={() => deleteMut.mutate(b.id)}>
                     <Trash2 className="size-3.5" />
                   </Button>
                 </TableCell>

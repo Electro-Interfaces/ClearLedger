@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as ref from '@/services/referenceService'
-import type { Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount } from '@/types'
+import type { Counterparty, Organization, Nomenclature, Contract } from '@/types'
 
 // ---- Keys ----
 

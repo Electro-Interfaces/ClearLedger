@@ -10,9 +10,8 @@ import type {
   MatchStatus,
   ReconciliationSummary,
   MatchDetails,
-  AccountingDocLine,
 } from '@/types'
-import { isApiEnabled, get, post, patch, del } from './apiClient'
+import { isApiEnabled, get, post, del } from './apiClient'
 import { getItem, setItem, accountingDocsKey, entriesKey } from './storage'
 import { nanoid } from 'nanoid'
 import type { DataEntry } from '@/types'
@@ -215,7 +214,7 @@ export async function runReconciliation(companyId: string): Promise<{
   total: number
 }> {
   if (isApiEnabled()) {
-    return post('/api/reconciliation/run', undefined, { company_id: companyId })
+    return post(`/api/reconciliation/run?company_id=${encodeURIComponent(companyId)}`)
   }
   // Локальная сверка
   return runLocalReconciliation(companyId)
