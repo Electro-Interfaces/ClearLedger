@@ -63,11 +63,11 @@ def compute_score(doc: AccountingDoc, entry: DataEntry) -> dict:
     if doc.counterparty_inn and entry_inn:
         if doc.counterparty_inn.strip() == entry_inn.strip():
             score += 40
-            details["inn_match"] = True
+            details["innMatch"] = True
         else:
-            details["inn_match"] = False
+            details["innMatch"] = False
     else:
-        details["inn_match"] = None
+        details["innMatch"] = None
 
     # --- Критерий 2: Номер документа (+25) ---
     entry_num = meta.get("docNumber", "") or meta.get("_1c.number", "")
@@ -77,14 +77,14 @@ def compute_score(doc: AccountingDoc, entry: DataEntry) -> dict:
         if norm_doc and norm_entry:
             if norm_doc == norm_entry:
                 score += 25
-                details["number_match"] = "exact"
+                details["numberMatch"] = "exact"
             elif norm_doc in norm_entry or norm_entry in norm_doc:
                 score += 15
-                details["number_match"] = "partial"
+                details["numberMatch"] = "partial"
             else:
-                details["number_match"] = False
+                details["numberMatch"] = False
     else:
-        details["number_match"] = None
+        details["numberMatch"] = None
 
     # --- Критерий 3: Дата (+20/+10) ---
     entry_date_str = meta.get("docDate", "")
@@ -92,13 +92,13 @@ def compute_score(doc: AccountingDoc, entry: DataEntry) -> dict:
     entry_date = parse_date(entry_date_str) if entry_date_str else None
     if doc_date and entry_date:
         diff_days = abs((doc_date - entry_date).days)
-        details["date_diff_days"] = diff_days
+        details["dateDiff"] = diff_days
         if diff_days <= 3:
             score += 20
         elif diff_days <= 7:
             score += 10
     else:
-        details["date_diff_days"] = None
+        details["dateDiff"] = None
 
     # --- Критерий 4: Сумма (+15/+8) ---
     entry_amount_str = meta.get("amount", "") or meta.get("totalAmount", "")
@@ -112,16 +112,17 @@ def compute_score(doc: AccountingDoc, entry: DataEntry) -> dict:
             pct_diff = abs(doc.amount - entry_amount) / doc.amount * 100
         else:
             pct_diff = 0 if entry_amount == 0 else 100
-        details["amount_diff"] = round(doc.amount - entry_amount, 2)
-        details["amount_pct_diff"] = round(pct_diff, 2)
+        details["amountDiff"] = round(doc.amount - entry_amount, 2)
+        details["amountPctDiff"] = round(pct_diff, 2)
         if pct_diff <= 1:
             score += 15
         elif pct_diff <= 5:
             score += 8
     else:
-        details["amount_diff"] = None
+        details["amountDiff"] = None
 
     details["score"] = score
+    details["confidence"] = min(score, 100)
     return details
 
 
@@ -133,14 +134,14 @@ def check_lines(doc: AccountingDoc, entry: DataEntry) -> dict:
     """Сравнить строки документа (если доступны)."""
     doc_lines = doc.lines if isinstance(doc.lines, list) else []
     if not doc_lines:
-        return {"missing_lines": [], "extra_lines": []}
+        return {"missingLines": [], "extraLines": []}
 
     # Для DataEntry строки могут быть в metadata._xml.items или ocr_data
     # В текущей версии просто фиксируем кол-во строк
     return {
-        "doc_lines_count": len(doc_lines),
-        "missing_lines": [],
-        "extra_lines": [],
+        "docLinesCount": len(doc_lines),
+        "missingLines": [],
+        "extraLines": [],
     }
 
 
@@ -171,6 +172,14 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
 
     stats = {"matched": 0, "unmatched": 0, "discrepancy": 0, "total": len(docs)}
 
+    # Индекс entries по ИНН для O(1) lookup (ИНН даёт +40, основной критерий)
+    entries_by_inn: dict[str, list[DataEntry]] = {}
+    for entry in entries:
+        meta = entry.meta or {}
+        inn = (meta.get("inn", "") or meta.get("counterpartyInn", "")).strip()
+        if inn:
+            entries_by_inn.setdefault(inn, []).append(entry)
+
     # Множество уже использованных entries (1 entry : 1 doc)
     used_entries: set[uuid.UUID] = set()
 
@@ -179,28 +188,42 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
         best_entry: DataEntry | None = None
         best_details: dict = {}
 
-        for entry in entries:
-            if entry.id in used_entries:
-                continue
+        # Фаза 1: кандидаты по ИНН (O(k) вместо O(n))
+        candidates: list[DataEntry] = []
+        if doc.counterparty_inn:
+            inn_key = doc.counterparty_inn.strip()
+            candidates = [e for e in entries_by_inn.get(inn_key, []) if e.id not in used_entries]
 
+        for entry in candidates:
             details = compute_score(doc, entry)
             score = details["score"]
-
             if score > best_score:
                 best_score = score
                 best_entry = entry
                 best_details = details
+
+        # Фаза 2: полный перебор если ИНН не дал матча (порог 55 без ИНН: max 60)
+        if best_score < MATCH_THRESHOLD:
+            for entry in entries:
+                if entry.id in used_entries:
+                    continue
+                details = compute_score(doc, entry)
+                score = details["score"]
+                if score > best_score:
+                    best_score = score
+                    best_entry = entry
+                    best_details = details
 
         if best_score >= MATCH_THRESHOLD and best_entry is not None:
             used_entries.add(best_entry.id)
 
             # Проверяем расхождения
             has_discrepancy = False
-            if best_details.get("amount_diff") is not None:
-                if abs(best_details["amount_diff"]) > 0.01:
+            if best_details.get("amountDiff") is not None:
+                if abs(best_details["amountDiff"]) > 0.01:
                     has_discrepancy = True
-            if best_details.get("date_diff_days") is not None:
-                if best_details["date_diff_days"] > 0:
+            if best_details.get("dateDiff") is not None:
+                if best_details["dateDiff"] > 0:
                     has_discrepancy = True
 
             line_details = check_lines(doc, best_entry)

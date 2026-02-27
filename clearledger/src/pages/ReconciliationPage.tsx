@@ -193,7 +193,7 @@ function SelectedDocView({ doc, onClose }: { doc: AccountingDoc; onClose: () => 
       <MatchView
         doc={doc}
         entry={matchedEntry}
-        onUnmatch={doc.matchStatus === 'matched' ? () => { unmatchMut.mutate(doc.id); onClose() } : undefined}
+        onUnmatch={(doc.matchStatus === 'matched' || doc.matchStatus === 'discrepancy') ? () => { unmatchMut.mutate(doc.id); onClose() } : undefined}
       />
     </div>
   )

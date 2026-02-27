@@ -98,7 +98,9 @@ function InboxNavItem() {
 
 function ReferenceNavItem() {
   const { data: stats } = useReferenceStats()
-  const total = stats ? stats.counterparties + stats.organizations + stats.nomenclature + stats.contracts : 0
+  const total = stats
+    ? stats.counterparties + stats.organizations + stats.nomenclature + stats.contracts + (stats.warehouses || 0) + (stats.bankAccounts || 0)
+    : 0
   return (
     <SidebarMenuItem>
       <NavLink to="/references">

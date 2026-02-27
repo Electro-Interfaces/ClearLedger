@@ -544,15 +544,25 @@ export async function upsertWarehouses(companyId: string, items: Warehouse[]): P
   for (const item of items) {
     const found = byCode.get(item.code)
     if (found) {
-      Object.assign(found, { name: item.name, address: item.address, type: item.type, updatedAt: now })
+      if (isApiEnabled()) {
+        await patch<Warehouse>(`/api/references/warehouses/${found.id}`, { name: item.name, address: item.address, type: item.type })
+      } else {
+        Object.assign(found, { name: item.name, address: item.address, type: item.type, updatedAt: now })
+      }
     } else {
-      const newItem: Warehouse = { ...item, id: item.id || nanoid(), companyId, createdAt: item.createdAt || now, updatedAt: now }
-      existing.push(newItem)
-      byCode.set(newItem.code, newItem)
+      if (isApiEnabled()) {
+        await post<Warehouse>('/api/references/warehouses', { code: item.code, name: item.name, address: item.address, type: item.type, company_id: companyId })
+      } else {
+        const newItem: Warehouse = { ...item, id: item.id || nanoid(), companyId, createdAt: item.createdAt || now, updatedAt: now }
+        existing.push(newItem)
+        byCode.set(newItem.code, newItem)
+      }
       added++
     }
   }
-  saveList(warehousesKey(companyId), existing)
+  if (!isApiEnabled()) {
+    saveList(warehousesKey(companyId), existing)
+  }
   return added
 }
 
@@ -617,22 +627,32 @@ export async function upsertBankAccounts(companyId: string, items: BankAccount[]
   for (const item of items) {
     const found = byNumber.get(item.number)
     if (found) {
-      Object.assign(found, {
+      const updates = {
         bankName: item.bankName || found.bankName,
         bik: item.bik || found.bik,
         corrAccount: item.corrAccount || found.corrAccount,
         currency: item.currency || found.currency,
         organizationId: item.organizationId || found.organizationId,
-        updatedAt: now,
-      })
+      }
+      if (isApiEnabled()) {
+        await patch<BankAccount>(`/api/references/bank-accounts/${found.id}`, updates)
+      } else {
+        Object.assign(found, { ...updates, updatedAt: now })
+      }
     } else {
-      const newItem: BankAccount = { ...item, id: item.id || nanoid(), companyId, createdAt: item.createdAt || now, updatedAt: now }
-      existing.push(newItem)
-      byNumber.set(newItem.number, newItem)
+      if (isApiEnabled()) {
+        await post<BankAccount>('/api/references/bank-accounts', { ...item, company_id: companyId })
+      } else {
+        const newItem: BankAccount = { ...item, id: item.id || nanoid(), companyId, createdAt: item.createdAt || now, updatedAt: now }
+        existing.push(newItem)
+        byNumber.set(newItem.number, newItem)
+      }
       added++
     }
   }
-  saveList(bankAccountsKey(companyId), existing)
+  if (!isApiEnabled()) {
+    saveList(bankAccountsKey(companyId), existing)
+  }
   return added
 }
 

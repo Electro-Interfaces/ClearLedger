@@ -1,3 +1,5 @@
+import type { AccountingDocType, MatchStatus } from '@/types'
+
 export type EntryStatus = 'new' | 'recognized' | 'verified' | 'transferred' | 'error' | 'archived'
 
 export interface StatusConfig {
@@ -44,4 +46,25 @@ export const statuses: Record<EntryStatus, StatusConfig> = {
     variant: 'secondary',
     className: 'border-zinc-500 text-zinc-400',
   },
+}
+
+// ============================================================
+// Учётные документы 1С
+// ============================================================
+
+export const DOC_TYPE_LABELS: Record<AccountingDocType | string, string> = {
+  receipt: 'Поступление',
+  'invoice-received': 'СФ полученный',
+  'payment-out': 'Платёж исходящий',
+  'payment-in': 'Платёж входящий',
+  sales: 'Реализация',
+  'invoice-issued': 'СФ выданный',
+  reconciliation: 'Акт сверки',
+}
+
+export const MATCH_STATUS_CONFIG: Record<MatchStatus | string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+  matched: { label: 'Сопоставлен', variant: 'default' },
+  unmatched: { label: 'Без пары', variant: 'destructive' },
+  discrepancy: { label: 'Расхождение', variant: 'secondary' },
+  pending: { label: 'Ожидает', variant: 'outline' },
 }

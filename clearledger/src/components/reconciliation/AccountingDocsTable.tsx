@@ -11,23 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Search, Trash2, Unlink } from 'lucide-react'
 import type { AccountingDoc } from '@/types'
-
-const DOC_TYPE_LABELS: Record<string, string> = {
-  receipt: 'Поступление',
-  'invoice-received': 'СФ полученный',
-  'payment-out': 'Платёж исходящий',
-  'payment-in': 'Платёж входящий',
-  sales: 'Реализация',
-  'invoice-issued': 'СФ выданный',
-  reconciliation: 'Акт сверки',
-}
-
-const MATCH_STATUS_LABELS: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-  matched: { label: 'Сопоставлен', variant: 'default' },
-  unmatched: { label: 'Без пары', variant: 'destructive' },
-  discrepancy: { label: 'Расхождение', variant: 'secondary' },
-  pending: { label: 'Ожидает', variant: 'outline' },
-}
+import { DOC_TYPE_LABELS, MATCH_STATUS_CONFIG } from '@/config/statuses'
 
 interface Props {
   docs: AccountingDoc[]
@@ -84,7 +68,7 @@ export function AccountingDocsTable({ docs, onDelete, onUnmatch, onSelect }: Pro
               </TableRow>
             )}
             {filtered.map((d) => {
-              const matchInfo = MATCH_STATUS_LABELS[d.matchStatus] || MATCH_STATUS_LABELS.pending
+              const matchInfo = MATCH_STATUS_CONFIG[d.matchStatus] || MATCH_STATUS_CONFIG.pending
               return (
                 <TableRow
                   key={d.id}

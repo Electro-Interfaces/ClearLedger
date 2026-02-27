@@ -107,11 +107,15 @@ async def list_accounting_docs(
 @router.get("/{doc_id}", response_model=AccountingDocResponse)
 async def get_accounting_doc(
     doc_id: str,
+    company_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(doc_id)
-    result = await db.execute(select(AccountingDoc).where(AccountingDoc.id == uid))
+    cid = await resolve_company_id(company_id, db)
+    result = await db.execute(
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+    )
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -234,11 +238,15 @@ async def import_accounting_docs(
 async def update_accounting_doc(
     doc_id: str,
     body: AccountingDocUpdate,
+    company_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(doc_id)
-    result = await db.execute(select(AccountingDoc).where(AccountingDoc.id == uid))
+    cid = await resolve_company_id(company_id, db)
+    result = await db.execute(
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+    )
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")
@@ -261,11 +269,15 @@ async def update_accounting_doc(
 @router.delete("/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_accounting_doc(
     doc_id: str,
+    company_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(doc_id)
-    result = await db.execute(select(AccountingDoc).where(AccountingDoc.id == uid))
+    cid = await resolve_company_id(company_id, db)
+    result = await db.execute(
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+    )
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Документ не найден")

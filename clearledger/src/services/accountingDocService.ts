@@ -229,7 +229,7 @@ export async function getReconciliationSummary(companyId: string): Promise<Recon
 
 export async function manualMatch(companyId: string, docId: string, entryId: string): Promise<void> {
   if (isApiEnabled()) {
-    await post('/api/reconciliation/match', { doc_id: docId, entry_id: entryId })
+    await post('/api/reconciliation/match', { company_id: companyId, doc_id: docId, entry_id: entryId })
     return
   }
   const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
@@ -245,7 +245,7 @@ export async function manualMatch(companyId: string, docId: string, entryId: str
 
 export async function unmatch(companyId: string, docId: string): Promise<void> {
   if (isApiEnabled()) {
-    await post('/api/reconciliation/unmatch', { doc_id: docId })
+    await post('/api/reconciliation/unmatch', { company_id: companyId, doc_id: docId })
     return
   }
   const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))

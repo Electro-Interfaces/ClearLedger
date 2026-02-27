@@ -8,16 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Unlink } from 'lucide-react'
 import type { AccountingDoc, DataEntry } from '@/types'
-
-const DOC_TYPE_LABELS: Record<string, string> = {
-  receipt: 'Поступление',
-  'invoice-received': 'СФ полученный',
-  'payment-out': 'Платёж исходящий',
-  'payment-in': 'Платёж входящий',
-  sales: 'Реализация',
-  'invoice-issued': 'СФ выданный',
-  reconciliation: 'Акт сверки',
-}
+import { DOC_TYPE_LABELS } from '@/config/statuses'
 
 interface Props {
   doc: AccountingDoc
@@ -46,7 +37,7 @@ export function MatchView({ doc, entry, onUnmatch }: Props) {
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Сравнение документов</CardTitle>
-          {onUnmatch && doc.matchStatus === 'matched' && (
+          {onUnmatch && (doc.matchStatus === 'matched' || doc.matchStatus === 'discrepancy') && (
             <Button variant="outline" size="sm" onClick={onUnmatch}>
               <Unlink className="size-3.5 mr-1.5" />
               Разорвать

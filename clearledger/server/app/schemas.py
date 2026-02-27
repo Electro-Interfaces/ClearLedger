@@ -545,11 +545,13 @@ class ReconciliationSummaryResponse(BaseModel):
 
 
 class ManualMatchRequest(BaseModel):
+    company_id: str
     doc_id: str
     entry_id: str
 
 
 class UnmatchRequest(BaseModel):
+    company_id: str
     doc_id: str
 
 

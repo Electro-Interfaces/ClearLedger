@@ -3,7 +3,7 @@
  * Таблица + импорт + кнопка сверки.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -23,7 +23,15 @@ export function AccountingDocsTab() {
   const unmatchMut = useUnmatch()
   const runReconciliation = useRunReconciliation()
   const navigate = useNavigate()
-  const [showImport, setShowImport] = useState(data.length === 0)
+  const [showImport, setShowImport] = useState(false)
+  const [initialized, setInitialized] = useState(false)
+
+  useEffect(() => {
+    if (!isLoading && !initialized) {
+      setShowImport(data.length === 0)
+      setInitialized(true)
+    }
+  }, [isLoading, initialized, data.length])
 
   if (isLoading) {
     return (

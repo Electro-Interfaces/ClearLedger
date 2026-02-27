@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -108,33 +108,32 @@ async def get_summary(
 ):
     cid = await resolve_company_id(company_id, db)
 
-    # Считаем статусы документов 1С
+    # Считаем статусы документов 1С (один запрос, без N+1)
     docs_result = await db.execute(
-        select(AccountingDoc.match_status, AccountingDoc.id)
+        select(AccountingDoc.match_status, AccountingDoc.matched_entry_id)
         .where(AccountingDoc.company_id == cid)
     )
     docs = docs_result.all()
 
-    matched = sum(1 for d in docs if d[0] == "matched")
-    unmatched_acc = sum(1 for d in docs if d[0] in ("unmatched", "pending"))
-    discrepancy = sum(1 for d in docs if d[0] == "discrepancy")
+    matched = 0
+    unmatched_acc = 0
+    discrepancy = 0
+    matched_entry_ids: set = set()
 
-    # Считаем записи CL без пары
-    matched_entry_ids = set()
-    for d in docs:
-        if d[0] == "matched":
-            doc_result = await db.execute(
-                select(AccountingDoc.matched_entry_id)
-                .where(AccountingDoc.id == d[1])
-            )
-            eid = doc_result.scalar_one_or_none()
-            if eid:
-                matched_entry_ids.add(eid)
+    for status, entry_id in docs:
+        if status == "matched":
+            matched += 1
+            if entry_id:
+                matched_entry_ids.add(entry_id)
+        elif status in ("unmatched", "pending"):
+            unmatched_acc += 1
+        elif status == "discrepancy":
+            discrepancy += 1
 
     entries_result = await db.execute(
-        select(DataEntry.id).where(DataEntry.company_id == cid)
+        select(func.count(DataEntry.id)).where(DataEntry.company_id == cid)
     )
-    total_entries = len(entries_result.all())
+    total_entries = entries_result.scalar() or 0
     unmatched_entry = total_entries - len(matched_entry_ids)
 
     return ReconciliationSummaryResponse(
@@ -234,18 +233,19 @@ async def manual_match(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    cid = await resolve_company_id(body.company_id, db)
     doc_uuid = uuid.UUID(body.doc_id)
     entry_uuid = uuid.UUID(body.entry_id)
 
     doc_result = await db.execute(
-        select(AccountingDoc).where(AccountingDoc.id == doc_uuid)
+        select(AccountingDoc).where(AccountingDoc.id == doc_uuid, AccountingDoc.company_id == cid)
     )
     doc = doc_result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Документ 1С не найден")
 
     entry_result = await db.execute(
-        select(DataEntry).where(DataEntry.id == entry_uuid)
+        select(DataEntry).where(DataEntry.id == entry_uuid, DataEntry.company_id == cid)
     )
     entry = entry_result.scalar_one_or_none()
     if not entry:
@@ -253,7 +253,7 @@ async def manual_match(
 
     doc.matched_entry_id = entry_uuid
     doc.match_status = "matched"
-    doc.match_details = {"manual": True}
+    doc.match_details = {"manual": True, "score": 100, "confidence": 100, "missingLines": [], "extraLines": []}
     await db.flush()
     return {"status": "ok", "docId": str(doc.id), "entryId": str(entry.id)}
 
@@ -268,9 +268,10 @@ async def unmatch(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    cid = await resolve_company_id(body.company_id, db)
     doc_uuid = uuid.UUID(body.doc_id)
     doc_result = await db.execute(
-        select(AccountingDoc).where(AccountingDoc.id == doc_uuid)
+        select(AccountingDoc).where(AccountingDoc.id == doc_uuid, AccountingDoc.company_id == cid)
     )
     doc = doc_result.scalar_one_or_none()
     if not doc:
