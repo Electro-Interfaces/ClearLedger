@@ -1,10 +1,13 @@
 /**
- * CRUD для конфигов коннекторов в localStorage.
+ * CRUD для конфигов коннекторов.
+ * Dual-mode: localStorage (demo) / API (production).
  * Demo-sync: simulateSync генерирует тестовые записи через intake.
  * Реальный polling — задача Слоя 2 (Python + cron).
  */
 
 import type { Connector, DataEntry } from '@/types'
+import { isApiEnabled, get, post, patch, del } from './apiClient'
+import { apiToConnector, connectorToApi, type ApiConnector } from './apiMappers'
 import { getItem, setItem, nextId, entriesKey } from './storage'
 import { logEvent } from './auditService'
 
@@ -20,12 +23,24 @@ function nextConnectorId(): string {
   return `conn-${counter}`
 }
 
-export function getConnectors(companyId: string): Connector[] {
+export async function getConnectors(companyId: string): Promise<Connector[]> {
+  if (isApiEnabled()) {
+    const list = await get<ApiConnector[]>('/api/connectors', { company_id: companyId })
+    return list.map(apiToConnector)
+  }
   return getItem<Connector[]>(connectorsKey(companyId), [])
 }
 
-export function getConnector(companyId: string, id: string): Connector | undefined {
-  return getConnectors(companyId).find((c) => c.id === id)
+export async function getConnector(companyId: string, id: string): Promise<Connector | undefined> {
+  if (isApiEnabled()) {
+    try {
+      const a = await get<ApiConnector>(`/api/connectors/${id}`)
+      return apiToConnector(a)
+    } catch {
+      return undefined
+    }
+  }
+  return getItem<Connector[]>(connectorsKey(companyId), []).find((c) => c.id === id)
 }
 
 export interface CreateConnectorInput {
@@ -38,7 +53,21 @@ export interface CreateConnectorInput {
   companyId: string
 }
 
-export function createConnector(input: CreateConnectorInput): Connector {
+export async function createConnector(input: CreateConnectorInput): Promise<Connector> {
+  if (isApiEnabled()) {
+    const body = connectorToApi({
+      name: input.name,
+      type: input.type,
+      url: input.url,
+      status: input.status ?? 'disabled',
+      categoryId: input.categoryId,
+      interval: input.interval,
+      companyId: input.companyId,
+    })
+    const a = await post<ApiConnector>('/api/connectors', body)
+    return apiToConnector(a)
+  }
+
   const connector: Connector = {
     id: nextConnectorId(),
     name: input.name,
@@ -51,18 +80,24 @@ export function createConnector(input: CreateConnectorInput): Connector {
     interval: input.interval,
     companyId: input.companyId,
   }
-  const list = getConnectors(input.companyId)
+  const list = getItem<Connector[]>(connectorsKey(input.companyId), [])
   list.push(connector)
   setItem(connectorsKey(input.companyId), list)
   return connector
 }
 
-export function updateConnector(
+export async function updateConnector(
   companyId: string,
   id: string,
   updates: Partial<Omit<Connector, 'id' | 'companyId'>>,
-): Connector | undefined {
-  const list = getConnectors(companyId)
+): Promise<Connector | undefined> {
+  if (isApiEnabled()) {
+    const body = connectorToApi(updates)
+    const a = await patch<ApiConnector>(`/api/connectors/${id}`, body)
+    return apiToConnector(a)
+  }
+
+  const list = getItem<Connector[]>(connectorsKey(companyId), [])
   const idx = list.findIndex((c) => c.id === id)
   if (idx === -1) return undefined
   list[idx] = { ...list[idx], ...updates }
@@ -70,8 +105,17 @@ export function updateConnector(
   return list[idx]
 }
 
-export function deleteConnector(companyId: string, id: string): boolean {
-  const list = getConnectors(companyId)
+export async function deleteConnector(companyId: string, id: string): Promise<boolean> {
+  if (isApiEnabled()) {
+    try {
+      await del(`/api/connectors/${id}`)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const list = getItem<Connector[]>(connectorsKey(companyId), [])
   const filtered = list.filter((c) => c.id !== id)
   if (filtered.length === list.length) return false
   setItem(connectorsKey(companyId), filtered)
@@ -110,8 +154,17 @@ function randomItems<T>(arr: T[], count: number): T[] {
 }
 
 /** Симуляция синхронизации: генерирует 2-5 DataEntry */
-export function simulateSync(companyId: string, connectorId: string): { entries: DataEntry[]; error?: string } {
-  const connector = getConnector(companyId, connectorId)
+export async function simulateSync(companyId: string, connectorId: string): Promise<{ entries: DataEntry[]; error?: string }> {
+  if (isApiEnabled()) {
+    try {
+      const result = await post<{ entries: DataEntry[]; error?: string }>(`/api/connectors/${connectorId}/poll`, {})
+      return result
+    } catch (err) {
+      return { entries: [], error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  const connector = await getConnector(companyId, connectorId)
   if (!connector) return { entries: [], error: 'Коннектор не найден' }
   if (connector.status === 'disabled') return { entries: [], error: 'Коннектор отключён' }
 
@@ -158,7 +211,7 @@ export function simulateSync(companyId: string, connectorId: string): { entries:
   setItem(entriesKey(companyId), [...existing, ...newEntries])
 
   // Обновляем коннектор
-  updateConnector(companyId, connectorId, {
+  await updateConnector(companyId, connectorId, {
     lastSync: now,
     lastSyncAt: now,
     syncStatus: 'synced',

@@ -16,6 +16,7 @@ from app.auth import (
 )
 from app.database import get_db
 from app.models import Company, User
+from app.utils import resolve_company_id
 from app.schemas import (
     LoginRequest,
     RegisterRequest,
@@ -39,12 +40,15 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         )
 
     token = create_access_token(str(user.id), user.email)
-    return TokenResponse(access_token=token)
+    return TokenResponse(
+        access_token=token,
+        user=_user_response(user),
+    )
 
 
 @router.post(
     "/register",
-    response_model=UserResponse,
+    response_model=TokenResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
@@ -57,23 +61,8 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
             detail="Пользователь с таким email уже существует",
         )
 
-    # Проверка компании
-    try:
-        company_uuid = uuid.UUID(body.company_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Невалидный company_id",
-        )
-
-    company_result = await db.execute(
-        select(Company).where(Company.id == company_uuid)
-    )
-    if company_result.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Компания не найдена",
-        )
+    # Проверка компании (UUID или slug)
+    company_uuid = await resolve_company_id(body.company_id, db)
 
     user = User(
         email=body.email,
@@ -85,7 +74,21 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.flush()
 
-    return _user_response(user)
+    token = create_access_token(str(user.id), user.email)
+    return TokenResponse(
+        access_token=token,
+        user=_user_response(user),
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(current_user: User = Depends(get_current_user)):
+    """Продлить сессию — выдаёт новый JWT на основе текущего валидного."""
+    token = create_access_token(str(current_user.id), current_user.email)
+    return TokenResponse(
+        access_token=token,
+        user=_user_response(current_user),
+    )
 
 
 @router.get("/me", response_model=UserResponse)

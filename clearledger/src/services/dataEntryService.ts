@@ -12,6 +12,7 @@ import { isApiEnabled, get, post, patch, del } from './apiClient'
 import { getItem, setItem, nextId, entriesKey } from './storage'
 import { deleteSource } from './sourceStore'
 import { mockEntries } from './mockData'
+import { apiToEntry, type ApiEntry } from './apiMappers'
 
 // ============================================================
 // LocalStorage helpers (demo mode)
@@ -47,47 +48,6 @@ export function seedIfNeeded(): void {
 }
 
 // ============================================================
-// API response → DataEntry mapping
-// ============================================================
-
-interface ApiEntry {
-  id: string
-  company_id: string
-  source_id: string | null
-  title: string
-  category_id: string
-  subcategory_id: string
-  doc_type_id: string | null
-  status: string
-  source_type: string
-  source_label: string
-  metadata: Record<string, string>
-  created_at: string
-  updated_at: string
-  verified_at: string | null
-  verified_by: string | null
-  transferred_at: string | null
-}
-
-function apiToEntry(a: ApiEntry): DataEntry {
-  return {
-    id: a.id,
-    title: a.title,
-    categoryId: a.category_id,
-    subcategoryId: a.subcategory_id,
-    docTypeId: a.doc_type_id ?? undefined,
-    companyId: a.company_id,
-    status: a.status as EntryStatus,
-    source: a.source_type as DataEntry['source'],
-    sourceLabel: a.source_label,
-    metadata: a.metadata,
-    sourceId: a.source_id ?? undefined,
-    createdAt: a.created_at,
-    updatedAt: a.updated_at,
-  }
-}
-
-// ============================================================
 // CRUD (dual-mode)
 // ============================================================
 
@@ -95,11 +55,73 @@ export async function getEntries(companyId: string): Promise<DataEntry[]> {
   if (isApiEnabled()) {
     const res = await get<{ items: ApiEntry[]; total: number }>('/api/entries', {
       company_id: companyId,
-      limit: 200,
+      limit: 500,
     })
     return res.items.map(apiToEntry)
   }
   return loadEntries(companyId)
+}
+
+// ---- Пагинация (только API mode) ----
+
+export interface PaginatedParams {
+  offset?: number
+  limit?: number
+  status?: string
+  categoryId?: string
+  search?: string
+}
+
+export interface PaginatedResult {
+  items: DataEntry[]
+  total: number
+  hasMore: boolean
+}
+
+export async function getEntriesPaginated(
+  companyId: string,
+  params: PaginatedParams = {},
+): Promise<PaginatedResult> {
+  const { offset = 0, limit = 50, status, categoryId, search } = params
+
+  if (isApiEnabled()) {
+    const queryParams: Record<string, string | number | undefined> = {
+      company_id: companyId,
+      offset,
+      limit,
+    }
+    if (status && status !== 'all') queryParams.status = status
+    if (categoryId) queryParams.category_id = categoryId
+    if (search) queryParams.search = search
+
+    const res = await get<{ items: ApiEntry[]; total: number }>('/api/entries', queryParams)
+    const items = res.items.map(apiToEntry)
+    return {
+      items,
+      total: res.total,
+      hasMore: offset + items.length < res.total,
+    }
+  }
+
+  // Demo mode — клиентская пагинация
+  let entries = loadEntries(companyId)
+  if (status && status !== 'all') entries = entries.filter((e) => e.status === status)
+  if (categoryId) entries = entries.filter((e) => e.categoryId === categoryId)
+  if (search) {
+    const q = search.toLowerCase()
+    entries = entries.filter((e) =>
+      e.title.toLowerCase().includes(q) ||
+      Object.values(e.metadata).some((v) => v.toLowerCase().includes(q)),
+    )
+  }
+
+  const total = entries.length
+  const items = entries.slice(offset, offset + limit)
+  return {
+    items,
+    total,
+    hasMore: offset + items.length < total,
+  }
 }
 
 export async function getEntry(companyId: string, id: string): Promise<DataEntry | undefined> {
@@ -380,6 +402,14 @@ export interface CategoryStat {
 }
 
 export async function computeCategoryStats(companyId: string): Promise<CategoryStat[]> {
+  if (isApiEnabled()) {
+    try {
+      return await get<CategoryStat[]>('/api/stats/categories', { company_id: companyId })
+    } catch {
+      // fallback — клиентский расчёт
+    }
+  }
+
   const allEntries = await getEntries(companyId)
   const entries = allEntries.filter(
     (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false',
@@ -396,6 +426,14 @@ export async function computeCategoryStats(companyId: string): Promise<CategoryS
 }
 
 export async function computeKpi(companyId: string): Promise<ComputedKpi> {
+  if (isApiEnabled()) {
+    try {
+      return await get<ComputedKpi>('/api/stats/kpi', { company_id: companyId })
+    } catch {
+      // fallback — клиентский расчёт
+    }
+  }
+
   const allEntries = await getEntries(companyId)
   // Исключаем archived, excluded и старые версии из KPI
   const entries = allEntries.filter(

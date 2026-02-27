@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.git/
+.gitignore
+*.md
+test-results/
+pdf/
+server/__pycache__/
+server/.env
+server/uploads/
+.claude/
+.vscode/
+.idea/
+playwright-report/
+playwright.config.ts

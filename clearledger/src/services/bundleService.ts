@@ -224,7 +224,7 @@ export async function getBundleTree(
   if (bundleEntries.length === 0) return null
 
   // Получаем subordinate-линки
-  const allSubLinks = getLinksByType('subordinate')
+  const allSubLinks = await getLinksByType('subordinate')
   const bundleIds = new Set(bundleEntries.map((e) => e.id))
 
   // Строим children map: parentId → childId[]
@@ -291,7 +291,7 @@ export async function addToBundle(
   const rootId = parent.metadata._bundleRootId || parentId
 
   // Создаём subordinate-линк (parent → child)
-  createLink(parentId, childId, 'subordinate')
+  await createLink(parentId, childId, 'subordinate')
 
   // Ставим metadata на child: роль определяется автоматически по docTypeId
   const role = resolveRole(child.docTypeId)
@@ -312,7 +312,7 @@ export async function removeFromBundle(
   if (!entry || !entry.metadata._bundleRootId) return
 
   const isRoot = entry.metadata._bundleRootId === entryId
-  const allSubLinks = getLinksByType('subordinate')
+  const allSubLinks = await getLinksByType('subordinate')
 
   // Если удаляем корень и есть дети — reparent
   if (isRoot) {
@@ -327,28 +327,29 @@ export async function removeFromBundle(
       const rootToNewRootLink = allSubLinks.find(
         (l) => l.sourceEntryId === entryId && l.targetEntryId === newRootId,
       )
-      if (rootToNewRootLink) removeLink(rootToNewRootLink.id)
+      if (rootToNewRootLink) await removeLink(rootToNewRootLink.id)
 
       // Перевешиваем остальных детей root на newRoot
       for (const childId of directChildIds.slice(1)) {
         const oldLink = allSubLinks.find(
           (l) => l.sourceEntryId === entryId && l.targetEntryId === childId,
         )
-        if (oldLink) removeLink(oldLink.id)
-        createLink(newRootId, childId, 'subordinate')
+        if (oldLink) await removeLink(oldLink.id)
+        await createLink(newRootId, childId, 'subordinate')
       }
 
       // Собираем всех оставшихся членов комплекта
       const remaining = new Set<string>()
-      function collectAll(parentId: string) {
+      async function collectAll(parentId: string) {
         remaining.add(parentId)
-        for (const link of getLinksByType('subordinate')) {
+        const currentLinks = await getLinksByType('subordinate')
+        for (const link of currentLinks) {
           if (link.sourceEntryId === parentId && !remaining.has(link.targetEntryId)) {
-            collectAll(link.targetEntryId)
+            await collectAll(link.targetEntryId)
           }
         }
       }
-      collectAll(newRootId)
+      await collectAll(newRootId)
 
       // Batch-обновляем _bundleRootId у всех оставшихся членов
       await Promise.all(
@@ -384,12 +385,12 @@ export async function removeFromBundle(
 
   // Удаляем subordinate-линк от родителя к этому узлу
   const parentLink = allSubLinks.find((l) => l.targetEntryId === entryId)
-  if (parentLink) removeLink(parentLink.id)
+  if (parentLink) await removeLink(parentLink.id)
 
   // Удаляем все subordinate-линки потомков
   for (const link of allSubLinks) {
     if (descendants.has(link.sourceEntryId) && descendants.has(link.targetEntryId)) {
-      removeLink(link.id)
+      await removeLink(link.id)
     }
   }
 
@@ -420,12 +421,12 @@ export async function reparent(
   if (!validation.allowed) return validation
 
   // Удаляем старый subordinate-линк
-  const allSubLinks = getLinksByType('subordinate')
+  const allSubLinks = await getLinksByType('subordinate')
   const oldLink = allSubLinks.find((l) => l.targetEntryId === entryId)
-  if (oldLink) removeLink(oldLink.id)
+  if (oldLink) await removeLink(oldLink.id)
 
   // Создаём новый
-  createLink(newParentId, entryId, 'subordinate')
+  await createLink(newParentId, entryId, 'subordinate')
   return { allowed: true }
 }
 

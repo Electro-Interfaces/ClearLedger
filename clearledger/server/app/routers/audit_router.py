@@ -5,13 +5,26 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import AuditEvent, User
-from app.schemas import AuditEventResponse, PaginatedAudit
+from app.schemas import AuditEventResponse
+from app.utils import resolve_company_id, resolve_company_id_optional
+
+
+class AuditEventCreate(BaseModel):
+    """Схема создания аудит-события (camelCase от фронтенда)."""
+    companyId: str
+    entryId: str | None = None
+    action: str
+    details: str | None = None
+    userId: str | None = None
+    userName: str | None = None
 
 router = APIRouter(prefix="/audit", tags=["Аудит"])
 
@@ -30,61 +43,75 @@ def _audit_response(event: AuditEvent) -> AuditEventResponse:
     )
 
 
-@router.get("", response_model=PaginatedAudit)
+@router.post("", response_model=AuditEventResponse, status_code=201)
+async def create_audit_event(
+    body: AuditEventCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Создать событие аудита (используется фронтендом для логирования действий)."""
+    cid = await resolve_company_id(body.companyId, db)
+
+    entry_id = None
+    if body.entryId:
+        try:
+            entry_id = uuid.UUID(body.entryId)
+        except ValueError:
+            pass
+
+    event = AuditEvent(
+        company_id=cid,
+        entry_id=entry_id,
+        user_id=body.userId or str(current_user.id),
+        user_name=body.userName or current_user.name,
+        action=body.action,
+        details=body.details,
+    )
+    db.add(event)
+    await db.flush()
+    return _audit_response(event)
+
+
+@router.get("", response_model=list[AuditEventResponse])
 async def list_audit_events(
     company_id: str | None = Query(None),
     action: str | None = Query(None),
     entry_id: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Список событий аудита с фильтрами."""
+    """Список событий аудита с фильтрами. Возвращает плоский массив."""
     query = select(AuditEvent)
-    count_query = select(func.count(AuditEvent.id))
 
-    if company_id:
-        try:
-            cid = uuid.UUID(company_id)
-            query = query.where(AuditEvent.company_id == cid)
-            count_query = count_query.where(AuditEvent.company_id == cid)
-        except ValueError:
-            pass
+    # Изоляция данных по компании
+    cid = await resolve_company_id_optional(company_id, db) or current_user.company_id
+    query = query.where(AuditEvent.company_id == cid)
 
     if action:
         query = query.where(AuditEvent.action == action)
-        count_query = count_query.where(AuditEvent.action == action)
 
     if entry_id:
         try:
             eid = uuid.UUID(entry_id)
             query = query.where(AuditEvent.entry_id == eid)
-            count_query = count_query.where(AuditEvent.entry_id == eid)
         except ValueError:
             pass
 
     if date_from:
         query = query.where(AuditEvent.timestamp >= date_from)
-        count_query = count_query.where(AuditEvent.timestamp >= date_from)
 
     if date_to:
         query = query.where(AuditEvent.timestamp <= date_to)
-        count_query = count_query.where(AuditEvent.timestamp <= date_to)
-
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
 
     query = query.order_by(AuditEvent.timestamp.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     events = result.scalars().all()
 
-    return PaginatedAudit(
-        items=[_audit_response(e) for e in events],
-        total=total,
-    )
+    return [_audit_response(e) for e in events]
 
 
 @router.get("/entry/{entry_id}", response_model=list[AuditEventResponse])

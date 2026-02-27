@@ -28,6 +28,7 @@ import {
   BarChart3,
   BookOpen,
   Download,
+  GitCompare,
   type LucideIcon,
 } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -165,6 +166,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarMenu>
             <ReferenceNavItem />
+            <SidebarNavItem item={{ title: 'Сверка', path: '/reconciliation', icon: GitCompare }} />
             <SidebarNavItem item={{ title: 'Экспорт', path: '/export', icon: Download }} />
           </SidebarMenu>
         </SidebarGroup>

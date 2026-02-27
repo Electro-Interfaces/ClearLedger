@@ -364,6 +364,99 @@ export interface Contract {
   updatedAt: string
 }
 
+// ---- Учётные документы 1С (AccountingDoc) ----
+
+export type AccountingDocType =
+  | 'receipt'           // ПоступлениеТоваровУслуг
+  | 'invoice-received'  // СчётФактураПолученный
+  | 'payment-out'       // ПлатёжноеПоручение
+  | 'payment-in'        // ПоступлениеНаРасчётныйСчёт
+  | 'sales'             // Реализация
+  | 'invoice-issued'    // СчётФактураВыданный
+  | 'reconciliation'    // АктСверкиВзаиморасчётов
+
+export type MatchStatus = 'matched' | 'unmatched' | 'discrepancy' | 'pending'
+
+export interface AccountingDocLine {
+  nomenclatureCode?: string
+  nomenclatureName: string
+  quantity: number
+  price: number
+  amount: number
+  vatRate: number
+  vatAmount?: number
+}
+
+export interface AccountingDoc {
+  id: string
+  companyId: string
+  externalId: string         // GUID 1С
+  docType: AccountingDocType
+  number: string
+  date: string               // ISO date
+  counterpartyName: string
+  counterpartyInn?: string
+  organizationName?: string
+  amount: number
+  vatAmount?: number
+  status1c: string           // "Проведён" / "Не проведён"
+  lines: AccountingDocLine[]
+  matchedEntryId?: string    // ссылка на DataEntry
+  matchStatus: MatchStatus
+  matchDetails?: MatchDetails
+  warehouseCode?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MatchDetails {
+  score: number              // 0-100
+  amountDiff?: number        // разница сумм
+  dateDiff?: number          // разница дат (дни)
+  missingLines: string[]     // позиции без пары
+  extraLines: string[]       // лишние позиции
+  confidence: number         // 0-100
+}
+
+export interface ReconciliationSummary {
+  matched: number
+  unmatchedAcc: number       // документы 1С без оригинала
+  unmatchedEntry: number     // записи CL без пары в 1С
+  discrepancy: number
+  totalAccDocs: number
+  totalEntries: number
+}
+
+// ---- НСИ: Склады ----
+
+export type WarehouseType = 'warehouse' | 'station' | 'office' | 'other'
+
+export interface Warehouse {
+  id: string
+  companyId: string
+  code: string
+  name: string
+  address?: string
+  type: WarehouseType
+  createdAt: string
+  updatedAt: string
+}
+
+// ---- НСИ: Банковские счета ----
+
+export interface BankAccount {
+  id: string
+  companyId: string
+  number: string           // номер расчётного счёта
+  bankName: string
+  bik: string
+  corrAccount?: string
+  currency: string         // "RUB"
+  organizationId?: string
+  createdAt: string
+  updatedAt: string
+}
+
 // ---- Верификация (сверка с эталоном) ----
 
 export type VerificationCheckStatus = 'pass' | 'fail' | 'warning' | 'info'

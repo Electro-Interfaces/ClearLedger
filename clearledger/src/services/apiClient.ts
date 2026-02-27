@@ -37,22 +37,60 @@ export class ApiError extends Error {
   }
 }
 
+/** Ошибка валидации Pydantic (422) с деталями по полям */
+export class ApiValidationError extends ApiError {
+  fieldErrors: Array<{ loc: string[]; msg: string; type: string }>
+  constructor(detail: string, fieldErrors: Array<{ loc: string[]; msg: string; type: string }>) {
+    super(422, detail)
+    this.name = 'ApiValidationError'
+    this.fieldErrors = fieldErrors
+  }
+}
+
+/** Проверка: ошибка сети (нет подключения к серверу) */
+export function isNetworkError(err: unknown): boolean {
+  if (err instanceof TypeError && err.message.includes('fetch')) return true
+  if (err instanceof DOMException && err.name === 'AbortError') return true
+  return false
+}
+
 /** Guard от множественных 401 редиректов (race condition при параллельных запросах) */
 let isRedirecting = false
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText
+    let body: Record<string, unknown> | undefined
     try {
-      const body = await res.json()
-      detail = body.detail ?? JSON.stringify(body)
+      body = await res.json()
+      detail = (body?.detail as string) ?? JSON.stringify(body)
     } catch { /* ignore */ }
 
     if (res.status === 401 && !isRedirecting) {
       isRedirecting = true
       clearToken()
-      const base = import.meta.env.BASE_URL ?? '/'
-      window.location.href = `${base}login`
+      // Импортируем toast динамически чтобы избежать циклических зависимостей
+      import('sonner').then(({ toast }) => {
+        toast.error('Сессия истекла', { description: 'Войдите в систему снова' })
+      })
+      setTimeout(() => {
+        const base = import.meta.env.BASE_URL ?? '/'
+        window.location.href = `${base}login`
+      }, 1500)
+    }
+
+    if (res.status === 422 && body?.detail) {
+      const fieldErrors = Array.isArray(body.detail)
+        ? (body.detail as Array<{ loc: string[]; msg: string; type: string }>)
+        : []
+      const msg = fieldErrors.length > 0
+        ? fieldErrors.map((e) => `${e.loc.join('.')}: ${e.msg}`).join('; ')
+        : String(body.detail)
+      throw new ApiValidationError(msg, fieldErrors)
+    }
+
+    if (res.status === 403) {
+      throw new ApiError(403, 'Доступ запрещён. Проверьте права пользователя.')
     }
 
     throw new ApiError(res.status, detail)

@@ -12,6 +12,29 @@ import type { DataEntry } from '@/types'
 type SortField = 'title' | 'createdAt' | 'source' | 'status'
 type SortDirection = 'asc' | 'desc'
 
+function SortableHead({
+  field,
+  children,
+  onSort,
+}: {
+  field: SortField
+  children: React.ReactNode
+  onSort: (field: SortField) => void
+}) {
+  return (
+    <TableHead>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+        onClick={() => onSort(field)}
+      >
+        {children}
+        <ArrowUpDown className="size-3.5 text-muted-foreground" />
+      </button>
+    </TableHead>
+  )
+}
+
 interface InboxTableProps {
   entries: DataEntry[]
   selectedIds: Set<string>
@@ -85,21 +108,6 @@ export function InboxTable({
 
   const allSelected = entries.length > 0 && selectedIds.size === entries.length
   const someSelected = selectedIds.size > 0 && selectedIds.size < entries.length
-
-  function SortableHead({ field, children }: { field: SortField; children: React.ReactNode }) {
-    return (
-      <TableHead>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
-          onClick={() => handleSort(field)}
-        >
-          {children}
-          <ArrowUpDown className="size-3.5 text-muted-foreground" />
-        </button>
-      </TableHead>
-    )
-  }
 
   if (entries.length === 0) {
     return (
@@ -177,10 +185,10 @@ export function InboxTable({
               aria-label="Выделить все"
             />
           </TableHead>
-          <SortableHead field="title">Название</SortableHead>
-          <SortableHead field="createdAt">Дата</SortableHead>
-          <SortableHead field="source">Источник</SortableHead>
-          <SortableHead field="status">Статус</SortableHead>
+          <SortableHead field="title" onSort={handleSort}>Название</SortableHead>
+          <SortableHead field="createdAt" onSort={handleSort}>Дата</SortableHead>
+          <SortableHead field="source" onSort={handleSort}>Источник</SortableHead>
+          <SortableHead field="status" onSort={handleSort}>Статус</SortableHead>
           <TableHead className="text-right">Действия</TableHead>
         </TableRow>
       </TableHeader>

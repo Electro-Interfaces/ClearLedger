@@ -14,7 +14,7 @@ import { StatusBadge } from './StatusBadge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Link2, Mail, Copy, GitBranch, PenLine, X, Plus, FileText, FolderTree,
 } from 'lucide-react'
@@ -38,16 +38,21 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
 
-  // React Query вместо getEntries() + useEffect + refreshKey
+  // Загрузка связей через useQuery (поддержка API mode)
+  const { data: allLinks = [] } = useQuery({
+    queryKey: ['links', entryId],
+    queryFn: () => getLinksForEntry(entryId),
+  })
+
   const { data: allEntries = [] } = useEntries()
 
-  const { links, linkedEntries } = useMemo(() => {
-    // Фильтруем subordinate — они показываются в BundleTreeCard
-    const allLinks = getLinksForEntry(entryId).filter((l) => l.type !== 'subordinate')
-    const entryMap = new Map(allEntries.map((e: DataEntry) => [e.id, e]))
+  // Фильтруем subordinate — они показываются в BundleTreeCard
+  const links = useMemo(() => allLinks.filter((l) => l.type !== 'subordinate'), [allLinks])
 
+  const linkedEntries = useMemo(() => {
+    const entryMap = new Map(allEntries.map((e: DataEntry) => [e.id, e]))
     const linked: Array<{ link: DocumentLink; entry: DataEntry; direction: 'from' | 'to' }> = []
-    for (const link of allLinks) {
+    for (const link of links) {
       const otherId = link.sourceEntryId === entryId ? link.targetEntryId : link.sourceEntryId
       const entry = entryMap.get(otherId)
       if (entry) {
@@ -58,9 +63,8 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
         })
       }
     }
-
-    return { links: allLinks, linkedEntries: linked }
-  }, [entryId, allEntries])
+    return linked
+  }, [entryId, allEntries, links])
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -80,20 +84,23 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
   }, [showAddForm, allEntries, linkedEntries, entryId, searchQuery])
 
   const invalidate = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['links', entryId] })
     qc.invalidateQueries({ queryKey: ['entries', companyId] })
-  }, [qc, companyId])
+  }, [qc, companyId, entryId])
 
-  function handleAddLink(targetId: string) {
-    createLink(entryId, targetId, 'manual')
-    setShowAddForm(false)
-    setSearchQuery('')
-    invalidate()
-  }
+  const addLinkMut = useMutation({
+    mutationFn: (targetId: string) => createLink(entryId, targetId, 'manual'),
+    onSuccess: () => {
+      setShowAddForm(false)
+      setSearchQuery('')
+      invalidate()
+    },
+  })
 
-  function handleRemoveLink(linkId: string) {
-    removeLink(linkId)
-    invalidate()
-  }
+  const removeLinkMut = useMutation({
+    mutationFn: (linkId: string) => removeLink(linkId),
+    onSuccess: () => invalidate(),
+  })
 
   if (links.length === 0 && !allowAdd) return null
 
@@ -152,7 +159,7 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
                   variant="ghost"
                   size="sm"
                   className="opacity-0 group-hover:opacity-100 size-6 p-0"
-                  onClick={() => handleRemoveLink(link.id)}
+                  onClick={() => removeLinkMut.mutate(link.id)}
                 >
                   <X className="size-3" />
                 </Button>
@@ -180,7 +187,7 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
               {availableEntries.map((e) => (
                 <button
                   key={e.id}
-                  onClick={() => handleAddLink(e.id)}
+                  onClick={() => addLinkMut.mutate(e.id)}
                   className="w-full text-left text-sm p-1.5 rounded hover:bg-accent flex items-center gap-2"
                 >
                   <FileText className="size-3.5 shrink-0 text-muted-foreground" />

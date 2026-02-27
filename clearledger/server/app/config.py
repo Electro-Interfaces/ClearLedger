@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # Безопасность
     secret_key: str = "change-me-in-production-use-openssl-rand-hex-32"
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 1440  # 24 часа
     algorithm: str = "HS256"
 
     # CORS — список origin через запятую

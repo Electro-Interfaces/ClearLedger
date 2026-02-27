@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { FileText, Loader2 } from 'lucide-react'
 
@@ -89,8 +89,11 @@ export function LoginPage() {
           </button>
         </form>
 
-        <p className="text-center text-xs text-muted-foreground">
-          ClearLedger v0.3
+        <p className="text-center text-sm text-muted-foreground">
+          Нет аккаунта?{' '}
+          <Link to="/register" className="text-primary hover:underline">
+            Зарегистрироваться
+          </Link>
         </p>
       </div>
     </div>

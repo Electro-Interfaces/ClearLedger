@@ -53,6 +53,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setIsLoading(false))
   }, [apiMode])
 
+  // Авто-продление токена каждые 4 часа
+  useEffect(() => {
+    if (!apiMode || !user) return
+    const interval = setInterval(() => {
+      authService.refreshToken().catch(() => { /* при ошибке — 401 обработает apiClient */ })
+    }, 4 * 60 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [apiMode, user])
+
   const login = useCallback(async (email: string, password: string) => {
     const result = await authService.login(email, password)
     setUser(result.user)

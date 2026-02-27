@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import AuditEvent, DataEntry, User
+from app.utils import resolve_company_id_optional
 
 router = APIRouter(prefix="/export", tags=["Экспорт"])
 
@@ -28,15 +29,13 @@ async def _fetch_entries(
     db: AsyncSession,
     company_id: str | None = None,
     status_filter: str | None = None,
+    fallback_company_id: uuid.UUID | None = None,
 ) -> list[DataEntry]:
     """Получает записи для экспорта."""
     query = select(DataEntry)
-    if company_id:
-        try:
-            cid = uuid.UUID(company_id)
-            query = query.where(DataEntry.company_id == cid)
-        except ValueError:
-            pass
+    cid = await resolve_company_id_optional(company_id, db) or fallback_company_id
+    if cid:
+        query = query.where(DataEntry.company_id == cid)
     if status_filter and status_filter != "all":
         query = query.where(DataEntry.status == status_filter)
 
@@ -101,23 +100,20 @@ async def export_json(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в JSON (массив объектов)."""
-    entries = await _fetch_entries(db, company_id, status)
+    entries = await _fetch_entries(db, company_id, status, current_user.company_id)
     data = [_entry_to_dict(e) for e in entries]
 
     # Аудит экспорта
-    if company_id:
-        try:
-            cid = uuid.UUID(company_id)
-            event = AuditEvent(
-                company_id=cid,
-                user_id=str(current_user.id),
-                user_name=current_user.name,
-                action="exported",
-                details=f"Экспорт JSON: {len(data)} записей",
-            )
-            db.add(event)
-        except ValueError:
-            pass
+    cid = await resolve_company_id_optional(company_id, db)
+    if cid:
+        event = AuditEvent(
+            company_id=cid,
+            user_id=str(current_user.id),
+            user_name=current_user.name,
+            action="exported",
+            details=f"Экспорт JSON: {len(data)} записей",
+        )
+        db.add(event)
 
     return data
 
@@ -134,7 +130,7 @@ async def export_excel(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в Excel (.xlsx)."""
-    entries = await _fetch_entries(db, company_id, status)
+    entries = await _fetch_entries(db, company_id, status, current_user.company_id)
 
     wb = Workbook()
     ws = wb.active
@@ -168,19 +164,16 @@ async def export_excel(
     buffer.seek(0)
 
     # Аудит
-    if company_id:
-        try:
-            cid = uuid.UUID(company_id)
-            event = AuditEvent(
-                company_id=cid,
-                user_id=str(current_user.id),
-                user_name=current_user.name,
-                action="exported",
-                details=f"Экспорт Excel: {len(entries)} записей",
-            )
-            db.add(event)
-        except ValueError:
-            pass
+    cid = await resolve_company_id_optional(company_id, db)
+    if cid:
+        event = AuditEvent(
+            company_id=cid,
+            user_id=str(current_user.id),
+            user_name=current_user.name,
+            action="exported",
+            details=f"Экспорт Excel: {len(entries)} записей",
+        )
+        db.add(event)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"clearledger_{timestamp}.xlsx"
@@ -204,7 +197,7 @@ async def export_csv(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в CSV (UTF-8 с BOM для Excel)."""
-    entries = await _fetch_entries(db, company_id, status)
+    entries = await _fetch_entries(db, company_id, status, current_user.company_id)
 
     buffer = io.StringIO()
     # BOM для корректного открытия кириллицы в Excel
@@ -223,19 +216,16 @@ async def export_csv(
         writer.writerow(_entry_to_dict(entry))
 
     # Аудит
-    if company_id:
-        try:
-            cid = uuid.UUID(company_id)
-            event = AuditEvent(
-                company_id=cid,
-                user_id=str(current_user.id),
-                user_name=current_user.name,
-                action="exported",
-                details=f"Экспорт CSV: {len(entries)} записей",
-            )
-            db.add(event)
-        except ValueError:
-            pass
+    cid = await resolve_company_id_optional(company_id, db)
+    if cid:
+        event = AuditEvent(
+            company_id=cid,
+            user_id=str(current_user.id),
+            user_name=current_user.name,
+            action="exported",
+            details=f"Экспорт CSV: {len(entries)} записей",
+        )
+        db.add(event)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"clearledger_{timestamp}.csv"

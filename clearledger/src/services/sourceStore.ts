@@ -5,6 +5,7 @@
 
 import { openDB, type IDBPDatabase } from 'idb'
 import type { SourceRecord, ExtractRecord } from '@/types'
+import { isApiEnabled, downloadBlob } from './apiClient'
 
 const DB_NAME = 'clearledger-store'
 const DB_VERSION = 1
@@ -52,6 +53,14 @@ export async function deleteSource(id: string): Promise<void> {
 }
 
 export async function getSourceBlobUrl(id: string): Promise<string | null> {
+  if (isApiEnabled()) {
+    try {
+      const blob = await downloadBlob(`/api/files/${id}`)
+      return URL.createObjectURL(blob)
+    } catch {
+      return null
+    }
+  }
   const source = await getSource(id)
   return source ? URL.createObjectURL(source.blob) : null
 }

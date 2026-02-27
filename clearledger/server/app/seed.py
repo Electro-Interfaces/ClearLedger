@@ -13,13 +13,13 @@ from app.models import Company, User
 
 logger = logging.getLogger("clearledger.seed")
 
-# 5 компаний, совпадающих с фронтендом
+# 5 компаний — данные совпадают с config/companies.ts (defaultCompanies)
 COMPANIES = [
-    {"slug": "npk", "name": "НПК", "profile_id": "fuel"},
-    {"slug": "rti", "name": "РТИ", "profile_id": "trade"},
-    {"slug": "ts94", "name": "ТС-94", "profile_id": "retail"},
-    {"slug": "ofptk", "name": "ОФ ПТК", "profile_id": "energy"},
-    {"slug": "rushydro", "name": "РусГидро", "profile_id": "general"},
+    {"slug": "npk", "name": "НПК", "short_name": "НПК", "profile_id": "fuel", "color": "#3b82f6"},
+    {"slug": "rti", "name": "РТИ", "short_name": "РТИ", "profile_id": "fuel", "color": "#8b5cf6"},
+    {"slug": "ts94", "name": "ТС-94", "short_name": "ТС-94", "profile_id": "trade", "color": "#10b981"},
+    {"slug": "ofptk", "name": "ОФ ПТК", "short_name": "ОФПТК", "profile_id": "retail", "color": "#f59e0b"},
+    {"slug": "rushydro", "name": "РусГидро", "short_name": "РусГидро", "profile_id": "energy", "color": "#ef4444"},
 ]
 
 DEMO_USER = {

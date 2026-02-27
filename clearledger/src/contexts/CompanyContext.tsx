@@ -2,7 +2,8 @@ import { createContext, useContext, useState, useCallback, useMemo, type ReactNo
 import { defaultCompanies, defaultCompanyId, emptyCustomization, type Company, type CompanyCustomization } from '@/config/companies'
 import { getProfile, type CompanyProfile } from '@/config/profiles'
 import { getCategoriesForProfile, type Category } from '@/config/categories'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import * as companySvc from '@/services/companyService'
 
 interface CompanyContextType {
   company: Company
@@ -24,25 +25,13 @@ interface CompanyContextType {
   updateCustomization: (companyId: string, customization: CompanyCustomization) => void
   /** Категории, отфильтрованные по кастомизации */
   effectiveCategories: Category[]
+  /** Загрузка данных компаний */
+  isLoading: boolean
 }
 
 const CompanyContext = createContext<CompanyContextType | null>(null)
 
 const STORAGE_KEY = 'clearledger-company'
-const COMPANIES_KEY = 'clearledger-companies'
-const CUSTOM_KEY = 'clearledger-customizations'
-
-function loadFromStorage<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignore */ }
-  return fallback
-}
-
-function saveToStorage(key: string, value: unknown) {
-  try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* ignore */ }
-}
 
 function getInitialCompanyId(companies: Company[]): string {
   try {
@@ -70,14 +59,29 @@ function applyCustomization(categories: Category[], custom: CompanyCustomization
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
-  const [companiesList, setCompaniesList] = useState<Company[]>(() =>
-    loadFromStorage(COMPANIES_KEY, defaultCompanies),
-  )
-  const [customizations, setCustomizations] = useState<Record<string, CompanyCustomization>>(() =>
-    loadFromStorage(CUSTOM_KEY, {}),
-  )
-  const [companyId, setCompanyIdState] = useState(() => getInitialCompanyId(companiesList))
   const queryClient = useQueryClient()
+
+  // Загрузка компаний через useQuery (API или localStorage)
+  const companiesQuery = useQuery({
+    queryKey: ['companies'],
+    queryFn: companySvc.getCompanies,
+    staleTime: 10 * 60 * 1000,
+    // initialData чтобы не было мигания при первой загрузке
+    placeholderData: defaultCompanies,
+  })
+
+  // Загрузка кастомизаций
+  const customizationsQuery = useQuery({
+    queryKey: ['customizations'],
+    queryFn: companySvc.getCustomizations,
+    staleTime: 10 * 60 * 1000,
+    placeholderData: {},
+  })
+
+  const companiesList = companiesQuery.data ?? defaultCompanies
+  const customizations = customizationsQuery.data ?? {}
+
+  const [companyId, setCompanyIdState] = useState(() => getInitialCompanyId(companiesList))
 
   const setCompanyId = useCallback(
     (id: string) => {
@@ -88,54 +92,64 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     [queryClient],
   )
 
+  // Мутации
+  const updateCompanyMut = useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: Partial<Company> }) =>
+      companySvc.updateCompany(id, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['companies'] })
+    },
+  })
+
+  const addCompanyMut = useMutation({
+    mutationFn: (company: Company) => companySvc.createCompany(company),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['companies'] })
+    },
+  })
+
+  const removeCompanyMut = useMutation({
+    mutationFn: (id: string) => companySvc.deleteCompany(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['companies'] })
+      queryClient.invalidateQueries({ queryKey: ['customizations'] })
+      // Если удалили текущую — переключиться
+      setCompanyIdState((current) => {
+        if (current === id) {
+          const fallback = companiesList.find((c) => c.id !== id)?.id ?? defaultCompanyId
+          try { localStorage.setItem(STORAGE_KEY, fallback) } catch { /* ignore */ }
+          return fallback
+        }
+        return current
+      })
+    },
+  })
+
+  const updateCustomizationMut = useMutation({
+    mutationFn: ({ cId, customization }: { cId: string; customization: CompanyCustomization }) =>
+      companySvc.updateCustomization(cId, customization),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customizations'] })
+      queryClient.invalidateQueries()
+    },
+  })
+
+  // Обратная совместимость — те же сигнатуры, что раньше
   const updateCompany = useCallback((id: string, updates: Partial<Company>) => {
-    setCompaniesList((prev) => {
-      const next = prev.map((c) => (c.id === id ? { ...c, ...updates, id } : c))
-      saveToStorage(COMPANIES_KEY, next)
-      return next
-    })
-    queryClient.invalidateQueries()
-  }, [queryClient])
+    updateCompanyMut.mutate({ id, updates })
+  }, [updateCompanyMut])
 
   const addCompany = useCallback((company: Company) => {
-    setCompaniesList((prev) => {
-      const next = [...prev, company]
-      saveToStorage(COMPANIES_KEY, next)
-      return next
-    })
-  }, [])
+    addCompanyMut.mutate(company)
+  }, [addCompanyMut])
 
   const removeCompany = useCallback((id: string) => {
-    setCompaniesList((prev) => {
-      const next = prev.filter((c) => c.id !== id)
-      saveToStorage(COMPANIES_KEY, next)
-      return next
-    })
-    setCustomizations((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      saveToStorage(CUSTOM_KEY, next)
-      return next
-    })
-    // Если удалили текущую — переключиться
-    setCompanyIdState((current) => {
-      if (current === id) {
-        const fallback = companiesList.find((c) => c.id !== id)?.id ?? defaultCompanyId
-        try { localStorage.setItem(STORAGE_KEY, fallback) } catch { /* ignore */ }
-        return fallback
-      }
-      return current
-    })
-  }, [companiesList])
+    removeCompanyMut.mutate(id)
+  }, [removeCompanyMut])
 
   const updateCustomization = useCallback((cId: string, customization: CompanyCustomization) => {
-    setCustomizations((prev) => {
-      const next = { ...prev, [cId]: customization }
-      saveToStorage(CUSTOM_KEY, next)
-      return next
-    })
-    queryClient.invalidateQueries()
-  }, [queryClient])
+    updateCustomizationMut.mutate({ cId, customization })
+  }, [updateCustomizationMut])
 
   const company = companiesList.find((c) => c.id === companyId) ?? companiesList[0] ?? defaultCompanies[0]
   const customization = customizations[companyId] ?? emptyCustomization()
@@ -154,6 +168,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         profile, categories, customization, customizations,
         updateCompany, addCompany, removeCompany, updateCustomization,
         effectiveCategories,
+        isLoading: companiesQuery.isLoading,
       }}
     >
       {children}

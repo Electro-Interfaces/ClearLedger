@@ -16,6 +16,7 @@ import { createEntry, getEntries } from '@/services/dataEntryService'
 import { createLink } from '@/services/linkService'
 import { logEvent } from '@/services/auditService'
 import { enrichFromReference } from '@/services/normalizationService'
+import { isApiEnabled, upload } from '@/services/apiClient'
 
 export type PipelineCallback = (item: IntakeItem) => void
 
@@ -167,35 +168,46 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     item.progress = 90
     opts.onUpdate({ ...item })
 
-    // 5. SAVE — Source + Extract в IndexedDB, лёгкий DataEntry в localStorage
+    // 5. SAVE — API mode: upload на сервер; Demo mode: IndexedDB + localStorage
     item.stage = 'save'
 
-    const sourceRecord: SourceRecord = {
-      id: sourceId,
-      blob: file,
-      fileName: file.name,
-      mimeType: file.type,
-      size: file.size,
-      fingerprint: item.fingerprint,
-      createdAt: new Date().toISOString(),
-    }
-    await saveSource(sourceRecord)
+    let serverSourceId: string | undefined
+    if (isApiEnabled()) {
+      // Upload файл на сервер → получаем source_id
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('company_id', opts.companyId)
+      const uploadResult = await upload<{ source_id: string }>('/api/intake', formData)
+      serverSourceId = uploadResult.source_id
+    } else {
+      // Demo mode: сохраняем в IndexedDB
+      const sourceRecord: SourceRecord = {
+        id: sourceId,
+        blob: file,
+        fileName: file.name,
+        mimeType: file.type,
+        size: file.size,
+        fingerprint: item.fingerprint,
+        createdAt: new Date().toISOString(),
+      }
+      await saveSource(sourceRecord)
 
-    const extractFields = buildExtractedFields(item.classification.metadata)
-    const extractRecord: ExtractRecord = {
-      id: sourceId,
-      sourceId,
-      fullText: item.extractedText ?? '',
-      fields: extractFields,
-      classification: {
-        categoryId: item.classification.categoryId,
-        subcategoryId: item.classification.subcategoryId,
-        docTypeId: item.classification.docTypeId,
-        confidence: item.classification.confidence,
-      },
-      extractedAt: new Date().toISOString(),
+      const extractFields = buildExtractedFields(item.classification.metadata)
+      const extractRecord: ExtractRecord = {
+        id: sourceId,
+        sourceId,
+        fullText: item.extractedText ?? '',
+        fields: extractFields,
+        classification: {
+          categoryId: item.classification.categoryId,
+          subcategoryId: item.classification.subcategoryId,
+          docTypeId: item.classification.docTypeId,
+          confidence: item.classification.confidence,
+        },
+        extractedAt: new Date().toISOString(),
+      }
+      await saveExtract(extractRecord)
     }
-    await saveExtract(extractRecord)
 
     const entrySource: EntrySource = mapFileTypeToSource(item.fileType)
     const entry = await createEntry({
@@ -208,7 +220,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
       sourceLabel: file.name,
       fileType: file.type,
       fileSize: file.size,
-      sourceId,
+      sourceId: serverSourceId ?? sourceId,
       metadata: {
         ...item.classification.metadata,
         ...(opts._extraMeta ?? {}),
@@ -260,7 +272,7 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
         })
         // Создаём связь email → вложение
         if (childItem.entryId) {
-          createLink(entry.id, childItem.entryId, 'email-attachment', att.filename)
+          await createLink(entry.id, childItem.entryId, 'email-attachment', att.filename)
           logEvent({
             companyId: opts.companyId,
             entryId: childItem.entryId,
@@ -393,38 +405,46 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
     item.progress = 90
     opts.onUpdate({ ...item })
 
-    // SAVE — для текста нет blob, но сохраняем extract
-    // Для paste fingerprint уже textHash (computeTextHash), сохраняем как _textHash тоже
+    // SAVE — API mode: upload текст на сервер; Demo mode: IndexedDB
     item.stage = 'save'
 
-    // Для вставленного текста создаём Source с текстовым blob
     const textBlob = new Blob([text], { type: 'text/plain' })
-    const sourceRecord: SourceRecord = {
-      id: sourceId,
-      blob: textBlob,
-      fileName: item.fileName,
-      mimeType: 'text/plain',
-      size: textBlob.size,
-      fingerprint: item.fingerprint,
-      createdAt: new Date().toISOString(),
-    }
-    await saveSource(sourceRecord)
+    let serverSourceId: string | undefined
 
-    const extractFields = buildExtractedFields(item.classification.metadata)
-    const extractRecord: ExtractRecord = {
-      id: sourceId,
-      sourceId,
-      fullText: text,
-      fields: extractFields,
-      classification: {
-        categoryId: item.classification.categoryId,
-        subcategoryId: item.classification.subcategoryId,
-        docTypeId: item.classification.docTypeId,
-        confidence: item.classification.confidence,
-      },
-      extractedAt: new Date().toISOString(),
+    if (isApiEnabled()) {
+      const formData = new FormData()
+      formData.append('file', new File([textBlob], item.fileName, { type: 'text/plain' }))
+      formData.append('company_id', opts.companyId)
+      const uploadResult = await upload<{ source_id: string }>('/api/intake', formData)
+      serverSourceId = uploadResult.source_id
+    } else {
+      const sourceRecord: SourceRecord = {
+        id: sourceId,
+        blob: textBlob,
+        fileName: item.fileName,
+        mimeType: 'text/plain',
+        size: textBlob.size,
+        fingerprint: item.fingerprint,
+        createdAt: new Date().toISOString(),
+      }
+      await saveSource(sourceRecord)
+
+      const extractFields = buildExtractedFields(item.classification.metadata)
+      const extractRecord: ExtractRecord = {
+        id: sourceId,
+        sourceId,
+        fullText: text,
+        fields: extractFields,
+        classification: {
+          categoryId: item.classification.categoryId,
+          subcategoryId: item.classification.subcategoryId,
+          docTypeId: item.classification.docTypeId,
+          confidence: item.classification.confidence,
+        },
+        extractedAt: new Date().toISOString(),
+      }
+      await saveExtract(extractRecord)
     }
-    await saveExtract(extractRecord)
 
     const entrySource: EntrySource = pasteType === 'email' ? 'email' : 'paste'
     const entry = await createEntry({
@@ -437,7 +457,7 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
       sourceLabel: pasteType === 'email' ? 'Email (вставка)' : 'Вставленный текст',
       fileType: 'text/plain',
       fileSize: textBlob.size,
-      sourceId,
+      sourceId: serverSourceId ?? sourceId,
       metadata: {
         ...item.classification.metadata,
         ...(opts._extraMeta ?? {}),
@@ -477,50 +497,65 @@ export async function forceSaveDuplicate(
   if (!item.classification) return null
 
   const sourceId = nanoid()
+  let serverSourceId: string | undefined
 
-  // Сохраняем source
-  if (item.file) {
-    const fingerprint = item.fingerprint ?? ''
-    const sourceRecord: SourceRecord = {
-      id: sourceId,
-      blob: item.file,
-      fileName: item.fileName,
-      mimeType: item.mimeType,
-      size: item.size,
-      fingerprint,
-      createdAt: new Date().toISOString(),
+  if (isApiEnabled()) {
+    // Upload файл/текст на сервер
+    const formData = new FormData()
+    if (item.file) {
+      formData.append('file', item.file)
+    } else if (item.pastedText) {
+      const textBlob = new Blob([item.pastedText], { type: 'text/plain' })
+      formData.append('file', new File([textBlob], item.fileName, { type: 'text/plain' }))
     }
-    await saveSource(sourceRecord)
-  } else if (item.pastedText) {
-    const textBlob = new Blob([item.pastedText], { type: 'text/plain' })
-    const sourceRecord: SourceRecord = {
-      id: sourceId,
-      blob: textBlob,
-      fileName: item.fileName,
-      mimeType: 'text/plain',
-      size: textBlob.size,
-      fingerprint: item.fingerprint ?? '',
-      createdAt: new Date().toISOString(),
+    formData.append('company_id', companyId)
+    const uploadResult = await upload<{ source_id: string }>('/api/intake', formData)
+    serverSourceId = uploadResult.source_id
+  } else {
+    // Demo mode: сохраняем в IndexedDB
+    if (item.file) {
+      const fingerprint = item.fingerprint ?? ''
+      const sourceRecord: SourceRecord = {
+        id: sourceId,
+        blob: item.file,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        size: item.size,
+        fingerprint,
+        createdAt: new Date().toISOString(),
+      }
+      await saveSource(sourceRecord)
+    } else if (item.pastedText) {
+      const textBlob = new Blob([item.pastedText], { type: 'text/plain' })
+      const sourceRecord: SourceRecord = {
+        id: sourceId,
+        blob: textBlob,
+        fileName: item.fileName,
+        mimeType: 'text/plain',
+        size: textBlob.size,
+        fingerprint: item.fingerprint ?? '',
+        createdAt: new Date().toISOString(),
+      }
+      await saveSource(sourceRecord)
     }
-    await saveSource(sourceRecord)
-  }
 
-  // Сохраняем extract
-  const extractFields = buildExtractedFields(item.classification.metadata)
-  const extractRecord: ExtractRecord = {
-    id: sourceId,
-    sourceId,
-    fullText: item.extractedText ?? item.pastedText ?? '',
-    fields: extractFields,
-    classification: {
-      categoryId: item.classification.categoryId,
-      subcategoryId: item.classification.subcategoryId,
-      docTypeId: item.classification.docTypeId,
-      confidence: item.classification.confidence,
-    },
-    extractedAt: new Date().toISOString(),
+    // Сохраняем extract
+    const extractFields = buildExtractedFields(item.classification.metadata)
+    const extractRecord: ExtractRecord = {
+      id: sourceId,
+      sourceId,
+      fullText: item.extractedText ?? item.pastedText ?? '',
+      fields: extractFields,
+      classification: {
+        categoryId: item.classification.categoryId,
+        subcategoryId: item.classification.subcategoryId,
+        docTypeId: item.classification.docTypeId,
+        confidence: item.classification.confidence,
+      },
+      extractedAt: new Date().toISOString(),
+    }
+    await saveExtract(extractRecord)
   }
-  await saveExtract(extractRecord)
 
   const source: EntrySource = item.file
     ? mapFileTypeToSource(item.fileType ?? 'unknown')
@@ -536,7 +571,7 @@ export async function forceSaveDuplicate(
     sourceLabel: item.fileName,
     fileType: item.mimeType,
     fileSize: item.size,
-    sourceId,
+    sourceId: serverSourceId ?? sourceId,
     metadata: {
       ...item.classification.metadata,
       _fingerprint: item.fingerprint ?? '',
@@ -555,7 +590,7 @@ export async function forceSaveDuplicate(
 
   // Связь с оригиналом (дубликат)
   if (item.duplicateOf?.id) {
-    createLink(item.duplicateOf.id, entry.id, 'duplicate')
+    await createLink(item.duplicateOf.id, entry.id, 'duplicate')
   }
 
   return entry

@@ -71,7 +71,7 @@ export async function importFromJson(file: File, companyId: string): Promise<Imp
 
   // Import connectors
   if (payload.connectors?.length) {
-    const existingConnectors = getConnectors(companyId)
+    const existingConnectors = await getConnectors(companyId)
     const connectorIds = new Set(existingConnectors.map((c) => c.id))
     const newConnectors: Connector[] = []
 

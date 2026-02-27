@@ -62,3 +62,15 @@ export function nomenclatureKey(companyId: string): string {
 export function contractsKey(companyId: string): string {
   return `clearledger-contracts-${companyId}`
 }
+
+export function warehousesKey(companyId: string): string {
+  return `clearledger-warehouses-${companyId}`
+}
+
+export function bankAccountsKey(companyId: string): string {
+  return `clearledger-bank-accounts-${companyId}`
+}
+
+export function accountingDocsKey(companyId: string): string {
+  return `clearledger-accounting-docs-${companyId}`
+}

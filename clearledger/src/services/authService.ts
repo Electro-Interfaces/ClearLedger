@@ -25,11 +25,12 @@ export async function login(email: string, password: string): Promise<TokenRespo
   return result
 }
 
-/** Регистрация нового пользователя (admin/owner) */
+/** Регистрация нового пользователя */
 export async function register(data: {
   email: string
   name: string
   password: string
+  company_id: string
   role?: string
 }): Promise<TokenResponse> {
   const result = await api.post<TokenResponse>('/api/auth/register', data)
@@ -40,6 +41,13 @@ export async function register(data: {
 /** Получить текущего пользователя по токену */
 export async function getMe(): Promise<AuthUser> {
   return api.get<AuthUser>('/api/auth/me')
+}
+
+/** Продлить токен (выдаёт новый JWT) */
+export async function refreshToken(): Promise<TokenResponse> {
+  const result = await api.post<TokenResponse>('/api/auth/refresh')
+  api.setToken(result.access_token)
+  return result
 }
 
 /** Выход */

@@ -3,7 +3,7 @@
  * Работают одинаково в API и demo режимах (сервис абстрагирует).
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as svc from '@/services/dataEntryService'
 import { logEvent } from '@/services/auditService'
@@ -214,6 +214,31 @@ export function useIncludeEntry() {
     onSuccess: (_data, id) => {
       logEvent({ companyId, entryId: id, action: 'included', details: id })
       invalidateAll(qc, companyId)
+    },
+  })
+}
+
+// ---- Paginated (infinite scroll / load more) ----
+
+/** Пагинированные записи с "Загрузить ещё" */
+export function useInfiniteEntries(params?: { status?: string; categoryId?: string; search?: string; pageSize?: number }) {
+  const { companyId } = useCompany()
+  const pageSize = params?.pageSize ?? 50
+
+  return useInfiniteQuery({
+    queryKey: ['entries', companyId, 'paginated', params],
+    queryFn: ({ pageParam = 0 }) =>
+      svc.getEntriesPaginated(companyId, {
+        offset: pageParam as number,
+        limit: pageSize,
+        status: params?.status,
+        categoryId: params?.categoryId,
+        search: params?.search,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _allPages, lastPageParam) => {
+      if (!lastPage.hasMore) return undefined
+      return (lastPageParam as number) + pageSize
     },
   })
 }

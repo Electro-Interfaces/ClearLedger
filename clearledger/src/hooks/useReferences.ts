@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as ref from '@/services/referenceService'
-import type { Counterparty, Organization, Nomenclature, Contract } from '@/types'
+import type { Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount } from '@/types'
 
 // ---- Keys ----
 
@@ -14,6 +14,8 @@ const keys = {
   organizations: (companyId: string) => ['references', companyId, 'organizations'] as const,
   nomenclature: (companyId: string) => ['references', companyId, 'nomenclature'] as const,
   contracts: (companyId: string) => ['references', companyId, 'contracts'] as const,
+  warehouses: (companyId: string) => ['references', companyId, 'warehouses'] as const,
+  bankAccounts: (companyId: string) => ['references', companyId, 'bankAccounts'] as const,
   stats: (companyId: string) => ['references', companyId, 'stats'] as const,
 }
 
@@ -161,6 +163,48 @@ export function useDeleteContract() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => ref.deleteContract(companyId, id),
+    onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
+// ============================================================
+// Warehouses
+// ============================================================
+
+export function useWarehouses() {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: keys.warehouses(companyId),
+    queryFn: () => ref.getWarehouses(companyId),
+  })
+}
+
+export function useDeleteWarehouse() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => ref.deleteWarehouse(companyId, id),
+    onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
+// ============================================================
+// BankAccounts
+// ============================================================
+
+export function useBankAccounts() {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: keys.bankAccounts(companyId),
+    queryFn: () => ref.getBankAccounts(companyId),
+  })
+}
+
+export function useDeleteBankAccount() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => ref.deleteBankAccount(companyId, id),
     onSuccess: () => invalidateAll(qc, companyId),
   })
 }

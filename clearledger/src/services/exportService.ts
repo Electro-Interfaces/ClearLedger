@@ -1,5 +1,6 @@
 /**
  * Экспорт данных: JSON, Excel, CSV, 1С XML, EnterpriseData XML.
+ * Dual-mode: в API mode CSV/XML скачиваются с сервера.
  */
 
 import type { DataEntry } from '@/types'
@@ -7,6 +8,7 @@ import type { Connector } from '@/types'
 import { getEntries } from './dataEntryService'
 import { getConnectors } from './connectorService'
 import { generateEnterpriseDataXml } from './enterpriseDataExport'
+import { isApiEnabled, downloadBlob } from './apiClient'
 import * as XLSX from 'xlsx'
 
 // ---- Types ----
@@ -91,12 +93,18 @@ function entryToRow(entry: DataEntry, columns: string[], dateFormat: 'dd.mm.yyyy
 // ---- Export: JSON (existing) ----
 
 export async function exportAllData(companyId: string): Promise<void> {
+  if (isApiEnabled()) {
+    const blob = await downloadBlob(`/api/export/json?company_id=${encodeURIComponent(companyId)}`)
+    triggerDownload(blob, `clearledger-export-${companyId}-${new Date().toISOString().slice(0, 10)}.json`)
+    return
+  }
+
   const payload: ExportPayload = {
     version: '1.0',
     exportedAt: new Date().toISOString(),
     companyId,
     entries: await getEntries(companyId),
-    connectors: getConnectors(companyId),
+    connectors: await getConnectors(companyId),
   }
 
   const json = JSON.stringify(payload, null, 2)
@@ -122,7 +130,14 @@ export function exportToExcel(entries: DataEntry[], options?: ExportOptions): vo
 
 // ---- Export: CSV ----
 
-export function exportToCsv(entries: DataEntry[], options?: ExportOptions): void {
+export async function exportToCsv(entries: DataEntry[], options?: ExportOptions & { companyId?: string }): Promise<void> {
+  // В API mode — серверный export
+  if (isApiEnabled() && options?.companyId) {
+    const blob = await downloadBlob(`/api/export/csv?company_id=${encodeURIComponent(options.companyId)}`)
+    triggerDownload(blob, options?.fileName ?? `clearledger-${new Date().toISOString().slice(0, 10)}.csv`)
+    return
+  }
+
   const columns = options?.columns ?? DEFAULT_COLUMNS
   const dateFormat = options?.dateFormat ?? 'dd.mm.yyyy'
   const labels = columns.map((c) => COLUMN_LABELS[c] ?? c)

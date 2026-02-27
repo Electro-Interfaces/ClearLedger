@@ -13,13 +13,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import async_session_factory, create_all
 from app.routers import (
+    accounting_docs_router,
     audit_router,
     auth_router,
+    companies_router,
     connectors_router,
+    document_links_router,
     entries_router,
     export_router,
+    intake_router,
     ocr_router,
+    reconciliation_router,
+    references_router,
     reports_router,
+    settings_router,
+    stats_router,
 )
 from app.seed import seed_data
 
@@ -75,11 +83,19 @@ app.add_middleware(
 API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
+app.include_router(companies_router.router, prefix=API_PREFIX)
 app.include_router(entries_router.router, prefix=API_PREFIX)
 app.include_router(audit_router.router, prefix=API_PREFIX)
 app.include_router(connectors_router.router, prefix=API_PREFIX)
+app.include_router(document_links_router.router, prefix=API_PREFIX)
 app.include_router(export_router.router, prefix=API_PREFIX)
 app.include_router(reports_router.router, prefix=API_PREFIX)
+app.include_router(stats_router.router, prefix=API_PREFIX)
+app.include_router(settings_router.router, prefix=API_PREFIX)
+app.include_router(intake_router.router, prefix=API_PREFIX)
+app.include_router(references_router.router, prefix=API_PREFIX)
+app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
+app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 
 

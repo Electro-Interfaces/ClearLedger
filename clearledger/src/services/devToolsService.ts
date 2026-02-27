@@ -157,7 +157,7 @@ export async function getStorageStats(): Promise<StorageStats> {
   for (const company of defaultCompanies) {
     const entries = await getEntries(company.id)
     if (entries.length > 0) entriesByCompany[company.id] = entries.length
-    const connectors = getConnectors(company.id)
+    const connectors = await getConnectors(company.id)
     if (connectors.length > 0) connectorsByCompany[company.id] = connectors.length
   }
 

@@ -4,11 +4,12 @@
  * Dual-mode: localStorage (v0.2) / API (production).
  */
 
-import type { Counterparty, Organization, Nomenclature, Contract } from '@/types'
+import type { Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount } from '@/types'
 import { isApiEnabled, get, post, patch, del } from './apiClient'
 import {
   getItem, setItem,
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
+  warehousesKey, bankAccountsKey,
 } from './storage'
 import { nanoid } from 'nanoid'
 import { normalizeCounterparty, diceCoefficient } from '@/lib/textUtils'
@@ -483,6 +484,159 @@ export async function upsertContracts(companyId: string, items: Contract[]): Pro
 }
 
 // ============================================================
+// Warehouses (Склады / АЗС)
+// ============================================================
+
+export async function getWarehouses(companyId: string): Promise<Warehouse[]> {
+  if (isApiEnabled()) {
+    return get<Warehouse[]>('/api/references/warehouses', { company_id: companyId })
+  }
+  return loadList<Warehouse>(warehousesKey(companyId))
+}
+
+export async function createWarehouse(
+  companyId: string,
+  input: Omit<Warehouse, 'id' | 'companyId' | 'createdAt' | 'updatedAt'>,
+): Promise<Warehouse> {
+  if (isApiEnabled()) {
+    return post<Warehouse>('/api/references/warehouses', { ...input, company_id: companyId })
+  }
+  const now = new Date().toISOString()
+  const item: Warehouse = { id: nanoid(), companyId, ...input, createdAt: now, updatedAt: now }
+  const list = loadList<Warehouse>(warehousesKey(companyId))
+  list.push(item)
+  saveList(warehousesKey(companyId), list)
+  return item
+}
+
+export async function updateWarehouse(
+  companyId: string,
+  id: string,
+  updates: Partial<Omit<Warehouse, 'id' | 'companyId' | 'createdAt'>>,
+): Promise<Warehouse | undefined> {
+  if (isApiEnabled()) {
+    return patch<Warehouse>(`/api/references/warehouses/${id}`, updates)
+  }
+  const list = loadList<Warehouse>(warehousesKey(companyId))
+  const idx = list.findIndex((w) => w.id === id)
+  if (idx === -1) return undefined
+  list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
+  saveList(warehousesKey(companyId), list)
+  return list[idx]
+}
+
+export async function deleteWarehouse(companyId: string, id: string): Promise<boolean> {
+  if (isApiEnabled()) {
+    try { await del(`/api/references/warehouses/${id}`); return true } catch { return false }
+  }
+  const list = loadList<Warehouse>(warehousesKey(companyId))
+  const filtered = list.filter((w) => w.id !== id)
+  if (filtered.length === list.length) return false
+  saveList(warehousesKey(companyId), filtered)
+  return true
+}
+
+export async function upsertWarehouses(companyId: string, items: Warehouse[]): Promise<number> {
+  const existing = await getWarehouses(companyId)
+  const byCode = new Map(existing.map((w) => [w.code, w]))
+  let added = 0
+  const now = new Date().toISOString()
+  for (const item of items) {
+    const found = byCode.get(item.code)
+    if (found) {
+      Object.assign(found, { name: item.name, address: item.address, type: item.type, updatedAt: now })
+    } else {
+      const newItem: Warehouse = { ...item, id: item.id || nanoid(), companyId, createdAt: item.createdAt || now, updatedAt: now }
+      existing.push(newItem)
+      byCode.set(newItem.code, newItem)
+      added++
+    }
+  }
+  saveList(warehousesKey(companyId), existing)
+  return added
+}
+
+// ============================================================
+// BankAccounts (Банковские счета)
+// ============================================================
+
+export async function getBankAccounts(companyId: string): Promise<BankAccount[]> {
+  if (isApiEnabled()) {
+    return get<BankAccount[]>('/api/references/bank-accounts', { company_id: companyId })
+  }
+  return loadList<BankAccount>(bankAccountsKey(companyId))
+}
+
+export async function createBankAccount(
+  companyId: string,
+  input: Omit<BankAccount, 'id' | 'companyId' | 'createdAt' | 'updatedAt'>,
+): Promise<BankAccount> {
+  if (isApiEnabled()) {
+    return post<BankAccount>('/api/references/bank-accounts', { ...input, company_id: companyId })
+  }
+  const now = new Date().toISOString()
+  const item: BankAccount = { id: nanoid(), companyId, ...input, createdAt: now, updatedAt: now }
+  const list = loadList<BankAccount>(bankAccountsKey(companyId))
+  list.push(item)
+  saveList(bankAccountsKey(companyId), list)
+  return item
+}
+
+export async function updateBankAccount(
+  companyId: string,
+  id: string,
+  updates: Partial<Omit<BankAccount, 'id' | 'companyId' | 'createdAt'>>,
+): Promise<BankAccount | undefined> {
+  if (isApiEnabled()) {
+    return patch<BankAccount>(`/api/references/bank-accounts/${id}`, updates)
+  }
+  const list = loadList<BankAccount>(bankAccountsKey(companyId))
+  const idx = list.findIndex((b) => b.id === id)
+  if (idx === -1) return undefined
+  list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
+  saveList(bankAccountsKey(companyId), list)
+  return list[idx]
+}
+
+export async function deleteBankAccount(companyId: string, id: string): Promise<boolean> {
+  if (isApiEnabled()) {
+    try { await del(`/api/references/bank-accounts/${id}`); return true } catch { return false }
+  }
+  const list = loadList<BankAccount>(bankAccountsKey(companyId))
+  const filtered = list.filter((b) => b.id !== id)
+  if (filtered.length === list.length) return false
+  saveList(bankAccountsKey(companyId), filtered)
+  return true
+}
+
+export async function upsertBankAccounts(companyId: string, items: BankAccount[]): Promise<number> {
+  const existing = await getBankAccounts(companyId)
+  const byNumber = new Map(existing.map((b) => [b.number, b]))
+  let added = 0
+  const now = new Date().toISOString()
+  for (const item of items) {
+    const found = byNumber.get(item.number)
+    if (found) {
+      Object.assign(found, {
+        bankName: item.bankName || found.bankName,
+        bik: item.bik || found.bik,
+        corrAccount: item.corrAccount || found.corrAccount,
+        currency: item.currency || found.currency,
+        organizationId: item.organizationId || found.organizationId,
+        updatedAt: now,
+      })
+    } else {
+      const newItem: BankAccount = { ...item, id: item.id || nanoid(), companyId, createdAt: item.createdAt || now, updatedAt: now }
+      existing.push(newItem)
+      byNumber.set(newItem.number, newItem)
+      added++
+    }
+  }
+  saveList(bankAccountsKey(companyId), existing)
+  return added
+}
+
+// ============================================================
 // Статистика справочников
 // ============================================================
 
@@ -491,19 +645,25 @@ export interface ReferenceStats {
   organizations: number
   nomenclature: number
   contracts: number
+  warehouses: number
+  bankAccounts: number
 }
 
 export async function getReferenceStats(companyId: string): Promise<ReferenceStats> {
-  const [cp, org, nom, ctr] = await Promise.all([
+  const [cp, org, nom, ctr, wh, ba] = await Promise.all([
     getCounterparties(companyId),
     getOrganizations(companyId),
     getNomenclature(companyId),
     getContracts(companyId),
+    getWarehouses(companyId),
+    getBankAccounts(companyId),
   ])
   return {
     counterparties: cp.length,
     organizations: org.length,
     nomenclature: nom.length,
     contracts: ctr.length,
+    warehouses: wh.length,
+    bankAccounts: ba.length,
   }
 }

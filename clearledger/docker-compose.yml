@@ -1,0 +1,59 @@
+# ============================================================
+# ClearLedger — полный стек в одной команде
+# Запуск: docker-compose up --build
+# Доступ: http://localhost
+# Логин:  admin@clearledger.ru / admin123
+# ============================================================
+
+services:
+  # PostgreSQL 16
+  postgres:
+    image: postgres:16-alpine
+    container_name: clearledger-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clearledger
+      POSTGRES_PASSWORD: clearledger
+      POSTGRES_DB: clearledger
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clearledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI backend
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: clearledger-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://clearledger:clearledger@postgres:5432/clearledger
+      SECRET_KEY: ${SECRET_KEY:-clearledger-demo-secret-change-in-production}
+      CORS_ORIGINS: http://localhost,http://localhost:3000,http://localhost:5173
+      OCR_ENABLED: "true"
+    volumes:
+      - uploads:/app/uploads
+
+  # nginx — frontend SPA + reverse proxy к API
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: clearledger-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${PORT:-80}:80"
+
+volumes:
+  pgdata:
+  uploads:

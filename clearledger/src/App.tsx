@@ -28,7 +28,9 @@ const InboxDetailPage = lazy(() => import('@/pages/InboxDetailPage').then((m) =>
 const ReportsPage = lazy(() => import('@/pages/ReportsPage').then((m) => ({ default: m.ReportsPage })))
 const ReferencePage = lazy(() => import('@/pages/ReferencePage').then((m) => ({ default: m.ReferencePage })))
 const ExportPage = lazy(() => import('@/pages/ExportPage').then((m) => ({ default: m.ExportPage })))
+const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
+const RegisterPage = lazy(() => import('@/pages/RegisterPage').then((m) => ({ default: m.RegisterPage })))
 
 function PageLoader() {
   return (
@@ -105,6 +107,7 @@ const router = createBrowserRouter([
     element: <Providers />,
     children: [
       { path: '/login', element: <LoginRoute /> },
+      { path: '/register', element: <LazyPage><RegisterPage /></LazyPage> },
       {
         element: <ProtectedRoute />,
         children: [
@@ -126,6 +129,7 @@ const router = createBrowserRouter([
               { path: '/data/:category/:id', element: <LazyPage><DataDetailPage /></LazyPage> },
               { path: '/search', element: <LazyPage><SearchPage /></LazyPage> },
               { path: '/references', element: <LazyPage><ReferencePage /></LazyPage> },
+              { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
               { path: '/export', element: <LazyPage><ExportPage /></LazyPage> },
               { path: '/reports', element: <LazyPage><ReportsPage /></LazyPage> },
               { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },

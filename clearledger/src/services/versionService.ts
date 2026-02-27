@@ -106,7 +106,7 @@ export async function finalizeNewVersion(
   newEntryId: string,
   prevEntryId: string,
 ): Promise<void> {
-  createLink(newEntryId, prevEntryId, 'correction', 'Исправленная версия')
+  await createLink(newEntryId, prevEntryId, 'correction', 'Исправленная версия')
 }
 
 /**

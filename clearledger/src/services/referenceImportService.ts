@@ -9,12 +9,14 @@
  */
 
 import { XMLParser } from 'fast-xml-parser'
-import type { Counterparty, Organization, Nomenclature, Contract, CounterpartyType } from '@/types'
+import type { Counterparty, Organization, Nomenclature, Contract, CounterpartyType, Warehouse, BankAccount, WarehouseType } from '@/types'
 import {
   upsertCounterparties,
   upsertOrganizations,
   upsertNomenclature,
   upsertContracts,
+  upsertWarehouses,
+  upsertBankAccounts,
 } from './referenceService'
 import { nanoid } from 'nanoid'
 
@@ -23,6 +25,8 @@ export interface ImportResult {
   organizations: { total: number; added: number }
   nomenclature: { total: number; added: number }
   contracts: { total: number; added: number }
+  warehouses: { total: number; added: number }
+  bankAccounts: { total: number; added: number }
   errors: string[]
 }
 
@@ -68,6 +72,8 @@ interface ParsedReferences {
   organizations: Organization[]
   nomenclature: Nomenclature[]
   contracts: Contract[]
+  warehouses: Warehouse[]
+  bankAccounts: BankAccount[]
   errors: string[]
 }
 
@@ -75,7 +81,7 @@ function parseEnterpriseDataXml(content: string): ParsedReferences {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
-    isArray: (name) => ['Контрагент', 'Организация', 'Номенклатура', 'ДоговорКонтрагента', 'Товар'].includes(name),
+    isArray: (name) => ['Контрагент', 'Организация', 'Номенклатура', 'ДоговорКонтрагента', 'Товар', 'Склад', 'БанковскийСчёт', 'БанковскийСчет'].includes(name),
   })
 
   const parsed = parser.parse(content)
@@ -168,7 +174,50 @@ function parseEnterpriseDataXml(content: string): ParsedReferences {
     })
   }
 
-  return { counterparties, organizations, nomenclature, contracts, errors }
+  // ------- Склады -------
+  const whNodes = ensureArray(root['Склад'] ?? root['Справочник.Склады'] ?? findDeep(root, 'Склад'))
+  const warehouses: Warehouse[] = []
+  for (const node of whNodes) {
+    const code = str(node['Код'] || node['Code'])
+    const name = str(node['Наименование'] || node['НаименованиеПолное'])
+    if (!name) continue
+    const typeStr = str(node['ТипСклада'] || node['Вид'] || '').toLowerCase()
+    let whType: WarehouseType = 'warehouse'
+    if (typeStr.includes('азс') || typeStr.includes('станци')) whType = 'station'
+    else if (typeStr.includes('офис')) whType = 'office'
+    warehouses.push({
+      id: str(node['Ссылка'] || node['Ref'] || node['@_Ref']) || nanoid(),
+      companyId: '',
+      code: code || nanoid().slice(0, 8),
+      name,
+      address: str(node['Адрес'] || node['ФактическийАдрес']) || undefined,
+      type: whType,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  // ------- Банковские счета -------
+  const baNodes = ensureArray(root['БанковскийСчёт'] ?? root['БанковскийСчет'] ?? root['Справочник.БанковскиеСчета'] ?? findDeep(root, 'БанковскийСчёт'))
+  const bankAccounts: BankAccount[] = []
+  for (const node of baNodes) {
+    const number = str(node['НомерСчета'] || node['Номер'])
+    if (!number) continue
+    bankAccounts.push({
+      id: str(node['Ссылка'] || node['Ref'] || node['@_Ref']) || nanoid(),
+      companyId: '',
+      number,
+      bankName: str(node['Банк'] || node['НаименованиеБанка'] || ''),
+      bik: str(node['БИК'] || node['БИКБанка'] || ''),
+      corrAccount: str(node['КоррСчёт'] || node['КоррСчет'] || node['КорреспондентскийСчёт']) || undefined,
+      currency: str(node['ВалютаДенежныхСредств'] || node['Валюта'] || 'RUB'),
+      organizationId: str(node['Владелец'] || node['Организация'] || node['ОрганизацияСсылка']) || undefined,
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  return { counterparties, organizations, nomenclature, contracts, warehouses, bankAccounts, errors }
 }
 
 /** Рекурсивный поиск ключа в дереве */
@@ -248,7 +297,31 @@ function parseJsonImport(content: string): ParsedReferences {
     updatedAt: now,
   }))
 
-  return { counterparties, organizations, nomenclature, contracts, errors }
+  const warehouses: Warehouse[] = ensureArray(data.warehouses ?? data.sklady).map((w: Record<string, unknown>) => ({
+    id: str(w.id || w.ref) || nanoid(),
+    companyId: '',
+    code: str(w.code || w.kod) || nanoid().slice(0, 8),
+    name: str(w.name || w.naimenovanie),
+    address: str(w.address || w.adres) || undefined,
+    type: (str(w.type || w.vid) || 'warehouse') as WarehouseType,
+    createdAt: str(w.createdAt) || now,
+    updatedAt: now,
+  })).filter((w: Warehouse) => w.name)
+
+  const bankAccounts: BankAccount[] = ensureArray(data.bankAccounts ?? data.bankovskieScheta).map((b: Record<string, unknown>) => ({
+    id: str(b.id || b.ref) || nanoid(),
+    companyId: '',
+    number: str(b.number || b.nomerScheta),
+    bankName: str(b.bankName || b.naimenovanieBanka || ''),
+    bik: str(b.bik || ''),
+    corrAccount: str(b.corrAccount || b.korrSchet) || undefined,
+    currency: str(b.currency || b.valuta || 'RUB'),
+    organizationId: str(b.organizationId || b.organizaciyaRef) || undefined,
+    createdAt: str(b.createdAt) || now,
+    updatedAt: now,
+  })).filter((b: BankAccount) => b.number)
+
+  return { counterparties, organizations, nomenclature, contracts, warehouses, bankAccounts, errors }
 }
 
 // ============================================================
@@ -271,6 +344,8 @@ export async function importReferences(companyId: string, content: string): Prom
         organizations: { total: 0, added: 0 },
         nomenclature: { total: 0, added: 0 },
         contracts: { total: 0, added: 0 },
+        warehouses: { total: 0, added: 0 },
+        bankAccounts: { total: 0, added: 0 },
         errors: ['Неизвестный формат файла. Поддерживаются: EnterpriseData XML, JSON.'],
       }
     }
@@ -280,17 +355,21 @@ export async function importReferences(companyId: string, content: string): Prom
       organizations: { total: 0, added: 0 },
       nomenclature: { total: 0, added: 0 },
       contracts: { total: 0, added: 0 },
+      warehouses: { total: 0, added: 0 },
+      bankAccounts: { total: 0, added: 0 },
       errors: [`Ошибка парсинга: ${err instanceof Error ? err.message : String(err)}`],
     }
   }
 
   errors.push(...parsed.errors)
 
-  const [cpAdded, orgAdded, nomAdded, ctrAdded] = await Promise.all([
+  const [cpAdded, orgAdded, nomAdded, ctrAdded, whAdded, baAdded] = await Promise.all([
     parsed.counterparties.length > 0 ? upsertCounterparties(companyId, parsed.counterparties) : 0,
     parsed.organizations.length > 0 ? upsertOrganizations(companyId, parsed.organizations) : 0,
     parsed.nomenclature.length > 0 ? upsertNomenclature(companyId, parsed.nomenclature) : 0,
     parsed.contracts.length > 0 ? upsertContracts(companyId, parsed.contracts) : 0,
+    parsed.warehouses.length > 0 ? upsertWarehouses(companyId, parsed.warehouses) : 0,
+    parsed.bankAccounts.length > 0 ? upsertBankAccounts(companyId, parsed.bankAccounts) : 0,
   ])
 
   return {
@@ -298,6 +377,8 @@ export async function importReferences(companyId: string, content: string): Prom
     organizations: { total: parsed.organizations.length, added: orgAdded },
     nomenclature: { total: parsed.nomenclature.length, added: nomAdded },
     contracts: { total: parsed.contracts.length, added: ctrAdded },
+    warehouses: { total: parsed.warehouses.length, added: whAdded },
+    bankAccounts: { total: parsed.bankAccounts.length, added: baAdded },
     errors,
   }
 }
