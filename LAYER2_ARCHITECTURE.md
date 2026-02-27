@@ -161,6 +161,8 @@ CREATE TABLE staging.ai_results (
         -- { "docNumber": "245", "docDate": "2026-02-25",
         --   "counterparty": "ООО Лукойл", "counterparty_inn": "7707083893",
         --   "amount": "65100.00", "currency": "RUB" }
+    metadata_version TEXT NOT NULL DEFAULT 'v1',
+        -- Версия schema нормализованных метаданных (согласована с public.entries.metadata_version)
     -- Решение
     decision        TEXT NOT NULL DEFAULT 'pending',
         -- accepted          = принято, готово к промоушену в Layer 2
@@ -274,6 +276,33 @@ CREATE TABLE entries (
     source_label    TEXT NOT NULL DEFAULT '',
     metadata        JSONB NOT NULL DEFAULT '{}',
         -- Нормализованные метаданные (прошли AI-обработку)
+    metadata_version TEXT NOT NULL DEFAULT 'v1',
+        -- Версия schema метаданных. При изменении структуры metadata
+        -- нормализатор проверяет версию и мигрирует при необходимости.
+        -- Позволяет читать старые записи без потери совместимости.
+
+    -- === Accounting-critical generated columns ===
+    -- Ключевые учётные поля вынесены из JSONB в типизированные колонки.
+    -- Автоматически вычисляются из metadata, индексируются, имеют constraints.
+    -- Это гарантирует целостность на уровне БД, а не только Pydantic.
+    doc_number      TEXT GENERATED ALWAYS AS (metadata->>'docNumber') STORED,
+    doc_date        DATE GENERATED ALWAYS AS ((metadata->>'docDate')::date) STORED,
+    counterparty_inn TEXT GENERATED ALWAYS AS (metadata->>'counterparty_inn') STORED,
+    total_amount    NUMERIC GENERATED ALWAYS AS (
+        CASE WHEN metadata->>'totalAmount' IS NOT NULL
+             THEN (metadata->>'totalAmount')::numeric
+             ELSE NULL END
+    ) STORED,
+    vat_amount      NUMERIC GENERATED ALWAYS AS (
+        CASE WHEN metadata->>'vatAmount' IS NOT NULL
+             THEN (metadata->>'vatAmount')::numeric
+             ELSE NULL END
+    ) STORED,
+
+    -- Constraints на accounting-critical поля
+    CONSTRAINT chk_total_amount CHECK (total_amount IS NULL OR total_amount >= 0),
+    CONSTRAINT chk_vat_amount CHECK (vat_amount IS NULL OR vat_amount >= 0),
+
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     verified_at     TIMESTAMPTZ,
@@ -286,6 +315,8 @@ CREATE INDEX idx_entries_status ON entries(company_id, status);
 CREATE INDEX idx_entries_category ON entries(company_id, category_id);
 CREATE INDEX idx_entries_created ON entries(company_id, created_at DESC);
 CREATE INDEX idx_entries_metadata ON entries USING GIN (metadata jsonb_path_ops);
+CREATE INDEX idx_entries_doc_date ON entries(company_id, doc_date DESC);
+CREATE INDEX idx_entries_counterparty ON entries(counterparty_inn) WHERE counterparty_inn IS NOT NULL;
 
 -- Коннекторы
 CREATE TABLE connectors (
@@ -496,10 +527,64 @@ volumes:
 
 | Угроза | Защита |
 |--------|--------|
-| Перехват данных | HTTPS + API key + instance_id |
-| Подмена облака | Certificate pinning, проверка instance_id |
-| Утечка данных | В облако уходит ТОЛЬКО текст и метаданные, НЕ оригинальные файлы |
-| Наше облако упало | Клиент работает офлайн, sync_queue копит |
+| Перехват данных | **mTLS** (mutual TLS): клиентский сертификат вшит в Docker-образ + серверный сертификат на облаке |
+| Подмена облака | mTLS certificate pinning — контейнер принимает ТОЛЬКО наш серверный сертификат |
+| Подмена контейнера | Облако принимает ТОЛЬКО запросы с валидным клиентским сертификатом + `INSTANCE_ID` |
+| Утечка данных | В облако уходит ТОЛЬКО `extracted_text` и метаданные, НЕ оригинальные файлы |
+| Наше облако упало | Клиент работает в режиме `grace` (парсинг + sync_queue), AI-обработка возобновляется при восстановлении |
+
+### Лицензирование и привязка
+
+```
+INSTANCE_ID = sha256(ИНН + MAC + hostname + salt)
+CLOUD_API_KEY — выдаётся при регистрации, привязан к INSTANCE_ID
+
+При каждом запросе к облаку:
+  Header: X-Instance-ID: {INSTANCE_ID}
+  Header: Authorization: Bearer {CLOUD_API_KEY}
+  + mTLS client certificate
+
+Облако проверяет:
+  1. mTLS сертификат валиден?
+  2. CLOUD_API_KEY валиден и привязан к этому INSTANCE_ID?
+  3. Подписка активна?
+  4. Лимит документов не превышен?
+```
+
+Перенос контейнера на другой сервер → `INSTANCE_ID` изменится → требуется перерегистрация.
+
+### Heartbeat и деградация
+
+Контейнер отправляет heartbeat каждые **24 часа** на `license.clearledger.ru`:
+
+```json
+// POST https://license.clearledger.ru/api/heartbeat
+{
+  "instance_id": "client-npk-001",
+  "version": "1.2.3",
+  "documents_processed_24h": 47,
+  "last_sync": "2026-02-27T10:00:00Z"
+}
+// Ответ:
+{
+  "status": "active",
+  "next_check": "2026-02-28T10:00:00Z",
+  "features": ["case1", "case2", "case3"]
+}
+```
+
+**Режимы деградации (degrade-mode):**
+
+| Состояние | Условие | Что работает | Что заблокировано |
+|-----------|---------|-------------|-------------------|
+| `active` | Подписка оплачена, heartbeat <24ч | Всё | — |
+| `grace` | Нет связи 1–7 дней | Просмотр, экспорт, парсинг в sync_queue | AI-обработка (копится) |
+| `suspended` | Нет связи >7 дней ИЛИ подписка истекла | Только чтение (read-only) | Загрузка, обработка, экспорт |
+| `terminated` | Договор расторгнут | Экспорт данных (30 дней) | Всё остальное |
+
+Логика деградации встроена в FastAPI middleware. При `grace` документы парсятся и копятся в `sync_queue` — при восстановлении связи пакетно обрабатываются. При `suspended` данные не теряются, но работа остановлена до оплаты/восстановления связи.
+
+> Полная стратегия защиты IP (7 уровней), монетизация и юридическая защита — [MARKETING_AND_IP_STRATEGY.md](./MARKETING_AND_IP_STRATEGY.md)
 
 ### Модель ролей
 
@@ -534,18 +619,21 @@ viewer   → только чтение Layer 2
 
 ## 11. Что отправляется в облако
 
-**Только текст и метаданные. Файлы НЕ уходят.**
+**Только маскированный текст и метаданные. Файлы и ПДн НЕ уходят.**
+
+Перед отправкой контейнер пропускает `extracted_text` через **PII-маскер**: ФИО, ИНН, телефоны, карты, паспорта заменяются токенами `[PERSON_1]`, `[INN_1]` и т.д. Маппинг токен→оригинал (`pii_map`) хранится ТОЛЬКО в контейнере. Три режима privacy: `standard` (критичные ПДн), `strict` (все ПДн + реквизиты), `local-first` (в облако только исключения). Подробнее → [MARKETING_AND_IP_STRATEGY.md](./MARKETING_AND_IP_STRATEGY.md#privacy-hard-маскирование-пдн-до-отправки-mvp).
 
 ```json
 // POST https://cloud.clearledger.ru/api/process
 {
   "instance_id": "client-npk-001",
+  "privacy_mode": "standard",
   "batch": [
     {
       "raw_entry_id": "a1b2c3d4-...",
       "file_name": "ТТН_245.pdf",
       "mime_type": "application/pdf",
-      "extracted_text": "Товарно-транспортная накладная №245 от 25.02.2026...",
+      "masked_text": "Товарно-транспортная накладная №245 от 25.02.2026, водитель [PERSON_1], ИНН [INN_1]...",
       "extracted_fields": {
         "page_count": 3
       },
@@ -554,7 +642,7 @@ viewer   → только чтение Layer 2
   ]
 }
 
-// Ответ
+// Ответ (облако работает с маскированным текстом)
 {
   "results": [
     {
@@ -569,16 +657,18 @@ viewer   → только чтение Layer 2
       "normalized_metadata": {
         "docNumber": "245",
         "docDate": "2026-02-25",
-        "counterparty": "ПАО Лукойл",
-        "counterparty_inn": "7707083893",
+        "counterparty": "[INN_1]",
         "amount": "65100.00",
         "currency": "RUB",
-        "title": "ТТН №245 от 25.02.2026 — ПАО Лукойл"
+        "title": "ТТН №245 от 25.02.2026 — [INN_1]"
       },
+      "metadata_version": "v1",
       "model_version": "cl-classify-v1.2"
     }
   ]
 }
+// Контейнер подставляет оригиналы из pii_map:
+//   [INN_1] → "7707083893" → ищет в НСИ → "ПАО Лукойл"
 ```
 
 ---
