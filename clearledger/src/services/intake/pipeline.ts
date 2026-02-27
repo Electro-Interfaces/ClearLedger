@@ -290,6 +290,13 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
       mimeType: 'text/plain',
       profileId: opts.profileId,
     })
+    // Мержим метаданные из extract в classify (как в processFile)
+    if (extracted.metadata) {
+      item.classification.metadata = {
+        ...item.classification.metadata,
+        ...extracted.metadata,
+      }
+    }
     item.progress = 70
     opts.onUpdate({ ...item })
 
@@ -363,9 +370,12 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
       companyId: opts.companyId,
       source: entrySource,
       sourceLabel: pasteType === 'email' ? 'Email (вставка)' : 'Вставленный текст',
+      fileType: 'text/plain',
+      fileSize: textBlob.size,
       sourceId,
       metadata: {
         ...item.classification.metadata,
+        ...(opts._extraMeta ?? {}),
         _textHash: pasteTextHash,
       },
     })
