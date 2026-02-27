@@ -48,6 +48,8 @@ export async function extractText(
       return extractImage(file)
     case 'word':
       return extractWord(file)
+    case 'dbf':
+      return extractDbf(file)
     default:
       return { text: '', metadata: {} }
   }
@@ -96,6 +98,18 @@ async function extractExcel(file: File): Promise<ExtractResult> {
   } catch (err) {
     console.error('Excel extraction error:', err)
     return { text: '', metadata: { _extractError: `Excel: ${String(err)}` } }
+  }
+}
+
+// ---- DBF (dBASE) — SheetJS ----
+
+async function extractDbf(file: File): Promise<ExtractResult> {
+  try {
+    const { parseExcel } = await import('./parsers/excelParser')
+    return parseExcel(file)
+  } catch (err) {
+    console.error('DBF extraction error:', err)
+    return { text: '', metadata: { _extractError: `DBF: ${String(err)}` } }
   }
 }
 

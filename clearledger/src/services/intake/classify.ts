@@ -325,10 +325,10 @@ const rules: Rule[] = [
 
   // ---- Excel-правила ----
 
-  // Excel: реестр транзакций / Z-отчёт
+  // Excel/DBF: реестр транзакций / Z-отчёт
   {
     test: ({ fileType, text }) =>
-      (fileType === 'excel' || fileType === 'csv') &&
+      (fileType === 'excel' || fileType === 'csv' || fileType === 'dbf') &&
       /транзакц|терминал|z-отчёт|z-отчет|смен.*касс/i.test(text),
     profiles: ['fuel', 'trade', 'retail'],
     result: {
@@ -342,10 +342,10 @@ const rules: Rule[] = [
       },
     },
   },
-  // Excel: остатки
+  // Excel/DBF: остатки
   {
     test: ({ fileType, text }) =>
-      (fileType === 'excel' || fileType === 'csv') &&
+      (fileType === 'excel' || fileType === 'csv' || fileType === 'dbf') &&
       /остат.*резервуар|резервуар.*остат|остат.*ёмкост|остат.*емкост/i.test(text),
     profiles: ['fuel'],
     result: {
@@ -355,10 +355,10 @@ const rules: Rule[] = [
       title: 'Остатки в резервуарах',
     },
   },
-  // Excel: банковская выписка
+  // Excel/DBF: банковская выписка
   {
     test: ({ fileType, text }) =>
-      (fileType === 'excel' || fileType === 'csv') &&
+      (fileType === 'excel' || fileType === 'csv' || fileType === 'dbf') &&
       /дебет.*кредит|кредит.*дебет|сальдо|выписк/i.test(text),
     result: {
       categoryId: 'financial',
