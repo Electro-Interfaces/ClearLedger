@@ -59,7 +59,7 @@ const integrationItems: NavItem[] = [
 function SidebarNavItem({ item }: { item: NavItem }) {
   return (
     <SidebarMenuItem>
-      <NavLink to={item.path} end={item.path === '/'}>
+      <NavLink to={item.path} end={item.path === '/' || item.path === '/data'}>
         {({ isActive }) => (
           <SidebarMenuButton isActive={isActive} tooltip={item.title}>
             <item.icon className="size-4" />
@@ -97,11 +97,14 @@ export function AppSidebar() {
   const { isApiMode, user, logout } = useAuth()
   const navigate = useNavigate()
 
-  const dataItems: NavItem[] = effectiveCategories.map((cat) => ({
-    title: cat.label,
-    path: `/data/${cat.id}`,
-    icon: iconMap[cat.icon] ?? FileText,
-  }))
+  const dataItems: NavItem[] = [
+    { title: 'Все данные', path: '/data', icon: FileText },
+    ...effectiveCategories.map((cat) => ({
+      title: cat.label,
+      path: `/data/${cat.id}`,
+      icon: iconMap[cat.icon] ?? FileText,
+    })),
+  ]
 
   return (
     <Sidebar collapsible="icon" style={{ paddingTop: 'var(--header-height)' }}>

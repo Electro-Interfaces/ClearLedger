@@ -8,6 +8,7 @@ import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 import { AuditJournal } from '@/components/common/AuditJournal'
+import { TechnicalInfoCard } from '@/components/data/TechnicalInfoCard'
 import { SplitViewSkeleton } from '@/components/common/Skeletons'
 import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
@@ -186,6 +187,7 @@ export function InboxDetailPage() {
           onReject={handleReject}
           isLoading={updateEntry.isPending || verifyEntry.isPending || rejectEntry.isPending}
         />
+        <TechnicalInfoCard entry={entry} />
         <AuditJournal entryId={entry.id} />
         </div>
       </div>

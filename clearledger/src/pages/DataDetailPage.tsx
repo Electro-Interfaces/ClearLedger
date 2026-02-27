@@ -6,6 +6,7 @@ import { MetadataPanel } from '@/components/data/MetadataPanel'
 import { HistoryTimeline } from '@/components/data/HistoryTimeline'
 import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { VersionHistory } from '@/components/data/VersionHistory'
+import { TechnicalInfoCard } from '@/components/data/TechnicalInfoCard'
 import { ArrowLeft, FilePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DetailPageSkeleton } from '@/components/common/Skeletons'
@@ -145,6 +146,7 @@ export function DataDetailPage() {
           />
           <VersionHistory entryId={entry.id} />
           <DocumentLinks entryId={entry.id} allowAdd />
+          <TechnicalInfoCard entry={entry} />
           <HistoryTimeline entry={entry} auditEvents={auditEvents} />
         </div>
       </div>

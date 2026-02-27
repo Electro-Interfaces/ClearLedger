@@ -16,6 +16,7 @@ const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ defaul
 const ManualEntryPage = lazy(() => import('@/pages/ManualEntryPage').then((m) => ({ default: m.ManualEntryPage })))
 const ConnectorsPage = lazy(() => import('@/pages/ConnectorsPage').then((m) => ({ default: m.ConnectorsPage })))
 const ConnectorDetailPage = lazy(() => import('@/pages/ConnectorDetailPage').then((m) => ({ default: m.ConnectorDetailPage })))
+const DataOverviewPage = lazy(() => import('@/pages/DataOverviewPage').then((m) => ({ default: m.DataOverviewPage })))
 const DataCategoryPage = lazy(() => import('@/pages/DataCategoryPage').then((m) => ({ default: m.DataCategoryPage })))
 const DataDetailPage = lazy(() => import('@/pages/DataDetailPage').then((m) => ({ default: m.DataDetailPage })))
 const SearchPage = lazy(() => import('@/pages/SearchPage').then((m) => ({ default: m.SearchPage })))
@@ -118,6 +119,7 @@ const router = createBrowserRouter([
               { path: '/connectors', element: <LazyPage><ConnectorsPage /></LazyPage> },
               { path: '/connectors/new', element: <LazyPage><ConnectorDetailPage /></LazyPage> },
               { path: '/connectors/:id', element: <LazyPage><ConnectorDetailPage /></LazyPage> },
+              { path: '/data', element: <LazyPage><DataOverviewPage /></LazyPage> },
               { path: '/data/:category', element: <LazyPage><DataCategoryPage /></LazyPage> },
               { path: '/data/:category/:id', element: <LazyPage><DataDetailPage /></LazyPage> },
               { path: '/search', element: <LazyPage><SearchPage /></LazyPage> },

@@ -23,7 +23,7 @@ export function MobileBottomNav() {
     { label: 'Дашборд', path: '/', icon: LayoutDashboard },
     { label: 'Приём', path: '/input', icon: Upload },
     { label: 'Входящие', path: '/inbox', icon: Inbox, badge: inboxCount },
-    { label: 'Данные', path: '/data/documents', icon: Database },
+    { label: 'Данные', path: '/data', icon: Database },
     { label: 'Ещё', path: '/settings', icon: MoreHorizontal },
   ]
 
