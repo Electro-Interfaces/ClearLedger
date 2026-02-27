@@ -111,7 +111,12 @@ async function extractCsv(file: File): Promise<ExtractResult> {
   }
 }
 
-// ---- PDF (pdfjs-dist) ----
+// ---- PDF (pdfjs-dist + OCR fallback для сканов) ----
+
+/** Макс. страниц для OCR (Tesseract.js медленный — ограничиваем) */
+const PDF_OCR_MAX_PAGES = 5
+/** Масштаб рендера страницы для OCR (2x ≈ 150 DPI для A4) */
+const PDF_OCR_SCALE = 2
 
 async function extractPdf(file: File): Promise<ExtractResult> {
   try {
@@ -140,13 +145,21 @@ async function extractPdf(file: File): Promise<ExtractResult> {
     const metadata: Record<string, string> = {
       _pdfPages: String(pdf.numPages),
     }
-    // Предупреждение если PDF обрезан
+
     if (pdf.numPages > maxPages) {
       metadata['_pdf.truncated'] = `Обработано ${maxPages} из ${pdf.numPages} страниц`
     }
-    // Hint: если текст пустой — возможно скан, нужен OCR
-    if (fullText.trim().length === 0 && pdf.numPages > 0) {
-      metadata['_pdf.noText'] = 'Текст не извлечён (возможно, скан)'
+
+    // Если текст пустой — скан, запускаем OCR fallback
+    if (fullText.trim().length < 30 && pdf.numPages > 0) {
+      const ocrResult = await extractPdfViaOcr(pdf, pdfjsLib)
+      if (ocrResult.text.trim().length > 0) {
+        return {
+          text: ocrResult.text,
+          metadata: { ...metadata, ...ocrResult.metadata },
+        }
+      }
+      metadata['_pdf.noText'] = 'Текст не извлечён (скан, OCR не помог)'
     }
 
     return { text: fullText, metadata }
@@ -154,6 +167,89 @@ async function extractPdf(file: File): Promise<ExtractResult> {
     console.error('PDF extraction error:', err)
     return { text: '', metadata: { _extractError: String(err) } }
   }
+}
+
+/**
+ * OCR fallback для PDF-сканов.
+ * Рендерит страницы в canvas → Blob → Tesseract.js.
+ */
+async function extractPdfViaOcr(
+  pdf: { numPages: number; getPage: (n: number) => Promise<import('pdfjs-dist').PDFPageProxy> },
+  _pdfjsLib: typeof import('pdfjs-dist'),
+): Promise<ExtractResult> {
+  const ocrPages = Math.min(pdf.numPages, PDF_OCR_MAX_PAGES)
+  const metadata: Record<string, string> = {
+    '_pdf.ocrUsed': 'true',
+    '_pdf.ocrPages': String(ocrPages),
+    '_ocrSource': 'browser',
+  }
+
+  try {
+    const Tesseract = await import('tesseract.js')
+
+    const textParts: string[] = []
+    let totalConfidence = 0
+
+    for (let i = 1; i <= ocrPages; i++) {
+      const page = await pdf.getPage(i)
+      const viewport = page.getViewport({ scale: PDF_OCR_SCALE })
+
+      // Рендерим страницу в canvas (pdfjs v5 требует HTMLCanvasElement)
+      const canvas = createFallbackCanvas(viewport.width, viewport.height)
+
+      await page.render({ canvas, viewport }).promise
+
+      // Canvas → Blob → Tesseract
+      const blob = await canvasToBlob(canvas)
+      if (!blob) continue
+
+      const result = await Promise.race([
+        Tesseract.recognize(blob, 'rus+eng', {
+          logger: () => { /* suppress */ },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('OCR таймаут')), 60_000),
+        ),
+      ])
+
+      const pageText = result.data.text.trim()
+      if (pageText) {
+        textParts.push(pageText)
+        totalConfidence += result.data.confidence
+      }
+    }
+
+    if (textParts.length > 0) {
+      metadata['_ocr.confidence'] = String(Math.round(totalConfidence / textParts.length))
+      metadata['_ocr.language'] = 'rus+eng'
+    }
+
+    if (pdf.numPages > PDF_OCR_MAX_PAGES) {
+      metadata['_pdf.ocrTruncated'] = `OCR: ${ocrPages} из ${pdf.numPages} страниц`
+    }
+
+    return { text: textParts.join('\n\n'), metadata }
+  } catch (err) {
+    console.warn('PDF OCR fallback failed:', err)
+    metadata['_ocrError'] = String(err)
+    return { text: '', metadata }
+  }
+}
+
+/** Создаёт обычный canvas как fallback для окружений без OffscreenCanvas */
+function createFallbackCanvas(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  return canvas
+}
+
+/** Canvas → Blob (работает и с OffscreenCanvas, и с HTMLCanvasElement) */
+async function canvasToBlob(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Blob | null> {
+  if (canvas instanceof OffscreenCanvas) {
+    return canvas.convertToBlob({ type: 'image/png' })
+  }
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
 }
 
 // ---- Word (.docx) — mammoth.js ----
