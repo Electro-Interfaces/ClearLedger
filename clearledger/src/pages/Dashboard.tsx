@@ -7,6 +7,8 @@ import { ConnectorsStatus } from '@/components/dashboard/ConnectorsStatus'
 import { CategoryChart } from '@/components/dashboard/CategoryChart'
 import { StatusFunnel } from '@/components/dashboard/StatusFunnel'
 import { ActivityChart } from '@/components/dashboard/ActivityChart'
+import { VerificationHealthWidget } from '@/components/dashboard/VerificationHealthWidget'
+import { ReferenceStatusWidget } from '@/components/dashboard/ReferenceStatusWidget'
 import { useInboxCount, useKpi } from '@/hooks/useEntries'
 import { useCompany } from '@/contexts/CompanyContext'
 import { computeExtendedKpi, getTopCounterparties, getSourceDistribution, getRecentErrors } from '@/services/dashboardService'
@@ -151,6 +153,12 @@ export function Dashboard() {
           </Card>
         </div>
       )}
+
+      {/* Виджеты верификации и справочников */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <VerificationHealthWidget />
+        <ReferenceStatusWidget />
+      </div>
 
       <InboxWidget />
 

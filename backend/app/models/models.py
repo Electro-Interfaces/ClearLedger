@@ -170,6 +170,97 @@ class Settings(Base):
 
 
 # ============================================================
+# Справочники НСИ (Reference Data)
+# ============================================================
+
+class Counterparty(Base):
+    __tablename__ = "counterparties"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    inn = Column(String, nullable=False)
+    kpp = Column(String)
+    name = Column(String, nullable=False)
+    short_name = Column(String)
+    type = Column(String, nullable=False, default="ЮЛ")  # ЮЛ / ФЛ / ИП
+    aliases = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    contracts = relationship("Contract", back_populates="counterparty")
+
+    __table_args__ = (
+        Index("idx_cp_company", "company_id"),
+        Index("idx_cp_inn_kpp", "company_id", "inn", "kpp", unique=True),
+        Index("idx_cp_name_trgm", "name", postgresql_using="gin",
+              postgresql_ops={"name": "gin_trgm_ops"}),
+    )
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    inn = Column(String, nullable=False)
+    kpp = Column(String)
+    ogrn = Column(String)
+    name = Column(String, nullable=False)
+    bank_account = Column(String)
+    bank_bik = Column(String)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    contracts = relationship("Contract", back_populates="organization")
+
+    __table_args__ = (
+        Index("idx_org_company", "company_id"),
+        Index("idx_org_inn_kpp", "company_id", "inn", "kpp", unique=True),
+    )
+
+
+class Nomenclature(Base):
+    __tablename__ = "nomenclature"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    code = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    unit = Column(String, nullable=False, default="796")
+    unit_label = Column(String, nullable=False, default="шт")
+    vat_rate = Column(Float, nullable=False, default=20)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    __table_args__ = (
+        Index("idx_nom_company_code", "company_id", "code", unique=True),
+    )
+
+
+class Contract(Base):
+    __tablename__ = "contracts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    number = Column(String, nullable=False)
+    date = Column(String)
+    counterparty_id = Column(UUID(as_uuid=True), ForeignKey("counterparties.id"))
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"))
+    type = Column(String, nullable=False, default="Прочее")
+    amount_limit = Column(Float)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    counterparty = relationship("Counterparty", back_populates="contracts")
+    organization = relationship("Organization", back_populates="contracts")
+
+    __table_args__ = (
+        Index("idx_contracts_company", "company_id"),
+        Index("idx_contracts_cp", "counterparty_id"),
+    )
+
+
+# ============================================================
 # STAGING SCHEMA (Layer 1a)
 # ============================================================
 

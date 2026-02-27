@@ -26,11 +26,14 @@ import {
   Inbox,
   LogOut,
   BarChart3,
+  BookOpen,
+  Download,
   type LucideIcon,
 } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useInboxCount } from '@/hooks/useEntries'
+import { useReferenceStats } from '@/hooks/useReferences'
 
 interface NavItem {
   title: string
@@ -52,7 +55,7 @@ const inputItems: NavItem[] = [
   { title: 'Приём', path: '/input', icon: PackageOpen },
 ]
 
-const integrationItems: NavItem[] = [
+const systemItems: NavItem[] = [
   { title: 'Коннекторы', path: '/connectors', icon: Plug },
 ]
 
@@ -92,6 +95,28 @@ function InboxNavItem() {
   )
 }
 
+function ReferenceNavItem() {
+  const { data: stats } = useReferenceStats()
+  const total = stats ? stats.counterparties + stats.organizations + stats.nomenclature + stats.contracts : 0
+  return (
+    <SidebarMenuItem>
+      <NavLink to="/references">
+        {({ isActive }) => (
+          <SidebarMenuButton isActive={isActive} tooltip="Справочники">
+            <BookOpen className="size-4" />
+            <span className="flex-1">Справочники</span>
+            {total > 0 && (
+              <span className="inline-flex items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground min-w-[18px]">
+                {total}
+              </span>
+            )}
+          </SidebarMenuButton>
+        )}
+      </NavLink>
+    </SidebarMenuItem>
+  )
+}
+
 export function AppSidebar() {
   const { effectiveCategories } = useCompany()
   const { isApiMode, user, logout } = useAuth()
@@ -118,14 +143,6 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarMenu>
             <InboxNavItem />
-          </SidebarMenu>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Ввод</SidebarGroupLabel>
-          <SidebarMenu>
             {inputItems.map((item) => (
               <SidebarNavItem key={item.path} item={item} />
             ))}
@@ -146,6 +163,15 @@ export function AppSidebar() {
         <SidebarSeparator />
 
         <SidebarGroup>
+          <SidebarMenu>
+            <ReferenceNavItem />
+            <SidebarNavItem item={{ title: 'Экспорт', path: '/export', icon: Download }} />
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarSeparator />
+
+        <SidebarGroup>
           <SidebarGroupLabel>Аналитика</SidebarGroupLabel>
           <SidebarMenu>
             <SidebarNavItem item={{ title: 'Отчёты', path: '/reports', icon: BarChart3 }} />
@@ -155,9 +181,9 @@ export function AppSidebar() {
         <SidebarSeparator />
 
         <SidebarGroup>
-          <SidebarGroupLabel>Интеграции</SidebarGroupLabel>
+          <SidebarGroupLabel>Система</SidebarGroupLabel>
           <SidebarMenu>
-            {integrationItems.map((item) => (
+            {systemItems.map((item) => (
               <SidebarNavItem key={item.path} item={item} />
             ))}
           </SidebarMenu>

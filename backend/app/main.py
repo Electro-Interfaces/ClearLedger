@@ -11,7 +11,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 
-from app.api import auth, entries, companies, intake, files, connectors, document_links, settings_api, stats, audit, export, connector_actions
+from app.api import auth, entries, companies, intake, files, connectors, document_links, settings_api, stats, audit, export, connector_actions, references, verification
 from app.config import settings as app_settings
 from app.database import async_session
 from app.services.sync import sync_loop
@@ -77,6 +77,8 @@ app.include_router(stats.router, prefix="/api")
 app.include_router(audit.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(connector_actions.router, prefix="/api")
+app.include_router(references.router, prefix="/api")
+app.include_router(verification.router, prefix="/api")
 
 
 @app.get("/api/health")

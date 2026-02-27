@@ -83,6 +83,11 @@ export function removeLink(linkId: string): void {
   saveAll(links)
 }
 
+/** Получить все связи определённого типа */
+export function getLinksByType(type: LinkType): DocumentLink[] {
+  return getAll().filter((l) => l.type === type)
+}
+
 /** Удалить все связи записи (при удалении записи) */
 export function removeLinksForEntry(entryId: string): void {
   const links = getAll().filter(

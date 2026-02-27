@@ -1,6 +1,6 @@
 /**
  * Intake Pipeline — оркестратор обработки файлов/текстов.
- * Поток: DETECT → EXTRACT → CLASSIFY → DEDUP → createEntry()
+ * Поток: DETECT → EXTRACT → CLASSIFY → VERIFY → DEDUP → createEntry()
  * Хранение: Source + Extract в IndexedDB (sourceStore), лёгкий DataEntry в localStorage.
  */
 
@@ -15,6 +15,7 @@ import { saveSource, saveExtract } from '@/services/sourceStore'
 import { createEntry, getEntries } from '@/services/dataEntryService'
 import { createLink } from '@/services/linkService'
 import { logEvent } from '@/services/auditService'
+import { enrichFromReference } from '@/services/normalizationService'
 
 export type PipelineCallback = (item: IntakeItem) => void
 
@@ -89,7 +90,39 @@ export async function processFile(file: File, opts: PipelineOptions): Promise<In
     item.progress = 70
     opts.onUpdate({ ...item })
 
-    // 4. DEDUP
+    // 4. VERIFY — обогащение из справочников НСИ
+    item.stage = 'verify'
+    item.progress = 75
+    opts.onUpdate({ ...item })
+
+    try {
+      const refEnrichment = await enrichFromReference(
+        { metadata: item.classification.metadata } as DataEntry,
+        opts.companyId,
+      )
+      if (Object.keys(refEnrichment).length > 0) {
+        item.classification.metadata = { ...item.classification.metadata, ...refEnrichment }
+      }
+    } catch { /* справочники пусты или ошибка — не блокируем pipeline */ }
+
+    // Верификация — сохраняем _verificationStatus для дашборда
+    try {
+      const { verifyEntry } = await import('@/services/verificationService')
+      const virtualEntry = {
+        id: item.id,
+        metadata: item.classification.metadata,
+        docTypeId: item.classification.docTypeId,
+        categoryId: item.classification.categoryId,
+        subcategoryId: item.classification.subcategoryId,
+      } as DataEntry
+      const vResult = await verifyEntry(virtualEntry, opts.companyId)
+      item.classification.metadata._verificationStatus = vResult.overallStatus
+    } catch { /* верификация необязательна — не блокируем pipeline */ }
+
+    item.progress = 78
+    opts.onUpdate({ ...item })
+
+    // 5. DEDUP
     item.stage = 'dedup'
     item.progress = 80
     opts.onUpdate({ ...item })
@@ -298,6 +331,38 @@ export async function processPaste(text: string, opts: PipelineOptions): Promise
       }
     }
     item.progress = 70
+    opts.onUpdate({ ...item })
+
+    // VERIFY — обогащение из справочников НСИ
+    item.stage = 'verify'
+    item.progress = 75
+    opts.onUpdate({ ...item })
+
+    try {
+      const refEnrichment = await enrichFromReference(
+        { metadata: item.classification.metadata } as DataEntry,
+        opts.companyId,
+      )
+      if (Object.keys(refEnrichment).length > 0) {
+        item.classification.metadata = { ...item.classification.metadata, ...refEnrichment }
+      }
+    } catch { /* справочники пусты — не блокируем */ }
+
+    // Верификация — сохраняем _verificationStatus для дашборда
+    try {
+      const { verifyEntry } = await import('@/services/verificationService')
+      const virtualEntry = {
+        id: item.id,
+        metadata: item.classification.metadata,
+        docTypeId: item.classification.docTypeId,
+        categoryId: item.classification.categoryId,
+        subcategoryId: item.classification.subcategoryId,
+      } as DataEntry
+      const vResult = await verifyEntry(virtualEntry, opts.companyId)
+      item.classification.metadata._verificationStatus = vResult.overallStatus
+    } catch { /* верификация необязательна */ }
+
+    item.progress = 78
     opts.onUpdate({ ...item })
 
     // DEDUP

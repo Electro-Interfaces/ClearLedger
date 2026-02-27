@@ -1,11 +1,12 @@
 /**
- * Экспорт данных: JSON, Excel, CSV, 1С XML.
+ * Экспорт данных: JSON, Excel, CSV, 1С XML, EnterpriseData XML.
  */
 
 import type { DataEntry } from '@/types'
 import type { Connector } from '@/types'
 import { getEntries } from './dataEntryService'
 import { getConnectors } from './connectorService'
+import { generateEnterpriseDataXml } from './enterpriseDataExport'
 import * as XLSX from 'xlsx'
 
 // ---- Types ----
@@ -183,4 +184,20 @@ export function exportTo1C(entries: DataEntry[], options?: ExportOptions): void 
   const xml = lines.join('\n')
   const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
   triggerDownload(blob, options?.fileName ?? `clearledger-1c-${new Date().toISOString().slice(0, 10)}.xml`)
+}
+
+// ---- Export: EnterpriseData XML (для 1С:Бухгалтерия) ----
+
+export async function exportToEnterpriseData(
+  entries: DataEntry[],
+  companyId: string,
+  options?: ExportOptions,
+): Promise<{ documentsExported: number }> {
+  const result = await generateEnterpriseDataXml(entries, companyId)
+  const blob = new Blob([result.xml], { type: 'application/xml;charset=utf-8' })
+  triggerDownload(
+    blob,
+    options?.fileName ?? `clearledger-enterprise-data-${new Date().toISOString().slice(0, 10)}.xml`,
+  )
+  return { documentsExported: result.documentsExported }
 }

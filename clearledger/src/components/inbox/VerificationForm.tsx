@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
@@ -22,12 +22,15 @@ import {
 } from '@/components/ui/tooltip'
 import { StatusBadge } from '@/components/data/StatusBadge'
 import { SourceBadge } from '@/components/data/SourceBadge'
+import { QuickAddCounterpartyDialog } from './QuickAddCounterpartyDialog'
 import { formatDateTime } from '@/lib/formatDate'
-import { Check, Clock, X, AlertCircle, AlertTriangle } from 'lucide-react'
+import { Check, Clock, X, AlertCircle, AlertTriangle, CheckCircle2, Info, ShieldCheck, ChevronDown, ChevronRight, UserPlus } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getSubcategories } from '@/config/categories'
 import { validateEntry } from '@/services/validationService'
-import type { DataEntry } from '@/types'
+import { verifyEntry } from '@/services/verificationService'
+import { getCounterpartyFromMeta } from '@/lib/textUtils'
+import type { DataEntry, VerificationResult, VerificationCheckStatus } from '@/types'
 
 export interface VerifyPayload {
   categoryId: string
@@ -68,10 +71,27 @@ export function VerificationForm({
   const [categoryId, setCategoryId] = useState(entry.categoryId)
   const [subcategoryId, setSubcategoryId] = useState(entry.subcategoryId)
   const [editedMetadata, setEditedMetadata] = useState<Record<string, string>>(() => ({ ...entry.metadata }))
+  const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null)
+  const [checksCollapsed, setChecksCollapsed] = useState(false)
+  const [quickAddOpen, setQuickAddOpen] = useState(false)
+
+  // Запускаем верификацию при монтировании
+  const runVerification = () => {
+    verifyEntry(entry, company.id).then((result) => {
+      setVerificationResult(result)
+    }).catch(() => { /* справочники пусты */ })
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    verifyEntry(entry, company.id).then((result) => {
+      if (!cancelled) setVerificationResult(result)
+    }).catch(() => { /* справочники пусты */ })
+    return () => { cancelled = true }
+  }, [entry.id, company.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const subcategories = getSubcategories(company.profileId, categoryId)
   const metadataEntries = Object.entries(editedMetadata).filter(([k]) => k !== 'rejectReason' && !k.startsWith('_'))
-  const systemEntries = Object.entries(editedMetadata).filter(([k]) => k.startsWith('_'))
   const ocrFields = entry.ocrData?.fields ?? []
 
   // Валидация — вычисляем на лету при изменении metadata
@@ -119,6 +139,61 @@ export function VerificationForm({
           </div>
           <Progress value={validation.completeness} className="h-1.5" />
         </div>
+
+        {/* Результаты сверки с эталоном (collapsible) */}
+        {verificationResult && verificationResult.checks.length > 0 && (
+          <>
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="flex items-center justify-between w-full"
+                onClick={() => setChecksCollapsed(!checksCollapsed)}
+              >
+                <h4 className="text-sm font-medium flex items-center gap-1.5">
+                  <ShieldCheck className="size-4" />
+                  Сверка с эталоном
+                  {checksCollapsed && (
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 ml-1">
+                      {verificationResult.checks.length}
+                    </Badge>
+                  )}
+                </h4>
+                <div className="flex items-center gap-1.5">
+                  <VerificationStatusBadge status={verificationResult.overallStatus} />
+                  {checksCollapsed ? <ChevronRight className="size-4 text-muted-foreground" /> : <ChevronDown className="size-4 text-muted-foreground" />}
+                </div>
+              </button>
+              {!checksCollapsed && (
+                <div className="space-y-1">
+                  {verificationResult.checks.map((check, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs py-1">
+                      <VerificationIcon status={check.status} />
+                      <div className="flex-1 min-w-0">
+                        <span className={checkTextClass(check.status)}>{check.message}</span>
+                        {check.suggestion && (
+                          <p className="text-muted-foreground mt-0.5">{check.suggestion}</p>
+                        )}
+                        {/* Кнопка быстрого добавления контрагента */}
+                        {check.checkType === 'new_counterparty' && (
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="h-auto p-0 text-xs text-primary"
+                            onClick={() => setQuickAddOpen(true)}
+                          >
+                            <UserPlus className="size-3 mr-1" />
+                            Добавить в справочник
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Separator />
+          </>
+        )}
 
         {/* Категория / Подкатегория */}
         <div className="space-y-3">
@@ -193,17 +268,7 @@ export function VerificationForm({
           </div>
         )}
 
-        {/* Системные поля (read-only) */}
-        {systemEntries.length > 0 && (
-          <div className="space-y-1.5">
-            {systemEntries.map(([key, value]) => (
-              <div key={key} className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground/60">{key}</span>
-                <span className="text-muted-foreground/60 max-w-[60%] truncate">{value}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Системные _-поля перенесены в таб «Техн.» в DetailRightPanel */}
 
         {/* OCR-подсказки */}
         {ocrFields.length > 0 && (
@@ -330,7 +395,51 @@ export function VerificationForm({
             </Button>
           </div>
         </div>
+        {/* Quick-add контрагента */}
+        <QuickAddCounterpartyDialog
+          open={quickAddOpen}
+          onOpenChange={setQuickAddOpen}
+          prefill={{
+            name: getCounterpartyFromMeta(entry.metadata),
+            inn: entry.metadata.inn?.trim() || '',
+            kpp: entry.metadata.kpp?.trim() || '',
+          }}
+          onCreated={runVerification}
+        />
       </CardContent>
     </Card>
   )
+}
+
+// ---- Verification helpers ----
+
+function VerificationIcon({ status }: { status: VerificationCheckStatus }) {
+  switch (status) {
+    case 'pass': return <CheckCircle2 className="size-3.5 text-green-500 shrink-0 mt-0.5" />
+    case 'fail': return <AlertCircle className="size-3.5 text-red-500 shrink-0 mt-0.5" />
+    case 'warning': return <AlertTriangle className="size-3.5 text-yellow-500 shrink-0 mt-0.5" />
+    case 'info': return <Info className="size-3.5 text-blue-500 shrink-0 mt-0.5" />
+  }
+}
+
+function checkTextClass(status: VerificationCheckStatus): string {
+  switch (status) {
+    case 'pass': return 'text-green-400'
+    case 'fail': return 'text-red-400'
+    case 'warning': return 'text-yellow-400'
+    case 'info': return 'text-blue-400'
+  }
+}
+
+function VerificationStatusBadge({ status }: { status: string }) {
+  switch (status) {
+    case 'approved':
+      return <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs">Одобрено</Badge>
+    case 'needs_review':
+      return <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 text-xs">Требует проверки</Badge>
+    case 'rejected':
+      return <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 text-xs">Отклонено</Badge>
+    default:
+      return null
+  }
 }

@@ -2,13 +2,12 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useMemo, useEffect } from 'react'
 import { useInbox, useEntry, useVerifyEntry, useRejectEntry, useUpdateEntry } from '@/hooks/useEntries'
 import { DocumentPreview } from '@/components/data/DocumentPreview'
-import { VerificationForm, type VerifyPayload } from '@/components/inbox/VerificationForm'
+import { type VerifyPayload } from '@/components/inbox/VerificationForm'
+import { DetailRightPanel } from '@/components/inbox/DetailRightPanel'
 import { InboxNavigation } from '@/components/inbox/InboxNavigation'
 import { DocumentLinks } from '@/components/data/DocumentLinks'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
-import { AuditJournal } from '@/components/common/AuditJournal'
-import { TechnicalInfoCard } from '@/components/data/TechnicalInfoCard'
 import { SplitViewSkeleton } from '@/components/common/Skeletons'
 import { QueryError } from '@/components/common/QueryError'
 import { toast } from 'sonner'
@@ -173,23 +172,20 @@ export function InboxDetailPage() {
         </div>
       </div>
 
-      {/* Split view: 60% preview / 40% form */}
+      {/* Split view: 60% preview / 40% form + tabs */}
       <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4">
         <div className="space-y-4">
           <DocumentPreview entry={entry} />
           <DocumentLinks entryId={entry.id} />
         </div>
-        <div className="space-y-4">
-        <VerificationForm
+        <DetailRightPanel
+          key={entry.id}
           entry={entry}
           onVerify={handleVerify}
           onPostpone={handlePostpone}
           onReject={handleReject}
           isLoading={updateEntry.isPending || verifyEntry.isPending || rejectEntry.isPending}
         />
-        <TechnicalInfoCard entry={entry} />
-        <AuditJournal entryId={entry.id} />
-        </div>
       </div>
     </div>
   )

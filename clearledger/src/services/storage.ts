@@ -46,3 +46,19 @@ export function nextId(): string {
 export function entriesKey(companyId: string): string {
   return `clearledger-entries-${companyId}`
 }
+
+export function counterpartiesKey(companyId: string): string {
+  return `clearledger-counterparties-${companyId}`
+}
+
+export function organizationsKey(companyId: string): string {
+  return `clearledger-organizations-${companyId}`
+}
+
+export function nomenclatureKey(companyId: string): string {
+  return `clearledger-nomenclature-${companyId}`
+}
+
+export function contractsKey(companyId: string): string {
+  return `clearledger-contracts-${companyId}`
+}

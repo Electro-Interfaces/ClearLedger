@@ -116,7 +116,7 @@ export type IntakeFileType =
   | 'pdf' | 'image' | 'excel' | 'csv' | 'xml' | 'email'
   | 'text' | 'json' | 'dbf' | 'word' | 'whatsapp' | 'telegram' | 'unknown'
 
-export type IntakeStage = 'detect' | 'extract' | 'classify' | 'dedup' | 'save'
+export type IntakeStage = 'detect' | 'extract' | 'classify' | 'verify' | 'dedup' | 'save'
 
 export interface IntakeItem {
   id: string
@@ -161,6 +161,7 @@ export type LinkType =
   | 'related'            // связанные (один контрагент / номер / дата)
   | 'correction'         // исправление / дополнение
   | 'manual'             // ручная связь пользователя
+  | 'subordinate'        // подчинённость: source = родитель, target = ребёнок
 
 export interface DocumentLink {
   id: string
@@ -269,5 +270,120 @@ export interface AdvancedFilters {
   categoryId?: string
   source?: string
   docTypeId?: string
+}
+
+// ---- Bundle (бизнес-комплекты документов) ----
+
+/** Роль документа в комплекте — enum, а не свободный текст (как в 1С:УТ) */
+export type BundleRole =
+  | 'contract'        // Договор (корень цепочки)
+  | 'addendum'        // Допсоглашение
+  | 'act'             // Акт (выполненных работ, приёма-передачи, сверки)
+  | 'invoice'         // Счёт на оплату
+  | 'invoice-factura' // Счёт-фактура
+  | 'upd'             // Универсальный передаточный документ
+  | 'payment'         // Оплата (платёжное поручение, ПКО/РКО)
+  | 'waybill'         // Накладная (ТОРГ-12, ТТН)
+  | 'other'           // Прочее (паспорт качества, сертификат и т.д.)
+
+export interface BundleNode {
+  entry: DataEntry
+  children: BundleNode[]
+  depth: number
+}
+
+export interface BundleTree {
+  root: BundleNode
+  totalCount: number
+}
+
+export interface BundleSuggestion {
+  entry: DataEntry
+  score: number       // 0-100
+  reasons: string[]   // ["Совпадение контрагента", "Ссылка на номер договора"]
+}
+
+/** Результат валидации допустимой пары родитель→ребёнок */
+export interface BundleValidation {
+  allowed: boolean
+  reason?: string     // причина отказа
+}
+
+// ---- НСИ: Справочники (Reference Data) ----
+
+export type CounterpartyType = 'ЮЛ' | 'ФЛ' | 'ИП'
+
+export interface Counterparty {
+  id: string
+  companyId: string
+  inn: string
+  kpp?: string
+  name: string
+  shortName?: string
+  type: CounterpartyType
+  aliases: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Organization {
+  id: string
+  companyId: string
+  inn: string
+  kpp?: string
+  ogrn?: string
+  name: string
+  bankAccount?: string
+  bankBik?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Nomenclature {
+  id: string
+  companyId: string
+  code: string
+  name: string
+  unit: string       // код ОКЕИ
+  unitLabel: string   // наименование единицы
+  vatRate: number     // % НДС (0, 10, 20)
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Contract {
+  id: string
+  companyId: string
+  number: string
+  date: string
+  counterpartyId: string
+  organizationId: string
+  type: string        // "Поставка", "Услуги", "Аренда" и т.д.
+  amountLimit?: number
+  createdAt: string
+  updatedAt: string
+}
+
+// ---- Верификация (сверка с эталоном) ----
+
+export type VerificationCheckStatus = 'pass' | 'fail' | 'warning' | 'info'
+
+export type VerificationOverallStatus = 'approved' | 'needs_review' | 'rejected'
+
+export interface VerificationCheck {
+  field: string
+  checkType: string
+  status: VerificationCheckStatus
+  confidence: number   // 0-100
+  message: string
+  suggestion?: string
+}
+
+export interface VerificationResult {
+  entryId: string
+  checks: VerificationCheck[]
+  overallStatus: VerificationOverallStatus
+  overallConfidence: number  // 0-100
+  enrichment?: Record<string, string>
 }
 

@@ -1,20 +1,22 @@
 /**
  * DocumentLinks — отображение связей документа с другими записями.
  * Показывает список связанных документов с типом связи и возможностью навигации.
+ * Subordinate-линки не показываются — они в BundleTreeCard.
  */
 
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useEntries } from '@/hooks/useEntries'
 import { getLinksForEntry, createLink, removeLink } from '@/services/linkService'
-import { getEntries } from '@/services/dataEntryService'
 import type { DataEntry, DocumentLink, LinkType } from '@/types'
 import { StatusBadge } from './StatusBadge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { useQueryClient } from '@tanstack/react-query'
 import {
-  Link2, Mail, Copy, GitBranch, PenLine, X, Plus, FileText,
+  Link2, Mail, Copy, GitBranch, PenLine, X, Plus, FileText, FolderTree,
 } from 'lucide-react'
 
 const LINK_TYPE_CONFIG: Record<LinkType, { label: string; icon: typeof Link2; color: string }> = {
@@ -23,6 +25,7 @@ const LINK_TYPE_CONFIG: Record<LinkType, { label: string; icon: typeof Link2; co
   'related': { label: 'Связан', icon: GitBranch, color: 'text-green-500' },
   'correction': { label: 'Исправление', icon: FileText, color: 'text-purple-500' },
   'manual': { label: 'Связь', icon: PenLine, color: 'text-gray-500' },
+  'subordinate': { label: 'Комплект', icon: FolderTree, color: 'text-teal-500' },
 }
 
 interface Props {
@@ -33,15 +36,14 @@ interface Props {
 
 export function DocumentLinks({ entryId, allowAdd }: Props) {
   const { companyId } = useCompany()
-  const [refreshKey, setRefreshKey] = useState(0)
+  const qc = useQueryClient()
 
-  const [allEntries, setAllEntries] = useState<DataEntry[]>([])
-  useEffect(() => {
-    getEntries(companyId).then(setAllEntries)
-  }, [companyId, refreshKey])
+  // React Query вместо getEntries() + useEffect + refreshKey
+  const { data: allEntries = [] } = useEntries()
 
   const { links, linkedEntries } = useMemo(() => {
-    const allLinks = getLinksForEntry(entryId)
+    // Фильтруем subordinate — они показываются в BundleTreeCard
+    const allLinks = getLinksForEntry(entryId).filter((l) => l.type !== 'subordinate')
     const entryMap = new Map(allEntries.map((e: DataEntry) => [e.id, e]))
 
     const linked: Array<{ link: DocumentLink; entry: DataEntry; direction: 'from' | 'to' }> = []
@@ -58,7 +60,7 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
     }
 
     return { links: allLinks, linkedEntries: linked }
-  }, [entryId, allEntries, refreshKey])
+  }, [entryId, allEntries])
 
   const [showAddForm, setShowAddForm] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -77,16 +79,20 @@ export function DocumentLinks({ entryId, allowAdd }: Props) {
       .slice(0, 10)
   }, [showAddForm, allEntries, linkedEntries, entryId, searchQuery])
 
+  const invalidate = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['entries', companyId] })
+  }, [qc, companyId])
+
   function handleAddLink(targetId: string) {
     createLink(entryId, targetId, 'manual')
     setShowAddForm(false)
     setSearchQuery('')
-    setRefreshKey((k) => k + 1)
+    invalidate()
   }
 
   function handleRemoveLink(linkId: string) {
     removeLink(linkId)
-    setRefreshKey((k) => k + 1)
+    invalidate()
   }
 
   if (links.length === 0 && !allowAdd) return null

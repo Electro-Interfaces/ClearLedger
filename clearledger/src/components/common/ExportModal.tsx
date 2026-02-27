@@ -2,20 +2,23 @@
  * Модальное окно экспорта: выбор формата, колонок, параметров.
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Download } from 'lucide-react'
-import { exportToExcel, exportToCsv, exportTo1C } from '@/services/exportService'
+import { Download, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { exportToExcel, exportToCsv, exportTo1C, exportToEnterpriseData } from '@/services/exportService'
+import { validateForExport } from '@/services/exportValidationService'
 import { logEvent } from '@/services/auditService'
+import { toast } from 'sonner'
 import type { DataEntry } from '@/types'
 
-type ExportFormat = 'excel' | 'csv' | '1c-xml'
+type ExportFormat = 'excel' | 'csv' | '1c-xml' | 'enterprise-data'
 
 const ALL_COLUMNS = [
   { key: 'id', label: 'ID' },
@@ -49,6 +52,12 @@ export function ExportModal({ open, onOpenChange, entries, companyId }: ExportMo
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set(DEFAULT_SELECTED))
   const [dateFormat, setDateFormat] = useState<'dd.mm.yyyy' | 'yyyy-mm-dd'>('dd.mm.yyyy')
 
+  // Предэкспортная валидация для EnterpriseData
+  const exportValidation = useMemo(() => {
+    if (format !== 'enterprise-data') return null
+    return validateForExport(entries)
+  }, [format, entries])
+
   function toggleColumn(key: string) {
     setSelectedColumns((prev) => {
       const next = new Set(prev)
@@ -58,13 +67,21 @@ export function ExportModal({ open, onOpenChange, entries, companyId }: ExportMo
     })
   }
 
-  function handleExport() {
+  async function handleExport() {
     const columns = ALL_COLUMNS.filter((c) => selectedColumns.has(c.key)).map((c) => c.key)
     const options = { columns, dateFormat }
 
-    if (format === 'excel') exportToExcel(entries, options)
-    else if (format === 'csv') exportToCsv(entries, options)
-    else exportTo1C(entries, options)
+    if (format === 'excel') {
+      exportToExcel(entries, options)
+    } else if (format === 'csv') {
+      exportToCsv(entries, options)
+    } else if (format === 'enterprise-data') {
+      const entriesToExport = exportValidation?.entriesReady ?? entries
+      const result = await exportToEnterpriseData(entriesToExport, companyId, options)
+      toast.success(`EnterpriseData: экспортировано ${result.documentsExported} документов`)
+    } else {
+      exportTo1C(entries, options)
+    }
 
     logEvent({ companyId, action: 'exported', details: `${format}: ${entries.length} записей` })
     onOpenChange(false)
@@ -88,7 +105,8 @@ export function ExportModal({ open, onOpenChange, entries, companyId }: ExportMo
               <SelectContent>
                 <SelectItem value="excel">Excel (.xlsx)</SelectItem>
                 <SelectItem value="csv">CSV (.csv)</SelectItem>
-                <SelectItem value="1c-xml">1С XML</SelectItem>
+                <SelectItem value="1c-xml">1С XML (CommerceML)</SelectItem>
+                <SelectItem value="enterprise-data">EnterpriseData XML (для 1С:БП)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -107,8 +125,47 @@ export function ExportModal({ open, onOpenChange, entries, companyId }: ExportMo
             </Select>
           </div>
 
+          {/* EnterpriseData: предэкспортная валидация */}
+          {format === 'enterprise-data' && exportValidation && (
+            <div className="space-y-2 p-3 rounded-lg border bg-muted/30">
+              <div className="flex items-center justify-between text-sm">
+                <span>Готово к экспорту:</span>
+                <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                  <CheckCircle2 className="size-3 mr-1" />
+                  {exportValidation.totalReady}
+                </Badge>
+              </div>
+              {exportValidation.totalWithIssues > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span>С ошибками (пропущены):</span>
+                  <Badge variant="destructive">
+                    <AlertCircle className="size-3 mr-1" />
+                    {exportValidation.totalWithIssues}
+                  </Badge>
+                </div>
+              )}
+              {exportValidation.issues.filter((i) => i.severity === 'error').length > 0 && (
+                <div className="max-h-24 overflow-auto text-xs space-y-0.5 mt-1">
+                  {exportValidation.issues
+                    .filter((i) => i.severity === 'error')
+                    .slice(0, 5)
+                    .map((issue, i) => (
+                      <p key={i} className="text-destructive">
+                        {issue.entryTitle}: {issue.issue}
+                      </p>
+                    ))}
+                  {exportValidation.issues.filter((i) => i.severity === 'error').length > 5 && (
+                    <p className="text-muted-foreground">
+                      ...ещё {exportValidation.issues.filter((i) => i.severity === 'error').length - 5}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Columns */}
-          {format !== '1c-xml' && (
+          {format !== '1c-xml' && format !== 'enterprise-data' && (
             <div className="space-y-1.5">
               <Label>Колонки</Label>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 border rounded-lg">
@@ -128,7 +185,10 @@ export function ExportModal({ open, onOpenChange, entries, companyId }: ExportMo
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>
-          <Button onClick={handleExport} disabled={selectedColumns.size === 0 && format !== '1c-xml'}>
+          <Button onClick={handleExport} disabled={
+            (selectedColumns.size === 0 && format !== '1c-xml' && format !== 'enterprise-data') ||
+            !!(format === 'enterprise-data' && exportValidation && !exportValidation.canExport)
+          }>
             <Download className="size-4" />
             Экспорт
           </Button>

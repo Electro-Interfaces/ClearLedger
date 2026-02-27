@@ -1,12 +1,13 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, memo, useCallback } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { formatDate } from '@/lib/formatDate'
 import type { DataEntry } from '@/types'
-import { ArrowUpDown } from 'lucide-react'
+import { ArrowUpDown, FolderTree } from 'lucide-react'
 
 type SortField = 'title' | 'createdAt' | 'source' | 'status'
 type SortDirection = 'asc' | 'desc'
@@ -48,14 +49,16 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
     return sorted
   }, [entries, sortField, sortDirection])
 
-  function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortField(field)
+  const handleSort = useCallback((field: SortField) => {
+    setSortField((prev) => {
+      if (prev === field) {
+        setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
+        return prev
+      }
       setSortDirection('asc')
-    }
-  }
+      return field
+    })
+  }, [])
 
   function toggleAll() {
     if (!onSelectionChange) return
@@ -80,21 +83,6 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
   const allSelected = entries.length > 0 && selected.size === entries.length
   const someSelected = selected.size > 0 && selected.size < entries.length
 
-  function SortableHead({ field, children }: { field: SortField; children: React.ReactNode }) {
-    return (
-      <TableHead>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
-          onClick={() => handleSort(field)}
-        >
-          {children}
-          <ArrowUpDown className="size-3.5 text-muted-foreground" />
-        </button>
-      </TableHead>
-    )
-  }
-
   if (entries.length === 0) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -115,7 +103,12 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
             className="w-full text-left p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
           >
             <div className="flex items-start justify-between gap-2">
-              <span className="text-sm font-medium leading-tight line-clamp-2">{entry.title}</span>
+              <span className="text-sm font-medium leading-tight line-clamp-2 flex items-center gap-1">
+                {entry.metadata._bundleRootId && (
+                  <FolderTree className="size-3.5 shrink-0 text-teal-500" />
+                )}
+                {entry.title}
+              </span>
               <StatusBadge status={entry.status} />
             </div>
             <div className="flex items-center gap-2 mt-2">
@@ -139,10 +132,10 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
               aria-label="Выделить все"
             />
           </TableHead>
-          <SortableHead field="title">Название</SortableHead>
-          <SortableHead field="createdAt">Дата</SortableHead>
-          <SortableHead field="source">Источник</SortableHead>
-          <SortableHead field="status">Статус</SortableHead>
+          <SortableHead field="title" onSort={handleSort}>Название</SortableHead>
+          <SortableHead field="createdAt" onSort={handleSort}>Дата</SortableHead>
+          <SortableHead field="source" onSort={handleSort}>Источник</SortableHead>
+          <SortableHead field="status" onSort={handleSort}>Статус</SortableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -161,13 +154,25 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
               />
             </TableCell>
             <TableCell>
-              <button
-                type="button"
-                className="text-left text-sm font-medium text-foreground hover:underline"
-                onClick={() => onRowClick(entry.id)}
-              >
-                {entry.title}
-              </button>
+              <div className="flex items-center gap-1.5">
+                {entry.metadata._bundleRootId && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <FolderTree className="size-3.5 shrink-0 text-teal-500" />
+                      </TooltipTrigger>
+                      <TooltipContent>Часть комплекта</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+                <button
+                  type="button"
+                  className="text-left text-sm font-medium text-foreground hover:underline"
+                  onClick={() => onRowClick(entry.id)}
+                >
+                  {entry.title}
+                </button>
+              </div>
             </TableCell>
             <TableCell className="text-muted-foreground text-sm">
               {formatDate(entry.createdAt)}
@@ -184,3 +189,28 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
     </Table>
   )
 }
+
+// ---- SortableHead (извлечён из render, мемоизирован) ----
+
+const SortableHead = memo(function SortableHead({
+  field,
+  onSort,
+  children,
+}: {
+  field: SortField
+  onSort: (field: SortField) => void
+  children: React.ReactNode
+}) {
+  return (
+    <TableHead>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+        onClick={() => onSort(field)}
+      >
+        {children}
+        <ArrowUpDown className="size-3.5 text-muted-foreground" />
+      </button>
+    </TableHead>
+  )
+})

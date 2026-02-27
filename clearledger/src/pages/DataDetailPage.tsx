@@ -2,11 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useEntry, useVerifyEntry, useTransferEntries, useDeleteEntry, useArchiveEntry, useRestoreEntry, useExcludeEntry, useIncludeEntry } from '@/hooks/useEntries'
 import { useEntryAudit } from '@/hooks/useAudit'
 import { DocumentPreview } from '@/components/data/DocumentPreview'
-import { MetadataPanel } from '@/components/data/MetadataPanel'
-import { HistoryTimeline } from '@/components/data/HistoryTimeline'
-import { DocumentLinks } from '@/components/data/DocumentLinks'
-import { VersionHistory } from '@/components/data/VersionHistory'
-import { TechnicalInfoCard } from '@/components/data/TechnicalInfoCard'
+import { DataDetailRightPanel } from '@/components/data/DataDetailRightPanel'
 import { ArrowLeft, FilePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { DetailPageSkeleton } from '@/components/common/Skeletons'
@@ -131,24 +127,19 @@ export function DataDetailPage() {
         {/* Left: Document preview */}
         <DocumentPreview entry={entry} />
 
-        {/* Right: Metadata + actions + History */}
-        <div className="space-y-4">
-          <MetadataPanel
-            entry={entry}
-            onVerify={entry.status === 'new' || entry.status === 'recognized' ? handleVerify : undefined}
-            onTransfer={entry.status === 'verified' ? handleTransfer : undefined}
-            onDelete={entry.status !== 'transferred' ? handleDelete : undefined}
-            onArchive={entry.status !== 'archived' && entry.status !== 'transferred' ? handleArchive : undefined}
-            onRestore={entry.status === 'archived' ? handleRestore : undefined}
-            onExclude={entry.metadata._excluded !== 'true' ? handleExclude : undefined}
-            onInclude={entry.metadata._excluded === 'true' ? handleInclude : undefined}
-            validation={validation}
-          />
-          <VersionHistory entryId={entry.id} />
-          <DocumentLinks entryId={entry.id} allowAdd />
-          <TechnicalInfoCard entry={entry} />
-          <HistoryTimeline entry={entry} auditEvents={auditEvents} />
-        </div>
+        {/* Right: Metadata + tabs */}
+        <DataDetailRightPanel
+          entry={entry}
+          validation={validation}
+          auditEvents={auditEvents}
+          onVerify={entry.status === 'new' || entry.status === 'recognized' ? handleVerify : undefined}
+          onTransfer={entry.status === 'verified' ? handleTransfer : undefined}
+          onDelete={entry.status !== 'transferred' ? handleDelete : undefined}
+          onArchive={entry.status !== 'archived' && entry.status !== 'transferred' ? handleArchive : undefined}
+          onRestore={entry.status === 'archived' ? handleRestore : undefined}
+          onExclude={entry.metadata._excluded !== 'true' ? handleExclude : undefined}
+          onInclude={entry.metadata._excluded === 'true' ? handleInclude : undefined}
+        />
       </div>
     </div>
   )

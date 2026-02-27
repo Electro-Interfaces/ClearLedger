@@ -22,6 +22,7 @@ import {
   X,
   Trash2,
   Inbox,
+  ShieldCheck,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
@@ -36,6 +37,7 @@ const STAGE_INFO: Record<string, { label: string; icon: typeof FileText }> = {
   detect: { label: 'Определение типа', icon: Search },
   extract: { label: 'Извлечение данных', icon: FileText },
   classify: { label: 'Классификация', icon: Brain },
+  verify: { label: 'Сверка с эталоном', icon: ShieldCheck },
   dedup: { label: 'Проверка дубликатов', icon: Fingerprint },
   save: { label: 'Сохранение', icon: Save },
 }
