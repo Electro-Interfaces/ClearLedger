@@ -683,7 +683,7 @@ viewer   → только чтение Layer 2
 | API | Python 3.12 + FastAPI | CRUD, парсинг, sync с облаком |
 | ORM | SQLAlchemy 2.0 + asyncpg | Работа с PostgreSQL |
 | Миграции | Alembic | Автоматические при старте |
-| БД | PostgreSQL 16 | staging + public schemas |
+| БД | PostgreSQL 16 + pgvector | staging + public schemas + RAG-эмбеддинги прецедентов |
 | Парсинг PDF | PyMuPDF (fitz) | Извлечение текста |
 | Парсинг Excel | openpyxl | Строки и заголовки |
 | Парсинг XML | lxml | Структура документа |
@@ -700,9 +700,9 @@ viewer   → только чтение Layer 2
 |-----------|-----------|-----------|
 | API | FastAPI | Приём batch-запросов от instance'ов |
 | AI | Claude API | Классификация, извлечение полей |
-| OCR | Tesseract / Claude Vision | Распознавание сканов |
+| Vision OCR | Claude Vision / GPT-4o | Multimodal: PDF → JSON нативно (без Tesseract) |
 | Нормализация | Python + справочники | Унификация контрагентов, номенклатуры |
-| БД | PostgreSQL | Справочники, модели, статистика |
+| БД | PostgreSQL + pgvector | Справочники, модели, статистика, RAG-эмбеддинги |
 | Мониторинг | — | Здоровье instance'ов, очереди, ошибки |
 
 ---
