@@ -17,29 +17,7 @@ import { importFromJson } from '@/services/importService'
 import { getStorageUsage, formatBytes, type StorageUsage } from '@/services/storageMonitor'
 import { resetOnboarding } from '@/components/onboarding/OnboardingWizard'
 import { clearAll as clearNotifications } from '@/services/notificationService'
-import { isApiEnabled } from '@/services/apiClient'
-import { OneCConnectionForm } from '@/components/settings/OneCConnectionForm'
-import { OneCSyncStatus } from '@/components/settings/OneCSyncStatus'
-import { OneCSyncHistory } from '@/components/settings/OneCSyncHistory'
-import { useOneCConnections } from '@/hooks/useOneCSync'
 import type { AppSettings } from '@/services/settingsService'
-
-function OneCIntegrationSection() {
-  const { data: connections } = useOneCConnections()
-  const connection = connections?.[0]
-
-  return (
-    <div className="lg:col-span-2 space-y-4">
-      <OneCConnectionForm />
-      {connection && (
-        <>
-          <OneCSyncStatus connectionId={connection.id} exchangePath={connection.exchangePath} />
-          <OneCSyncHistory connectionId={connection.id} />
-        </>
-      )}
-    </div>
-  )
-}
 
 export function SettingsPage() {
   const { companies, companyId } = useCompany()
@@ -285,7 +263,26 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        {isApiEnabled() && <OneCIntegrationSection />}
+        <NavLink to="/channels">
+          <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                    <Download className="size-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle>Каналы и интеграции</CardTitle>
+                    <CardDescription>
+                      Управление каналами поступления: почта, API, 1С, FTP и другие источники
+                    </CardDescription>
+                  </div>
+                </div>
+                <ChevronRight className="size-5 text-muted-foreground" />
+              </div>
+            </CardHeader>
+          </Card>
+        </NavLink>
 
         <Card className="lg:col-span-2">
           <CardHeader>

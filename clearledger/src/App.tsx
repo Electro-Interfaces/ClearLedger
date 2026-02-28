@@ -14,8 +14,10 @@ import { Loader2 } from 'lucide-react'
 // Lazy-loaded pages (code-split)
 const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ default: m.IntakePage })))
 const ManualEntryPage = lazy(() => import('@/pages/ManualEntryPage').then((m) => ({ default: m.ManualEntryPage })))
-const ConnectorsPage = lazy(() => import('@/pages/ConnectorsPage').then((m) => ({ default: m.ConnectorsPage })))
+// ConnectorsPage: /connectors → redirect to /channels (страница осталась для /connectors/:id)
 const ConnectorDetailPage = lazy(() => import('@/pages/ConnectorDetailPage').then((m) => ({ default: m.ConnectorDetailPage })))
+const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
+const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const DataOverviewPage = lazy(() => import('@/pages/DataOverviewPage').then((m) => ({ default: m.DataOverviewPage })))
 const DataCategoryPage = lazy(() => import('@/pages/DataCategoryPage').then((m) => ({ default: m.DataCategoryPage })))
 const DataDetailPage = lazy(() => import('@/pages/DataDetailPage').then((m) => ({ default: m.DataDetailPage })))
@@ -121,7 +123,9 @@ const router = createBrowserRouter([
               { path: '/input/upload', element: <Navigate to="/input" replace /> },
               { path: '/input/photo', element: <Navigate to="/input" replace /> },
               { path: '/input/manual', element: <LazyPage><ManualEntryPage /></LazyPage> },
-              { path: '/connectors', element: <LazyPage><ConnectorsPage /></LazyPage> },
+              { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
+              { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
+              { path: '/connectors', element: <Navigate to="/channels" replace /> },
               { path: '/connectors/new', element: <LazyPage><ConnectorDetailPage /></LazyPage> },
               { path: '/connectors/:id', element: <LazyPage><ConnectorDetailPage /></LazyPage> },
               { path: '/data', element: <LazyPage><DataOverviewPage /></LazyPage> },

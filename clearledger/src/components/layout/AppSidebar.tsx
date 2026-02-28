@@ -20,9 +20,10 @@ import {
   LayoutDashboard,
   PackageOpen,
   FileText,
-  Plug,
   Settings,
   Inbox,
+  Upload,
+  Radio,
   LogOut,
   BarChart3,
   BookOpen,
@@ -189,8 +190,9 @@ export function AppSidebar() {
       <SidebarContent className="scroll-thin px-2">
         {/* ── Блок 1: Поступление ── */}
         <CollapsibleSidebarGroup id="intake" label="Поступление" icon={PackageOpen} collapsed={collapsed} onToggle={handleToggle}>
-          <SidebarNavItem item={{ title: 'Приём', path: '/input', icon: PackageOpen }} />
           <InboxNavItem />
+          <SidebarNavItem item={{ title: 'Загрузить', path: '/input', icon: Upload }} />
+          <SidebarNavItem item={{ title: 'Каналы', path: '/channels', icon: Radio }} />
         </CollapsibleSidebarGroup>
 
         <SidebarSeparator className="mx-0" />
@@ -214,7 +216,6 @@ export function AppSidebar() {
 
         {/* ── Блок 4: Настройки ── */}
         <CollapsibleSidebarGroup id="settings" label="Настройки" icon={Settings} defaultOpen={false} collapsed={collapsed} onToggle={handleToggle}>
-          <SidebarNavItem item={{ title: 'Коннекторы', path: '/connectors', icon: Plug }} />
           <SidebarNavItem item={{ title: 'Компании', path: '/settings/companies', icon: Building2 }} />
           <SidebarNavItem item={{ title: 'Параметры', path: '/settings', icon: Settings }} />
         </CollapsibleSidebarGroup>

@@ -506,6 +506,32 @@ export interface OneCSyncLog {
   finishedAt?: string
 }
 
+// ---- Каналы (фасад над Connector + OneCConnection) ----
+
+export type ChannelKind = 'connector' | 'oneC' | 'manual'
+
+export interface Channel {
+  id: string
+  kind: ChannelKind
+  name: string
+  type: string                    // 'email', 'rest', '1c', 'ftp', 'webhook', 'upload', etc.
+  status: 'active' | 'error' | 'disabled' | 'not_configured'
+  lastSyncAt?: string
+  todayCount: number
+  totalCount: number
+  errorsCount: number
+  syncStatus?: 'idle' | 'syncing' | 'synced' | 'error'
+  connectorId?: string
+  connectionId?: string
+}
+
+export interface ChannelStats {
+  total: number
+  active: number
+  errors: number
+  todayEntries: number
+}
+
 export interface OneCTestResult {
   available: boolean
   catalogs: string[]

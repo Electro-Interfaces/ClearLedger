@@ -48,8 +48,8 @@ export function UniversalDropZone({ onFiles, disabled }: UniversalDropZoneProps)
     <div
       {...getRootProps()}
       className={`
-        relative flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed p-8
-        transition-all cursor-pointer min-h-[220px]
+        relative flex items-center justify-center gap-5 rounded-xl border-2 border-dashed px-6 py-5
+        transition-all cursor-pointer
         ${isDragActive
           ? 'border-primary bg-primary/5 scale-[1.01]'
           : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/30'
@@ -59,25 +59,24 @@ export function UniversalDropZone({ onFiles, disabled }: UniversalDropZoneProps)
     >
       <input {...getInputProps()} />
 
-      <div className={`rounded-full p-4 transition-colors ${isDragActive ? 'bg-primary/10' : 'bg-muted'}`}>
-        <Upload className={`size-8 ${isDragActive ? 'text-primary' : 'text-muted-foreground'}`} />
+      <div className={`rounded-full p-3 shrink-0 transition-colors ${isDragActive ? 'bg-primary/10' : 'bg-muted'}`}>
+        <Upload className={`size-6 ${isDragActive ? 'text-primary' : 'text-muted-foreground'}`} />
       </div>
 
-      <div className="text-center">
-        <p className="text-lg font-medium">
+      <div className="min-w-0">
+        <p className="font-medium">
           {isDragActive ? 'Отпустите файлы здесь' : 'Бросайте файлы сюда'}
+          <span className="text-sm text-muted-foreground font-normal ml-2">
+            или нажмите для выбора — до 50 МБ
+          </span>
         </p>
-        <p className="text-sm text-muted-foreground mt-1">
-          или нажмите для выбора — до 50 МБ
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
-        <FormatBadge icon={FileText} label="PDF" />
-        <FormatBadge icon={Image} label="Фото" />
-        <FormatBadge icon={Table2} label="Excel/CSV" />
-        <FormatBadge icon={Mail} label="Email" />
-        <FormatBadge icon={Code} label="XML/JSON" />
+        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+          <FormatBadge icon={FileText} label="PDF" />
+          <FormatBadge icon={Image} label="Фото" />
+          <FormatBadge icon={Table2} label="Excel/CSV" />
+          <FormatBadge icon={Mail} label="Email" />
+          <FormatBadge icon={Code} label="XML/JSON" />
+        </div>
       </div>
     </div>
   )

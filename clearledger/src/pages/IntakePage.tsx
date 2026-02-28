@@ -154,15 +154,15 @@ export function IntakePage() {
   const isProcessing = items.some((i) => i.status === 'processing')
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">
-          {newVersionOf ? 'Загрузка новой версии' : 'Приём документов'}
+          {newVersionOf ? 'Загрузка новой версии' : 'Загрузить документы'}
         </h1>
-        <p className="text-muted-foreground mt-1">
+        <p className="text-sm text-muted-foreground mt-0.5">
           {newVersionOf
             ? 'Загрузите исправленную версию документа'
-            : 'Загрузите файлы, вставьте текст или создайте запись вручную'}
+            : 'Файлы, текст или ручной ввод'}
         </p>
       </div>
 
@@ -191,16 +191,16 @@ export function IntakePage() {
           )}
         </TabsList>
 
-        <TabsContent value="files" className="mt-4">
+        <TabsContent value="files" className="mt-3">
           <UniversalDropZone onFiles={handleFiles} disabled={isProcessing} />
         </TabsContent>
 
-        <TabsContent value="paste" className="mt-4">
+        <TabsContent value="paste" className="mt-3">
           <PasteZone onPaste={handlePaste} disabled={isProcessing} />
         </TabsContent>
 
         {!newVersionOf && (
-          <TabsContent value="manual" className="mt-4">
+          <TabsContent value="manual" className="mt-3">
             <ManualEntryForm entryType="new" />
           </TabsContent>
         )}

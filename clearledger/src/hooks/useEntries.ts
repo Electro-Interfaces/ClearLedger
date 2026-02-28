@@ -313,6 +313,39 @@ export function useCategoryStats() {
   })
 }
 
+// ---- Auditor Verification (10 проверок verificationService) ----
+
+/** Запуск верификации аудитором — 10 проверок + сохранение результата в metadata */
+export function useAuditorVerify() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const entry = await svc.getEntry(companyId, id)
+      if (!entry) throw new Error(`Entry ${id} not found`)
+      const { verifyEntry: runChecks } = await import('@/services/verificationService')
+      const result = await runChecks(entry, companyId)
+      // Сохраняем результат в metadata
+      await svc.updateEntry(companyId, id, {
+        metadata: {
+          ...entry.metadata,
+          _verificationStatus: result.overallStatus,
+          _verificationConfidence: String(result.overallConfidence),
+          _verificationChecks: String(result.checks.length),
+          _verificationFails: String(result.checks.filter(c => c.status === 'fail').length),
+          _verificationWarnings: String(result.checks.filter(c => c.status === 'warning').length),
+          _auditorVerifiedAt: new Date().toISOString(),
+        },
+      })
+      return result
+    },
+    onSuccess: (result, id) => {
+      logEvent({ companyId, entryId: id, action: 'updated', details: `Аудитор: ${result.overallStatus} (${result.overallConfidence}%)` })
+      invalidateAll(qc, companyId)
+    },
+  })
+}
+
 // ---- Utils ----
 
 function invalidateAll(qc: ReturnType<typeof useQueryClient>, companyId: string) {
