@@ -125,10 +125,10 @@ export async function deleteConnector(companyId: string, id: string): Promise<bo
 // ---- Demo Sync ----
 
 const EMAIL_SUBJECTS = [
-  'Акт сверки за январь 2025',
-  'Счёт-фактура №1234 от 15.01.2025',
+  'Акт сверки за январь 2026',
+  'Счёт-фактура №1234 от 15.01.2026',
   'Накладная на поставку ГСМ',
-  'Договор поставки №45-2025',
+  'Договор поставки №45-2026',
   'Счёт на оплату №789',
 ]
 
@@ -141,10 +141,10 @@ const ONEС_DOCS = [
 ]
 
 const API_DOCS = [
-  'Транзакция #TX-2025-001',
+  'Транзакция #TX-2026-001',
   'Отгрузка #SHP-45678',
   'Заявка на поставку #REQ-99',
-  'Инвентаризация #INV-2025-02',
+  'Инвентаризация #INV-2026-02',
   'Приходный ордер #REC-112',
 ]
 
@@ -186,17 +186,30 @@ export async function simulateSync(companyId: string, connectorId: string): Prom
     source = 'api'
   }
 
+  // Маппинг категорий коннектора → подкатегории
+  const subcategoryMap: Record<string, string> = {
+    primary: 'invoices',
+    operational: 'fuel-deliveries',
+    financial: 'reconciliation',
+    media: 'scans',
+    compliance: 'licenses',
+  }
+
   for (let i = 0; i < count; i++) {
+    const categoryId = connector.categoryId || 'primary'
+    const docNumber = `${Math.floor(Math.random() * 9000) + 1000}`
     const entry: DataEntry = {
       id: nextId(),
       title: templates[i] ?? `Запись ${i + 1} от ${connector.name}`,
-      categoryId: connector.categoryId || 'documents',
-      subcategoryId: 'incoming',
+      categoryId,
+      subcategoryId: subcategoryMap[categoryId] || 'invoices',
       companyId,
       status: 'new',
       source,
       sourceLabel: `Коннектор: ${connector.name}`,
       metadata: {
+        docNumber,
+        docDate: now.slice(0, 10),
         _syncedFrom: connectorId,
         _syncedAt: now,
       },

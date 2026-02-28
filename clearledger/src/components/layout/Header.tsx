@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, User, Menu, Settings, LogOut, Sun, Moon } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/hooks/useTheme'
+import { getSettings } from '@/services/settingsService'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { StorageWarning } from '@/components/common/StorageWarning'
+import { NotificationCenter } from '@/components/notifications/NotificationCenter'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -21,9 +23,18 @@ interface HeaderProps {
 
 export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
   const navigate = useNavigate()
-  const { logout } = useAuth()
+  const { user, logout } = useAuth()
   const { theme, toggle: toggleTheme } = useTheme()
   const [searchQuery, setSearchQuery] = useState('')
+
+  const profile = useMemo(() => {
+    const s = getSettings()
+    return {
+      name: s.userName || user?.name || 'Пользователь',
+      email: s.userEmail || user?.email || '',
+      initials: (s.userName || user?.name || 'П').slice(0, 1).toUpperCase(),
+    }
+  }, [user])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -120,6 +131,9 @@ export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
 
+          {/* Notifications */}
+          <NotificationCenter />
+
           {/* User Profile */}
           <div className="shrink-0 ml-auto">
           <DropdownMenu>
@@ -135,8 +149,8 @@ export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
                   <User className="w-4 h-4 md:w-5 md:h-5 text-primary-foreground" />
                 </div>
                 <div className="hidden lg:flex flex-col items-start">
-                  <span className="font-medium text-sm text-foreground leading-none">Администратор</span>
-                  <span className="text-xs mt-1 text-muted-foreground">admin</span>
+                  <span className="font-medium text-sm text-foreground leading-none">{profile.name}</span>
+                  <span className="text-xs mt-1 text-muted-foreground">{profile.email}</span>
                 </div>
               </Button>
             </DropdownMenuTrigger>
@@ -155,12 +169,12 @@ export function Header({ onMobileMenuToggle, isMobile = false }: HeaderProps) {
                     <User className="w-6 h-6 text-primary-foreground" />
                   </div>
                   <div className="flex flex-col flex-1 min-w-0">
-                    <span className="font-semibold text-sm truncate">Администратор</span>
+                    <span className="font-semibold text-sm truncate">{profile.name}</span>
                     <span className="text-xs text-muted-foreground truncate">
-                      admin@clearledger.ru
+                      {profile.email}
                     </span>
                     <span className="text-xs font-medium mt-0.5 text-primary">
-                      Администратор
+                      {user?.role === 'admin' ? 'Администратор' : 'Пользователь'}
                     </span>
                   </div>
                 </div>

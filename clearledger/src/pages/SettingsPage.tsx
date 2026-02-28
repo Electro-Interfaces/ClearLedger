@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { NavLink } from 'react-router-dom'
-import { Building2, ChevronRight, Download, Upload, FileJson, HardDrive } from 'lucide-react'
+import { Building2, ChevronRight, Download, Upload, FileJson, HardDrive, RotateCcw, Bell } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useTheme } from '@/hooks/useTheme'
 import { useQueryClient } from '@tanstack/react-query'
@@ -15,7 +15,31 @@ import { getSettings, saveSettings } from '@/services/settingsService'
 import { exportAllData } from '@/services/exportService'
 import { importFromJson } from '@/services/importService'
 import { getStorageUsage, formatBytes, type StorageUsage } from '@/services/storageMonitor'
+import { resetOnboarding } from '@/components/onboarding/OnboardingWizard'
+import { clearAll as clearNotifications } from '@/services/notificationService'
+import { isApiEnabled } from '@/services/apiClient'
+import { OneCConnectionForm } from '@/components/settings/OneCConnectionForm'
+import { OneCSyncStatus } from '@/components/settings/OneCSyncStatus'
+import { OneCSyncHistory } from '@/components/settings/OneCSyncHistory'
+import { useOneCConnections } from '@/hooks/useOneCSync'
 import type { AppSettings } from '@/services/settingsService'
+
+function OneCIntegrationSection() {
+  const { data: connections } = useOneCConnections()
+  const connection = connections?.[0]
+
+  return (
+    <div className="lg:col-span-2 space-y-4">
+      <OneCConnectionForm />
+      {connection && (
+        <>
+          <OneCSyncStatus connectionId={connection.id} exchangePath={connection.exchangePath} />
+          <OneCSyncHistory connectionId={connection.id} />
+        </>
+      )}
+    </div>
+  )
+}
 
 export function SettingsPage() {
   const { companies, companyId } = useCompany()
@@ -160,17 +184,8 @@ export function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label>Язык</Label>
-              <Select
-                value={settings.language}
-                onValueChange={(v) => setSettings({ ...settings, language: v as AppSettings['language'] })}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ru">Русский</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Будет доступно в следующей версии</p>
+              <Input value="Русский" readOnly className="text-muted-foreground" />
+              <p className="text-xs text-muted-foreground">Дополнительные языки будут доступны в следующей версии</p>
             </div>
             <div className="space-y-2">
               <Label>Формат даты</Label>
@@ -220,6 +235,57 @@ export function SettingsPage() {
             <Button onClick={handleSaveApp}>Сохранить</Button>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Уведомления и онбординг</CardTitle>
+            <CardDescription>Управление уведомлениями и первоначальной настройкой</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RotateCcw className="size-4 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Онбординг</p>
+                  <p className="text-xs text-muted-foreground">Повторить приветственный визард</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  resetOnboarding()
+                  toast.success('Онбординг сброшен. Перейдите на дашборд для запуска.')
+                }}
+              >
+                Сбросить
+              </Button>
+            </div>
+            <Separator />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bell className="size-4 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Уведомления</p>
+                  <p className="text-xs text-muted-foreground">Очистить все уведомления</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  clearNotifications()
+                  queryClient.invalidateQueries({ queryKey: ['notifications'] })
+                  toast.success('Уведомления очищены')
+                }}
+              >
+                Очистить
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {isApiEnabled() && <OneCIntegrationSection />}
 
         <Card className="lg:col-span-2">
           <CardHeader>

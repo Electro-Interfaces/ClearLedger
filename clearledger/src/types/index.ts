@@ -457,6 +457,60 @@ export interface BankAccount {
   updatedAt: string
 }
 
+// ---- Интеграция 1С ----
+
+export type OneCConnectionStatus = 'inactive' | 'active' | 'error'
+export type OneCSyncDirection = 'inbound' | 'outbound'
+export type OneCSyncType = 'catalogs' | 'documents' | 'full' | 'export'
+export type OneCSyncStatus = 'running' | 'success' | 'error'
+
+export interface OneCConnection {
+  id: string
+  companyId: string
+  name: string
+  odataUrl: string
+  username: string
+  exchangePath?: string
+  status: OneCConnectionStatus
+  lastSyncAt?: string
+  syncIntervalSec: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OneCSyncLog {
+  id: string
+  connectionId: string
+  direction: OneCSyncDirection
+  syncType: OneCSyncType
+  status: OneCSyncStatus
+  itemsProcessed: number
+  itemsCreated: number
+  itemsUpdated: number
+  itemsErrors: number
+  details: Record<string, unknown>
+  startedAt: string
+  finishedAt?: string
+}
+
+export interface OneCTestResult {
+  available: boolean
+  catalogs: string[]
+  error?: string
+}
+
+export interface OneCSyncResult {
+  status: string
+  stats: {
+    processed: number
+    created: number
+    updated: number
+    errors: number
+  }
+  details: Record<string, unknown>
+  logId: string
+}
+
 // ---- Верификация (сверка с эталоном) ----
 
 export type VerificationCheckStatus = 'pass' | 'fail' | 'warning' | 'info'

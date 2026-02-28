@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { KpiCards } from '@/components/dashboard/KpiCards'
@@ -16,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { Inbox, Upload, FileText, Settings, CalendarDays, TrendingDown, Clock, Users } from 'lucide-react'
+import { OnboardingWizard, isOnboardingDone } from '@/components/onboarding/OnboardingWizard'
 
 const COLORS = ['hsl(217, 91%, 60%)', 'hsl(120, 100%, 40%)', 'hsl(45, 100%, 55%)', 'hsl(0, 84%, 60%)', 'hsl(280, 65%, 60%)', 'hsl(180, 70%, 45%)']
 
@@ -87,6 +89,12 @@ export function Dashboard() {
   const { data: kpi } = useKpi()
   const isEmpty = kpi && kpi.uploadedToday === 0 && kpi.totalVerified === 0 && kpi.inProcessing === 0 && kpi.errors === 0
 
+  // Онбординг — показываем при первом визите
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  useEffect(() => {
+    if (!isOnboardingDone()) setShowOnboarding(true)
+  }, [])
+
   const { data: extKpi } = useQuery({
     queryKey: ['ext-kpi', companyId],
     queryFn: () => computeExtendedKpi(companyId),
@@ -109,9 +117,11 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col gap-6">
+      <OnboardingWizard open={showOnboarding} onOpenChange={setShowOnboarding} />
+
       <h1 className="text-2xl font-bold tracking-tight">Панель управления</h1>
 
-      {isEmpty && <OnboardingBanner />}
+      {isEmpty && !showOnboarding && <OnboardingBanner />}
 
       <KpiCards />
 
@@ -222,7 +232,14 @@ export function Dashboard() {
                         <Cell key={i} fill={COLORS[i % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--popover))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                        color: 'hsl(var(--popover-foreground))',
+                      }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-1 text-xs">

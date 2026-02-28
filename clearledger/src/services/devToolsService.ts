@@ -19,21 +19,49 @@ const SEED_KEY = 'clearledger-seeded'
 const LS_PREFIX = 'clearledger-'
 
 const ALL_STATUSES: EntryStatus[] = ['new', 'recognized', 'verified', 'transferred', 'error']
-const ALL_SOURCES: DataEntry['source'][] = ['upload', 'manual', 'api', 'email', 'paste']
+const ALL_SOURCES: DataEntry['source'][] = [
+  'upload', 'photo', 'manual', 'api', 'email', 'oneC', 'whatsapp', 'telegram', 'paste',
+]
 
 const SOURCE_LABELS: Record<string, string> = {
-  upload: 'Загрузка файла',
+  upload: 'Загрузка',
+  photo: 'Фото',
   manual: 'Ручной ввод',
-  api: 'API интеграция',
+  api: 'API',
   email: 'Email',
-  paste: 'Вставка текста',
+  oneC: '1С',
+  whatsapp: 'WhatsApp',
+  telegram: 'Telegram',
+  paste: 'Вставка',
 }
 
-const COUNTERPARTIES = [
-  'ООО "Лукойл"', 'ПАО "Газпром нефть"', 'ООО "ТНК"', 'АО "Роснефть"',
-  'ООО "Башнефть"', 'ИП Иванов А.А.', 'ООО "ТрансНефть"', 'АО "Сургутнефтегаз"',
-  'ООО "Славнефть"', 'ПАО "Татнефть"',
-]
+const COUNTERPARTIES_BY_PROFILE: Record<string, string[]> = {
+  fuel: [
+    'ООО "Лукойл"', 'ПАО "Газпром нефть"', 'АО "Роснефть"', 'ООО "Башнефть"',
+    'АО "Сургутнефтегаз"', 'ПАО "Татнефть"', 'ООО "ТрансНефть"', 'ООО "Славнефть"',
+    'ИП Иванов А.А.', 'ООО "Нефтесервис"',
+  ],
+  trade: [
+    'ООО "ТоргСервис"', 'АО "Мегаполис"', 'ИП Сидоров В.П.', 'ООО "ОптТорг"',
+    'ПАО "Магнит"', 'ООО "Дистрибьютор"', 'АО "ТрейдГрупп"', 'ООО "Поставщик Плюс"',
+    'ИП Козлова Е.А.', 'ООО "СнабКомплект"',
+  ],
+  retail: [
+    'ООО "Пятёрочка"', 'АО "Дикси"', 'ООО "Лента"', 'ИП Морозова Н.С.',
+    'ООО "Фреш Маркет"', 'ПАО "Перекрёсток"', 'ООО "ПродТорг"', 'АО "Ашан"',
+    'ИП Белов Д.М.', 'ООО "Розница 24"',
+  ],
+  energy: [
+    'ПАО "РусГидро"', 'ПАО "Россети"', 'АО "Мосэнерго"', 'ООО "ЭнергоСбыт"',
+    'ПАО "Интер РАО"', 'АО "ФСК ЕЭС"', 'ООО "ТГК-1"', 'АО "Энергоатом"',
+    'ИП Волков С.А.', 'ООО "ЭлектроМонтаж"',
+  ],
+  general: [
+    'ООО "Альфа"', 'АО "Бета Групп"', 'ИП Петров А.И.', 'ООО "Дельта"',
+    'ПАО "Гамма"', 'ООО "Консалт Про"', 'АО "Сервис Плюс"', 'ИП Смирнова О.В.',
+    'ООО "Стандарт"', 'АО "Партнёр"',
+  ],
+}
 
 // ---- Утилиты ----
 
@@ -95,6 +123,8 @@ export async function generateEntries(
   const docTypes = getAllDocumentTypes(profileId)
   if (docTypes.length === 0) return []
 
+  const counterparties = COUNTERPARTIES_BY_PROFILE[profileId] ?? COUNTERPARTIES_BY_PROFILE.general
+
   const created: DataEntry[] = []
   for (let i = 0; i < count; i++) {
     const dt = randomItem(docTypes)
@@ -103,6 +133,7 @@ export async function generateEntries(
     const docNumber = `${randomInt(100, 9999)}`
     const amount = `${randomInt(1000, 500000)}`
     const createdAt = randomDate(30)
+    const docDate = new Date(createdAt).toISOString().slice(0, 10)
 
     const entry = await createEntry({
       title: `${dt.label} №${docNumber}`,
@@ -115,8 +146,8 @@ export async function generateEntries(
       sourceLabel: SOURCE_LABELS[source] ?? source,
       metadata: {
         docNumber,
-        docDate: new Date(createdAt).toISOString().slice(0, 10),
-        counterparty: randomItem(COUNTERPARTIES),
+        docDate,
+        counterparty: randomItem(counterparties),
         amount,
       },
     })

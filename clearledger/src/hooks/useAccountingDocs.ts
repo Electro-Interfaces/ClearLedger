@@ -5,6 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as accService from '@/services/accountingDocService'
+import { notifyReconciliation } from '@/services/notificationService'
 import type { AccountingDocType, MatchStatus } from '@/types'
 
 // ---- Keys ----
@@ -74,7 +75,11 @@ export function useRunReconciliation() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => accService.runReconciliation(companyId),
-    onSuccess: () => invalidateAll(qc, companyId),
+    onSuccess: (result) => {
+      invalidateAll(qc, companyId)
+      qc.invalidateQueries({ queryKey: ['notifications'] })
+      notifyReconciliation(result.matched, result.unmatched)
+    },
   })
 }
 

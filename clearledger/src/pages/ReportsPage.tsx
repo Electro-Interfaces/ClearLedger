@@ -157,7 +157,14 @@ export function ReportsPage() {
                         <Cell key={i} fill={COLORS[i % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'hsl(var(--popover))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                        color: 'hsl(var(--popover-foreground))',
+                      }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="space-y-1 text-sm">
@@ -184,10 +191,18 @@ export function ReportsPage() {
             ) : (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={errorStats.slice(0, 8)} layout="vertical">
-                  <XAxis type="number" />
-                  <YAxis type="category" dataKey="reason" width={150} tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="hsl(0, 84%, 60%)" radius={[0, 4, 4, 0]} />
+                  <XAxis type="number" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} />
+                  <YAxis type="category" dataKey="reason" width={150} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 12 }} />
+                  <Tooltip
+                    cursor={{ fill: 'hsl(var(--muted) / 0.3)' }}
+                    contentStyle={{
+                      backgroundColor: 'hsl(var(--popover))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      color: 'hsl(var(--popover-foreground))',
+                    }}
+                  />
+                  <Bar dataKey="count" fill="hsl(var(--error))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}

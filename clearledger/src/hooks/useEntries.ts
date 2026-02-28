@@ -7,6 +7,7 @@ import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tansta
 import { useCompany } from '@/contexts/CompanyContext'
 import * as svc from '@/services/dataEntryService'
 import { logEvent } from '@/services/auditService'
+import { notifyVerification } from '@/services/notificationService'
 import type { DataEntry, FilterState } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 import { useMemo, useState, useEffect } from 'react'
@@ -141,6 +142,8 @@ export function useVerifyEntry() {
     onSuccess: (entry, id) => {
       logEvent({ companyId, entryId: id, action: 'verified', details: entry?.title })
       invalidateAll(qc, companyId)
+      qc.invalidateQueries({ queryKey: ['notifications'] })
+      if (entry?.title) notifyVerification(entry.title, true)
     },
   })
 }
@@ -151,9 +154,11 @@ export function useRejectEntry() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
       svc.rejectEntry(companyId, id, reason),
-    onSuccess: (_data, vars) => {
+    onSuccess: (entry, vars) => {
       logEvent({ companyId, entryId: vars.id, action: 'rejected', details: vars.reason })
       invalidateAll(qc, companyId)
+      qc.invalidateQueries({ queryKey: ['notifications'] })
+      notifyVerification(entry?.title || vars.id, false)
     },
   })
 }
@@ -166,6 +171,15 @@ export function useTransferEntries() {
     onSuccess: (count, ids) => {
       logEvent({ companyId, action: 'transferred', details: `${count} из ${ids.length}` })
       invalidateAll(qc, companyId)
+      qc.invalidateQueries({ queryKey: ['notifications'] })
+      import('@/services/notificationService').then(({ addNotification }) => {
+        addNotification({
+          type: 'success',
+          title: 'Записи переданы',
+          message: `Передано ${count} из ${ids.length} записей`,
+          link: '/data',
+        })
+      })
     },
   })
 }

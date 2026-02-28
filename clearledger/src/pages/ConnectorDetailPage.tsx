@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, Navigate } from 'react-router-dom'
 import { ArrowLeft, Save, Trash2, Power, PowerOff, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -62,7 +62,7 @@ const statusConfig = {
 export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { data: connector, isLoading, isError, refetch } = useConnector(id ?? '')
+  const { data: connector, isLoading, isError, refetch } = useConnector(id === 'new' ? '' : (id ?? ''))
   const updateConnector = useUpdateConnector()
   const deleteConnector = useDeleteConnector()
   const syncConnector = useSyncConnector()
@@ -85,6 +85,9 @@ export function ConnectorDetailPage() {
       })
     }
   }, [connector])
+
+  // /connectors/new — создание через диалог на ConnectorsPage
+  if (id === 'new') return <Navigate to="/connectors" replace />
 
   if (isLoading) return <DetailPageSkeleton />
   if (isError) return <QueryError onRetry={() => refetch()} />

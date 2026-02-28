@@ -12,9 +12,11 @@ from slowapi.util import get_remote_address
 from sqlalchemy import text
 
 from app.api import auth, entries, companies, intake, files, connectors, document_links, settings_api, stats, audit, export, connector_actions, references, verification
+from app.api import onec as onec_api
 from app.config import settings as app_settings
 from app.database import async_session
 from app.services.sync import sync_loop
+from app.services.onec.scheduler import onec_sync_loop
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,6 +34,10 @@ async def lifespan(app: FastAPI):
     else:
         logging.info("Sync worker не запущен (CLOUD_API_URL не задан)")
 
+    # 1С auto-sync scheduler
+    onec_task = asyncio.create_task(onec_sync_loop())
+    logging.info("1С scheduler запущен")
+
     yield
 
     # Shutdown
@@ -41,6 +47,12 @@ async def lifespan(app: FastAPI):
             await sync_task
         except asyncio.CancelledError:
             pass
+
+    onec_task.cancel()
+    try:
+        await onec_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -79,6 +91,7 @@ app.include_router(export.router, prefix="/api")
 app.include_router(connector_actions.router, prefix="/api")
 app.include_router(references.router, prefix="/api")
 app.include_router(verification.router, prefix="/api")
+app.include_router(onec_api.router, prefix="/api")
 
 
 @app.get("/api/health")

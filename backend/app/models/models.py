@@ -184,6 +184,7 @@ class Counterparty(Base):
     short_name = Column(String)
     type = Column(String, nullable=False, default="ЮЛ")  # ЮЛ / ФЛ / ИП
     aliases = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    external_ref = Column(String)  # 1С Ref_Key (GUID)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
@@ -208,6 +209,7 @@ class Organization(Base):
     name = Column(String, nullable=False)
     bank_account = Column(String)
     bank_bik = Column(String)
+    external_ref = Column(String)  # 1С Ref_Key (GUID)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
@@ -229,6 +231,7 @@ class Nomenclature(Base):
     unit = Column(String, nullable=False, default="796")
     unit_label = Column(String, nullable=False, default="шт")
     vat_rate = Column(Float, nullable=False, default=20)
+    external_ref = Column(String)  # 1С Ref_Key (GUID)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
@@ -257,6 +260,102 @@ class Contract(Base):
     __table_args__ = (
         Index("idx_contracts_company", "company_id"),
         Index("idx_contracts_cp", "counterparty_id"),
+    )
+
+
+# ============================================================
+# НСИ: Склады + Банковские счета
+# ============================================================
+
+class Warehouse(Base):
+    __tablename__ = "warehouses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    code = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    address = Column(String)
+    type = Column(String, nullable=False, default="warehouse")  # warehouse / station / office / other
+    external_ref = Column(String)  # 1С Ref_Key
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    __table_args__ = (
+        Index("idx_wh_company_code", "company_id", "code", unique=True),
+    )
+
+
+class BankAccount(Base):
+    __tablename__ = "bank_accounts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    number = Column(String, nullable=False)
+    bank_name = Column(String, nullable=False, default="")
+    bik = Column(String, nullable=False, default="")
+    corr_account = Column(String)
+    currency = Column(String, nullable=False, default="RUB")
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id"))
+    external_ref = Column(String)  # 1С Ref_Key
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    organization = relationship("Organization")
+
+    __table_args__ = (
+        Index("idx_ba_company", "company_id"),
+        Index("idx_ba_number", "company_id", "number", unique=True),
+    )
+
+
+# ============================================================
+# Интеграция 1С (OneCConnection + OneCSyncLog)
+# ============================================================
+
+class OneCConnection(Base):
+    __tablename__ = "onec_connections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id = Column(String, ForeignKey("companies.id"), nullable=False)
+    name = Column(String, nullable=False, default="1С:Бухгалтерия")
+    odata_url = Column(String, nullable=False)  # http://host/base/odata/standard.odata
+    username = Column(String, nullable=False)
+    password_encrypted = Column(String, nullable=False)  # Fernet-шифрование
+    exchange_path = Column(String)  # путь к папке обмена
+    status = Column(String, nullable=False, default="inactive")  # inactive / active / error
+    last_sync_at = Column(DateTime(timezone=True))
+    sync_interval_sec = Column(Integer, nullable=False, default=300)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+    sync_logs = relationship("OneCSyncLog", back_populates="connection", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_onec_conn_company", "company_id"),
+    )
+
+
+class OneCSyncLog(Base):
+    __tablename__ = "onec_sync_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    connection_id = Column(UUID(as_uuid=True), ForeignKey("onec_connections.id", ondelete="CASCADE"), nullable=False)
+    direction = Column(String, nullable=False)  # inbound / outbound
+    sync_type = Column(String, nullable=False)  # catalogs / documents / full / export
+    status = Column(String, nullable=False, default="running")  # running / success / error
+    items_processed = Column(Integer, nullable=False, default=0)
+    items_created = Column(Integer, nullable=False, default=0)
+    items_updated = Column(Integer, nullable=False, default=0)
+    items_errors = Column(Integer, nullable=False, default=0)
+    details = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    finished_at = Column(DateTime(timezone=True))
+
+    connection = relationship("OneCConnection", back_populates="sync_logs")
+
+    __table_args__ = (
+        Index("idx_sync_log_conn", "connection_id"),
+        Index("idx_sync_log_started", "started_at"),
     )
 
 
