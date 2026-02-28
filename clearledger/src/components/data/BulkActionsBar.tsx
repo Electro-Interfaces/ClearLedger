@@ -10,7 +10,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { X, ChevronDown, Send, Trash2, Download, Archive, EyeOff } from 'lucide-react'
+import { X, ChevronDown, Send, Trash2, Download, Archive, EyeOff, ShieldCheck, Upload } from 'lucide-react'
 import type { EntryStatus } from '@/config/statuses'
 import { statuses } from '@/config/statuses'
 
@@ -23,6 +23,8 @@ interface BulkActionsBarProps {
   onExportCsv?: () => void
   onArchive?: () => void
   onExclude?: () => void
+  onAuditor?: () => void
+  onExportTo1C?: () => void
 }
 
 export function BulkActionsBar({
@@ -34,6 +36,8 @@ export function BulkActionsBar({
   onExportCsv,
   onArchive,
   onExclude,
+  onAuditor,
+  onExportTo1C,
 }: BulkActionsBarProps) {
   if (selectedCount === 0) return null
 
@@ -64,6 +68,20 @@ export function BulkActionsBar({
           <Send />
           Передать
         </Button>
+
+        {onExportTo1C && (
+          <Button variant="outline" size="sm" onClick={onExportTo1C}>
+            <Upload />
+            Выгрузить в 1С
+          </Button>
+        )}
+
+        {onAuditor && (
+          <Button variant="outline" size="sm" onClick={onAuditor} className="text-violet-500">
+            <ShieldCheck />
+            Аудитор
+          </Button>
+        )}
 
         {onArchive && (
           <AlertDialog>

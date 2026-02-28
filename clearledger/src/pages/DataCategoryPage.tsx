@@ -2,10 +2,13 @@ import { useState, useMemo, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
-import { useEntriesByCategory, useTransferEntries, useVerifyEntry, useDeleteEntry, useArchiveEntry, useExcludeEntry } from '@/hooks/useEntries'
+import { useEntriesByCategory, useTransferEntries, useVerifyEntry, useDeleteEntry, useArchiveEntry, useExcludeEntry, useAuditorVerify, useSetSyncStatus } from '@/hooks/useEntries'
 import { DataTableToolbar } from '@/components/data/DataTableToolbar'
 import { CategoryTabs } from '@/components/data/CategoryTabs'
 import { DataTable } from '@/components/data/DataTable'
+import { RegisterTable } from '@/components/data/RegisterTable'
+import { ViewSwitcher, type ViewMode } from '@/components/data/ViewSwitcher'
+import { RegisterStatsBar } from '@/components/data/RegisterStatsBar'
 import { BulkActionsBar } from '@/components/data/BulkActionsBar'
 import { PaginationWrapper } from '@/components/common/PaginationWrapper'
 import { ExportModal } from '@/components/common/ExportModal'
@@ -13,15 +16,21 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { QueryError } from '@/components/common/QueryError'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { toast } from 'sonner'
 import { Download } from 'lucide-react'
 import type { FilterState } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 
+// Lazy load тяжёлых компонентов
+import { lazy, Suspense } from 'react'
+const DocumentTreeView = lazy(() => import('@/components/data/DocumentTreeView').then(m => ({ default: m.DocumentTreeView })))
+
 export function DataCategoryPage() {
   const { category } = useParams<{ category: string }>()
   const navigate = useNavigate()
   const { company, companyId } = useCompany()
+  const isMobile = useIsMobile()
 
   const categoryConfig = category ? getCategoryById(company.profileId, category) : undefined
 
@@ -32,6 +41,7 @@ export function DataCategoryPage() {
     subcategory: 'all',
   })
 
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [activeSubcategory, setActiveSubcategory] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(1)
@@ -49,6 +59,11 @@ export function DataCategoryPage() {
   const deleteEntry = useDeleteEntry()
   const archiveEntry = useArchiveEntry()
   const excludeEntry = useExcludeEntry()
+  const auditorVerify = useAuditorVerify()
+  const setSyncStatus = useSetSyncStatus()
+
+  // Мобильный → только list
+  const effectiveViewMode = isMobile ? 'list' : viewMode
 
   const handleSubcategoryChange = useCallback((value: string) => {
     setActiveSubcategory(value)
@@ -108,6 +123,31 @@ export function DataCategoryPage() {
     setSelectedIds(new Set())
   }
 
+  function handleBulkAuditor() {
+    for (const id of selectedIds) {
+      auditorVerify.mutate(id)
+    }
+    toast.success(`Аудитор запущен для ${selectedIds.size} записей`)
+  }
+
+  function handleExportTo1C() {
+    const selected = entries.filter((e) => selectedIds.has(e.id))
+    const ready = selected.filter(
+      (e) => e.docPurpose === 'accounting' && (e.status === 'verified' || e.status === 'transferred'),
+    )
+    if (ready.length === 0) {
+      toast.error('Нет документов, готовых к выгрузке (нужен бухгалтерский + проверен/передан)')
+      return
+    }
+    // Передаём и обновляем syncStatus
+    transferEntries.mutate(ready.map((e) => e.id))
+    for (const e of ready) {
+      setSyncStatus.mutate({ id: e.id, syncStatus: 'exported' })
+    }
+    toast.success(`Выгружено ${ready.length} из ${selected.length} документов в 1С`)
+    setSelectedIds(new Set())
+  }
+
   function handleExportCsv() {
     const selected = entries.filter((e) => selectedIds.has(e.id))
     const header = 'ID,Название,Категория,Подкатегория,Статус,Источник,Дата создания\n'
@@ -145,11 +185,18 @@ export function DataCategoryPage() {
     <div className="space-y-4 pb-16">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight">{categoryConfig.label}</h1>
-        <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}>
-          <Download className="size-4" />
-          Экспорт
-        </Button>
+        <div className="flex items-center gap-2">
+          {!isMobile && (
+            <ViewSwitcher value={effectiveViewMode} onChange={setViewMode} />
+          )}
+          <Button variant="outline" size="sm" onClick={() => setExportOpen(true)}>
+            <Download className="size-4" />
+            Экспорт
+          </Button>
+        </div>
       </div>
+
+      <RegisterStatsBar entries={entries} />
 
       <DataTableToolbar filters={filters} onFiltersChange={handleFiltersChange} />
 
@@ -199,20 +246,43 @@ export function DataCategoryPage() {
         onSubcategoryChange={handleSubcategoryChange}
       />
 
-      <DataTable
-        entries={paginatedEntries}
-        onRowClick={handleRowClick}
-        selectedIds={selectedIds}
-        onSelectionChange={setSelectedIds}
-      />
+      {effectiveViewMode === 'list' && (
+        <DataTable
+          entries={paginatedEntries}
+          onRowClick={handleRowClick}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          onAuditorVerify={(id) => auditorVerify.mutate(id)}
+        />
+      )}
 
-      <PaginationWrapper
-        total={entries.length}
-        page={page}
-        pageSize={pageSize}
-        onPageChange={setPage}
-        onPageSizeChange={setPageSize}
-      />
+      {effectiveViewMode === 'register' && (
+        <RegisterTable
+          entries={paginatedEntries}
+          onRowClick={handleRowClick}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+        />
+      )}
+
+      {effectiveViewMode === 'tree' && (
+        <Suspense fallback={<div className="flex items-center justify-center py-12 text-muted-foreground">Загрузка...</div>}>
+          <DocumentTreeView
+            entries={entries}
+            onRowClick={handleRowClick}
+          />
+        </Suspense>
+      )}
+
+      {effectiveViewMode !== 'tree' && (
+        <PaginationWrapper
+          total={entries.length}
+          page={page}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      )}
 
       <BulkActionsBar
         selectedCount={selectedIds.size}
@@ -223,6 +293,8 @@ export function DataCategoryPage() {
         onExportCsv={handleExportCsv}
         onArchive={handleBulkArchive}
         onExclude={handleBulkExclude}
+        onAuditor={handleBulkAuditor}
+        onExportTo1C={handleExportTo1C}
       />
 
       <ExportModal open={exportOpen} onOpenChange={setExportOpen} entries={entries} companyId={companyId} />

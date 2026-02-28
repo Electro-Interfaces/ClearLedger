@@ -31,6 +31,7 @@ import {
   GitCompare,
   Building2,
   Database,
+  Bot,
   ChevronRight,
   type LucideIcon,
 } from 'lucide-react'
@@ -214,7 +215,14 @@ export function AppSidebar() {
 
         <SidebarSeparator className="mx-0" />
 
-        {/* ── Блок 4: Настройки ── */}
+        {/* ── Блок 4: Партнёр ── */}
+        <CollapsibleSidebarGroup id="partner" label="Партнёр" icon={Bot} defaultOpen={false} collapsed={collapsed} onToggle={handleToggle}>
+          <SidebarNavItem item={{ title: 'AI Аудитор', path: '/partner/auditor', icon: Bot }} />
+        </CollapsibleSidebarGroup>
+
+        <SidebarSeparator className="mx-0" />
+
+        {/* ── Блок 5: Настройки ── */}
         <CollapsibleSidebarGroup id="settings" label="Настройки" icon={Settings} defaultOpen={false} collapsed={collapsed} onToggle={handleToggle}>
           <SidebarNavItem item={{ title: 'Компании', path: '/settings/companies', icon: Building2 }} />
           <SidebarNavItem item={{ title: 'Параметры', path: '/settings', icon: Settings }} />

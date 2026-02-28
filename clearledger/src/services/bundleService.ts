@@ -430,6 +430,44 @@ export async function reparent(
   return { allowed: true }
 }
 
+/** Получить все деревья комплектов + одиночные документы */
+export async function getAllBundleTrees(
+  companyId: string,
+  entries: DataEntry[],
+): Promise<{ trees: BundleTree[]; orphans: DataEntry[] }> {
+  // Собираем уникальные rootId
+  const rootIds = new Set<string>()
+  for (const e of entries) {
+    if (e.metadata._bundleRootId) {
+      rootIds.add(e.metadata._bundleRootId)
+    }
+  }
+
+  // Собираем деревья
+  const trees: BundleTree[] = []
+  const inBundle = new Set<string>()
+
+  for (const rootId of rootIds) {
+    const tree = await getBundleTree(companyId, rootId)
+    if (tree) {
+      trees.push(tree)
+      // Собираем все ID в дереве
+      function collectIds(node: BundleNode) {
+        inBundle.add(node.entry.id)
+        for (const child of node.children) {
+          collectIds(child)
+        }
+      }
+      collectIds(tree.root)
+    }
+  }
+
+  // Одиночные документы — не входят ни в один комплект
+  const orphans = entries.filter((e) => !inBundle.has(e.id))
+
+  return { trees, orphans }
+}
+
 /** Авто-предложения кандидатов для комплекта */
 export async function suggestBundleMembers(
   companyId: string,

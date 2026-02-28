@@ -33,6 +33,7 @@ const ExportPage = lazy(() => import('@/pages/ExportPage').then((m) => ({ defaul
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const RegisterPage = lazy(() => import('@/pages/RegisterPage').then((m) => ({ default: m.RegisterPage })))
+const AuditorPage = lazy(() => import('@/pages/partner/AuditorPage').then((m) => ({ default: m.AuditorPage })))
 
 function PageLoader() {
   return (
@@ -139,6 +140,7 @@ const router = createBrowserRouter([
               { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
               { path: '/settings/companies', element: <LazyPage><CompaniesPage /></LazyPage> },
               { path: '/settings/companies/:id', element: <LazyPage><CompanyEditPage /></LazyPage> },
+              { path: '/partner/auditor', element: <LazyPage><AuditorPage /></LazyPage> },
               { path: '*', element: <NotFoundPage /> },
             ],
           },

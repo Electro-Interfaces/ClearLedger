@@ -6,12 +6,14 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as bundleSvc from '@/services/bundleService'
 import { toast } from 'sonner'
+import type { DataEntry } from '@/types'
 
 // ---- Keys ----
 
 const keys = {
   all: (companyId: string) => ['bundle', companyId] as const,
   tree: (companyId: string, entryId: string) => ['bundle', companyId, 'tree', entryId] as const,
+  allTrees: (companyId: string) => ['bundle', companyId, 'all-trees'] as const,
   suggestions: (companyId: string, entryId: string) => ['bundle', companyId, 'suggestions', entryId] as const,
 }
 
@@ -24,6 +26,17 @@ export function useBundleTree(entryId: string) {
     queryKey: keys.tree(companyId, entryId),
     queryFn: () => bundleSvc.getBundleTree(companyId, entryId),
     enabled: !!entryId,
+    staleTime: 30_000,
+  })
+}
+
+/** Все деревья комплектов + одиночные документы */
+export function useAllBundleTrees(entries: DataEntry[]) {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: [...keys.allTrees(companyId), entries.length],
+    queryFn: () => bundleSvc.getAllBundleTrees(companyId, entries),
+    enabled: entries.length > 0,
     staleTime: 30_000,
   })
 }

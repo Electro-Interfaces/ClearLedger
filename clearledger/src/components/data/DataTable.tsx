@@ -1,25 +1,70 @@
 import { useState, useMemo, memo, useCallback } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { formatDate } from '@/lib/formatDate'
 import type { DataEntry } from '@/types'
-import { ArrowUpDown, FolderTree } from 'lucide-react'
+import { ArrowUpDown, FolderTree, ShieldCheck } from 'lucide-react'
 
 type SortField = 'title' | 'createdAt' | 'source' | 'status'
 type SortDirection = 'asc' | 'desc'
+
+const AUDITOR_STATUS_MAP: Record<string, { label: string; className: string }> = {
+  approved: { label: 'OK', className: 'border-green-500 text-green-500' },
+  needs_review: { label: 'Проверить', className: 'border-yellow-500 text-yellow-500' },
+  rejected: { label: 'Отклонён', className: 'border-red-500 text-red-500' },
+}
+
+function AuditorBadge({ entry }: { entry: DataEntry }) {
+  const vs = entry.metadata._verificationStatus
+  if (!vs) return null
+  const cfg = AUDITOR_STATUS_MAP[vs]
+  if (!cfg) return null
+
+  const confidence = entry.metadata._verificationConfidence
+  const fails = entry.metadata._verificationFails
+  const warnings = entry.metadata._verificationWarnings
+
+  const tooltipText = [
+    confidence && `Уверенность: ${confidence}%`,
+    fails && fails !== '0' && `Ошибок: ${fails}`,
+    warnings && warnings !== '0' && `Предупреждений: ${warnings}`,
+  ].filter(Boolean).join(', ')
+
+  const badge = (
+    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${cfg.className}`}>
+      {cfg.label}
+    </Badge>
+  )
+
+  if (tooltipText) {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>{badge}</TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">{tooltipText}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
+  return badge
+}
 
 interface DataTableProps {
   entries: DataEntry[]
   onRowClick: (id: string) => void
   selectedIds?: Set<string>
   onSelectionChange?: (ids: Set<string>) => void
+  onAuditorVerify?: (id: string) => void
 }
 
-export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange }: DataTableProps) {
+export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange, onAuditorVerify }: DataTableProps) {
   const isMobile = useIsMobile()
   const [sortField, setSortField] = useState<SortField>('createdAt')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -135,7 +180,9 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
           <SortableHead field="title" onSort={handleSort}>Название</SortableHead>
           <SortableHead field="createdAt" onSort={handleSort}>Дата</SortableHead>
           <SortableHead field="source" onSort={handleSort}>Источник</SortableHead>
+          <TableHead>Аудитор</TableHead>
           <SortableHead field="status" onSort={handleSort}>Статус</SortableHead>
+          {onAuditorVerify && <TableHead className="w-10" />}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -181,8 +228,24 @@ export function DataTable({ entries, onRowClick, selectedIds, onSelectionChange 
               <SourceBadge source={entry.source} />
             </TableCell>
             <TableCell>
+              <AuditorBadge entry={entry} />
+            </TableCell>
+            <TableCell>
               <StatusBadge status={entry.status} />
             </TableCell>
+            {onAuditorVerify && (
+              <TableCell>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Проверить аудитором"
+                  onClick={(e) => { e.stopPropagation(); onAuditorVerify(entry.id) }}
+                  className="text-violet-500 hover:text-violet-400 hover:bg-violet-500/10"
+                >
+                  <ShieldCheck className="size-4" />
+                </Button>
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>

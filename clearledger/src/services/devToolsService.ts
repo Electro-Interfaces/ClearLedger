@@ -5,12 +5,14 @@
  */
 
 import type { EntryStatus } from '@/config/statuses'
-import type { DataEntry, DocPurpose, SyncStatus } from '@/types'
+import type { DataEntry, DocPurpose, SyncStatus, DocumentLink } from '@/types'
 import { getItem, setItem, removeItem, entriesKey } from './storage'
 import { getEntries, createEntry, seedIfNeeded } from './dataEntryService'
 import { getConnectors } from './connectorService'
 import { getAllDocumentTypes } from '@/config/categories'
 import { defaultCompanies } from '@/config/companies'
+import { resolveRole } from './bundleService'
+import { nanoid } from 'nanoid'
 import type { ProfileId } from '@/config/profiles'
 
 // ---- Константы ----
@@ -114,7 +116,16 @@ export function clearAllData(): void {
   }
 }
 
-/** Генерация N записей с рандомными данными */
+// ---- Типы документов, которые могут быть подчинены договору ----
+
+const SUBORDINATE_DOC_TYPES = [
+  'ttn-gsm', 'act-acceptance', 'act-reconciliation', 'act-work',
+  'invoice', 'invoice-factura', 'upd', 'supply-invoice', 'torg-12',
+]
+
+const LINKS_KEY = 'clearledger-links'
+
+/** Генерация N записей с рандомными данными + бандлы */
 export async function generateEntries(
   companyId: string,
   profileId: ProfileId,
@@ -124,8 +135,12 @@ export async function generateEntries(
   if (docTypes.length === 0) return []
 
   const counterparties = COUNTERPARTIES_BY_PROFILE[profileId] ?? COUNTERPARTIES_BY_PROFILE.general
+  // Берём 4-6 контрагентов для концентрации документов
+  const activeCounterparties = counterparties.slice(0, Math.min(6, counterparties.length))
 
   const created: DataEntry[] = []
+
+  // Шаг 1: генерируем записи, назначая контрагентов из ограниченного пула
   for (let i = 0; i < count; i++) {
     const dt = randomItem(docTypes)
     const source = randomItem(ALL_SOURCES)
@@ -135,11 +150,9 @@ export async function generateEntries(
     const createdAt = randomDate(30)
     const docDate = new Date(createdAt).toISOString().slice(0, 10)
 
-    // 80% accounting, 10% reference, 10% context
     const purposeRoll = Math.random()
     const docPurpose: DocPurpose = purposeRoll < 0.8 ? 'accounting' : purposeRoll < 0.9 ? 'reference' : 'context'
 
-    // syncStatus зависит от docPurpose
     let syncStatus: SyncStatus = 'not_applicable'
     if (docPurpose === 'accounting') {
       const syncRoll = Math.random()
@@ -160,7 +173,7 @@ export async function generateEntries(
       metadata: {
         docNumber,
         docDate,
-        counterparty: randomItem(counterparties),
+        counterparty: randomItem(activeCounterparties),
         amount,
       },
     })
@@ -176,7 +189,84 @@ export async function generateEntries(
 
     created.push(entry)
   }
+
+  // Шаг 2: создаём бандлы (Договор → подчинённые документы)
+  buildBundles(companyId, created)
+
   return created
+}
+
+/** Создаёт бандлы из сгенерированных записей: договоры становятся корнями */
+function buildBundles(companyId: string, created: DataEntry[]) {
+  const entries = getItem<DataEntry[]>(entriesKey(companyId), [])
+  const entryMap = new Map(entries.map((e) => [e.id, e]))
+  const links = getItem<DocumentLink[]>(LINKS_KEY, [])
+
+  // Группируем созданные записи по контрагенту
+  const byCounterparty = new Map<string, DataEntry[]>()
+  for (const e of created) {
+    const cp = e.metadata.counterparty || ''
+    if (!cp) continue
+    const arr = byCounterparty.get(cp)
+    if (arr) arr.push(e)
+    else byCounterparty.set(cp, [e])
+  }
+
+  for (const [, cpEntries] of byCounterparty) {
+    // Ищем договоры в этой группе
+    const contracts = cpEntries.filter((e) => e.docTypeId === 'contract')
+    if (contracts.length === 0) continue
+
+    // Подчинённые документы (не договоры, допустимые типы)
+    const subordinates = cpEntries.filter((e) =>
+      e.docTypeId !== 'contract' && SUBORDINATE_DOC_TYPES.includes(e.docTypeId ?? ''),
+    )
+
+    // Для каждого договора берём 2-5 подчинённых
+    let subIdx = 0
+    for (const contract of contracts) {
+      const contractEntry = entryMap.get(contract.id)
+      if (!contractEntry) continue
+
+      // Помечаем договор как корень бандла
+      contractEntry.metadata = {
+        ...contractEntry.metadata,
+        _bundleRootId: contract.id,
+        _bundleRole: 'contract',
+      }
+
+      const childCount = Math.min(randomInt(2, 5), subordinates.length - subIdx)
+      for (let i = 0; i < childCount; i++) {
+        const child = subordinates[subIdx + i]
+        if (!child) break
+        const childEntry = entryMap.get(child.id)
+        if (!childEntry) continue
+
+        const role = resolveRole(child.docTypeId)
+
+        // Помечаем ребёнка
+        childEntry.metadata = {
+          ...childEntry.metadata,
+          _bundleRootId: contract.id,
+          _bundleRole: role,
+        }
+
+        // Создаём subordinate-линк
+        links.push({
+          id: nanoid(),
+          sourceEntryId: contract.id,
+          targetEntryId: child.id,
+          type: 'subordinate',
+          createdAt: new Date().toISOString(),
+        })
+      }
+      subIdx += childCount
+    }
+  }
+
+  // Сохраняем обновлённые записи и линки
+  setItem(entriesKey(companyId), entries)
+  setItem(LINKS_KEY, links)
 }
 
 /** Статистика хранилища */
