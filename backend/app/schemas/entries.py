@@ -35,6 +35,8 @@ class EntryCreate(BaseModel):
     source_type: str
     source_label: str = ""
     metadata: dict[str, Any] = {}
+    doc_purpose: str = "accounting"
+    sync_status: str = "not_applicable"
 
 
 class EntryUpdate(BaseModel):
@@ -45,6 +47,8 @@ class EntryUpdate(BaseModel):
     status: str | None = None
     source_label: str | None = None
     metadata: dict[str, Any] | None = None
+    doc_purpose: str | None = None
+    sync_status: str | None = None
 
 
 class EntryOut(BaseModel):
@@ -56,6 +60,8 @@ class EntryOut(BaseModel):
     subcategory_id: str
     doc_type_id: str | None
     status: str
+    doc_purpose: str
+    sync_status: str
     source_type: str
     source_label: str
     metadata: dict[str, Any] = Field(validation_alias="metadata_")

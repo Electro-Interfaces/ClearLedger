@@ -453,6 +453,7 @@ async def _sync_one_doc_type(
                 if existing:
                     existing.title = f"{mapped['number']} от {mapped.get('date', '')}"
                     existing.metadata_ = metadata
+                    existing.sync_status = "confirmed"
                     existing.updated_at = datetime.now(timezone.utc)
                     stats["updated"] += 1
                 else:
@@ -466,6 +467,8 @@ async def _sync_one_doc_type(
                         source_type="oneC",
                         source_label=f"1С: {entity_name.replace('Document_', '')}",
                         metadata_=metadata,
+                        doc_purpose="accounting",
+                        sync_status="confirmed",
                     )
                     db.add(entry)
                     stats["created"] += 1

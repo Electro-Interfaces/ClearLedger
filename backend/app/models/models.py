@@ -8,7 +8,7 @@ from sqlalchemy import (
     String, Text, DateTime, Float,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
+from sqlalchemy.dialects.postgresql import UUID, JSONB, INET, ARRAY
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -87,6 +87,8 @@ class Entry(Base):
     subcategory_id = Column(String, nullable=False)
     doc_type_id = Column(String)
     status = Column(String, nullable=False, default="new")
+    doc_purpose = Column(String, nullable=False, default="accounting")
+    sync_status = Column(String, nullable=False, default="not_applicable")
     source_type = Column(String, nullable=False)  # upload, photo, email, etc.
     source_label = Column(String, nullable=False, default="")
     metadata_ = Column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
@@ -104,6 +106,8 @@ class Entry(Base):
         Index("idx_entries_status", "company_id", "status"),
         Index("idx_entries_category", "company_id", "category_id"),
         Index("idx_entries_created", "company_id", "created_at"),
+        Index("idx_entries_doc_purpose", "company_id", "doc_purpose"),
+        Index("idx_entries_sync_status", "company_id", "sync_status"),
     )
 
 
@@ -357,6 +361,26 @@ class OneCSyncLog(Base):
         Index("idx_sync_log_conn", "connection_id"),
         Index("idx_sync_log_started", "started_at"),
     )
+
+
+# ============================================================
+# Аудит-данные (облачный аудитор)
+# ============================================================
+
+class AuditFinding(Base):
+    __tablename__ = "audit_findings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    finding_type = Column(String, nullable=False)
+    severity = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    affected_entry_ids = Column(ARRAY(String), server_default="{}")
+    recommendation = Column(Text)
+    cloud_finding_id = Column(String)
+    status = Column(String, nullable=False, server_default=text("'open'"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
 
 
 # ============================================================

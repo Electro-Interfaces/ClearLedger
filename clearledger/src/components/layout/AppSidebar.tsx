@@ -1,27 +1,26 @@
+import { useState, useCallback } from 'react'
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarSeparator,
 } from '@/components/ui/sidebar'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   PackageOpen,
   FileText,
-  Wallet,
-  Activity,
-  Image,
   Plug,
-  Users,
-  Scale,
-  ShieldCheck,
   Settings,
   Inbox,
   LogOut,
@@ -29,9 +28,11 @@ import {
   BookOpen,
   Download,
   GitCompare,
+  Building2,
+  Database,
+  ChevronRight,
   type LucideIcon,
 } from 'lucide-react'
-import { useCompany } from '@/contexts/CompanyContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useInboxCount } from '@/hooks/useEntries'
 import { useReferenceStats } from '@/hooks/useReferences'
@@ -42,23 +43,25 @@ interface NavItem {
   icon: LucideIcon
 }
 
-const iconMap: Record<string, LucideIcon> = {
-  FileText, Wallet, Activity, Image, Users, Scale, ShieldCheck,
+// ---- Persist collapsed state ----
+
+const STORAGE_KEY = 'clearledger-sidebar-collapsed'
+
+function loadCollapsed(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* ignore */ }
+  return {}
 }
 
-const dashboardItem: NavItem = {
-  title: 'Дашборд',
-  path: '/',
-  icon: LayoutDashboard,
+function saveCollapsed(state: Record<string, boolean>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch { /* ignore */ }
 }
 
-const inputItems: NavItem[] = [
-  { title: 'Приём', path: '/input', icon: PackageOpen },
-]
-
-const systemItems: NavItem[] = [
-  { title: 'Коннекторы', path: '/connectors', icon: Plug },
-]
+// ---- Nav items ----
 
 function SidebarNavItem({ item }: { item: NavItem }) {
   return (
@@ -120,84 +123,106 @@ function ReferenceNavItem() {
   )
 }
 
+// ---- Collapsible group (TradeFrame style) ----
+
+interface CollapsibleGroupProps {
+  id: string
+  label: string
+  icon: LucideIcon
+  defaultOpen?: boolean
+  collapsed: Record<string, boolean>
+  onToggle: (id: string, open: boolean) => void
+  children: React.ReactNode
+}
+
+function CollapsibleSidebarGroup({ id, label, icon: Icon, defaultOpen = true, collapsed, onToggle, children }: CollapsibleGroupProps) {
+  const isOpen = collapsed[id] === undefined ? defaultOpen : !collapsed[id]
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={(open) => onToggle(id, open)}>
+      <SidebarGroup className="py-0">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="w-full text-sidebar-foreground text-sm font-semibold tracking-wider hover:bg-sidebar-accent active:bg-sidebar-accent transition-all duration-200 ease-in-out flex items-center gap-3 uppercase px-3 py-3 rounded-md cursor-pointer select-none"
+          >
+            <Icon className="size-5 shrink-0 opacity-70" />
+            <span className="flex-1 text-left">{label}</span>
+            <ChevronRight
+              className={`size-4 shrink-0 opacity-50 transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}
+            />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarMenu>
+            {children}
+          </SidebarMenu>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
+  )
+}
+
+// ---- Main sidebar ----
+
 export function AppSidebar() {
-  const { effectiveCategories } = useCompany()
   const { isApiMode, user, logout } = useAuth()
   const navigate = useNavigate()
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed)
 
-  const dataItems: NavItem[] = [
-    { title: 'Все данные', path: '/data', icon: FileText },
-    ...effectiveCategories.map((cat) => ({
-      title: cat.label,
-      path: `/data/${cat.id}`,
-      icon: iconMap[cat.icon] ?? FileText,
-    })),
-  ]
+  const handleToggle = useCallback((id: string, open: boolean) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [id]: !open }
+      saveCollapsed(next)
+      return next
+    })
+  }, [])
 
   return (
     <Sidebar collapsible="icon" style={{ paddingTop: 'var(--header-height)' }}>
       <SidebarHeader>
         <SidebarMenu>
-          <SidebarNavItem item={dashboardItem} />
+          <SidebarNavItem item={{ title: 'Дашборд', path: '/', icon: LayoutDashboard }} />
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent className="scroll-thin">
-        <SidebarGroup>
-          <SidebarMenu>
-            <InboxNavItem />
-            {inputItems.map((item) => (
-              <SidebarNavItem key={item.path} item={item} />
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+      <SidebarContent className="scroll-thin px-2">
+        {/* ── Блок 1: Поступление ── */}
+        <CollapsibleSidebarGroup id="intake" label="Поступление" icon={PackageOpen} collapsed={collapsed} onToggle={handleToggle}>
+          <SidebarNavItem item={{ title: 'Приём', path: '/input', icon: PackageOpen }} />
+          <InboxNavItem />
+        </CollapsibleSidebarGroup>
 
-        <SidebarSeparator />
+        <SidebarSeparator className="mx-0" />
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Данные</SidebarGroupLabel>
-          <SidebarMenu>
-            {dataItems.map((item) => (
-              <SidebarNavItem key={item.path} item={item} />
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        {/* ── Блок 2: Документы ── */}
+        <CollapsibleSidebarGroup id="documents" label="Документы" icon={FileText} collapsed={collapsed} onToggle={handleToggle}>
+          <SidebarNavItem item={{ title: 'Все данные', path: '/data', icon: FileText }} />
+          <SidebarNavItem item={{ title: 'Отчёты', path: '/reports', icon: BarChart3 }} />
+          <SidebarNavItem item={{ title: 'Экспорт', path: '/export', icon: Download }} />
+        </CollapsibleSidebarGroup>
 
-        <SidebarSeparator />
+        <SidebarSeparator className="mx-0" />
 
-        <SidebarGroup>
-          <SidebarMenu>
-            <ReferenceNavItem />
-            <SidebarNavItem item={{ title: 'Сверка', path: '/reconciliation', icon: GitCompare }} />
-            <SidebarNavItem item={{ title: 'Экспорт', path: '/export', icon: Download }} />
-          </SidebarMenu>
-        </SidebarGroup>
+        {/* ── Блок 3: База (эталонные данные, 1С) ── */}
+        <CollapsibleSidebarGroup id="base" label="База" icon={Database} collapsed={collapsed} onToggle={handleToggle}>
+          <ReferenceNavItem />
+          <SidebarNavItem item={{ title: 'Сверка', path: '/reconciliation', icon: GitCompare }} />
+        </CollapsibleSidebarGroup>
 
-        <SidebarSeparator />
+        <SidebarSeparator className="mx-0" />
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Аналитика</SidebarGroupLabel>
-          <SidebarMenu>
-            <SidebarNavItem item={{ title: 'Отчёты', path: '/reports', icon: BarChart3 }} />
-          </SidebarMenu>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Система</SidebarGroupLabel>
-          <SidebarMenu>
-            {systemItems.map((item) => (
-              <SidebarNavItem key={item.path} item={item} />
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        {/* ── Блок 4: Настройки ── */}
+        <CollapsibleSidebarGroup id="settings" label="Настройки" icon={Settings} defaultOpen={false} collapsed={collapsed} onToggle={handleToggle}>
+          <SidebarNavItem item={{ title: 'Коннекторы', path: '/connectors', icon: Plug }} />
+          <SidebarNavItem item={{ title: 'Компании', path: '/settings/companies', icon: Building2 }} />
+          <SidebarNavItem item={{ title: 'Параметры', path: '/settings', icon: Settings }} />
+        </CollapsibleSidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>
-        <SidebarMenu>
-          <SidebarNavItem item={{ title: 'Настройки', path: '/settings', icon: Settings }} />
-          {isApiMode && user && (
+        {isApiMode && user && (
+          <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
                 tooltip="Выйти"
@@ -207,8 +232,8 @@ export function AppSidebar() {
                 <span>{user.name}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-          )}
-        </SidebarMenu>
+          </SidebarMenu>
+        )}
       </SidebarFooter>
     </Sidebar>
   )

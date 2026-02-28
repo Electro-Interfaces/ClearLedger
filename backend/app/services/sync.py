@@ -183,6 +183,8 @@ async def promote_to_public(db: AsyncSession, raw_entry_id: UUID, result: dict):
         source_type=source_type,
         source_label=raw.file_name,
         metadata_=metadata,
+        doc_purpose="accounting",
+        sync_status="not_applicable",
     )
     db.add(entry)
     logger.info(f"Promoted: {raw.file_name} → {entry.title}")

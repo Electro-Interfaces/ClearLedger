@@ -191,12 +191,11 @@ new → recognized → verified → transferred
 
 ## Данные — просмотр по категориям
 
-Раздел «Данные» в сайдбаре — динамические пункты из профиля компании. Каждая категория — таблица с фильтрами:
-- Поиск по тексту
-- Фильтр по статусу
-- Фильтр по источнику
-- Фильтр по подкатегории
-- Фильтр по периоду
+Раздел «Документы» в сайдбаре: **Все данные**, **Отчёты**, **Экспорт**. Категории (Первичные, Финансовый учёт и т.д.) доступны как фильтры на странице «Все данные». Маршруты `/data/:categoryId` работают.
+
+Фильтры:
+- Поиск по тексту, статус, источник, подкатегория, период
+- Назначение документа (docPurpose), статус синхронизации (syncStatus)
 
 Детальная страница записи: все метаданные, история изменений, превью документа.
 
@@ -647,7 +646,7 @@ __cl.export(companyId?) — экспорт данных компании
 
 ### Навигация
 
-- Группа «Аналитика» в сайдбаре с иконкой BarChart3 → /reports
+- Отчёты → /reports в разделе «Документы» сайдбара
 - Lazy-load маршрут /reports в App.tsx
 
 ### E2E тесты
@@ -746,6 +745,142 @@ server/
 
 ---
 
+---
+
+## v0.6.0 — Живое подключение к 1С:Бухгалтерия 3.0
+
+Гибридная интеграция: **OData для чтения** из 1С + **EnterpriseData XML для записи** в 1С. Файловая база 1С допускает одно OData-соединение → burst-sync (быстро подключиться, забрать дельту, отключиться).
+
+### Бэкенд: OData-клиент и синхронизация
+
+| Компонент | Файл | Описание |
+|-----------|------|----------|
+| OData-клиент | `backend/app/services/onec/odata_client.py` | httpx AsyncClient, Basic Auth, пагинация ($top/$skip), retry 3 попытки с backoff (2с→5с→15с), лимит сессии 5 мин, пауза 200мс между запросами |
+| Маппинг | `backend/app/services/onec/mapping.py` | OData → модели ClearLedger: 6 справочников + 5 типов документов |
+| Sync-оркестратор | `backend/app/services/onec/sync_service.py` | `sync_catalogs()`, `sync_documents()`, `sync_full()` с bulk upsert, ведением лога, resolve FK через кеш external_ref |
+| Файловый обмен | `backend/app/services/onec/file_exchange.py` | `export_verified_entries()` → EnterpriseData XML v1.5 в `{exchange_path}/to_1c/`, `check_feedback()` — чтение `from_1c/status_*.xml` |
+| Шифрование | `backend/app/services/onec/crypto.py` | Fernet (SHA-256 от SECRET_KEY) для паролей 1С в PostgreSQL |
+| Scheduler | `backend/app/services/onec/scheduler.py` | Background loop (60с), автозапуск sync для active-подключений по интервалу |
+
+### Маппинг справочников
+
+| OData-эндпоинт 1С | Модель ClearLedger | Ключ upsert |
+|---|---|---|
+| `Catalog_Контрагенты` | Counterparty | ИНН+КПП |
+| `Catalog_Организации` | Organization | ИНН+КПП |
+| `Catalog_Номенклатура` | Nomenclature | Код |
+| `Catalog_ДоговорыКонтрагентов` | Contract | Номер+Контрагент |
+| `Catalog_Склады` | Warehouse | Код |
+| `Catalog_БанковскиеСчета` | BankAccount | Номер счёта |
+
+### Маппинг документов
+
+| OData-эндпоинт | AccountingDocType | $expand |
+|---|---|---|
+| `Document_ПоступлениеТоваровУслуг` | receipt | Товары |
+| `Document_РеализацияТоваровУслуг` | sales | Товары |
+| `Document_ПлатежноеПоручениеИсходящее` | payment-out | — |
+| `Document_СчетФактураПолученный` | invoice-received | — |
+| `Document_СчетФактураВыданный` | invoice-issued | — |
+
+### Модели БД (миграция 004)
+
+| Модель | Таблица | Назначение |
+|--------|---------|------------|
+| `OneCConnection` | `onec_connections` | Настройки подключения (odata_url, user, password_encrypted, exchange_path, sync_interval_sec) |
+| `OneCSyncLog` | `onec_sync_logs` | Журнал синхронизаций (direction, sync_type, status, items_processed/created/updated/errors, details JSONB) |
+| `Warehouse` | `warehouses` | Справочник складов (code, name, address, type) |
+| `BankAccount` | `bank_accounts` | Справочник банковских счетов (number, bank_name, bik, corr_account, currency) |
+| +`external_ref` | counterparties, organizations, nomenclature | 1С Ref_Key (GUID) для связки записей |
+
+### API-эндпоинты (13 штук)
+
+```
+POST   /api/onec/connections                        — Создать подключение
+GET    /api/onec/connections                        — Список
+GET    /api/onec/connections/{id}                   — Детали
+PATCH  /api/onec/connections/{id}                   — Обновить
+DELETE /api/onec/connections/{id}                   — Удалить
+POST   /api/onec/connections/{id}/test              — Тест ($metadata)
+POST   /api/onec/connections/{id}/sync/catalogs     — Синхронизировать справочники
+POST   /api/onec/connections/{id}/sync/documents    — Синхронизировать документы
+POST   /api/onec/connections/{id}/sync/full         — Полная синхронизация
+GET    /api/onec/connections/{id}/sync/status        — Текущий статус
+GET    /api/onec/connections/{id}/history            — История синхронизаций
+POST   /api/onec/connections/{id}/export             — Экспорт в папку обмена
+GET    /api/onec/connections/{id}/export/status       — Проверить feedback от 1С
+```
+
+### Фронтенд
+
+| Компонент | Файл | Описание |
+|-----------|------|----------|
+| API-сервис | `src/services/oneCIntegrationService.ts` | Все вызовы к `/api/onec/*`, snake_case ↔ camelCase маппинг |
+| React Query хуки | `src/hooks/useOneCSync.ts` | 12 хуков: подключения CRUD, тест, синхронизация, статус, история, экспорт |
+| Форма подключения | `src/components/settings/OneCConnectionForm.tsx` | OData URL, логин/пароль, папка обмена, интервал. Кнопка «Тест подключения» с результатом |
+| Статус синхронизации | `src/components/settings/OneCSyncStatus.tsx` | Badge статуса, кнопки ручного запуска (справочники/документы/полная), progress, результат с счётчиками |
+| История | `src/components/settings/OneCSyncHistory.tsx` | Таблица с раскрытием: дата, направление, тип, статус, счётчики, длительность, JSON-детали |
+| Интеграция | `src/pages/SettingsPage.tsx` | Секция «Интеграция с 1С» (показывается при `isApiEnabled()`) |
+
+### Типы TypeScript
+
+`OneCConnection`, `OneCSyncLog`, `OneCTestResult`, `OneCSyncResult` + `DocPurpose`, `SyncStatus` на DataEntry.
+
+### На стороне 1С (без разработки)
+
+Пользователь настраивает через GUI:
+1. Конфигуратор → Администрирование → Публикация на веб-сервере → включить OData
+2. Создать пользователя ClearLedger с правами на чтение
+3. Папка обмена: создать, расшарить, указать путь в ClearLedger
+4. Загрузка XML: типовая обработка «Загрузка данных из XML» для файлов из `to_1c/`
+
+---
+
+## v0.6.1 — Многомерный жизненный цикл + упрощение навигации
+
+### Многомерный жизненный цикл документа (3 оси)
+
+Записи Entry теперь имеют три независимых оси состояния:
+
+| Ось | Поле | Значения | Назначение |
+|-----|------|----------|------------|
+| Основной статус | `status` | new, recognized, verified, transferred, error, archived | Жизненный цикл обработки |
+| Назначение | `doc_purpose` | accounting, reference, context, archive | Роль документа в учёте |
+| Синхронизация | `sync_status` | not_applicable, pending, exported, confirmed, rejected_1c | Статус обмена с 1С |
+
+#### Бэкенд
+
+| Файл | Изменение |
+|------|-----------|
+| `backend/app/models/models.py` | +2 колонки `doc_purpose`, `sync_status` с индексами |
+| `backend/alembic/versions/006_entry_lifecycle_axes.py` | Миграция с server_default для существующих строк |
+| `backend/app/schemas/entries.py` | +2 поля в EntryCreate, EntryUpdate, EntryOut |
+| `backend/app/api/entries.py` | Фильтры `doc_purpose`, `sync_status` в list_entries, передача в create_entry |
+| `backend/app/services/onec/sync_service.py` | Документы из 1С: `doc_purpose=accounting`, `sync_status=confirmed` |
+| `backend/app/services/onec/file_exchange.py` | Экспорт только `accounting` + `pending/not_applicable`; после экспорта `→ exported`; feedback: `→ confirmed` / `→ rejected_1c` |
+| `backend/app/services/sync.py` | promote_to_public: `doc_purpose=accounting`, `sync_status=not_applicable` |
+
+#### Фронтенд (реализован ранее)
+
+- `DocPurpose` и `SyncStatus` типы в `types/index.ts`
+- Конфиг в `config/statuses.ts` (DOC_PURPOSE_CONFIG, SYNC_STATUS_CONFIG)
+- Фильтры в DataTableToolbar
+- Отображение в MetadataPanel
+- API-маппинг в `apiMappers.ts` (`doc_purpose` ↔ `docPurpose`, `sync_status` ↔ `syncStatus`)
+- Мутации `setDocPurpose`, `setSyncStatus` в `useEntries.ts`
+
+### Упрощение сайдбара
+
+Раздел «Документы» сокращён с 9 до 3 пунктов:
+
+| Было (9 пунктов) | Стало (3 пункта) |
+|---|---|
+| Все данные, Первичные документы, Финансовый учёт, Операционный учёт, Кадры, Юридические, Медиа, Отчёты, Экспорт | **Все данные**, **Отчёты**, **Экспорт** |
+
+Категории доступны через фильтры на странице «Все данные». Маршруты `/data/:categoryId` сохранены.
+
+---
+
 ### Запланировано
 
 - Полнотекстовый поиск (PostgreSQL FTS)
@@ -754,4 +889,3 @@ server/
 - Dashboard: сравнение периодов
 - Мониторинг (metrics endpoint)
 - Нормализация + fuzzy match в cloud classifier
-- Alembic миграции (сейчас create_all при старте)

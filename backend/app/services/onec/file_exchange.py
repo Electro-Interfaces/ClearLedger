@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from lxml import etree
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database import async_session
 from app.models.models import OneCConnection, Entry, Counterparty, Organization
@@ -31,12 +31,14 @@ async def export_verified_entries(conn: OneCConnection) -> dict[str, Any]:
     to_1c.mkdir(parents=True, exist_ok=True)
 
     async with async_session() as db:
-        # Получаем верифицированные записи с source=oneC
+        # Получаем бухгалтерские записи, ожидающие экспорта
         result = await db.execute(
             select(Entry).where(
                 Entry.company_id == conn.company_id,
                 Entry.status == "verified",
                 Entry.source_type != "oneC",  # Не реэкспортировать то, что пришло из 1С
+                Entry.doc_purpose == "accounting",
+                Entry.sync_status.in_(["pending", "not_applicable"]),
             )
         )
         entries = list(result.scalars().all())
@@ -81,6 +83,16 @@ async def export_verified_entries(conn: OneCConnection) -> dict[str, Any]:
 
     tree = etree.ElementTree(root)
     tree.write(str(filepath), xml_declaration=True, encoding="UTF-8", pretty_print=True)
+
+    # Обновляем sync_status экспортированных записей
+    exported_ids = [e.id for e in entries]
+    async with async_session() as db:
+        await db.execute(
+            update(Entry)
+            .where(Entry.id.in_(exported_ids))
+            .values(sync_status="exported")
+        )
+        await db.commit()
 
     logger.info("Экспортировано %d записей в %s", exported, filepath)
 
@@ -145,7 +157,7 @@ def _add_text(parent: etree._Element, tag: str, text: str) -> etree._Element:
 
 
 async def check_feedback(conn: OneCConnection) -> dict[str, Any]:
-    """Читает feedback-файлы из {exchange_path}/from_1c/."""
+    """Читает feedback-файлы из {exchange_path}/from_1c/ и обновляет sync_status."""
     exchange_path = Path(conn.exchange_path)
     from_1c = exchange_path / "from_1c"
 
@@ -168,11 +180,72 @@ async def check_feedback(conn: OneCConnection) -> dict[str, Any]:
                 "errors": [],
             }
 
+            # Собираем GUID-ы успешных и ошибочных документов
+            confirmed_guids = []
+            rejected_guids = []
+
+            for doc_el in root.findall(".//{%s}Document" % ED_NS) or root.findall(".//Document"):
+                guid = doc_el.get("GUID") or doc_el.get("Id")
+                doc_status = doc_el.get("Status", "")
+                if guid:
+                    if doc_status == "Error":
+                        rejected_guids.append(guid)
+                    else:
+                        confirmed_guids.append(guid)
+
             for err in root.findall(".//{%s}Error" % ED_NS) or root.findall(".//Error"):
                 file_info["errors"].append({
                     "code": err.get("Code", ""),
                     "message": err.text or err.get("Message", ""),
                 })
+
+            # Обновляем sync_status записей по GUID-ам из metadata
+            async with async_session() as db:
+                if confirmed_guids:
+                    result = await db.execute(
+                        select(Entry).where(
+                            Entry.company_id == conn.company_id,
+                            Entry.sync_status == "exported",
+                            Entry.metadata_["_1c.guid"].astext.in_(confirmed_guids),
+                        )
+                    )
+                    for entry in result.scalars().all():
+                        entry.sync_status = "confirmed"
+
+                if rejected_guids:
+                    result = await db.execute(
+                        select(Entry).where(
+                            Entry.company_id == conn.company_id,
+                            Entry.sync_status == "exported",
+                            Entry.metadata_["_1c.guid"].astext.in_(rejected_guids),
+                        )
+                    )
+                    for entry in result.scalars().all():
+                        entry.sync_status = "rejected_1c"
+
+                # Если нет конкретных GUID, но есть общий статус — обновляем все exported
+                if not confirmed_guids and not rejected_guids:
+                    overall_status = root.get("Status", "")
+                    if overall_status == "Success":
+                        await db.execute(
+                            update(Entry)
+                            .where(
+                                Entry.company_id == conn.company_id,
+                                Entry.sync_status == "exported",
+                            )
+                            .values(sync_status="confirmed")
+                        )
+                    elif overall_status == "Error":
+                        await db.execute(
+                            update(Entry)
+                            .where(
+                                Entry.company_id == conn.company_id,
+                                Entry.sync_status == "exported",
+                            )
+                            .values(sync_status="rejected_1c")
+                        )
+
+                await db.commit()
 
             feedback_files.append(file_info)
 

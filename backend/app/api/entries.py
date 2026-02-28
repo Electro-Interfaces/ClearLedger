@@ -20,6 +20,8 @@ async def list_entries(
     company_id: str | None = None,
     category_id: str | None = None,
     status: str | None = None,
+    doc_purpose: str | None = None,
+    sync_status: str | None = None,
     search: str | None = None,
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -39,6 +41,12 @@ async def list_entries(
     if status:
         q = q.where(Entry.status == status)
         count_q = count_q.where(Entry.status == status)
+    if doc_purpose:
+        q = q.where(Entry.doc_purpose == doc_purpose)
+        count_q = count_q.where(Entry.doc_purpose == doc_purpose)
+    if sync_status:
+        q = q.where(Entry.sync_status == sync_status)
+        count_q = count_q.where(Entry.sync_status == sync_status)
     if search:
         pattern = f"%{search}%"
         q = q.where(Entry.title.ilike(pattern))
@@ -83,6 +91,8 @@ async def create_entry(
         source_type=data.source_type,
         source_label=data.source_label,
         metadata_=data.metadata,
+        doc_purpose=data.doc_purpose,
+        sync_status=data.sync_status,
     )
     db.add(entry)
     await db.commit()
