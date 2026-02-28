@@ -48,10 +48,12 @@ export function ExportPage() {
     queryFn: () => getEntries(companyId),
   })
 
-  // Фильтруем: verified/transferred, не архивные, не исключённые
+  // Фильтруем: verified/transferred, бухгалтерские, не confirmed, не исключённые
   const exportableEntries = useMemo(
     () => allEntries.filter((e) =>
       (e.status === 'verified' || e.status === 'transferred') &&
+      e.docPurpose === 'accounting' &&
+      e.syncStatus !== 'confirmed' &&
       e.metadata._excluded !== 'true',
     ),
     [allEntries],

@@ -143,6 +143,8 @@ export interface CreateEntryInput {
   docTypeId?: string
   companyId: string
   status?: EntryStatus
+  docPurpose?: DataEntry['docPurpose']
+  syncStatus?: DataEntry['syncStatus']
   source: DataEntry['source']
   sourceLabel: string
   fileUrl?: string
@@ -169,6 +171,8 @@ export async function createEntry(input: CreateEntryInput): Promise<DataEntry> {
   }
 
   const now = new Date().toISOString()
+  const docPurpose = input.docPurpose ?? 'accounting'
+  const syncStatus = input.syncStatus ?? 'not_applicable'
   const entry: DataEntry = {
     id: nextId(),
     title: input.title,
@@ -177,6 +181,8 @@ export async function createEntry(input: CreateEntryInput): Promise<DataEntry> {
     docTypeId: input.docTypeId,
     companyId: input.companyId,
     status: input.status ?? 'new',
+    docPurpose,
+    syncStatus,
     source: input.source,
     sourceLabel: input.sourceLabel,
     fileUrl: input.fileUrl,
@@ -206,6 +212,8 @@ export async function updateEntry(
     if (updates.subcategoryId !== undefined) body.subcategory_id = updates.subcategoryId
     if (updates.docTypeId !== undefined) body.doc_type_id = updates.docTypeId
     if (updates.status !== undefined) body.status = updates.status
+    if (updates.docPurpose !== undefined) body.doc_purpose = updates.docPurpose
+    if (updates.syncStatus !== undefined) body.sync_status = updates.syncStatus
     if (updates.sourceLabel !== undefined) body.source_label = updates.sourceLabel
     if (updates.metadata !== undefined) body.metadata = updates.metadata
     const a = await patch<ApiEntry>(`/api/entries/${id}`, body)
@@ -248,7 +256,12 @@ export async function deleteEntry(companyId: string, id: string): Promise<boolea
 // ============================================================
 
 export async function verifyEntry(companyId: string, id: string): Promise<DataEntry | undefined> {
-  return updateEntry(companyId, id, { status: 'verified' })
+  const entry = await getEntry(companyId, id)
+  const updates: Partial<DataEntry> = { status: 'verified' }
+  if (entry && entry.docPurpose !== 'accounting') {
+    updates.syncStatus = 'not_applicable'
+  }
+  return updateEntry(companyId, id, updates)
 }
 
 export async function rejectEntry(companyId: string, id: string, reason?: string): Promise<DataEntry | undefined> {
@@ -269,7 +282,7 @@ export async function transferEntries(companyId: string, ids: string[]): Promise
     let count = 0
     for (const id of ids) {
       try {
-        await patch(`/api/entries/${id}`, { status: 'transferred' })
+        await patch(`/api/entries/${id}`, { status: 'transferred', sync_status: 'pending' })
         count++
       } catch { /* skip */ }
     }
@@ -282,6 +295,9 @@ export async function transferEntries(companyId: string, ids: string[]): Promise
   for (const entry of entries) {
     if (ids.includes(entry.id) && entry.status === 'verified') {
       entry.status = 'transferred'
+      if (entry.docPurpose === 'accounting') {
+        entry.syncStatus = 'pending'
+      }
       entry.updatedAt = now
       count++
     }
@@ -412,7 +428,8 @@ export async function computeCategoryStats(companyId: string): Promise<CategoryS
 
   const allEntries = await getEntries(companyId)
   const entries = allEntries.filter(
-    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false',
+    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false'
+      && e.docPurpose !== 'archive',
   )
   const countMap = new Map<string, number>()
   for (const e of entries) {
@@ -425,6 +442,35 @@ export async function computeCategoryStats(companyId: string): Promise<CategoryS
   }))
 }
 
+// ============================================================
+// DocPurpose / SyncStatus setters
+// ============================================================
+
+export async function setDocPurpose(
+  companyId: string,
+  id: string,
+  docPurpose: DataEntry['docPurpose'],
+): Promise<DataEntry | undefined> {
+  const updates: Partial<DataEntry> = { docPurpose }
+  // Автоматическая коррекция syncStatus при смене назначения
+  if (docPurpose !== 'accounting') {
+    updates.syncStatus = 'not_applicable'
+  }
+  return updateEntry(companyId, id, updates)
+}
+
+export async function setSyncStatus(
+  companyId: string,
+  id: string,
+  syncStatus: DataEntry['syncStatus'],
+): Promise<DataEntry | undefined> {
+  return updateEntry(companyId, id, { syncStatus })
+}
+
+// ============================================================
+// KPI
+// ============================================================
+
 export async function computeKpi(companyId: string): Promise<ComputedKpi> {
   if (isApiEnabled()) {
     try {
@@ -435,9 +481,10 @@ export async function computeKpi(companyId: string): Promise<ComputedKpi> {
   }
 
   const allEntries = await getEntries(companyId)
-  // Исключаем archived, excluded и старые версии из KPI
+  // Исключаем archived, excluded, старые версии и архивные по назначению из KPI
   const entries = allEntries.filter(
-    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false',
+    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false'
+      && e.docPurpose !== 'archive',
   )
   const today = new Date().toISOString().slice(0, 10)
   return {

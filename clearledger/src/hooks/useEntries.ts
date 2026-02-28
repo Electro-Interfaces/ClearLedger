@@ -232,6 +232,32 @@ export function useIncludeEntry() {
   })
 }
 
+export function useSetDocPurpose() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, docPurpose }: { id: string; docPurpose: DataEntry['docPurpose'] }) =>
+      svc.setDocPurpose(companyId, id, docPurpose),
+    onSuccess: (_data, vars) => {
+      logEvent({ companyId, entryId: vars.id, action: 'updated', details: `docPurpose → ${vars.docPurpose}` })
+      invalidateAll(qc, companyId)
+    },
+  })
+}
+
+export function useSetSyncStatus() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, syncStatus }: { id: string; syncStatus: DataEntry['syncStatus'] }) =>
+      svc.setSyncStatus(companyId, id, syncStatus),
+    onSuccess: (_data, vars) => {
+      logEvent({ companyId, entryId: vars.id, action: 'updated', details: `syncStatus → ${vars.syncStatus}` })
+      invalidateAll(qc, companyId)
+    },
+  })
+}
+
 // ---- Paginated (infinite scroll / load more) ----
 
 /** Пагинированные записи с "Загрузить ещё" */
@@ -305,6 +331,8 @@ function applyFilters(entries: DataEntry[], filters: Partial<FilterState>): Data
     if (filters.status && filters.status !== 'all' && e.status !== (filters.status as EntryStatus)) return false
     if (filters.source && filters.source !== 'all' && e.source !== filters.source) return false
     if (filters.subcategory && filters.subcategory !== 'all' && e.subcategoryId !== filters.subcategory) return false
+    if (filters.docPurpose && filters.docPurpose !== 'all' && e.docPurpose !== filters.docPurpose) return false
+    if (filters.syncStatus && filters.syncStatus !== 'all' && e.syncStatus !== filters.syncStatus) return false
     if (filters.dateFrom && e.createdAt < filters.dateFrom) return false
     if (filters.dateTo && e.createdAt > filters.dateTo) return false
     return true

@@ -20,6 +20,8 @@ export interface ApiEntry {
   subcategory_id: string
   doc_type_id: string | null
   status: string
+  doc_purpose?: string
+  sync_status?: string
   source_type?: string
   source: string
   source_label: string
@@ -44,6 +46,8 @@ export function apiToEntry(a: ApiEntry): DataEntry {
     docTypeId: a.doc_type_id ?? undefined,
     companyId: a.company_id,
     status: a.status as EntryStatus,
+    docPurpose: (a.doc_purpose as DataEntry['docPurpose']) ?? 'accounting',
+    syncStatus: (a.sync_status as DataEntry['syncStatus']) ?? 'not_applicable',
     source: (a.source_type ?? a.source) as DataEntry['source'],
     sourceLabel: a.source_label,
     metadata: a.metadata,

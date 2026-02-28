@@ -133,7 +133,7 @@ export function DataDetailPage() {
           validation={validation}
           auditEvents={auditEvents}
           onVerify={entry.status === 'new' || entry.status === 'recognized' ? handleVerify : undefined}
-          onTransfer={entry.status === 'verified' ? handleTransfer : undefined}
+          onTransfer={entry.status === 'verified' && entry.docPurpose === 'accounting' ? handleTransfer : undefined}
           onDelete={entry.status !== 'transferred' ? handleDelete : undefined}
           onArchive={entry.status !== 'archived' && entry.status !== 'transferred' ? handleArchive : undefined}
           onRestore={entry.status === 'archived' ? handleRestore : undefined}

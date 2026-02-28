@@ -59,6 +59,39 @@ export function DataTableToolbar({ filters, onFiltersChange }: DataTableToolbarP
         </SelectContent>
       </Select>
 
+      <Select
+        value={filters.docPurpose ?? 'all'}
+        onValueChange={(value) => updateFilter('docPurpose', value as FilterState['docPurpose'])}
+      >
+        <SelectTrigger className="w-[160px]">
+          <SelectValue placeholder="Назначение" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Все назначения</SelectItem>
+          <SelectItem value="accounting">Бухгалтерский</SelectItem>
+          <SelectItem value="reference">Справочный</SelectItem>
+          <SelectItem value="context">Контекстный</SelectItem>
+          <SelectItem value="archive">Архивный</SelectItem>
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={filters.syncStatus ?? 'all'}
+        onValueChange={(value) => updateFilter('syncStatus', value as FilterState['syncStatus'])}
+      >
+        <SelectTrigger className="w-[160px]">
+          <SelectValue placeholder="Синхр." />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Все статусы 1С</SelectItem>
+          <SelectItem value="not_applicable">Не требуется</SelectItem>
+          <SelectItem value="pending">Ожидает</SelectItem>
+          <SelectItem value="exported">Выгружен</SelectItem>
+          <SelectItem value="confirmed">Подтверждён</SelectItem>
+          <SelectItem value="rejected_1c">Отклонён 1С</SelectItem>
+        </SelectContent>
+      </Select>
+
       <Button variant="outline" size="default">
         <Download />
         Экспорт

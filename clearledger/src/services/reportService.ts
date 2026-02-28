@@ -15,10 +15,11 @@ function filterByPeriod(entries: DataEntry[], dateFrom: string, dateTo: string):
   })
 }
 
-/** Активные записи (не старые версии, не excluded) */
+/** Активные записи (не старые версии, не excluded, не архивные по назначению) */
 function activeEntries(entries: DataEntry[]): DataEntry[] {
   return entries.filter(
-    (e) => e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false',
+    (e) => e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false'
+      && e.docPurpose !== 'archive',
   )
 }
 
@@ -53,6 +54,13 @@ export async function generatePeriodReport(
     }
   } catch { /* audit may be empty */ }
 
+  // Группировка по docPurpose
+  const byPurpose: Record<string, number> = {}
+  for (const e of entries) {
+    const p = e.docPurpose ?? 'accounting'
+    byPurpose[p] = (byPurpose[p] ?? 0) + 1
+  }
+
   return {
     dateFrom,
     dateTo,
@@ -62,6 +70,7 @@ export async function generatePeriodReport(
     transferred: entries.filter((e) => e.status === 'transferred').length,
     archived: entries.filter((e) => e.status === 'archived').length,
     avgVerificationTimeMs,
+    byPurpose,
   }
 }
 

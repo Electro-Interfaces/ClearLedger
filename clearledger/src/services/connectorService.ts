@@ -205,6 +205,8 @@ export async function simulateSync(companyId: string, connectorId: string): Prom
       subcategoryId: subcategoryMap[categoryId] || 'invoices',
       companyId,
       status: 'new',
+      docPurpose: 'accounting',
+      syncStatus: 'pending',
       source,
       sourceLabel: `Коннектор: ${connector.name}`,
       metadata: {

@@ -34,6 +34,26 @@ export function validateForExport(entries: DataEntry[]): ExportValidationResult 
   for (const entry of entries) {
     const entryIssues: ExportIssue[] = []
 
+    // 0. Назначение — только бухгалтерские документы
+    if (entry.docPurpose !== 'accounting') {
+      entryIssues.push({
+        entryId: entry.id,
+        entryTitle: entry.title,
+        issue: `Назначение "${entry.docPurpose}" — экспорт только бухгалтерских`,
+        severity: 'error',
+      })
+    }
+
+    // 0.5. Уже подтверждён в 1С — повторный экспорт не нужен
+    if (entry.syncStatus === 'confirmed') {
+      entryIssues.push({
+        entryId: entry.id,
+        entryTitle: entry.title,
+        issue: 'Уже подтверждён в 1С',
+        severity: 'warning',
+      })
+    }
+
     // 1. Статус — только verified или transferred
     if (entry.status !== 'verified' && entry.status !== 'transferred') {
       entryIssues.push({

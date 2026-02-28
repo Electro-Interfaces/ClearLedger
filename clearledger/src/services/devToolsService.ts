@@ -5,7 +5,7 @@
  */
 
 import type { EntryStatus } from '@/config/statuses'
-import type { DataEntry } from '@/types'
+import type { DataEntry, DocPurpose, SyncStatus } from '@/types'
 import { getItem, setItem, removeItem, entriesKey } from './storage'
 import { getEntries, createEntry, seedIfNeeded } from './dataEntryService'
 import { getConnectors } from './connectorService'
@@ -135,6 +135,17 @@ export async function generateEntries(
     const createdAt = randomDate(30)
     const docDate = new Date(createdAt).toISOString().slice(0, 10)
 
+    // 80% accounting, 10% reference, 10% context
+    const purposeRoll = Math.random()
+    const docPurpose: DocPurpose = purposeRoll < 0.8 ? 'accounting' : purposeRoll < 0.9 ? 'reference' : 'context'
+
+    // syncStatus зависит от docPurpose
+    let syncStatus: SyncStatus = 'not_applicable'
+    if (docPurpose === 'accounting') {
+      const syncRoll = Math.random()
+      syncStatus = syncRoll < 0.4 ? 'not_applicable' : syncRoll < 0.6 ? 'pending' : syncRoll < 0.8 ? 'exported' : syncRoll < 0.95 ? 'confirmed' : 'rejected_1c'
+    }
+
     const entry = await createEntry({
       title: `${dt.label} №${docNumber}`,
       categoryId: dt.categoryId,
@@ -142,6 +153,8 @@ export async function generateEntries(
       docTypeId: dt.id,
       companyId,
       status,
+      docPurpose,
+      syncStatus,
       source,
       sourceLabel: SOURCE_LABELS[source] ?? source,
       metadata: {

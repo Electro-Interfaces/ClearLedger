@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.api import auth, entries, companies, intake, files, connectors, document_links, settings_api, stats, audit, export, connector_actions, references, verification
 from app.api import onec as onec_api
+from app.api import audit_data
 from app.config import settings as app_settings
 from app.database import async_session
 from app.services.sync import sync_loop
@@ -92,6 +93,7 @@ app.include_router(connector_actions.router, prefix="/api")
 app.include_router(references.router, prefix="/api")
 app.include_router(verification.router, prefix="/api")
 app.include_router(onec_api.router, prefix="/api")
+app.include_router(audit_data.router, prefix="/api")
 
 
 @app.get("/api/health")

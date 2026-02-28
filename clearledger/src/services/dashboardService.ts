@@ -16,11 +16,14 @@ export interface ExtendedKpi {
   weekCount: number
   rejectionRate: number
   avgVerificationTimeMs?: number
+  syncPending: number
+  syncConfirmed: number
 }
 
 function activeEntries(entries: DataEntry[]): DataEntry[] {
   return entries.filter(
-    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false',
+    (e) => e.status !== 'archived' && e.metadata._excluded !== 'true' && e.metadata._isLatestVersion !== 'false'
+      && e.docPurpose !== 'archive',
   )
 }
 
@@ -43,6 +46,8 @@ export async function computeExtendedKpi(companyId: string): Promise<ExtendedKpi
     transferredToday: entries.filter((e) => e.status === 'transferred' && e.updatedAt.startsWith(today)).length,
     weekCount: entries.filter((e) => e.createdAt.slice(0, 10) >= weekAgo).length,
     rejectionRate: totalDecided > 0 ? Math.round((errorsCount / totalDecided) * 100) : 0,
+    syncPending: entries.filter((e) => e.syncStatus === 'pending' || e.syncStatus === 'exported').length,
+    syncConfirmed: entries.filter((e) => e.syncStatus === 'confirmed').length,
   }
 }
 

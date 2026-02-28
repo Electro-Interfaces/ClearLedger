@@ -4,6 +4,12 @@ export type EntrySource =
   | 'upload' | 'photo' | 'manual' | 'api'
   | 'email' | 'oneC' | 'whatsapp' | 'telegram' | 'paste'
 
+/** Назначение документа в системе */
+export type DocPurpose = 'accounting' | 'reference' | 'context' | 'archive'
+
+/** Статус синхронизации с внешней системой (1С) */
+export type SyncStatus = 'not_applicable' | 'pending' | 'exported' | 'confirmed' | 'rejected_1c'
+
 export interface DataEntry {
   id: string
   title: string
@@ -12,6 +18,10 @@ export interface DataEntry {
   docTypeId?: string
   companyId: string
   status: EntryStatus
+  /** Назначение документа: бухгалтерский, справочный, контекстный, архивный */
+  docPurpose: DocPurpose
+  /** Статус синхронизации с 1С */
+  syncStatus: SyncStatus
   source: EntrySource
   sourceLabel: string
   fileUrl?: string
@@ -189,6 +199,8 @@ export interface FilterState {
   dateFrom?: string
   dateTo?: string
   subcategory: string
+  docPurpose?: DocPurpose | 'all'
+  syncStatus?: SyncStatus | 'all'
   showArchived?: boolean
   showExcluded?: boolean
   showAllVersions?: boolean
@@ -231,6 +243,7 @@ export interface PeriodReport {
   transferred: number
   archived: number
   avgVerificationTimeMs?: number
+  byPurpose?: Record<string, number>
 }
 
 export interface CounterpartyStat {

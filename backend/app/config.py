@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     instance_id: str = "dev-local"
 
     # CORS (через запятую: "http://localhost:3000,https://app.example.com")
-    cors_origins: str = "http://localhost:3000,http://localhost:8080"
+    cors_origins: str = "http://localhost:3000,http://localhost:3010,http://localhost:8080"
 
     # JWT
     access_token_expire_minutes: int = 1440  # 24 часа

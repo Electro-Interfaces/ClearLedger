@@ -50,7 +50,7 @@ function formatDateValue(iso: string, fmt: 'dd.mm.yyyy' | 'yyyy-mm-dd'): string 
   return `${dd}.${mm}.${d.getFullYear()}`
 }
 
-const DEFAULT_COLUMNS = ['id', 'title', 'categoryId', 'subcategoryId', 'status', 'source', 'sourceLabel', 'createdAt', 'updatedAt']
+const DEFAULT_COLUMNS = ['id', 'title', 'categoryId', 'subcategoryId', 'status', 'docPurpose', 'syncStatus', 'source', 'sourceLabel', 'createdAt', 'updatedAt']
 
 const COLUMN_LABELS: Record<string, string> = {
   id: 'ID',
@@ -59,6 +59,8 @@ const COLUMN_LABELS: Record<string, string> = {
   subcategoryId: 'Подкатегория',
   docTypeId: 'Тип документа',
   status: 'Статус',
+  docPurpose: 'Назначение',
+  syncStatus: 'Синхронизация 1С',
   source: 'Источник',
   sourceLabel: 'Метка источника',
   createdAt: 'Создан',

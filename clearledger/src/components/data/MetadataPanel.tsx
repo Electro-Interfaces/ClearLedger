@@ -7,11 +7,13 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { formatDateTime } from '@/lib/formatDate'
 import { Check, Trash2, Send, Archive, ArchiveRestore, EyeOff, Eye, ChevronDown, ChevronUp, History } from 'lucide-react'
 import { useEntryAudit } from '@/hooks/useAudit'
+import { DOC_PURPOSE_CONFIG, SYNC_STATUS_CONFIG } from '@/config/statuses'
 import type { DataEntry, AuditAction } from '@/types'
 import type { ValidationResult } from '@/services/validationService'
 
@@ -62,6 +64,14 @@ export function MetadataPanel({
         <div className="flex items-center gap-2 flex-wrap">
           <CardTitle className="text-base flex-1">{entry.title}</CardTitle>
           <StatusBadge status={entry.status} />
+          <Badge variant="outline" className="text-[10px] px-1.5">
+            {DOC_PURPOSE_CONFIG[entry.docPurpose]?.label ?? entry.docPurpose}
+          </Badge>
+          {entry.syncStatus !== 'not_applicable' && (
+            <Badge variant={SYNC_STATUS_CONFIG[entry.syncStatus]?.variant ?? 'secondary'} className="text-[10px] px-1.5">
+              {SYNC_STATUS_CONFIG[entry.syncStatus]?.label ?? entry.syncStatus}
+            </Badge>
+          )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -128,6 +138,14 @@ export function MetadataPanel({
         <div className="space-y-2">
           <h4 className="text-sm font-medium text-muted-foreground">Информация</h4>
           <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Назначение</span>
+              <span className="font-medium">{DOC_PURPOSE_CONFIG[entry.docPurpose]?.label ?? entry.docPurpose}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Синхронизация 1С</span>
+              <span className="font-medium">{SYNC_STATUS_CONFIG[entry.syncStatus]?.label ?? entry.syncStatus}</span>
+            </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Источник</span>
               <SourceBadge source={entry.source} />

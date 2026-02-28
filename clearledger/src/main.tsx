@@ -2,8 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import { seedIfNeeded } from '@/services/dataEntryService'
+import { migrateEntries } from '@/services/storage'
 import './index.css'
 
+migrateEntries()
 seedIfNeeded()
 
 if (import.meta.env.DEV) {

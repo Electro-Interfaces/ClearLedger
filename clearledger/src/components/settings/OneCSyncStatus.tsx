@@ -11,7 +11,7 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import {
   RefreshCw, BookOpen, FileText, Loader2, Upload,
-  ArrowDownToLine, ArrowUpFromLine, CheckCircle2, AlertTriangle,
+  ArrowDownToLine, ArrowUpFromLine, CheckCircle2,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ru } from 'date-fns/locale'

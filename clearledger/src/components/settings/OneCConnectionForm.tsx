@@ -19,7 +19,7 @@ import {
   useDeleteOneCConnection,
   useTestOneCConnection,
 } from '@/hooks/useOneCSync'
-import type { OneCConnection, OneCTestResult } from '@/types'
+import type { OneCTestResult } from '@/types'
 
 export function OneCConnectionForm() {
   const { companyId } = useCompany()

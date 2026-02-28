@@ -1,4 +1,4 @@
-import type { AccountingDocType, MatchStatus } from '@/types'
+import type { AccountingDocType, MatchStatus, DocPurpose, SyncStatus } from '@/types'
 
 export type EntryStatus = 'new' | 'recognized' | 'verified' | 'transferred' | 'error' | 'archived'
 
@@ -46,6 +46,29 @@ export const statuses: Record<EntryStatus, StatusConfig> = {
     variant: 'secondary',
     className: 'border-zinc-500 text-zinc-400',
   },
+}
+
+// ============================================================
+// Назначение документа (DocPurpose)
+// ============================================================
+
+export const DOC_PURPOSE_CONFIG: Record<DocPurpose, { label: string; icon: string }> = {
+  accounting: { label: 'Бухгалтерский', icon: 'FileText' },
+  reference: { label: 'Справочный', icon: 'BookOpen' },
+  context: { label: 'Контекстный', icon: 'Image' },
+  archive: { label: 'Архивный', icon: 'Archive' },
+}
+
+// ============================================================
+// Статус синхронизации (SyncStatus)
+// ============================================================
+
+export const SYNC_STATUS_CONFIG: Record<SyncStatus, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+  not_applicable: { label: 'Не требуется', variant: 'secondary' },
+  pending: { label: 'Ожидает', variant: 'outline' },
+  exported: { label: 'Выгружен', variant: 'outline' },
+  confirmed: { label: 'Подтверждён', variant: 'default' },
+  rejected_1c: { label: 'Отклонён 1С', variant: 'destructive' },
 }
 
 // ============================================================
