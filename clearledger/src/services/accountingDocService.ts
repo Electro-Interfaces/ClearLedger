@@ -12,20 +12,21 @@ import type {
   MatchDetails,
 } from '@/types'
 import { isApiEnabled, get, post, del } from './apiClient'
-import { getItem, setItem, accountingDocsKey, entriesKey } from './storage'
+import { accountingDocsKey, entriesKey } from './storage'
+import { getItemIDB, setItemIDB } from './idbStorage'
 import { nanoid } from 'nanoid'
 import type { DataEntry } from '@/types'
 
 // ============================================================
-// localStorage helpers
+// IndexedDB helpers (async, лимит сотни МБ)
 // ============================================================
 
-function loadList<T>(key: string): T[] {
-  return getItem<T[]>(key, [])
+async function loadList<T>(key: string): Promise<T[]> {
+  return getItemIDB<T[]>(key, [])
 }
 
-function saveList<T>(key: string, items: T[]): void {
-  setItem(key, items)
+async function saveList<T>(key: string, items: T[]): Promise<void> {
+  await setItemIDB(key, items)
 }
 
 // ============================================================
@@ -52,7 +53,7 @@ export async function getAccountingDocs(
     return get<AccountingDoc[]>('/api/accounting-docs', params)
   }
 
-  let docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
+  let docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
   if (filters?.docType) docs = docs.filter((d) => d.docType === filters.docType)
   if (filters?.counterparty) {
     const q = filters.counterparty.toLowerCase()
@@ -68,7 +69,7 @@ export async function getAccountingDoc(companyId: string, id: string): Promise<A
   if (isApiEnabled()) {
     return get<AccountingDoc>(`/api/accounting-docs/${id}`)
   }
-  const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
   return docs.find((d) => d.id === id)
 }
 
@@ -88,9 +89,9 @@ export async function createAccountingDoc(
     updatedAt: now,
     ...input,
   }
-  const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
   docs.push(doc)
-  saveList(accountingDocsKey(companyId), docs)
+  await saveList(accountingDocsKey(companyId), docs)
   return doc
 }
 
@@ -98,10 +99,10 @@ export async function deleteAccountingDoc(companyId: string, id: string): Promis
   if (isApiEnabled()) {
     try { await del(`/api/accounting-docs/${id}`); return true } catch { return false }
   }
-  const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
   const filtered = docs.filter((d) => d.id !== id)
   if (filtered.length === docs.length) return false
-  saveList(accountingDocsKey(companyId), filtered)
+  await saveList(accountingDocsKey(companyId), filtered)
   return true
 }
 
@@ -150,7 +151,7 @@ export async function importAccountingDocs(
   }
 
   // localStorage upsert
-  const existing = loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const existing = await loadList<AccountingDoc>(accountingDocsKey(companyId))
   const byExtId = new Map(existing.map((d) => [d.externalId, d]))
   const now = new Date().toISOString()
   let created = 0
@@ -199,7 +200,7 @@ export async function importAccountingDocs(
     }
   }
 
-  saveList(accountingDocsKey(companyId), existing)
+  await saveList(accountingDocsKey(companyId), existing)
   return { total: docs.length, created, updated, errors: [] }
 }
 
@@ -232,14 +233,14 @@ export async function manualMatch(companyId: string, docId: string, entryId: str
     await post('/api/reconciliation/match', { company_id: companyId, doc_id: docId, entry_id: entryId })
     return
   }
-  const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
   const doc = docs.find((d) => d.id === docId)
   if (doc) {
     doc.matchedEntryId = entryId
     doc.matchStatus = 'matched'
     doc.matchDetails = { score: 100, confidence: 100, missingLines: [], extraLines: [] }
     doc.updatedAt = new Date().toISOString()
-    saveList(accountingDocsKey(companyId), docs)
+    await saveList(accountingDocsKey(companyId), docs)
   }
 }
 
@@ -248,14 +249,14 @@ export async function unmatch(companyId: string, docId: string): Promise<void> {
     await post('/api/reconciliation/unmatch', { company_id: companyId, doc_id: docId })
     return
   }
-  const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
   const doc = docs.find((d) => d.id === docId)
   if (doc) {
     doc.matchedEntryId = undefined
     doc.matchStatus = 'pending'
     doc.matchDetails = undefined
     doc.updatedAt = new Date().toISOString()
-    saveList(accountingDocsKey(companyId), docs)
+    await saveList(accountingDocsKey(companyId), docs)
   }
 }
 
@@ -332,9 +333,9 @@ function computeScore(doc: AccountingDoc, entry: DataEntry): { score: number; de
   }
 }
 
-function runLocalReconciliation(companyId: string) {
-  const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
-  const entries = loadList<DataEntry>(entriesKey(companyId))
+async function runLocalReconciliation(companyId: string) {
+  const docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const entries = await loadList<DataEntry>(entriesKey(companyId))
   const usedEntries = new Set<string>()
   let matched = 0
   let unmatched = 0
@@ -378,13 +379,13 @@ function runLocalReconciliation(companyId: string) {
     doc.updatedAt = new Date().toISOString()
   }
 
-  saveList(accountingDocsKey(companyId), docs)
+  await saveList(accountingDocsKey(companyId), docs)
   return { matched, unmatched, discrepancy, total: docs.length }
 }
 
-function computeLocalSummary(companyId: string): ReconciliationSummary {
-  const docs = loadList<AccountingDoc>(accountingDocsKey(companyId))
-  const entries = loadList<DataEntry>(entriesKey(companyId))
+async function computeLocalSummary(companyId: string): Promise<ReconciliationSummary> {
+  const docs = await loadList<AccountingDoc>(accountingDocsKey(companyId))
+  const entries = await loadList<DataEntry>(entriesKey(companyId))
   const matchedEntryIds = new Set(
     docs.filter((d) => d.matchStatus === 'matched' && d.matchedEntryId).map((d) => d.matchedEntryId!),
   )

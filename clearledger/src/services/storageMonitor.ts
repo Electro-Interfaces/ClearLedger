@@ -1,6 +1,7 @@
 /**
- * Мониторинг использования localStorage.
- * Предупреждения при >80%, критическое при >95%.
+ * Мониторинг использования хранилища.
+ * Основные данные теперь в IndexedDB (лимит сотни МБ).
+ * localStorage — только лёгкие флаги/настройки.
  */
 
 import { getItem, setItem } from './storage'
@@ -23,11 +24,10 @@ export interface StorageBreakdown {
 const TOTAL_ESTIMATE = 5 * 1024 * 1024 // 5MB — типичный лимит localStorage
 
 function byteLength(str: string): number {
-  // Быстрая оценка: UTF-16 → ~2 байта на символ, но JSON в localStorage — в основном ASCII
   return new Blob([str]).size
 }
 
-/** Общее использование localStorage */
+/** Общее использование localStorage (после миграции — только лёгкие данные) */
 export function getStorageUsage(): StorageUsage {
   let usedBytes = 0
   let entries = 0

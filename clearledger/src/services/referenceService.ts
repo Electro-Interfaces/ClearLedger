@@ -4,26 +4,26 @@
  * Dual-mode: localStorage (v0.2) / API (production).
  */
 
-import type { Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount } from '@/types'
+import type { Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount, CounterpartyBalance } from '@/types'
 import { isApiEnabled, get, post, patch, del } from './apiClient'
 import {
-  getItem, setItem,
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
-  warehousesKey, bankAccountsKey,
+  warehousesKey, bankAccountsKey, balancesKey,
 } from './storage'
+import { getItemIDB, setItemIDB } from './idbStorage'
 import { nanoid } from 'nanoid'
 import { normalizeCounterparty, diceCoefficient } from '@/lib/textUtils'
 
 // ============================================================
-// localStorage helpers
+// IndexedDB helpers (async, лимит сотни МБ)
 // ============================================================
 
-function loadList<T>(key: string): T[] {
-  return getItem<T[]>(key, [])
+async function loadList<T>(key: string): Promise<T[]> {
+  return getItemIDB<T[]>(key, [])
 }
 
-function saveList<T>(key: string, items: T[]): void {
-  setItem(key, items)
+async function saveList<T>(key: string, items: T[]): Promise<void> {
+  await setItemIDB(key, items)
 }
 
 // ============================================================
@@ -34,7 +34,7 @@ export async function getCounterparties(companyId: string): Promise<Counterparty
   if (isApiEnabled()) {
     return get<Counterparty[]>('/api/references/counterparties', { company_id: companyId })
   }
-  return loadList<Counterparty>(counterpartiesKey(companyId))
+  return await loadList<Counterparty>(counterpartiesKey(companyId))
 }
 
 export async function getCounterparty(companyId: string, id: string): Promise<Counterparty | undefined> {
@@ -100,9 +100,9 @@ export async function createCounterparty(
     createdAt: now,
     updatedAt: now,
   }
-  const list = loadList<Counterparty>(counterpartiesKey(companyId))
+  const list = await loadList<Counterparty>(counterpartiesKey(companyId))
   list.push(item)
-  saveList(counterpartiesKey(companyId), list)
+  await saveList(counterpartiesKey(companyId), list)
   return item
 }
 
@@ -114,11 +114,11 @@ export async function updateCounterparty(
   if (isApiEnabled()) {
     return patch<Counterparty>(`/api/references/counterparties/${id}`, updates)
   }
-  const list = loadList<Counterparty>(counterpartiesKey(companyId))
+  const list = await loadList<Counterparty>(counterpartiesKey(companyId))
   const idx = list.findIndex((c) => c.id === id)
   if (idx === -1) return undefined
   list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
-  saveList(counterpartiesKey(companyId), list)
+  await saveList(counterpartiesKey(companyId), list)
   return list[idx]
 }
 
@@ -126,10 +126,10 @@ export async function deleteCounterparty(companyId: string, id: string): Promise
   if (isApiEnabled()) {
     try { await del(`/api/references/counterparties/${id}`); return true } catch { return false }
   }
-  const list = loadList<Counterparty>(counterpartiesKey(companyId))
+  const list = await loadList<Counterparty>(counterpartiesKey(companyId))
   const filtered = list.filter((c) => c.id !== id)
   if (filtered.length === list.length) return false
-  saveList(counterpartiesKey(companyId), filtered)
+  await saveList(counterpartiesKey(companyId), filtered)
   return true
 }
 
@@ -199,7 +199,7 @@ export async function upsertCounterparties(companyId: string, items: Counterpart
     }
   }
 
-  saveList(counterpartiesKey(companyId), existing)
+  await saveList(counterpartiesKey(companyId), existing)
   return added
 }
 
@@ -211,7 +211,7 @@ export async function getOrganizations(companyId: string): Promise<Organization[
   if (isApiEnabled()) {
     return get<Organization[]>('/api/references/organizations', { company_id: companyId })
   }
-  return loadList<Organization>(organizationsKey(companyId))
+  return await loadList<Organization>(organizationsKey(companyId))
 }
 
 export async function getOrganization(companyId: string, id: string): Promise<Organization | undefined> {
@@ -233,9 +233,9 @@ export async function createOrganization(
   }
   const now = new Date().toISOString()
   const item: Organization = { id: nanoid(), companyId, ...input, createdAt: now, updatedAt: now }
-  const list = loadList<Organization>(organizationsKey(companyId))
+  const list = await loadList<Organization>(organizationsKey(companyId))
   list.push(item)
-  saveList(organizationsKey(companyId), list)
+  await saveList(organizationsKey(companyId), list)
   return item
 }
 
@@ -247,11 +247,11 @@ export async function updateOrganization(
   if (isApiEnabled()) {
     return patch<Organization>(`/api/references/organizations/${id}`, updates)
   }
-  const list = loadList<Organization>(organizationsKey(companyId))
+  const list = await loadList<Organization>(organizationsKey(companyId))
   const idx = list.findIndex((o) => o.id === id)
   if (idx === -1) return undefined
   list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
-  saveList(organizationsKey(companyId), list)
+  await saveList(organizationsKey(companyId), list)
   return list[idx]
 }
 
@@ -259,10 +259,10 @@ export async function deleteOrganization(companyId: string, id: string): Promise
   if (isApiEnabled()) {
     try { await del(`/api/references/organizations/${id}`); return true } catch { return false }
   }
-  const list = loadList<Organization>(organizationsKey(companyId))
+  const list = await loadList<Organization>(organizationsKey(companyId))
   const filtered = list.filter((o) => o.id !== id)
   if (filtered.length === list.length) return false
-  saveList(organizationsKey(companyId), filtered)
+  await saveList(organizationsKey(companyId), filtered)
   return true
 }
 
@@ -297,7 +297,7 @@ export async function upsertOrganizations(companyId: string, items: Organization
     }
   }
 
-  saveList(organizationsKey(companyId), existing)
+  await saveList(organizationsKey(companyId), existing)
   return added
 }
 
@@ -309,7 +309,7 @@ export async function getNomenclature(companyId: string): Promise<Nomenclature[]
   if (isApiEnabled()) {
     return get<Nomenclature[]>('/api/references/nomenclature', { company_id: companyId })
   }
-  return loadList<Nomenclature>(nomenclatureKey(companyId))
+  return await loadList<Nomenclature>(nomenclatureKey(companyId))
 }
 
 export async function findNomenclatureByCode(companyId: string, code: string): Promise<Nomenclature | undefined> {
@@ -326,9 +326,9 @@ export async function createNomenclature(
   }
   const now = new Date().toISOString()
   const item: Nomenclature = { id: nanoid(), companyId, ...input, createdAt: now, updatedAt: now }
-  const list = loadList<Nomenclature>(nomenclatureKey(companyId))
+  const list = await loadList<Nomenclature>(nomenclatureKey(companyId))
   list.push(item)
-  saveList(nomenclatureKey(companyId), list)
+  await saveList(nomenclatureKey(companyId), list)
   return item
 }
 
@@ -340,11 +340,11 @@ export async function updateNomenclature(
   if (isApiEnabled()) {
     return patch<Nomenclature>(`/api/references/nomenclature/${id}`, updates)
   }
-  const list = loadList<Nomenclature>(nomenclatureKey(companyId))
+  const list = await loadList<Nomenclature>(nomenclatureKey(companyId))
   const idx = list.findIndex((n) => n.id === id)
   if (idx === -1) return undefined
   list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
-  saveList(nomenclatureKey(companyId), list)
+  await saveList(nomenclatureKey(companyId), list)
   return list[idx]
 }
 
@@ -352,10 +352,10 @@ export async function deleteNomenclature(companyId: string, id: string): Promise
   if (isApiEnabled()) {
     try { await del(`/api/references/nomenclature/${id}`); return true } catch { return false }
   }
-  const list = loadList<Nomenclature>(nomenclatureKey(companyId))
+  const list = await loadList<Nomenclature>(nomenclatureKey(companyId))
   const filtered = list.filter((n) => n.id !== id)
   if (filtered.length === list.length) return false
-  saveList(nomenclatureKey(companyId), filtered)
+  await saveList(nomenclatureKey(companyId), filtered)
   return true
 }
 
@@ -379,7 +379,7 @@ export async function upsertNomenclature(companyId: string, items: Nomenclature[
     }
   }
 
-  saveList(nomenclatureKey(companyId), existing)
+  await saveList(nomenclatureKey(companyId), existing)
   return added
 }
 
@@ -391,7 +391,7 @@ export async function getContracts(companyId: string): Promise<Contract[]> {
   if (isApiEnabled()) {
     return get<Contract[]>('/api/references/contracts', { company_id: companyId })
   }
-  return loadList<Contract>(contractsKey(companyId))
+  return await loadList<Contract>(contractsKey(companyId))
 }
 
 export async function getContract(companyId: string, id: string): Promise<Contract | undefined> {
@@ -418,9 +418,9 @@ export async function createContract(
   }
   const now = new Date().toISOString()
   const item: Contract = { id: nanoid(), companyId, ...input, createdAt: now, updatedAt: now }
-  const list = loadList<Contract>(contractsKey(companyId))
+  const list = await loadList<Contract>(contractsKey(companyId))
   list.push(item)
-  saveList(contractsKey(companyId), list)
+  await saveList(contractsKey(companyId), list)
   return item
 }
 
@@ -432,11 +432,11 @@ export async function updateContract(
   if (isApiEnabled()) {
     return patch<Contract>(`/api/references/contracts/${id}`, updates)
   }
-  const list = loadList<Contract>(contractsKey(companyId))
+  const list = await loadList<Contract>(contractsKey(companyId))
   const idx = list.findIndex((c) => c.id === id)
   if (idx === -1) return undefined
   list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
-  saveList(contractsKey(companyId), list)
+  await saveList(contractsKey(companyId), list)
   return list[idx]
 }
 
@@ -444,10 +444,10 @@ export async function deleteContract(companyId: string, id: string): Promise<boo
   if (isApiEnabled()) {
     try { await del(`/api/references/contracts/${id}`); return true } catch { return false }
   }
-  const list = loadList<Contract>(contractsKey(companyId))
+  const list = await loadList<Contract>(contractsKey(companyId))
   const filtered = list.filter((c) => c.id !== id)
   if (filtered.length === list.length) return false
-  saveList(contractsKey(companyId), filtered)
+  await saveList(contractsKey(companyId), filtered)
   return true
 }
 
@@ -479,7 +479,7 @@ export async function upsertContracts(companyId: string, items: Contract[]): Pro
     }
   }
 
-  saveList(contractsKey(companyId), existing)
+  await saveList(contractsKey(companyId), existing)
   return added
 }
 
@@ -491,7 +491,7 @@ export async function getWarehouses(companyId: string): Promise<Warehouse[]> {
   if (isApiEnabled()) {
     return get<Warehouse[]>('/api/references/warehouses', { company_id: companyId })
   }
-  return loadList<Warehouse>(warehousesKey(companyId))
+  return await loadList<Warehouse>(warehousesKey(companyId))
 }
 
 export async function createWarehouse(
@@ -503,9 +503,9 @@ export async function createWarehouse(
   }
   const now = new Date().toISOString()
   const item: Warehouse = { id: nanoid(), companyId, ...input, createdAt: now, updatedAt: now }
-  const list = loadList<Warehouse>(warehousesKey(companyId))
+  const list = await loadList<Warehouse>(warehousesKey(companyId))
   list.push(item)
-  saveList(warehousesKey(companyId), list)
+  await saveList(warehousesKey(companyId), list)
   return item
 }
 
@@ -517,11 +517,11 @@ export async function updateWarehouse(
   if (isApiEnabled()) {
     return patch<Warehouse>(`/api/references/warehouses/${id}`, updates)
   }
-  const list = loadList<Warehouse>(warehousesKey(companyId))
+  const list = await loadList<Warehouse>(warehousesKey(companyId))
   const idx = list.findIndex((w) => w.id === id)
   if (idx === -1) return undefined
   list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
-  saveList(warehousesKey(companyId), list)
+  await saveList(warehousesKey(companyId), list)
   return list[idx]
 }
 
@@ -529,10 +529,10 @@ export async function deleteWarehouse(companyId: string, id: string): Promise<bo
   if (isApiEnabled()) {
     try { await del(`/api/references/warehouses/${id}`); return true } catch { return false }
   }
-  const list = loadList<Warehouse>(warehousesKey(companyId))
+  const list = await loadList<Warehouse>(warehousesKey(companyId))
   const filtered = list.filter((w) => w.id !== id)
   if (filtered.length === list.length) return false
-  saveList(warehousesKey(companyId), filtered)
+  await saveList(warehousesKey(companyId), filtered)
   return true
 }
 
@@ -561,7 +561,7 @@ export async function upsertWarehouses(companyId: string, items: Warehouse[]): P
     }
   }
   if (!isApiEnabled()) {
-    saveList(warehousesKey(companyId), existing)
+    await saveList(warehousesKey(companyId), existing)
   }
   return added
 }
@@ -574,7 +574,7 @@ export async function getBankAccounts(companyId: string): Promise<BankAccount[]>
   if (isApiEnabled()) {
     return get<BankAccount[]>('/api/references/bank-accounts', { company_id: companyId })
   }
-  return loadList<BankAccount>(bankAccountsKey(companyId))
+  return await loadList<BankAccount>(bankAccountsKey(companyId))
 }
 
 export async function createBankAccount(
@@ -586,9 +586,9 @@ export async function createBankAccount(
   }
   const now = new Date().toISOString()
   const item: BankAccount = { id: nanoid(), companyId, ...input, createdAt: now, updatedAt: now }
-  const list = loadList<BankAccount>(bankAccountsKey(companyId))
+  const list = await loadList<BankAccount>(bankAccountsKey(companyId))
   list.push(item)
-  saveList(bankAccountsKey(companyId), list)
+  await saveList(bankAccountsKey(companyId), list)
   return item
 }
 
@@ -600,11 +600,11 @@ export async function updateBankAccount(
   if (isApiEnabled()) {
     return patch<BankAccount>(`/api/references/bank-accounts/${id}`, updates)
   }
-  const list = loadList<BankAccount>(bankAccountsKey(companyId))
+  const list = await loadList<BankAccount>(bankAccountsKey(companyId))
   const idx = list.findIndex((b) => b.id === id)
   if (idx === -1) return undefined
   list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() }
-  saveList(bankAccountsKey(companyId), list)
+  await saveList(bankAccountsKey(companyId), list)
   return list[idx]
 }
 
@@ -612,10 +612,10 @@ export async function deleteBankAccount(companyId: string, id: string): Promise<
   if (isApiEnabled()) {
     try { await del(`/api/references/bank-accounts/${id}`); return true } catch { return false }
   }
-  const list = loadList<BankAccount>(bankAccountsKey(companyId))
+  const list = await loadList<BankAccount>(bankAccountsKey(companyId))
   const filtered = list.filter((b) => b.id !== id)
   if (filtered.length === list.length) return false
-  saveList(bankAccountsKey(companyId), filtered)
+  await saveList(bankAccountsKey(companyId), filtered)
   return true
 }
 
@@ -651,7 +651,7 @@ export async function upsertBankAccounts(companyId: string, items: BankAccount[]
     }
   }
   if (!isApiEnabled()) {
-    saveList(bankAccountsKey(companyId), existing)
+    await saveList(bankAccountsKey(companyId), existing)
   }
   return added
 }
@@ -686,4 +686,32 @@ export async function getReferenceStats(companyId: string): Promise<ReferenceSta
     warehouses: wh.length,
     bankAccounts: ba.length,
   }
+}
+
+// ============================================================
+// Balances (Сальдо взаиморасчётов)
+// ============================================================
+
+export async function getBalances(companyId: string): Promise<CounterpartyBalance[]> {
+  if (isApiEnabled()) {
+    return get<CounterpartyBalance[]>('/api/references/balances', { company_id: companyId })
+  }
+  return await loadList<CounterpartyBalance>(balancesKey(companyId))
+}
+
+/** Импорт сальдо — полная замена (каждая выгрузка содержит актуальный срез). */
+export async function upsertBalances(companyId: string, items: CounterpartyBalance[]): Promise<number> {
+  const now = new Date().toISOString()
+  const withCompany = items.map((b) => ({
+    ...b,
+    id: b.id || nanoid(),
+    companyId,
+    importedAt: now,
+  }))
+  if (isApiEnabled()) {
+    await post<CounterpartyBalance[]>('/api/references/balances/bulk', { items: withCompany, company_id: companyId })
+  } else {
+    await saveList(balancesKey(companyId), withCompany)
+  }
+  return withCompany.length
 }

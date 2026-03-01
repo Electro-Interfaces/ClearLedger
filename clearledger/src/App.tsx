@@ -33,7 +33,6 @@ const ExportPage = lazy(() => import('@/pages/ExportPage').then((m) => ({ defaul
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 const NormalizationPage = lazy(() => import('@/pages/NormalizationPage').then((m) => ({ default: m.NormalizationPage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
-const RegisterPage = lazy(() => import('@/pages/RegisterPage').then((m) => ({ default: m.RegisterPage })))
 const AuditorPage = lazy(() => import('@/pages/partner/AuditorPage').then((m) => ({ default: m.AuditorPage })))
 
 function PageLoader() {
@@ -111,7 +110,6 @@ const router = createBrowserRouter([
     element: <Providers />,
     children: [
       { path: '/login', element: <LoginRoute /> },
-      { path: '/register', element: <LazyPage><RegisterPage /></LazyPage> },
       {
         element: <ProtectedRoute />,
         children: [

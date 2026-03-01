@@ -71,6 +71,10 @@ export function bankAccountsKey(companyId: string): string {
   return `clearledger-bank-accounts-${companyId}`
 }
 
+export function balancesKey(companyId: string): string {
+  return `clearledger-balances-${companyId}`
+}
+
 export function accountingDocsKey(companyId: string): string {
   return `clearledger-accounting-docs-${companyId}`
 }

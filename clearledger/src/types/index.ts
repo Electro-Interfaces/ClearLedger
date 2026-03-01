@@ -387,6 +387,13 @@ export type AccountingDocType =
   | 'sales'             // Реализация
   | 'invoice-issued'    // СчётФактураВыданный
   | 'reconciliation'    // АктСверкиВзаиморасчётов
+  | 'payment-order'    // ПлатёжноеПоручение (исходящее)
+  | 'advance-report'   // АвансовыйОтчёт
+  | 'debt-adjustment'  // КорректировкаДолга
+  | 'cash-in'          // ПриходныйКассовыйОрдер (ПКО)
+  | 'cash-out'         // РасходныйКассовыйОрдер (РКО)
+  | 'power-of-attorney' // Доверенность
+  | 'return-to-supplier' // ВозвратТоваровПоставщику
 
 export type MatchStatus = 'matched' | 'unmatched' | 'discrepancy' | 'pending'
 
@@ -468,6 +475,127 @@ export interface BankAccount {
   organizationId?: string
   createdAt: string
   updatedAt: string
+}
+
+// ---- Сальдо взаиморасчётов ----
+
+export interface CounterpartyBalance {
+  id: string
+  companyId: string
+  account: string            // "60", "62"
+  accountName: string        // "Расчёты с поставщиками"
+  counterpartyId: string
+  counterpartyName: string
+  counterpartyInn?: string
+  contractId?: string
+  contractName?: string
+  debitBalance: number       // дебет остаток
+  creditBalance: number      // кредит остаток
+  debitTurnover: number      // дебет оборот
+  creditTurnover: number     // кредит оборот
+  netBalance: number         // положительный = нам должны
+  periodFrom: string
+  periodTo: string
+  importedAt: string
+}
+
+// ---- Основные средства ----
+
+export interface FixedAsset {
+  id: string
+  companyId: string
+  code: string
+  name: string
+  shortName?: string
+  acceptedDate?: string
+  initialCost?: number
+  usefulLife?: number          // срок полезного использования (мес.)
+  createdAt: string
+  updatedAt: string
+}
+
+// ---- ОСВ (оборотно-сальдовая ведомость) ----
+
+export interface OsvAccount {
+  account: string              // "01", "10", "60" и т.д.
+  accountName: string
+  kind?: string                // Активный/Пассивный/АктивноПассивный
+  openDebit: number            // начальное сальдо дебет
+  openCredit: number           // начальное сальдо кредит
+  turnDebit: number            // оборот дебет
+  turnCredit: number           // оборот кредит
+  closeDebit: number           // конечное сальдо дебет
+  closeCredit: number          // конечное сальдо кредит
+}
+
+export interface OsvData {
+  periodFrom: string
+  periodTo: string
+  accounts: OsvAccount[]
+  importedAt: string
+}
+
+// ---- Проводки (журнал операций) ----
+
+export interface JournalEntry {
+  date: string
+  documentId: string
+  documentDesc: string
+  debitAccount: string         // "60.01"
+  debitName: string
+  creditAccount: string        // "51"
+  creditName: string
+  amount: number
+  content?: string
+}
+
+export interface JournalData {
+  periodFrom: string
+  periodTo: string
+  entries: JournalEntry[]
+  importedAt: string
+}
+
+// ---- План счетов ----
+
+export interface ChartAccount {
+  code: string                 // "01", "01.01"
+  name: string
+  kind: string                 // "Активный", "Пассивный", "АктивноПассивный"
+  offBalance: boolean
+  quantitative: boolean
+  currency: boolean
+  parentCode?: string
+  subconto: string[]           // ["Основные средства", "Склады"]
+}
+
+// ---- Учётная политика ----
+
+export interface AccountingPolicy {
+  period: string
+  organizationName: string
+  organizationId: string
+  taxSystem?: string           // "ОСНО", "УСН" и т.д.
+  depreciationMethod?: string
+  separateVat?: boolean
+  inventoryMethod?: string
+  revenueMethod?: string
+  smallBusiness?: boolean
+}
+
+// ---- Регламентированная отчётность (факт сдачи) ----
+
+export interface Filing {
+  id: string
+  date: string
+  organizationName: string
+  organizationInn: string
+  reportKind?: string          // вид отчёта
+  reportType?: string          // имя отчёта
+  periodFrom?: string
+  periodTo?: string
+  comment?: string
+  description?: string
 }
 
 // ---- Интеграция 1С ----

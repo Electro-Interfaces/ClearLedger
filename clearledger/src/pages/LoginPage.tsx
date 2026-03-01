@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { FileText, Loader2 } from 'lucide-react'
 
@@ -90,10 +90,7 @@ export function LoginPage() {
         </form>
 
         <p className="text-center text-sm text-muted-foreground">
-          Нет аккаунта?{' '}
-          <Link to="/register" className="text-primary hover:underline">
-            Зарегистрироваться
-          </Link>
+          Для получения доступа обратитесь к администратору
         </p>
       </div>
     </div>

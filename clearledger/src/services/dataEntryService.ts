@@ -10,21 +10,22 @@ import type { DataEntry, OcrResult, DocPurpose, SyncStatus } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 import { isApiEnabled, get, post, patch, del } from './apiClient'
 import { getItem, setItem, nextId, entriesKey } from './storage'
+import { getItemIDB, setItemIDB } from './idbStorage'
 import { deleteSource } from './sourceStore'
 import { mockEntries } from './mockData'
 import { apiToEntry, type ApiEntry } from './apiMappers'
 import { getAllDocumentTypes } from '@/config/categories'
 
 // ============================================================
-// LocalStorage helpers (demo mode)
+// IndexedDB helpers (async, лимит сотни МБ)
 // ============================================================
 
-function loadEntries(companyId: string): DataEntry[] {
-  return getItem<DataEntry[]>(entriesKey(companyId), [])
+async function loadEntries(companyId: string): Promise<DataEntry[]> {
+  return getItemIDB<DataEntry[]>(entriesKey(companyId), [])
 }
 
-function saveEntries(companyId: string, entries: DataEntry[]): void {
-  setItem(entriesKey(companyId), entries)
+async function saveEntries(companyId: string, entries: DataEntry[]): Promise<void> {
+  await setItemIDB(entriesKey(companyId), entries)
 }
 
 // ---- Seed (при первом запуске, demo mode) ----
@@ -61,28 +62,36 @@ function seedGenerateInn(): string {
   return inn
 }
 
-export function seedIfNeeded(): void {
+export async function seedIfNeeded(): Promise<void> {
   if (isApiEnabled()) return // seed делается на сервере
 
-  // Шаг 1: seed mock-записей (однократно)
+  // НПК: очистка демо-данных (одноразово, v3)
+  // НПК использует реальные данные из 1С — демо больше не нужны.
+  if (!getItem<boolean>('clearledger-npk-cleaned', false)) {
+    await saveEntries('npk', [])
+    setItem('clearledger-npk-cleaned', true)
+  }
+
+  // Шаг 1: seed mock-записей (однократно), НПК исключён
   if (!getItem<boolean>(SEED_KEY, false)) {
     const byCompany = new Map<string, DataEntry[]>()
     for (const entry of mockEntries) {
+      if (entry.companyId === 'npk') continue // НПК — реальные данные из 1С
       const list = byCompany.get(entry.companyId) ?? []
       list.push(entry)
       byCompany.set(entry.companyId, list)
     }
     for (const [companyId, entries] of byCompany) {
-      saveEntries(companyId, entries)
+      await saveEntries(companyId, entries)
     }
     const maxId = Math.max(...mockEntries.map((e) => Number(e.id) || 0), 0)
     setItem('clearledger-entry-counter', maxId)
     setItem(SEED_KEY, true)
   }
 
-  // Шаг 2: генерация 200 записей для НПК (однократно, v2)
+  // Шаг 2: генерация НПК отключена — реальные данные из 1С
   if (!getItem<boolean>(SEED_V2_KEY, false)) {
-    seedGenerateNpkEntries()
+    // seedGenerateNpkEntries() — отключено
     setItem(SEED_V2_KEY, true)
   }
 }
@@ -170,7 +179,7 @@ export async function getEntries(companyId: string): Promise<DataEntry[]> {
     })
     return res.items.map(apiToEntry)
   }
-  return loadEntries(companyId)
+  return await loadEntries(companyId)
 }
 
 // ---- Пагинация (только API mode) ----
@@ -215,7 +224,7 @@ export async function getEntriesPaginated(
   }
 
   // Demo mode — клиентская пагинация
-  let entries = loadEntries(companyId)
+  let entries = await loadEntries(companyId)
   if (status && status !== 'all') entries = entries.filter((e) => e.status === status)
   if (categoryId) entries = entries.filter((e) => e.categoryId === categoryId)
   if (search) {
@@ -244,7 +253,7 @@ export async function getEntry(companyId: string, id: string): Promise<DataEntry
       return undefined
     }
   }
-  return loadEntries(companyId).find((e) => e.id === id)
+  return (await loadEntries(companyId)).find((e) => e.id === id)
 }
 
 export interface CreateEntryInput {
@@ -305,9 +314,9 @@ export async function createEntry(input: CreateEntryInput): Promise<DataEntry> {
     createdAt: now,
     updatedAt: now,
   }
-  const entries = loadEntries(input.companyId)
+  const entries = await loadEntries(input.companyId)
   entries.push(entry)
-  saveEntries(input.companyId, entries)
+  await saveEntries(input.companyId, entries)
   return entry
 }
 
@@ -331,11 +340,11 @@ export async function updateEntry(
     return apiToEntry(a)
   }
 
-  const entries = loadEntries(companyId)
+  const entries = await loadEntries(companyId)
   const idx = entries.findIndex((e) => e.id === id)
   if (idx === -1) return undefined
   entries[idx] = { ...entries[idx], ...updates, updatedAt: new Date().toISOString() }
-  saveEntries(companyId, entries)
+  await saveEntries(companyId, entries)
   return entries[idx]
 }
 
@@ -349,12 +358,12 @@ export async function deleteEntry(companyId: string, id: string): Promise<boolea
     }
   }
 
-  const entries = loadEntries(companyId)
+  const entries = await loadEntries(companyId)
   const entry = entries.find((e) => e.id === id)
   if (!entry) return false
 
   const filtered = entries.filter((e) => e.id !== id)
-  saveEntries(companyId, filtered)
+  await saveEntries(companyId, filtered)
 
   if (entry.sourceId) {
     deleteSource(entry.sourceId).catch(() => { /* best effort */ })
@@ -400,7 +409,7 @@ export async function transferEntries(companyId: string, ids: string[]): Promise
     return count
   }
 
-  const entries = loadEntries(companyId)
+  const entries = await loadEntries(companyId)
   let count = 0
   const now = new Date().toISOString()
   for (const entry of entries) {
@@ -413,7 +422,7 @@ export async function transferEntries(companyId: string, ids: string[]): Promise
       count++
     }
   }
-  if (count > 0) saveEntries(companyId, entries)
+  if (count > 0) await saveEntries(companyId, entries)
   return count
 }
 
@@ -480,7 +489,7 @@ export async function getInboxEntries(companyId: string): Promise<DataEntry[]> {
     ])
     return [...resNew.items, ...resRecognized.items].map(apiToEntry)
   }
-  return loadEntries(companyId).filter(
+  return (await loadEntries(companyId)).filter(
     (e) => e.status === 'new' || e.status === 'recognized',
   )
 }
@@ -504,7 +513,7 @@ export async function searchEntries(companyId: string, query: string): Promise<D
     return res.items.map(apiToEntry)
   }
   const q = query.toLowerCase()
-  return loadEntries(companyId).filter((e) =>
+  return (await loadEntries(companyId)).filter((e) =>
     e.title.toLowerCase().includes(q) ||
     Object.values(e.metadata).some((v) => v.toLowerCase().includes(q)),
   )

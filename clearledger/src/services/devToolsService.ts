@@ -7,6 +7,7 @@
 import type { EntryStatus } from '@/config/statuses'
 import type { DataEntry, DocPurpose, SyncStatus, DocumentLink, AccountingDoc, AccountingDocLine, AccountingDocType } from '@/types'
 import { getItem, setItem, removeItem, entriesKey, accountingDocsKey } from './storage'
+import { getItemIDB, setItemIDB } from './idbStorage'
 import { getEntries, createEntry, seedIfNeeded } from './dataEntryService'
 import { getConnectors } from './connectorService'
 import { runReconciliation } from './accountingDocService'
@@ -172,7 +173,7 @@ export async function generateAccountingDocs(
   companyId: string,
   _profileId: ProfileId,
 ): Promise<GenerateAccountingDocsResult> {
-  const entries = getItem<DataEntry[]>(entriesKey(companyId), [])
+  const entries = await getItemIDB<DataEntry[]>(entriesKey(companyId), [])
   const accountingEntries = entries.filter((e) => e.docPurpose === 'accounting')
 
   if (accountingEntries.length === 0) {
@@ -289,21 +290,16 @@ export async function generateAccountingDocs(
 }
 
 /** Удалить seed-флаг и все записи, заново вызвать seedIfNeeded() */
-export function resetSeed(): void {
+export async function resetSeed(): Promise<void> {
+  const { removeItemIDB } = await import('./idbStorage')
   removeItem(SEED_KEY)
   removeItem('clearledger-seeded-v2')
-  // Удалить все записи по компаниям
+  // Удалить все записи по компаниям из IndexedDB
   for (const company of defaultCompanies) {
-    removeItem(entriesKey(company.id))
-  }
-  // Удалить также кастомные компании
-  for (const key of getAllClearledgerKeys()) {
-    if (key.startsWith('clearledger-entries-')) {
-      removeItem(key)
-    }
+    await removeItemIDB(entriesKey(company.id))
   }
   removeItem('clearledger-entry-counter')
-  seedIfNeeded()
+  await seedIfNeeded()
 }
 
 /** Полная очистка всех clearledger-* ключей в localStorage */
@@ -377,26 +373,26 @@ export async function generateEntries(
     })
 
     // Перезаписываем createdAt для рандомизации даты
-    const entries = getItem<DataEntry[]>(entriesKey(companyId), [])
+    const entries = await getItemIDB<DataEntry[]>(entriesKey(companyId), [])
     const idx = entries.findIndex((e) => e.id === entry.id)
     if (idx !== -1) {
       entries[idx].createdAt = createdAt
       entries[idx].updatedAt = createdAt
-      setItem(entriesKey(companyId), entries)
+      await setItemIDB(entriesKey(companyId), entries)
     }
 
     created.push(entry)
   }
 
   // Шаг 2: создаём бандлы (Договор → подчинённые документы)
-  buildBundles(companyId, created)
+  await buildBundles(companyId, created)
 
   return created
 }
 
 /** Создаёт бандлы из сгенерированных записей: договоры становятся корнями */
-function buildBundles(companyId: string, created: DataEntry[]) {
-  const entries = getItem<DataEntry[]>(entriesKey(companyId), [])
+async function buildBundles(companyId: string, created: DataEntry[]) {
+  const entries = await getItemIDB<DataEntry[]>(entriesKey(companyId), [])
   const entryMap = new Map(entries.map((e) => [e.id, e]))
   const links = getItem<DocumentLink[]>(LINKS_KEY, [])
 
@@ -463,7 +459,7 @@ function buildBundles(companyId: string, created: DataEntry[]) {
   }
 
   // Сохраняем обновлённые записи и линки
-  setItem(entriesKey(companyId), entries)
+  await setItemIDB(entriesKey(companyId), entries)
   setItem(LINKS_KEY, links)
 }
 
@@ -513,8 +509,8 @@ export async function getStorageStats(): Promise<StorageStats> {
 }
 
 /** Массовая смена статуса всех записей компании */
-export function setAllStatuses(companyId: string, status: EntryStatus): number {
-  const entries = getItem<DataEntry[]>(entriesKey(companyId), [])
+export async function setAllStatuses(companyId: string, status: EntryStatus): Promise<number> {
+  const entries = await getItemIDB<DataEntry[]>(entriesKey(companyId), [])
   const now = new Date().toISOString()
   let changed = 0
   for (const entry of entries) {
@@ -524,7 +520,7 @@ export function setAllStatuses(companyId: string, status: EntryStatus): number {
       changed++
     }
   }
-  if (changed > 0) setItem(entriesKey(companyId), entries)
+  if (changed > 0) await setItemIDB(entriesKey(companyId), entries)
   return changed
 }
 
@@ -532,6 +528,7 @@ export function setAllStatuses(companyId: string, status: EntryStatus): number {
 export async function deleteAllEntries(companyId: string): Promise<number> {
   const entries = await getEntries(companyId)
   const count = entries.length
-  removeItem(entriesKey(companyId))
+  const { removeItemIDB } = await import('./idbStorage')
+  await removeItemIDB(entriesKey(companyId))
   return count
 }

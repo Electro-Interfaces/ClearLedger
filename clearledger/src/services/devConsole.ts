@@ -40,8 +40,8 @@ function getProfileId(companyId: string) {
 }
 
 const cl = {
-  reset() {
-    resetSeed()
+  async reset() {
+    await resetSeed()
     console.log('[ClearLedger] Seed сброшен и пересоздан. Перезагрузка...')
     location.reload()
   },
@@ -83,9 +83,9 @@ const cl = {
     return entries
   },
 
-  setStatus(status: EntryStatus) {
+  async setStatus(status: EntryStatus) {
     const companyId = getCurrentCompanyId()
-    const count = setAllStatuses(companyId, status)
+    const count = await setAllStatuses(companyId, status)
     console.log(`[ClearLedger] Изменено ${count} записей → ${status}`)
     return count
   },

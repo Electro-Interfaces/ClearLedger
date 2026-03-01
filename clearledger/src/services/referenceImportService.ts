@@ -17,6 +17,7 @@ import {
   upsertContracts,
   upsertWarehouses,
   upsertBankAccounts,
+  upsertBalances,
 } from './referenceService'
 import { nanoid } from 'nanoid'
 
@@ -383,6 +384,12 @@ export async function importReferences(companyId: string, content: string): Prom
   }
 }
 
+/** Сохранить снимок данных в IndexedDB (полная замена). */
+async function saveSnapshot(companyId: string, key: string, data: unknown): Promise<void> {
+  const { setItemIDB } = await import('./idbStorage')
+  await setItemIDB(`clearledger-${key}-${companyId}`, data)
+}
+
 /** Прочитать файл как текст */
 export function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -391,4 +398,180 @@ export function readFileAsText(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
     reader.readAsText(file, 'utf-8')
   })
+}
+
+// ============================================================
+// Импорт папки выгрузки 1С (множественные JSON-файлы)
+// ============================================================
+
+export interface FolderImportResult extends ImportResult {
+  documents: { total: number; created: number; updated: number }
+  balances: { total: number; imported: number }
+  fixedAssets: { total: number; added: number }
+  osv: { total: number }
+  journal: { total: number }
+  chartOfAccounts: { total: number }
+  accountingPolicy: { total: number }
+  filings: { total: number }
+  meta: { exportDate: string; periodFrom: string; periodTo: string; source: string; version?: string } | null
+}
+
+export async function import1CExportFiles(companyId: string, files: File[]): Promise<FolderImportResult> {
+  const { importAccountingDocs } = await import('./accountingDocService')
+  const errors: string[] = []
+  const result: FolderImportResult = {
+    counterparties: { total: 0, added: 0 },
+    organizations: { total: 0, added: 0 },
+    nomenclature: { total: 0, added: 0 },
+    contracts: { total: 0, added: 0 },
+    warehouses: { total: 0, added: 0 },
+    bankAccounts: { total: 0, added: 0 },
+    documents: { total: 0, created: 0, updated: 0 },
+    balances: { total: 0, imported: 0 },
+    fixedAssets: { total: 0, added: 0 },
+    osv: { total: 0 },
+    journal: { total: 0 },
+    chartOfAccounts: { total: 0 },
+    accountingPolicy: { total: 0 },
+    filings: { total: 0 },
+    meta: null,
+    errors: [],
+  }
+
+  for (const file of files) {
+    try {
+      const text = await readFileAsText(file)
+      const data = JSON.parse(text)
+
+      // meta.json — информация о выгрузке
+      if (data.exportDate && data.source) {
+        result.meta = {
+          exportDate: data.exportDate,
+          periodFrom: data.periodFrom ?? '',
+          periodTo: data.periodTo ?? '',
+          source: data.source,
+        }
+        continue
+      }
+
+      // documents.json — учётные документы
+      if (data.documents && Array.isArray(data.documents)) {
+        const docs = data.documents.map((d: Record<string, unknown>) => ({
+          externalId: String(d.externalId ?? ''),
+          docType: String(d.docType ?? 'receipt') as import('@/types').AccountingDocType,
+          number: String(d.number ?? ''),
+          date: String(d.date ?? ''),
+          counterpartyName: String(d.counterpartyName ?? ''),
+          counterpartyInn: String(d.counterpartyInn ?? ''),
+          organizationName: String(d.organizationName ?? ''),
+          amount: Number(d.amount ?? 0),
+          vatAmount: undefined as number | undefined,
+          status1c: String(d.status1c ?? d.posted ? 'Проведён' : 'Не проведён'),
+          lines: Array.isArray(d.lines) ? d.lines.map((l: Record<string, unknown>) => ({
+            nomenclatureName: String(l.nomenclatureName ?? ''),
+            quantity: Number(l.quantity ?? 0),
+            price: Number(l.price ?? 0),
+            amount: Number(l.amount ?? 0),
+            vatRate: Number(l.vatRate ?? 0),
+            vatAmount: Number(l.vatAmount ?? 0),
+          })) : [],
+        }))
+        const docResult = await importAccountingDocs(companyId, docs)
+        result.documents = { total: docResult.total, created: docResult.created, updated: docResult.updated }
+        errors.push(...docResult.errors)
+        continue
+      }
+
+      // balances.json — сальдо взаиморасчётов
+      if (data.balances && Array.isArray(data.balances)) {
+        const balanceItems = data.balances.map((b: Record<string, unknown>) => ({
+          id: '',
+          companyId: '',
+          account: String(b.account ?? ''),
+          accountName: String(b.accountName ?? ''),
+          counterpartyId: String(b.counterpartyId ?? ''),
+          counterpartyName: String(b.counterpartyName ?? ''),
+          counterpartyInn: String(b.counterpartyInn ?? ''),
+          contractId: String(b.contractId ?? '') || undefined,
+          contractName: String(b.contractName ?? '') || undefined,
+          debitBalance: Number(b.debitBalance ?? 0),
+          creditBalance: Number(b.creditBalance ?? 0),
+          debitTurnover: Number(b.debitTurnover ?? 0),
+          creditTurnover: Number(b.creditTurnover ?? 0),
+          netBalance: Number(b.netBalance ?? 0),
+          periodFrom: result.meta?.periodFrom ?? '',
+          periodTo: result.meta?.periodTo ?? '',
+          importedAt: '',
+        }))
+        const imported = await upsertBalances(companyId, balanceItems)
+        result.balances = { total: balanceItems.length, imported }
+        continue
+      }
+
+      // fixedAssets.json — основные средства
+      if (data.fixedAssets && Array.isArray(data.fixedAssets)) {
+        const items = data.fixedAssets as Record<string, unknown>[]
+        await saveSnapshot(companyId, 'fixedAssets', data.fixedAssets)
+        result.fixedAssets = { total: items.length, added: items.length }
+        continue
+      }
+
+      // osv.json — оборотно-сальдовая ведомость
+      if (data.accounts && Array.isArray(data.accounts) && data.periodFrom) {
+        await saveSnapshot(companyId, 'osv', data)
+        result.osv = { total: (data.accounts as unknown[]).length }
+        continue
+      }
+
+      // journal.json — проводки
+      if (data.entries && Array.isArray(data.entries) && data.periodFrom) {
+        await saveSnapshot(companyId, 'journal', data)
+        result.journal = { total: (data.entries as unknown[]).length }
+        continue
+      }
+
+      // chartOfAccounts.json — план счетов
+      if (data.chartOfAccounts && Array.isArray(data.chartOfAccounts)) {
+        await saveSnapshot(companyId, 'chartOfAccounts', data.chartOfAccounts)
+        result.chartOfAccounts = { total: (data.chartOfAccounts as unknown[]).length }
+        continue
+      }
+
+      // accountingPolicy.json — учётная политика
+      if (data.policies && Array.isArray(data.policies)) {
+        await saveSnapshot(companyId, 'accountingPolicy', data.policies)
+        result.accountingPolicy = { total: (data.policies as unknown[]).length }
+        continue
+      }
+
+      // filings.json — регламентированная отчётность
+      if (data.filings && Array.isArray(data.filings)) {
+        await saveSnapshot(companyId, 'filings', data.filings)
+        result.filings = { total: (data.filings as unknown[]).length }
+        continue
+      }
+
+      // Справочники — через существующий importReferences
+      const refResult = await importReferences(companyId, text)
+      result.counterparties.total += refResult.counterparties.total
+      result.counterparties.added += refResult.counterparties.added
+      result.organizations.total += refResult.organizations.total
+      result.organizations.added += refResult.organizations.added
+      result.nomenclature.total += refResult.nomenclature.total
+      result.nomenclature.added += refResult.nomenclature.added
+      result.contracts.total += refResult.contracts.total
+      result.contracts.added += refResult.contracts.added
+      result.warehouses.total += refResult.warehouses.total
+      result.warehouses.added += refResult.warehouses.added
+      result.bankAccounts.total += refResult.bankAccounts.total
+      result.bankAccounts.added += refResult.bankAccounts.added
+      errors.push(...refResult.errors)
+
+    } catch (err) {
+      errors.push(`${file.name}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  result.errors = errors
+  return result
 }
