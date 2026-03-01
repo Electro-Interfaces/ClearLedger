@@ -14,25 +14,25 @@ export const statuses: Record<EntryStatus, StatusConfig> = {
     id: 'new',
     label: 'Новый',
     variant: 'outline',
-    className: 'border-blue-500 text-blue-400',
+    className: 'border-blue-400/50 text-blue-300/80',
   },
   recognized: {
     id: 'recognized',
     label: 'Распознан',
     variant: 'outline',
-    className: 'border-yellow-500 text-yellow-400',
+    className: 'border-amber-400/50 text-amber-300/80',
   },
   verified: {
     id: 'verified',
     label: 'Проверен',
     variant: 'outline',
-    className: 'border-green-500 text-green-400',
+    className: 'border-emerald-400/50 text-emerald-300/80',
   },
   transferred: {
     id: 'transferred',
     label: 'Передан',
     variant: 'default',
-    className: 'bg-green-600 text-white border-green-600',
+    className: 'bg-emerald-600/80 text-white border-emerald-600/80',
   },
   error: {
     id: 'error',
@@ -44,7 +44,7 @@ export const statuses: Record<EntryStatus, StatusConfig> = {
     id: 'archived',
     label: 'В архиве',
     variant: 'secondary',
-    className: 'border-zinc-500 text-zinc-400',
+    className: 'border-zinc-600 text-zinc-500',
   },
 }
 

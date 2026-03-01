@@ -44,9 +44,9 @@ function formatAmount(value: string | undefined): string {
 // ---- Статус аудитора ----
 
 const AUDITOR_STATUS_MAP: Record<string, { label: string; className: string }> = {
-  approved: { label: 'OK', className: 'border-green-500 text-green-500' },
-  needs_review: { label: 'Проверить', className: 'border-yellow-500 text-yellow-500' },
-  rejected: { label: 'Отклонён', className: 'border-red-500 text-red-500' },
+  approved: { label: 'OK', className: 'border-emerald-400/40 text-emerald-300/70' },
+  needs_review: { label: 'Проверить', className: 'border-amber-400/40 text-amber-300/70' },
+  rejected: { label: 'Отклонён', className: 'border-red-400/40 text-red-300/70' },
 }
 
 function AuditorBadge({ entry }: { entry: DataEntry }) {
