@@ -58,6 +58,7 @@ class CompanyUpdate(BaseModel):
     profile_id: str | None = None
     color: str | None = None
     inn: str | None = None
+    cloud_api_key: str | None = None
 
 
 class CompanyResponse(BaseModel):

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import User
+from app.models import Company, User
 
 settings = get_settings()
 
@@ -107,3 +107,30 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_company_by_api_key(
+    x_cloud_api_key: str = Header(..., alias="X-Cloud-API-Key"),
+    db: AsyncSession = Depends(get_db),
+) -> Company:
+    """
+    FastAPI dependency: аутентификация по X-Cloud-API-Key.
+    Используется внешними системами (TSupport) для доступа к audit-data.
+    """
+    if not x_cloud_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Требуется X-Cloud-API-Key",
+        )
+
+    result = await db.execute(
+        select(Company).where(Company.cloud_api_key == x_cloud_api_key)
+    )
+    company = result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Невалидный API-ключ",
+        )
+
+    return company

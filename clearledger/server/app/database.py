@@ -35,9 +35,18 @@ class Base(DeclarativeBase):
 
 
 async def create_all() -> None:
-    """Создаёт все таблицы (если не существуют)."""
+    """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Инкрементальные миграции для существующих таблиц
+    async with engine.begin() as conn:
+        # v0.6: cloud_api_key для Companies (внешний доступ TSupport)
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE companies ADD COLUMN IF NOT EXISTS cloud_api_key VARCHAR(128) UNIQUE"
+            )
+        )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.database import async_session_factory, create_all
 from app.routers import (
     accounting_docs_router,
+    audit_data_router,
     audit_router,
     auth_router,
     companies_router,
@@ -96,6 +97,7 @@ app.include_router(intake_router.router, prefix=API_PREFIX)
 app.include_router(references_router.router, prefix=API_PREFIX)
 app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
+app.include_router(audit_data_router.router, prefix=API_PREFIX)
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 
 

@@ -38,6 +38,7 @@ class Company(Base):
     profile_id: Mapped[str] = mapped_column(String(50), nullable=False)
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    cloud_api_key: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
