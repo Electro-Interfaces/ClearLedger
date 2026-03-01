@@ -30,6 +30,7 @@ function saveEntries(companyId: string, entries: DataEntry[]): void {
 // ---- Seed (при первом запуске, demo mode) ----
 
 const SEED_KEY = 'clearledger-seeded'
+const SEED_V2_KEY = 'clearledger-seeded-v2'
 const SEED_GENERATED_COUNT = 200
 
 const SEED_COUNTERPARTIES = [
@@ -62,90 +63,99 @@ function seedGenerateInn(): string {
 
 export function seedIfNeeded(): void {
   if (isApiEnabled()) return // seed делается на сервере
-  if (getItem<boolean>(SEED_KEY, false)) return
 
-  // Шаг 1: сохранить 10 mock-записей из mockData.ts
-  const byCompany = new Map<string, DataEntry[]>()
-  for (const entry of mockEntries) {
-    const list = byCompany.get(entry.companyId) ?? []
-    list.push(entry)
-    byCompany.set(entry.companyId, list)
+  // Шаг 1: seed mock-записей (однократно)
+  if (!getItem<boolean>(SEED_KEY, false)) {
+    const byCompany = new Map<string, DataEntry[]>()
+    for (const entry of mockEntries) {
+      const list = byCompany.get(entry.companyId) ?? []
+      list.push(entry)
+      byCompany.set(entry.companyId, list)
+    }
+    for (const [companyId, entries] of byCompany) {
+      saveEntries(companyId, entries)
+    }
+    const maxId = Math.max(...mockEntries.map((e) => Number(e.id) || 0), 0)
+    setItem('clearledger-entry-counter', maxId)
+    setItem(SEED_KEY, true)
   }
-  for (const [companyId, entries] of byCompany) {
-    saveEntries(companyId, entries)
-  }
-  let counter = Math.max(...mockEntries.map((e) => Number(e.id) || 0), 0)
 
-  // Шаг 2: сгенерировать 200 записей для НПК (fuel профиль)
+  // Шаг 2: генерация 200 записей для НПК (однократно, v2)
+  if (!getItem<boolean>(SEED_V2_KEY, false)) {
+    seedGenerateNpkEntries()
+    setItem(SEED_V2_KEY, true)
+  }
+}
+
+/** Синхронная генерация 200 записей для НПК (fuel профиль) */
+function seedGenerateNpkEntries(): void {
   const docTypes = getAllDocumentTypes('fuel')
-  if (docTypes.length > 0) {
-    const npkEntries = loadEntries('npk')
-    const now = Date.now()
-    const allStatuses: EntryStatus[] = ['new', 'recognized', 'verified', 'transferred', 'error']
+  if (docTypes.length === 0) return
 
-    for (let i = 0; i < SEED_GENERATED_COUNT; i++) {
-      counter++
-      const dt = seedRandom(docTypes)
-      const source = seedRandom(SEED_SOURCES)
-      const docNumber = `${seedRandomInt(100, 9999)}`
-      const amount = `${seedRandomInt(1000, 500000)}`
-      const daysBack = Math.random() * 60
-      const entryDate = new Date(now - daysBack * 24 * 60 * 60 * 1000)
-      const createdAt = entryDate.toISOString()
-      const docDate = createdAt.slice(0, 10)
+  const npkEntries = loadEntries('npk')
+  let counter = getItem<number>('clearledger-entry-counter', 0)
+  const now = Date.now()
 
-      // docPurpose: 80% accounting, 10% reference, 10% context
-      const purposeRoll = Math.random()
-      const docPurpose: DocPurpose = purposeRoll < 0.8 ? 'accounting' : purposeRoll < 0.9 ? 'reference' : 'context'
+  for (let i = 0; i < SEED_GENERATED_COUNT; i++) {
+    counter++
+    const dt = seedRandom(docTypes)
+    const source = seedRandom(SEED_SOURCES)
+    const docNumber = `${seedRandomInt(100, 9999)}`
+    const amount = `${seedRandomInt(1000, 500000)}`
+    const daysBack = Math.random() * 60
+    const entryDate = new Date(now - daysBack * 24 * 60 * 60 * 1000)
+    const createdAt = entryDate.toISOString()
+    const docDate = createdAt.slice(0, 10)
 
-      // syncStatus зависит от docPurpose
-      let syncStatus: SyncStatus = 'not_applicable'
-      if (docPurpose === 'accounting') {
-        const syncRoll = Math.random()
-        syncStatus = syncRoll < 0.4 ? 'not_applicable'
-          : syncRoll < 0.6 ? 'pending'
-          : syncRoll < 0.8 ? 'exported'
-          : syncRoll < 0.95 ? 'confirmed'
-          : 'rejected_1c'
-      }
+    // docPurpose: 80% accounting, 10% reference, 10% context
+    const purposeRoll = Math.random()
+    const docPurpose: DocPurpose = purposeRoll < 0.8 ? 'accounting' : purposeRoll < 0.9 ? 'reference' : 'context'
 
-      // status: 25% verified, 25% recognized, 20% new, 15% transferred, 15% error
-      const statusRoll = Math.random()
-      const status: EntryStatus = statusRoll < 0.25 ? 'verified'
-        : statusRoll < 0.50 ? 'recognized'
-        : statusRoll < 0.70 ? 'new'
-        : statusRoll < 0.85 ? 'transferred'
-        : seedRandom(allStatuses)
-
-      npkEntries.push({
-        id: String(counter),
-        title: `${dt.label} №${docNumber}`,
-        categoryId: dt.categoryId,
-        subcategoryId: dt.subcategoryId,
-        docTypeId: dt.id,
-        companyId: 'npk',
-        status,
-        docPurpose,
-        syncStatus,
-        source,
-        sourceLabel: SEED_SOURCE_LABELS[source] ?? source,
-        metadata: {
-          docNumber,
-          docDate,
-          counterparty: seedRandom(SEED_COUNTERPARTIES),
-          amount,
-          inn: seedGenerateInn(),
-        },
-        createdAt,
-        updatedAt: createdAt,
-      })
+    // syncStatus зависит от docPurpose
+    let syncStatus: SyncStatus = 'not_applicable'
+    if (docPurpose === 'accounting') {
+      const syncRoll = Math.random()
+      syncStatus = syncRoll < 0.4 ? 'not_applicable'
+        : syncRoll < 0.6 ? 'pending'
+        : syncRoll < 0.8 ? 'exported'
+        : syncRoll < 0.95 ? 'confirmed'
+        : 'rejected_1c'
     }
 
-    saveEntries('npk', npkEntries)
+    // status: 25% verified, 25% recognized, 20% new, 15% transferred, 15% error
+    const statusRoll = Math.random()
+    const status: EntryStatus = statusRoll < 0.25 ? 'verified'
+      : statusRoll < 0.50 ? 'recognized'
+      : statusRoll < 0.70 ? 'new'
+      : statusRoll < 0.85 ? 'transferred'
+      : 'error'
+
+    npkEntries.push({
+      id: String(counter),
+      title: `${dt.label} №${docNumber}`,
+      categoryId: dt.categoryId,
+      subcategoryId: dt.subcategoryId,
+      docTypeId: dt.id,
+      companyId: 'npk',
+      status,
+      docPurpose,
+      syncStatus,
+      source,
+      sourceLabel: SEED_SOURCE_LABELS[source] ?? source,
+      metadata: {
+        docNumber,
+        docDate,
+        counterparty: seedRandom(SEED_COUNTERPARTIES),
+        amount,
+        inn: seedGenerateInn(),
+      },
+      createdAt,
+      updatedAt: createdAt,
+    })
   }
 
+  saveEntries('npk', npkEntries)
   setItem('clearledger-entry-counter', counter)
-  setItem(SEED_KEY, true)
 }
 
 // ============================================================

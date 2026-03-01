@@ -291,6 +291,7 @@ export async function generateAccountingDocs(
 /** Удалить seed-флаг и все записи, заново вызвать seedIfNeeded() */
 export function resetSeed(): void {
   removeItem(SEED_KEY)
+  removeItem('clearledger-seeded-v2')
   // Удалить все записи по компаниям
   for (const company of defaultCompanies) {
     removeItem(entriesKey(company.id))
