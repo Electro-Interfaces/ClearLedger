@@ -5,10 +5,11 @@
  */
 
 import type { EntryStatus } from '@/config/statuses'
-import type { DataEntry, DocPurpose, SyncStatus, DocumentLink } from '@/types'
-import { getItem, setItem, removeItem, entriesKey } from './storage'
+import type { DataEntry, DocPurpose, SyncStatus, DocumentLink, AccountingDoc, AccountingDocLine, AccountingDocType } from '@/types'
+import { getItem, setItem, removeItem, entriesKey, accountingDocsKey } from './storage'
 import { getEntries, createEntry, seedIfNeeded } from './dataEntryService'
 import { getConnectors } from './connectorService'
+import { runReconciliation } from './accountingDocService'
 import { getAllDocumentTypes } from '@/config/categories'
 import { defaultCompanies } from '@/config/companies'
 import { resolveRole } from './bundleService'
@@ -90,7 +91,202 @@ function getAllClearledgerKeys(): string[] {
   return keys
 }
 
+/** Генерация 10-значного ИНН (случайный) */
+function generateInn(): string {
+  let inn = ''
+  for (let i = 0; i < 10; i++) inn += String(Math.floor(Math.random() * 10))
+  return inn
+}
+
+// ---- Маппинг docTypeId → AccountingDocType ----
+
+const DOC_TYPE_TO_ACCOUNTING: Record<string, AccountingDocType> = {
+  'ttn-gsm': 'receipt',
+  'supply-invoice': 'receipt',
+  'torg-12': 'receipt',
+  'upd': 'receipt',
+  'invoice-factura': 'invoice-received',
+  'invoice': 'invoice-received',
+  'payment': 'payment-out',
+  'payment-order': 'payment-out',
+  'act-work': 'sales',
+  'act-acceptance': 'sales',
+  'act-reconciliation': 'reconciliation',
+}
+
+// ---- Номенклатура для AccountingDocLine ----
+
+const NOMENCLATURE_POOL = [
+  { name: 'Бензин АИ-92', unit: 'л', price: 52.30 },
+  { name: 'Бензин АИ-95', unit: 'л', price: 56.80 },
+  { name: 'Дизельное топливо', unit: 'л', price: 58.20 },
+  { name: 'Масло моторное 5W-40', unit: 'шт', price: 2400 },
+  { name: 'Антифриз G12+', unit: 'л', price: 450 },
+  { name: 'Фильтр масляный', unit: 'шт', price: 780 },
+  { name: 'Услуги по ТО', unit: 'усл', price: 5000 },
+  { name: 'Транспортные услуги', unit: 'усл', price: 15000 },
+  { name: 'Аренда оборудования', unit: 'мес', price: 25000 },
+  { name: 'Канцтовары', unit: 'комп', price: 3200 },
+]
+
+function generateLines(totalAmount: number): AccountingDocLine[] {
+  const count = randomInt(1, 3)
+  const lines: AccountingDocLine[] = []
+  let remaining = totalAmount
+
+  for (let i = 0; i < count; i++) {
+    const nom = randomItem(NOMENCLATURE_POOL)
+    const isLast = i === count - 1
+    const lineAmount = isLast ? remaining : Math.round(remaining * (0.3 + Math.random() * 0.4) * 100) / 100
+    remaining -= lineAmount
+    const qty = Math.max(1, Math.round(lineAmount / nom.price))
+    const price = Math.round((lineAmount / qty) * 100) / 100
+    const vatRate = randomItem([0, 10, 20])
+    const vatAmount = Math.round(lineAmount * vatRate / (100 + vatRate) * 100) / 100
+
+    lines.push({
+      nomenclatureName: nom.name,
+      quantity: qty,
+      price,
+      amount: Math.round(lineAmount * 100) / 100,
+      vatRate,
+      vatAmount,
+    })
+  }
+
+  return lines
+}
+
 // ---- Публичные функции ----
+
+/** Результат генерации документов 1С */
+export interface GenerateAccountingDocsResult {
+  total: number
+  matched: number
+  unmatched: number
+  discrepancy: number
+}
+
+/** Генерация AccountingDoc[] из существующих DataEntry + автозапуск сверки */
+export async function generateAccountingDocs(
+  companyId: string,
+  _profileId: ProfileId,
+): Promise<GenerateAccountingDocsResult> {
+  const entries = getItem<DataEntry[]>(entriesKey(companyId), [])
+  const accountingEntries = entries.filter((e) => e.docPurpose === 'accounting')
+
+  if (accountingEntries.length === 0) {
+    return { total: 0, matched: 0, unmatched: 0, discrepancy: 0 }
+  }
+
+  const docs: AccountingDoc[] = []
+  const now = new Date().toISOString()
+
+  // ~40% — точное совпадение
+  // ~20% — расхождение суммы
+  // ~10% — расхождение даты
+  // ~15% — без пары (случайные)
+  // ~15% entries остаются без пары
+
+  const totalToProcess = Math.round(accountingEntries.length * 0.85) // 85% entries получат пару
+  const shuffled = [...accountingEntries].sort(() => Math.random() - 0.5)
+  const toProcess = shuffled.slice(0, totalToProcess)
+
+  // Разбивка внутри toProcess
+  const exactEnd = Math.round(toProcess.length * 0.47)        // ~40% от всех
+  const amountDiscEnd = Math.round(toProcess.length * 0.71)    // ~20% от всех
+  const dateDiscEnd = Math.round(toProcess.length * 0.83)      // ~10% от всех
+  // остальные ~15% = без пары
+
+  for (let i = 0; i < toProcess.length; i++) {
+    const entry = toProcess[i]
+    const meta = entry.metadata
+    const docTypeId = entry.docTypeId ?? ''
+    const accDocType = DOC_TYPE_TO_ACCOUNTING[docTypeId] ?? 'receipt'
+
+    let amount = parseFloat(meta.amount || '0')
+    let date = meta.docDate || entry.createdAt.slice(0, 10)
+    const docNumber = meta.docNumber || ''
+    const counterparty = meta.counterparty || ''
+    const inn = meta.inn || ''
+
+    if (i < exactEnd) {
+      // Точное совпадение — не меняем ничего
+    } else if (i < amountDiscEnd) {
+      // Расхождение суммы: ± 2-8%
+      const factor = 1 + (Math.random() * 0.06 + 0.02) * (Math.random() > 0.5 ? 1 : -1)
+      amount = Math.round(amount * factor * 100) / 100
+    } else if (i < dateDiscEnd) {
+      // Расхождение даты: ± 4-7 дней
+      const dayShift = randomInt(4, 7) * (Math.random() > 0.5 ? 1 : -1)
+      const d = new Date(date)
+      d.setDate(d.getDate() + dayShift)
+      date = d.toISOString().slice(0, 10)
+    }
+    // После dateDiscEnd — не создаём AccountingDoc для этих entries (они остаются без пары)
+    if (i >= dateDiscEnd) continue
+
+    docs.push({
+      id: nanoid(),
+      companyId,
+      externalId: nanoid(),
+      docType: accDocType,
+      number: docNumber,
+      date,
+      counterpartyName: counterparty,
+      counterpartyInn: inn,
+      organizationName: 'ООО "Наша Организация"',
+      amount,
+      vatAmount: Math.round(amount * 20 / 120 * 100) / 100,
+      status1c: randomItem(['Проведён', 'Проведён', 'Проведён', 'Не проведён']),
+      lines: generateLines(amount),
+      matchStatus: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  // ~15% без пары — случайные AccountingDoc
+  const orphanCount = Math.round(accountingEntries.length * 0.15)
+  const counterparties = [...new Set(accountingEntries.map((e) => e.metadata.counterparty).filter(Boolean))]
+
+  for (let i = 0; i < orphanCount; i++) {
+    const amount = randomInt(5000, 300000)
+    const accDocType = randomItem<AccountingDocType>(['receipt', 'invoice-received', 'payment-out', 'sales'])
+    const cp = randomItem(counterparties.length > 0 ? counterparties : ['ООО "Неизвестный"'])
+    docs.push({
+      id: nanoid(),
+      companyId,
+      externalId: nanoid(),
+      docType: accDocType,
+      number: `${randomInt(100, 9999)}`,
+      date: randomDate(30).slice(0, 10),
+      counterpartyName: cp,
+      counterpartyInn: generateInn(),
+      organizationName: 'ООО "Наша Организация"',
+      amount,
+      vatAmount: Math.round(amount * 20 / 120 * 100) / 100,
+      status1c: 'Проведён',
+      lines: generateLines(amount),
+      matchStatus: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    })
+  }
+
+  // Сохраняем AccountingDocs
+  setItem(accountingDocsKey(companyId), docs)
+
+  // Запускаем сверку
+  const result = await runReconciliation(companyId)
+
+  return {
+    total: docs.length,
+    matched: result.matched,
+    unmatched: result.unmatched,
+    discrepancy: result.discrepancy,
+  }
+}
 
 /** Удалить seed-флаг и все записи, заново вызвать seedIfNeeded() */
 export function resetSeed(): void {
@@ -175,6 +371,7 @@ export async function generateEntries(
         docDate,
         counterparty: randomItem(activeCounterparties),
         amount,
+        inn: generateInn(),
       },
     })
 

@@ -2,6 +2,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useEntry, useVerifyEntry, useTransferEntries, useDeleteEntry, useArchiveEntry, useRestoreEntry, useExcludeEntry, useIncludeEntry } from '@/hooks/useEntries'
 import { useEntryAudit } from '@/hooks/useAudit'
 import { DocumentPreview } from '@/components/data/DocumentPreview'
+import { DocumentChainBreadcrumb } from '@/components/data/DocumentChainBreadcrumb'
 import { DataDetailRightPanel } from '@/components/data/DataDetailRightPanel'
 import { ArrowLeft, FilePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -121,6 +122,9 @@ export function DataDetailPage() {
           </Button>
         )}
       </div>
+
+      {/* Цепочка документов (breadcrumb) */}
+      <DocumentChainBreadcrumb entry={entry} />
 
       {/* Split layout: 60/40 on desktop, stacked on mobile */}
       <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-4">

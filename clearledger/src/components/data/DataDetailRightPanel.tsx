@@ -6,6 +6,7 @@
  */
 
 import { MetadataPanel } from './MetadataPanel'
+import { LinkedDocsCompact } from './LinkedDocsCompact'
 import { VersionHistory } from './VersionHistory'
 import { BundleTreeCard } from './BundleTreeCard'
 import { BundleSuggestionsPanel } from './BundleSuggestionsPanel'
@@ -72,6 +73,9 @@ export function DataDetailRightPanel({
         onInclude={onInclude}
         validation={validation}
       />
+
+      {/* Связанные документы — компактный блок */}
+      <LinkedDocsCompact entry={entry} />
 
       {/* Табы: Версии | Комплект | Связи | Техн. | История */}
       <Tabs defaultValue={defaultTab} className="w-full">

@@ -40,7 +40,7 @@ export function AdvancedFilters({ filters, onFiltersChange, counterparties = [],
       {/* Toggle + chips */}
       <div className="flex items-center gap-2 flex-wrap">
         <Button variant="outline" size="sm" onClick={() => setOpen(!open)}>
-          Фильтры
+          Ещё фильтры
           {activeCount > 0 && (
             <Badge variant="secondary" className="ml-1 h-5 min-w-5 px-1">
               {activeCount}

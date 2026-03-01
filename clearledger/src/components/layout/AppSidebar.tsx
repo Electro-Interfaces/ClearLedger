@@ -24,6 +24,7 @@ import {
   Inbox,
   Upload,
   Radio,
+  ShieldCheck,
   LogOut,
   BarChart3,
   BookOpen,
@@ -38,6 +39,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext'
 import { useInboxCount } from '@/hooks/useEntries'
 import { useReferenceStats } from '@/hooks/useReferences'
+import { useNormalizationSummary } from '@/hooks/useNormalization'
 
 interface NavItem {
   title: string
@@ -125,6 +127,28 @@ function ReferenceNavItem() {
   )
 }
 
+function NormalizationNavItem() {
+  const { data: summary } = useNormalizationSummary()
+  const pending = summary?.pendingCount ?? 0
+  return (
+    <SidebarMenuItem>
+      <NavLink to="/normalization">
+        {({ isActive }) => (
+          <SidebarMenuButton isActive={isActive} tooltip="Нормализация">
+            <ShieldCheck className="size-4" />
+            <span className="flex-1">Нормализация</span>
+            {pending > 0 && (
+              <span className="inline-flex items-center justify-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-amber-700 min-w-[18px]">
+                {pending}
+              </span>
+            )}
+          </SidebarMenuButton>
+        )}
+      </NavLink>
+    </SidebarMenuItem>
+  )
+}
+
 // ---- Collapsible group (TradeFrame style) ----
 
 interface CollapsibleGroupProps {
@@ -194,6 +218,7 @@ export function AppSidebar() {
           <InboxNavItem />
           <SidebarNavItem item={{ title: 'Загрузить', path: '/input', icon: Upload }} />
           <SidebarNavItem item={{ title: 'Каналы', path: '/channels', icon: Radio }} />
+          <NormalizationNavItem />
         </CollapsibleSidebarGroup>
 
         <SidebarSeparator className="mx-0" />

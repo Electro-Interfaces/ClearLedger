@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { StatusBadge } from './StatusBadge'
 import { SourceBadge } from './SourceBadge'
 import { formatDateTime } from '@/lib/formatDate'
-import { Check, Trash2, Send, Archive, ArchiveRestore, EyeOff, Eye, ChevronDown, ChevronUp, History } from 'lucide-react'
+import { Check, Trash2, Send, Archive, ArchiveRestore, EyeOff, Eye, ChevronDown, ChevronUp, History, FileText, Building2, Banknote, Calendar } from 'lucide-react'
 import { useEntryAudit } from '@/hooks/useAudit'
 import { DOC_PURPOSE_CONFIG, SYNC_STATUS_CONFIG } from '@/config/statuses'
 import type { DataEntry, AuditAction } from '@/types'
@@ -32,6 +32,111 @@ const auditActionLabels: Record<AuditAction, string> = {
   bulk_archived: 'Массовая архивация',
   bulk_excluded: 'Массовое исключение',
   connector_synced: 'Синхронизация',
+}
+
+// ---- Структурированные метаданные ----
+
+const METADATA_LABELS: Record<string, string> = {
+  docNumber: '№ документа',
+  docDate: 'Дата документа',
+  counterparty: 'Контрагент',
+  inn: 'ИНН',
+  kpp: 'КПП',
+  amount: 'Сумма',
+  amountVat: 'Сумма с НДС',
+  totalAmount: 'Итого',
+  vatAmount: 'НДС',
+  period: 'Период',
+  dateFrom: 'Дата начала',
+  dateTo: 'Дата окончания',
+  contractNumber: 'Номер договора',
+  contractDate: 'Дата договора',
+  parentDocNumber: '№ родительского документа',
+  parentDocDate: 'Дата родительского документа',
+  currency: 'Валюта',
+  contractor: 'Подрядчик',
+}
+
+const AMOUNT_FIELDS = new Set(['amount', 'amountVat', 'totalAmount', 'vatAmount'])
+const amountFmt = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+
+interface MetadataGroup {
+  id: string
+  label: string
+  icon: React.ElementType
+  keys: string[]
+}
+
+const GROUPS: MetadataGroup[] = [
+  { id: 'requisites', label: 'Реквизиты', icon: FileText, keys: ['docNumber', 'docDate', 'contractNumber', 'contractDate', 'parentDocNumber', 'parentDocDate'] },
+  { id: 'counterparty', label: 'Контрагент', icon: Building2, keys: ['counterparty', 'contractor', 'inn', 'kpp'] },
+  { id: 'amounts', label: 'Суммы', icon: Banknote, keys: ['amount', 'amountVat', 'totalAmount', 'vatAmount', 'currency'] },
+  { id: 'period', label: 'Период', icon: Calendar, keys: ['period', 'dateFrom', 'dateTo'] },
+]
+
+const GROUPED_KEYS = new Set(GROUPS.flatMap((g) => g.keys))
+
+function formatMetaValue(key: string, value: string): string {
+  if (AMOUNT_FIELDS.has(key)) {
+    const n = parseFloat(value.replace(',', '.').replace(/\s/g, ''))
+    if (!isNaN(n)) return `${amountFmt.format(n)} \u20BD`
+  }
+  return value
+}
+
+function MetadataGroups({ entries }: { entries: [string, string][] }) {
+  const entryMap = new Map(entries)
+
+  // Разбиваем по группам
+  const renderedGroups = GROUPS.map((group) => {
+    const items = group.keys
+      .filter((k) => entryMap.has(k))
+      .map((k) => ({ key: k, value: entryMap.get(k)! }))
+    return { ...group, items }
+  }).filter((g) => g.items.length > 0)
+
+  // Прочее — всё что не вошло в группы
+  const otherItems = entries.filter(([k]) => !GROUPED_KEYS.has(k))
+
+  return (
+    <div className="space-y-3">
+      {renderedGroups.map((group) => {
+        const Icon = group.icon
+        return (
+          <div key={group.id} className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Icon className="size-3.5 text-muted-foreground" />
+              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{group.label}</h4>
+            </div>
+            <div className="space-y-1">
+              {group.items.map(({ key, value }) => (
+                <div key={key} className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{METADATA_LABELS[key] || key}</span>
+                  <span className={`font-medium text-right max-w-[60%] truncate ${AMOUNT_FIELDS.has(key) ? 'font-mono' : ''}`}>
+                    {formatMetaValue(key, value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+
+      {otherItems.length > 0 && (
+        <div className="space-y-1.5">
+          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Прочее</h4>
+          <div className="space-y-1">
+            {otherItems.map(([key, value]) => (
+              <div key={key} className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{METADATA_LABELS[key] || key}</span>
+                <span className="font-medium text-right max-w-[60%] truncate">{formatMetaValue(key, value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 interface MetadataPanelProps {
@@ -117,19 +222,9 @@ export function MetadataPanel({
           </div>
         )}
 
-        {/* Metadata fields */}
+        {/* Metadata fields — структурированные группы */}
         {metadataEntries.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-sm font-medium text-muted-foreground">Метаданные</h4>
-            <div className="space-y-1.5">
-              {metadataEntries.map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground capitalize">{key}</span>
-                  <span className="font-medium text-right max-w-[60%] truncate">{value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <MetadataGroups entries={metadataEntries} />
         )}
 
         <Separator />

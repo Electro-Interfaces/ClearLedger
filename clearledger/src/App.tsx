@@ -31,6 +31,7 @@ const ReportsPage = lazy(() => import('@/pages/ReportsPage').then((m) => ({ defa
 const ReferencePage = lazy(() => import('@/pages/ReferencePage').then((m) => ({ default: m.ReferencePage })))
 const ExportPage = lazy(() => import('@/pages/ExportPage').then((m) => ({ default: m.ExportPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
+const NormalizationPage = lazy(() => import('@/pages/NormalizationPage').then((m) => ({ default: m.NormalizationPage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const RegisterPage = lazy(() => import('@/pages/RegisterPage').then((m) => ({ default: m.RegisterPage })))
 const AuditorPage = lazy(() => import('@/pages/partner/AuditorPage').then((m) => ({ default: m.AuditorPage })))
@@ -134,6 +135,7 @@ const router = createBrowserRouter([
               { path: '/data/:category/:id', element: <LazyPage><DataDetailPage /></LazyPage> },
               { path: '/search', element: <LazyPage><SearchPage /></LazyPage> },
               { path: '/references', element: <LazyPage><ReferencePage /></LazyPage> },
+              { path: '/normalization', element: <LazyPage><NormalizationPage /></LazyPage> },
               { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
               { path: '/export', element: <LazyPage><ExportPage /></LazyPage> },
               { path: '/reports', element: <LazyPage><ReportsPage /></LazyPage> },

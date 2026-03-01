@@ -573,3 +573,147 @@ export interface VerificationResult {
   enrichment?: Record<string, string>
 }
 
+// ---- Нормализация (Layer 2 pipeline) ----
+
+export interface EntryValidationResult {
+  entryId: string
+  entryTitle: string
+  categoryId: string
+  completeness: number       // 0-100
+  errorCount: number
+  warningCount: number
+  isValid: boolean
+  issues: { severity: string; label: string; message: string }[]
+  validatedAt: string
+}
+
+export interface EntryEnrichmentResult {
+  entryId: string
+  entryTitle: string
+  counterpartyMatch: { name: string; confidence: number } | null
+  contractMatch: { number: string } | null
+  bundleSuggestionCount: number
+  enrichmentApplied: boolean
+  /** Полный набор _ref.* ключей для применения */
+  fullEnrichment: Record<string, string>
+  enrichedAt: string
+}
+
+export interface ComplianceFinding {
+  id: string
+  severity: 'critical' | 'warning' | 'info'
+  category: string
+  title: string
+  description: string
+  affectedEntryIds: string[]
+  detectedAt: string
+}
+
+export interface NormalizationSummary {
+  totalEntries: number
+  pendingCount: number       // status: new | recognized
+  validatedCount: number
+  validPercent: number
+  enrichedCount: number
+  enrichedPercent: number
+  issuesCount: number
+  complianceFindings: number
+  criticalFindings: number
+  lastRunAt?: string
+}
+
+export interface NormalizationState {
+  companyId: string
+  summary: NormalizationSummary
+  validationResults: EntryValidationResult[]
+  enrichmentResults: EntryEnrichmentResult[]
+  complianceFindings: ComplianceFinding[]
+  updatedAt: string
+}
+
+// ---- Аудиторская нормализация (TSupport AI) ----
+
+export type AuditorNormStatus = 'idle' | 'running' | 'done' | 'error'
+
+/** Решение пользователя по находке аудитора */
+export type AuditFindingResolution = 'pending' | 'accepted' | 'corrected' | 'dismissed'
+
+/** Статус предложения обогащения / создания записи */
+export type AuditProposalStatus = 'pending' | 'applied' | 'dismissed'
+
+export interface AuditorNormFinding {
+  id: string
+  severity: 'critical' | 'warning' | 'info'
+  category: 'missing_in_1c' | 'missing_in_cl' | 'amount_mismatch' | 'date_mismatch' | 'counterparty_mismatch' | 'period_incomplete' | 'semantic' | 'other'
+  title: string
+  description: string
+  entryId?: string
+  accDocId?: string
+  detectedAt: string
+}
+
+/** Запись, проверенная аудитором и подтверждённая */
+export interface AuditVerifiedEntry {
+  entryId: string
+  entryTitle: string
+  accDocNumber?: string
+  accDocDate?: string
+}
+
+/** Предложение обогащения конкретного поля записи */
+export interface AuditEnrichmentProposal {
+  id: string
+  entryId: string
+  entryTitle: string
+  field: string
+  currentValue?: string
+  proposedValue: string
+  source: string
+  metadataKey: string
+}
+
+/** Соответствие CL↔1С */
+export interface AuditCorrespondence {
+  entryId: string
+  entryTitle: string
+  accDocNumber: string
+  accDocType: string
+  accDocDate: string
+  accDocAmount: number
+  entryAmount?: number
+  matchScore: number
+}
+
+/** Документ 1С, не найденный в CL — предложение создать */
+export interface AuditMissingEntry {
+  id: string
+  accDocNumber: string
+  accDocType: string
+  accDocDate: string
+  counterpartyName: string
+  amount: number
+  proposedEntry: {
+    title: string
+    categoryId: string
+    subcategoryId: string
+    docTypeId?: string
+    metadata: Record<string, string>
+  }
+}
+
+export interface AuditorNormResult {
+  companyId: string
+  status: AuditorNormStatus
+  /** Период 1С для сверки (закрытый/выверенный) */
+  period?: { from: string; to: string }
+  totalChecked: number
+  matchedCount: number
+  findings: AuditorNormFinding[]
+  verifiedEntries: AuditVerifiedEntry[]
+  enrichmentProposals: AuditEnrichmentProposal[]
+  correspondences: AuditCorrespondence[]
+  missingEntries: AuditMissingEntry[]
+  startedAt?: string
+  finishedAt?: string
+}
+

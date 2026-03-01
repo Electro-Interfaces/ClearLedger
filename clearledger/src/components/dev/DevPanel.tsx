@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { Wrench, X, RotateCcw, Trash2, Plus, Zap } from 'lucide-react'
+import { Wrench, X, RotateCcw, Trash2, Plus, Zap, FileStack } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -20,6 +20,7 @@ import {
   resetSeed,
   clearAllData,
   generateEntries,
+  generateAccountingDocs,
   getStorageStats,
   setAllStatuses,
   deleteAllEntries,
@@ -70,6 +71,15 @@ export function DevPanel() {
   const handleGenerate = async (count: number) => {
     await generateEntries(companyId, company.profileId, count)
     invalidateAndRefresh()
+  }
+
+  const handleGenerateAccDocs = async () => {
+    const result = await generateAccountingDocs(companyId, company.profileId)
+    invalidateAndRefresh()
+    if (result.total > 0) {
+      // Уведомление через window.alert, чтобы не тянуть toast в DevPanel
+      alert(`Док. 1С: ${result.total}\nСовпало: ${result.matched}\nРасхождение: ${result.discrepancy}\nБез пары: ${result.unmatched}`)
+    }
   }
 
   const handleSetAllStatuses = () => {
@@ -189,6 +199,15 @@ export function DevPanel() {
               >
                 <Trash2 className="size-3" />
                 Удалить записи ({entryCount})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleGenerateAccDocs}
+                className="w-full text-xs bg-zinc-800 border-zinc-600 hover:bg-blue-900/50 hover:border-blue-700 hover:text-blue-300 mt-2"
+              >
+                <FileStack className="size-3" />
+                Док. 1С + Сверка
               </Button>
             </Section>
 

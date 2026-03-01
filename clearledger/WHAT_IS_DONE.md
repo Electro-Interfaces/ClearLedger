@@ -881,6 +881,62 @@ GET    /api/onec/connections/{id}/export/status       — Проверить fee
 
 ---
 
+## v0.6.2 — Полный отчёт аудитора + применение результатов
+
+### Аудитор TSupport — полный отчёт с 5 секциями
+
+Таб «Аудит» на странице «Нормализация» теперь показывает полный отчёт аудитора вместо простого списка находок. 5 collapsible-секций с возможностью применять результаты к данным.
+
+| Секция | Описание | defaultOpen |
+|--------|----------|-------------|
+| Проверенные записи | Read-only таблица подтверждённых записей (Название, Документ 1С, Дата) | Свёрнуто |
+| Предложения обогащения | Таблица с кнопками «Принять»/«Пропустить» + «Принять все» (поле, было→стало, источник) | Развёрнуто |
+| Соответствия CL↔1С | Read-only таблица с matchScore (85-100%), разница сумм | Свёрнуто |
+| Не найдены в CL | Карточки с кнопками «Создать запись»/«Пропустить» + «Создать все» | Развёрнуто |
+| Находки | Существующие AuditFindingCard с решениями (принять/исправить/пропустить) | Развёрнуто |
+
+#### Сводка KPI
+Проверено / совпало / обогащений / не найдено / находок + кнопка «Применить все результаты» (bulk apply).
+
+#### Типы (types/index.ts)
+
+| Тип | Назначение |
+|-----|-----------|
+| `AuditProposalStatus` | pending / applied / dismissed |
+| `AuditVerifiedEntry` | Запись, проверенная и подтверждённая аудитором |
+| `AuditEnrichmentProposal` | Предложение обогащения (поле, текущее→предлагаемое, источник, metadataKey) |
+| `AuditCorrespondence` | Соответствие CL↔1С (matchScore 0-100) |
+| `AuditMissingEntry` | Документ 1С без пары в CL, с proposedEntry для создания |
+| `AuditorNormResult` | Расширен: +verifiedEntries, +enrichmentProposals, +correspondences, +missingEntries |
+
+#### Сервисные функции (normalizationService.ts)
+
+| Функция | Описание |
+|---------|----------|
+| `applyAuditEnrichment(companyId, entryId, metadataKey, proposedValue)` | Обёртка над applyEnrichment для одного поля |
+| `createEntryFromAuditProposal(companyId, proposal)` | Создаёт DataEntry из AuditMissingEntry (source: 'api', sourceLabel: 'Аудит TSupport') |
+
+#### React Query хуки (useNormalization.ts)
+
+| Хук | Описание |
+|-----|----------|
+| `useApplyAuditEnrichment()` | Mutation → applyAuditEnrichment → invalidate normalization + entries |
+| `useCreateEntryFromAudit()` | Mutation → createEntryFromAuditProposal → invalidate entries |
+
+#### Компоненты
+
+| Компонент | Файл | Описание |
+|-----------|------|----------|
+| `AuditTab` | `src/components/normalization/AuditTab.tsx` | Извлечён из NormalizationPage — полный отчёт аудитора |
+| `CollapsibleSection` | Внутри AuditTab.tsx | Переиспользуемый компонент: иконка + заголовок + счётчик + chevron |
+| `AuditFindingCard` | Внутри AuditTab.tsx | Карточка находки с кнопками решений |
+| `DEMO_AUDIT_RESULT` | Экспорт из AuditTab.tsx | Демо-данные: 5 verified, 4 enrichment, 8 correspondences, 2 missing, 3 findings |
+
+#### Bulk apply
+Кнопка «Применить все результаты»: обогащения + создание записей. Findings НЕ автоматически (нужно решение человека). Toast с итогами.
+
+---
+
 ### Запланировано
 
 - Полнотекстовый поиск (PostgreSQL FTS)

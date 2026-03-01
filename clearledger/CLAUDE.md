@@ -85,10 +85,11 @@ components/
   data/         — таблицы по категориям, карточки записей
   settings/     — OneCConnectionForm, OneCSyncStatus, OneCSyncHistory
   dev/          — DevPanel (только import.meta.env.DEV)
+  normalization/ — NormalizationKpiCards, ValidationResultsTable, EnrichmentResultsTable, ComplianceReport, AuditTab
   common/       — переиспользуемые примитивы
 config/         — profiles.ts, categories.ts, companies.ts, statuses.ts
 contexts/       — CompanyContext (текущая компания, кастомизация)
-hooks/          — useEntries, useConnectors, use-mobile
+hooks/          — useEntries, useConnectors, useNormalization, use-mobile
 services/       — бизнес-логика, CRUD, хранилище
   intake/       — pipeline (detect → extract → classify → dedup → save)
 pages/          — по маршрутам (Dashboard, InboxPage, IntakePage, ...)
@@ -153,6 +154,9 @@ lib/            — queryClient, cn() утилита
 | `src/services/linkService.ts` | CRUD связей между документами (DocumentLink) |
 | `src/services/oneCIntegrationService.ts` | API-сервис интеграции 1С (OData + файловый обмен) |
 | `src/hooks/useOneCSync.ts` | React Query хуки для 1С (12 хуков) |
+| `src/services/normalizationService.ts` | Нормализация: валидация, обогащение, compliance, аудит TSupport |
+| `src/hooks/useNormalization.ts` | React Query хуки для нормализации (7 хуков) |
+| `src/components/normalization/AuditTab.tsx` | Полный отчёт аудитора TSupport (5 collapsible-секций, bulk apply) |
 | `src/types/index.ts` | Все TypeScript типы |
 
 ---
