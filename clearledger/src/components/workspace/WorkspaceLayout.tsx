@@ -44,6 +44,10 @@ function DesktopWorkspace() {
   const [exportSize, setExportSize] = useState(25)
 
   const ICON = 5
+  const RAW_SIZE = '20%' as const
+  const CORE_SIZE = '55%' as const
+  const EXPORT_SIZE = '25%' as const
+  const COLLAPSED_SIZE = '3%' as const
 
   const { exportDocs, selectedShiftNumber } = useWorkspace()
 
@@ -55,14 +59,14 @@ function DesktopWorkspace() {
         {/* === Raw Panel === */}
         <ResizablePanel
           panelRef={rawRef}
-          defaultSize={20}
-          minSize={3}
-          onResize={(size) => setRawSize(typeof size === 'number' ? size : 0)}
+          defaultSize="20%"
+          minSize="3%"
+          onResize={(s) => setRawSize(s.asPercentage)}
           className="bg-card/30"
         >
           {rawSize <= ICON ? (
             <div className="h-full flex flex-col items-center py-3 gap-3">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => rawRef.current?.resize(20)} title="Развернуть">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => rawRef.current?.resize(RAW_SIZE)} title="Развернуть">
                 <PanelLeftOpen className="h-3.5 w-3.5" />
               </Button>
               <ClipboardList className="h-4 w-4 text-muted-foreground" />
@@ -72,16 +76,15 @@ function DesktopWorkspace() {
             </div>
           ) : (
             <div className="h-full flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
-                <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  Загруженные
-                </h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => rawRef.current?.resize(3)} title="Свернуть">
-                  <PanelLeftClose className="h-3.5 w-3.5" />
-                </Button>
-              </div>
               <div className="flex-1 overflow-hidden">
-                <RawPanel hideHeader />
+                <RawPanel
+                  hideHeader
+                  collapseButton={
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => rawRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
+                      <PanelLeftClose className="h-3.5 w-3.5" />
+                    </Button>
+                  }
+                />
               </div>
             </div>
           )}
@@ -92,14 +95,14 @@ function DesktopWorkspace() {
         {/* === Core Panel === */}
         <ResizablePanel
           panelRef={coreRef}
-          defaultSize={55}
-          minSize={3}
-          onResize={(size) => setCoreSize(typeof size === 'number' ? size : 0)}
+          defaultSize="55%"
+          minSize="3%"
+          onResize={(s) => setCoreSize(s.asPercentage)}
           className="bg-background"
         >
           {coreSize <= ICON ? (
             <div className="h-full flex flex-col items-center py-3 gap-3">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => coreRef.current?.resize(55)} title="Развернуть">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => coreRef.current?.resize(CORE_SIZE)} title="Развернуть">
                 <PanelLeftOpen className="h-3.5 w-3.5" />
               </Button>
               <Database className="h-4 w-4 text-muted-foreground" />
@@ -113,7 +116,7 @@ function DesktopWorkspace() {
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                   {selectedShiftNumber ? `Смена №${selectedShiftNumber}` : 'Нормализованные данные'}
                 </h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => coreRef.current?.resize(3)} title="Свернуть">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => coreRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
                   <PanelLeftClose className="h-3.5 w-3.5" />
                 </Button>
               </div>
@@ -129,14 +132,14 @@ function DesktopWorkspace() {
         {/* === Export Panel === */}
         <ResizablePanel
           panelRef={exportRef}
-          defaultSize={25}
-          minSize={3}
-          onResize={(size) => setExportSize(typeof size === 'number' ? size : 0)}
+          defaultSize="25%"
+          minSize="3%"
+          onResize={(s) => setExportSize(s.asPercentage)}
           className="bg-card/30"
         >
           {exportSize <= ICON ? (
             <div className="h-full flex flex-col items-center py-3 gap-3">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => exportRef.current?.resize(25)} title="Развернуть">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => exportRef.current?.resize(EXPORT_SIZE)} title="Развернуть">
                 <PanelRightOpen className="h-3.5 w-3.5" />
               </Button>
               <div className="relative">
@@ -157,7 +160,7 @@ function DesktopWorkspace() {
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                   Для 1С
                 </h2>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => exportRef.current?.resize(3)} title="Свернуть">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => exportRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
                   <PanelRightClose className="h-3.5 w-3.5" />
                 </Button>
               </div>

@@ -20,7 +20,7 @@ import type { StsShift } from '@/services/fuel/types'
 type ViewMode = 'list' | 'catalog'
 type DocFilter = 'all' | 'shifts' | 'receipts'
 
-export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
+export function RawPanel({ hideHeader = false, collapseButton }: { hideHeader?: boolean; collapseButton?: React.ReactNode }) {
   const settings = getSettings()
   const queryClient = useQueryClient()
   const { globalStation, selectedStationId, selectedShiftNumber, selectShift } = useWorkspace()
@@ -92,11 +92,12 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
         </div>
       )}
 
-      {/* Toolbar: тип + поиск + счётчик + обновить */}
+      {/* Toolbar */}
       <div className="px-2 py-1.5 border-b border-border/30 space-y-1.5">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
+          {collapseButton}
           <Select value={docFilter} onValueChange={(v) => setDocFilter(v as DocFilter)}>
-            <SelectTrigger className="h-7 w-[90px] text-xs">
+            <SelectTrigger className="h-7 w-[80px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -105,8 +106,6 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
               <SelectItem value="receipts">ТТН</SelectItem>
             </SelectContent>
           </Select>
-
-          {/* Переключатель вида */}
           <div className="flex items-center border border-border/40 rounded-md">
             <Button variant={viewMode === 'list' ? 'secondary' : 'ghost'} size="icon" className="h-7 w-7 rounded-r-none"
               onClick={() => setViewMode('list')} title="Список">
@@ -117,26 +116,17 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
               <FolderTree className="h-3 w-3" />
             </Button>
           </div>
-
           <div className="ml-auto flex items-center gap-1">
-            <Badge variant="secondary" className="text-[9px] h-4 px-1.5">
-              {filteredShifts.length}
-            </Badge>
+            <Badge variant="secondary" className="text-[9px] h-4 px-1.5">{filteredShifts.length}</Badge>
             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRefresh} disabled={isFetching} title="Обновить">
               <RefreshCw className={`h-3 w-3 ${isFetching ? 'animate-spin' : ''}`} />
             </Button>
           </div>
         </div>
-
-        {/* Поиск */}
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Поиск по номеру, дате..."
-            className="h-7 text-xs pl-7"
-          />
+          <Input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Поиск по номеру, дате..." className="h-7 text-xs pl-7" />
         </div>
       </div>
 
