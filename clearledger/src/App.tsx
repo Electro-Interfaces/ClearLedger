@@ -1,9 +1,8 @@
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider, Outlet, Navigate, Link } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet, Link } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { CompanyProvider } from '@/contexts/CompanyContext'
-import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { MainLayout } from '@/components/layout/MainLayout'
@@ -11,29 +10,11 @@ import { Dashboard } from '@/pages/Dashboard'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Loader2 } from 'lucide-react'
 
-// Lazy-loaded pages (code-split)
-const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ default: m.IntakePage })))
-const ManualEntryPage = lazy(() => import('@/pages/ManualEntryPage').then((m) => ({ default: m.ManualEntryPage })))
-// ConnectorsPage: /connectors → redirect to /channels (страница осталась для /connectors/:id)
-const ConnectorDetailPage = lazy(() => import('@/pages/ConnectorDetailPage').then((m) => ({ default: m.ConnectorDetailPage })))
-const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
-const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
-const DataOverviewPage = lazy(() => import('@/pages/DataOverviewPage').then((m) => ({ default: m.DataOverviewPage })))
-const DataCategoryPage = lazy(() => import('@/pages/DataCategoryPage').then((m) => ({ default: m.DataCategoryPage })))
-const DataDetailPage = lazy(() => import('@/pages/DataDetailPage').then((m) => ({ default: m.DataDetailPage })))
-const SearchPage = lazy(() => import('@/pages/SearchPage').then((m) => ({ default: m.SearchPage })))
+const ShiftsPage = lazy(() => import('@/pages/ShiftsPage').then((m) => ({ default: m.ShiftsPage })))
+const ShiftDetailPage = lazy(() => import('@/pages/ShiftDetailPage').then((m) => ({ default: m.ShiftDetailPage })))
+const ReceiptsPage = lazy(() => import('@/pages/ReceiptsPage').then((m) => ({ default: m.ReceiptsPage })))
+const ReceiptDetailPage = lazy(() => import('@/pages/ReceiptDetailPage').then((m) => ({ default: m.ReceiptDetailPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
-const CompaniesPage = lazy(() => import('@/pages/CompaniesPage').then((m) => ({ default: m.CompaniesPage })))
-const CompanyEditPage = lazy(() => import('@/pages/CompanyEditPage').then((m) => ({ default: m.CompanyEditPage })))
-const InboxPage = lazy(() => import('@/pages/InboxPage').then((m) => ({ default: m.InboxPage })))
-const InboxDetailPage = lazy(() => import('@/pages/InboxDetailPage').then((m) => ({ default: m.InboxDetailPage })))
-const ReportsPage = lazy(() => import('@/pages/ReportsPage').then((m) => ({ default: m.ReportsPage })))
-const ReferencePage = lazy(() => import('@/pages/ReferencePage').then((m) => ({ default: m.ReferencePage })))
-const ExportPage = lazy(() => import('@/pages/ExportPage').then((m) => ({ default: m.ExportPage })))
-const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
-const NormalizationPage = lazy(() => import('@/pages/NormalizationPage').then((m) => ({ default: m.NormalizationPage })))
-const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
-const AuditorPage = lazy(() => import('@/pages/partner/AuditorPage').then((m) => ({ default: m.AuditorPage })))
 
 function PageLoader() {
   return (
@@ -47,33 +28,6 @@ function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>
 }
 
-/** Защищённый роут — редирект на /login если не авторизован */
-function ProtectedRoute() {
-  const { isAuthenticated, isLoading, isApiMode } = useAuth()
-
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
-  if (isApiMode && !isAuthenticated) {
-    return <Navigate to="/login" replace />
-  }
-
-  return <Outlet />
-}
-
-/** Роут логина — редирект на / если уже залогинен */
-function LoginRoute() {
-  const { isAuthenticated, isApiMode } = useAuth()
-  if (!isApiMode || isAuthenticated) return <Navigate to="/" replace />
-  return <LazyPage><LoginPage /></LazyPage>
-}
-
-/** 404 страница */
 function NotFoundPage() {
   return (
     <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
@@ -90,65 +44,37 @@ function Providers() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <CompanyProvider>
-            <TooltipProvider>
-              <Outlet />
-              <Toaster position="bottom-right" richColors closeButton />
-            </TooltipProvider>
-          </CompanyProvider>
-        </AuthProvider>
+        <CompanyProvider>
+          <TooltipProvider>
+            <Outlet />
+            <Toaster position="bottom-right" richColors closeButton />
+          </TooltipProvider>
+        </CompanyProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   )
 }
 
-const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
-
 const router = createBrowserRouter([
   {
     element: <Providers />,
     children: [
-      { path: '/login', element: <LoginRoute /> },
       {
-        element: <ProtectedRoute />,
+        element: <MainLayout />,
         children: [
-          {
-            element: <MainLayout />,
-            children: [
-              { path: '/', element: <Dashboard /> },
-              { path: '/inbox', element: <LazyPage><InboxPage /></LazyPage> },
-              { path: '/inbox/:id', element: <LazyPage><InboxDetailPage /></LazyPage> },
-              { path: '/input', element: <LazyPage><IntakePage /></LazyPage> },
-              { path: '/input/upload', element: <Navigate to="/input" replace /> },
-              { path: '/input/photo', element: <Navigate to="/input" replace /> },
-              { path: '/input/manual', element: <LazyPage><ManualEntryPage /></LazyPage> },
-              { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
-              { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
-              { path: '/connectors', element: <Navigate to="/channels" replace /> },
-              { path: '/connectors/new', element: <LazyPage><ConnectorDetailPage /></LazyPage> },
-              { path: '/connectors/:id', element: <LazyPage><ConnectorDetailPage /></LazyPage> },
-              { path: '/data', element: <LazyPage><DataOverviewPage /></LazyPage> },
-              { path: '/data/:category', element: <LazyPage><DataCategoryPage /></LazyPage> },
-              { path: '/data/:category/:id', element: <LazyPage><DataDetailPage /></LazyPage> },
-              { path: '/search', element: <LazyPage><SearchPage /></LazyPage> },
-              { path: '/references', element: <LazyPage><ReferencePage /></LazyPage> },
-              { path: '/normalization', element: <LazyPage><NormalizationPage /></LazyPage> },
-              { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
-              { path: '/export', element: <LazyPage><ExportPage /></LazyPage> },
-              { path: '/reports', element: <LazyPage><ReportsPage /></LazyPage> },
-              { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
-              { path: '/settings/companies', element: <LazyPage><CompaniesPage /></LazyPage> },
-              { path: '/settings/companies/:id', element: <LazyPage><CompanyEditPage /></LazyPage> },
-              { path: '/partner/auditor', element: <LazyPage><AuditorPage /></LazyPage> },
-              { path: '*', element: <NotFoundPage /> },
-            ],
-          },
+          { path: '/', element: <Dashboard /> },
+          { path: '/shifts', element: <LazyPage><ShiftsPage /></LazyPage> },
+          { path: '/shifts/:stationId/:shiftNumber', element: <LazyPage><ShiftDetailPage /></LazyPage> },
+          { path: '/receipts', element: <LazyPage><ReceiptsPage /></LazyPage> },
+          { path: '/receipts/:stationId/:ttnId', element: <LazyPage><ReceiptDetailPage /></LazyPage> },
+          { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
+          { path: '/data', element: <NotFoundPage /> },
+          { path: '*', element: <NotFoundPage /> },
         ],
       },
     ],
   },
-], { basename })
+])
 
 export default function App() {
   return <RouterProvider router={router} />

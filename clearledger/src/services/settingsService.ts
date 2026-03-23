@@ -1,27 +1,37 @@
 /**
- * Persist пользовательских настроек в localStorage.
+ * Настройки приложения GIG Fuel Ledger.
  */
 
 import { getItem, setItem } from './storage'
 
-const SETTINGS_KEY = 'clearledger-settings'
+const SETTINGS_KEY = 'gig-fuel-settings'
+
+export interface StsStation {
+  code: number
+  name: string
+}
 
 export interface AppSettings {
-  language: 'ru' | 'en'
-  dateFormat: 'dd.mm.yyyy' | 'yyyy-mm-dd'
   theme: 'light' | 'dark' | 'system'
-  defaultCompanyId: string
-  userName: string
-  userEmail: string
+  /** URL API STS (без /v1/) */
+  stsApiUrl: string
+  stsLogin: string
+  stsPassword: string
+  /** Код системы (сети) в STS */
+  stsSystemCode: number
+  /** Станции для загрузки */
+  stations: StsStation[]
 }
 
 const defaults: AppSettings = {
-  language: 'ru',
-  dateFormat: 'dd.mm.yyyy',
   theme: 'system',
-  defaultCompanyId: 'npk',
-  userName: 'Михеев Андрей',
-  userEmail: 'admin@clearledger.ru',
+  stsApiUrl: 'https://pos.autooplata.ru/tms',
+  stsLogin: '',
+  stsPassword: '',
+  stsSystemCode: 15,
+  stations: [
+    { code: 4, name: 'АКАЗС №5' },
+  ],
 }
 
 export function getSettings(): AppSettings {
@@ -33,4 +43,13 @@ export function saveSettings(updates: Partial<AppSettings>): AppSettings {
   const merged = { ...current, ...updates }
   setItem(SETTINGS_KEY, merged)
   return merged
+}
+
+export function getStationCodes(): number[] {
+  return getSettings().stations.map((s) => s.code)
+}
+
+export function getStationName(code: number): string {
+  const s = getSettings().stations.find((st) => st.code === code)
+  return s?.name ?? `Станция ${code}`
 }

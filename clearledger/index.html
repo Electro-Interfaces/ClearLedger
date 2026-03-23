@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClearLedger</title>
+    <title>GIG Fuel Ledger</title>
   </head>
   <body>
     <div id="root"></div>
@@ -13,14 +13,6 @@
         var t = localStorage.getItem('clearledger-theme');
         if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
-        }
-      })();
-      // GitHub Pages SPA route restore
-      (function() {
-        var q = new URLSearchParams(window.location.search);
-        var route = q.get('route');
-        if (route) {
-          history.replaceState(null, '', '/ClearLedger' + decodeURIComponent(route));
         }
       })();
     </script>

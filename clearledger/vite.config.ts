@@ -3,10 +3,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
-const isProduction = process.env.NODE_ENV === 'production'
-
 export default defineConfig({
-  base: process.env.VITE_BASE_PATH || (isProduction ? '/ClearLedger/' : '/'),
+  base: '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -29,7 +27,6 @@ export default defineConfig({
             '@radix-ui/react-popover',
           ],
           'vendor-xlsx': ['xlsx'],
-          'vendor-pdf': ['pdfjs-dist'],
         },
       },
     },
@@ -37,5 +34,12 @@ export default defineConfig({
   server: {
     port: 3010,
     open: true,
+    proxy: {
+      '/tms': {
+        target: 'https://pos.autooplata.ru',
+        changeOrigin: true,
+        secure: true,
+      },
+    },
   },
 })
