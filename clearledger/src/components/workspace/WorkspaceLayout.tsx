@@ -8,6 +8,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useWorkspace, WorkspaceProvider } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Group as ResizablePanelGroup, Panel as ResizablePanel, Separator as ResizableHandle } from 'react-resizable-panels'
 import { Button } from '@/components/ui/button'
 import { RawPanel } from './RawPanel'
 import { CorePanel } from './CorePanel'
@@ -88,81 +89,93 @@ function DesktopWorkspace() {
       {/* Общий тулбар над всеми панелями */}
       <WorkspaceToolbar />
 
-      {/* 3 панели */}
-      <div className="flex-1 overflow-hidden flex">
-      {/* Raw Panel */}
-      {rawOpen ? (
-        <div className="w-[280px] min-w-[220px] h-full border-r border-border/40 bg-card/30 flex-shrink-0 overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              Загруженные
-            </h2>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setRawOpen(false)} title="Свернуть">
-              <PanelLeftClose className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <RawPanel hideHeader />
-          </div>
-        </div>
-      ) : (
-        <CollapsedStrip
-          icon={ClipboardList}
-          label="Загруженные"
-          side="left"
-          onClick={() => setRawOpen(true)}
-        />
-      )}
+      {/* 3 resizable панели */}
+      <ResizablePanelGroup orientation="horizontal" className="flex-1 overflow-hidden">
+        {/* Raw Panel */}
+        {rawOpen ? (
+          <>
+            <ResizablePanel defaultSize={20} minSize={15} maxSize={35} className="bg-card/30">
+              <div className="h-full flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
+                  <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    Загруженные
+                  </h2>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setRawOpen(false)} title="Свернуть">
+                    <PanelLeftClose className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <RawPanel hideHeader />
+                </div>
+              </div>
+            </ResizablePanel>
+            <ResizableHandle />
+          </>
+        ) : (
+          <CollapsedStrip
+            icon={ClipboardList}
+            label="Загруженные"
+            side="left"
+            onClick={() => setRawOpen(true)}
+          />
+        )}
 
-      {/* Core Panel */}
-      {coreOpen ? (
-        <div className="flex-1 h-full bg-background overflow-hidden min-w-[300px] flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              {selectedShiftNumber ? `Смена №${selectedShiftNumber}` : 'Нормализованные данные'}
-            </h2>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCoreOpen(false)} title="Свернуть">
-              <PanelLeftClose className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <CorePanel hideHeader />
-          </div>
-        </div>
-      ) : (
-        <CollapsedStrip
-          icon={Database}
-          label="Данные"
-          side="left"
-          onClick={() => setCoreOpen(true)}
-        />
-      )}
+        {/* Core Panel */}
+        {coreOpen ? (
+          <>
+            <ResizablePanel defaultSize={55} minSize={30} className="bg-background">
+              <div className="h-full flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
+                  <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    {selectedShiftNumber ? `Смена №${selectedShiftNumber}` : 'Нормализованные данные'}
+                  </h2>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setCoreOpen(false)} title="Свернуть">
+                    <PanelLeftClose className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <CorePanel hideHeader />
+                </div>
+              </div>
+            </ResizablePanel>
+            <ResizableHandle />
+          </>
+        ) : (
+          <CollapsedStrip
+            icon={Database}
+            label="Данные"
+            side="left"
+            onClick={() => setCoreOpen(true)}
+          />
+        )}
 
-      {/* Export Panel */}
-      {exportOpen ? (
-        <div className="w-[300px] min-w-[220px] h-full border-l border-border/40 bg-card/30 flex-shrink-0 overflow-hidden flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              Для 1С
-            </h2>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExportOpen(false)} title="Свернуть">
-              <PanelRightClose className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <ExportPanel hideHeader />
-          </div>
-        </div>
-      ) : (
-        <CollapsedStrip
-          icon={FileOutput}
-          label="Для 1С"
-          side="right"
-          onClick={() => setExportOpen(true)}
-          badge={exportDocs.length}
-        />
-      )}
-      </div>
+        {/* Export Panel */}
+        {exportOpen ? (
+          <ResizablePanel defaultSize={25} minSize={15} maxSize={40} className="bg-card/30">
+            <div className="h-full flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
+                <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  Для 1С
+                </h2>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExportOpen(false)} title="Свернуть">
+                  <PanelRightClose className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <ExportPanel hideHeader />
+              </div>
+            </div>
+          </ResizablePanel>
+        ) : (
+          <CollapsedStrip
+            icon={FileOutput}
+            label="Для 1С"
+            side="right"
+            onClick={() => setExportOpen(true)}
+            badge={exportDocs.length}
+          />
+        )}
+      </ResizablePanelGroup>
     </div>
   )
 }
