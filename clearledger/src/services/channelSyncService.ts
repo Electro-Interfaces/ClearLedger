@@ -3,8 +3,9 @@
  * MVP: поддержка REST API (STS) — смены и ТТН.
  */
 
-import type { Channel, SyncLogEntry, SyncResult } from '@/types/channel'
+import type { Channel, SyncLogEntry } from '@/types/channel'
 import { updateChannel, addSyncLog } from './channelService'
+import { getSource } from './sourceService'
 import { stsLogin, stsGetShifts, stsGetShiftReport, stsGetReceipts } from './fuel/stsApiClient'
 import { normalizeShift } from './fuel/shiftNormalizer'
 import { normalizeReceipt } from './fuel/receiptNormalizer'
@@ -66,7 +67,7 @@ export interface SyncOptions {
 }
 
 /** Синхронизация REST API канала (STS) */
-export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}): Promise<SyncResult> {
+export async function syncRestChannel(channel: Channel & { config?: Record<string, string> }, opts: SyncOptions = {}): Promise<import('@/types/channel').SyncResult> {
   const log: SyncLogEntry[] = []
   const startedAt = new Date().toISOString()
   let loaded = 0
@@ -74,10 +75,13 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
   let duplicates = 0
   let errors = 0
 
-  const url = channel.config.url || channel.endpoint || ''
-  const login = channel.config.login || ''
-  const password = channel.config.password || ''
-  const systemCode = Number(channel.config.systemCode) || 65
+  // Получаем connection из источника или из переданного config (обратная совместимость)
+  const source = getSource(channel.sourceId)
+  const conn = channel.config ?? source?.connection ?? {}
+  const url = conn.url || ''
+  const login = conn.login || ''
+  const password = conn.password || ''
+  const systemCode = Number(conn.systemCode) || 65
   const policy = opts.duplicatePolicy ?? channel.duplicatePolicy ?? 'skip'
 
   // Определяем какие потоки обновлять
@@ -104,7 +108,7 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
     const msg = err instanceof Error ? err.message : String(err)
     log.push(logEntry('error', 'ERROR', `Авторизация: ${msg}`))
     addSyncLog(channel.id, log)
-    updateChannel(channel.id, { status: 'error', errorMessage: msg })
+    updateChannel(channel.id, { status: 'error' })
     return { channelId: channel.id, startedAt, finishedAt: new Date().toISOString(), loaded, skipped, duplicates, errors: 1, log }
   }
 
@@ -119,13 +123,13 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
   }
 
   // Определить станции
-  const stationCodes = opts.stationCodes ?? [Number(Object.values(channel.config).find((v) => !isNaN(Number(v))) || 0)]
+  const stationCodes = opts.stationCodes ?? [Number(conn.stationCode || Object.values(conn).find((v) => !isNaN(Number(v))) || 0)]
 
   // 3. Загрузка по потокам
   for (const stream of activeStreams) {
     opts.onProgress?.(loaded, shifts.length, `Поток: ${stream.name}`)
 
-    if (stream.docType === 'shift_report') {
+    if (stream.docTypeId === 'shift_report') {
       // Загрузка сменных отчётов
       let streamLoaded = 0
       let streamDups = 0
@@ -179,7 +183,7 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
       log.push(logEntry('info', 'LOAD', `${stream.name}: ${streamLoaded} загружено, ${streamDups} дубликатов`))
       duplicates += streamDups
 
-    } else if (stream.docType === 'receipt') {
+    } else if (stream.docTypeId === 'receipt') {
       // Загрузка ТТН
       let streamLoaded = 0
 
@@ -233,7 +237,6 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
     status: errors > 0 ? 'error' : 'active',
     docsLoaded: (channel.docsLoaded || 0) + loaded,
     lastSync: finishedAt,
-    errorMessage: errors > 0 ? `${errors} ошибок при загрузке` : undefined,
   })
 
   opts.onProgress?.(loaded, loaded, 'Готово')

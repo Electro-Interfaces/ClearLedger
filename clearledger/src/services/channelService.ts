@@ -1,44 +1,31 @@
 /**
  * CRUD для каналов данных (localStorage).
+ * Канал = работа с данными из источника (расписание, периоды, потоки, каталоги).
  */
 
 import { getItem, setItem } from './storage'
-import type { Channel, ChannelType, ChannelStream, SyncLogEntry } from '@/types/channel'
+import { getSource } from './sourceService'
+import type { Channel, ChannelStream, SyncLogEntry } from '@/types/channel'
 import { nanoid } from 'nanoid'
 
 const STORAGE_KEY = 'gig-channels'
 
-/** Дефолтные потоки для REST API (STS) */
-function defaultStreamsForRest(): ChannelStream[] {
-  return [
-    {
-      id: nanoid(6),
-      name: 'Сменные отчёты',
-      docType: 'shift_report',
-      endpoint: '/v1/report/shift_report',
-      catalogTemplate: '/Смены/{станция}/{год}-{месяц}/',
-      filters: {},
-      enabled: true,
-    },
-    {
-      id: nanoid(6),
-      name: 'Поступления (ТТН)',
-      docType: 'receipt',
-      endpoint: '/v1/report/receipts',
-      catalogTemplate: '/ТТН/{станция}/{год}-{месяц}/',
-      filters: {},
-      enabled: true,
-    },
-    {
-      id: nanoid(6),
-      name: 'Цены',
-      docType: 'price',
-      endpoint: '/v1/prices',
-      catalogTemplate: '/Справочники/',
-      filters: {},
-      enabled: false,
-    },
-  ]
+/** Создать дефолтные потоки из типов документов источника */
+function defaultStreamsFromSource(sourceId: string): ChannelStream[] {
+  const source = getSource(sourceId)
+  if (!source) return []
+  return source.docTypes.map((dt) => ({
+    id: nanoid(6),
+    docTypeId: dt.id,
+    name: dt.name,
+    catalogTemplate: dt.id === 'shift_report'
+      ? '/Смены/{станция}/{год}-{месяц}/'
+      : dt.id === 'receipt'
+        ? '/ТТН/{станция}/{год}-{месяц}/'
+        : `/Справочники/`,
+    filters: {},
+    enabled: dt.id !== 'price', // цены выключены по умолчанию
+  }))
 }
 
 export function getChannels(): Channel[] {
@@ -51,21 +38,19 @@ export function getChannel(id: string): Channel | undefined {
 
 export function createChannel(data: {
   name: string
-  type: ChannelType
-  endpoint?: string
+  sourceId: string
   description?: string
-  config?: Record<string, string>
 }): Channel {
   const channel: Channel = {
     id: nanoid(10),
     name: data.name,
-    type: data.type,
+    sourceId: data.sourceId,
     status: 'draft',
     description: data.description,
-    endpoint: data.endpoint,
     duplicatePolicy: 'skip',
-    streams: data.type === 'rest' ? defaultStreamsForRest() : [],
-    config: data.config ?? {},
+    schedule: 'manual',
+    periodDays: 7,
+    streams: defaultStreamsFromSource(data.sourceId),
     docsLoaded: 0,
     syncLog: [],
     createdAt: new Date().toISOString(),
@@ -98,7 +83,7 @@ export function addSyncLog(channelId: string, entries: SyncLogEntry[]): void {
   const channels = getChannels()
   const idx = channels.findIndex((c) => c.id === channelId)
   if (idx === -1) return
-  const log = [...entries, ...(channels[idx].syncLog || [])].slice(0, 100) // последние 100 записей
+  const log = [...entries, ...(channels[idx].syncLog || [])].slice(0, 100)
   channels[idx].syncLog = log
   channels[idx].lastSync = new Date().toISOString()
   channels[idx].updatedAt = new Date().toISOString()

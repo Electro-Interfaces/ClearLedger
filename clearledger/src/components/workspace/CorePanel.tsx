@@ -28,7 +28,7 @@ function fmt(n: number): string {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(n)
 }
 
-export function CorePanel({ hideHeader = false }: { hideHeader?: boolean }) {
+export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: boolean }) {
   const [coreTab, setCoreTab] = useState<CoreTab>('overview')
   const { selectedStationId, selectedShiftNumber, addExportDoc, setActiveTab } = useWorkspace()
 

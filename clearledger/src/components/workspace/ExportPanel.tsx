@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { FileOutput, Trash2, Upload, PackageCheck, Filter } from 'lucide-react'
+import { FileOutput, Trash2, Upload, PackageCheck } from 'lucide-react'
 import { format } from 'date-fns'
 
 const TYPE_LABELS: Record<string, string> = {
@@ -26,7 +26,12 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export function ExportPanel({ hideHeader = false }: { hideHeader?: boolean }) {
+  const [statusFilter, setStatusFilter] = useState<string>('all')
   const { exportDocs, removeExportDoc, markExported } = useWorkspace()
+
+  const filteredDocs = statusFilter === 'all'
+    ? exportDocs
+    : exportDocs.filter((d) => d.status === statusFilter)
 
   return (
     <div className="flex flex-col h-full">
@@ -44,18 +49,37 @@ export function ExportPanel({ hideHeader = false }: { hideHeader?: boolean }) {
         </div>
       )}
 
+      {/* Локальный тулбар — фильтр по статусу */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/30">
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="h-7 w-[120px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все</SelectItem>
+            <SelectItem value="draft">Черновики</SelectItem>
+            <SelectItem value="confirmed">Подтв.</SelectItem>
+            <SelectItem value="exported">Выгруж.</SelectItem>
+          </SelectContent>
+        </Select>
+        <Badge variant="secondary" className="text-[9px] h-4 px-1.5 ml-auto">
+          {filteredDocs.length} / {exportDocs.length}
+        </Badge>
+      </div>
+
       <ScrollArea className="flex-1">
-        {exportDocs.length === 0 ? (
+        {filteredDocs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[200px] text-muted-foreground gap-3 px-4">
             <FileOutput className="h-10 w-10 opacity-30" />
             <p className="text-xs text-center">
-              Нет документов для загрузки.<br />
-              Выберите смену и нажмите «В 1С».
+              {exportDocs.length === 0
+                ? <>Нет документов для загрузки.<br />Выберите смену и нажмите «В 1С».</>
+                : 'Нет документов с выбранным статусом.'}
             </p>
           </div>
         ) : (
           <div className="divide-y divide-border/20">
-            {exportDocs.map((doc) => (
+            {filteredDocs.map((doc) => (
               <div key={doc.id} className="px-3 py-3 hover:bg-accent/30 transition-colors">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
