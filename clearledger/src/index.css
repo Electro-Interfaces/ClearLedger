@@ -122,7 +122,7 @@
     --error: 0 84% 55%;
 
     /* Layout */
-    --header-height: 5rem;
+    --header-height: 3.5rem;
 
     /* Shadows */
     --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -192,7 +192,8 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.01em;
   }
 
   #root {

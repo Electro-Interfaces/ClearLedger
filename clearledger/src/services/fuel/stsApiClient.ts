@@ -28,8 +28,8 @@ function getStoredToken(): string | null {
 
 function storeToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token)
-  // JWT expires in ~24h, we refresh after 20h
-  localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + 20 * 60 * 60 * 1000))
+  // JWT expires in ~20 min, refresh after 18 min
+  localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + 18 * 60 * 1000))
 }
 
 export function clearToken() {
@@ -71,18 +71,33 @@ export async function stsLogin(url?: string, login?: string, password?: string):
   const user = login ?? settings.stsLogin
   const pass = password ?? settings.stsPassword
 
-  const resp = await fetchWithRetry(`${baseUrl}/v1/login`, {
+  // STS API v2: POST /v2/login с полем user как объект {id, name}
+  const resp = await fetchWithRetry(`${baseUrl}/v2/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ login: user, password: pass }),
+    body: JSON.stringify({
+      login: user,
+      password: pass,
+      user: {
+        id: '00000000-0000-0000-0000-000000000000',
+        name: 'System',
+      },
+    }),
   })
 
   if (!resp.ok) {
     throw new Error(`Ошибка авторизации STS: ${resp.status} ${resp.statusText}`)
   }
 
-  const data = await resp.json()
-  const token = typeof data === 'string' ? data : data.token
+  // STS может вернуть токен как голую строку или JSON {token: "..."}
+  const text = await resp.text()
+  let token = text.trim().replace(/^"|"$/g, '')
+  if (token.startsWith('{')) {
+    try {
+      const obj = JSON.parse(token)
+      token = obj.token ?? ''
+    } catch { /* use as-is */ }
+  }
   if (!token) throw new Error('Токен не получен')
 
   storeToken(token)
@@ -164,15 +179,16 @@ export async function stsGetPrices(station: number, system?: number): Promise<St
 // ─── Test Connection ─────────────────────────────────────────
 
 export async function stsTestConnection(
-  url: string,
+  _url: string,
   login: string,
   password: string,
 ): Promise<{ ok: boolean; error?: string; shiftsCount?: number }> {
   try {
-    const token = await stsLogin(url, login, password)
-    // Попробуем получить список смен как проверку
+    // Всегда используем getBaseUrl() (proxy в dev, полный URL в prod)
+    const token = await stsLogin(undefined, login, password)
     const settings = getSettings()
-    const resp = await fetchWithRetry(`${url}/v1/shifts?system=${settings.stsSystemCode}`, {
+    const baseUrl = getBaseUrl()
+    const resp = await fetchWithRetry(`${baseUrl}/v1/shifts?system=${settings.stsSystemCode}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!resp.ok) {

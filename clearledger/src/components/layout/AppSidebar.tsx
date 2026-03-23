@@ -2,83 +2,39 @@ import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
-  SidebarHeader,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-  SidebarSeparator,
 } from '@/components/ui/sidebar'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ClipboardList, Truck, Settings, Fuel } from 'lucide-react'
+import { LayoutDashboard, Settings } from 'lucide-react'
 
-const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Дашборд' },
-]
-
-const operationsItems = [
-  { to: '/shifts', icon: ClipboardList, label: 'Сменные отчёты' },
-  { to: '/receipts', icon: Truck, label: 'Поступления' },
-]
-
-const settingsItems = [
+const items = [
+  { to: '/', icon: LayoutDashboard, label: 'Рабочий стол', end: true },
   { to: '/settings', icon: Settings, label: 'Настройки' },
 ]
 
 export function AppSidebar() {
   return (
-    <Sidebar>
-      <SidebarHeader className="p-4">
-        <NavLink to="/" className="flex items-center gap-2">
-          <Fuel className="h-6 w-6 text-primary" />
-          <span className="font-bold text-lg">GIG Fuel</span>
-        </NavLink>
-      </SidebarHeader>
-
-      <SidebarContent>
+    <Sidebar className="pt-[var(--header-height)] border-r-0">
+      <SidebarContent className="px-2 py-4">
         <SidebarGroup>
           <SidebarMenu>
-            {navItems.map((item) => (
+            {items.map((item) => (
               <SidebarMenuItem key={item.to}>
                 <SidebarMenuButton asChild>
-                  <NavLink to={item.to} end className={({ isActive }) => isActive ? 'bg-accent' : ''}>
-                    <item.icon className="h-4 w-4" />
-                    <span>{item.label}</span>
-                  </NavLink>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
-        <SidebarGroup>
-          <div className="px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Операции
-          </div>
-          <SidebarMenu>
-            {operationsItems.map((item) => (
-              <SidebarMenuItem key={item.to}>
-                <SidebarMenuButton asChild>
-                  <NavLink to={item.to} className={({ isActive }) => isActive ? 'bg-accent' : ''}>
-                    <item.icon className="h-4 w-4" />
-                    <span>{item.label}</span>
-                  </NavLink>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
-        <SidebarGroup>
-          <SidebarMenu>
-            {settingsItems.map((item) => (
-              <SidebarMenuItem key={item.to}>
-                <SidebarMenuButton asChild>
-                  <NavLink to={item.to} className={({ isActive }) => isActive ? 'bg-accent' : ''}>
-                    <item.icon className="h-4 w-4" />
+                  <NavLink
+                    to={item.to}
+                    end={item.end}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        isActive
+                          ? 'bg-primary/10 text-primary'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                      }`
+                    }
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" />
                     <span>{item.label}</span>
                   </NavLink>
                 </SidebarMenuButton>

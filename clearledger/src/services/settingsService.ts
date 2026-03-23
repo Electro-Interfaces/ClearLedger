@@ -28,9 +28,11 @@ const defaults: AppSettings = {
   stsApiUrl: 'https://pos.autooplata.ru/tms',
   stsLogin: '',
   stsPassword: '',
-  stsSystemCode: 15,
+  stsSystemCode: 65,
   stations: [
-    { code: 4, name: 'АКАЗС №5' },
+    { code: 208, name: 'АЗС №208' },
+    { code: 209, name: 'АЗС №209' },
+    { code: 210, name: 'АЗС №210' },
   ],
 }
 

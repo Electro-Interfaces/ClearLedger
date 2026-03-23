@@ -6,14 +6,10 @@ import { CompanyProvider } from '@/contexts/CompanyContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { MainLayout } from '@/components/layout/MainLayout'
-import { Dashboard } from '@/pages/Dashboard'
+import { WorkspaceLayout } from '@/components/workspace/WorkspaceLayout'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Loader2 } from 'lucide-react'
 
-const ShiftsPage = lazy(() => import('@/pages/ShiftsPage').then((m) => ({ default: m.ShiftsPage })))
-const ShiftDetailPage = lazy(() => import('@/pages/ShiftDetailPage').then((m) => ({ default: m.ShiftDetailPage })))
-const ReceiptsPage = lazy(() => import('@/pages/ReceiptsPage').then((m) => ({ default: m.ReceiptsPage })))
-const ReceiptDetailPage = lazy(() => import('@/pages/ReceiptDetailPage').then((m) => ({ default: m.ReceiptDetailPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 
 function PageLoader() {
@@ -24,18 +20,12 @@ function PageLoader() {
   )
 }
 
-function LazyPage({ children }: { children: React.ReactNode }) {
-  return <Suspense fallback={<PageLoader />}>{children}</Suspense>
-}
-
 function NotFoundPage() {
   return (
     <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
       <h1 className="text-6xl font-bold text-muted-foreground">404</h1>
       <p className="text-lg text-muted-foreground">Страница не найдена</p>
-      <Link to="/" className="text-primary hover:underline">
-        На главную
-      </Link>
+      <Link to="/" className="text-primary hover:underline">На главную</Link>
     </div>
   )
 }
@@ -62,13 +52,15 @@ const router = createBrowserRouter([
       {
         element: <MainLayout />,
         children: [
-          { path: '/', element: <Dashboard /> },
-          { path: '/shifts', element: <LazyPage><ShiftsPage /></LazyPage> },
-          { path: '/shifts/:stationId/:shiftNumber', element: <LazyPage><ShiftDetailPage /></LazyPage> },
-          { path: '/receipts', element: <LazyPage><ReceiptsPage /></LazyPage> },
-          { path: '/receipts/:stationId/:ttnId', element: <LazyPage><ReceiptDetailPage /></LazyPage> },
-          { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
-          { path: '/data', element: <NotFoundPage /> },
+          { path: '/', element: <WorkspaceLayout /> },
+          {
+            path: '/settings',
+            element: (
+              <Suspense fallback={<PageLoader />}>
+                <SettingsPage />
+              </Suspense>
+            ),
+          },
           { path: '*', element: <NotFoundPage /> },
         ],
       },
