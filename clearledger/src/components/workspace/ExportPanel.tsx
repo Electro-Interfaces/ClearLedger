@@ -3,11 +3,13 @@
  * Только документы, отмеченные «готов к загрузке» в CorePanel.
  */
 
+import { useState } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { FileOutput, Trash2, Upload, PackageCheck } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { FileOutput, Trash2, Upload, PackageCheck, Filter } from 'lucide-react'
 import { format } from 'date-fns'
 
 const TYPE_LABELS: Record<string, string> = {

@@ -13,6 +13,7 @@ import { RawPanel } from './RawPanel'
 import { CorePanel } from './CorePanel'
 import { ExportPanel } from './ExportPanel'
 import { OnboardingScreen } from './OnboardingScreen'
+import { WorkspaceToolbar } from './WorkspaceToolbar'
 import {
   ClipboardList, Database, FileOutput,
   PanelLeftClose, PanelLeftOpen,
@@ -83,7 +84,12 @@ function DesktopWorkspace() {
   const { exportDocs, selectedShiftNumber } = useWorkspace()
 
   return (
-    <div className="h-[calc(100vh-var(--header-height))] overflow-hidden flex">
+    <div className="h-[calc(100vh-var(--header-height))] overflow-hidden flex flex-col">
+      {/* Общий тулбар над всеми панелями */}
+      <WorkspaceToolbar />
+
+      {/* 3 панели */}
+      <div className="flex-1 overflow-hidden flex">
       {/* Raw Panel */}
       {rawOpen ? (
         <div className="w-[280px] min-w-[220px] h-full border-r border-border/40 bg-card/30 flex-shrink-0 overflow-hidden flex flex-col">
@@ -156,6 +162,7 @@ function DesktopWorkspace() {
           badge={exportDocs.length}
         />
       )}
+      </div>
     </div>
   )
 }

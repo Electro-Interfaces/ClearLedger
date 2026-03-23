@@ -16,6 +16,10 @@ interface ExportDocument {
 }
 
 interface WorkspaceContextType {
+  /** Глобальный фильтр станции (общий тулбар) */
+  globalStation: string
+  setGlobalStation: (value: string) => void
+
   /** Выбранная станция */
   selectedStationId: number | null
   /** Выбранная смена */
@@ -43,6 +47,7 @@ interface WorkspaceContextType {
 const WorkspaceContext = createContext<WorkspaceContextType | null>(null)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const [globalStation, setGlobalStation] = useState<string>('all')
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null)
   const [selectedShiftNumber, setSelectedShiftNumber] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'raw' | 'core' | 'export'>('raw')
@@ -79,6 +84,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   return (
     <WorkspaceContext.Provider
       value={{
+        globalStation,
+        setGlobalStation,
         selectedStationId,
         selectedShiftNumber,
         activeTab,

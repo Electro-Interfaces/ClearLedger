@@ -3,7 +3,6 @@
  * Список смен с фильтром. Клик → выбор смены → CorePanel.
  */
 
-import { useState } from 'react'
 import { useShifts } from '@/hooks/useFuel'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
@@ -18,10 +17,9 @@ import { format } from 'date-fns'
 export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
   const settings = getSettings()
   const queryClient = useQueryClient()
-  const { selectedStationId, selectedShiftNumber, selectShift } = useWorkspace()
-  const [stationFilter, setStationFilter] = useState<string>('all')
+  const { globalStation, selectedStationId, selectedShiftNumber, selectShift } = useWorkspace()
 
-  const filterStation = stationFilter === 'all' ? undefined : Number(stationFilter)
+  const filterStation = globalStation === 'all' ? undefined : Number(globalStation)
   const { data: shifts, isLoading, isFetching } = useShifts(filterStation)
 
   function handleRefresh() {
@@ -42,21 +40,25 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
         </div>
       )}
 
-      {/* Station filter */}
-      <div className="px-3 py-2 border-b border-border/30">
-        <Select value={stationFilter} onValueChange={setStationFilter}>
-          <SelectTrigger className="h-8 text-xs">
-            <SelectValue placeholder="Все станции" />
+      {/* Локальный тулбар панели */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border/30">
+        <Select defaultValue="shifts">
+          <SelectTrigger className="h-7 w-[100px] text-xs">
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Все станции</SelectItem>
-            {settings.stations.map((s) => (
-              <SelectItem key={s.code} value={String(s.code)}>
-                {s.name}
-              </SelectItem>
-            ))}
+            <SelectItem value="shifts">Смены</SelectItem>
+            <SelectItem value="receipts">ТТН</SelectItem>
           </SelectContent>
         </Select>
+        <div className="ml-auto flex items-center gap-1">
+          <Badge variant="secondary" className="text-[9px] h-4 px-1.5">
+            {shifts?.length ?? 0}
+          </Badge>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRefresh} disabled={isFetching} title="Обновить">
+            <RefreshCw className={`h-3 w-3 ${isFetching ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
       </div>
 
       {/* Shifts list */}
@@ -72,10 +74,10 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
         )}
 
         {shifts?.map((shift) => {
+          const stId = filterStation ?? settings.stations[0]?.code ?? 0
           const isSelected =
             selectedShiftNumber === shift.shift &&
-            selectedStationId === (filterStation ?? settings.stations[0]?.code)
-          const stId = filterStation ?? settings.stations[0]?.code ?? 0
+            selectedStationId === stId
 
           return (
             <button

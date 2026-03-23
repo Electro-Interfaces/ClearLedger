@@ -37,6 +37,72 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
   draft: { label: 'Черновик', variant: 'outline' },
 }
 
+/** Настройка одного потока данных внутри канала */
+function StreamConfig({ stream, onChange }: {
+  stream: import('@/types/channel').ChannelStream
+  onChange: (updated: import('@/types/channel').ChannelStream) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [catalog, setCatalog] = useState(stream.catalogTemplate)
+  const [endpoint, setEndpoint] = useState(stream.endpoint ?? '')
+
+  function handleToggle(enabled: boolean) {
+    onChange({ ...stream, enabled })
+  }
+
+  function handleSaveCatalog() {
+    onChange({ ...stream, catalogTemplate: catalog, endpoint })
+    toast.success(`Поток «${stream.name}» обновлён`)
+  }
+
+  return (
+    <div className="rounded-md border border-border/40 bg-muted/20">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <button className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent/30 transition-colors rounded-md">
+            <Checkbox
+              checked={stream.enabled}
+              className="h-3.5 w-3.5"
+              onClick={(e) => { e.stopPropagation(); handleToggle(!stream.enabled) }}
+            />
+            <span className={`font-medium ${stream.enabled ? '' : 'text-muted-foreground line-through'}`}>
+              {stream.name}
+            </span>
+            <span className="text-muted-foreground/50 ml-auto mr-2 truncate max-w-[200px]">
+              {stream.catalogTemplate}
+            </span>
+            <ChevronDown className={`h-3 w-3 text-muted-foreground shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="px-3 pb-3 pt-1 space-y-3 border-t border-border/30">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground">Тип документа</Label>
+              <div className="text-xs font-mono bg-muted/50 px-2 py-1 rounded">{stream.docType}</div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground">Endpoint / метод API</Label>
+              <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)}
+                className="h-7 text-xs font-mono" placeholder="/v1/report/shift_report" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground">
+                Каталог хранения
+                <span className="text-muted-foreground/40 ml-1">шаблон: {'{станция}'}, {'{год}'}, {'{месяц}'}</span>
+              </Label>
+              <Input value={catalog} onChange={(e) => setCatalog(e.target.value)}
+                className="h-7 text-xs font-mono" placeholder="/Смены/{станция}/{год}-{месяц}/" />
+            </div>
+            <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={handleSaveCatalog}>
+              Применить
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  )
+}
+
 /** Форма настройки REST API канала (STS) */
 function RestApiConfig({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
   const [url, setUrl] = useState(channel.config.url ?? channel.endpoint ?? '')
@@ -133,17 +199,22 @@ function RestApiConfig({ channel, onUpdate }: { channel: Channel; onUpdate: (ch:
         <Input value={systemCode} onChange={(e) => setSystemCode(e.target.value)} className="h-8 text-sm w-24" />
       </div>
 
-      {/* Потоки */}
+      {/* Потоки данных */}
       {streams.length > 0 && (
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">Потоки данных</Label>
-          <div className="space-y-1.5">
-            {streams.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 text-xs">
-                <Checkbox checked={s.enabled} disabled className="h-3.5 w-3.5" />
-                <span className={s.enabled ? '' : 'text-muted-foreground line-through'}>{s.name}</span>
-                <span className="text-muted-foreground/50 ml-auto">{s.catalogTemplate}</span>
-              </div>
+          <div className="space-y-2">
+            {streams.map((s, idx) => (
+              <StreamConfig
+                key={s.id}
+                stream={s}
+                onChange={(updated) => {
+                  const newStreams = [...streams]
+                  newStreams[idx] = updated
+                  updateChannel(channel.id, { streams: newStreams })
+                  onUpdate({ ...channel, streams: newStreams })
+                }}
+              />
             ))}
           </div>
         </div>
