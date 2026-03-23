@@ -3,10 +3,43 @@
  */
 
 import { getItem, setItem } from './storage'
-import type { Channel, ChannelType } from '@/types/channel'
+import type { Channel, ChannelType, ChannelStream, SyncLogEntry } from '@/types/channel'
 import { nanoid } from 'nanoid'
 
 const STORAGE_KEY = 'gig-channels'
+
+/** Дефолтные потоки для REST API (STS) */
+function defaultStreamsForRest(): ChannelStream[] {
+  return [
+    {
+      id: nanoid(6),
+      name: 'Сменные отчёты',
+      docType: 'shift_report',
+      endpoint: '/v1/report/shift_report',
+      catalogTemplate: '/Смены/{станция}/{год}-{месяц}/',
+      filters: {},
+      enabled: true,
+    },
+    {
+      id: nanoid(6),
+      name: 'Поступления (ТТН)',
+      docType: 'receipt',
+      endpoint: '/v1/report/receipts',
+      catalogTemplate: '/ТТН/{станция}/{год}-{месяц}/',
+      filters: {},
+      enabled: true,
+    },
+    {
+      id: nanoid(6),
+      name: 'Цены',
+      docType: 'price',
+      endpoint: '/v1/prices',
+      catalogTemplate: '/Справочники/',
+      filters: {},
+      enabled: false,
+    },
+  ]
+}
 
 export function getChannels(): Channel[] {
   return getItem<Channel[]>(STORAGE_KEY, [])
@@ -30,8 +63,11 @@ export function createChannel(data: {
     status: 'draft',
     description: data.description,
     endpoint: data.endpoint,
+    duplicatePolicy: 'skip',
+    streams: data.type === 'rest' ? defaultStreamsForRest() : [],
     config: data.config ?? {},
     docsLoaded: 0,
+    syncLog: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
@@ -56,4 +92,15 @@ export function deleteChannel(id: string): boolean {
   if (filtered.length === channels.length) return false
   setItem(STORAGE_KEY, filtered)
   return true
+}
+
+export function addSyncLog(channelId: string, entries: SyncLogEntry[]): void {
+  const channels = getChannels()
+  const idx = channels.findIndex((c) => c.id === channelId)
+  if (idx === -1) return
+  const log = [...entries, ...(channels[idx].syncLog || [])].slice(0, 100) // последние 100 записей
+  channels[idx].syncLog = log
+  channels[idx].lastSync = new Date().toISOString()
+  channels[idx].updatedAt = new Date().toISOString()
+  setItem(STORAGE_KEY, channels)
 }
