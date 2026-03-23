@@ -10,13 +10,20 @@ import { WorkspaceLayout } from '@/components/workspace/WorkspaceLayout'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Loader2 } from 'lucide-react'
 
+const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ default: m.IntakePage })))
+const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
+const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 
-function PageLoader() {
+function LazyPage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-center h-[50vh]">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-    </div>
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-[50vh]">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      {children}
+    </Suspense>
   )
 }
 
@@ -53,14 +60,10 @@ const router = createBrowserRouter([
         element: <MainLayout />,
         children: [
           { path: '/', element: <WorkspaceLayout /> },
-          {
-            path: '/settings',
-            element: (
-              <Suspense fallback={<PageLoader />}>
-                <SettingsPage />
-              </Suspense>
-            ),
-          },
+          { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
+          { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
+          { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
+          { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
         ],
       },

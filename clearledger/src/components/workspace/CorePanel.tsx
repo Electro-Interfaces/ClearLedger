@@ -17,7 +17,7 @@ function fmt(n: number): string {
   return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(n)
 }
 
-export function CorePanel() {
+export function CorePanel({ hideHeader = false }: { hideHeader?: boolean }) {
   const { selectedStationId, selectedShiftNumber, addExportDoc, setActiveTab } = useWorkspace()
 
   const hasSelection = selectedStationId != null && selectedShiftNumber != null
@@ -80,21 +80,31 @@ export function CorePanel() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/50">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-bold">
-            Смена №{shift.shiftNumber}
-          </h2>
-          <span className="text-xs text-muted-foreground">{shift.stationName}</span>
-          <Badge variant={shift.status === 'open' ? 'default' : 'secondary'} className="text-[10px] h-5">
-            {shift.status === 'open' ? 'Открыта' : 'Закрыта'}
-          </Badge>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/50">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold">
+              Смена №{shift.shiftNumber}
+            </h2>
+            <span className="text-xs text-muted-foreground">{shift.stationName}</span>
+            <Badge variant={shift.status === 'open' ? 'default' : 'secondary'} className="text-[10px] h-5">
+              {shift.status === 'open' ? 'Открыта' : 'Закрыта'}
+            </Badge>
+          </div>
+          <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handlePrepareExport}>
+            <FileOutput className="h-3.5 w-3.5" />
+            В 1С
+          </Button>
         </div>
-        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handlePrepareExport}>
-          <FileOutput className="h-3.5 w-3.5" />
-          В 1С
-        </Button>
-      </div>
+      )}
+      {hideHeader && (
+        <div className="flex justify-end px-4 py-1.5 border-b border-border/30">
+          <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handlePrepareExport}>
+            <FileOutput className="h-3.5 w-3.5" />
+            В 1С
+          </Button>
+        </div>
+      )}
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-4">

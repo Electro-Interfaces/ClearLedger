@@ -38,12 +38,12 @@ export function MainLayout() {
           </>
         ) : (
           <div className="flex w-full max-w-none" style={{ paddingTop: 'var(--header-height)' }}>
-            {!isWorkspace && <AppSidebar />}
-            <main className={`flex-1 min-w-0 w-full max-w-none ${isWorkspace ? '' : 'overflow-y-auto'}`}>
+            <AppSidebar />
+            <main className="flex-1 min-w-0 w-full max-w-none overflow-hidden">
               {isWorkspace ? (
                 <Outlet />
               ) : (
-                <div className="px-4 md:px-6 lg:px-8 w-full max-w-[1000px] py-6">
+                <div className="px-4 md:px-6 lg:px-8 w-full max-w-[1000px] py-6 overflow-y-auto h-[calc(100vh-var(--header-height))]">
                   <Outlet />
                 </div>
               )}

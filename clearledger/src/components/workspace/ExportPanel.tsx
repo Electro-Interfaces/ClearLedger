@@ -23,22 +23,24 @@ const STATUS_LABELS: Record<string, string> = {
   exported: 'Выгружен',
 }
 
-export function ExportPanel() {
+export function ExportPanel({ hideHeader = false }: { hideHeader?: boolean }) {
   const { exportDocs, removeExportDoc, markExported } = useWorkspace()
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/50">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Для 1С
-        </h2>
-        {exportDocs.length > 0 && (
-          <Badge variant="default" className="text-[10px] h-5">
-            {exportDocs.length}
-          </Badge>
-        )}
-      </div>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/50">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Для 1С
+          </h2>
+          {exportDocs.length > 0 && (
+            <Badge variant="default" className="text-[10px] h-5">
+              {exportDocs.length}
+            </Badge>
+          )}
+        </div>
+      )}
 
       <ScrollArea className="flex-1">
         {exportDocs.length === 0 ? (

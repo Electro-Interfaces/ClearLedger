@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 
-export function RawPanel() {
+export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
   const settings = getSettings()
   const queryClient = useQueryClient()
   const { selectedStationId, selectedShiftNumber, selectShift } = useWorkspace()
@@ -31,14 +31,16 @@ export function RawPanel() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/50">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Загруженные
-        </h2>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} disabled={isFetching}>
-          <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
-        </Button>
-      </div>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/50">
+          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Загруженные
+          </h2>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRefresh} disabled={isFetching}>
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+      )}
 
       {/* Station filter */}
       <div className="px-3 py-2 border-b border-border/30">
