@@ -48,16 +48,26 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
     )
   }, [shifts, searchQuery])
 
-  // Группировка по месяцам для каталога
-  const groupedByMonth = useMemo(() => {
-    const groups: Record<string, StsShift[]> = {}
+  // Глубокая иерархия: Год → Месяц → АЗС → Тип (Смены/ТТН)
+  const catalogTree = useMemo(() => {
+    const tree: Record<string, Record<string, StsShift[]>> = {} // year → month → shifts
     for (const s of filteredShifts) {
-      const key = s.dt_open ? format(new Date(s.dt_open), 'yyyy-MM') : 'unknown'
-      if (!groups[key]) groups[key] = []
-      groups[key].push(s)
+      const d = s.dt_open ? new Date(s.dt_open) : null
+      const year = d ? String(d.getFullYear()) : '—'
+      const month = d ? String(d.getMonth() + 1).padStart(2, '0') : '00'
+      const key = `${year}-${month}`
+      if (!tree[year]) tree[year] = {}
+      if (!tree[year][key]) tree[year][key] = []
+      tree[year][key].push(s)
     }
-    return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a))
+    return tree
   }, [filteredShifts])
+
+  const stId = filterStation ?? settings.stations[0]?.code ?? 0
+  const stationName = settings.stations.find(s => s.code === stId)?.name ?? `АЗС-${stId}`
+
+  const MONTH_NAMES = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+    'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
   function toggleFolder(key: string) {
     setExpandedFolders((prev) => {
@@ -66,8 +76,6 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
       return next
     })
   }
-
-  const stId = filterStation ?? settings.stations[0]?.code ?? 0
 
   return (
     <div className="flex flex-col h-full">
@@ -174,51 +182,105 @@ export function RawPanel({ hideHeader = false }: { hideHeader?: boolean }) {
           )
         })}
 
-        {/* Режим КАТАЛОГ */}
+        {/* Режим КАТАЛОГ — Год → Месяц → АЗС → Смены/ТТН */}
         {viewMode === 'catalog' && (
           <div className="py-1">
-            {groupedByMonth.map(([monthKey, monthShifts]) => {
-              const isExpanded = expandedFolders.has(monthKey) || expandedFolders.size === 0
-              const monthLabel = monthKey !== 'unknown'
-                ? format(new Date(monthKey + '-01'), 'LLLL yyyy')
-                : 'Без даты'
+            {Object.entries(catalogTree).sort(([a], [b]) => b.localeCompare(a)).map(([year, months]) => {
+              const yearKey = `y-${year}`
+              const yearExpanded = expandedFolders.has(yearKey) || expandedFolders.size === 0
 
               return (
-                <div key={monthKey}>
-                  {/* Папка-месяц */}
-                  <button
-                    onClick={() => toggleFolder(monthKey)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent/30 transition-colors"
-                  >
-                    <ChevronRight className={`h-3 w-3 text-muted-foreground transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                <div key={year}>
+                  {/* Уровень 1: Год */}
+                  <button onClick={() => toggleFolder(yearKey)}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-xs hover:bg-accent/30 transition-colors">
+                    <ChevronRight className={`h-3 w-3 text-muted-foreground transition-transform ${yearExpanded ? 'rotate-90' : ''}`} />
                     <FolderOpen className="h-3.5 w-3.5 text-amber-500" />
-                    <span className="font-medium capitalize">{monthLabel}</span>
-                    <Badge variant="outline" className="text-[9px] h-4 px-1 ml-auto">{monthShifts.length}</Badge>
+                    <span className="font-bold">{year}</span>
                   </button>
 
-                  {/* Файлы внутри */}
-                  {isExpanded && monthShifts.map((shift) => {
-                    const isSelected = selectedShiftNumber === shift.shift && selectedStationId === stId
+                  {yearExpanded && Object.entries(months).sort(([a], [b]) => b.localeCompare(a)).map(([monthKey, monthShifts]) => {
+                    const monthNum = Number(monthKey.split('-')[1])
+                    const monthExpanded = expandedFolders.has(monthKey) || expandedFolders.size === 0
 
                     return (
-                      <button
-                        key={shift.shift}
-                        onClick={() => selectShift(stId, shift.shift)}
-                        className={`w-full flex items-center gap-2 pl-9 pr-3 py-1.5 text-xs hover:bg-accent/50 transition-colors ${
-                          isSelected ? 'bg-primary/10 text-primary' : 'text-muted-foreground'
-                        }`}
-                      >
-                        <FileText className="h-3 w-3 shrink-0" />
-                        <span className={`font-medium ${isSelected ? 'text-primary' : 'text-foreground'}`}>
-                          Смена №{shift.shift}
-                        </span>
-                        <span className="ml-auto text-[10px]">
-                          {shift.dt_open ? format(new Date(shift.dt_open), 'dd.MM') : ''}
-                        </span>
-                        <Badge variant={shift.dt_close ? 'secondary' : 'default'} className="text-[8px] h-3.5 px-1">
-                          {shift.dt_close ? 'З' : 'О'}
-                        </Badge>
-                      </button>
+                      <div key={monthKey}>
+                        {/* Уровень 2: Месяц */}
+                        <button onClick={() => toggleFolder(monthKey)}
+                          className="w-full flex items-center gap-2 pl-6 pr-2 py-1.5 text-xs hover:bg-accent/30 transition-colors">
+                          <ChevronRight className={`h-3 w-3 text-muted-foreground transition-transform ${monthExpanded ? 'rotate-90' : ''}`} />
+                          <FolderOpen className="h-3.5 w-3.5 text-blue-400" />
+                          <span className="font-medium">{MONTH_NAMES[monthNum] || monthKey}</span>
+                          <Badge variant="outline" className="text-[9px] h-4 px-1 ml-auto">{monthShifts.length}</Badge>
+                        </button>
+
+                        {monthExpanded && (() => {
+                          const stationKey = `${monthKey}-s-${stId}`
+                          const stationExpanded = expandedFolders.has(stationKey) || expandedFolders.size === 0
+
+                          return (
+                            <div>
+                              {/* Уровень 3: АЗС */}
+                              <button onClick={() => toggleFolder(stationKey)}
+                                className="w-full flex items-center gap-2 pl-10 pr-2 py-1.5 text-xs hover:bg-accent/30 transition-colors">
+                                <ChevronRight className={`h-3 w-3 text-muted-foreground transition-transform ${stationExpanded ? 'rotate-90' : ''}`} />
+                                <FolderOpen className="h-3.5 w-3.5 text-emerald-400" />
+                                <span className="font-medium">{stationName}</span>
+                              </button>
+
+                              {stationExpanded && (
+                                <div>
+                                  {/* Уровень 4: Тип — Смены */}
+                                  {(() => {
+                                    const shiftsKey = `${stationKey}-shifts`
+                                    const shiftsExpanded = expandedFolders.has(shiftsKey) || expandedFolders.size === 0
+                                    return (
+                                      <div>
+                                        <button onClick={() => toggleFolder(shiftsKey)}
+                                          className="w-full flex items-center gap-2 pl-14 pr-2 py-1 text-xs hover:bg-accent/30 transition-colors">
+                                          <ChevronRight className={`h-2.5 w-2.5 text-muted-foreground transition-transform ${shiftsExpanded ? 'rotate-90' : ''}`} />
+                                          <FolderOpen className="h-3 w-3 text-purple-400" />
+                                          <span className="font-medium text-muted-foreground">Смены</span>
+                                          <Badge variant="outline" className="text-[8px] h-3.5 px-1 ml-auto">{monthShifts.length}</Badge>
+                                        </button>
+
+                                        {shiftsExpanded && monthShifts.map((shift) => {
+                                          const isSelected = selectedShiftNumber === shift.shift && selectedStationId === stId
+                                          return (
+                                            <button key={shift.shift}
+                                              onClick={() => selectShift(stId, shift.shift)}
+                                              className={`w-full flex items-center gap-2 pl-[4.5rem] pr-2 py-1 text-[11px] hover:bg-accent/50 transition-colors ${
+                                                isSelected ? 'bg-primary/10 text-primary' : ''
+                                              }`}>
+                                              <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                              <span className={isSelected ? 'font-semibold text-primary' : ''}>
+                                                №{shift.shift}
+                                              </span>
+                                              <span className="text-[10px] text-muted-foreground ml-auto">
+                                                {shift.dt_open ? format(new Date(shift.dt_open), 'dd.MM') : ''}
+                                              </span>
+                                              <Badge variant={shift.dt_close ? 'secondary' : 'default'} className="text-[7px] h-3 px-0.5">
+                                                {shift.dt_close ? 'З' : 'О'}
+                                              </Badge>
+                                            </button>
+                                          )
+                                        })}
+                                      </div>
+                                    )
+                                  })()}
+
+                                  {/* Уровень 4: Тип — ТТН (placeholder) */}
+                                  <button className="w-full flex items-center gap-2 pl-14 pr-2 py-1 text-xs text-muted-foreground/50">
+                                    <FolderOpen className="h-3 w-3" />
+                                    <span>ТТН</span>
+                                    <Badge variant="outline" className="text-[8px] h-3.5 px-1 ml-auto">0</Badge>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
+                      </div>
                     )
                   })}
                 </div>
