@@ -12,10 +12,16 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { getChannels, createChannel, updateChannel, deleteChannel } from '@/services/channelService'
 import { CHANNEL_TYPE_META, type ChannelType, type Channel } from '@/types/channel'
 import { stsTestConnection } from '@/services/fuel/stsApiClient'
+import { syncRestChannel } from '@/services/channelSyncService'
+import type { SyncResult } from '@/types/channel'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Progress } from '@/components/ui/progress'
 import {
   Plus, Trash2, Globe, Database, Mail, HardDrive,
   Webhook, FolderOpen, FileCheck, Cloud, Radio,
   ChevronDown, Settings, Loader2, CheckCircle2, XCircle, Save,
+  Play, History,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -39,6 +45,10 @@ function RestApiConfig({ channel, onUpdate }: { channel: Channel; onUpdate: (ch:
   const [systemCode, setSystemCode] = useState(channel.config.systemCode ?? '65')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string; shiftsCount?: number } | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncProgress, setSyncProgress] = useState('')
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
+  const [showLog, setShowLog] = useState(false)
 
   async function handleTest() {
     setTesting(true)
@@ -63,8 +73,47 @@ function RestApiConfig({ channel, onUpdate }: { channel: Channel; onUpdate: (ch:
     }
   }
 
+  async function handleSync() {
+    setSyncing(true)
+    setSyncResult(null)
+    setSyncProgress('Запуск...')
+
+    // Сохранить настройки перед синхронизацией
+    updateChannel(channel.id, {
+      endpoint: url,
+      config: { ...channel.config, url, login, password, systemCode },
+    })
+
+    try {
+      const result = await syncRestChannel(
+        { ...channel, config: { ...channel.config, url, login, password, systemCode } },
+        {
+          onProgress: (_loaded, _total, msg) => setSyncProgress(msg),
+        },
+      )
+      setSyncResult(result)
+      onUpdate(getChannels().find((c) => c.id === channel.id) ?? channel)
+
+      if (result.errors > 0) {
+        toast.error(`Загрузка завершена с ошибками: ${result.loaded} загружено, ${result.errors} ошибок`)
+      } else {
+        toast.success(`Загружено ${result.loaded} документов, ${result.duplicates} дубликатов пропущено`)
+      }
+    } catch (err) {
+      toast.error(`Ошибка: ${err instanceof Error ? err.message : err}`)
+    } finally {
+      setSyncing(false)
+      setSyncProgress('')
+    }
+  }
+
+  // Потоки канала
+  const streams = channel.streams || []
+  const log = channel.syncLog || []
+
   return (
     <div className="space-y-4 pt-2">
+      {/* Подключение */}
       <div className="space-y-2">
         <Label className="text-xs">URL API</Label>
         <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://pos.autooplata.ru/tms" className="h-8 text-sm" />
@@ -83,27 +132,101 @@ function RestApiConfig({ channel, onUpdate }: { channel: Channel; onUpdate: (ch:
         <Label className="text-xs">Код системы (сети)</Label>
         <Input value={systemCode} onChange={(e) => setSystemCode(e.target.value)} className="h-8 text-sm w-24" />
       </div>
-      <div className="flex items-center gap-2">
-        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleTest} disabled={testing || !login}>
+
+      {/* Потоки */}
+      {streams.length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">Потоки данных</Label>
+          <div className="space-y-1.5">
+            {streams.map((s) => (
+              <div key={s.id} className="flex items-center gap-2 text-xs">
+                <Checkbox checked={s.enabled} disabled className="h-3.5 w-3.5" />
+                <span className={s.enabled ? '' : 'text-muted-foreground line-through'}>{s.name}</span>
+                <span className="text-muted-foreground/50 ml-auto">{s.catalogTemplate}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Кнопки */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleTest} disabled={testing || syncing || !login}>
           {testing && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
           Проверить
         </Button>
-        <Button size="sm" className="h-8 text-xs gap-1" onClick={handleSave}>
+        <Button size="sm" className="h-8 text-xs gap-1" onClick={handleSave} disabled={syncing}>
           <Save className="h-3 w-3" />
           Сохранить
         </Button>
+        <Button size="sm" variant="default" className="h-8 text-xs gap-1" onClick={handleSync} disabled={syncing || !login}>
+          {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+          Обновить данные
+        </Button>
+        {log.length > 0 && (
+          <Button size="sm" variant="ghost" className="h-8 text-xs gap-1 ml-auto" onClick={() => setShowLog(!showLog)}>
+            <History className="h-3 w-3" />
+            Лог ({log.length})
+          </Button>
+        )}
+
         {testResult && (
           <span className="flex items-center gap-1 text-xs">
             {testResult.ok
-              ? <><CheckCircle2 className="h-4 w-4 text-emerald-500" /><span className="text-emerald-500">OK ({testResult.shiftsCount} смен)</span></>
-              : <><XCircle className="h-4 w-4 text-destructive" /><span className="text-destructive">{testResult.error}</span></>
+              ? <><CheckCircle2 className="h-4 w-4 text-emerald-500" /><span className="text-emerald-500">OK</span></>
+              : <><XCircle className="h-4 w-4 text-destructive" /><span className="text-destructive truncate max-w-[200px]">{testResult.error}</span></>
             }
           </span>
         )}
       </div>
+
+      {/* Прогресс синхронизации */}
+      {syncing && (
+        <div className="space-y-1">
+          <Progress className="h-1.5" />
+          <p className="text-[10px] text-muted-foreground">{syncProgress}</p>
+        </div>
+      )}
+
+      {/* Результат */}
+      {syncResult && !syncing && (
+        <div className="rounded-md bg-muted/50 p-3 text-xs space-y-1">
+          <div className="flex gap-4">
+            <span className="text-emerald-500 font-medium">Загружено: {syncResult.loaded}</span>
+            <span className="text-muted-foreground">Дубликатов: {syncResult.duplicates}</span>
+            {syncResult.errors > 0 && <span className="text-destructive">Ошибок: {syncResult.errors}</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Лог */}
+      {showLog && log.length > 0 && (
+        <div className="rounded-md border border-border/50 bg-muted/30">
+          <div className="px-3 py-1.5 border-b border-border/30 text-[10px] font-semibold text-muted-foreground">
+            Лог операций
+          </div>
+          <ScrollArea className="max-h-[200px]">
+            <div className="p-2 space-y-0.5 font-mono text-[10px]">
+              {log.map((entry, i) => (
+                <div key={i} className={`flex gap-2 ${
+                  entry.level === 'error' ? 'text-destructive' :
+                  entry.level === 'success' ? 'text-emerald-500' :
+                  entry.level === 'warn' ? 'text-amber-500' :
+                  'text-muted-foreground'
+                }`}>
+                  <span className="shrink-0 w-14">{format(new Date(entry.timestamp), 'HH:mm:ss')}</span>
+                  <span className="shrink-0 w-10 font-semibold">{entry.event}</span>
+                  <span>{entry.message}</span>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </div>
+      )}
     </div>
   )
 }
+
 
 /** Заглушка настройки для других типов каналов */
 function GenericConfig({ channel }: { channel: Channel }) {
