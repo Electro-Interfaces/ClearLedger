@@ -3,6 +3,15 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
 
+// Миграция: очистить данные старого формата
+const SCHEMA_VERSION = '2'
+if (localStorage.getItem('gig-schema') !== SCHEMA_VERSION) {
+  localStorage.removeItem('gig-channels')
+  localStorage.removeItem('gig-sources')
+  localStorage.setItem('gig-schema', SCHEMA_VERSION)
+  console.log('[GIG Fuel] Schema migrated to v' + SCHEMA_VERSION)
+}
+
 console.log('[GIG Fuel] Starting...')
 
 try {

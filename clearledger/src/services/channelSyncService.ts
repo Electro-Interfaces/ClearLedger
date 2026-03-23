@@ -85,7 +85,7 @@ export async function syncRestChannel(channel: Channel & { config?: Record<strin
   const policy = opts.duplicatePolicy ?? channel.duplicatePolicy ?? 'skip'
 
   // Определяем какие потоки обновлять
-  const activeStreams = channel.streams.filter((s) => {
+  const activeStreams = (channel.streams ?? []).filter((s) => {
     if (!s.enabled) return false
     if (opts.streamIds && !opts.streamIds.includes(s.id)) return false
     return true

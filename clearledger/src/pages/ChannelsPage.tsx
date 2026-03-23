@@ -35,10 +35,19 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
   draft: { label: 'Черновик', variant: 'outline' },
 }
 
-/** Настройка одного потока */
-function StreamConfig({ stream, onChange }: { stream: ChannelStream; onChange: (s: ChannelStream) => void }) {
+/** Настройка одного потока (подкаталог) */
+function StreamConfig({ stream, rootCatalog, onChange }: {
+  stream: ChannelStream; rootCatalog: string; onChange: (s: ChannelStream) => void
+}) {
   const [open, setOpen] = useState(false)
-  const [catalog, setCatalog] = useState(stream.catalogTemplate)
+  const [subdir, setSubdir] = useState(stream.catalogTemplate)
+  const [streamName, setStreamName] = useState(stream.name)
+
+  const fullPath = `${rootCatalog}${subdir}`.replace(/\/\//g, '/')
+  const previewPath = fullPath
+    .replace(/\{станция\}/g, 'АЗС-208')
+    .replace(/\{год\}/g, '2026')
+    .replace(/\{месяц\}/g, '03')
 
   return (
     <div className="rounded-md border border-border/40 bg-muted/20">
@@ -48,20 +57,38 @@ function StreamConfig({ stream, onChange }: { stream: ChannelStream; onChange: (
             <Checkbox checked={stream.enabled} className="h-3.5 w-3.5"
               onClick={(e) => { e.stopPropagation(); onChange({ ...stream, enabled: !stream.enabled }) }} />
             <span className={`font-medium ${stream.enabled ? '' : 'text-muted-foreground line-through'}`}>{stream.name}</span>
-            <span className="text-muted-foreground/50 ml-auto mr-2 truncate max-w-[200px] font-mono text-[10px]">{stream.catalogTemplate}</span>
+            <span className="text-muted-foreground/50 ml-auto mr-2 truncate max-w-[250px] font-mono text-[10px]">{previewPath}</span>
             <ChevronDown className={`h-3 w-3 text-muted-foreground shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
           </button>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="px-3 pb-3 pt-1 space-y-2 border-t border-border/30">
+          <div className="px-3 pb-3 pt-1 space-y-2.5 border-t border-border/30">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[10px] text-muted-foreground">Название потока</Label>
+                <Input value={streamName} onChange={(e) => setStreamName(e.target.value)} className="h-7 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] text-muted-foreground">Тип документа</Label>
+                <div className="h-7 flex items-center px-2 rounded border border-border/30 bg-muted/30 text-xs font-mono text-muted-foreground">
+                  {stream.docTypeId}
+                </div>
+              </div>
+            </div>
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">
-                Каталог хранения <span className="text-muted-foreground/40">({'{станция}'}, {'{год}'}, {'{месяц}'})</span>
+                Подкаталог <span className="text-muted-foreground/40">(переменные: {'{станция}'}, {'{год}'}, {'{месяц}'})</span>
               </Label>
-              <Input value={catalog} onChange={(e) => setCatalog(e.target.value)} className="h-7 text-xs font-mono" />
+              <Input value={subdir} onChange={(e) => setSubdir(e.target.value)} className="h-7 text-xs font-mono" />
+            </div>
+            <div className="text-[10px] text-muted-foreground/60 font-mono bg-muted/30 px-2 py-1 rounded">
+              Полный путь: {previewPath}
             </div>
             <Button size="sm" variant="outline" className="h-7 text-[10px]"
-              onClick={() => { onChange({ ...stream, catalogTemplate: catalog }); toast.success('Каталог обновлён') }}>
+              onClick={() => {
+                onChange({ ...stream, catalogTemplate: subdir, name: streamName })
+                toast.success(`Поток «${streamName}» обновлён`)
+              }}>
               Применить
             </Button>
           </div>
@@ -80,8 +107,9 @@ function ChannelCard({ channel, onUpdate, onDelete }: {
   const [syncProgress, setSyncProgress] = useState('')
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
   const [showLog, setShowLog] = useState(false)
-  const [periodDays, setPeriodDays] = useState(String(channel.periodDays))
-  const [dupPolicy, setDupPolicy] = useState<DuplicatePolicy>(channel.duplicatePolicy)
+  const [periodDays, setPeriodDays] = useState(String(channel.periodDays ?? 7))
+  const [dupPolicy, setDupPolicy] = useState<DuplicatePolicy>(channel.duplicatePolicy ?? 'skip')
+  const [rootCatalog, setRootCatalog] = useState((channel as any).rootCatalog ?? '/Нефтепродукты АЗС')
 
   const sources = getSources()
   const source = sources.find((s) => s.id === channel.sourceId)
@@ -122,7 +150,11 @@ function ChannelCard({ channel, onUpdate, onDelete }: {
   }
 
   function handleSave() {
-    updateChannel(channel.id, { periodDays: Number(periodDays), duplicatePolicy: dupPolicy })
+    updateChannel(channel.id, {
+      periodDays: Number(periodDays),
+      duplicatePolicy: dupPolicy,
+      ...({ rootCatalog } as any),
+    })
     toast.success('Канал сохранён')
   }
 
@@ -189,17 +221,39 @@ function ChannelCard({ channel, onUpdate, onDelete }: {
               </div>
             </div>
 
-            {/* Потоки */}
-            <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">Потоки данных и каталоги</Label>
-              {channel.streams.map((s, idx) => (
-                <StreamConfig key={s.id} stream={s} onChange={(updated) => {
-                  const streams = [...channel.streams]
-                  streams[idx] = updated
-                  updateChannel(channel.id, { streams })
-                  onUpdate({ ...channel, streams })
-                }} />
-              ))}
+            {/* Каталог хранения */}
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Корневой каталог</Label>
+                <Input value={rootCatalog} onChange={(e) => setRootCatalog(e.target.value)}
+                  className="h-8 text-sm font-mono" placeholder="/Нефтепродукты АЗС" />
+                <p className="text-[10px] text-muted-foreground">Все документы канала будут размещены внутри этого каталога</p>
+              </div>
+
+              {/* Потоки — подкаталоги */}
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Подкаталоги по типам документов</Label>
+                {(channel.streams ?? []).map((s, idx) => (
+                  <StreamConfig key={s.id} stream={s} rootCatalog={rootCatalog} onChange={(updated) => {
+                    const streams = [...(channel.streams ?? [])]
+                    streams[idx] = updated
+                    updateChannel(channel.id, { streams })
+                    onUpdate({ ...channel, streams })
+                  }} />
+                ))}
+              </div>
+
+              {/* Preview дерева каталогов */}
+              <div className="rounded-md border border-border/30 bg-muted/20 p-3">
+                <p className="text-[10px] font-semibold text-muted-foreground mb-1.5">Структура хранения:</p>
+                <pre className="text-[10px] font-mono text-muted-foreground leading-relaxed">
+{rootCatalog}/
+{(channel.streams ?? []).filter(s => s.enabled).map(s => {
+  const sub = s.catalogTemplate.replace(/^\//, '')
+  return `├── ${sub.replace(/\{станция\}/g, 'АЗС-208').replace(/\{год\}/g, '2026').replace(/\{месяц\}/g, '03')}`
+}).join('\n')}
+                </pre>
+              </div>
             </div>
 
             {/* Кнопки */}
