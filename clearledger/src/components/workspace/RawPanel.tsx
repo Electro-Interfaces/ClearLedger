@@ -11,15 +11,15 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
-  Loader2, RefreshCw, List, LayoutGrid, Search,
-  ChevronRight, FolderOpen, Folder, FileText, ArrowUp,
+  Loader2, RefreshCw, List, LayoutGrid, Search, GitBranchPlus,
+  ChevronRight, ChevronDown, FolderOpen, Folder, FileText, ArrowUp,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import type { StsShift } from '@/services/fuel/types'
 
-type ViewMode = 'list' | 'grid'
+type ViewMode = 'list' | 'grid' | 'tree'
 
 interface FsNode {
   name: string
@@ -33,6 +33,94 @@ interface FsNode {
   date?: string
   status?: string
   size?: string
+}
+
+/** Рекурсивный компонент дерева */
+function TreeView({ fsTree, path, depth, selectedShiftNumber, selectedStationId, onSelectFile }: {
+  fsTree: Map<string, FsNode[]>
+  path: string[]
+  depth: number
+  selectedShiftNumber: number | null
+  selectedStationId: number | null
+  onSelectFile: (node: FsNode) => void
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const key = path.join('/')
+  const nodes = fsTree.get(key) ?? []
+
+  function toggle(name: string) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(name) ? next.delete(name) : next.add(name)
+      return next
+    })
+  }
+
+  const pl = depth * 16
+
+  return (
+    <div>
+      {nodes.map((node) => {
+        const isFolder = node.type === 'folder'
+        const isOpen = expanded.has(node.name)
+        const isSelected = !isFolder && node.shift && selectedShiftNumber === node.shift.shift && selectedStationId === node.stationId
+
+        return (
+          <div key={node.path}>
+            <button
+              onClick={() => isFolder ? toggle(node.name) : onSelectFile(node)}
+              className={`w-full flex items-center gap-1.5 py-1 pr-2 text-[11px] hover:bg-accent/40 transition-colors ${
+                isSelected ? 'bg-primary/10' : ''
+              }`}
+              style={{ paddingLeft: `${pl + 8}px` }}
+            >
+              {isFolder ? (
+                <>
+                  {isOpen
+                    ? <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                    : <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                  }
+                  {isOpen
+                    ? <FolderOpen className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                    : <Folder className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                  }
+                </>
+              ) : (
+                <>
+                  <span className="w-3" />
+                  <FileText className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                </>
+              )}
+              <span className={`truncate text-left ${
+                isSelected ? 'font-semibold text-primary' : isFolder ? 'font-medium' : ''
+              }`}>
+                {node.name}
+              </span>
+              {isFolder && node.childCount != null && (
+                <Badge variant="outline" className="text-[8px] h-3.5 px-1 ml-auto shrink-0">{node.childCount}</Badge>
+              )}
+              {!isFolder && node.status && (
+                <Badge variant={node.status === 'Закрыта' ? 'secondary' : 'default'} className="text-[7px] h-3 px-0.5 ml-auto shrink-0">
+                  {node.status === 'Закрыта' ? 'З' : 'О'}
+                </Badge>
+              )}
+            </button>
+
+            {isFolder && isOpen && (
+              <TreeView
+                fsTree={fsTree}
+                path={[...path, node.name]}
+                depth={depth + 1}
+                selectedShiftNumber={selectedShiftNumber}
+                selectedStationId={selectedStationId}
+                onSelectFile={onSelectFile}
+              />
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseButton?: React.ReactNode }) {
@@ -232,6 +320,10 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
             onClick={() => setViewMode('list')} title="Список">
             <List className="h-3 w-3" />
           </Button>
+          <Button variant={viewMode === 'tree' ? 'secondary' : 'ghost'} size="icon" className="h-7 w-7 rounded-none border-x border-border/40"
+            onClick={() => setViewMode('tree')} title="Дерево">
+            <GitBranchPlus className="h-3 w-3" />
+          </Button>
           <Button variant={viewMode === 'grid' ? 'secondary' : 'ghost'} size="icon" className="h-7 w-7 rounded-l-none"
             onClick={() => setViewMode('grid')} title="Плитка">
             <LayoutGrid className="h-3 w-3" />
@@ -338,6 +430,17 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
               )
             })}
           </div>
+        )}
+        {/* Вид ДЕРЕВО */}
+        {viewMode === 'tree' && !isLoading && (
+          <TreeView
+            fsTree={fsTree}
+            path={[]}
+            depth={0}
+            selectedShiftNumber={selectedShiftNumber}
+            selectedStationId={selectedStationId}
+            onSelectFile={openFile}
+          />
         )}
       </ScrollArea>
 
