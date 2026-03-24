@@ -9,10 +9,11 @@ import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
-  Loader2, RefreshCw, List, LayoutGrid, Search, GitBranchPlus,
-  ChevronRight, ChevronDown, FolderOpen, Folder, FileText, ArrowUp,
+  Loader2, RefreshCw, List, LayoutGrid, Search, GitBranchPlus, SlidersHorizontal,
+  ChevronRight, ChevronDown, FolderOpen, Folder, FileText, ArrowUp, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useQueryClient } from '@tanstack/react-query'
@@ -130,7 +131,12 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
 
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [searchQuery, setSearchQuery] = useState('')
-  const [currentPath, setCurrentPath] = useState<string[]>([]) // навигация по папкам
+  const [currentPath, setCurrentPath] = useState<string[]>([])
+  const [openTabs, setOpenTabs] = useState<FsNode[]>([])
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [showFilter, setShowFilter] = useState(false)
+  const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all')
+  const [filterDocType, setFilterDocType] = useState<'all' | 'shifts' | 'receipts'>('all')
 
   const filterStation = globalStation === 'all' ? undefined : Number(globalStation)
   const { data: shifts, isLoading, isFetching } = useShifts(filterStation)
@@ -165,8 +171,21 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
     }
 
     // Группируем смены по году→месяцу
+    // Применяем фильтр статуса
+    let filtered = shifts
+    if (filterStatus === 'open') filtered = filtered.filter(s => !s.dt_close)
+    if (filterStatus === 'closed') filtered = filtered.filter(s => !!s.dt_close)
+    // Применяем поиск
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      filtered = filtered.filter(s =>
+        String(s.shift).includes(q) ||
+        (s.dt_open && format(new Date(s.dt_open), 'dd.MM.yyyy').includes(q))
+      )
+    }
+
     const byYearMonth = new Map<string, StsShift[]>()
-    for (const s of shifts) {
+    for (const s of filtered) {
       const d = s.dt_open ? new Date(s.dt_open) : null
       const year = d ? String(d.getFullYear()) : '—'
       const month = d ? String(d.getMonth() + 1).padStart(2, '0') : '00'
@@ -228,7 +247,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
 
     tree.set('', rootNodes)
     return tree
-  }, [shifts, stId, settings.stations, MONTH_NAMES])
+  }, [shifts, stId, settings.stations, MONTH_NAMES, filterStatus, searchQuery])
 
   // Текущий контент папки
   const currentNodes = useMemo(() => {
@@ -274,6 +293,26 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   function openFile(node: FsNode) {
     if (node.shift && node.stationId != null) {
       selectShift(node.stationId, node.shift.shift)
+      // Добавить вкладку
+      setOpenTabs(prev => {
+        if (prev.some(t => t.path === node.path)) return prev
+        return [...prev, node]
+      })
+      setActiveTabId(node.path)
+    }
+  }
+
+  function closeTab(path: string) {
+    setOpenTabs(prev => prev.filter(t => t.path !== path))
+    if (activeTabId === path) {
+      setActiveTabId(null)
+    }
+  }
+
+  function switchTab(node: FsNode) {
+    setActiveTabId(node.path)
+    if (node.shift && node.stationId != null) {
+      selectShift(node.stationId, node.shift.shift)
     }
   }
 
@@ -284,27 +323,54 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
 
   return (
     <div className="flex flex-col h-full">
-      {/* Breadcrumb path */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-border/40 bg-card/20 min-h-[32px] overflow-x-auto">
-        {collapseButton}
-        {currentPath.length > 0 && (
-          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={goUp} title="Вверх">
-            <ArrowUp className="h-3 w-3" />
-          </Button>
+      {/* Breadcrumb + open tabs */}
+      <div className="border-b border-border/40 bg-card/20">
+        {/* Path bar */}
+        <div className="flex items-center gap-0.5 px-2 py-1 min-h-[28px] overflow-x-auto">
+          {collapseButton}
+          {currentPath.length > 0 && (
+            <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={goUp} title="Вверх">
+              <ArrowUp className="h-3 w-3" />
+            </Button>
+          )}
+          {breadcrumbParts.map((part, i) => (
+            <span key={i} className="flex items-center shrink-0">
+              {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/40 mx-0.5" />}
+              <button
+                onClick={() => navigateTo(part.path)}
+                className={`text-[11px] px-1 py-0.5 rounded hover:bg-accent/50 transition-colors ${
+                  i === breadcrumbParts.length - 1 ? 'font-semibold text-foreground' : 'text-muted-foreground'
+                }`}
+              >
+                {part.name}
+              </button>
+            </span>
+          ))}
+        </div>
+
+        {/* Open document tabs */}
+        {openTabs.length > 0 && (
+          <div className="flex items-center gap-0.5 px-2 py-0.5 overflow-x-auto border-t border-border/20">
+            {openTabs.map((tab) => (
+              <div key={tab.path}
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] cursor-pointer transition-colors shrink-0 ${
+                  activeTabId === tab.path
+                    ? 'bg-primary/15 text-primary font-semibold'
+                    : 'text-muted-foreground hover:bg-accent/40'
+                }`}
+              >
+                <button onClick={() => switchTab(tab)} className="flex items-center gap-1">
+                  <FileText className="h-3 w-3 shrink-0" />
+                  <span className="max-w-[100px] truncate">{tab.name}</span>
+                </button>
+                <button onClick={() => closeTab(tab.path)}
+                  className="h-3.5 w-3.5 flex items-center justify-center rounded hover:bg-destructive/20 hover:text-destructive transition-colors ml-0.5">
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
         )}
-        {breadcrumbParts.map((part, i) => (
-          <span key={i} className="flex items-center shrink-0">
-            {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/40 mx-0.5" />}
-            <button
-              onClick={() => navigateTo(part.path)}
-              className={`text-[11px] px-1 py-0.5 rounded hover:bg-accent/50 transition-colors ${
-                i === breadcrumbParts.length - 1 ? 'font-semibold text-foreground' : 'text-muted-foreground'
-              }`}
-            >
-              {part.name}
-            </button>
-          </span>
-        ))}
       </div>
 
       {/* Toolbar: поиск + вид + обновить */}
@@ -329,10 +395,46 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
             <LayoutGrid className="h-3 w-3" />
           </Button>
         </div>
+        <Button variant={showFilter ? 'secondary' : 'ghost'} size="icon" className="h-7 w-7 shrink-0"
+          onClick={() => setShowFilter(!showFilter)} title="Фильтр">
+          <SlidersHorizontal className="h-3 w-3" />
+        </Button>
         <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={handleRefresh} disabled={isFetching} title="Обновить">
           <RefreshCw className={`h-3 w-3 ${isFetching ? 'animate-spin' : ''}`} />
         </Button>
       </div>
+
+      {/* Filter panel */}
+      {showFilter && (
+        <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border/30 bg-card/30">
+          <Select value={filterDocType} onValueChange={(v) => setFilterDocType(v as typeof filterDocType)}>
+            <SelectTrigger className="h-7 w-[90px] text-[11px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все типы</SelectItem>
+              <SelectItem value="shifts">Смены</SelectItem>
+              <SelectItem value="receipts">ТТН</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as typeof filterStatus)}>
+            <SelectTrigger className="h-7 w-[100px] text-[11px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все статусы</SelectItem>
+              <SelectItem value="open">Открытые</SelectItem>
+              <SelectItem value="closed">Закрытые</SelectItem>
+            </SelectContent>
+          </Select>
+          {(filterDocType !== 'all' || filterStatus !== 'all') && (
+            <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0"
+              onClick={() => { setFilterDocType('all'); setFilterStatus('all') }} title="Сбросить">
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Content */}
       <ScrollArea className="flex-1">
