@@ -3,13 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ClearLedger</title>
-    <script type="module" crossorigin src="/ClearLedger/assets/index-BzvY-bsE.js"></script>
-    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-react-C4GHHqjU.js">
-    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-query-BNjE6iwf.js">
-    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-radix-DEkFa0GW.js">
-    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-xlsx-CNerDvZX.js">
-    <link rel="stylesheet" crossorigin href="/ClearLedger/assets/index-Dy84neeg.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <title>GIG Fuel Ledger</title>
+    <script type="module" crossorigin src="/ClearLedger/assets/index-DGAvsu4B.js"></script>
+    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-react-DEoiVAkn.js">
+    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-query-Ct7Thu3Y.js">
+    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-radix-B8vyuYxu.js">
+    <link rel="stylesheet" crossorigin href="/ClearLedger/assets/index-DP9tQV6F.css">
   </head>
   <body>
     <div id="root"></div>
@@ -19,14 +21,6 @@
         var t = localStorage.getItem('clearledger-theme');
         if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
-        }
-      })();
-      // GitHub Pages SPA route restore
-      (function() {
-        var q = new URLSearchParams(window.location.search);
-        var route = q.get('route');
-        if (route) {
-          history.replaceState(null, '', '/ClearLedger' + decodeURIComponent(route));
         }
       })();
     </script>
