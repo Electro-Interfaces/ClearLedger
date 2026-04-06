@@ -12,8 +12,13 @@ import { Loader2 } from 'lucide-react'
 
 const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ default: m.IntakePage })))
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
+const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
+const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
+const PeriodsPage = lazy(() => import('@/pages/oneC/PeriodsPage').then((m) => ({ default: m.PeriodsPage })))
+// ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
   return (
@@ -52,6 +57,8 @@ function Providers() {
   )
 }
 
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
+
 const router = createBrowserRouter([
   {
     element: <Providers />,
@@ -62,14 +69,18 @@ const router = createBrowserRouter([
           { path: '/', element: <WorkspaceLayout /> },
           { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
           { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
+          { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
           { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
+          { path: '/1c/connection', element: <LazyPage><ConnectionPage /></LazyPage> },
+          { path: '/1c/references', element: <LazyPage><ReferencesPage /></LazyPage> },
+          { path: '/1c/periods', element: <LazyPage><PeriodsPage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
         ],
       },
     ],
   },
-])
+], { basename })
 
 export default function App() {
   return <RouterProvider router={router} />

@@ -3,10 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
     <title>GIG Fuel Ledger</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // GitHub Pages SPA: restore route from 404.html redirect
+      (function() {
+        var q = new URLSearchParams(window.location.search);
+        var route = q.get('route');
+        if (route) {
+          history.replaceState(null, '', window.location.pathname.replace(/\/$/, '') + route);
+        }
+      })();
+    </script>
     <script>
       // Theme: apply dark class before paint to prevent flash
       (function() {

@@ -15,6 +15,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen,
   Upload, FileText, Radio, Database, ChevronDown,
+  Plug, BookOpen, CalendarClock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -25,8 +26,14 @@ const mainItems = [
 
 const intakeItems = [
   { to: '/intake', icon: FileText, label: 'Файлы и документы' },
-  { to: '/channels', icon: Radio, label: 'Каналы данных' },
+  { to: '/channels', icon: Radio, label: 'Обработки' },
   { to: '/sources', icon: Database, label: 'Источники' },
+]
+
+const oneCItems = [
+  { to: '/1c/connection', icon: Plug, label: 'Подключение' },
+  { to: '/1c/references', icon: BookOpen, label: 'Справочники' },
+  { to: '/1c/periods', icon: CalendarClock, label: 'Периоды' },
 ]
 
 const settingsItems = [
@@ -67,6 +74,7 @@ export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar()
   const collapsed = state === 'collapsed'
   const [intakeOpen, setIntakeOpen] = useState(true)
+  const [oneCOpen, setOneCOpen] = useState(true)
 
   return (
     <Sidebar collapsible="icon" className="pt-[var(--header-height)] border-r border-border/40">
@@ -110,6 +118,36 @@ export function AppSidebar() {
               <CollapsibleContent>
                 <SidebarMenu>
                   {intakeItems.map((item) => (
+                    <NavItem key={item.to} {...item} collapsed={collapsed} />
+                  ))}
+                </SidebarMenu>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </SidebarGroup>
+
+        <SidebarSeparator className="my-2" />
+
+        {/* 1С section */}
+        <SidebarGroup className="py-0">
+          {collapsed ? (
+            <SidebarMenu>
+              <NavItem to="/1c/connection" icon={Database} label="1С" collapsed />
+            </SidebarMenu>
+          ) : (
+            <Collapsible open={oneCOpen} onOpenChange={setOneCOpen}>
+              <CollapsibleTrigger asChild>
+                <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
+                  <span className="flex items-center gap-1.5">
+                    <Database className="h-3 w-3" />
+                    1С
+                  </span>
+                  <ChevronDown className={`h-3 w-3 transition-transform ${oneCOpen ? '' : '-rotate-90'}`} />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <SidebarMenu>
+                  {oneCItems.map((item) => (
                     <NavItem key={item.to} {...item} collapsed={collapsed} />
                   ))}
                 </SidebarMenu>

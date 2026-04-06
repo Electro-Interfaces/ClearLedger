@@ -11,13 +11,17 @@ import { getSettings } from '@/services/settingsService'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Button } from '@/components/ui/button'
-import { RawPanel } from './RawPanel'
+import { RawPanel } from './raw-panel'
 import { CorePanel } from './CorePanel'
+import { NormalizationPanel } from './NormalizationPanel'
+import { ReconciliationPanel } from './ReconciliationPanel'
+import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
+import { ExportLayerPanel } from './ExportLayerPanel'
 import { ExportPanel } from './ExportPanel'
 import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 import {
-  ClipboardList, Database, FileOutput,
+  ClipboardList, Database, FileOutput, GitCompare, Shuffle,
   PanelLeftClose, PanelLeftOpen,
   PanelRightClose, PanelRightOpen,
 } from 'lucide-react'
@@ -49,7 +53,9 @@ function DesktopWorkspace() {
   const EXPORT_SIZE = '25%' as const
   const COLLAPSED_SIZE = '3%' as const
 
-  const { exportDocs, selectedShiftNumber } = useWorkspace()
+  const { exportDocs, selectedShiftNumber, coreMode, lastReconcileResult } = useWorkspace()
+  const reconResult = lastReconcileResult as { summary: { totalMstoVolume: number; totalMstoSum: number; totalMstoCount: number; totalTfVolume: number; totalTfSum: number; totalShiftNonCashVolume: number; mstoVsTfVolumeDiff: number; matched: number; mismatch: number; hasErrors: boolean } } | null
+  const fmtN = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(n)
 
   return (
     <div className="h-[calc(100vh-var(--header-height))] overflow-hidden flex flex-col">
@@ -62,7 +68,7 @@ function DesktopWorkspace() {
           defaultSize="20%"
           minSize="3%"
           onResize={(s) => setRawSize(s.asPercentage)}
-          className="bg-card/30"
+          className="bg-muted/60"
         >
           {rawSize <= ICON ? (
             <div className="h-full flex flex-col items-center py-3 gap-3">
@@ -114,14 +120,47 @@ function DesktopWorkspace() {
             <div className="h-full flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  {selectedShiftNumber ? `Смена №${selectedShiftNumber}` : 'Нормализованные данные'}
+                  {{ normalize: 'Нормализация', reconcile: 'Сверка данных', management: 'Управленческий учёт', financial: 'Финансовый учёт', accounting: 'Бухгалтерский учёт', tax: 'Налоговый учёт', export: 'Выгрузка в 1С' }[coreMode]}
                 </h2>
+
+                {/* KPI результатов сверки */}
+                {coreMode === 'reconcile' && reconResult && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
+                      <span className="text-[10px] text-muted-foreground">MSTO</span>
+                      <span className="text-[11px] font-semibold">{fmtN(reconResult.summary.totalMstoVolume)} л</span>
+                      <span className="text-[10px] text-muted-foreground">{fmtN(reconResult.summary.totalMstoSum)} ₽</span>
+                    </div>
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
+                      <span className="text-[10px] text-muted-foreground">TF</span>
+                      <span className="text-[11px] font-semibold">{fmtN(reconResult.summary.totalTfVolume)} л</span>
+                    </div>
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
+                      <span className="text-[10px] text-muted-foreground">Смены</span>
+                      <span className="text-[11px] font-semibold">{fmtN(reconResult.summary.totalShiftNonCashVolume)} л</span>
+                    </div>
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded border ${reconResult.summary.hasErrors ? 'bg-red-500/5 border-red-500/30' : 'bg-emerald-500/5 border-emerald-500/30'}`}>
+                      <span className="text-[10px] text-muted-foreground">Δ</span>
+                      <span className={`text-[11px] font-bold ${Math.abs(reconResult.summary.mstoVsTfVolumeDiff) > 1 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {reconResult.summary.mstoVsTfVolumeDiff > 0 ? '+' : ''}{fmtN(reconResult.summary.mstoVsTfVolumeDiff)} л
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">{reconResult.summary.matched}✓{reconResult.summary.mismatch > 0 ? ` ${reconResult.summary.mismatch}✗` : ''}</span>
+                    </div>
+                  </div>
+                )}
+
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => coreRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
                   <PanelLeftClose className="h-3.5 w-3.5" />
                 </Button>
               </div>
               <div className="flex-1 overflow-hidden">
-                <CorePanel hideHeader />
+                {coreMode === 'normalize' && <NormalizationPanel />}
+                {coreMode === 'reconcile' && <ReconciliationPanel />}
+                {coreMode === 'management' && <ManagementPanel />}
+                {coreMode === 'financial' && <FinancialPanel />}
+                {coreMode === 'accounting' && <AccountingPanel />}
+                {coreMode === 'tax' && <TaxPanel />}
+                {coreMode === 'export' && <ExportLayerPanel />}
               </div>
             </div>
           )}
@@ -135,7 +174,7 @@ function DesktopWorkspace() {
           defaultSize="25%"
           minSize="3%"
           onResize={(s) => setExportSize(s.asPercentage)}
-          className="bg-card/30"
+          className="bg-muted/60"
         >
           {exportSize <= ICON ? (
             <div className="h-full flex flex-col items-center py-3 gap-3">

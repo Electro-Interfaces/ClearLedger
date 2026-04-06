@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 export default defineConfig({
-  base: '/',
+  base: '/ClearLedger/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -39,6 +39,17 @@ export default defineConfig({
         target: 'https://pos.autooplata.ru',
         changeOrigin: true,
         secure: true,
+      },
+      '/msto': {
+        target: 'http://46.229.214.21:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/msto/, ''),
+      },
+      '/tradecorp': {
+        target: 'https://api.autooplata.ru',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/tradecorp/, ''),
       },
     },
   },

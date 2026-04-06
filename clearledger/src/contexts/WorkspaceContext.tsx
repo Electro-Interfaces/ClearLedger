@@ -5,6 +5,8 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'financial' | 'accounting' | 'tax' | 'export'
+
 interface ExportDocument {
   id: string
   type: 'receipt' | 'transfer' | 'assembly' | 'retail_sales'
@@ -34,6 +36,14 @@ interface WorkspaceContextType {
   /** Переключить вкладку (mobile) */
   setActiveTab: (tab: 'raw' | 'core' | 'export') => void
 
+  /** Режим центральной панели — конвейер слева направо */
+  coreMode: CoreMode
+  setCoreMode: (mode: CoreMode) => void
+
+  /** Результат последней сверки (для KPI в тулбаре) */
+  lastReconcileResult: unknown | null
+  setLastReconcileResult: (result: unknown | null) => void
+
   /** Документы для экспорта в 1С */
   exportDocs: ExportDocument[]
   /** Добавить документ в Export */
@@ -51,6 +61,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null)
   const [selectedShiftNumber, setSelectedShiftNumber] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'raw' | 'core' | 'export'>('raw')
+  const [coreMode, setCoreMode] = useState<CoreMode>('normalize')
+  const [lastReconcileResult, setLastReconcileResult] = useState<unknown | null>(null)
   const [exportDocs, setExportDocs] = useState<ExportDocument[]>([])
 
   const selectShift = useCallback((stationId: number, shiftNumber: number) => {
@@ -92,6 +104,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         selectShift,
         clearSelection,
         setActiveTab,
+        coreMode,
+        setCoreMode,
+        lastReconcileResult,
+        setLastReconcileResult,
         exportDocs,
         addExportDoc,
         removeExportDoc,
