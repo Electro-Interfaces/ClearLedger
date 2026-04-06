@@ -7,14 +7,24 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
     <title>GIG Fuel Ledger</title>
-    <script type="module" crossorigin src="/ClearLedger/assets/index-DGAvsu4B.js"></script>
-    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-react-DEoiVAkn.js">
-    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-query-Ct7Thu3Y.js">
-    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-radix-B8vyuYxu.js">
+    <script type="module" crossorigin src="/ClearLedger/assets/index-iRsqe8wf.js"></script>
+    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-react-CAFvLs9s.js">
+    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-query-Ce7S3NJd.js">
+    <link rel="modulepreload" crossorigin href="/ClearLedger/assets/vendor-radix-BSslMURQ.js">
     <link rel="stylesheet" crossorigin href="/ClearLedger/assets/index-DP9tQV6F.css">
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // GitHub Pages SPA: restore route from 404.html redirect
+      (function() {
+        var q = new URLSearchParams(window.location.search);
+        var route = q.get('route');
+        if (route) {
+          history.replaceState(null, '', window.location.pathname.replace(/\/$/, '') + route);
+        }
+      })();
+    </script>
     <script>
       // Theme: apply dark class before paint to prevent flash
       (function() {
