@@ -8,6 +8,7 @@ import { useShifts, useAllReceipts } from '@/hooks/useFuel'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import { getAllLoadedDocs } from '@/services/channelSyncService'
+import { useFilteredLoadedDocs } from '@/hooks/useFilteredLoadedDocs'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -146,6 +147,11 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   const [filterDateTo, setFilterDateTo] = useState('')
   const [viewingShift, setViewingShift] = useState<ShiftRecord | null>(null)
   const [viewingDelivery, setViewingDelivery] = useState<DeliveryRecord | null>(null)
+
+  // Глобальные фильтры из шапки — применяются к плоскому списку файлов
+  // и к построению дерева. Для просмотра конкретного документа
+  // (viewer modal) фильтр игнорируется — мы открываем то что выбрали.
+  const { docs: filteredDocs, hasActiveFilters: hasGlobalFilters } = useFilteredLoadedDocs()
 
   const filterStation = globalStation === 'all' ? undefined : Number(globalStation)
   const { data: shifts, isLoading, isFetching } = useShifts(filterStation)
@@ -301,10 +307,10 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   }, [shifts, allReceipts, stId, settings.stations, MONTH_NAMES, filterStatus, filterDocType, searchQuery])
 
   // Все файлы (плоский список) — единый источник для Список/Плитка
-  // Собираем из загруженных документов (localStorage), НЕ из fsTree
+  // Собираем из загруженных документов с учётом глобального фильтра шапки.
   const allFiles = useMemo(() => {
     const files: FsNode[] = []
-    const loadedDocs = getAllLoadedDocs()
+    const loadedDocs = filteredDocs
 
     for (const doc of loadedDocs) {
       if (doc.docType === 'shift_report') {

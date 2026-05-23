@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getChannel, updateChannel, addSourceToChannel, removeSourceFromChannel } from '@/services/channelService'
 import { getSources } from '@/services/sourceService'
 import { getLocations } from '@/services/locationService'
+import { useFilters } from '@/contexts/FilterContext'
 import { StationsSelectorDialog } from '@/components/stations/StationsSelectorDialog'
 import { syncChannel, getAllLoadedDocs } from '@/services/channelSyncService'
 import { extractDeliveries } from '@/services/receiptExtractService'
@@ -26,7 +27,7 @@ import {
   ArrowLeft, Play, Loader2, Radio, Database, Download, Shuffle,
   GitCompare, ShieldCheck, ArrowRightLeft, Trash2, Plus, History,
   Settings2, FileText, AlertTriangle, CheckCircle2, XCircle, GripVertical, MapPin,
-  Search,
+  Search, Filter,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -951,36 +952,74 @@ function parseShiftNo(title: string): number | null {
 function DataTab({ channel }: { channel: Channel }) {
   const allDocs = getAllLoadedDocs().filter((d) => d.channelId === channel.id)
 
+  // Глобальные фильтры из шапки (Компания/Точки/Типы документов).
+  // Применяются ПОВЕРХ локальных фильтров вкладки (AND-логика):
+  // если в шапке выбраны точки A,B,C — даже при «Все станции» локально
+  // мы видим только их.
+  const { locationIds: globalLocIds, docTypeIds: globalDocTypes } = useFilters()
+
+  // Перевод выбранных точек обслуживания (ID) в коды станций для матча
+  // с doc.stationId. Если ничего не выбрано — null (фильтр выключен).
+  const globalStationCodes = useMemo<Set<number> | null>(() => {
+    if (globalLocIds.length === 0) return null
+    const set = new Set<number>()
+    const locsById = new Map(getLocations().map((l) => [l.id, l]))
+    for (const id of globalLocIds) {
+      const loc = locsById.get(id)
+      const code = Number(loc?.code)
+      if (Number.isFinite(code) && code > 0) set.add(code)
+    }
+    return set.size > 0 ? set : null
+  }, [globalLocIds])
+
+  const globalDocTypeSet = useMemo<Set<string> | null>(() => {
+    return globalDocTypes.length > 0 ? new Set(globalDocTypes) : null
+  }, [globalDocTypes])
+
   // Состояние фильтров (локально для вкладки)
   const [query, setQuery] = useState('')
   const [stationFilter, setStationFilter] = useState<number[]>([])
   const [monthFilter, setMonthFilter] = useState<string>('all')
   const [sortKey, setSortKey] = useState<SortKey>('date_desc')
 
-  // Доступные значения для фильтров
+  // Доступные значения для локальных фильтров — только из документов,
+  // прошедших глобальный фильтр (иначе в селекте «Станция 208» при
+  // глобально выбранной АЗС 5 — пустота).
+  const docsForLocalFilters = useMemo(() => {
+    if (!globalStationCodes && !globalDocTypeSet) return allDocs
+    return allDocs.filter((d) =>
+      (!globalStationCodes || globalStationCodes.has(d.stationId)) &&
+      (!globalDocTypeSet || globalDocTypeSet.has(d.docType)),
+    )
+  }, [allDocs, globalStationCodes, globalDocTypeSet])
+
   const allStations = useMemo(() => {
     const set = new Set<number>()
-    for (const d of allDocs) if (d.stationId) set.add(d.stationId)
+    for (const d of docsForLocalFilters) if (d.stationId) set.add(d.stationId)
     return Array.from(set).sort((a, b) => a - b)
-  }, [allDocs])
+  }, [docsForLocalFilters])
 
   const allMonths = useMemo(() => {
     const set = new Set<string>()
-    for (const d of allDocs) {
+    for (const d of docsForLocalFilters) {
       const dt = new Date(d.date)
       if (!isNaN(dt.getTime())) {
         set.add(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`)
       }
     }
     return Array.from(set).sort().reverse()
-  }, [allDocs])
+  }, [docsForLocalFilters])
 
-  // Применить фильтры + сортировку
+  // Применить фильтры + сортировку (global AND local)
   const filteredDocs = useMemo(() => {
     const q = query.trim().toLowerCase()
     const stationSet = stationFilter.length > 0 ? new Set(stationFilter) : null
 
     let out = allDocs.filter((d) => {
+      // Глобальные фильтры (из шапки)
+      if (globalStationCodes && !globalStationCodes.has(d.stationId)) return false
+      if (globalDocTypeSet && !globalDocTypeSet.has(d.docType)) return false
+      // Локальные фильтры (вкладки)
       if (q && !d.title.toLowerCase().includes(q)) return false
       if (stationSet && !stationSet.has(d.stationId)) return false
       if (monthFilter !== 'all') {
@@ -1010,7 +1049,7 @@ function DataTab({ channel }: { channel: Channel }) {
       }
     })
     return out
-  }, [allDocs, query, stationFilter, monthFilter, sortKey])
+  }, [allDocs, query, stationFilter, monthFilter, sortKey, globalStationCodes, globalDocTypeSet])
 
   // Группировка после фильтра — по типу документа
   const grouped = useMemo(() => {
@@ -1119,11 +1158,29 @@ function DataTab({ channel }: { channel: Channel }) {
         </CardContent>
       </Card>
 
-      <p className="text-sm text-muted-foreground">
-        {hasFilters
-          ? `Показано ${filteredDocs.length} из ${allDocs.length}`
-          : `Загружено ${allDocs.length} документов`}
-      </p>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-sm text-muted-foreground">
+          {hasFilters || globalStationCodes || globalDocTypeSet
+            ? `Показано ${filteredDocs.length} из ${allDocs.length}`
+            : `Загружено ${allDocs.length} документов`}
+        </p>
+        {(globalStationCodes || globalDocTypeSet) && (
+          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Filter className="h-3 w-3" />
+            <span>Действует глобальный фильтр</span>
+            {globalStationCodes && (
+              <Badge variant="outline" className="text-[9px] h-4 px-1">
+                точек {globalStationCodes.size}
+              </Badge>
+            )}
+            {globalDocTypeSet && (
+              <Badge variant="outline" className="text-[9px] h-4 px-1">
+                типов {globalDocTypeSet.size}
+              </Badge>
+            )}
+          </div>
+        )}
+      </div>
 
       {filteredDocs.length === 0 ? (
         <Card>
