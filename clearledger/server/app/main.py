@@ -22,6 +22,7 @@ from app.routers import (
     document_links_router,
     entries_router,
     export_router,
+    fuel_router,
     intake_router,
     ocr_router,
     reconciliation_router,
@@ -99,6 +100,7 @@ app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
 app.include_router(ocr_router.router, prefix=API_PREFIX)
+app.include_router(fuel_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

@@ -5,7 +5,7 @@
 
 import { getItem, setItem } from './storage'
 import type { Source, SourceType, SourceDocType } from '@/types/channel'
-import { defaultStsDocTypes } from '@/types/channel'
+import { defaultStsDocTypes, defaultStsOpsDocTypes, defaultStsPricesDocTypes, defaultStsCouponsDocTypes, defaultStsTanksDocTypes, defaultMstoDocTypes, defaultTradecorpDocTypes } from '@/types/channel'
 import { nanoid } from 'nanoid'
 
 const STORAGE_KEY = 'gig-sources'
@@ -32,7 +32,16 @@ export function createSource(data: {
     status: 'draft',
     description: data.description,
     connection: data.connection ?? {},
-    docTypes: data.docTypes ?? (data.type === 'rest' ? defaultStsDocTypes() : []),
+    docTypes: data.docTypes ?? (
+      data.type === 'rest' ? defaultStsDocTypes() :
+      data.type === 'sts-ops' ? defaultStsOpsDocTypes() :
+      data.type === 'sts-prices' ? defaultStsPricesDocTypes() :
+      data.type === 'sts-coupons' ? defaultStsCouponsDocTypes() :
+      data.type === 'sts-tanks' ? defaultStsTanksDocTypes() :
+      data.type === 'msto' ? defaultMstoDocTypes() :
+      data.type === 'tradecorp' ? defaultTradecorpDocTypes() :
+      []
+    ),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }

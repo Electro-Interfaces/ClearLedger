@@ -434,3 +434,242 @@ class BankAccount(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+# ===========================================================================
+# FUEL: Топливный учёт (GIG Fuel Ledger)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# FuelStation (АЗС)
+# ---------------------------------------------------------------------------
+class FuelStation(Base):
+    __tablename__ = "fuel_stations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    code: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sts_system_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelShift (Сменный отчёт — нормализованный)
+# ---------------------------------------------------------------------------
+class FuelShift(Base):
+    __tablename__ = "fuel_shifts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id"), nullable=False
+    )
+    shift_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    operator: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="new"
+    )  # new|verified|exported|posted
+
+    total_liters: Mapped[float] = mapped_column(
+        Numeric(12, 2), nullable=False, default=0
+    )
+    total_amount: Mapped[float] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
+    cash: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    card: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    voucher: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+
+    # Ссылка на сырой документ
+    raw_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_entries.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Связи
+    station: Mapped["FuelStation"] = relationship()
+    tanks: Mapped[list["FuelTank"]] = relationship(back_populates="shift")
+    pumps: Mapped[list["FuelPump"]] = relationship(back_populates="shift")
+
+
+# ---------------------------------------------------------------------------
+# FuelTank (Резервуар — по смене)
+# ---------------------------------------------------------------------------
+class FuelTank(Base):
+    __tablename__ = "fuel_tanks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    shift_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_shifts.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    tank_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    fuel_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    volume_start: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    volume_end: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    sales: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+
+    # Связи
+    shift: Mapped["FuelShift"] = relationship(back_populates="tanks")
+
+
+# ---------------------------------------------------------------------------
+# FuelPump (ТРК/колонка — по смене)
+# ---------------------------------------------------------------------------
+class FuelPump(Base):
+    __tablename__ = "fuel_pumps"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    shift_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_shifts.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    pump_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    nozzle: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    fuel_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    sales_volume: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+
+    # Связи
+    shift: Mapped["FuelShift"] = relationship(back_populates="pumps")
+
+
+# ---------------------------------------------------------------------------
+# FuelReceipt (ТТН / Поступление)
+# ---------------------------------------------------------------------------
+class FuelReceipt(Base):
+    __tablename__ = "fuel_receipts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id"), nullable=False
+    )
+    shift_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_shifts.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    ttn: Mapped[str] = mapped_column(String(100), nullable=False)
+    fuel_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    fuel_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    supplier: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    doc_volume_liters: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    doc_mass_kg: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    doc_cost: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    fact_volume_liters: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    fact_mass_kg: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    fact_cost: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    diff_volume: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    diff_mass: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+
+    received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="new"
+    )
+
+    raw_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_entries.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelExportDoc (Документ для выгрузки в 1С)
+# ---------------------------------------------------------------------------
+class FuelExportDoc(Base):
+    __tablename__ = "fuel_export_docs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # receipt|transfer|assembly|retail_sales
+    label: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_shift_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_shifts.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    station_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="draft"
+    )  # draft|confirmed|exported|posted
+    export_format: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    export_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    exported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelValidationResult (Результат проверки по эталону)
+# ---------------------------------------------------------------------------
+class FuelValidationResult(Base):
+    __tablename__ = "fuel_validation_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    entity_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # shift|receipt
+    entity_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    rule_code: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )  # counterparty_inn, nomenclature, vat_rate
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="warning"
+    )  # info|warning|error|block
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actual_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ref_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

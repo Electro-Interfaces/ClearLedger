@@ -55,6 +55,52 @@ export function useReceipts(stationId: number, shiftNumber: number) {
   })
 }
 
+/** Все ТТН по станции (из receipt-секций shift_report, кэшировано) */
+export function useAllReceipts(stationId?: number) {
+  const settings = getSettings()
+  const enabled = !!settings.stsLogin && !!settings.stsPassword
+
+  return useQuery<{ shift: number; ttn: string; fuel: string; docVolume: number; factVolume: number; dt: string }[]>({
+    queryKey: ['sts-all-receipts', stationId, settings.stsSystemCode],
+    queryFn: async () => {
+      const shifts = await stsGetShifts(settings.stsSystemCode, stationId)
+      const closedShifts = shifts.filter((s) => s.dt_close)
+      const results: { shift: number; ttn: string; fuel: string; docVolume: number; factVolume: number; dt: string }[] = []
+
+      // Загружаем receipt-секции параллельно (батчами по 10)
+      const station = stationId ?? settings.stations[0]?.code ?? 0
+      for (let i = 0; i < closedShifts.length; i += 10) {
+        const batch = closedShifts.slice(i, i + 10)
+        const reports = await Promise.all(
+          batch.map((s) => stsGetShiftReport(station, s.shift).catch(() => null)),
+        )
+        for (let j = 0; j < reports.length; j++) {
+          const report = reports[j]
+          if (!report) continue
+          const receipts = (report as Record<string, unknown>).receipt as Array<Record<string, unknown>> | undefined
+          if (!receipts) continue
+          for (const r of receipts) {
+            const svc = r.service as Record<string, unknown> | undefined
+            const doc = r.doc as Record<string, unknown> | undefined
+            const fact = r.fact as Record<string, unknown> | undefined
+            results.push({
+              shift: batch[j].shift,
+              ttn: String(r.ttn ?? ''),
+              fuel: String(svc?.service_name ?? ''),
+              docVolume: Number(doc?.volume ?? 0),
+              factVolume: Number(fact?.volume ?? 0),
+              dt: String(r.dt ?? batch[j].dt_open ?? ''),
+            })
+          }
+        }
+      }
+      return results
+    },
+    enabled,
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
 /** Агрегированные KPI по всем станциям */
 export function useFuelKpi() {
   const settings = getSettings()

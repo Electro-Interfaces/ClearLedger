@@ -44,6 +44,26 @@
   --color-accent-purple: hsl(var(--accent-purple));
   --color-accent-green: hsl(var(--accent-green));
   --color-accent-orange: hsl(var(--accent-orange));
+
+  /* Deep Intel surface tokens */
+  --color-di-bg: var(--di-bg);
+  --color-di-surface: var(--di-surface);
+  --color-di-surface-low: var(--di-surface-low);
+  --color-di-surface-lowest: var(--di-surface-lowest);
+  --color-di-surface-mid: var(--di-surface-mid);
+  --color-di-surface-high: var(--di-surface-high);
+  --color-di-surface-highest: var(--di-surface-highest);
+  --color-di-surface-bright: var(--di-surface-bright);
+  --color-di-on-surface: var(--di-on-surface);
+  --color-di-on-surface-variant: var(--di-on-surface-variant);
+  --color-di-primary: var(--di-primary);
+  --color-di-primary-light: var(--di-primary-light);
+  --color-di-tertiary: var(--di-tertiary);
+  --color-di-tertiary-container: var(--di-tertiary-container);
+  --color-di-outline: var(--di-outline);
+  --color-di-outline-variant: var(--di-outline-variant);
+  --color-di-error-container: var(--di-error-container);
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -58,6 +78,10 @@
   --shadow-medium: var(--shadow-medium);
   --shadow-large: var(--shadow-large);
 
+  /* Font families */
+  --font-headline: 'Manrope', system-ui, sans-serif;
+  --font-body: 'Segoe UI', system-ui, -apple-system, sans-serif;
+
   @keyframes accordion-down {
     from { height: 0; }
     to { height: var(--radix-accordion-content-height); }
@@ -71,27 +95,46 @@
 
 @layer base {
   :root {
-    /* Light theme */
-    --background: 0 0% 100%;
-    --foreground: 215 28% 17%;
+    /* Light theme — Deep Intel Design System */
+    --background: 210 18% 93%;
+    --foreground: 195 14% 19%;
     --card: 0 0% 100%;
-    --card-foreground: 215 28% 17%;
+    --card-foreground: 195 14% 19%;
     --popover: 0 0% 100%;
-    --popover-foreground: 215 28% 17%;
-    --primary: 217 91% 55%;
+    --popover-foreground: 195 14% 19%;
+    --primary: 224 10% 40%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 217 20% 93%;
-    --secondary-foreground: 215 28% 17%;
-    --muted: 217 20% 96%;
+    --secondary: 210 20% 93%;
+    --secondary-foreground: 195 14% 19%;
+    --muted: 210 18% 95%;
     --muted-foreground: 215 15% 47%;
-    --accent: 217 20% 94%;
-    --accent-foreground: 215 28% 17%;
+    --accent: 210 20% 94%;
+    --accent-foreground: 195 14% 19%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 217 20% 88%;
-    --input: 217 20% 90%;
+    --border: 200 12% 70%;
+    --input: 200 12% 87%;
     --ring: 217 91% 55%;
     --radius: 0.75rem;
+
+    /* Deep Intel surface tokens */
+    --di-bg: #f7f9fb;
+    --di-surface: #f0f4f7;
+    --di-surface-low: #f7f9fb;
+    --di-surface-lowest: #ffffff;
+    --di-surface-mid: #ffffff;
+    --di-surface-high: #ffffff;
+    --di-surface-highest: #f0f4f7;
+    --di-surface-bright: #ffffff;
+    --di-on-surface: #2a3439;
+    --di-on-surface-variant: #566166;
+    --di-primary: #565e74;
+    --di-primary-light: #3b82f6;
+    --di-tertiary: #605c78;
+    --di-tertiary-container: #9f403d;
+    --di-outline: #717c82;
+    --di-outline-variant: #c5cdd3;
+    --di-error-container: #fe8983;
 
     /* Chart colors */
     --chart-1: 217 91% 55%;
@@ -101,42 +144,42 @@
     --chart-5: 340 75% 50%;
 
     /* Sidebar */
-    --sidebar-background: 217 20% 97%;
-    --sidebar-foreground: 215 28% 17%;
-    --sidebar-primary: 217 91% 55%;
+    --sidebar-background: 210 14% 96%;
+    --sidebar-foreground: 195 14% 19%;
+    --sidebar-primary: 224 10% 40%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 217 20% 93%;
-    --sidebar-accent-foreground: 215 28% 17%;
-    --sidebar-border: 217 20% 88%;
+    --sidebar-accent: 210 14% 93%;
+    --sidebar-accent-foreground: 195 14% 19%;
+    --sidebar-border: 200 12% 87%;
     --sidebar-ring: 217 91% 55%;
 
     /* Platform accent colors */
-    --accent-blue: 217 91% 55%;
-    --accent-purple: 280 100% 65%;
-    --accent-green: 120 80% 35%;
-    --accent-orange: 25 100% 50%;
+    --accent-blue: 221 100% 38%;
+    --accent-purple: 261 18% 42%;
+    --accent-green: 152 69% 31%;
+    --accent-orange: 25 95% 53%;
 
     /* Status colors */
-    --success: 120 80% 35%;
-    --warning: 45 100% 50%;
-    --error: 0 84% 55%;
+    --success: 152 69% 31%;
+    --warning: 45 93% 47%;
+    --error: 0 43% 44%;
 
     /* Layout */
-    --header-height: 3.5rem;
+    --header-height: 5rem;
 
     /* Shadows */
-    --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
-    --shadow-medium: 0 4px 16px rgba(0, 0, 0, 0.1);
-    --shadow-large: 0 8px 32px rgba(0, 0, 0, 0.15);
+    --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-medium: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-large: 0 4px 16px rgba(0, 0, 0, 0.08);
   }
 
   .dark {
-    /* Dark theme — TradeFrame design system */
-    --background: 215 28% 12%;
+    /* Dark theme — Deep Intel Design System */
+    --background: 222 47% 9%;
     --foreground: 0 0% 95%;
-    --card: 217 32% 17%;
+    --card: 222 33% 13%;
     --card-foreground: 0 0% 95%;
-    --popover: 217 32% 17%;
+    --popover: 222 33% 13%;
     --popover-foreground: 0 0% 95%;
     --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
@@ -152,6 +195,25 @@
     --input: 217 32% 17%;
     --ring: 217 91% 60%;
 
+    /* Deep Intel surface tokens */
+    --di-bg: #0c1320;
+    --di-surface: #19202d;
+    --di-surface-low: #151c29;
+    --di-surface-lowest: #070e1b;
+    --di-surface-mid: #1e2533;
+    --di-surface-high: #232a38;
+    --di-surface-highest: #2e3543;
+    --di-surface-bright: #323948;
+    --di-on-surface: #dce2f5;
+    --di-on-surface-variant: #c3c6d7;
+    --di-primary: #2563eb;
+    --di-primary-light: #b4c5ff;
+    --di-tertiary: #ffb596;
+    --di-tertiary-container: #bc4800;
+    --di-outline: #8d90a0;
+    --di-outline-variant: #434655;
+    --di-error-container: #93000a;
+
     /* Chart colors */
     --chart-1: 217 91% 60%;
     --chart-2: 160 60% 45%;
@@ -160,7 +222,7 @@
     --chart-5: 340 75% 55%;
 
     /* Sidebar */
-    --sidebar-background: 215 28% 10%;
+    --sidebar-background: 222 47% 5%;
     --sidebar-foreground: 0 0% 95%;
     --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
@@ -191,8 +253,8 @@
   }
 
   body {
-    @apply bg-background text-foreground;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    @apply bg-di-bg text-foreground;
+    font-family: var(--font-body);
     letter-spacing: -0.01em;
   }
 
@@ -235,6 +297,11 @@
 }
 
 @layer utilities {
+  /* Headline font utility */
+  .font-headline {
+    font-family: var(--font-headline);
+  }
+
   /* Mobile safe areas */
   .mobile-safe-top {
     padding-top: env(safe-area-inset-top);
@@ -267,6 +334,11 @@
       overscroll-behavior-y: contain;
     }
   }
+
+  /* iOS input zoom fix */
+  .ios-input-fix {
+    font-size: 16px !important;
+  }
 }
 
 @layer components {
@@ -281,21 +353,46 @@
     @apply bg-accent;
   }
 
-  /* Panel */
+  /* Panel — Deep Intel surface */
   .panel {
-    @apply bg-card border border-border rounded-lg p-4;
+    @apply rounded-xl p-4;
+    background: var(--di-surface-mid);
+    border: 1px solid var(--di-outline-variant);
   }
 
   /* Section surface with shadow */
   .section {
-    @apply bg-card border border-border rounded-lg p-4 md:p-6;
+    @apply rounded-xl p-4 md:p-6;
+    background: var(--di-surface-mid);
+    border: 1px solid var(--di-outline-variant);
     box-shadow: var(--shadow-soft);
   }
 
   /* Card panel without padding */
   .card-panel {
-    @apply bg-card border border-border rounded-lg;
+    @apply rounded-xl;
+    background: var(--di-surface-mid);
+    border: 1px solid var(--di-outline-variant);
     box-shadow: var(--shadow-soft);
+  }
+
+  /* Deep Intel card */
+  .di-card {
+    @apply rounded-xl p-4 transition-all;
+    background: var(--di-surface-mid);
+    border: 1px solid transparent;
+  }
+
+  .di-card:hover {
+    border-color: var(--di-primary-light);
+    border-opacity: 0.2;
+  }
+
+  /* Deep Intel divider */
+  .di-divider {
+    height: 1px;
+    background: var(--di-outline-variant);
+    opacity: 0.15;
   }
 
   /* Table condensed */
@@ -344,5 +441,17 @@
 
   input[type="number"] {
     -moz-appearance: textfield;
+  }
+
+  /* Touch targets for mobile */
+  .multi-touch-optimize button {
+    min-height: 48px;
+    min-width: 48px;
+  }
+
+  /* Mobile scroll optimization */
+  .mobile-scroll-fix {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
   }
 }

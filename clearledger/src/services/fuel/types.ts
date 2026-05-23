@@ -1,8 +1,9 @@
 /**
  * Типы данных STS API и нормализованные структуры для GIG Fuel Ledger.
+ * Типы соответствуют реальному ответу pos.autooplata.ru/tms
  */
 
-// ─── STS API Raw Types ──────────────────────────────────────
+// ─── STS API: Список смен ──────────────────────────────────
 
 export interface StsShift {
   shift: number
@@ -10,56 +11,106 @@ export interface StsShift {
   dt_close: string | null
 }
 
-export interface StsShiftInfo {
-  shift_number: number
-  station_id: number
-  dt_open: string
-  dt_close: string | null
-  operator: string
+// ─── STS API: Сменный отчёт (shift_report) ─────────────────
+
+/** Услуга (вид топлива) */
+export interface StsService {
+  service_code: number
+  service_name: string
 }
 
-export interface StsTank {
-  tank_number: number
-  fuel_type: string
-  fuel_code: number
-  volume_start: number
-  volume_end: number
-  receipts: number
-  sales: number
-  density: number
+/** Отпуск (объём/масса/сумма) */
+export interface StsRelease {
+  volume: string
+  amount: string
+  cost: string
 }
 
-export interface StsPump {
-  pump_number: number
-  nozzle: string
-  fuel_type: string
-  counter_start: number
-  counter_end: number
-  sales_volume: number
-  sales_mass: number
+/** PSM итог по виду топлива */
+export interface StsPsmTotal {
+  service: StsService
+  release: { quantity: number; cost: number; amount: number }
+  tank: number
+}
+
+/** PSM данные по колонке/пистолету */
+export interface StsPsmData {
+  shift: number
   price: number
-  amount: number
+  tank: number
+  density: number
+  pump: number
+  nozzle: string
+  psm_beg: number
+  psm_end: number
+  release: StsRelease
+  accuracy: number
+  dt: string
+  service: StsService
 }
 
-export interface StsPayments {
-  cash: number
-  card: number
-  voucher: number
-  total: number
+/** Резервуар — остатки и движение */
+export interface StsTankRelease {
+  shift: number
+  tank: number
+  density_beg: number
+  density_end: number
+  temp_beg: number
+  temp_end: number
+  doc_beg: { volume: string; amount: string }
+  doc_end: { volume: string; amount: string }
+  receipt: { volume: string; amount: string }
+  release: { volume: string; amount: string }
+  level_end: number
+  volume_end: number
+  water: { volume: number; level: number }
+  rest: { volume: string; amount: string }
+  dt: string
+  service: StsService
 }
 
-export interface StsCashOp {
-  operation: string
-  amount: number
+/** ТТН внутри смены */
+export interface StsShiftReceipt {
+  tank: number
+  ttn: string
+  doc: { volume: string; amount: string; density: number; temp: number }
+  fact: { volume: string; amount: string; density: number; temp: number }
+  dt: string
+  base: { id: number; name: string }
+  shift: number
+  service: StsService
 }
 
+/** Продажи по каналу оплаты */
+export interface StsSalesChannel {
+  pay_type: { id: number; name: string }
+  fuel: {
+    service: StsService
+    release: { volume: string; cost: string; discount: number }
+  }[]
+}
+
+/** Денежная операция */
+export interface StsMoneyOp {
+  pos: number
+  shift: number
+  volume: number
+  operation: { id: number; name: string }
+}
+
+/** Полный сменный отчёт — как возвращает API */
 export interface StsShiftReport {
-  shift_info: StsShiftInfo
-  tanks: StsTank[]
-  pumps: StsPump[]
-  payments: StsPayments
-  cash_operations: StsCashOp[]
+  psm: {
+    total: StsPsmTotal[]
+    data: StsPsmData[]
+  }
+  release: StsTankRelease[]
+  receipt: StsShiftReceipt[]
+  sales: StsSalesChannel[]
+  money: StsMoneyOp[]
 }
+
+// ─── STS API: Поступления (receipts) ───────────────────────
 
 export interface StsReceipt {
   shift: number
@@ -70,7 +121,7 @@ export interface StsReceipt {
   fact: { volume: string; amount: string; cost: string }
   dt: string
   fuel: number
-  service: { service_code: number; service_name: string }
+  service: StsService
 }
 
 export interface StsPrice {
@@ -78,8 +129,47 @@ export interface StsPrice {
   services: { id: number; name: string; price: number }[]
 }
 
-// ─── Normalized Types ────────────────────────────────────────
+// ─── Нормализованные типы ───────────────────────────────────
 
+/** Итог продаж по виду топлива */
+export interface FuelSaleSummary {
+  fuelCode: number
+  fuelName: string
+  volumeLiters: number
+  massKg: number
+  amount: number
+  tankNumber: number
+}
+
+/** Продажи по каналу оплаты */
+export interface PaymentChannelSummary {
+  channelId: number
+  channelName: string
+  fuels: {
+    fuelCode: number
+    fuelName: string
+    volumeLiters: number
+    amount: number
+    discount: number
+  }[]
+  totalAmount: number
+}
+
+/** Остатки резервуара */
+export interface TankSummary {
+  tankNumber: number
+  fuelCode: number
+  fuelName: string
+  densityStart: number
+  densityEnd: number
+  volumeStart: number
+  volumeEnd: number
+  received: number
+  released: number
+  rest: number
+}
+
+/** Нормализованный сменный отчёт */
 export interface ShiftRecord {
   id: string
   stationId: number
@@ -87,14 +177,22 @@ export interface ShiftRecord {
   shiftNumber: number
   openedAt: string
   closedAt: string | null
-  operator: string
-  tanks: StsTank[]
-  pumps: StsPump[]
-  payments: StsPayments
-  cashOperations: StsCashOp[]
-  totalSalesLiters: number
-  totalSalesAmount: number
   status: 'open' | 'closed'
+  /** Итоги по видам топлива */
+  fuelSales: FuelSaleSummary[]
+  /** Продажи по каналам оплаты */
+  paymentChannels: PaymentChannelSummary[]
+  /** Резервуары */
+  tanks: TankSummary[]
+  /** ТТН внутри смены */
+  receiptsCount: number
+  /** Денежные операции */
+  moneyOps: StsMoneyOp[]
+  /** Общие итоги */
+  totalVolumeLiters: number
+  totalAmount: number
+  /** Сырой ответ API */
+  raw: StsShiftReport
 }
 
 export interface ReceiptRecord {

@@ -17,15 +17,18 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { getSources, createSource, updateSource, deleteSource } from '@/services/sourceService'
 import { SOURCE_TYPE_META, type SourceType, type Source } from '@/types/channel'
 import { stsTestConnection } from '@/services/fuel/stsApiClient'
+import { mstoTestConnection } from '@/services/msto/mstoApiClient'
+import { tradecorpTestConnection } from '@/services/tradecorp/tradecorpApiClient'
 import {
   Plus, Trash2, Globe, Database, Mail, HardDrive,
   Webhook, FolderOpen, FileCheck, Cloud, Server,
   ChevronDown, Loader2, CheckCircle2, XCircle, Save, Plug,
+  Fuel, CreditCard, Activity, Tag, Ticket, Cylinder,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  Globe, Database, Mail, HardDrive, Webhook, FolderOpen, FileCheck, Cloud,
+  Globe, Database, Mail, HardDrive, Webhook, FolderOpen, FileCheck, Cloud, Fuel, CreditCard, Activity, Tag, Ticket, Cylinder,
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -44,10 +47,10 @@ const STATUS_LABELS: Record<string, string> = {
 
 /** Форма настройки подключения REST API */
 function RestConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s: Source) => void }) {
-  const [url, setUrl] = useState(source.connection.url ?? '')
-  const [login, setLogin] = useState(source.connection.login ?? '')
+  const [url, setUrl] = useState(source.connection.url || 'https://pos.autooplata.ru/tms')
+  const [login, setLogin] = useState(source.connection.login || 'UserApi')
   const [password, setPassword] = useState(source.connection.password ?? '')
-  const [systemCode, setSystemCode] = useState(source.connection.systemCode ?? '65')
+  const [systemCode, setSystemCode] = useState(source.connection.systemCode || '65')
   const [testing, setTesting] = useState(false)
   const [testOk, setTestOk] = useState<boolean | null>(null)
   const [testError, setTestError] = useState('')
@@ -132,6 +135,175 @@ function RestConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s
   )
 }
 
+/** Форма настройки подключения MSTO */
+function MstoConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s: Source) => void }) {
+  const [url, setUrl] = useState(source.connection.url || 'http://46.229.214.21:3000')
+  const [login, setLogin] = useState(source.connection.login || 'tf-integration')
+  const [password, setPassword] = useState(source.connection.password ?? '')
+  const [testing, setTesting] = useState(false)
+  const [testOk, setTestOk] = useState<boolean | null>(null)
+  const [testError, setTestError] = useState('')
+
+  async function handleTest() {
+    setTesting(true)
+    setTestOk(null)
+    const testUrl = import.meta.env.DEV ? '/msto' : url
+    const result = await mstoTestConnection(testUrl, login, password)
+    setTestOk(result.ok)
+    setTestError(result.error ?? '')
+    setTesting(false)
+    if (result.ok) toast.success(`MSTO подключено — ${result.pointsCount} станций`)
+    else toast.error(result.error ?? 'Ошибка подключения MSTO')
+  }
+
+  function handleSave() {
+    const updated = updateSource(source.id, {
+      connection: { url, login, password },
+      status: testOk ? 'connected' : source.status,
+    })
+    if (updated) { onUpdate(updated); toast.success('Источник MSTO сохранён') }
+  }
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="space-y-1.5">
+        <Label className="text-xs">URL MSTO API</Label>
+        <Input value={url} onChange={(e) => setUrl(e.target.value)}
+          placeholder="http://46.229.214.21:3000" className="h-8 text-sm" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Логин</Label>
+          <Input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="tf-integration" className="h-8 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Пароль</Label>
+          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-8 text-sm" />
+        </div>
+      </div>
+      {source.docTypes.length > 0 && (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Доступные типы документов</Label>
+          <div className="space-y-1">
+            {source.docTypes.map((dt) => (
+              <div key={dt.id} className="flex items-center gap-2 text-xs py-1 px-2 rounded bg-muted/30">
+                <Badge variant="outline" className="text-[9px] h-4 px-1.5 font-mono">{dt.id}</Badge>
+                <span className="font-medium">{dt.name}</span>
+                {dt.endpoint && <span className="text-muted-foreground/50 ml-auto font-mono text-[10px]">{dt.endpoint}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleTest} disabled={testing || !login}>
+          {testing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plug className="h-3 w-3 mr-1" />}
+          Проверить подключение
+        </Button>
+        <Button size="sm" className="h-8 text-xs gap-1" onClick={handleSave}>
+          <Save className="h-3 w-3" />
+          Сохранить
+        </Button>
+        {testOk != null && (
+          <span className="flex items-center gap-1 text-xs">
+            {testOk
+              ? <><CheckCircle2 className="h-4 w-4 text-emerald-500" /><span className="text-emerald-500">Подключено</span></>
+              : <><XCircle className="h-4 w-4 text-destructive" /><span className="text-destructive truncate max-w-[200px]">{testError}</span></>
+            }
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Форма настройки подключения TradeCorp */
+function TradecorpConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s: Source) => void }) {
+  const [url, setUrl] = useState(source.connection.url || 'https://api.autooplata.ru')
+  const [login, setLogin] = useState(source.connection.login ?? '')
+  const [password, setPassword] = useState(source.connection.password ?? '')
+  const [emitentId, setEmitentId] = useState(source.connection.emitentId || '15')
+  const [testing, setTesting] = useState(false)
+  const [testOk, setTestOk] = useState<boolean | null>(null)
+  const [testError, setTestError] = useState('')
+
+  async function handleTest() {
+    setTesting(true)
+    setTestOk(null)
+    const testUrl = import.meta.env.DEV ? '/tradecorp' : url
+    const result = await tradecorpTestConnection(testUrl, login, password, emitentId)
+    setTestOk(result.ok)
+    setTestError(result.error ?? '')
+    setTesting(false)
+    if (result.ok) toast.success(`TradeCorp подключено — ${result.txCount} транзакций за неделю`)
+    else toast.error(result.error ?? 'Ошибка подключения TradeCorp')
+  }
+
+  function handleSave() {
+    const updated = updateSource(source.id, {
+      connection: { url, login, password, emitentId },
+      status: testOk ? 'connected' : source.status,
+    })
+    if (updated) { onUpdate(updated); toast.success('Источник TradeCorp сохранён') }
+  }
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="space-y-1.5">
+        <Label className="text-xs">URL TradeCorp API</Label>
+        <Input value={url} onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://api.autooplata.ru" className="h-8 text-sm" />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Логин</Label>
+          <Input value={login} onChange={(e) => setLogin(e.target.value)} className="h-8 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">Пароль</Label>
+          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="h-8 text-sm" />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-xs">ID эмитента</Label>
+        <Input value={emitentId} onChange={(e) => setEmitentId(e.target.value)} className="h-8 text-sm w-24" />
+      </div>
+      {source.docTypes.length > 0 && (
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Доступные типы документов</Label>
+          <div className="space-y-1">
+            {source.docTypes.map((dt) => (
+              <div key={dt.id} className="flex items-center gap-2 text-xs py-1 px-2 rounded bg-muted/30">
+                <Badge variant="outline" className="text-[9px] h-4 px-1.5 font-mono">{dt.id}</Badge>
+                <span className="font-medium">{dt.name}</span>
+                {dt.endpoint && <span className="text-muted-foreground/50 ml-auto font-mono text-[10px]">{dt.endpoint}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleTest} disabled={testing || !login}>
+          {testing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Plug className="h-3 w-3 mr-1" />}
+          Проверить подключение
+        </Button>
+        <Button size="sm" className="h-8 text-xs gap-1" onClick={handleSave}>
+          <Save className="h-3 w-3" />
+          Сохранить
+        </Button>
+        {testOk != null && (
+          <span className="flex items-center gap-1 text-xs">
+            {testOk
+              ? <><CheckCircle2 className="h-4 w-4 text-emerald-500" /><span className="text-emerald-500">Подключено</span></>
+              : <><XCircle className="h-4 w-4 text-destructive" /><span className="text-destructive truncate max-w-[200px]">{testError}</span></>
+            }
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** Заглушка для других типов */
 function GenericConnectionForm({ source }: { source: Source }) {
   return (
@@ -190,8 +362,12 @@ function SourceCard({ source, onUpdate, onDelete }: {
 
         <CollapsibleContent>
           <CardContent className="pt-0 border-t border-border/30 mt-1">
-            {source.type === 'rest' ? (
+            {source.type === 'rest' || source.type === 'sts-ops' || source.type === 'sts-prices' || source.type === 'sts-coupons' || source.type === 'sts-tanks' ? (
               <RestConnectionForm source={source} onUpdate={onUpdate} />
+            ) : source.type === 'msto' ? (
+              <MstoConnectionForm source={source} onUpdate={onUpdate} />
+            ) : source.type === 'tradecorp' ? (
+              <TradecorpConnectionForm source={source} onUpdate={onUpdate} />
             ) : (
               <GenericConnectionForm source={source} />
             )}
@@ -232,7 +408,7 @@ export function SourcesPage() {
         <div>
           <h1 className="text-xl font-bold">Источники данных</h1>
           <p className="text-sm text-muted-foreground">
-            Подключения к внешним системам. Настройте источник, затем создайте канал для загрузки.
+            Подключения к внешним системам. Настройте источник, затем создайте обработку.
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

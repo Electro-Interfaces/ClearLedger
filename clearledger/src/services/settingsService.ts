@@ -26,13 +26,11 @@ export interface AppSettings {
 const defaults: AppSettings = {
   theme: 'system',
   stsApiUrl: 'https://pos.autooplata.ru/tms',
-  stsLogin: '',
-  stsPassword: '',
+  stsLogin: 'UserApi',
+  stsPassword: 'lHQfLZHzB3tn',
   stsSystemCode: 65,
   stations: [
-    { code: 208, name: 'АЗС №208' },
-    { code: 209, name: 'АЗС №209' },
-    { code: 210, name: 'АЗС №210' },
+    { code: 5, name: 'АКАЗС №5' },
   ],
 }
 

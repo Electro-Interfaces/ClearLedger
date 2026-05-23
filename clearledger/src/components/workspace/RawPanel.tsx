@@ -4,9 +4,10 @@
  */
 
 import { useState, useMemo } from 'react'
-import { useShifts } from '@/hooks/useFuel'
+import { useShifts, useAllReceipts } from '@/hooks/useFuel'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
+import { getAllLoadedDocs } from '@/services/channelSyncService'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -19,6 +20,10 @@ import { Button } from '@/components/ui/button'
 import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import type { StsShift } from '@/services/fuel/types'
+import type { ShiftRecord } from '@/services/fuel/types'
+import type { DeliveryRecord } from '@/services/receiptExtractService'
+import { ShiftDetailModal } from '@/components/shift-reports/ShiftDetailModal'
+import { DeliveryDetailModal } from '@/components/shift-reports/DeliveryDetailModal'
 
 type ViewMode = 'list' | 'grid' | 'tree'
 
@@ -134,15 +139,21 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   const [currentPath, setCurrentPath] = useState<string[]>([])
   const [openTabs, setOpenTabs] = useState<FsNode[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
-  const [showFilter, setShowFilter] = useState(false)
+  const [showFilter, setShowFilter] = useState(true)
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all')
   const [filterDocType, setFilterDocType] = useState<'all' | 'shifts' | 'receipts'>('all')
+  const [filterDateFrom, setFilterDateFrom] = useState('')
+  const [filterDateTo, setFilterDateTo] = useState('')
+  const [viewingShift, setViewingShift] = useState<ShiftRecord | null>(null)
+  const [viewingDelivery, setViewingDelivery] = useState<DeliveryRecord | null>(null)
 
   const filterStation = globalStation === 'all' ? undefined : Number(globalStation)
   const { data: shifts, isLoading, isFetching } = useShifts(filterStation)
+  const { data: allReceipts } = useAllReceipts(filterStation)
 
   function handleRefresh() {
     queryClient.invalidateQueries({ queryKey: ['sts-shifts'] })
+    queryClient.invalidateQueries({ queryKey: ['sts-all-receipts'] })
   }
 
   const stId = filterStation ?? settings.stations[0]?.code ?? 0
@@ -216,23 +227,63 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
           if (!ym.startsWith(year + '/')) continue
           const monthNum = Number(ym.split('/')[1])
           const monthName = MONTH_NAMES[monthNum] || ym
-          monthNodes.push({ name: monthName, type: 'folder', path: `${sName}/${year}/${monthName}`, childCount: ymShifts.length })
 
-          // Внутри месяца: файлы-смены
-          const shiftFiles: FsNode[] = ymShifts.map(s => ({
-            name: `Смена №${s.shift}`,
-            type: 'file' as const,
-            path: `${sName}/${year}/${monthName}/Смена №${s.shift}`,
-            shift: s,
-            stationId: code,
-            date: s.dt_open ? format(new Date(s.dt_open), 'dd.MM.yyyy HH:mm') : '—',
-            status: s.dt_close ? 'Закрыта' : 'Открыта',
-            size: '—',
-          }))
-          tree.set(`${sName}/${year}/${monthName}`, shiftFiles)
+          // ТТН этого месяца
+          const monthReceipts = (allReceipts ?? []).filter(r => {
+            if (!r.dt) return false
+            const rd = new Date(r.dt)
+            return rd.getFullYear() === Number(year) && (rd.getMonth() + 1) === monthNum
+          })
+
+          const totalItems = ymShifts.length + monthReceipts.length
+          monthNodes.push({ name: monthName, type: 'folder', path: `${sName}/${year}/${monthName}`, childCount: totalItems })
+
+          // Внутри месяца: подпапки Смены и ТТН
+          const monthContent: FsNode[] = []
+
+          // Подпапка Смены
+          if (filterDocType === 'all' || filterDocType === 'shifts') {
+            monthContent.push({
+              name: 'Смены', type: 'folder',
+              path: `${sName}/${year}/${monthName}/Смены`,
+              childCount: ymShifts.length,
+            })
+            // Файлы-смены внутри подпапки
+            const shiftFiles: FsNode[] = ymShifts.map(s => ({
+              name: `Смена №${s.shift}`,
+              type: 'file' as const,
+              path: `${sName}/${year}/${monthName}/Смены/Смена №${s.shift}`,
+              shift: s,
+              stationId: code,
+              date: s.dt_open ? format(new Date(s.dt_open), 'dd.MM.yyyy HH:mm') : '—',
+              status: s.dt_close ? 'Закрыта' : 'Открыта',
+              size: '—',
+            }))
+            tree.set(`${sName}/${year}/${monthName}/Смены`, shiftFiles)
+          }
+
+          // Подпапка ТТН
+          if ((filterDocType === 'all' || filterDocType === 'receipts') && monthReceipts.length > 0) {
+            monthContent.push({
+              name: 'ТТН', type: 'folder',
+              path: `${sName}/${year}/${monthName}/ТТН`,
+              childCount: monthReceipts.length,
+            })
+            // Файлы-ТТН внутри подпапки
+            const receiptFiles: FsNode[] = monthReceipts.map((r, idx) => ({
+              name: `ТТН ${r.ttn} — ${r.fuel}`,
+              type: 'file' as const,
+              path: `${sName}/${year}/${monthName}/ТТН/ТТН ${r.ttn}-${idx}`,
+              date: r.dt ? format(new Date(r.dt), 'dd.MM.yyyy HH:mm') : '—',
+              size: `${r.docVolume.toLocaleString('ru')} л`,
+            }))
+            tree.set(`${sName}/${year}/${monthName}/ТТН`, receiptFiles)
+          }
+
+          tree.set(`${sName}/${year}/${monthName}`, monthContent)
         }
 
-        // Также добавим папки Смены/ТТН внутри года
+        // childCount года
         smenyNode.childCount = [...byYearMonth.entries()]
           .filter(([ym]) => ym.startsWith(year + '/'))
           .reduce((sum, [, s]) => sum + s.length, 0)
@@ -247,33 +298,101 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
 
     tree.set('', rootNodes)
     return tree
-  }, [shifts, stId, settings.stations, MONTH_NAMES, filterStatus, searchQuery])
+  }, [shifts, allReceipts, stId, settings.stations, MONTH_NAMES, filterStatus, filterDocType, searchQuery])
 
-  // Текущий контент папки
-  const currentNodes = useMemo(() => {
-    const key = currentPath.join('/')
-    let nodes = fsTree.get(key) ?? []
+  // Все файлы (плоский список) — единый источник для Список/Плитка
+  // Собираем из загруженных документов (localStorage), НЕ из fsTree
+  const allFiles = useMemo(() => {
+    const files: FsNode[] = []
+    const loadedDocs = getAllLoadedDocs()
 
+    for (const doc of loadedDocs) {
+      if (doc.docType === 'shift_report') {
+        const shift = doc.data as ShiftRecord
+        if (!shift) continue
+        files.push({
+          name: `Смена №${shift.shiftNumber}`,
+          type: 'file',
+          path: `shift-${doc.id}`,
+          shift: { shift: shift.shiftNumber, dt_open: shift.openedAt, dt_close: shift.closedAt } as StsShift,
+          stationId: shift.stationId,
+          date: shift.openedAt ? format(new Date(shift.openedAt), 'dd.MM.yyyy HH:mm') : '—',
+          status: shift.closedAt ? 'Закрыта' : 'Открыта',
+          size: `${shift.totalVolumeLiters?.toFixed(0) ?? '—'} л`,
+        })
+      } else if (doc.docType === 'delivery') {
+        const delivery = doc.data as DeliveryRecord
+        if (!delivery) continue
+        files.push({
+          name: doc.title,
+          type: 'file',
+          path: `delivery-${doc.id}`,
+          stationId: doc.stationId,
+          date: doc.date ? format(new Date(doc.date), 'dd.MM.yyyy HH:mm') : '—',
+          size: `${delivery.docVolumeLiters?.toFixed(0) ?? '—'} л`,
+        })
+      }
+    }
+
+    // Сортировка: новые сверху
+    files.sort((a, b) => {
+      const da = a.shift?.dt_open || a.date || ''
+      const db = b.shift?.dt_open || b.date || ''
+      return db.localeCompare(da)
+    })
+    return files
+  }, [shifts, allReceipts]) // пересчитать при обновлении данных
+
+  // Отфильтрованные файлы — для Список/Плитка
+  const flatFiles = useMemo(() => {
+    let result = allFiles
+    // Период
+    if (filterDateFrom) {
+      const from = new Date(filterDateFrom)
+      result = result.filter(f => {
+        const d = f.shift?.dt_open || f.date
+        if (!d) return true
+        // date может быть "dd.MM.yyyy HH:mm", dt_open — ISO
+        const parsed = d.includes('T') ? new Date(d) : new Date(d.split('.').reverse().join('-'))
+        return parsed >= from
+      })
+    }
+    if (filterDateTo) {
+      const to = new Date(filterDateTo + 'T23:59:59')
+      result = result.filter(f => {
+        const d = f.shift?.dt_open || f.date
+        if (!d) return true
+        const parsed = d.includes('T') ? new Date(d) : new Date(d.split('.').reverse().join('-'))
+        return parsed <= to
+      })
+    }
+    // Тип документа
+    if (filterDocType === 'shifts') {
+      result = result.filter(f => f.name.startsWith('Смена'))
+    } else if (filterDocType === 'receipts') {
+      result = result.filter(f => f.name.includes('ТТН'))
+    }
+    // Статус (только для смен)
+    if (filterStatus === 'open') {
+      result = result.filter(f => !f.shift || !f.shift.dt_close)
+    } else if (filterStatus === 'closed') {
+      result = result.filter(f => !f.shift || !!f.shift.dt_close)
+    }
     // Поиск
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
-      // Поиск по всем файлам
-      const allFiles: FsNode[] = []
-      for (const [, items] of fsTree) {
-        for (const item of items) {
-          if (item.type === 'file' && item.name.toLowerCase().includes(q)) {
-            allFiles.push(item)
-          }
-          if (item.type === 'file' && item.date?.includes(q)) {
-            allFiles.push(item)
-          }
-        }
-      }
-      return [...new Map(allFiles.map(f => [f.path, f])).values()]
+      result = result.filter(f =>
+        f.name.toLowerCase().includes(q) || (f.date && f.date.includes(q))
+      )
     }
+    return result
+  }, [allFiles, searchQuery, filterDateFrom, filterDateTo, filterDocType, filterStatus])
 
-    return nodes
-  }, [fsTree, currentPath, searchQuery])
+  // Текущий контент папки — для навигации в режиме Дерево
+  const currentNodes = useMemo(() => {
+    const key = currentPath.join('/')
+    return fsTree.get(key) ?? []
+  }, [fsTree, currentPath])
 
   function navigateTo(path: string[]) {
     setCurrentPath(path)
@@ -291,14 +410,53 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   }
 
   function openFile(node: FsNode) {
+    // Добавить вкладку
+    setOpenTabs(prev => {
+      if (prev.some(t => t.path === node.path)) return prev
+      return [...prev, node]
+    })
+    setActiveTabId(node.path)
+
     if (node.shift && node.stationId != null) {
       selectShift(node.stationId, node.shift.shift)
-      // Добавить вкладку
-      setOpenTabs(prev => {
-        if (prev.some(t => t.path === node.path)) return prev
-        return [...prev, node]
-      })
-      setActiveTabId(node.path)
+    }
+
+    // Открыть просмотрщик — определить тип документа по загруженным данным
+    const loadedDocs = getAllLoadedDocs()
+
+    // Сменный отчёт?
+    if (node.shift && node.stationId != null) {
+      const shiftDoc = loadedDocs.find(d =>
+        d.docType === 'shift_report' && d.stationId === node.stationId &&
+        (d.data as ShiftRecord)?.shiftNumber === node.shift?.shift
+      )
+      if (shiftDoc) {
+        setViewingShift(shiftDoc.data as ShiftRecord)
+        return
+      }
+    }
+
+    // ТТН? Ищем по названию файла (содержит номер ТТН)
+    if (node.name.includes('ТТН')) {
+      // Извлечь номер ТТН из имени файла: "ТТН 3310 — АИ-95" → "3310"
+      const ttnMatch = node.name.match(/ТТН\s+(\S+)/)
+      const ttnNumber = ttnMatch?.[1]
+      if (ttnNumber) {
+        const deliveryDoc = loadedDocs.find(d =>
+          d.docType === 'delivery' && (d.data as DeliveryRecord)?.ttn === ttnNumber
+        )
+        if (deliveryDoc) {
+          setViewingDelivery(deliveryDoc.data as DeliveryRecord)
+          return
+        }
+      }
+      // Если не нашли по номеру, ищем по stationId
+      const anyDelivery = loadedDocs.find(d =>
+        d.docType === 'delivery' && d.stationId === node.stationId
+      )
+      if (anyDelivery) {
+        setViewingDelivery(anyDelivery.data as DeliveryRecord)
+      }
     }
   }
 
@@ -325,27 +483,33 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
     <div className="flex flex-col h-full">
       {/* Breadcrumb + open tabs */}
       <div className="border-b border-border/40 bg-card/20">
-        {/* Path bar */}
+        {/* Path bar — breadcrumb только в режиме дерева */}
         <div className="flex items-center gap-0.5 px-2 py-1 min-h-[28px] overflow-x-auto">
           {collapseButton}
-          {currentPath.length > 0 && (
-            <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={goUp} title="Вверх">
-              <ArrowUp className="h-3 w-3" />
-            </Button>
+          {viewMode === 'tree' ? (
+            <>
+              {currentPath.length > 0 && (
+                <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={goUp} title="Вверх">
+                  <ArrowUp className="h-3 w-3" />
+                </Button>
+              )}
+              {breadcrumbParts.map((part, i) => (
+                <span key={i} className="flex items-center shrink-0">
+                  {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/40 mx-0.5" />}
+                  <button
+                    onClick={() => navigateTo(part.path)}
+                    className={`text-[11px] px-1 py-0.5 rounded hover:bg-accent/50 transition-colors ${
+                      i === breadcrumbParts.length - 1 ? 'font-semibold text-foreground' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {part.name}
+                  </button>
+                </span>
+              ))}
+            </>
+          ) : (
+            <span className="text-[11px] font-semibold text-foreground px-1">Все документы</span>
           )}
-          {breadcrumbParts.map((part, i) => (
-            <span key={i} className="flex items-center shrink-0">
-              {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/40 mx-0.5" />}
-              <button
-                onClick={() => navigateTo(part.path)}
-                className={`text-[11px] px-1 py-0.5 rounded hover:bg-accent/50 transition-colors ${
-                  i === breadcrumbParts.length - 1 ? 'font-semibold text-foreground' : 'text-muted-foreground'
-                }`}
-              >
-                {part.name}
-              </button>
-            </span>
-          ))}
         </div>
 
         {/* Open document tabs */}
@@ -406,134 +570,126 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
 
       {/* Filter panel */}
       {showFilter && (
-        <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border/30 bg-card/30">
-          <Select value={filterDocType} onValueChange={(v) => setFilterDocType(v as typeof filterDocType)}>
-            <SelectTrigger className="h-7 w-[90px] text-[11px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все типы</SelectItem>
-              <SelectItem value="shifts">Смены</SelectItem>
-              <SelectItem value="receipts">ТТН</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as typeof filterStatus)}>
-            <SelectTrigger className="h-7 w-[100px] text-[11px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все статусы</SelectItem>
-              <SelectItem value="open">Открытые</SelectItem>
-              <SelectItem value="closed">Закрытые</SelectItem>
-            </SelectContent>
-          </Select>
-          {(filterDocType !== 'all' || filterStatus !== 'all') && (
-            <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0"
-              onClick={() => { setFilterDocType('all'); setFilterStatus('all') }} title="Сбросить">
-              <X className="h-3 w-3" />
-            </Button>
-          )}
+        <div className="px-2 py-1.5 border-b border-border/30 bg-card/30 space-y-1.5">
+          {/* Период */}
+          <div className="flex items-center gap-1.5">
+            <Input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)}
+              className="h-7 text-[11px] flex-1" placeholder="С" />
+            <span className="text-[10px] text-muted-foreground">—</span>
+            <Input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)}
+              className="h-7 text-[11px] flex-1" placeholder="По" />
+          </div>
+          {/* Тип + статус */}
+          <div className="flex items-center gap-1.5">
+            <Select value={filterDocType} onValueChange={(v) => setFilterDocType(v as typeof filterDocType)}>
+              <SelectTrigger className="h-7 flex-1 text-[11px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все типы</SelectItem>
+                <SelectItem value="shifts">Смены</SelectItem>
+                <SelectItem value="receipts">ТТН</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as typeof filterStatus)}>
+              <SelectTrigger className="h-7 flex-1 text-[11px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все статусы</SelectItem>
+                <SelectItem value="open">Открытые</SelectItem>
+                <SelectItem value="closed">Закрытые</SelectItem>
+              </SelectContent>
+            </Select>
+            {(filterDocType !== 'all' || filterStatus !== 'all' || filterDateFrom || filterDateTo) && (
+              <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0"
+                onClick={() => { setFilterDocType('all'); setFilterStatus('all'); setFilterDateFrom(''); setFilterDateTo('') }} title="Сбросить">
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
       {/* Content */}
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {isLoading && (
           <div className="flex justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         )}
 
-        {!isLoading && currentNodes.length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-8">
-            {searchQuery ? 'Ничего не найдено' : 'Пустая папка'}
-          </p>
-        )}
-
-        {/* Вид СПИСОК */}
-        {viewMode === 'list' && currentNodes.length > 0 && (
-          <div>
-            {/* Заголовок таблицы */}
-            <div className="flex items-center gap-2 px-3 py-1 border-b border-border/30 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
-              <span className="flex-1">Имя</span>
-              <span className="w-28 text-right">Дата</span>
-              <span className="w-16 text-right">Тип</span>
-              <span className="w-14 text-right">Размер</span>
+        {/* Вид СПИСОК — плоский список всех документов */}
+        {viewMode === 'list' && !isLoading && (
+          flatFiles.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">
+              {searchQuery ? 'Ничего не найдено' : 'Нет загруженных документов'}
+            </p>
+          ) : (
+            <div>
+              <div className="flex items-center gap-2 px-3 py-1 border-b border-border/30 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+                <span className="flex-1">Имя</span>
+                <span className="w-28 text-right">Дата</span>
+                <span className="w-16 text-right">Тип</span>
+                <span className="w-14 text-right">Статус</span>
+              </div>
+              {flatFiles.map((node) => {
+                const isSelected = node.shift && selectedShiftNumber === node.shift.shift && selectedStationId === node.stationId
+                return (
+                  <button key={node.path}
+                    onClick={() => openFile(node)}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent/40 transition-colors border-b border-border/10 ${
+                      isSelected ? 'bg-primary/10' : ''
+                    }`}>
+                    <FileText className={`h-4 w-4 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <span className={`flex-1 text-left truncate ${isSelected ? 'font-semibold text-primary' : 'font-medium'}`}>
+                      {node.name}
+                    </span>
+                    <span className="w-28 text-right text-muted-foreground">{node.date ?? '—'}</span>
+                    <span className="w-16 text-right text-muted-foreground text-[10px]">
+                      {node.name.startsWith('ТТН') ? 'ТТН' : 'Смена'}
+                    </span>
+                    <span className="w-14 text-right">
+                      {node.status && (
+                        <Badge variant={node.status === 'Закрыта' ? 'secondary' : 'default'} className="text-[8px] h-4 px-1">
+                          {node.status === 'Закрыта' ? 'Закр.' : 'Откр.'}
+                        </Badge>
+                      )}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
-
-            {/* Папки сначала, потом файлы */}
-            {currentNodes.filter(n => n.type === 'folder').map((node) => (
-              <button key={node.path}
-                onDoubleClick={() => openFolder(node.name)}
-                onClick={() => openFolder(node.name)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent/40 transition-colors border-b border-border/10">
-                <Folder className="h-4 w-4 text-amber-500 shrink-0" />
-                <span className="flex-1 font-medium text-left truncate">{node.name}</span>
-                <span className="w-28 text-right text-muted-foreground">—</span>
-                <span className="w-16 text-right text-muted-foreground">Папка</span>
-                <span className="w-14 text-right text-muted-foreground">
-                  {node.childCount != null ? `${node.childCount}` : '—'}
-                </span>
-              </button>
-            ))}
-
-            {currentNodes.filter(n => n.type === 'file').map((node) => {
-              const isSelected = node.shift && selectedShiftNumber === node.shift.shift && selectedStationId === node.stationId
-              return (
-                <button key={node.path}
-                  onClick={() => openFile(node)}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-accent/40 transition-colors border-b border-border/10 ${
-                    isSelected ? 'bg-primary/10' : ''
-                  }`}>
-                  <FileText className={`h-4 w-4 shrink-0 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
-                  <span className={`flex-1 text-left truncate ${isSelected ? 'font-semibold text-primary' : 'font-medium'}`}>
-                    {node.name}
-                  </span>
-                  <span className="w-28 text-right text-muted-foreground">{node.date ?? '—'}</span>
-                  <span className="w-16 text-right">
-                    {node.status && (
-                      <Badge variant={node.status === 'Закрыта' ? 'secondary' : 'default'} className="text-[8px] h-4 px-1">
-                        {node.status === 'Закрыта' ? 'Закр.' : 'Откр.'}
-                      </Badge>
-                    )}
-                  </span>
-                  <span className="w-14 text-right text-muted-foreground">{node.size ?? '—'}</span>
-                </button>
-              )
-            })}
-          </div>
+          )
         )}
 
-        {/* Вид ПЛИТКА */}
-        {viewMode === 'grid' && currentNodes.length > 0 && (
-          <div className="p-2 grid grid-cols-2 gap-1.5">
-            {currentNodes.map((node) => {
-              const isSelected = node.shift && selectedShiftNumber === node.shift.shift && selectedStationId === node.stationId
-              const isFolder = node.type === 'folder'
-
-              return (
-                <button key={node.path}
-                  onClick={() => isFolder ? openFolder(node.name) : openFile(node)}
-                  className={`flex flex-col items-center gap-1 p-3 rounded-lg hover:bg-accent/40 transition-colors text-center ${
-                    isSelected ? 'bg-primary/10 ring-1 ring-primary/30' : ''
-                  }`}>
-                  {isFolder
-                    ? <FolderOpen className="h-8 w-8 text-amber-500" />
-                    : <FileText className={`h-8 w-8 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
-                  }
-                  <span className="text-[11px] font-medium truncate w-full">{node.name}</span>
-                  {!isFolder && node.date && (
-                    <span className="text-[9px] text-muted-foreground">{node.date}</span>
-                  )}
-                  {isFolder && node.childCount != null && (
-                    <span className="text-[9px] text-muted-foreground">{node.childCount} эл.</span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+        {/* Вид ПЛИТКА — плоский список карточек */}
+        {viewMode === 'grid' && !isLoading && (
+          flatFiles.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">
+              {searchQuery ? 'Ничего не найдено' : 'Нет загруженных документов'}
+            </p>
+          ) : (
+            <div className="p-2 grid grid-cols-2 gap-1.5">
+              {flatFiles.map((node) => {
+                const isSelected = node.shift && selectedShiftNumber === node.shift.shift && selectedStationId === node.stationId
+                return (
+                  <button key={node.path}
+                    onClick={() => openFile(node)}
+                    className={`flex flex-col items-center gap-1 p-3 rounded-lg hover:bg-accent/40 transition-colors text-center ${
+                      isSelected ? 'bg-primary/10 ring-1 ring-primary/30' : ''
+                    }`}>
+                    <FileText className={`h-8 w-8 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <span className="text-[11px] font-medium truncate w-full">{node.name}</span>
+                    {node.date && <span className="text-[9px] text-muted-foreground">{node.date}</span>}
+                  </button>
+                )
+              })}
+            </div>
+          )
         )}
-        {/* Вид ДЕРЕВО */}
+
+        {/* Вид ДЕРЕВО — навигация по папкам */}
         {viewMode === 'tree' && !isLoading && (
           <TreeView
             fsTree={fsTree}
@@ -544,13 +700,17 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
             onSelectFile={openFile}
           />
         )}
-      </ScrollArea>
+      </div>
 
       {/* Footer — статус */}
       <div className="px-3 py-1 border-t border-border/50 text-[10px] text-muted-foreground flex items-center justify-between">
-        <span>{currentNodes.length} элементов</span>
-        <span>{currentPath.length > 0 ? currentPath.join(' / ') : 'Хранилище'}</span>
+        <span>{viewMode === 'tree' ? `${currentNodes.length} элементов` : `${flatFiles.length} документов`}</span>
+        <span>{viewMode === 'tree' && currentPath.length > 0 ? currentPath.join(' / ') : 'Хранилище'}</span>
       </div>
+
+      {/* Просмотрщики документов */}
+      <ShiftDetailModal shift={viewingShift} onClose={() => setViewingShift(null)} />
+      <DeliveryDetailModal delivery={viewingDelivery} onClose={() => setViewingDelivery(null)} />
     </div>
   )
 }

@@ -1,11 +1,11 @@
 /**
  * CRUD для каналов данных (localStorage).
- * Канал = работа с данными из источника (расписание, периоды, потоки, каталоги).
+ * Канал = pipeline обработки данных: несколько источников → обработка → сверка → результат.
  */
 
 import { getItem, setItem } from './storage'
 import { getSource } from './sourceService'
-import type { Channel, ChannelStream, SyncLogEntry } from '@/types/channel'
+import type { Channel, ChannelStream, ChannelStage, SyncLogEntry } from '@/types/channel'
 import { nanoid } from 'nanoid'
 
 const STORAGE_KEY = 'gig-channels'
@@ -17,6 +17,7 @@ function defaultStreamsFromSource(sourceId: string): ChannelStream[] {
   return source.docTypes.map((dt) => ({
     id: nanoid(6),
     docTypeId: dt.id,
+    sourceId,
     name: dt.name,
     catalogTemplate: dt.id === 'shift_report'
       ? '/Смены/{станция}/{год}-{месяц}/'
@@ -28,8 +29,79 @@ function defaultStreamsFromSource(sourceId: string): ChannelStream[] {
   }))
 }
 
+/** Создать дефолтные этапы pipeline */
+function defaultStages(sourceIds: string[]): ChannelStage[] {
+  const stages: ChannelStage[] = []
+  let order = 0
+
+  // Этап загрузки для каждого источника
+  for (const sourceId of sourceIds) {
+    const source = getSource(sourceId)
+    stages.push({
+      id: nanoid(6),
+      type: 'fetch',
+      name: `Загрузка: ${source?.name ?? sourceId}`,
+      sourceId,
+      config: {},
+      enabled: true,
+      order: order++,
+    })
+  }
+
+  // Нормализация
+  stages.push({
+    id: nanoid(6),
+    type: 'normalize',
+    name: 'Нормализация данных',
+    config: {},
+    enabled: true,
+    order: order++,
+  })
+
+  // Сверка (если больше 1 источника)
+  if (sourceIds.length > 1) {
+    stages.push({
+      id: nanoid(6),
+      type: 'reconcile',
+      name: 'Сверка источников',
+      config: {},
+      enabled: true,
+      order: order++,
+    })
+  }
+
+  return stages
+}
+
+/** Миграция: старый формат (sourceId) → новый (sourceIds) */
+function migrateChannel(ch: any): Channel {
+  if (!ch.sourceIds) {
+    ch.sourceIds = ch.sourceId ? [ch.sourceId] : []
+  }
+  if (!ch.stages) {
+    ch.stages = defaultStages(ch.sourceIds)
+  }
+  if (!ch.reconcileRules) {
+    ch.reconcileRules = []
+  }
+  if (!ch.rootCatalog) {
+    ch.rootCatalog = '/Нефтепродукты АЗС'
+  }
+  if (!ch.config) {
+    ch.config = {}
+  }
+  // Миграция потоков: добавить sourceId если нет
+  if (ch.streams) {
+    const primarySourceId = ch.sourceIds[0] ?? ch.sourceId ?? ''
+    for (const s of ch.streams) {
+      if (!s.sourceId) s.sourceId = primarySourceId
+    }
+  }
+  return ch as Channel
+}
+
 export function getChannels(): Channel[] {
-  return getItem<Channel[]>(STORAGE_KEY, [])
+  return getItem<any[]>(STORAGE_KEY, []).map(migrateChannel)
 }
 
 export function getChannel(id: string): Channel | undefined {
@@ -38,19 +110,28 @@ export function getChannel(id: string): Channel | undefined {
 
 export function createChannel(data: {
   name: string
-  sourceId: string
+  sourceIds: string[]
   description?: string
+  config?: Record<string, any>
+  templateId?: string
+  schedule?: import('@/types/channel').ScheduleConfig
 }): Channel {
   const channel: Channel = {
     id: nanoid(10),
     name: data.name,
-    sourceId: data.sourceId,
+    sourceIds: data.sourceIds,
+    sourceId: data.sourceIds[0], // legacy compat
     status: 'draft',
     description: data.description,
+    config: data.config ?? {},
     duplicatePolicy: 'skip',
-    schedule: 'manual',
+    schedule: data.schedule ?? 'manual',
+    templateId: data.templateId,
     periodDays: 7,
-    streams: defaultStreamsFromSource(data.sourceId),
+    streams: data.sourceIds.flatMap((sid) => defaultStreamsFromSource(sid)),
+    stages: defaultStages(data.sourceIds),
+    reconcileRules: [],
+    rootCatalog: '/Нефтепродукты АЗС',
     docsLoaded: 0,
     syncLog: [],
     createdAt: new Date().toISOString(),
@@ -88,4 +169,69 @@ export function addSyncLog(channelId: string, entries: SyncLogEntry[]): void {
   channels[idx].lastSync = new Date().toISOString()
   channels[idx].updatedAt = new Date().toISOString()
   setItem(STORAGE_KEY, channels)
+}
+
+/** Добавить источник к каналу */
+export function addSourceToChannel(channelId: string, sourceId: string): Channel | undefined {
+  const ch = getChannel(channelId)
+  if (!ch) return undefined
+  if (ch.sourceIds.includes(sourceId)) return ch
+
+  const newSourceIds = [...ch.sourceIds, sourceId]
+  const newStreams = [...ch.streams, ...defaultStreamsFromSource(sourceId)]
+
+  // Добавить fetch-этап для нового источника
+  const source = getSource(sourceId)
+  const maxOrder = ch.stages.reduce((max, s) => Math.max(max, s.order), -1)
+  const fetchStage: ChannelStage = {
+    id: nanoid(6),
+    type: 'fetch',
+    name: `Загрузка: ${source?.name ?? sourceId}`,
+    sourceId,
+    config: {},
+    enabled: true,
+    order: maxOrder + 1,
+  }
+
+  // Добавить reconcile если стало >1 источника и ещё нет
+  const stages = [...ch.stages, fetchStage]
+  if (newSourceIds.length > 1 && !stages.some((s) => s.type === 'reconcile')) {
+    stages.push({
+      id: nanoid(6),
+      type: 'reconcile',
+      name: 'Сверка источников',
+      config: {},
+      enabled: true,
+      order: maxOrder + 2,
+    })
+  }
+
+  return updateChannel(channelId, {
+    sourceIds: newSourceIds,
+    sourceId: newSourceIds[0],
+    streams: newStreams,
+    stages,
+  })
+}
+
+/** Убрать источник из канала */
+export function removeSourceFromChannel(channelId: string, sourceId: string): Channel | undefined {
+  const ch = getChannel(channelId)
+  if (!ch) return undefined
+
+  const newSourceIds = ch.sourceIds.filter((id) => id !== sourceId)
+  const newStreams = ch.streams.filter((s) => s.sourceId !== sourceId)
+  let newStages = ch.stages.filter((s) => s.sourceId !== sourceId)
+
+  // Убрать reconcile если остался 1 источник
+  if (newSourceIds.length <= 1) {
+    newStages = newStages.filter((s) => s.type !== 'reconcile')
+  }
+
+  return updateChannel(channelId, {
+    sourceIds: newSourceIds,
+    sourceId: newSourceIds[0],
+    streams: newStreams,
+    stages: newStages,
+  })
 }

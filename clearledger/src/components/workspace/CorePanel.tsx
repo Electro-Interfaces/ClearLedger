@@ -11,17 +11,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { Loader2, Fuel, CreditCard, Truck, FileOutput, ClipboardList, BarChart3 } from 'lucide-react'
 import { format } from 'date-fns'
 
 type CoreTab = 'overview' | 'tanks' | 'pumps' | 'payments' | 'receipts'
 
-const CORE_TABS: { key: CoreTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { key: 'overview', label: 'Обзор', icon: BarChart3 },
-  { key: 'tanks', label: 'Резервуары', icon: Fuel },
-  { key: 'pumps', label: 'ТРК', icon: Fuel },
-  { key: 'payments', label: 'Оплаты', icon: CreditCard },
-  { key: 'receipts', label: 'ТТН', icon: Truck },
+const CORE_MENU: CentralMenuItem[] = [
+  { key: 'overview', label: 'Обзор' },
+  { key: 'tanks', label: 'Резервуары' },
+  { key: 'pumps', label: 'ТРК' },
+  { key: 'payments', label: 'Оплаты' },
+  { key: 'receipts', label: 'ТТН' },
 ]
 
 function fmt(n: number): string {
@@ -92,43 +93,26 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
   const showSection = (section: CoreTab) => coreTab === 'overview' || coreTab === section
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Локальный тулбар — инфо о смене + кнопка */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-bold">
-            №{shift.shiftNumber}
-          </h2>
-          <span className="text-xs text-muted-foreground">{shift.stationName}</span>
-          <Badge variant={shift.status === 'open' ? 'default' : 'secondary'} className="text-[10px] h-5">
-            {shift.status === 'open' ? 'Открыта' : 'Закрыта'}
-          </Badge>
+    <CentralPanelLayout items={CORE_MENU} activeKey={coreTab} onSelect={(k) => setCoreTab(k as CoreTab)}>
+      <div className="flex flex-col h-full">
+        {/* Локальный тулбар — инфо о смене + кнопка */}
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold">
+              №{shift.shiftNumber}
+            </h2>
+            <span className="text-xs text-muted-foreground">{shift.stationName}</span>
+            <Badge variant={shift.status === 'open' ? 'default' : 'secondary'} className="text-[10px] h-5">
+              {shift.status === 'open' ? 'Открыта' : 'Закрыта'}
+            </Badge>
+          </div>
+          <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handlePrepareExport}>
+            <FileOutput className="h-3.5 w-3.5" />
+            В 1С
+          </Button>
         </div>
-        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handlePrepareExport}>
-          <FileOutput className="h-3.5 w-3.5" />
-          В 1С
-        </Button>
-      </div>
 
-      {/* Табы навигации внутри панели */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border/30 bg-card/20 overflow-x-auto">
-        {CORE_TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setCoreTab(key)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap ${
-              coreTab === key
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
-            }`}
-          >
-            <Icon className="h-3 w-3" />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1">
         <div className="p-4 space-y-4">
           {/* KPI — всегда в обзоре */}
           {showSection('overview') && (
@@ -311,6 +295,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
           )}
         </div>
       </ScrollArea>
-    </div>
+      </div>
+    </CentralPanelLayout>
   )
 }
