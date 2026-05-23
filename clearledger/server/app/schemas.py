@@ -619,3 +619,81 @@ class BankAccountResponse(BaseModel):
     organizationId: str | None = None
     createdAt: str
     updatedAt: str
+
+
+# ===== Интеграция 1С =====
+
+class OneCConnectionCreate(BaseModel):
+    company_id: str
+    name: str = Field(default="1С:Бухгалтерия", max_length=255)
+    odata_url: str = Field(min_length=1, max_length=500)
+    username: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1)
+    exchange_path: str | None = None
+    sync_interval_sec: int = Field(default=300, ge=60, le=86400)
+
+
+class OneCConnectionUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
+    odata_url: str | None = Field(default=None, max_length=500)
+    username: str | None = Field(default=None, max_length=255)
+    password: str | None = None
+    exchange_path: str | None = None
+    sync_interval_sec: int | None = Field(default=None, ge=60, le=86400)
+    status: Literal["inactive", "active", "error"] | None = None
+
+
+class OneCConnectionResponse(BaseModel):
+    id: str
+    company_id: str
+    name: str
+    odata_url: str
+    username: str
+    exchange_path: str | None = None
+    status: str
+    last_sync_at: datetime | None = None
+    sync_interval_sec: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class OneCTestResult(BaseModel):
+    available: bool
+    catalogs: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class OneCSyncStats(BaseModel):
+    processed: int = 0
+    created: int = 0
+    updated: int = 0
+    errors: int = 0
+
+
+class OneCSyncResult(BaseModel):
+    status: str
+    stats: OneCSyncStats
+    details: dict = Field(default_factory=dict)
+    log_id: str
+
+
+class OneCSyncLogResponse(BaseModel):
+    id: str
+    connection_id: str
+    direction: str
+    sync_type: str
+    status: str
+    items_processed: int
+    items_created: int
+    items_updated: int
+    items_errors: int
+    details: dict
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+class OneCSyncStatusResponse(BaseModel):
+    is_syncing: bool
+    current_log: OneCSyncLogResponse | None = None
+    connection_status: str
+    last_sync_at: datetime | None = None

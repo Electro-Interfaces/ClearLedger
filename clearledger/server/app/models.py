@@ -1257,3 +1257,75 @@ class RawBatchRecord(Base):
     items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     items_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+# ---------------------------------------------------------------------------
+# Интеграция 1С: подключения и журнал синхронизации
+# ---------------------------------------------------------------------------
+class OneCConnection(Base):
+    __tablename__ = "onec_connections"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    odata_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_encrypted: Mapped[str] = mapped_column(String(1024), nullable=False)
+    exchange_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="inactive"
+    )
+    last_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_interval_sec: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=300
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+    sync_logs: Mapped[list["OneCSyncLog"]] = relationship(
+        back_populates="connection", cascade="all, delete-orphan"
+    )
+
+
+class OneCSyncLog(Base):
+    __tablename__ = "onec_sync_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("onec_connections.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)
+    sync_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    items_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_errors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    connection: Mapped["OneCConnection"] = relationship(back_populates="sync_logs")
