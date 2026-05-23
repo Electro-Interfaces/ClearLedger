@@ -103,8 +103,8 @@ function ScheduleCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: 
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-1.5">
+    <Card className="py-3 gap-2">
+      <CardHeader className="pb-0">
         <CardTitle className="text-sm flex items-center gap-1.5">
           <History className="h-3.5 w-3.5" />
           Расписание
@@ -188,8 +188,8 @@ function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
     `Месяцев: ${selected.size}`
 
   return (
-    <Card>
-      <CardHeader className="pb-1.5">
+    <Card className="py-3 gap-2">
+      <CardHeader className="pb-0">
         <CardTitle className="text-sm flex items-center gap-1.5">
           <FileText className="h-3.5 w-3.5" />
           Период загрузки
@@ -309,8 +309,8 @@ function StationsCard({
   }, [channelStations])
 
   return (
-    <Card className="md:col-span-2">
-      <CardHeader className="pb-1.5">
+    <Card className="md:col-span-2 py-3 gap-2">
+      <CardHeader className="pb-0">
         <CardTitle className="text-sm flex items-center gap-1.5">
           <MapPin className="h-3.5 w-3.5" />
           Станции
@@ -398,11 +398,16 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
   // Все CRUD-операции теперь внутри StationsCard.
   const stations = getChannelStations(channel)
 
+  // shadcn Card по умолчанию имеет py-6 gap-6 — это съедает вертикаль.
+  // Переопределяем на компактный режим для всех карточек Обзора.
+  // (tailwind-merge правильно подменяет py-6→py-3, gap-6→gap-2.)
+  const compactCard = "py-3 gap-2"
+
   return (
-    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 [grid-auto-rows:min-content] items-start">
       {/* Статус — компактная карточка: статус + кнопка + last sync в одну колонку */}
-      <Card>
-        <CardHeader className="pb-1.5">
+      <Card className={compactCard}>
+        <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-2">
             <span className={status.color}>●</span>
             Статус
@@ -430,8 +435,8 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
       <StationsCard channel={channel} onUpdate={onUpdate} />
 
       {/* Источники */}
-      <Card>
-        <CardHeader className="pb-1.5">
+      <Card className={compactCard}>
+        <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-1.5">
             <Database className="h-3.5 w-3.5" />
             Источники
@@ -460,8 +465,8 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
       <PeriodCard channel={channel} onUpdate={onUpdate} />
 
       {/* Загружено */}
-      <Card>
-        <CardHeader className="pb-1.5">
+      <Card className={compactCard}>
+        <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-1.5">
             <FileText className="h-3.5 w-3.5" />
             Загружено
@@ -484,8 +489,8 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
       </Card>
 
       {/* Pipeline */}
-      <Card className="md:col-span-2 lg:col-span-3">
-        <CardHeader className="pb-1.5">
+      <Card className={`${compactCard} md:col-span-2 lg:col-span-3`}>
+        <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-1.5">
             <Settings2 className="h-3.5 w-3.5" />
             Pipeline
