@@ -32,14 +32,16 @@ import {
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 
-type TabId = 'overview' | 'sources' | 'pipeline' | 'reconcile' | 'data' | 'log'
+type TabId = 'overview' | 'sources' | 'pipeline' | 'data' | 'log'
 
+// Сверка и работа с нормализованными данными — это отдельный раздел
+// продукта (Обработка → Сверка / Управленческий / ...), не часть канала.
+// Канал отвечает только за получение сырых данных из внешнего источника.
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'Обзор', icon: Radio },
   { id: 'sources', label: 'Источники', icon: Database },
   { id: 'pipeline', label: 'Обработка', icon: Settings2 },
-  { id: 'reconcile', label: 'Сверка', icon: GitCompare },
-  { id: 'data', label: 'Данные', icon: FileText },
+  { id: 'data', label: 'Загружено', icon: FileText },
   { id: 'log', label: 'Лог', icon: History },
 ]
 
@@ -53,6 +55,129 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
   error: { label: 'Ошибка', variant: 'destructive', color: 'text-destructive' },
   draft: { label: 'Черновик', variant: 'outline', color: 'text-amber-500' },
 }
+
+// ─── Расписание и Период загрузки ────────────────────────
+
+function getScheduleSummary(channel: Channel): { mode: string; interval: number | null; label: string } {
+  const sched = channel.schedule
+  if (typeof sched === 'string') {
+    return { mode: sched, interval: null, label: sched === 'manual' ? 'Вручную' : sched }
+  }
+  if (!sched) return { mode: 'manual', interval: null, label: 'Вручную' }
+  if (sched.mode === 'manual') return { mode: 'manual', interval: null, label: 'Вручную' }
+  if (sched.mode === 'interval') {
+    const m = sched.intervalMinutes ?? 60
+    const label =
+      m < 60 ? `Каждые ${m} мин` :
+      m === 60 ? 'Каждый час' :
+      m < 1440 ? `Каждые ${m / 60} ч` :
+      m === 1440 ? 'Раз в сутки' :
+      `Каждые ${m} мин`
+    return { mode: 'interval', interval: m, label }
+  }
+  return { mode: sched.mode ?? 'manual', interval: null, label: sched.mode ?? 'manual' }
+}
+
+const SCHEDULE_PRESETS: { key: string; label: string; mode: 'manual' | 'interval'; intervalMinutes?: number }[] = [
+  { key: 'manual', label: 'Вручную', mode: 'manual' },
+  { key: 'i30', label: 'Каждые 30 мин', mode: 'interval', intervalMinutes: 30 },
+  { key: 'i60', label: 'Каждый час', mode: 'interval', intervalMinutes: 60 },
+  { key: 'i360', label: 'Каждые 6 часов', mode: 'interval', intervalMinutes: 360 },
+  { key: 'i1440', label: 'Раз в сутки', mode: 'interval', intervalMinutes: 1440 },
+]
+
+function ScheduleCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
+  const current = getScheduleSummary(channel)
+  const currentKey =
+    current.mode === 'manual' ? 'manual' :
+    current.interval ? `i${current.interval}` : 'manual'
+
+  function pick(key: string) {
+    const preset = SCHEDULE_PRESETS.find((p) => p.key === key)
+    if (!preset) return
+    const updated = updateChannel(channel.id, {
+      schedule: preset.mode === 'manual'
+        ? { mode: 'manual', pauseOnError: true, maxRetries: 3 }
+        : { mode: 'interval', intervalMinutes: preset.intervalMinutes, pauseOnError: true, maxRetries: 3 },
+    })
+    if (updated) onUpdate(updated)
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <History className="h-3.5 w-3.5" />
+          Расписание
+        </CardTitle>
+        <CardDescription className="text-xs">{current.label}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Select value={currentKey} onValueChange={pick}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {SCHEDULE_PRESETS.map((p) => (
+              <SelectItem key={p.key} value={p.key} className="text-xs">{p.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground mt-2 leading-tight">
+          {current.mode === 'manual'
+            ? 'Канал запускается только по кнопке «Запустить».'
+            : 'Канал запускается автоматически, пока приложение открыто.'}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+const PERIOD_PRESETS: { value: number; label: string }[] = [
+  { value: 1, label: 'Последний день' },
+  { value: 7, label: 'Последняя неделя' },
+  { value: 30, label: 'Последний месяц' },
+  { value: 90, label: 'Последние 90 дней' },
+  { value: 365, label: 'Последний год' },
+]
+
+function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
+  const periodDays = channel.periodDays ?? 7
+  const preset = PERIOD_PRESETS.find((p) => p.value === periodDays)
+
+  function pick(value: string) {
+    const days = Number(value)
+    if (!days) return
+    const updated = updateChannel(channel.id, { periodDays: days })
+    if (updated) onUpdate(updated)
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <FileText className="h-3.5 w-3.5" />
+          Период загрузки
+        </CardTitle>
+        <CardDescription className="text-xs">
+          {preset?.label ?? `${periodDays} дней`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Select value={String(periodDays)} onValueChange={pick}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {PERIOD_PRESETS.map((p) => (
+              <SelectItem key={p.value} value={String(p.value)} className="text-xs">{p.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground mt-2 leading-tight">
+          Глубина выборки при запуске. Дубли отсекаются по fingerprint.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 
 // ─── Выбор станций из справочника точек обслуживания ──────
 
@@ -382,11 +507,17 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
         </CardContent>
       </Card>
 
+      {/* Расписание */}
+      <ScheduleCard channel={channel} onUpdate={onUpdate} />
+
+      {/* Период загрузки */}
+      <PeriodCard channel={channel} onUpdate={onUpdate} />
+
       {/* Данные */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Данные</CardTitle>
-          <CardDescription className="text-xs">{docs.length} документов загружено</CardDescription>
+          <CardTitle className="text-sm">Загружено</CardTitle>
+          <CardDescription className="text-xs">{docs.length} документов</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-1.5">
@@ -636,76 +767,6 @@ function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
   )
 }
 
-// ─── Вкладка: Сверка ────────────────────────────────────────
-
-function ReconcileTab({ channel }: { channel: Channel }) {
-  const channelSourceIds = getChannelSourceIds(channel)
-
-  if (channelSourceIds.length < 2) {
-    return (
-      <Card>
-        <CardContent className="py-12 text-center">
-          <GitCompare className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">Сверка недоступна</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Для сверки подключите минимум 2 источника к обработке
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  const rules = channel.reconcileRules ?? []
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold">Правила сверки</h3>
-          <p className="text-xs text-muted-foreground">
-            Сравнение данных между источниками внутри обработки
-          </p>
-        </div>
-        <Button size="sm" variant="outline" className="gap-1.5" disabled>
-          <Plus className="h-3.5 w-3.5" />
-          Добавить правило
-        </Button>
-      </div>
-
-      {rules.length === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <AlertTriangle className="h-8 w-8 text-amber-500/50 mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Нет правил сверки</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Настройте правила для автоматической сверки данных из разных источников
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-3">
-          {rules.map((rule) => (
-            <Card key={rule.id}>
-              <CardContent className="py-3">
-                <div className="flex items-center gap-3">
-                  <GitCompare className="h-4 w-4 text-primary" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{rule.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Сопоставление по: {rule.matchField} · Допуск: {rule.tolerance}%
-                    </p>
-                  </div>
-                  <Checkbox checked={rule.enabled} className="h-4 w-4" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ─── Вкладка: Данные ────────────────────────────────────────
 
 function DataTab({ channel }: { channel: Channel }) {
@@ -917,7 +978,6 @@ export function ChannelDetailPage() {
         {activeTab === 'overview' && <OverviewTab channel={channel} onSync={handleSync} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
         {activeTab === 'sources' && <SourcesTab channel={channel} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
         {activeTab === 'pipeline' && <PipelineTab channel={channel} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
-        {activeTab === 'reconcile' && <ReconcileTab channel={channel} />}
         {activeTab === 'data' && <DataTab channel={channel} />}
         {activeTab === 'log' && <LogTab channel={channel} />}
       </div>
