@@ -903,3 +903,357 @@ class PullCheckpoint(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+# ===========================================================================
+# CHANNEL SUBSYSTEM — подсистема входных каналов (Шаг 1.5)
+# ===========================================================================
+# Source         — настроенное подключение (STS, ОФД, OData 1С, ...).
+# SourceCredentials — зашифрованные креды (Fernet, отдельная таблица).
+# Channel        — pipeline обработки: 1+ Source → stages → результат.
+# ChannelStream  — что забираем из каждого источника канала.
+# ChannelStage   — этап pipeline (fetch / normalize / reconcile / ...).
+# ReconcileRule  — правила сверки между потоками.
+# ChannelTemplate — шаблон pipeline для типовой задачи.
+# SyncLog        — журнал прогонов канала.
+# RawBatchRecord — сырой ответ источника (для дебага и переигрывания).
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Source (Настроенное подключение)
+# ---------------------------------------------------------------------------
+class Source(Base):
+    __tablename__ = "sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+
+    # Тип источника — соответствует SourceAdapter.source_type
+    # ("sts", "onec_odata", "ofd_platforma", "acquiring_sber", ...)
+    source_type: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Имя, заданное пользователем («STS ГИГ (65)», «1С Бухгалтерия ГИГ»)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # connected | disconnected | error | draft
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="draft")
+
+    # Не-секретные настройки (URL, login, system_ids — без пароля)
+    connection_config: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_test_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# SourceCredentials (Секреты — отдельная таблица, Fernet)
+# ---------------------------------------------------------------------------
+# Хранение паролей / токенов отдельно от Source — чтобы дамп-эндпоинты
+# CRUD случайно не вернули секреты, и чтобы можно было ротировать
+# Fernet-ключ без переписывания Source.
+# ---------------------------------------------------------------------------
+class SourceCredentials(Base):
+    __tablename__ = "source_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE"),
+        nullable=False, unique=True
+    )
+
+    # Ключ → зашифрованное значение Fernet (base64)
+    # Например: {"password": "gAAAAA..."}
+    encrypted_values: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    # Версия шифрования (для будущих миграций ключа)
+    cipher_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# Channel (Pipeline обработки)
+# ---------------------------------------------------------------------------
+class Channel(Base):
+    __tablename__ = "channels"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # active | paused | error | draft
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="draft")
+
+    # ID шаблона, из которого канал создан (опционально)
+    template_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Расписание: { mode: 'manual'|'interval'|'cron', interval_minutes, cron, ... }
+    schedule: Mapped[dict] = mapped_column(
+        JSONB, nullable=False,
+        default=lambda: {"mode": "manual", "pause_on_error": True, "max_retries": 3}
+    )
+
+    # skip | warn | overwrite
+    duplicate_policy: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="skip"
+    )
+
+    # Период загрузки (дней назад) — для каналов с дельтой по дате
+    period_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+
+    # Произвольная конфигурация (специфика канала)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # Каталог хранения сырых файлов (если канал работает с файлами)
+    root_catalog: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    last_sync_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    docs_loaded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# ChannelStream (Поток данных канала — что из какого Source забираем)
+# ---------------------------------------------------------------------------
+class ChannelStream(Base):
+    __tablename__ = "channel_streams"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id"), nullable=False
+    )
+
+    # ID типа документа в Source.adapter.available_doc_types
+    # (например, "shift_report" / "receipt" / "transactions")
+    doc_type_id: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    catalog_template: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    filters: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+# ---------------------------------------------------------------------------
+# ChannelStage (Этап pipeline канала)
+# ---------------------------------------------------------------------------
+class ChannelStage(Base):
+    __tablename__ = "channel_stages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    # fetch | normalize | reconcile | validate | transform | save
+    stage_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Для fetch — из какого Source через какой поток
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id"), nullable=True
+    )
+    # Для reconcile — массив stream id
+    reconcile_stream_ids: Mapped[list] = mapped_column(
+        ARRAY(String), nullable=False, default=list
+    )
+
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+# ---------------------------------------------------------------------------
+# ReconcileRule (Правило сверки между потоками канала)
+# ---------------------------------------------------------------------------
+class ReconcileRule(Base):
+    __tablename__ = "reconcile_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Минимум 2 stream-id для сверки
+    stream_ids: Mapped[list] = mapped_column(
+        ARRAY(String), nullable=False, default=list
+    )
+
+    # По какому полю сопоставлять записи между потоками
+    match_field: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Какие поля сравнивать
+    compare_fields: Mapped[list] = mapped_column(
+        ARRAY(String), nullable=False, default=list
+    )
+    # Допустимое расхождение (%)
+    tolerance: Mapped[float] = mapped_column(
+        Numeric(6, 2), nullable=False, default=0
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+# ---------------------------------------------------------------------------
+# ChannelTemplate (Пользовательский шаблон канала)
+# ---------------------------------------------------------------------------
+# Шаблоны хранятся также в коде (clearledger/src/templates/), но если
+# пользователь модифицировал шаблон — сохраняется в БД компании.
+# ---------------------------------------------------------------------------
+class ChannelTemplate(Base):
+    __tablename__ = "channel_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
+    )
+
+    # Если NULL company_id — это «системный» шаблон из кода
+    is_system: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    source_type: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Полный JSON шаблона: streams, stages, schedule, default_connection
+    template_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# ChannelSyncLog (Журнал прогона канала)
+# ---------------------------------------------------------------------------
+class ChannelSyncLog(Base):
+    __tablename__ = "channel_sync_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # success | partial | error | running
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="running")
+
+    loaded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duplicates: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    errors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Подробный лог: список событий [{ts, level, event, message}]
+    events: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
+# ---------------------------------------------------------------------------
+# RawBatchRecord (Сырой ответ источника — для дебага и переигрывания)
+# ---------------------------------------------------------------------------
+# Каждый fetch_delta пишет сюда RawBatch. Полезно когда нормализация
+# упадёт на странных данных — можно посмотреть исходник и переиграть.
+# ---------------------------------------------------------------------------
+class RawBatchRecord(Base):
+    __tablename__ = "raw_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    sync_log_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channel_sync_logs.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    doc_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Сырая полезная нагрузка
+    items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    items_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

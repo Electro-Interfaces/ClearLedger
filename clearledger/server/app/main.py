@@ -29,6 +29,7 @@ from app.routers import (
     references_router,
     reports_router,
     settings_router,
+    source_types_router,
     stats_router,
 )
 from app.seed import seed_data
@@ -101,6 +102,7 @@ app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
+app.include_router(source_types_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")
@@ -108,6 +110,6 @@ async def health_check():
     """Проверка работоспособности сервера."""
     return {
         "status": "ok",
-        "version": "0.5.0",
+        "version": "0.7.0",
         "service": "ClearLedger API",
     }
