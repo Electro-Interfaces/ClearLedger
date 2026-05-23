@@ -418,7 +418,7 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
     'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 [grid-auto-rows:min-content] items-start">
+    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
       {/* Row 1: meta — Статус, Источники, Расписание */}
       <Card className={`${compactCard} border-l-2 ${statusBorder}`}>
         <CardHeader className="pb-0">
