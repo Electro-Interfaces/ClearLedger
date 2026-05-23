@@ -39,7 +39,7 @@ type TabId = 'overview' | 'sources' | 'pipeline' | 'data' | 'log'
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'Обзор', icon: Radio },
   { id: 'sources', label: 'Источники', icon: Database },
-  { id: 'pipeline', label: 'Обработка', icon: Settings2 },
+  { id: 'pipeline', label: 'Схема', icon: Settings2 },
   { id: 'data', label: 'Загружено', icon: FileText },
   { id: 'log', label: 'Лог', icon: History },
 ]
@@ -672,62 +672,227 @@ function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      {/* Этапы pipeline */}
+      <div className="space-y-3">
         <div>
           <h3 className="text-sm font-semibold">Этапы обработки</h3>
           <p className="text-xs text-muted-foreground">
             Данные проходят через pipeline слева направо
           </p>
         </div>
-      </div>
 
-      <div className="space-y-2">
-        {stages.map((stage, i) => {
-          const meta = STAGE_TYPE_META[stage.type]
-          const IconComp = STAGE_ICONS[meta.icon] ?? Download
-          return (
-            <div key={stage.id}>
-              {i > 0 && (
-                <div className="flex items-center justify-center py-1">
-                  <div className="w-px h-4 bg-border" />
-                </div>
-              )}
-              <Card className={stage.enabled ? '' : 'opacity-50'}>
-                <CardContent className="py-3">
-                  <div className="flex items-center gap-3">
-                    <GripVertical className="h-4 w-4 text-muted-foreground/30 cursor-grab" />
-                    <Checkbox checked={stage.enabled} className="h-4 w-4"
-                      onCheckedChange={() => toggleStage(stage.id)} />
-                    <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary/10">
-                      <IconComp className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{stage.name}</p>
-                      <p className="text-xs text-muted-foreground">{meta.description}</p>
-                    </div>
-                    <Badge variant="outline" className="text-[10px]">{meta.label}</Badge>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeStage(stage.id)}>
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+        <div className="space-y-2">
+          {stages.map((stage, i) => {
+            const meta = STAGE_TYPE_META[stage.type]
+            const IconComp = STAGE_ICONS[meta.icon] ?? Download
+            return (
+              <div key={stage.id}>
+                {i > 0 && (
+                  <div className="flex items-center justify-center py-1">
+                    <div className="w-px h-4 bg-border" />
                   </div>
-                </CardContent>
-              </Card>
-            </div>
-          )
-        })}
+                )}
+                <Card className={stage.enabled ? '' : 'opacity-50'}>
+                  <CardContent className="py-3">
+                    <div className="flex items-center gap-3">
+                      <GripVertical className="h-4 w-4 text-muted-foreground/30 cursor-grab" />
+                      <Checkbox checked={stage.enabled} className="h-4 w-4"
+                        onCheckedChange={() => toggleStage(stage.id)} />
+                      <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary/10">
+                        <IconComp className="h-4 w-4 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{stage.name}</p>
+                        <p className="text-xs text-muted-foreground">{meta.description}</p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px]">{meta.label}</Badge>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeStage(stage.id)}>
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )
+          })}
+        </div>
+
+        {stages.length === 0 && (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <Settings2 className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Pipeline пуст</p>
+              <p className="text-xs text-muted-foreground">Добавьте источники — этапы создадутся автоматически</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
-      {stages.length === 0 && (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <Settings2 className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Pipeline пуст</p>
-            <p className="text-xs text-muted-foreground">Добавьте источники — этапы создадутся автоматически</p>
-          </CardContent>
-        </Card>
-      )}
+      {/* Параметры обработки — специфика конкретной обработки */}
+      <ProcessingParametersCard channel={channel} onUpdate={onUpdate} />
+    </div>
+  )
+}
+
+
+/**
+ * Параметры обработки — специфичные настройки конкретной загрузки.
+ *
+ * Общие параметры применимы к любому каналу. Доп. параметры по типу
+ * первого активного потока (например, для shift_report — глубина деталей,
+ * для receipt — режим парсинга масс).
+ */
+function ProcessingParametersCard({
+  channel, onUpdate,
+}: {
+  channel: Channel
+  onUpdate: (ch: Channel) => void
+}) {
+  // Определяем профиль обработки по активному потоку (для контекстных опций)
+  const primaryDocType = channel.streams?.find((s) => s.enabled)?.docTypeId
+  const cfg = channel.config ?? {}
+
+  function update(patch: Record<string, any>) {
+    const updated = updateChannel(channel.id, {
+      config: { ...channel.config, ...patch },
+    })
+    if (updated) onUpdate(updated)
+  }
+
+  function updatePolicy(value: DuplicatePolicy) {
+    const updated = updateChannel(channel.id, { duplicatePolicy: value })
+    if (updated) onUpdate(updated)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold">Параметры обработки</h3>
+        <p className="text-xs text-muted-foreground">
+          Специфичные для этой загрузки. Применяются на этапах нормализации
+          и сохранения.
+        </p>
+      </div>
+
+      <Card>
+        <CardContent className="py-4 space-y-4">
+          {/* Дедупликация */}
+          <div className="grid sm:grid-cols-3 gap-3 items-start">
+            <div>
+              <Label className="text-xs font-medium">Политика дубликатов</Label>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                Что делать с документом, который уже загружен (по fingerprint)
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <Select
+                value={channel.duplicatePolicy ?? 'skip'}
+                onValueChange={(v) => updatePolicy(v as DuplicatePolicy)}
+              >
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="skip" className="text-xs">Пропустить (не загружать повторно)</SelectItem>
+                  <SelectItem value="warn" className="text-xs">Предупредить (показать в логе)</SelectItem>
+                  <SelectItem value="overwrite" className="text-xs">Перезаписать (обновить данные)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="border-t border-border/40" />
+
+          {/* Лимит документов за один запуск */}
+          <div className="grid sm:grid-cols-3 gap-3 items-start">
+            <div>
+              <Label className="text-xs font-medium">Лимит за запуск</Label>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                Макс. документов за один прогон. 0 = без ограничения.
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <Input
+                type="number"
+                min="0"
+                value={cfg.runLimit ?? 0}
+                onChange={(e) => update({ runLimit: Number(e.target.value) || 0 })}
+                className="h-8 text-xs sm:max-w-[160px]"
+              />
+            </div>
+          </div>
+
+          {/* Параметры специфики типа документа */}
+          {primaryDocType === 'shift_report' && (
+            <>
+              <div className="border-t border-border/40" />
+              <div className="space-y-3">
+                <div className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
+                  Сменные отчёты
+                </div>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <Checkbox
+                    checked={cfg.includeReceipts ?? true}
+                    onCheckedChange={(v) => update({ includeReceipts: !!v })}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span>Извлекать ТТН из сменных отчётов</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <Checkbox
+                    checked={cfg.includePayments ?? true}
+                    onCheckedChange={(v) => update({ includePayments: !!v })}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span>Сохранять разбивку оплат (наличные / карты / талоны)</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <Checkbox
+                    checked={cfg.includeTanks ?? true}
+                    onCheckedChange={(v) => update({ includeTanks: !!v })}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span>Сохранять остатки резервуаров</span>
+                </label>
+              </div>
+            </>
+          )}
+
+          {primaryDocType === 'receipt' && (
+            <>
+              <div className="border-t border-border/40" />
+              <div className="space-y-3">
+                <div className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
+                  Поступления (ТТН)
+                </div>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <Checkbox
+                    checked={cfg.recomputeDensity ?? false}
+                    onCheckedChange={(v) => update({ recomputeDensity: !!v })}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span>Пересчитывать плотность по факту (объём ↔ масса)</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs cursor-pointer">
+                  <Checkbox
+                    checked={cfg.warnDiff ?? true}
+                    onCheckedChange={(v) => update({ warnDiff: !!v })}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span>Помечать расхождения «факт vs документ» в логе</span>
+                </label>
+              </div>
+            </>
+          )}
+
+          {!primaryDocType && (
+            <div className="text-[11px] text-muted-foreground italic">
+              Дополнительные параметры появятся после подключения первого
+              источника к обработке.
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }
