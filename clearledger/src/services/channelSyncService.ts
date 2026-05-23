@@ -3,6 +3,7 @@
  */
 
 import type { Channel, SyncLogEntry, SyncResult } from '@/types/channel'
+import { getChannelStations } from '@/types/channel'
 import { updateChannel, addSyncLog } from './channelService'
 import { getSource } from './sourceService'
 import { stsLogin, stsGetShifts, stsGetShiftReport } from './fuel/stsApiClient'
@@ -68,11 +69,11 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
   const conn = source?.connection ?? {}
   const login = conn.login || ''
   const password = conn.password || ''
-  const systemCode = Number(conn.systemCode) || 65
 
-  const stationCodes: number[] = channel.config?.stationCodes ?? []
-  if (stationCodes.length === 0) {
-    log.push(logEntry('error', 'ERROR', 'Не указаны станции (config.stationCodes)'))
+  // Берём станции из канала. Каждая несёт свой system_id — сеть АЗС в STS.
+  const stations = getChannelStations(channel)
+  if (stations.length === 0) {
+    log.push(logEntry('error', 'ERROR', 'Не указаны станции (config.stations)'))
     addSyncLog(channel.id, log)
     return { channelId: channel.id, startedAt, finishedAt: new Date().toISOString(), loaded, skipped: 0, duplicates, errors: 1, log }
   }
@@ -84,7 +85,10 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
     return { channelId: channel.id, startedAt, finishedAt: new Date().toISOString(), loaded, skipped: 0, duplicates, errors: 0, log }
   }
 
-  log.push(logEntry('info', 'SYNC', `Загрузка сменных отчётов (станции: ${stationCodes.join(', ')})`))
+  const stationsLabel = stations
+    .map((s) => `${s.code}@sys${s.systemId}`)
+    .join(', ')
+  log.push(logEntry('info', 'SYNC', `Загрузка сменных отчётов (станции: ${stationsLabel})`))
   opts.onProgress?.(0, 0, 'Авторизация...')
 
   try {
@@ -97,21 +101,27 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
     return { channelId: channel.id, startedAt, finishedAt: new Date().toISOString(), loaded, skipped: 0, duplicates, errors: 1, log }
   }
 
-  for (const stationId of stationCodes) {
+  for (const station of stations) {
+    const stationId = station.code
+    const systemId = station.systemId
+    const stationTag = `${stationId}@sys${systemId}`
+
     let shifts: Awaited<ReturnType<typeof stsGetShifts>> = []
     try {
-      shifts = await stsGetShifts(systemCode, stationId)
-      log.push(logEntry('info', 'LOAD', `Станция ${stationId}: ${shifts.length} смен`))
+      shifts = await stsGetShifts(systemId, stationId)
+      log.push(logEntry('info', 'LOAD', `Станция ${stationTag}: ${shifts.length} смен`))
     } catch (err) {
-      log.push(logEntry('error', 'ERROR', `Станция ${stationId}: ${err instanceof Error ? err.message : err}`))
+      log.push(logEntry('error', 'ERROR', `Станция ${stationTag}: ${err instanceof Error ? err.message : err}`))
       errors++
       continue
     }
 
-    opts.onProgress?.(loaded, shifts.length, `Станция ${stationId}: загрузка...`)
+    opts.onProgress?.(loaded, shifts.length, `Станция ${stationTag}: загрузка...`)
 
     for (const shift of shifts) {
-      const fp = `shift|${stationId}|${shift.shift}`
+      // Включаем system_id в fingerprint — иначе при работе с обеими
+      // сетями одна и та же пара (station, shift) может перетереть запись.
+      const fp = `shift|sys${systemId}|${stationId}|${shift.shift}`
 
       if (getLoadedDocs().some((d) => d.fingerprint === fp)) {
         duplicates++
@@ -119,11 +129,11 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
       }
 
       try {
-        const report = await stsGetShiftReport(stationId, shift.shift, systemCode)
+        const report = await stsGetShiftReport(stationId, shift.shift, systemId)
         const record = normalizeShift(stationId, shift.shift, shift.dt_open, shift.dt_close, report)
 
         const doc: LoadedDocument = {
-          id: `shift-${stationId}-${shift.shift}`,
+          id: `shift-sys${systemId}-${stationId}-${shift.shift}`,
           channelId: channel.id,
           streamId: shiftStream.id,
           docType: 'shift_report',
@@ -133,7 +143,7 @@ export async function syncRestChannel(channel: Channel, opts: SyncOptions = {}):
           date: shift.dt_open,
           data: record,
           catalog: shiftStream.catalogTemplate
-            .replace('{станция}', `АЗС-${stationId}`)
+            .replace('{станция}', station.name ?? `АЗС-${stationId}`)
             .replace('{год}', new Date(shift.dt_open).getFullYear().toString())
             .replace('{месяц}', String(new Date(shift.dt_open).getMonth() + 1).padStart(2, '0')),
           loadedAt: new Date().toISOString(),

@@ -41,13 +41,14 @@ export function initDefaults() {
   })
 
   // Канал 1: «Загрузка сменных отчётов»
+  // Стартовый набор — пилотная АЗС 5 в сети 65. Менеджер добавит остальные
+  // станции через UI (диалог «Выбрать из справочника»).
   const shiftChannel = createChannel({
     name: 'Загрузка сменных отчётов',
     sourceIds: [source.id],
-    description: 'Сменные отчёты с АЗС сети ГИГ (сеть 65, станция 5)',
+    description: 'Сменные отчёты с АЗС сети ГИГ',
     config: {
-      stationCodes: [5],
-      systemCode: 65,
+      stations: [{ code: 5, systemId: 65, name: 'АКЗС Витебский (пилот ГИГ)' }],
     },
   })
 
@@ -67,7 +68,7 @@ export function initDefaults() {
     description: 'ТТН (слив бензовозов) — извлекаются из сменных отчётов',
     config: {
       extractFrom: 'shift_reports',
-      stationCodes: [5],
+      stations: [{ code: 5, systemId: 65, name: 'АКЗС Витебский (пилот ГИГ)' }],
     },
   })
 

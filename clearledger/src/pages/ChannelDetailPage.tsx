@@ -12,12 +12,16 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+} from '@/components/ui/dialog'
 import { getChannel, updateChannel, addSourceToChannel, removeSourceFromChannel } from '@/services/channelService'
 import { getSources } from '@/services/sourceService'
+import { getLocations } from '@/services/locationService'
 import { syncChannel, getAllLoadedDocs } from '@/services/channelSyncService'
 import { extractDeliveries } from '@/services/receiptExtractService'
-import { getChannelSourceIds, STAGE_TYPE_META, DUPLICATE_POLICY_META } from '@/types/channel'
-import type { Channel, ChannelStage, SyncResult, DuplicatePolicy } from '@/types/channel'
+import { getChannelSourceIds, getChannelStations, STAGE_TYPE_META, DUPLICATE_POLICY_META } from '@/types/channel'
+import type { Channel, ChannelStage, ChannelStation, SyncResult, DuplicatePolicy } from '@/types/channel'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -50,6 +54,183 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
   draft: { label: 'Черновик', variant: 'outline', color: 'text-amber-500' },
 }
 
+// ─── Выбор станций из справочника точек обслуживания ──────
+
+interface PickerEntry {
+  /** Уникальный ключ выбора в UI */
+  key: string
+  /** Код станции */
+  code: number
+  /** Тех. сеть STS */
+  systemId: number
+  /** Имя ServiceLocation для отображения */
+  name: string
+  /** ID ServiceLocation */
+  locationId: string
+}
+
+/**
+ * Подготовить кандидатов из справочника точек обслуживания —
+ * по STS-привязкам в `location.sourceBindings`.
+ *
+ * Одна точка может быть в нескольких сетях (например, АЗС 5 в sys=65
+ * пилотно и параллельно в sys=15 как fallback) — тогда возвращаются
+ * две разных записи, выбираются независимо.
+ */
+function collectStationCandidates(stsSourceId?: string): PickerEntry[] {
+  const entries: PickerEntry[] = []
+  for (const loc of getLocations()) {
+    if (loc.type !== 'fuel_station') continue
+    for (const b of loc.sourceBindings) {
+      if (stsSourceId && b.sourceId !== stsSourceId) continue
+      const systemId = Number(b.config?.system_id ?? b.config?.systemId)
+      const code = Number(b.config?.station ?? b.config?.code ?? loc.code)
+      if (!systemId || !code) continue
+      entries.push({
+        key: `${loc.id}|${systemId}|${code}`,
+        code, systemId,
+        name: loc.name,
+        locationId: loc.id,
+      })
+    }
+  }
+  // Группировка-сортировка: по системе, потом по коду
+  entries.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
+  return entries
+}
+
+function StationPickerDialog({
+  open, onOpenChange, channelStations, onSave,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  channelStations: ChannelStation[]
+  onSave: (next: ChannelStation[]) => void
+}) {
+  // Кандидаты — все STS-привязки из справочника точек
+  const stsSource = getSources().find((s) => s.type === 'rest')
+  const candidates = useMemo(
+    () => collectStationCandidates(stsSource?.id),
+    [stsSource?.id, open],
+  )
+
+  // Какие уже выбраны (по code+systemId)
+  const initiallyChecked = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of channelStations) set.add(`${s.systemId}|${s.code}`)
+    return set
+  }, [channelStations, open])
+
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+
+  // Сброс выбора при открытии
+  useMemo(() => {
+    if (open) setChecked(new Set(initiallyChecked))
+  }, [open, initiallyChecked])
+
+  function toggle(codeKey: string) {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(codeKey)) next.delete(codeKey)
+      else next.add(codeKey)
+      return next
+    })
+  }
+
+  function handleSave() {
+    // Собираем результат: оставляем не-STS станции как есть (например,
+    // ручные с любой системой), и заменяем STS-набор из чекбоксов
+    const stsCodeKeys = new Set(candidates.map((c) => `${c.systemId}|${c.code}`))
+    const keptManual = channelStations.filter(
+      (s) => !stsCodeKeys.has(`${s.systemId}|${s.code}`),
+    )
+    const selectedFromPicker: ChannelStation[] = candidates
+      .filter((c) => checked.has(`${c.systemId}|${c.code}`))
+      .map((c) => ({
+        code: c.code,
+        systemId: c.systemId,
+        name: c.name,
+        locationId: c.locationId,
+      }))
+    const merged = [...keptManual, ...selectedFromPicker]
+    merged.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
+    onSave(merged)
+  }
+
+  // Группировка кандидатов по system_id
+  const groups = useMemo(() => {
+    const m = new Map<number, PickerEntry[]>()
+    for (const c of candidates) {
+      if (!m.has(c.systemId)) m.set(c.systemId, [])
+      m.get(c.systemId)!.push(c)
+    }
+    return Array.from(m.entries()).sort((a, b) => a[0] - b[0])
+  }, [candidates])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 text-xs gap-1">
+          <Plus className="h-3 w-3" />
+          Из справочника
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Выбрать станции для обработки</DialogTitle>
+          <DialogDescription>
+            Точки обслуживания с STS-привязками. Одна станция может присутствовать
+            в обеих тех. сетях — выбирайте независимо.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+          {groups.length === 0 && (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              В справочнике нет точек со STS-привязкой. Откройте «Настройки → Точки обслуживания»
+              и запустите «Импорт из STS».
+            </p>
+          )}
+          {groups.map(([sys, items]) => (
+            <div key={sys} className="space-y-1">
+              <div className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
+                Сеть system_id = {sys} <span className="text-muted-foreground/50">· {items.length}</span>
+              </div>
+              {items.map((c) => {
+                const codeKey = `${c.systemId}|${c.code}`
+                return (
+                  <label
+                    key={c.key}
+                    className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-accent/30 cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={checked.has(codeKey)}
+                      onCheckedChange={() => toggle(codeKey)}
+                      className="h-4 w-4"
+                    />
+                    <span className="text-xs font-mono w-10 shrink-0 text-muted-foreground">
+                      {c.code}
+                    </span>
+                    <span className="text-xs truncate">{c.name}</span>
+                  </label>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Отмена
+          </Button>
+          <Button size="sm" onClick={handleSave}>
+            Сохранить ({checked.size})
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+
 // ─── Вкладка: Обзор ────────────────────────────────────────
 
 function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: () => void; onUpdate: (ch: Channel) => void }) {
@@ -58,24 +239,35 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
   const channelSources = sources.filter((s) => channelSourceIds.includes(s.id))
   const status = STATUS_MAP[channel.status] ?? STATUS_MAP.draft
   const docs = getAllLoadedDocs().filter((d) => d.channelId === channel.id)
-  const stationCodes: number[] = channel.config?.stationCodes ?? []
 
-  const [newStation, setNewStation] = useState('')
+  const stations = getChannelStations(channel)
+  const [newStationCode, setNewStationCode] = useState('')
+  const [newStationSystem, setNewStationSystem] = useState<string>('65')
+  const [pickerOpen, setPickerOpen] = useState(false)
 
-  function addStation() {
-    const code = Number(newStation)
-    if (!code || stationCodes.includes(code)) return
+  function saveStations(next: ChannelStation[]) {
     const updated = updateChannel(channel.id, {
-      config: { ...channel.config, stationCodes: [...stationCodes, code] },
-    })
-    if (updated) { onUpdate(updated); setNewStation('') }
-  }
-
-  function removeStation(code: number) {
-    const updated = updateChannel(channel.id, {
-      config: { ...channel.config, stationCodes: stationCodes.filter((c) => c !== code) },
+      config: {
+        ...channel.config,
+        stations: next,
+        // Очищаем legacy-поле — теперь источник истины stations[]
+        stationCodes: undefined,
+      },
     })
     if (updated) onUpdate(updated)
+  }
+
+  function addManualStation() {
+    const code = Number(newStationCode)
+    const systemId = Number(newStationSystem)
+    if (!code || !systemId) return
+    if (stations.some((s) => s.code === code && s.systemId === systemId)) return
+    saveStations([...stations, { code, systemId }])
+    setNewStationCode('')
+  }
+
+  function removeStation(code: number, systemId: number) {
+    saveStations(stations.filter((s) => !(s.code === code && s.systemId === systemId)))
   }
 
   return (
@@ -95,11 +287,11 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
             </p>
           )}
           <Button size="sm" className="mt-3 gap-1.5" onClick={onSync}
-            disabled={stationCodes.length === 0 || channelSources.length === 0}>
+            disabled={stations.length === 0 || channelSources.length === 0}>
             <Play className="h-3.5 w-3.5" />
             Запустить pipeline
           </Button>
-          {stationCodes.length === 0 && (
+          {stations.length === 0 && (
             <p className="text-[10px] text-amber-500 mt-1">Укажите хотя бы одну станцию</p>
           )}
         </CardContent>
@@ -108,31 +300,60 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
       {/* Станции */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-1.5">
-            <MapPin className="h-3.5 w-3.5" />
-            Станции
-          </CardTitle>
-          <CardDescription className="text-xs">Какие АЗС загружать</CardDescription>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5" />
+              Станции
+            </CardTitle>
+            <StationPickerDialog
+              open={pickerOpen}
+              onOpenChange={setPickerOpen}
+              channelStations={stations}
+              onSave={(next) => { saveStations(next); setPickerOpen(false) }}
+            />
+          </div>
+          <CardDescription className="text-xs">
+            {stations.length === 0 ? 'Нет станций' : `Выбрано ${stations.length}`}
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            {stationCodes.map((code) => (
-              <div key={code} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-muted/30">
-                <span className="font-medium">Станция {code}</span>
-                <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-destructive"
-                  onClick={() => removeStation(code)}>
+          <div className="space-y-1">
+            {stations.length === 0 && (
+              <p className="text-xs text-muted-foreground py-2 text-center">
+                Откройте «Выбрать из справочника» или добавьте вручную
+              </p>
+            )}
+            {stations.map((s) => (
+              <div key={`${s.systemId}-${s.code}`}
+                className="flex items-center justify-between text-xs py-1 px-2 rounded bg-muted/30">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium truncate">
+                    {s.name ?? `Станция ${s.code}`}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground font-mono">
+                    code={s.code} · sys={s.systemId}
+                  </div>
+                </div>
+                <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-destructive shrink-0"
+                  onClick={() => removeStation(s.code, s.systemId)}>
                   <Trash2 className="h-3 w-3" />
                 </Button>
               </div>
             ))}
-            <div className="flex items-center gap-2 mt-2">
-              <Input value={newStation} onChange={(e) => setNewStation(e.target.value)}
-                placeholder="Код станции" className="h-7 text-xs w-24" type="number"
-                onKeyDown={(e) => e.key === 'Enter' && addStation()} />
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={addStation}
-                disabled={!newStation}>
+            <div className="flex items-center gap-1 mt-2 pt-2 border-t border-border/40">
+              <Input value={newStationCode} onChange={(e) => setNewStationCode(e.target.value)}
+                placeholder="Код" className="h-7 text-xs flex-1 min-w-0" type="number"
+                onKeyDown={(e) => e.key === 'Enter' && addManualStation()} />
+              <Select value={newStationSystem} onValueChange={setNewStationSystem}>
+                <SelectTrigger className="h-7 text-xs w-[92px] shrink-0"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="65" className="text-xs">sys 65</SelectItem>
+                  <SelectItem value="15" className="text-xs">sys 15</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={addManualStation}
+                disabled={!newStationCode}>
                 <Plus className="h-3 w-3" />
-                Добавить
               </Button>
             </div>
           </div>

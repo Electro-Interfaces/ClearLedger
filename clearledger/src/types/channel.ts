@@ -87,6 +87,25 @@ export function defaultTradecorpDocTypes(): SourceDocType[] {
 
 // ─── Каналы (Channels) — pipeline обработки данных ──────
 
+/**
+ * Конкретная АЗС, обрабатываемая каналом, вместе с тех. сетью STS.
+ *
+ * Раньше канал хранил только `stationCodes: number[]` и неявно использовал
+ * один `systemCode` из source.connection. Когда у клиента несколько сетей
+ * (у ГИГ — 65 и 15), это перестаёт работать: одна станция может
+ * существовать только в одной из сетей. Поэтому привязка теперь явная.
+ */
+export interface ChannelStation {
+  /** Код станции в STS (5, 208, 209, ...) */
+  code: number
+  /** Технический ID сети STS (65 или 15 для ГИГ) */
+  systemId: number
+  /** Человекочитаемое имя — для UI и логов (необязательно) */
+  name?: string
+  /** ID ServiceLocation, если станция выбрана из справочника */
+  locationId?: string
+}
+
 export type ChannelStatus = 'active' | 'paused' | 'error' | 'draft'
 
 export type DuplicatePolicy = 'skip' | 'warn' | 'overwrite'
@@ -281,6 +300,24 @@ export function getChannelSourceIds(ch: Channel): string[] {
   if (ch.sourceIds?.length) return ch.sourceIds
   if (ch.sourceId) return [ch.sourceId]
   return []
+}
+
+/**
+ * Получить станции канала с явным system_id.
+ *
+ * Совместимость:
+ * - если в config есть `stations: ChannelStation[]` — берём как есть;
+ * - иначе строим из legacy `stationCodes: number[]`, подставляя systemId
+ *   из config.systemCode или 65 как fallback.
+ */
+export function getChannelStations(ch: Channel): ChannelStation[] {
+  const cfg = ch.config ?? {}
+  if (Array.isArray(cfg.stations) && cfg.stations.length > 0) {
+    return cfg.stations as ChannelStation[]
+  }
+  const codes: number[] = cfg.stationCodes ?? []
+  const fallbackSystem = Number(cfg.systemCode ?? cfg.system_id ?? 65)
+  return codes.map((code) => ({ code, systemId: fallbackSystem }))
 }
 
 export const DUPLICATE_POLICY_META: Record<DuplicatePolicy, { label: string; description: string }> = {

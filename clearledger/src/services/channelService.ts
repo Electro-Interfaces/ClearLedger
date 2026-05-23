@@ -73,7 +73,7 @@ function defaultStages(sourceIds: string[]): ChannelStage[] {
   return stages
 }
 
-/** Миграция: старый формат (sourceId) → новый (sourceIds) */
+/** Миграция: старый формат (sourceId) → новый (sourceIds, stations) */
 function migrateChannel(ch: any): Channel {
   if (!ch.sourceIds) {
     ch.sourceIds = ch.sourceId ? [ch.sourceId] : []
@@ -96,6 +96,21 @@ function migrateChannel(ch: any): Channel {
     for (const s of ch.streams) {
       if (!s.sourceId) s.sourceId = primarySourceId
     }
+  }
+  // Миграция станций: stationCodes:number[] → stations:ChannelStation[]
+  // с системой по умолчанию из config.systemCode (если был) или 65.
+  if (!ch.config.stations && Array.isArray(ch.config.stationCodes)) {
+    const fallbackSystem = Number(ch.config.systemCode ?? 65)
+    ch.config.stations = ch.config.stationCodes.map((code: number) => ({
+      code: Number(code), systemId: fallbackSystem,
+    }))
+  }
+  // Удаляем устаревшее description вида «сеть 65, станция 5» — оно сужает
+  // канал до одной сети, что больше не верно для ГИГ.
+  if (typeof ch.description === 'string' && /сеть\s*65,\s*станция/i.test(ch.description)) {
+    ch.description = ch.description
+      .replace(/\s*\(сеть\s*65,\s*станция[^)]*\)\s*/i, '')
+      .trim()
   }
   return ch as Channel
 }
