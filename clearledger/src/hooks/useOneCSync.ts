@@ -69,8 +69,13 @@ export function useDeleteOneCConnection() {
 // ── Тест подключения ────────────────────────────────────
 
 export function useTestOneCConnection() {
+  const qc = useQueryClient()
+  const { companyId } = useCompany()
   return useMutation({
     mutationFn: (id: string) => svc.testConnection(id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: keys.connections(companyId) })
+    },
   })
 }
 

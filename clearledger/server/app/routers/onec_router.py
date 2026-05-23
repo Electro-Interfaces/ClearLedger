@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import OneCConnection, OneCSyncLog, User
+from app.models import Company, OneCConnection, OneCSyncLog, User
 from app.schemas import (
     OneCConnectionCreate,
     OneCConnectionResponse,
@@ -42,6 +42,7 @@ def _connection_response(c: OneCConnection) -> OneCConnectionResponse:
         id=str(c.id),
         company_id=str(c.company_id),
         name=c.name,
+        mode=c.mode,
         odata_url=c.odata_url,
         username=c.username,
         exchange_path=c.exchange_path,
@@ -68,6 +69,20 @@ def _synclog_response(log: OneCSyncLog) -> OneCSyncLogResponse:
         started_at=log.started_at,
         finished_at=log.finished_at,
     )
+
+
+async def _resolve_company_id(value: str, db: AsyncSession) -> uuid.UUID:
+    """Принимает UUID или slug компании, возвращает UUID. CompanyContext во
+    фронте хранит slug ('gig', 'npk', 'rti'), а БД — UUID."""
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        pass
+    result = await db.execute(select(Company).where(Company.slug == value))
+    company = result.scalar_one_or_none()
+    if company is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Unknown company: {value}")
+    return company.id
 
 
 async def _get_connection_or_404(connection_id: str, db: AsyncSession) -> OneCConnection:
@@ -106,10 +121,8 @@ async def list_connections(
 ) -> list[OneCConnectionResponse]:
     stmt = select(OneCConnection)
     if company_id:
-        try:
-            stmt = stmt.where(OneCConnection.company_id == uuid.UUID(company_id))
-        except ValueError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid company_id") from exc
+        cid = await _resolve_company_id(company_id, db)
+        stmt = stmt.where(OneCConnection.company_id == cid)
     result = await db.execute(stmt.order_by(OneCConnection.created_at.desc()))
     return [_connection_response(c) for c in result.scalars().all()]
 
@@ -134,16 +147,14 @@ async def create_connection(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ) -> OneCConnectionResponse:
-    try:
-        cid = uuid.UUID(payload.company_id)
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid company_id") from exc
+    cid = await _resolve_company_id(payload.company_id, db)
 
     conn = OneCConnection(
         id=uuid.uuid4(),
         company_id=cid,
         name=payload.name,
-        odata_url=payload.odata_url.rstrip("/"),
+        mode=payload.mode,
+        odata_url=payload.odata_url.rstrip("/") if payload.mode == "odata" else payload.odata_url,
         username=payload.username,
         password_encrypted=encrypt_password(payload.password),
         exchange_path=payload.exchange_path,
@@ -168,8 +179,11 @@ async def update_connection(
     conn = await _get_connection_or_404(connection_id, db)
     if payload.name is not None:
         conn.name = payload.name
+    if payload.mode is not None:
+        conn.mode = payload.mode
     if payload.odata_url is not None:
-        conn.odata_url = payload.odata_url.rstrip("/")
+        new_mode = payload.mode or conn.mode
+        conn.odata_url = payload.odata_url.rstrip("/") if new_mode == "odata" else payload.odata_url
     if payload.username is not None:
         conn.username = payload.username
     if payload.password is not None:

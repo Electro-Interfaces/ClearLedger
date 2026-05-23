@@ -657,6 +657,60 @@ export async function upsertBankAccounts(companyId: string, items: BankAccount[]
 }
 
 // ============================================================
+// Пагинированный поиск (для страницы /1c/references)
+// ============================================================
+
+export interface ReferencesPage<T> {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface RefSearchParams {
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+function buildSearchParams(companyId: string, params: RefSearchParams): Record<string, string | number | undefined> {
+  return {
+    company_id: companyId,
+    q: params.q?.trim() || undefined,
+    limit: params.limit ?? 50,
+    offset: params.offset ?? 0,
+  }
+}
+
+export async function searchCounterpartiesPaged(
+  companyId: string,
+  params: RefSearchParams = {},
+): Promise<ReferencesPage<Counterparty>> {
+  return get<ReferencesPage<Counterparty>>('/api/references/counterparties/search', buildSearchParams(companyId, params))
+}
+
+export async function searchOrganizationsPaged(
+  companyId: string,
+  params: RefSearchParams = {},
+): Promise<ReferencesPage<Organization>> {
+  return get<ReferencesPage<Organization>>('/api/references/organizations/search', buildSearchParams(companyId, params))
+}
+
+export async function searchNomenclaturePaged(
+  companyId: string,
+  params: RefSearchParams = {},
+): Promise<ReferencesPage<Nomenclature>> {
+  return get<ReferencesPage<Nomenclature>>('/api/references/nomenclature/search', buildSearchParams(companyId, params))
+}
+
+export async function searchWarehousesPaged(
+  companyId: string,
+  params: RefSearchParams = {},
+): Promise<ReferencesPage<Warehouse>> {
+  return get<ReferencesPage<Warehouse>>('/api/references/warehouses/search', buildSearchParams(companyId, params))
+}
+
+// ============================================================
 // Статистика справочников
 // ============================================================
 

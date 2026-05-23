@@ -399,3 +399,73 @@ async function computeLocalSummary(companyId: string): Promise<ReconciliationSum
     totalEntries: entries.length,
   }
 }
+
+// ============================================================
+// Пагинированный поиск + сводка (для страницы /1c/documents)
+// ============================================================
+
+export interface AccountingDocSummary {
+  id: string
+  companyId: string
+  externalId: string
+  docType: string
+  number: string
+  date: string
+  counterpartyName: string
+  counterpartyInn?: string | null
+  organizationName?: string | null
+  amount: number
+  vatAmount?: number | null
+  status1c: string
+  matchStatus: string
+  warehouseCode?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AccountingDocsPageResp {
+  items: AccountingDocSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AccountingDocsStats {
+  total: number
+  byType: Record<string, number>
+  bySource: Record<string, number>
+}
+
+export type DocSort = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc'
+
+export interface DocSearchParams {
+  q?: string
+  docType?: string
+  dateFrom?: string
+  dateTo?: string
+  matchStatus?: string
+  sort?: DocSort
+  limit?: number
+  offset?: number
+}
+
+export async function searchAccountingDocs(
+  companyId: string,
+  params: DocSearchParams = {},
+): Promise<AccountingDocsPageResp> {
+  return get<AccountingDocsPageResp>('/api/accounting-docs/search', {
+    company_id: companyId,
+    q: params.q?.trim() || undefined,
+    doc_type: params.docType || undefined,
+    date_from: params.dateFrom || undefined,
+    date_to: params.dateTo || undefined,
+    match_status: params.matchStatus || undefined,
+    sort: params.sort ?? 'date_desc',
+    limit: params.limit ?? 50,
+    offset: params.offset ?? 0,
+  })
+}
+
+export async function getAccountingDocsStats(companyId: string): Promise<AccountingDocsStats> {
+  return get<AccountingDocsStats>('/api/accounting-docs/stats', { company_id: companyId })
+}

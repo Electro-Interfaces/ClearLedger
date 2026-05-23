@@ -34,3 +34,9 @@ pnpm-debug.log*
 # OS
 Thumbs.db
 Desktop.ini
+
+# Playwright и отладочные скриншоты
+.playwright-mcp/
+/*.png
+clearledger/*.png
+

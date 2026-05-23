@@ -13,6 +13,7 @@ interface ApiOneCConnection {
   id: string
   company_id: string
   name: string
+  mode: 'odata' | 'com'
   odata_url: string
   username: string
   exchange_path: string | null
@@ -28,6 +29,7 @@ function apiToConnection(a: ApiOneCConnection): OneCConnection {
     id: a.id,
     companyId: a.company_id,
     name: a.name,
+    mode: a.mode,
     odataUrl: a.odata_url,
     username: a.username,
     exchangePath: a.exchange_path ?? undefined,
@@ -92,6 +94,7 @@ function apiToSyncResult(a: ApiSyncResult): OneCSyncResult {
 export interface CreateConnectionInput {
   companyId: string
   name?: string
+  mode?: 'odata' | 'com'
   odataUrl: string
   username: string
   password: string
@@ -101,6 +104,7 @@ export interface CreateConnectionInput {
 
 export interface UpdateConnectionInput {
   name?: string
+  mode?: 'odata' | 'com'
   odataUrl?: string
   username?: string
   password?: string
@@ -124,6 +128,7 @@ export async function createConnection(input: CreateConnectionInput): Promise<On
   const res = await post<ApiOneCConnection>('/api/onec/connections', {
     company_id: input.companyId,
     name: input.name ?? '1С:Бухгалтерия',
+    mode: input.mode ?? 'odata',
     odata_url: input.odataUrl,
     username: input.username,
     password: input.password,
@@ -136,6 +141,7 @@ export async function createConnection(input: CreateConnectionInput): Promise<On
 export async function updateConnection(id: string, input: UpdateConnectionInput): Promise<OneCConnection> {
   const body: Record<string, unknown> = {}
   if (input.name !== undefined) body.name = input.name
+  if (input.mode !== undefined) body.mode = input.mode
   if (input.odataUrl !== undefined) body.odata_url = input.odataUrl
   if (input.username !== undefined) body.username = input.username
   if (input.password !== undefined) body.password = input.password

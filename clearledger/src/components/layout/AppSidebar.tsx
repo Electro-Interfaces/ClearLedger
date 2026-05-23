@@ -32,7 +32,8 @@ const intakeItems = [
 const oneCItems = [
   { to: '/1c/connection', icon: Plug, label: 'Подключение' },
   { to: '/1c/references', icon: BookOpen, label: 'Справочники' },
-  { to: '/1c/periods', icon: CalendarClock, label: 'Периоды' },
+  { to: '/1c/documents',  icon: FileText, label: 'Документы' },
+  { to: '/1c/periods',    icon: CalendarClock, label: 'Периоды' },
 ]
 
 const settingsItems = [

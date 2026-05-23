@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -18,6 +18,8 @@ from app.schemas import (
     AccountingDocImportRequest,
     AccountingDocImportResponse,
     AccountingDocResponse,
+    AccountingDocsPage,
+    AccountingDocsStats,
     AccountingDocUpdate,
 )
 from app.utils import resolve_company_id
@@ -98,6 +100,91 @@ async def list_accounting_docs(
     q = q.order_by(AccountingDoc.date.desc())
     result = await db.execute(q)
     return [_doc_resp(d) for d in result.scalars().all()]
+
+
+# ---------------------------------------------------------------------------
+# SEARCH (с пагинацией)
+# ---------------------------------------------------------------------------
+
+@router.get("/search", response_model=AccountingDocsPage)
+async def search_accounting_docs(
+    company_id: str = Query(...),
+    q: str | None = Query(None, description="Поиск по номеру/контрагенту/организации"),
+    doc_type: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    match_status: str | None = Query(None),
+    sort: str = Query("date_desc", pattern="^(date_desc|date_asc|amount_desc|amount_asc)$"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await resolve_company_id(company_id, db)
+    base = select(AccountingDoc).where(AccountingDoc.company_id == cid)
+
+    if doc_type:
+        base = base.where(AccountingDoc.doc_type == doc_type)
+    if q:
+        like = f"%{q.strip()}%"
+        base = base.where(or_(
+            AccountingDoc.number.ilike(like),
+            AccountingDoc.counterparty_name.ilike(like),
+            AccountingDoc.counterparty_inn.ilike(like),
+            AccountingDoc.organization_name.ilike(like),
+            AccountingDoc.external_id.ilike(like),
+        ))
+    if date_from:
+        base = base.where(AccountingDoc.date >= date_from)
+    if date_to:
+        base = base.where(AccountingDoc.date <= date_to)
+    if match_status:
+        base = base.where(AccountingDoc.match_status == match_status)
+
+    total = (await db.execute(
+        select(func.count()).select_from(base.subquery())
+    )).scalar_one()
+
+    order = {
+        "date_desc":   AccountingDoc.date.desc(),
+        "date_asc":    AccountingDoc.date.asc(),
+        "amount_desc": AccountingDoc.amount.desc(),
+        "amount_asc":  AccountingDoc.amount.asc(),
+    }[sort]
+    result = await db.execute(base.order_by(order).limit(limit).offset(offset))
+    return AccountingDocsPage(
+        items=[_doc_resp(d) for d in result.scalars().all()],
+        total=int(total or 0),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/stats", response_model=AccountingDocsStats)
+async def accounting_docs_stats(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await resolve_company_id(company_id, db)
+    total = (await db.execute(
+        select(func.count(AccountingDoc.id)).where(AccountingDoc.company_id == cid)
+    )).scalar_one()
+    by_type_rows = (await db.execute(
+        select(AccountingDoc.doc_type, func.count(AccountingDoc.id))
+        .where(AccountingDoc.company_id == cid)
+        .group_by(AccountingDoc.doc_type)
+    )).all()
+    by_status_rows = (await db.execute(
+        select(AccountingDoc.match_status, func.count(AccountingDoc.id))
+        .where(AccountingDoc.company_id == cid)
+        .group_by(AccountingDoc.match_status)
+    )).all()
+    return AccountingDocsStats(
+        total=int(total or 0),
+        byType={t or "—": int(c) for t, c in by_type_rows},
+        bySource={s or "—": int(c) for s, c in by_status_rows},
+    )
 
 
 # ---------------------------------------------------------------------------

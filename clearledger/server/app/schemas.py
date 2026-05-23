@@ -522,6 +522,19 @@ class AccountingDocResponse(BaseModel):
     updatedAt: str
 
 
+class AccountingDocsPage(BaseModel):
+    items: list[AccountingDocResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class AccountingDocsStats(BaseModel):
+    total: int
+    byType: dict[str, int]
+    bySource: dict[str, int]
+
+
 class AccountingDocImportRequest(BaseModel):
     company_id: str
     docs: list[AccountingDocCreate]
@@ -587,6 +600,36 @@ class WarehouseResponse(BaseModel):
     updatedAt: str
 
 
+# ===== НСИ: пагинированные ответы для UI справочников =====
+
+class CounterpartiesPage(BaseModel):
+    items: list[CounterpartyResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class OrganizationsPage(BaseModel):
+    items: list[OrganizationResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class NomenclaturePage(BaseModel):
+    items: list[NomenclatureResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class WarehousesPage(BaseModel):
+    items: list[WarehouseResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 # ===== НСИ: BankAccount (Банковские счета) =====
 
 class BankAccountCreate(BaseModel):
@@ -626,6 +669,7 @@ class BankAccountResponse(BaseModel):
 class OneCConnectionCreate(BaseModel):
     company_id: str
     name: str = Field(default="1С:Бухгалтерия", max_length=255)
+    mode: Literal["odata", "com"] = "odata"
     odata_url: str = Field(min_length=1, max_length=500)
     username: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=1)
@@ -635,6 +679,7 @@ class OneCConnectionCreate(BaseModel):
 
 class OneCConnectionUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
+    mode: Literal["odata", "com"] | None = None
     odata_url: str | None = Field(default=None, max_length=500)
     username: str | None = Field(default=None, max_length=255)
     password: str | None = None
@@ -647,6 +692,7 @@ class OneCConnectionResponse(BaseModel):
     id: str
     company_id: str
     name: str
+    mode: str
     odata_url: str
     username: str
     exchange_path: str | None = None

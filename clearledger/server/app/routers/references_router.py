@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -29,17 +29,21 @@ from app.schemas import (
     ContractCreate,
     ContractResponse,
     ContractUpdate,
+    CounterpartiesPage,
     CounterpartyCreate,
     CounterpartyResponse,
     CounterpartyUpdate,
     NomenclatureCreate,
+    NomenclaturePage,
     NomenclatureResponse,
     NomenclatureUpdate,
     OrganizationCreate,
     OrganizationResponse,
+    OrganizationsPage,
     OrganizationUpdate,
     WarehouseCreate,
     WarehouseResponse,
+    WarehousesPage,
     WarehouseUpdate,
 )
 
@@ -96,6 +100,38 @@ async def list_counterparties(
         .order_by(Counterparty.name)
     )
     return [_counterparty_resp(c) for c in result.scalars().all()]
+
+
+@router.get("/counterparties/search", response_model=CounterpartiesPage)
+async def search_counterparties(
+    company_id: str = Query(...),
+    q: str | None = Query(None, description="Поиск по name/inn/short_name"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await resolve_company_id(company_id, db)
+    base = select(Counterparty).where(Counterparty.company_id == cid)
+    if q:
+        like = f"%{q.strip()}%"
+        base = base.where(or_(
+            Counterparty.name.ilike(like),
+            Counterparty.short_name.ilike(like),
+            Counterparty.inn.ilike(like),
+        ))
+    total = (await db.execute(
+        select(func.count()).select_from(base.subquery())
+    )).scalar_one()
+    result = await db.execute(
+        base.order_by(Counterparty.name).limit(limit).offset(offset)
+    )
+    return CounterpartiesPage(
+        items=[_counterparty_resp(c) for c in result.scalars().all()],
+        total=int(total or 0),
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(
@@ -201,6 +237,37 @@ async def list_organizations(
     return [_org_resp(o) for o in result.scalars().all()]
 
 
+@router.get("/organizations/search", response_model=OrganizationsPage)
+async def search_organizations(
+    company_id: str = Query(...),
+    q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await resolve_company_id(company_id, db)
+    base = select(Organization).where(Organization.company_id == cid)
+    if q:
+        like = f"%{q.strip()}%"
+        base = base.where(or_(
+            Organization.name.ilike(like),
+            Organization.inn.ilike(like),
+        ))
+    total = (await db.execute(
+        select(func.count()).select_from(base.subquery())
+    )).scalar_one()
+    result = await db.execute(
+        base.order_by(Organization.name).limit(limit).offset(offset)
+    )
+    return OrganizationsPage(
+        items=[_org_resp(o) for o in result.scalars().all()],
+        total=int(total or 0),
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.post(
     "/organizations",
     response_model=OrganizationResponse,
@@ -301,6 +368,37 @@ async def list_nomenclature(
         .order_by(NomenclatureItem.name)
     )
     return [_nom_resp(n) for n in result.scalars().all()]
+
+
+@router.get("/nomenclature/search", response_model=NomenclaturePage)
+async def search_nomenclature(
+    company_id: str = Query(...),
+    q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await resolve_company_id(company_id, db)
+    base = select(NomenclatureItem).where(NomenclatureItem.company_id == cid)
+    if q:
+        like = f"%{q.strip()}%"
+        base = base.where(or_(
+            NomenclatureItem.name.ilike(like),
+            NomenclatureItem.code.ilike(like),
+        ))
+    total = (await db.execute(
+        select(func.count()).select_from(base.subquery())
+    )).scalar_one()
+    result = await db.execute(
+        base.order_by(NomenclatureItem.name).limit(limit).offset(offset)
+    )
+    return NomenclaturePage(
+        items=[_nom_resp(n) for n in result.scalars().all()],
+        total=int(total or 0),
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(
@@ -502,6 +600,38 @@ async def list_warehouses(
         .order_by(Warehouse.name)
     )
     return [_warehouse_resp(w) for w in result.scalars().all()]
+
+
+@router.get("/warehouses/search", response_model=WarehousesPage)
+async def search_warehouses(
+    company_id: str = Query(...),
+    q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await resolve_company_id(company_id, db)
+    base = select(Warehouse).where(Warehouse.company_id == cid)
+    if q:
+        like = f"%{q.strip()}%"
+        base = base.where(or_(
+            Warehouse.name.ilike(like),
+            Warehouse.code.ilike(like),
+            Warehouse.address.ilike(like),
+        ))
+    total = (await db.execute(
+        select(func.count()).select_from(base.subquery())
+    )).scalar_one()
+    result = await db.execute(
+        base.order_by(Warehouse.name).limit(limit).offset(offset)
+    )
+    return WarehousesPage(
+        items=[_warehouse_resp(w) for w in result.scalars().all()],
+        total=int(total or 0),
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(

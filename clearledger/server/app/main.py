@@ -26,6 +26,7 @@ from app.routers import (
     intake_router,
     ocr_router,
     onec_router,
+    periods_router,
     reconciliation_router,
     references_router,
     reports_router,
@@ -105,6 +106,7 @@ app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(source_types_router.router, prefix=API_PREFIX)
 app.include_router(onec_router.router, prefix=API_PREFIX)
+app.include_router(periods_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")
