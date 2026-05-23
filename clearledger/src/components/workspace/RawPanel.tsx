@@ -8,7 +8,9 @@ import { useShifts, useAllReceipts } from '@/hooks/useFuel'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import { getAllLoadedDocs } from '@/services/channelSyncService'
+import { getLocations } from '@/services/locationService'
 import { useFilteredLoadedDocs } from '@/hooks/useFilteredLoadedDocs'
+import { useFilters } from '@/contexts/FilterContext'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -152,8 +154,30 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   // и к построению дерева. Для просмотра конкретного документа
   // (viewer modal) фильтр игнорируется — мы открываем то что выбрали.
   const { docs: filteredDocs, hasActiveFilters: hasGlobalFilters } = useFilteredLoadedDocs()
+  const { locationIds: globalLocIds } = useFilters()
 
-  const filterStation = globalStation === 'all' ? undefined : Number(globalStation)
+  // Преобразуем выбранные точки → коды станций. useShifts работает на одну
+  // станцию за раз, поэтому: 1 точка в фильтре → переопределяем workspace;
+  // 0 или >1 точек → оставляем как было.
+  const globalStationCodes = useMemo<number[]>(() => {
+    if (globalLocIds.length === 0) return []
+    const idToLoc = new Map(getLocations().map((l) => [l.id, l]))
+    const codes: number[] = []
+    for (const id of globalLocIds) {
+      const code = Number(idToLoc.get(id)?.code)
+      if (Number.isFinite(code) && code > 0) codes.push(code)
+    }
+    return codes
+  }, [globalLocIds])
+
+  // Эффективная одна станция для useShifts: если глобально выбрана ровно
+  // одна → её код. Иначе → берём workspace.globalStation.
+  const effectiveStation =
+    globalStationCodes.length === 1
+      ? globalStationCodes[0]
+      : (globalStation === 'all' ? undefined : Number(globalStation))
+
+  const filterStation = effectiveStation
   const { data: shifts, isLoading, isFetching } = useShifts(filterStation)
   const { data: allReceipts } = useAllReceipts(filterStation)
 
@@ -542,6 +566,26 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
           </div>
         )}
       </div>
+
+      {/* Плашка-индикатор глобального фильтра шапки */}
+      {hasGlobalFilters && (
+        <div className="px-2 py-1 border-b border-border/30 bg-primary/5 text-[10px] text-muted-foreground flex items-center gap-1.5">
+          <span className="text-primary/80">●</span>
+          {globalStationCodes.length === 1 ? (
+            <span>
+              Дерево ограничено точкой <strong className="text-foreground">{globalStationCodes[0]}</strong>{' '}
+              из глобального фильтра
+            </span>
+          ) : globalStationCodes.length > 1 ? (
+            <span>
+              В шапке выбрано {globalStationCodes.length} точек — дерево показывает первую активную;
+              плоский список фильтруется по всем
+            </span>
+          ) : (
+            <span>Глобальный фильтр действует (по типам документов)</span>
+          )}
+        </div>
+      )}
 
       {/* Toolbar: поиск + вид + обновить */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/30">
