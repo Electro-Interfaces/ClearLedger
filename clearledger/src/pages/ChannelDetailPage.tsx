@@ -403,27 +403,50 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
   // (tailwind-merge правильно подменяет py-6→py-3, gap-6→gap-2.)
   const compactCard = "py-3 gap-2"
 
+  // Цветовой акцент карточки Статус по состоянию. Используем border-l как
+  // тонкий «маркер слева» — идиома из Stripe/Linear/Vercel: даёт читаемую
+  // визуальную иерархию без агрессивных заливок.
+  const statusBorder =
+    channel.status === 'active' ? 'border-l-emerald-500' :
+    channel.status === 'error' ? 'border-l-destructive' :
+    channel.status === 'paused' ? 'border-l-muted-foreground' :
+    'border-l-amber-500'
+  const statusBadgeBg =
+    channel.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
+    channel.status === 'error' ? 'bg-destructive/10 text-destructive border-destructive/20' :
+    channel.status === 'paused' ? 'bg-muted text-muted-foreground border-border' :
+    'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+
   return (
     <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 [grid-auto-rows:min-content] items-start">
-      {/* Статус — компактная карточка: статус + кнопка + last sync в одну колонку */}
-      <Card className={compactCard}>
+      {/* Row 1: meta — Статус, Источники, Расписание */}
+      <Card className={`${compactCard} border-l-2 ${statusBorder}`}>
         <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-2">
-            <span className={status.color}>●</span>
             Статус
-            <span className={`text-xs font-semibold ml-auto ${status.color}`}>{status.label}</span>
+            <Badge
+              variant="outline"
+              className={`ml-auto h-5 px-1.5 text-[10px] font-medium ${statusBadgeBg}`}
+            >
+              {status.label}
+            </Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent className="pt-0 pb-3 space-y-2">
-          <Button size="sm" className="w-full gap-1.5" onClick={onSync}
+        <CardContent className="pt-0 pb-3 space-y-2.5">
+          <Button size="sm" className="w-full gap-1.5 font-medium" onClick={onSync}
             disabled={stations.length === 0 || channelSources.length === 0}>
             <Play className="h-3.5 w-3.5" />
             Запустить pipeline
           </Button>
-          {channel.lastSync && (
+          {channel.lastSync ? (
             <p className="text-[10px] text-muted-foreground">
-              Последний прогон: {format(new Date(channel.lastSync), 'dd.MM.yyyy HH:mm')}
+              Последний прогон —{' '}
+              <span className="text-foreground/70 font-medium">
+                {format(new Date(channel.lastSync), 'dd.MM.yyyy HH:mm')}
+              </span>
             </p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground">Pipeline ещё не запускался</p>
           )}
           {stations.length === 0 && (
             <p className="text-[10px] text-amber-500">Укажите хотя бы одну станцию</p>
@@ -431,16 +454,15 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
         </CardContent>
       </Card>
 
-      {/* Станции (StationsCard сам шириной 2 ячейки) */}
-      <StationsCard channel={channel} onUpdate={onUpdate} />
-
       {/* Источники */}
       <Card className={compactCard}>
         <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-1.5">
-            <Database className="h-3.5 w-3.5" />
+            <Database className="h-3.5 w-3.5 text-muted-foreground" />
             Источники
-            <span className="text-xs text-muted-foreground font-normal ml-auto">{channelSources.length}</span>
+            <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">
+              {channelSources.length}
+            </span>
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0 pb-3">
@@ -448,7 +470,9 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
             {channelSources.map((src) => (
               <div key={src.id} className="flex items-center gap-2 text-xs">
                 <span className="font-medium truncate">{src.name}</span>
-                <Badge variant="outline" className="text-[9px] h-4 ml-auto shrink-0">{src.type}</Badge>
+                <Badge variant="outline" className="text-[9px] h-4 ml-auto shrink-0 uppercase tracking-wide">
+                  {src.type}
+                </Badge>
               </div>
             ))}
             {channelSources.length === 0 && (
@@ -461,26 +485,31 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
       {/* Расписание */}
       <ScheduleCard channel={channel} onUpdate={onUpdate} />
 
-      {/* Период загрузки */}
+      {/* Row 2: конфигурация — Станции (2) + Период (1) */}
+      <StationsCard channel={channel} onUpdate={onUpdate} />
       <PeriodCard channel={channel} onUpdate={onUpdate} />
 
-      {/* Загружено */}
+      {/* Row 3: результат — Загружено (1) + Pipeline (2) */}
       <Card className={compactCard}>
         <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-1.5">
-            <FileText className="h-3.5 w-3.5" />
+            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
             Загружено
-            <span className="text-xs text-muted-foreground font-normal ml-auto">{docs.length}</span>
+            <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">
+              {docs.length}
+            </span>
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0 pb-3">
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {channel.streams.filter((s) => s.enabled).map((s) => {
               const count = docs.filter((d) => d.streamId === s.id).length
               return (
-                <div key={s.id} className="flex items-center justify-between text-xs">
+                <div key={s.id} className="flex items-center justify-between text-xs gap-2">
                   <span className="truncate">{s.name}</span>
-                  <Badge variant="secondary" className="text-[10px] shrink-0">{count}</Badge>
+                  <Badge variant="secondary" className="text-[10px] shrink-0 tabular-nums">
+                    {count}
+                  </Badge>
                 </div>
               )
             })}
@@ -488,11 +517,11 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
         </CardContent>
       </Card>
 
-      {/* Pipeline */}
-      <Card className={`${compactCard} md:col-span-2 lg:col-span-3`}>
+      {/* Pipeline — визуальный путь обработки */}
+      <Card className={`${compactCard} md:col-span-2`}>
         <CardHeader className="pb-0">
           <CardTitle className="text-sm flex items-center gap-1.5">
-            <Settings2 className="h-3.5 w-3.5" />
+            <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
             Pipeline
             <span className="text-xs text-muted-foreground font-normal ml-auto">
               {channel.stages.filter((s) => s.enabled).length} активных
@@ -500,14 +529,19 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0 pb-3">
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center flex-wrap gap-y-2">
             {channel.stages.sort((a, b) => a.order - b.order).map((stage, i) => {
               const meta = STAGE_TYPE_META[stage.type]
+              const active = stage.enabled
               return (
-                <div key={stage.id} className="flex items-center gap-1.5">
-                  {i > 0 && <span className="text-muted-foreground/30">→</span>}
-                  <div className={`px-2.5 py-1 rounded-md border text-[11px] ${
-                    stage.enabled ? 'border-border bg-card' : 'border-border/30 bg-muted/30 text-muted-foreground line-through'
+                <div key={stage.id} className="flex items-center">
+                  {i > 0 && (
+                    <span className="mx-2 text-muted-foreground/40 select-none">→</span>
+                  )}
+                  <div className={`px-3 py-1 rounded-full border text-[11px] font-medium transition-colors ${
+                    active
+                      ? 'border-primary/30 bg-primary/5 text-foreground'
+                      : 'border-border/40 bg-muted/40 text-muted-foreground line-through'
                   }`}>
                     {meta.label}
                   </div>
