@@ -25,12 +25,17 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Plus, Trash2, Fuel, Store, Building2, Warehouse, MapPin, Pencil,
+  Download, Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getLocations, createLocation, updateLocation, deleteLocation,
+  getLocationByCode,
 } from '@/services/locationService'
 import { getSources } from '@/services/sourceService'
+import { stsGetShifts } from '@/services/fuel/stsApiClient'
+import { mstoGetServicePoints } from '@/services/msto/mstoApiClient'
+import { tradecorpGetSummary } from '@/services/tradecorp/tradecorpApiClient'
 import {
   LOCATION_TYPE_META, LOCATION_STATUS_META,
   type LocationStatus, type LocationType, type ServiceLocation,
@@ -249,6 +254,332 @@ function LocationEditDialog({
 }
 
 
+// Пул кодов для discover в STS. Покрывает реальные коды сети ГИГ (1..10
+// + 200..220) с запасом — если появится станция «11» или «215», она
+// тоже найдётся при следующем импорте.
+interface ImportedCode {
+  code: string
+  label?: string
+  config: Record<string, string | number>
+  bindingLabel: string
+}
+
+interface ImportSummary {
+  found: number
+  matched: number
+  unmatched: ImportedCode[]
+  sourceName: string
+}
+
+/** Привязать найденные коды к существующим ServiceLocation по code. */
+function applyBindings(
+  sourceId: string,
+  sourceName: string,
+  found: ImportedCode[],
+): ImportSummary {
+  const unmatched: ImportedCode[] = []
+  let matched = 0
+  for (const item of found) {
+    const existing = getLocationByCode(item.code)
+    if (!existing) {
+      unmatched.push(item)
+      continue
+    }
+    // Удаляем старую привязку с тем же sourceId и теми же config-ключами,
+    // добавляем актуальную.
+    const otherBindings = existing.sourceBindings.filter((b) => {
+      if (b.sourceId !== sourceId) return true
+      const keys = Object.keys(item.config)
+      return !keys.every((k) => b.config[k] === item.config[k])
+    })
+    updateLocation(existing.id, {
+      sourceBindings: [
+        ...otherBindings,
+        { sourceId, config: item.config, label: item.bindingLabel },
+      ],
+    })
+    matched += 1
+  }
+  return { found: found.length, matched, unmatched, sourceName }
+}
+
+/** Извлечь первое целое число из строки (для имён типа «АКЗС 208»). */
+function parseStationCode(name: string): string | null {
+  const m = name.match(/\d+/)
+  return m ? m[0] : null
+}
+
+
+interface ImportDialogProps {
+  trigger: React.ReactNode
+  title: string
+  description: string
+  canRun: boolean
+  sourceMissingText?: string
+  runImport: (setProgress: (label: string) => void) => Promise<ImportSummary>
+  onDone: () => void
+}
+
+function ImportDialog({
+  trigger, title, description, canRun, sourceMissingText, runImport, onDone,
+}: ImportDialogProps) {
+  const [open, setOpen] = useState(false)
+  const [running, setRunning] = useState(false)
+  const [progressLabel, setProgressLabel] = useState('')
+  const [summary, setSummary] = useState<ImportSummary | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleRun() {
+    if (!canRun) {
+      toast.error(sourceMissingText ?? 'Источник не настроен')
+      return
+    }
+    setRunning(true)
+    setSummary(null)
+    setError(null)
+    try {
+      const result = await runImport(setProgressLabel)
+      setSummary(result)
+      toast.success(
+        `${result.sourceName}: найдено ${result.found}, сопоставлено ${result.matched}, без пары ${result.unmatched.length}`,
+      )
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      toast.error('Импорт прерван — см. ошибку в диалоге')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  function handleClose() {
+    setOpen(false)
+    setSummary(null)
+    setError(null)
+    setProgressLabel('')
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : handleClose())}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground">{description}</p>
+          {!canRun && sourceMissingText && (
+            <div className="text-destructive text-xs">{sourceMissingText}</div>
+          )}
+          {running && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {progressLabel || 'Запрос…'}
+            </div>
+          )}
+          {error && (
+            <div className="text-destructive text-xs whitespace-pre-wrap">{error}</div>
+          )}
+          {summary && !running && (
+            <div className="space-y-2 text-xs">
+              <div className="font-medium">
+                Найдено {summary.found} · сопоставлено {summary.matched} · без пары {summary.unmatched.length}
+              </div>
+              {summary.unmatched.length > 0 && (
+                <div>
+                  <div className="text-muted-foreground mb-1">
+                    Без точки обслуживания (создайте вручную с этими кодами):
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {summary.unmatched.map((u, i) => (
+                      <Badge key={i} variant="outline" className="text-[10px]">
+                        {u.code}{u.label ? ` · ${u.label}` : ''}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          {summary ? (
+            <Button onClick={handleClose}>Готово</Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={handleClose} disabled={running}>
+                Отмена
+              </Button>
+              <Button onClick={handleRun} disabled={running || !canRun}>
+                {running ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Запрос…
+                  </>
+                ) : (
+                  'Начать'
+                )}
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+
+function StsImportButton({ onDone }: { onDone: () => void }) {
+  const stsSource = getSources().find((s) => s.type === 'rest')
+  return (
+    <ImportDialog
+      trigger={
+        <Button variant="outline" size="sm">
+          <Download className="h-4 w-4 mr-2" />
+          Импорт из STS
+        </Button>
+      }
+      title="Импорт кодов станций из STS"
+      description={
+        'Проверяет в STS существование станций по кодам уже добавленных точек обслуживания. ' +
+        'Для каждой пробует обе сети (system_id=65 и 15). Найденные коды привязываются к точкам. ' +
+        'Новые точки не создаются.'
+      }
+      canRun={!!stsSource}
+      sourceMissingText={
+        !stsSource
+          ? 'Источник «STS API ГИГ» не настроен. Сначала откройте «Настройки → Источники».'
+          : undefined
+      }
+      runImport={async (setProgress) => {
+        const sourceId = stsSource!.id
+        const codes = getLocations()
+          .map((l) => Number(l.code))
+          .filter((n) => Number.isFinite(n) && n > 0)
+        const systems = [65, 15]
+        const found: ImportedCode[] = []
+        let done = 0
+        const total = codes.length * systems.length
+        for (const sys of systems) {
+          for (const code of codes) {
+            setProgress(`Сеть system_id=${sys} · код ${code} · ${done}/${total}`)
+            try {
+              const shifts = await stsGetShifts(sys, code)
+              if (Array.isArray(shifts) && shifts.length > 0) {
+                found.push({
+                  code: String(code),
+                  config: { system_id: sys, station: code },
+                  bindingLabel: `STS sys=${sys} st=${code}`,
+                })
+              }
+            } catch {
+              // станция в этой сети недоступна — пропуск
+            }
+            done += 1
+          }
+        }
+        return applyBindings(sourceId, 'STS', found)
+      }}
+      onDone={onDone}
+    />
+  )
+}
+
+
+function MstoImportButton({ onDone }: { onDone: () => void }) {
+  const mstoSource = getSources().find((s) => s.type === 'msto')
+  return (
+    <ImportDialog
+      trigger={
+        <Button variant="outline" size="sm">
+          <Download className="h-4 w-4 mr-2" />
+          Импорт из MSTO
+        </Button>
+      }
+      title="Импорт кодов станций из MSTO"
+      description={
+        'Получает список servicePoints из MSTO IntegratorService. Каждый servicePointId сопоставляется ' +
+        'с точкой обслуживания: сначала по числу в имени точки MSTO, затем по самому servicePointId.'
+      }
+      canRun={!!mstoSource}
+      sourceMissingText={
+        !mstoSource
+          ? 'Источник «MSTO Онлайн-заказы» не настроен. Сначала откройте «Настройки → Источники».'
+          : undefined
+      }
+      runImport={async (setProgress) => {
+        const sourceId = mstoSource!.id
+        setProgress('Запрос /private/servicePoints…')
+        const points = await mstoGetServicePoints({
+          url: mstoSource!.connection.url,
+          login: mstoSource!.connection.login,
+          password: mstoSource!.connection.password,
+        })
+        const found: ImportedCode[] = points.map((p) => {
+          const code = parseStationCode(p.name) ?? String(p.id)
+          return {
+            code,
+            label: p.name,
+            config: { servicePointId: p.id, servicePointName: p.name },
+            bindingLabel: `MSTO id=${p.id}${p.name ? ` (${p.name})` : ''}`,
+          }
+        })
+        return applyBindings(sourceId, 'MSTO', found)
+      }}
+      onDone={onDone}
+    />
+  )
+}
+
+
+function TradecorpImportButton({ onDone }: { onDone: () => void }) {
+  const tcSource = getSources().find((s) => s.type === 'tradecorp')
+  return (
+    <ImportDialog
+      trigger={
+        <Button variant="outline" size="sm">
+          <Download className="h-4 w-4 mr-2" />
+          Импорт из TradeCorp
+        </Button>
+      }
+      title="Импорт кодов станций из TradeCorp"
+      description={
+        'Получает сводку транзакций корпоративных карт за последние 90 дней и собирает уникальные ' +
+        'коды станций. Каждый stationNumber сопоставляется с точкой обслуживания по этому коду.'
+      }
+      canRun={!!tcSource}
+      sourceMissingText={
+        !tcSource
+          ? 'Источник «TradeCorp Корп. карты» не настроен. Сначала откройте «Настройки → Источники».'
+          : undefined
+      }
+      runImport={async (setProgress) => {
+        const sourceId = tcSource!.id
+        setProgress('Запрос transactions_get за 90 дней…')
+        const now = new Date()
+        const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+        const summary = await tradecorpGetSummary(ninetyDaysAgo, now, undefined, {
+          url: tcSource!.connection.url,
+          login: tcSource!.connection.login,
+          password: tcSource!.connection.password,
+          emitentId: tcSource!.connection.emitentId,
+        })
+        const found: ImportedCode[] = summary.map((s) => ({
+          code: String(s.stationNumber),
+          label: s.stationName,
+          config: { stationNumber: s.stationNumber, stationName: s.stationName },
+          bindingLabel: `TradeCorp st=${s.stationNumber}${s.stationName ? ` (${s.stationName})` : ''}`,
+        }))
+        return applyBindings(sourceId, 'TradeCorp', found)
+      }}
+      onDone={onDone}
+    />
+  )
+}
+
+
+
+
 export function LocationsPage() {
   const [_tick, setTick] = useState(0)
   const refresh = () => setTick((t) => t + 1)
@@ -275,12 +606,17 @@ export function LocationsPage() {
               для фильтрации документов и каналов.
             </p>
           </div>
-          <LocationEditDialog onSaved={refresh}>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Добавить точку
-            </Button>
-          </LocationEditDialog>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            <StsImportButton onDone={refresh} />
+            <MstoImportButton onDone={refresh} />
+            <TradecorpImportButton onDone={refresh} />
+            <LocationEditDialog onSaved={refresh}>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                Добавить точку
+              </Button>
+            </LocationEditDialog>
+          </div>
         </div>
 
         {locations.length === 0 ? (

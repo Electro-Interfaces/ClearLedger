@@ -176,6 +176,93 @@ export async function stsGetPrices(station: number, system?: number): Promise<St
   return authFetch(`/v1/prices?${params}`) as Promise<StsPrice[]>
 }
 
+// ─── Discover stations ──────────────────────────────────────
+//
+// У STS API нет endpoint списка станций — но `stsGetShifts(system, station)`
+// возвращает массив смен только для существующих станций (и пустой/4xx для
+// несуществующих). Дёргая пары (system_id, station) из пула, можно
+// собрать актуальный список «живых» торговых точек.
+
+export interface StsDiscoveredStation {
+  system: number
+  station: number
+  /** Смен найдено за всё время по этому коду */
+  shiftsCount: number
+  /** Последняя смена — её dt_open для сортировки активности */
+  lastShiftAt: string | null
+  /** Активна (есть смены за последние 90 дней) */
+  recentActive: boolean
+}
+
+/**
+ * Сканировать пул кодов на конкретной системе STS и вернуть существующие
+ * станции с количеством смен и временем последней смены.
+ *
+ * `concurrency` — сколько параллельных запросов держим (по умолчанию 6).
+ * `onProgress` — колбэк прогресса (доля 0..1) для UI.
+ */
+export async function stsDiscoverStations(
+  system: number,
+  stationCodes: number[],
+  options: {
+    concurrency?: number
+    onProgress?: (done: number, total: number) => void
+  } = {},
+): Promise<StsDiscoveredStation[]> {
+  const concurrency = options.concurrency ?? 6
+  const total = stationCodes.length
+  let done = 0
+
+  const results: StsDiscoveredStation[] = []
+  const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000
+
+  // Поллер чтобы не упереться в rate-limit STS
+  async function check(code: number): Promise<StsDiscoveredStation | null> {
+    try {
+      const shifts = await stsGetShifts(system, code)
+      if (!Array.isArray(shifts) || shifts.length === 0) return null
+      // Последняя по dt_open
+      let lastDt: string | null = null
+      for (const s of shifts) {
+        if (s.dt_open && (!lastDt || s.dt_open > lastDt)) lastDt = s.dt_open
+      }
+      const recentActive = lastDt ? new Date(lastDt).getTime() >= ninetyDaysAgo : false
+      return {
+        system,
+        station: code,
+        shiftsCount: shifts.length,
+        lastShiftAt: lastDt,
+        recentActive,
+      }
+    } catch {
+      return null
+    } finally {
+      done += 1
+      options.onProgress?.(done, total)
+    }
+  }
+
+  // Простой пул: запускаем concurrency задач, по мере завершения добавляем
+  const queue = [...stationCodes]
+  const workers: Promise<void>[] = []
+  for (let i = 0; i < Math.min(concurrency, queue.length); i++) {
+    workers.push(
+      (async () => {
+        while (queue.length > 0) {
+          const code = queue.shift()!
+          const r = await check(code)
+          if (r) results.push(r)
+        }
+      })(),
+    )
+  }
+  await Promise.all(workers)
+
+  // Сортировка по коду станции для предсказуемого порядка
+  results.sort((a, b) => a.station - b.station)
+  return results
+}
+
 // ─── Test Connection ─────────────────────────────────────────
 
 export async function stsTestConnection(
