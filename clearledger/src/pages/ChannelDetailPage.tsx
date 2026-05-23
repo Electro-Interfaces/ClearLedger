@@ -770,24 +770,25 @@ function DataTab({ channel }: { channel: Channel }) {
             <CardDescription className="text-xs">{items.length} документов</CardDescription>
           </CardHeader>
           <CardContent>
-            <ScrollArea className="max-h-[300px]">
-              <div className="space-y-1">
-                {items.slice(0, 50).map((doc) => (
-                  <div key={doc.id} className="flex items-center gap-3 text-xs py-1.5 px-2 rounded hover:bg-accent/30">
-                    <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="font-medium flex-1 truncate">{doc.title}</span>
-                    <span className="text-muted-foreground shrink-0">
-                      {format(new Date(doc.date), 'dd.MM.yyyy')}
-                    </span>
-                  </div>
-                ))}
-                {items.length > 50 && (
-                  <p className="text-xs text-muted-foreground py-2 text-center">
-                    ... и ещё {items.length - 50}
-                  </p>
-                )}
-              </div>
-            </ScrollArea>
+            {/* Обычный div с overflow — Radix ScrollArea без явной высоты
+                родителя не активирует прокрутку, из-за чего длинный список
+                ранее проливался за границы карточки. */}
+            <div className="max-h-[420px] overflow-y-auto -mx-2 px-2 space-y-0.5">
+              {items.slice(0, 200).map((doc) => (
+                <div key={doc.id} className="flex items-center gap-3 text-xs py-1.5 px-2 rounded hover:bg-accent/30">
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="font-medium flex-1 truncate">{doc.title}</span>
+                  <span className="text-muted-foreground shrink-0">
+                    {format(new Date(doc.date), 'dd.MM.yyyy')}
+                  </span>
+                </div>
+              ))}
+              {items.length > 200 && (
+                <p className="text-xs text-muted-foreground py-2 text-center">
+                  … и ещё {items.length - 200}
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
       ))}
