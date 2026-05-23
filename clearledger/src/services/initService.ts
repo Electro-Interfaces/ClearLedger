@@ -25,16 +25,18 @@ export function initDefaults() {
 
   const settings = getSettings()
 
-  // Источник STS
+  // Источник STS — единый для всей сети АЗС ГИГ.
+  // system_id 65 и 15 — технические коды STS, не разные компании.
+  // Канал/импорт выбирает нужную сеть из списка через filters.
   const source = createSource({
     name: 'STS API ГИГ',
     type: 'rest',
-    description: 'API управления АЗС (pos.autooplata.ru/tms)',
+    description: 'API управления АЗС ГИГ (pos.autooplata.ru/tms) — обе технические сети 65 и 15',
     connection: {
       url: settings.stsApiUrl,
       login: settings.stsLogin,
       password: settings.stsPassword,
-      systemCode: String(settings.stsSystemCode),
+      systemIds: '65,15',
     },
   })
 
@@ -160,51 +162,6 @@ function initReconciliationSources() {
         login: 'tf-integration',
         password: 'dsvL!r25Api26',
       },
-    })
-  }
-
-  if (!existing.some((s) => s.type === 'sts-ops')) {
-    const settings = getSettings()
-    createSource({
-      name: 'STS Операции',
-      type: 'sts-ops',
-      description: 'Отпуск нефтепродуктов на торговых точках (индивидуальные транзакции)',
-      connection: {
-        url: settings.stsApiUrl,
-        login: settings.stsLogin,
-        password: settings.stsPassword,
-        systemCode: String(settings.stsSystemCode),
-      },
-    })
-  }
-
-  if (!existing.some((s) => s.type === 'sts-prices')) {
-    const settings = getSettings()
-    createSource({
-      name: 'STS Цены',
-      type: 'sts-prices',
-      description: 'Цены на нефтепродукты по станциям',
-      connection: { url: settings.stsApiUrl, login: settings.stsLogin, password: settings.stsPassword, systemCode: String(settings.stsSystemCode) },
-    })
-  }
-
-  if (!existing.some((s) => s.type === 'sts-coupons')) {
-    const settings = getSettings()
-    createSource({
-      name: 'STS Купоны',
-      type: 'sts-coupons',
-      description: 'Талоны и купоны на топливо',
-      connection: { url: settings.stsApiUrl, login: settings.stsLogin, password: settings.stsPassword, systemCode: String(settings.stsSystemCode) },
-    })
-  }
-
-  if (!existing.some((s) => s.type === 'sts-tanks')) {
-    const settings = getSettings()
-    createSource({
-      name: 'STS Резервуары',
-      type: 'sts-tanks',
-      description: 'Остатки и уровни в резервуарах',
-      connection: { url: settings.stsApiUrl, login: settings.stsLogin, password: settings.stsPassword, systemCode: String(settings.stsSystemCode) },
     })
   }
 

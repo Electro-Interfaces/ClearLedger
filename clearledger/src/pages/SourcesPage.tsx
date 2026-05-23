@@ -362,7 +362,7 @@ function SourceCard({ source, onUpdate, onDelete }: {
 
         <CollapsibleContent>
           <CardContent className="pt-0 border-t border-border/30 mt-1">
-            {source.type === 'rest' || source.type === 'sts-ops' || source.type === 'sts-prices' || source.type === 'sts-coupons' || source.type === 'sts-tanks' ? (
+            {source.type === 'rest' ? (
               <RestConnectionForm source={source} onUpdate={onUpdate} />
             ) : source.type === 'msto' ? (
               <MstoConnectionForm source={source} onUpdate={onUpdate} />

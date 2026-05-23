@@ -7,7 +7,7 @@
 
 // ─── Источники (Sources) ─────────────────────────────────
 
-export type SourceType = 'rest' | '1c' | 'email' | 'ftp' | 'webhook' | 'watch-dir' | 'edi' | 'cloud' | 'msto' | 'tradecorp' | 'sts-ops' | 'sts-prices' | 'sts-coupons' | 'sts-tanks'
+export type SourceType = 'rest' | '1c' | 'email' | 'ftp' | 'webhook' | 'watch-dir' | 'edi' | 'cloud' | 'msto' | 'tradecorp'
 
 export type SourceStatus = 'connected' | 'disconnected' | 'error' | 'draft'
 
@@ -48,18 +48,23 @@ export const SOURCE_TYPE_META: Record<SourceType, { label: string; description: 
   cloud: { label: 'Облако', description: 'Google Drive, OneDrive, Dropbox', icon: 'Cloud' },
   msto: { label: 'MSTO', description: 'Онлайн-заказы (Яндекс, FuelUp, Benzuber)', icon: 'Fuel' },
   tradecorp: { label: 'TradeCorp', description: 'Корпоративные карты (процессинг)', icon: 'CreditCard' },
-  'sts-ops': { label: 'STS Операции', description: 'Отпуск нефтепродуктов на торговых точках', icon: 'Activity' },
-  'sts-prices': { label: 'STS Цены', description: 'Цены на нефтепродукты по станциям', icon: 'Tag' },
-  'sts-coupons': { label: 'STS Купоны', description: 'Талоны и купоны на топливо', icon: 'Ticket' },
-  'sts-tanks': { label: 'STS Резервуары', description: 'Остатки и уровни в резервуарах', icon: 'Cylinder' },
 }
 
-/** Дефолтные типы документов для STS REST API */
+/**
+ * Дефолтные типы документов для STS REST API (pos.autooplata.ru/tms).
+ *
+ * Один STS-источник покрывает всю сеть АЗС ГИГ (system_id 65 и 15 —
+ * технические коды, не разные компании). Все типы документов берутся
+ * с одного хоста и одного login/password.
+ */
 export function defaultStsDocTypes(): SourceDocType[] {
   return [
     { id: 'shift_report', name: 'Сменные отчёты', endpoint: '/v1/report/shift_report', description: 'Продажи, резервуары, ТРК, оплаты' },
     { id: 'receipt', name: 'Поступления (ТТН)', endpoint: '/v1/report/receipts', description: 'Приём топлива, плотность, масса' },
     { id: 'price', name: 'Цены', endpoint: '/v1/prices', description: 'Текущие цены на топливо' },
+    { id: 'sts_transactions', name: 'Операции отпуска', endpoint: '/v2/transactions', description: 'Индивидуальные транзакции отпуска на ТРК' },
+    { id: 'sts_coupons', name: 'Купоны и талоны', endpoint: '/v2/coupons', description: 'Операции по талонам и купонам на топливо' },
+    { id: 'sts_tanks', name: 'Остатки резервуаров', endpoint: '/v1/tanks', description: 'Уровни, объёмы и плотности в резервуарах' },
   ]
 }
 
@@ -69,34 +74,6 @@ export function defaultMstoDocTypes(): SourceDocType[] {
     { id: 'msto_transactions', name: 'Транзакции онлайн-заказов', endpoint: '/private/transactions', description: 'Заказы агрегаторов: Яндекс, FuelUp, Benzuber' },
     { id: 'msto_service_points', name: 'Станции обслуживания', endpoint: '/private/servicePoints', description: 'Список подключённых АЗС/АКАЗС' },
     { id: 'msto_tariffs', name: 'Тарифы агрегаторов', endpoint: '/private/tariffs', description: 'Справочник агрегаторов и тарифов' },
-  ]
-}
-
-/** Дефолтные типы документов для STS Операции (отпуск нефтепродуктов) */
-export function defaultStsOpsDocTypes(): SourceDocType[] {
-  return [
-    { id: 'sts_transactions', name: 'Операции отпуска', endpoint: '/v2/transactions', description: 'Индивидуальные транзакции отпуска на ТРК' },
-  ]
-}
-
-/** Дефолтные типы документов для STS Цены */
-export function defaultStsPricesDocTypes(): SourceDocType[] {
-  return [
-    { id: 'sts_prices', name: 'Цены на топливо', endpoint: '/v1/prices', description: 'Текущие и исторические цены по станциям' },
-  ]
-}
-
-/** Дефолтные типы документов для STS Купоны */
-export function defaultStsCouponsDocTypes(): SourceDocType[] {
-  return [
-    { id: 'sts_coupons', name: 'Купоны и талоны', endpoint: '/v2/coupons', description: 'Операции по талонам и купонам на топливо' },
-  ]
-}
-
-/** Дефолтные типы документов для STS Резервуары */
-export function defaultStsTanksDocTypes(): SourceDocType[] {
-  return [
-    { id: 'sts_tanks', name: 'Остатки резервуаров', endpoint: '/v1/tanks', description: 'Уровни, объёмы и плотности в резервуарах' },
   ]
 }
 

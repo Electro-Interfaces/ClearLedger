@@ -64,16 +64,18 @@ export const CHANNEL_TEMPLATES: ChannelTemplate[] = [
   },
 
   // ─── Операции ─────────────────────────────────────
+  // Шаблон «Операции отпуска» теперь подключается к основному STS-источнику
+  // (тип `rest`) с doc_type=sts_transactions. Отдельного типа sts-ops больше нет.
   {
     id: 'sts-operations',
     name: 'Операции отпуска (STS)',
     description: 'Индивидуальные транзакции отпуска нефтепродуктов на торговых точках через STS API',
     icon: 'Activity',
     category: 'Торговля',
-    sourceType: 'sts-ops',
+    sourceType: 'rest',
     defaultConnection: {
       url: 'https://pos.autooplata.ru/tms',
-      systemCode: '65',
+      systemIds: '65,15',
     },
     streams: [
       { docTypeId: 'sts_transactions', docTypeLabel: 'Операции отпуска', catalogTemplate: '/Операции/{объект}/{год}-{месяц}/', enabled: true },
@@ -82,7 +84,7 @@ export const CHANNEL_TEMPLATES: ChannelTemplate[] = [
     setupFields: [
       { key: 'login', label: 'Логин API', type: 'text', required: true, defaultValue: 'UserApi' },
       { key: 'password', label: 'Пароль', type: 'password', required: true },
-      { key: 'systemCode', label: 'Код системы', type: 'number', required: true, defaultValue: '65' },
+      { key: 'systemIds', label: 'ID сетей (через запятую)', type: 'text', required: true, defaultValue: '65,15' },
       { key: 'stationCodes', label: 'Коды станций', type: 'tags', required: true, placeholder: 'Введите код и нажмите Enter' },
     ],
   },
@@ -252,7 +254,6 @@ export const CHANNEL_TEMPLATES: ChannelTemplate[] = [
         { value: 'watch-dir', label: 'Папка' },
         { value: 'edi', label: 'ЭДО (Контур/СБИС)' },
         { value: 'cloud', label: 'Облако' },
-        { value: 'sts-ops', label: 'STS Операции (отпуск)' },
         { value: 'msto', label: 'MSTO (онлайн-заказы)' },
         { value: 'tradecorp', label: 'TradeCorp (корп. карты)' },
       ]},

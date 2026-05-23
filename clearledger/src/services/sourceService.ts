@@ -5,13 +5,56 @@
 
 import { getItem, setItem } from './storage'
 import type { Source, SourceType, SourceDocType } from '@/types/channel'
-import { defaultStsDocTypes, defaultStsOpsDocTypes, defaultStsPricesDocTypes, defaultStsCouponsDocTypes, defaultStsTanksDocTypes, defaultMstoDocTypes, defaultTradecorpDocTypes } from '@/types/channel'
+import { defaultStsDocTypes, defaultMstoDocTypes, defaultTradecorpDocTypes } from '@/types/channel'
 import { nanoid } from 'nanoid'
 
+const STS_LEGACY_TYPES = new Set(['sts-ops', 'sts-prices', 'sts-coupons', 'sts-tanks'])
+
 const STORAGE_KEY = 'gig-sources'
+const MIGRATION_KEY = 'gig-sources-migration-v2'
+
+/**
+ * Миграция STS-источников к единому источнику.
+ *
+ * До v2 в gig-sources было 5 STS-источников: основной "rest" + 4 «sub»
+ * (sts-ops, sts-prices, sts-coupons, sts-tanks). У всех одинаковые
+ * credentials, разница только в doc_type. В v2 — один "rest"-источник
+ * со всеми 6 doc_type и `systemIds` для обеих сетей (65, 15).
+ *
+ * Миграция идемпотентна — флаг `gig-sources-migration-v2` в localStorage.
+ */
+function migrateStsSourcesV2(sources: any[]): { sources: any[]; changed: boolean } {
+  if (localStorage.getItem(MIGRATION_KEY)) return { sources, changed: false }
+
+  let changed = false
+  const filtered = sources.filter((s) => {
+    if (STS_LEGACY_TYPES.has(s.type)) {
+      changed = true
+      return false
+    }
+    return true
+  })
+
+  const mainSts = filtered.find((s) => s.type === 'rest')
+  if (mainSts) {
+    mainSts.docTypes = defaultStsDocTypes()
+    if (mainSts.connection?.systemCode && !mainSts.connection.systemIds) {
+      // Старый systemCode=65 → новый systemIds="65,15" (две тех. сети ГИГ).
+      mainSts.connection.systemIds = `${mainSts.connection.systemCode},15`
+    }
+    mainSts.updatedAt = new Date().toISOString()
+    changed = true
+  }
+
+  localStorage.setItem(MIGRATION_KEY, '1')
+  return { sources: filtered, changed }
+}
 
 export function getSources(): Source[] {
-  return getItem<Source[]>(STORAGE_KEY, [])
+  const raw = getItem<Source[]>(STORAGE_KEY, [])
+  const { sources, changed } = migrateStsSourcesV2(raw as any[])
+  if (changed) setItem(STORAGE_KEY, sources)
+  return sources as Source[]
 }
 
 export function getSource(id: string): Source | undefined {
@@ -34,10 +77,6 @@ export function createSource(data: {
     connection: data.connection ?? {},
     docTypes: data.docTypes ?? (
       data.type === 'rest' ? defaultStsDocTypes() :
-      data.type === 'sts-ops' ? defaultStsOpsDocTypes() :
-      data.type === 'sts-prices' ? defaultStsPricesDocTypes() :
-      data.type === 'sts-coupons' ? defaultStsCouponsDocTypes() :
-      data.type === 'sts-tanks' ? defaultStsTanksDocTypes() :
       data.type === 'msto' ? defaultMstoDocTypes() :
       data.type === 'tradecorp' ? defaultTradecorpDocTypes() :
       []
