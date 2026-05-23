@@ -1,0 +1,39 @@
+# ClearLedger ↔ 1С:Бухгалтерия 3.0
+#
+# Шаблон конфигурации подключения к БП ГИГ (ООО "ГАЗИНВЕСТГРУПП").
+# СЕКРЕТЫ СЮДА НЕ ПОПАДАЮТ — пароль вводится через UI «Настройки →
+# Интеграция 1С» и хранится в БД зашифрованным (Fernet, ключ из
+# SECRET_KEY ClearLedger Server).
+#
+# Этот файл — справочник конфигов и реквизитов окружений. Бэкенд НЕ
+# читает его автоматически: подключения создаются через POST
+# /api/onec/connections и хранятся в таблице onec_connections.
+
+production:
+  name: "БП ГИГ (боевая)"
+  # IIS 10.0 на 192.168.40.31. Путь публикации уточнить у админа —
+  # стандартные acc/gig/bp/GIG/1c дают 404. Доступ через VPN ElsyPlus
+  # или из локальной сети офиса.
+  odata_url: "http://192.168.40.31/<alias_TBD>/odata/standard.odata"
+  username: "ClearLedger"            # сервисный пользователь, не Администратор
+  exchange_path: null                # не используется при pull-only
+  sync_interval_sec: 300
+  notes: |
+    Идеология v3: ClearLedger только ЧИТАЕТ. Запись в БП ГИГ выполняет
+    её собственное расширение TradeLedger.cfe / GIG_Ledger.cfe — тянет
+    подготовленные данные из ClearLedger HTTP API.
+    Боевую трогать только на чтение, без согласования с МАГ и Сидоренко.
+
+staging:
+  name: "БП ГИГ (стенд GIG Base2)"
+  # Файловая БД, локально через webinst.exe или COM. Если публикация
+  # ещё не поднята — для smoke-тестов используется V83.COMConnector
+  # из server/scripts/smoke_com_gigbase2.py.
+  odata_url: "http://localhost:8081/gig/odata/standard.odata"
+  username: "Гайворонская Татьяна"
+  exchange_path: null
+  sync_interval_sec: 600
+  notes: |
+    Стенд: D:\Users\magsp\GIG Base2 (Бухгалтерия предприятия 3.0.194.18).
+    Платформа 1С 8.3.27.2074 (32-bit инсталляция).
+    Креды стенда — Гайворонская Татьяна / 12345.
