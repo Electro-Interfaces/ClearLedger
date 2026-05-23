@@ -1133,36 +1133,112 @@ function DataTab({ channel }: { channel: Channel }) {
         </Card>
       ) : (
         Array.from(grouped.entries()).map(([type, items]) => (
-          <Card key={type}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{docTypeLabel(type)}</CardTitle>
-              <CardDescription className="text-xs">{items.length} документов</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="max-h-[420px] overflow-y-auto -mx-2 px-2 space-y-0.5">
-                {items.slice(0, 200).map((doc) => (
-                  <div key={doc.id} className="flex items-center gap-3 text-xs py-1.5 px-2 rounded hover:bg-accent/30">
-                    <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="font-medium flex-1 truncate">{doc.title}</span>
-                    <Badge variant="outline" className="text-[9px] h-4 px-1 shrink-0 font-mono">
-                      {doc.stationId}
-                    </Badge>
-                    <span className="text-muted-foreground shrink-0 w-[78px] text-right">
-                      {format(new Date(doc.date), 'dd.MM.yyyy')}
-                    </span>
-                  </div>
-                ))}
-                {items.length > 200 && (
-                  <p className="text-xs text-muted-foreground py-2 text-center">
-                    … и ещё {items.length - 200}
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+          <DocumentsTable key={type} type={type} items={items} />
         ))
       )}
     </div>
+  )
+}
+
+/**
+ * Таблица загруженных документов одного типа.
+ *
+ * Раньше каждая строка была сжатой однострочной с мелким бейджем
+ * станции — нечитаемо. Сейчас полноценная таблица со столбцами:
+ * Документ · Станция (название + код) · Дата документа · Загружено
+ * · Размер (литры или нет данных). Имя станции подтягивается из
+ * справочника по коду — если не найдено, показываем «Станция N».
+ */
+function DocumentsTable({ type, items }: { type: string; items: ReturnType<typeof getAllLoadedDocs> }) {
+  // Кэш имён станций по коду
+  const stationName = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const loc of getLocations()) {
+      if (loc.type !== 'fuel_station') continue
+      const code = Number(loc.code)
+      if (Number.isFinite(code) && !map.has(code)) {
+        map.set(code, loc.name)
+      }
+    }
+    return (id: number) => map.get(id) ?? `Станция ${id}`
+  }, [])
+
+  function docSize(doc: ReturnType<typeof getAllLoadedDocs>[number]): string | null {
+    // Литры топлива из data — для ТТН и аналогов
+    const d = doc.data as any
+    if (typeof d?.totalLiters === 'number') return `${d.totalLiters.toFixed(0)} л`
+    if (typeof d?.fact?.volume === 'number') return `${Number(d.fact.volume).toFixed(0)} л`
+    // Размер JSON как фолбэк
+    try {
+      const bytes = JSON.stringify(doc.data).length
+      if (bytes < 1024) return `${bytes} Б`
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`
+      return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
+    } catch {
+      return null
+    }
+  }
+
+  const visible = items.slice(0, 200)
+
+  return (
+    <Card className="py-3 gap-2">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+          {docTypeLabel(type)}
+          <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">
+            {items.length} документов
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0 pb-3">
+        {/* Заголовок таблицы */}
+        <div className="grid grid-cols-[1fr_220px_110px_140px_90px] gap-3 px-2 py-1.5 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide border-b border-border/40">
+          <span>Документ</span>
+          <span>Станция</span>
+          <span>Дата</span>
+          <span>Загружено</span>
+          <span className="text-right">Размер</span>
+        </div>
+
+        {/* Строки */}
+        <div className="max-h-[440px] overflow-y-auto -mx-2 px-2">
+          {visible.map((doc) => {
+            const size = docSize(doc)
+            return (
+              <div key={doc.id}
+                className="grid grid-cols-[1fr_220px_110px_140px_90px] gap-3 items-center px-2 py-2 text-xs border-b border-border/30 hover:bg-accent/30 transition-colors last:border-b-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="font-medium truncate">{doc.title}</span>
+                </div>
+                <div className="min-w-0">
+                  <span className="truncate block">{stationName(doc.stationId)}</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    код {doc.stationId}
+                  </span>
+                </div>
+                <span className="text-muted-foreground tabular-nums">
+                  {format(new Date(doc.date), 'dd.MM.yyyy')}
+                </span>
+                <span className="text-muted-foreground tabular-nums text-[11px]">
+                  {format(new Date(doc.loadedAt), 'dd.MM.yyyy HH:mm')}
+                </span>
+                <span className="text-right tabular-nums text-muted-foreground">
+                  {size ?? '—'}
+                </span>
+              </div>
+            )
+          })}
+          {items.length > 200 && (
+            <p className="text-xs text-muted-foreground py-2 text-center">
+              … и ещё {items.length - 200}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
