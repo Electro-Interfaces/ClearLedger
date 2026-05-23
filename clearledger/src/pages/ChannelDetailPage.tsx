@@ -12,9 +12,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog'
 import { getChannel, updateChannel, addSourceToChannel, removeSourceFromChannel } from '@/services/channelService'
 import { getSources } from '@/services/sourceService'
 import { getLocations } from '@/services/locationService'
@@ -131,79 +128,143 @@ function ScheduleCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: 
   )
 }
 
-const PERIOD_PRESETS: { value: number; label: string }[] = [
-  { value: 1, label: 'Последний день' },
-  { value: 7, label: 'Последняя неделя' },
-  { value: 30, label: 'Последний месяц' },
-  { value: 90, label: 'Последние 90 дней' },
-  { value: 365, label: 'Последний год' },
+// Период загрузки — список конкретных месяцев (YYYY-MM).
+// Канал при запуске прогоняет каждый выбранный месяц как диапазон.
+// Если ничего не выбрано — фолбэк к `periodDays` как глубине.
+
+const MONTH_NAMES_RU = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
 ]
 
-function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
-  const periodDays = channel.periodDays ?? 7
-  const preset = PERIOD_PRESETS.find((p) => p.value === periodDays)
+function monthKey(year: number, month0: number): string {
+  return `${year}-${String(month0 + 1).padStart(2, '0')}`
+}
 
-  function pick(value: string) {
-    const days = Number(value)
-    if (!days) return
-    const updated = updateChannel(channel.id, { periodDays: days })
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number)
+  return `${MONTH_NAMES_RU[(m ?? 1) - 1]} ${y}`
+}
+
+function lastNMonths(n: number): string[] {
+  const now = new Date()
+  const out: string[] = []
+  for (let i = 0; i < n; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    out.push(monthKey(d.getFullYear(), d.getMonth()))
+  }
+  return out
+}
+
+function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
+  const cfgMonths: string[] = channel.config?.months ?? []
+  const months = useMemo(() => lastNMonths(12), [])
+  const selected = useMemo(() => new Set(cfgMonths), [cfgMonths.join(',')])
+
+  function save(next: Set<string>) {
+    const arr = months.filter((m) => next.has(m))
+    const updated = updateChannel(channel.id, {
+      config: { ...channel.config, months: arr },
+    })
     if (updated) onUpdate(updated)
   }
+
+  function toggle(m: string) {
+    const next = new Set(selected)
+    if (next.has(m)) next.delete(m)
+    else next.add(m)
+    save(next)
+  }
+
+  function pickPreset(kind: 'current' | 'last3' | 'last6' | 'all' | 'none') {
+    const next = new Set<string>()
+    if (kind === 'current') next.add(months[0])
+    if (kind === 'last3') months.slice(0, 3).forEach((m) => next.add(m))
+    if (kind === 'last6') months.slice(0, 6).forEach((m) => next.add(m))
+    if (kind === 'all') months.forEach((m) => next.add(m))
+    save(next)
+  }
+
+  const summary =
+    selected.size === 0 ? 'Не выбрано' :
+    selected.size === 1 ? monthLabel([...selected][0]) :
+    `Месяцев: ${selected.size}`
 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-1.5">
-          <FileText className="h-3.5 w-3.5" />
-          Период загрузки
-        </CardTitle>
-        <CardDescription className="text-xs">
-          {preset?.label ?? `${periodDays} дней`}
-        </CardDescription>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
+            Период загрузки
+          </CardTitle>
+          <CardDescription className="text-xs">{summary}</CardDescription>
+        </div>
       </CardHeader>
       <CardContent>
-        <Select value={String(periodDays)} onValueChange={pick}>
-          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {PERIOD_PRESETS.map((p) => (
-              <SelectItem key={p.value} value={String(p.value)} className="text-xs">{p.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[10px] text-muted-foreground mt-2 leading-tight">
-          Глубина выборки при запуске. Дубли отсекаются по fingerprint.
-        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 max-h-[180px] overflow-y-auto pr-1">
+          {months.map((m) => {
+            const on = selected.has(m)
+            return (
+              <label key={m}
+                className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/30 cursor-pointer">
+                <Checkbox
+                  checked={on}
+                  onCheckedChange={() => toggle(m)}
+                  className="h-3.5 w-3.5"
+                />
+                <span className="truncate">{monthLabel(m)}</span>
+              </label>
+            )
+          })}
+        </div>
+        <div className="flex items-center flex-wrap gap-1 mt-3 pt-2 border-t border-border/40">
+          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+            onClick={() => pickPreset('current')}>
+            Текущий
+          </Button>
+          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+            onClick={() => pickPreset('last3')}>
+            3 месяца
+          </Button>
+          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+            onClick={() => pickPreset('last6')}>
+            6 месяцев
+          </Button>
+          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+            onClick={() => pickPreset('all')}>
+            Все 12
+          </Button>
+          <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 text-muted-foreground"
+            onClick={() => pickPreset('none')}>
+            Очистить
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )
 }
 
 
-// ─── Выбор станций из справочника точек обслуживания ──────
+// ─── Карточка Станций — inline-чекбоксы ──────────────────
 
-interface PickerEntry {
-  /** Уникальный ключ выбора в UI */
-  key: string
-  /** Код станции */
+interface StationCheckEntry {
   code: number
-  /** Тех. сеть STS */
   systemId: number
-  /** Имя ServiceLocation для отображения */
   name: string
-  /** ID ServiceLocation */
-  locationId: string
+  locationId?: string
 }
 
 /**
- * Подготовить кандидатов из справочника точек обслуживания —
- * по STS-привязкам в `location.sourceBindings`.
- *
- * Одна точка может быть в нескольких сетях (например, АЗС 5 в sys=65
- * пилотно и параллельно в sys=15 как fallback) — тогда возвращаются
- * две разных записи, выбираются независимо.
+ * Универсум станций: точки из справочника по STS-привязкам + станции,
+ * добавленные вручную в этот канал (даже если их нет в справочнике).
  */
-function collectStationCandidates(stsSourceId?: string): PickerEntry[] {
-  const entries: PickerEntry[] = []
+function collectStationUniverse(
+  stsSourceId: string | undefined,
+  channelStations: ChannelStation[],
+): StationCheckEntry[] {
+  const seen = new Set<string>()
+  const entries: StationCheckEntry[] = []
   for (const loc of getLocations()) {
     if (loc.type !== 'fuel_station') continue
     for (const b of loc.sourceBindings) {
@@ -211,147 +272,187 @@ function collectStationCandidates(stsSourceId?: string): PickerEntry[] {
       const systemId = Number(b.config?.system_id ?? b.config?.systemId)
       const code = Number(b.config?.station ?? b.config?.code ?? loc.code)
       if (!systemId || !code) continue
-      entries.push({
-        key: `${loc.id}|${systemId}|${code}`,
-        code, systemId,
-        name: loc.name,
-        locationId: loc.id,
-      })
+      const key = `${systemId}|${code}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      entries.push({ code, systemId, name: loc.name, locationId: loc.id })
     }
   }
-  // Группировка-сортировка: по системе, потом по коду
+  for (const s of channelStations) {
+    const key = `${s.systemId}|${s.code}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    entries.push({
+      code: s.code, systemId: s.systemId,
+      name: s.name ?? `Станция ${s.code}`,
+      locationId: s.locationId,
+    })
+  }
   entries.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
   return entries
 }
 
-function StationPickerDialog({
-  open, onOpenChange, channelStations, onSave,
+function StationsCard({
+  channel, onUpdate,
 }: {
-  open: boolean
-  onOpenChange: (o: boolean) => void
-  channelStations: ChannelStation[]
-  onSave: (next: ChannelStation[]) => void
+  channel: Channel
+  onUpdate: (ch: Channel) => void
 }) {
-  // Кандидаты — все STS-привязки из справочника точек
   const stsSource = getSources().find((s) => s.type === 'rest')
-  const candidates = useMemo(
-    () => collectStationCandidates(stsSource?.id),
-    [stsSource?.id, open],
+  const channelStations = getChannelStations(channel)
+  const universe = useMemo(
+    () => collectStationUniverse(stsSource?.id, channelStations),
+    [stsSource?.id, channel.id, channelStations.length],
   )
+  const selectedKeys = useMemo(() => {
+    const s = new Set<string>()
+    for (const x of channelStations) s.add(`${x.systemId}|${x.code}`)
+    return s
+  }, [channelStations])
 
-  // Какие уже выбраны (по code+systemId)
-  const initiallyChecked = useMemo(() => {
-    const set = new Set<string>()
-    for (const s of channelStations) set.add(`${s.systemId}|${s.code}`)
-    return set
-  }, [channelStations, open])
+  const [newCode, setNewCode] = useState('')
+  const [newSys, setNewSys] = useState('65')
 
-  const [checked, setChecked] = useState<Set<string>>(new Set())
-
-  // Сброс выбора при открытии
-  useMemo(() => {
-    if (open) setChecked(new Set(initiallyChecked))
-  }, [open, initiallyChecked])
-
-  function toggle(codeKey: string) {
-    setChecked((prev) => {
-      const next = new Set(prev)
-      if (next.has(codeKey)) next.delete(codeKey)
-      else next.add(codeKey)
-      return next
-    })
-  }
-
-  function handleSave() {
-    // Собираем результат: оставляем не-STS станции как есть (например,
-    // ручные с любой системой), и заменяем STS-набор из чекбоксов
-    const stsCodeKeys = new Set(candidates.map((c) => `${c.systemId}|${c.code}`))
-    const keptManual = channelStations.filter(
-      (s) => !stsCodeKeys.has(`${s.systemId}|${s.code}`),
-    )
-    const selectedFromPicker: ChannelStation[] = candidates
-      .filter((c) => checked.has(`${c.systemId}|${c.code}`))
-      .map((c) => ({
-        code: c.code,
-        systemId: c.systemId,
-        name: c.name,
-        locationId: c.locationId,
-      }))
-    const merged = [...keptManual, ...selectedFromPicker]
-    merged.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
-    onSave(merged)
-  }
-
-  // Группировка кандидатов по system_id
   const groups = useMemo(() => {
-    const m = new Map<number, PickerEntry[]>()
-    for (const c of candidates) {
-      if (!m.has(c.systemId)) m.set(c.systemId, [])
-      m.get(c.systemId)!.push(c)
+    const m = new Map<number, StationCheckEntry[]>()
+    for (const e of universe) {
+      if (!m.has(e.systemId)) m.set(e.systemId, [])
+      m.get(e.systemId)!.push(e)
     }
     return Array.from(m.entries()).sort((a, b) => a[0] - b[0])
-  }, [candidates])
+  }, [universe])
+
+  function saveFromKeys(keys: Set<string>) {
+    const next: ChannelStation[] = []
+    for (const e of universe) {
+      const k = `${e.systemId}|${e.code}`
+      if (!keys.has(k)) continue
+      next.push({
+        code: e.code, systemId: e.systemId,
+        name: e.name, locationId: e.locationId,
+      })
+    }
+    next.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
+    const updated = updateChannel(channel.id, {
+      config: { ...channel.config, stations: next, stationCodes: undefined },
+    })
+    if (updated) onUpdate(updated)
+  }
+
+  function toggle(key: string) {
+    const next = new Set(selectedKeys)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    saveFromKeys(next)
+  }
+
+  function toggleGroup(sys: number, on: boolean) {
+    const next = new Set(selectedKeys)
+    const items = groups.find(([s]) => s === sys)?.[1] ?? []
+    for (const e of items) {
+      const k = `${e.systemId}|${e.code}`
+      if (on) next.add(k)
+      else next.delete(k)
+    }
+    saveFromKeys(next)
+  }
+
+  function addManual() {
+    const code = Number(newCode)
+    const systemId = Number(newSys)
+    if (!code || !systemId) return
+    if (selectedKeys.has(`${systemId}|${code}`)) return
+    const newStation: ChannelStation = { code, systemId }
+    const next: ChannelStation[] = [...channelStations, newStation]
+    next.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
+    const updated = updateChannel(channel.id, {
+      config: { ...channel.config, stations: next, stationCodes: undefined },
+    })
+    if (updated) {
+      onUpdate(updated)
+      setNewCode('')
+    }
+  }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 text-xs gap-1">
-          <Plus className="h-3 w-3" />
-          Из справочника
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Выбрать станции для обработки</DialogTitle>
-          <DialogDescription>
-            Точки обслуживания с STS-привязками. Одна станция может присутствовать
-            в обеих тех. сетях — выбирайте независимо.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-          {groups.length === 0 && (
-            <p className="text-xs text-muted-foreground py-4 text-center">
-              В справочнике нет точек со STS-привязкой. Откройте «Настройки → Точки обслуживания»
-              и запустите «Импорт из STS».
-            </p>
-          )}
-          {groups.map(([sys, items]) => (
-            <div key={sys} className="space-y-1">
-              <div className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
-                Сеть system_id = {sys} <span className="text-muted-foreground/50">· {items.length}</span>
-              </div>
-              {items.map((c) => {
-                const codeKey = `${c.systemId}|${c.code}`
-                return (
-                  <label
-                    key={c.key}
-                    className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-accent/30 cursor-pointer"
-                  >
-                    <Checkbox
-                      checked={checked.has(codeKey)}
-                      onCheckedChange={() => toggle(codeKey)}
-                      className="h-4 w-4"
-                    />
-                    <span className="text-xs font-mono w-10 shrink-0 text-muted-foreground">
-                      {c.code}
-                    </span>
-                    <span className="text-xs truncate">{c.name}</span>
-                  </label>
-                )
-              })}
-            </div>
-          ))}
+    <Card className="md:col-span-2">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <MapPin className="h-3.5 w-3.5" />
+            Станции
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Выбрано {selectedKeys.size} из {universe.length}
+          </CardDescription>
         </div>
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            Отмена
+      </CardHeader>
+      <CardContent>
+        {universe.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-4 text-center">
+            Нет станций. Откройте «Настройки → Точки обслуживания»
+            и запустите «Импорт из STS» либо добавьте вручную ниже.
+          </p>
+        ) : (
+          <div className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
+            {groups.map(([sys, items]) => {
+              const allOn = items.every((e) => selectedKeys.has(`${e.systemId}|${e.code}`))
+              const someOn = items.some((e) => selectedKeys.has(`${e.systemId}|${e.code}`))
+              return (
+                <div key={sys} className="space-y-1">
+                  <label className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide cursor-pointer hover:text-foreground">
+                    <Checkbox
+                      checked={allOn ? true : (someOn ? 'indeterminate' as any : false)}
+                      onCheckedChange={(v) => toggleGroup(sys, !!v)}
+                      className="h-3.5 w-3.5"
+                    />
+                    Сеть system_id = {sys}{' '}
+                    <span className="text-muted-foreground/50 normal-case">· {items.length}</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 pl-5">
+                    {items.map((e) => {
+                      const key = `${e.systemId}|${e.code}`
+                      const on = selectedKeys.has(key)
+                      return (
+                        <label key={key}
+                          className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/30 cursor-pointer">
+                          <Checkbox
+                            checked={on}
+                            onCheckedChange={() => toggle(key)}
+                            className="h-3.5 w-3.5"
+                          />
+                          <span className="font-mono w-8 shrink-0 text-muted-foreground">
+                            {e.code}
+                          </span>
+                          <span className="truncate">{e.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 mt-3 pt-2 border-t border-border/40">
+          <Input value={newCode} onChange={(e) => setNewCode(e.target.value)}
+            placeholder="Код вручную" className="h-7 text-xs flex-1 min-w-0" type="number"
+            onKeyDown={(e) => e.key === 'Enter' && addManual()} />
+          <Select value={newSys} onValueChange={setNewSys}>
+            <SelectTrigger className="h-7 text-xs w-[88px] shrink-0"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="65" className="text-xs">sys 65</SelectItem>
+              <SelectItem value="15" className="text-xs">sys 15</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={addManual}
+            disabled={!newCode}>
+            <Plus className="h-3 w-3" />
           </Button>
-          <Button size="sm" onClick={handleSave}>
-            Сохранить ({checked.size})
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -365,35 +466,9 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
   const status = STATUS_MAP[channel.status] ?? STATUS_MAP.draft
   const docs = getAllLoadedDocs().filter((d) => d.channelId === channel.id)
 
+  // Список станций канала используется только для disabled-state кнопки.
+  // Все CRUD-операции теперь внутри StationsCard.
   const stations = getChannelStations(channel)
-  const [newStationCode, setNewStationCode] = useState('')
-  const [newStationSystem, setNewStationSystem] = useState<string>('65')
-  const [pickerOpen, setPickerOpen] = useState(false)
-
-  function saveStations(next: ChannelStation[]) {
-    const updated = updateChannel(channel.id, {
-      config: {
-        ...channel.config,
-        stations: next,
-        // Очищаем legacy-поле — теперь источник истины stations[]
-        stationCodes: undefined,
-      },
-    })
-    if (updated) onUpdate(updated)
-  }
-
-  function addManualStation() {
-    const code = Number(newStationCode)
-    const systemId = Number(newStationSystem)
-    if (!code || !systemId) return
-    if (stations.some((s) => s.code === code && s.systemId === systemId)) return
-    saveStations([...stations, { code, systemId }])
-    setNewStationCode('')
-  }
-
-  function removeStation(code: number, systemId: number) {
-    saveStations(stations.filter((s) => !(s.code === code && s.systemId === systemId)))
-  }
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -422,68 +497,8 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
         </CardContent>
       </Card>
 
-      {/* Станции */}
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-sm flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5" />
-              Станции
-            </CardTitle>
-            <StationPickerDialog
-              open={pickerOpen}
-              onOpenChange={setPickerOpen}
-              channelStations={stations}
-              onSave={(next) => { saveStations(next); setPickerOpen(false) }}
-            />
-          </div>
-          <CardDescription className="text-xs">
-            {stations.length === 0 ? 'Нет станций' : `Выбрано ${stations.length}`}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-1">
-            {stations.length === 0 && (
-              <p className="text-xs text-muted-foreground py-2 text-center">
-                Откройте «Выбрать из справочника» или добавьте вручную
-              </p>
-            )}
-            {stations.map((s) => (
-              <div key={`${s.systemId}-${s.code}`}
-                className="flex items-center justify-between text-xs py-1 px-2 rounded bg-muted/30">
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium truncate">
-                    {s.name ?? `Станция ${s.code}`}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground font-mono">
-                    code={s.code} · sys={s.systemId}
-                  </div>
-                </div>
-                <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-destructive shrink-0"
-                  onClick={() => removeStation(s.code, s.systemId)}>
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-            ))}
-            <div className="flex items-center gap-1 mt-2 pt-2 border-t border-border/40">
-              <Input value={newStationCode} onChange={(e) => setNewStationCode(e.target.value)}
-                placeholder="Код" className="h-7 text-xs flex-1 min-w-0" type="number"
-                onKeyDown={(e) => e.key === 'Enter' && addManualStation()} />
-              <Select value={newStationSystem} onValueChange={setNewStationSystem}>
-                <SelectTrigger className="h-7 text-xs w-[92px] shrink-0"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="65" className="text-xs">sys 65</SelectItem>
-                  <SelectItem value="15" className="text-xs">sys 15</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={addManualStation}
-                disabled={!newStationCode}>
-                <Plus className="h-3 w-3" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Станции — inline-чекбоксы (StationsCard сам шириной 2 ячейки) */}
+      <StationsCard channel={channel} onUpdate={onUpdate} />
 
       {/* Источники */}
       <Card>
