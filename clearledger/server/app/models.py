@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -264,6 +265,8 @@ class Counterparty(Base):
     short_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     type: Mapped[str] = mapped_column(String(10), nullable=False, default="ЮЛ")
     aliases: Mapped[list] = mapped_column(ARRAY(String), nullable=False, default=list)
+    # Ref_Key из БП ГИГ (OData) — связка записей справочника с источником
+    external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -290,6 +293,7 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     bank_account: Mapped[str | None] = mapped_column(String(30), nullable=True)
     bank_bik: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -315,6 +319,7 @@ class NomenclatureItem(Base):
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
     unit_label: Mapped[str] = mapped_column(String(100), nullable=False, default="")
     vat_rate: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -341,6 +346,7 @@ class Contract(Base):
     organization_id: Mapped[str] = mapped_column(String(100), nullable=False)
     type: Mapped[str] = mapped_column(String(100), nullable=False)
     amount_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -402,6 +408,7 @@ class Warehouse(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     type: Mapped[str] = mapped_column(String(30), nullable=False, default="warehouse")
+    external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -428,6 +435,7 @@ class BankAccount(Base):
     corr_account: Mapped[str | None] = mapped_column(String(30), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), nullable=False, default="RUB")
     organization_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -502,6 +510,20 @@ class FuelShift(Base):
     raw_entry_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("data_entries.id", ondelete="SET NULL"),
         nullable=True
+    )
+
+    # Учётный период (Шаг 1) — определяется по closed_at смены
+    period_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("periods.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    # Период закрыт в БП — запись read-only
+    is_locked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # Уникальный UUID для pull-расширения БП (идемпотентность)
+    source_uuid: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4, unique=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -606,6 +628,20 @@ class FuelReceipt(Base):
         UUID(as_uuid=True), ForeignKey("data_entries.id", ondelete="SET NULL"),
         nullable=True
     )
+
+    # Учётный период (Шаг 1) — определяется по received_at
+    period_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("periods.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    is_locked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # ИсточникUUID для pull-расширения БП
+    source_uuid: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4, unique=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -639,6 +675,19 @@ class FuelExportDoc(Base):
     )  # draft|confirmed|exported|posted
     export_format: Mapped[str | None] = mapped_column(String(50), nullable=True)
     export_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Учётный период (Шаг 1)
+    period_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("periods.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # Подтверждение от расширения БП (ack от GIG_Ledger.cfe)
+    bp_doc_uuid: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    bp_acked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -672,4 +721,185 @@ class FuelValidationResult(Base):
     ref_source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ===========================================================================
+# ACCOUNTING PERIODS — цикл «симбиоз с бухгалтерией» (Шаг 1)
+# ===========================================================================
+# Период — первичная сущность нормализованной БД. Каждый рабочий объект
+# (FuelShift, FuelReceipt, DataEntry, AccountingDoc) привязан к Period
+# и наследует флаг is_locked, если период закрыт.
+#
+# Закрытие происходит ВНЕ ClearLedger (в БП ГИГ через УстановкуДатЗапрета
+# или аналогичный механизм). ClearLedger детектирует закрытие при
+# репликации и проставляет Period.status='closed' + is_locked=true
+# на привязанные сущности.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Period (Учётный период)
+# ---------------------------------------------------------------------------
+class Period(Base):
+    __tablename__ = "periods"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)  # 1..12
+
+    # open|closed — закрыт ли период в бухгалтерии-эталоне
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    closed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Источник установки статуса: manual (вручную в UI ClearLedger)
+    # или from_bp (репликация из БП через OData / явный признак закрытия)
+    closure_source: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="from_bp"
+    )
+
+    # Связь с записью в БП: «дата запрета изменений до X числа» либо
+    # явная регистровая запись. JSONB для гибкости.
+    bp_closure_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# ReferenceSnapshot (Снимок эталона из БП по периоду)
+# ---------------------------------------------------------------------------
+# Хранит «срез знаний» из БП на момент закрытия периода — для
+# воспроизводимости проверок незакрытого периода. Не дублирует
+# справочники (они в Counterparty/Nomenclature/...), а фиксирует
+# *версию* справочников и список документов с проводками.
+# ---------------------------------------------------------------------------
+class ReferenceSnapshot(Base):
+    __tablename__ = "reference_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    period_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("periods.id", ondelete="CASCADE"),
+        nullable=False
+    )
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Сводка снимка: сколько документов, контрагентов, проводок и т.д.
+    # Структура: {"counterparties_count": N, "documents_count": M,
+    #             "postings_count": K, "checksum": "sha256:..."}
+    summary: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # Полный список Ref_Key документов БП в этом периоде —
+    # для быстрого «список финализированных документов периода».
+    document_refs: Mapped[list] = mapped_column(
+        ARRAY(String), nullable=False, default=list
+    )
+
+
+# ---------------------------------------------------------------------------
+# SourceSync (Лог репликации из БП через OData)
+# ---------------------------------------------------------------------------
+class SourceSync(Base):
+    __tablename__ = "source_syncs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+
+    # Тип репликации: catalogs (справочники) | closed_periods (документы и
+    # проводки за закрытые периоды) | period_closure (детект закрытия) |
+    # full (полная синхронизация)
+    sync_type: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # success|partial|error
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+
+    # Время начала и завершения
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Счётчики
+    items_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    errors_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Детали ошибок и метаданные
+    details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# PullCheckpoint (Точка чтения для расширения БП — pull-расширение)
+# ---------------------------------------------------------------------------
+# Хранит «что уже забрало расширение БП» для идемпотентности.
+# При повторном опросе расширение присылает свой extension_id и last_seen,
+# ClearLedger отдаёт только дельту с этого момента.
+# ---------------------------------------------------------------------------
+class PullCheckpoint(Base):
+    __tablename__ = "pull_checkpoints"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+
+    # Идентификатор расширения-потребителя (например, "gig_ledger_cfe@bp_gig")
+    extension_id: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Тип забираемых документов: fuel_shift | fuel_receipt | ...
+    doc_type: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Что забирали — за какой период
+    period_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("periods.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # Последняя отметка времени, на которую расширение получило документы
+    last_pulled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Список ИсточникUUID документов, которые расширение подтвердило загруженными
+    acknowledged_uuids: Mapped[list] = mapped_column(
+        ARRAY(String), nullable=False, default=list
+    )
+
+    # Сколько документов в последнем pull-вызове
+    last_pulled_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
