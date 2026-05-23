@@ -104,14 +104,14 @@ function ScheduleCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: 
 
   return (
     <Card>
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-1.5">
         <CardTitle className="text-sm flex items-center gap-1.5">
           <History className="h-3.5 w-3.5" />
           Расписание
+          <span className="text-xs text-muted-foreground font-normal ml-auto">{current.label}</span>
         </CardTitle>
-        <CardDescription className="text-xs">{current.label}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-0 pb-3">
         <Select value={currentKey} onValueChange={pick}>
           <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -120,11 +120,6 @@ function ScheduleCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: 
             ))}
           </SelectContent>
         </Select>
-        <p className="text-[10px] text-muted-foreground mt-2 leading-tight">
-          {current.mode === 'manual'
-            ? 'Канал запускается только по кнопке «Запустить».'
-            : 'Канал запускается автоматически, пока приложение открыто.'}
-        </p>
       </CardContent>
     </Card>
   )
@@ -194,53 +189,41 @@ function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
 
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <CardTitle className="text-sm flex items-center gap-1.5">
-            <FileText className="h-3.5 w-3.5" />
-            Период загрузки
-          </CardTitle>
-          <CardDescription className="text-xs">{summary}</CardDescription>
-        </div>
+      <CardHeader className="pb-1.5">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <FileText className="h-3.5 w-3.5" />
+          Период загрузки
+          <span className="text-xs text-muted-foreground font-normal ml-auto">{summary}</span>
+        </CardTitle>
       </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 max-h-[180px] overflow-y-auto pr-1">
+      <CardContent className="pt-0 pb-3">
+        <div className="grid grid-cols-3 gap-x-2 gap-y-0 max-h-[112px] overflow-y-auto pr-1">
           {months.map((m) => {
             const on = selected.has(m)
             return (
               <label key={m}
-                className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/30 cursor-pointer">
+                className="flex items-center gap-1.5 py-0.5 px-1 rounded text-[11px] hover:bg-accent/30 cursor-pointer">
                 <Checkbox
                   checked={on}
                   onCheckedChange={() => toggle(m)}
-                  className="h-3.5 w-3.5"
+                  className="h-3 w-3"
                 />
                 <span className="truncate">{monthLabel(m)}</span>
               </label>
             )
           })}
         </div>
-        <div className="flex items-center flex-wrap gap-1 mt-3 pt-2 border-t border-border/40">
-          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
-            onClick={() => pickPreset('current')}>
-            Текущий
-          </Button>
-          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
-            onClick={() => pickPreset('last3')}>
-            3 месяца
-          </Button>
-          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
-            onClick={() => pickPreset('last6')}>
-            6 месяцев
-          </Button>
-          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
-            onClick={() => pickPreset('all')}>
-            Все 12
-          </Button>
-          <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2 text-muted-foreground"
-            onClick={() => pickPreset('none')}>
-            Очистить
-          </Button>
+        <div className="flex items-center flex-wrap gap-1 mt-2 pt-2 border-t border-border/40">
+          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+            onClick={() => pickPreset('current')}>Текущий</Button>
+          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+            onClick={() => pickPreset('last3')}>3 мес</Button>
+          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+            onClick={() => pickPreset('last6')}>6 мес</Button>
+          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+            onClick={() => pickPreset('all')}>Все 12</Button>
+          <Button size="sm" variant="ghost" className="h-5 text-[10px] px-1.5 text-muted-foreground ml-auto"
+            onClick={() => pickPreset('none')}>Очистить</Button>
         </div>
       </CardContent>
     </Card>
@@ -327,55 +310,50 @@ function StationsCard({
 
   return (
     <Card className="md:col-span-2">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm flex items-center gap-1.5">
-            <MapPin className="h-3.5 w-3.5" />
-            Станции
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Выбрано {channelStations.length} из {universe.length}
-          </CardDescription>
-        </div>
+      <CardHeader className="pb-1.5">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <MapPin className="h-3.5 w-3.5" />
+          Станции
+          <span className="text-xs text-muted-foreground font-normal ml-auto">
+            {channelStations.length} из {universe.length}
+          </span>
+        </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-0 pb-3">
         {channelStations.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-3 text-center">
-            Станции не выбраны. Откройте селектор ниже.
+          <p className="text-xs text-muted-foreground py-1">
+            Станции не выбраны.
           </p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {bySystem.map(([sys, items]) => {
-              const previewCount = 4
+              const previewCount = 6
               const preview = items.slice(0, previewCount)
               const rest = items.length - preview.length
               return (
-                <div key={sys} className="space-y-1">
-                  <div className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
-                    Сеть system_id = {sys}
-                    <span className="text-muted-foreground/50 normal-case ml-1">· {items.length}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {preview.map((s) => (
-                      <Badge key={`${s.systemId}-${s.code}`} variant="secondary"
-                        className="text-[10px] font-normal">
-                        <span className="font-mono mr-1">{s.code}</span>
-                        <span className="truncate max-w-[160px]">{s.name ?? ''}</span>
-                      </Badge>
-                    ))}
-                    {rest > 0 && (
-                      <Badge variant="outline" className="text-[10px]">
-                        +{rest}
-                      </Badge>
-                    )}
-                  </div>
+                <div key={sys} className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase shrink-0">
+                    sys {sys}
+                  </span>
+                  {preview.map((s) => (
+                    <Badge key={`${s.systemId}-${s.code}`} variant="secondary"
+                      className="text-[10px] font-normal h-5">
+                      <span className="font-mono mr-1">{s.code}</span>
+                      <span className="truncate max-w-[140px]">{s.name ?? ''}</span>
+                    </Badge>
+                  ))}
+                  {rest > 0 && (
+                    <Badge variant="outline" className="text-[10px] h-5">
+                      +{rest}
+                    </Badge>
+                  )}
                 </div>
               )
             })}
           </div>
         )}
 
-        <div className="mt-3 pt-2 border-t border-border/40 flex items-center gap-2">
+        <div className="mt-2 pt-2 border-t border-border/40 flex items-center gap-2">
           <StationsSelectorDialog
             stsSourceId={stsSource?.id}
             selected={channelStations.map((s) => ({ code: s.code, systemId: s.systemId }))}
@@ -421,48 +399,51 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
   const stations = getChannelStations(channel)
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {/* Статус */}
+    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      {/* Статус — компактная карточка: статус + кнопка + last sync в одну колонку */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Статус</CardTitle>
+        <CardHeader className="pb-1.5">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <span className={status.color}>●</span>
+            Статус
+            <span className={`text-xs font-semibold ml-auto ${status.color}`}>{status.label}</span>
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 mb-3">
-            <span className={`text-2xl font-bold ${status.color}`}>● {status.label}</span>
-          </div>
-          {channel.lastSync && (
-            <p className="text-xs text-muted-foreground">
-              Последняя синхронизация: {format(new Date(channel.lastSync), 'dd.MM.yyyy HH:mm')}
-            </p>
-          )}
-          <Button size="sm" className="mt-3 gap-1.5" onClick={onSync}
+        <CardContent className="pt-0 pb-3 space-y-2">
+          <Button size="sm" className="w-full gap-1.5" onClick={onSync}
             disabled={stations.length === 0 || channelSources.length === 0}>
             <Play className="h-3.5 w-3.5" />
             Запустить pipeline
           </Button>
+          {channel.lastSync && (
+            <p className="text-[10px] text-muted-foreground">
+              Последний прогон: {format(new Date(channel.lastSync), 'dd.MM.yyyy HH:mm')}
+            </p>
+          )}
           {stations.length === 0 && (
-            <p className="text-[10px] text-amber-500 mt-1">Укажите хотя бы одну станцию</p>
+            <p className="text-[10px] text-amber-500">Укажите хотя бы одну станцию</p>
           )}
         </CardContent>
       </Card>
 
-      {/* Станции — inline-чекбоксы (StationsCard сам шириной 2 ячейки) */}
+      {/* Станции (StationsCard сам шириной 2 ячейки) */}
       <StationsCard channel={channel} onUpdate={onUpdate} />
 
       {/* Источники */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Источники</CardTitle>
-          <CardDescription className="text-xs">{channelSources.length} подключено</CardDescription>
+        <CardHeader className="pb-1.5">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <Database className="h-3.5 w-3.5" />
+            Источники
+            <span className="text-xs text-muted-foreground font-normal ml-auto">{channelSources.length}</span>
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
+        <CardContent className="pt-0 pb-3">
+          <div className="space-y-1">
             {channelSources.map((src) => (
               <div key={src.id} className="flex items-center gap-2 text-xs">
-                <Database className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="font-medium">{src.name}</span>
-                <Badge variant="outline" className="text-[9px] h-4 ml-auto">{src.type}</Badge>
+                <span className="font-medium truncate">{src.name}</span>
+                <Badge variant="outline" className="text-[9px] h-4 ml-auto shrink-0">{src.type}</Badge>
               </div>
             ))}
             {channelSources.length === 0 && (
@@ -478,20 +459,23 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
       {/* Период загрузки */}
       <PeriodCard channel={channel} onUpdate={onUpdate} />
 
-      {/* Данные */}
+      {/* Загружено */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Загружено</CardTitle>
-          <CardDescription className="text-xs">{docs.length} документов</CardDescription>
+        <CardHeader className="pb-1.5">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5" />
+            Загружено
+            <span className="text-xs text-muted-foreground font-normal ml-auto">{docs.length}</span>
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-1.5">
+        <CardContent className="pt-0 pb-3">
+          <div className="space-y-0.5">
             {channel.streams.filter((s) => s.enabled).map((s) => {
               const count = docs.filter((d) => d.streamId === s.id).length
               return (
                 <div key={s.id} className="flex items-center justify-between text-xs">
-                  <span>{s.name}</span>
-                  <Badge variant="secondary" className="text-[10px]">{count}</Badge>
+                  <span className="truncate">{s.name}</span>
+                  <Badge variant="secondary" className="text-[10px] shrink-0">{count}</Badge>
                 </div>
               )
             })}
@@ -500,24 +484,27 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
       </Card>
 
       {/* Pipeline */}
-      <Card className="md:col-span-2">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Pipeline</CardTitle>
-          <CardDescription className="text-xs">
-            {channel.stages.filter((s) => s.enabled).length} активных этапов
-          </CardDescription>
+      <Card className="md:col-span-2 lg:col-span-3">
+        <CardHeader className="pb-1.5">
+          <CardTitle className="text-sm flex items-center gap-1.5">
+            <Settings2 className="h-3.5 w-3.5" />
+            Pipeline
+            <span className="text-xs text-muted-foreground font-normal ml-auto">
+              {channel.stages.filter((s) => s.enabled).length} активных
+            </span>
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 flex-wrap">
+        <CardContent className="pt-0 pb-3">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {channel.stages.sort((a, b) => a.order - b.order).map((stage, i) => {
               const meta = STAGE_TYPE_META[stage.type]
               return (
-                <div key={stage.id} className="flex items-center gap-2">
+                <div key={stage.id} className="flex items-center gap-1.5">
                   {i > 0 && <span className="text-muted-foreground/30">→</span>}
-                  <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs ${
+                  <div className={`px-2.5 py-1 rounded-md border text-[11px] ${
                     stage.enabled ? 'border-border bg-card' : 'border-border/30 bg-muted/30 text-muted-foreground line-through'
                   }`}>
-                    <span>{meta.label}</span>
+                    {meta.label}
                   </div>
                 </div>
               )
