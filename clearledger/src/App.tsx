@@ -14,6 +14,7 @@ const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ defaul
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
 const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
+const LocationsPage = lazy(() => import('@/pages/LocationsPage').then((m) => ({ default: m.LocationsPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
@@ -71,6 +72,7 @@ const router = createBrowserRouter([
           { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
           { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
           { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
+          { path: '/locations', element: <LazyPage><LocationsPage /></LazyPage> },
           { path: '/1c/connection', element: <LazyPage><ConnectionPage /></LazyPage> },
           { path: '/1c/references', element: <LazyPage><ReferencesPage /></LazyPage> },
           { path: '/1c/periods', element: <LazyPage><PeriodsPage /></LazyPage> },
