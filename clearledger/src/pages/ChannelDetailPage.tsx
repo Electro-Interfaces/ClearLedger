@@ -734,19 +734,113 @@ function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
 
 // ─── Вкладка: Данные ────────────────────────────────────────
 
+type SortKey = 'date_desc' | 'date_asc' | 'station' | 'shift_no'
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  shift_report: 'Сменные отчёты',
+  receipt: 'ТТН',
+  delivery: 'ТТН',
+  price: 'Цены',
+  sts_transactions: 'Операции отпуска',
+  sts_coupons: 'Купоны и талоны',
+  sts_tanks: 'Остатки резервуаров',
+}
+
+function docTypeLabel(type: string): string {
+  return DOC_TYPE_LABELS[type] ?? type
+}
+
+/** Извлечь номер смены из title вида «Смена №1847 — АКАЗС №5». */
+function parseShiftNo(title: string): number | null {
+  const m = title.match(/№\s*(\d+)/)
+  return m ? Number(m[1]) : null
+}
+
+
 function DataTab({ channel }: { channel: Channel }) {
-  const docs = getAllLoadedDocs().filter((d) => d.channelId === channel.id)
+  const allDocs = getAllLoadedDocs().filter((d) => d.channelId === channel.id)
+
+  // Состояние фильтров (локально для вкладки)
+  const [query, setQuery] = useState('')
+  const [stationFilter, setStationFilter] = useState<number[]>([])
+  const [monthFilter, setMonthFilter] = useState<string>('all')
+  const [sortKey, setSortKey] = useState<SortKey>('date_desc')
+
+  // Доступные значения для фильтров
+  const allStations = useMemo(() => {
+    const set = new Set<number>()
+    for (const d of allDocs) if (d.stationId) set.add(d.stationId)
+    return Array.from(set).sort((a, b) => a - b)
+  }, [allDocs])
+
+  const allMonths = useMemo(() => {
+    const set = new Set<string>()
+    for (const d of allDocs) {
+      const dt = new Date(d.date)
+      if (!isNaN(dt.getTime())) {
+        set.add(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`)
+      }
+    }
+    return Array.from(set).sort().reverse()
+  }, [allDocs])
+
+  // Применить фильтры + сортировку
+  const filteredDocs = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const stationSet = stationFilter.length > 0 ? new Set(stationFilter) : null
+
+    let out = allDocs.filter((d) => {
+      if (q && !d.title.toLowerCase().includes(q)) return false
+      if (stationSet && !stationSet.has(d.stationId)) return false
+      if (monthFilter !== 'all') {
+        const dt = new Date(d.date)
+        if (isNaN(dt.getTime())) return false
+        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
+        if (key !== monthFilter) return false
+      }
+      return true
+    })
+
+    out = [...out].sort((a, b) => {
+      switch (sortKey) {
+        case 'date_asc':
+          return new Date(a.date).getTime() - new Date(b.date).getTime()
+        case 'station':
+          return (a.stationId - b.stationId) ||
+            (new Date(b.date).getTime() - new Date(a.date).getTime())
+        case 'shift_no': {
+          const an = parseShiftNo(a.title) ?? 0
+          const bn = parseShiftNo(b.title) ?? 0
+          return bn - an
+        }
+        case 'date_desc':
+        default:
+          return new Date(b.date).getTime() - new Date(a.date).getTime()
+      }
+    })
+    return out
+  }, [allDocs, query, stationFilter, monthFilter, sortKey])
+
+  // Группировка после фильтра — по типу документа
   const grouped = useMemo(() => {
-    const map = new Map<string, typeof docs>()
-    for (const doc of docs) {
+    const map = new Map<string, typeof filteredDocs>()
+    for (const doc of filteredDocs) {
       const key = doc.docType
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(doc)
     }
     return map
-  }, [docs])
+  }, [filteredDocs])
 
-  if (docs.length === 0) {
+  function clearFilters() {
+    setQuery('')
+    setStationFilter([])
+    setMonthFilter('all')
+  }
+
+  const hasFilters = !!query || stationFilter.length > 0 || monthFilter !== 'all'
+
+  if (allDocs.length === 0) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
@@ -762,36 +856,121 @@ function DataTab({ channel }: { channel: Channel }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">Загружено {docs.length} документов</p>
-      {Array.from(grouped.entries()).map(([type, items]) => (
-        <Card key={type}>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">{type === 'shift_report' ? 'Сменные отчёты' : type === 'receipt' ? 'ТТН' : type}</CardTitle>
-            <CardDescription className="text-xs">{items.length} документов</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {/* Обычный div с overflow — Radix ScrollArea без явной высоты
-                родителя не активирует прокрутку, из-за чего длинный список
-                ранее проливался за границы карточки. */}
-            <div className="max-h-[420px] overflow-y-auto -mx-2 px-2 space-y-0.5">
-              {items.slice(0, 200).map((doc) => (
-                <div key={doc.id} className="flex items-center gap-3 text-xs py-1.5 px-2 rounded hover:bg-accent/30">
-                  <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span className="font-medium flex-1 truncate">{doc.title}</span>
-                  <span className="text-muted-foreground shrink-0">
-                    {format(new Date(doc.date), 'dd.MM.yyyy')}
-                  </span>
-                </div>
+      {/* Toolbar: поиск + фильтры + сортировка */}
+      <Card>
+        <CardContent className="py-3 flex flex-wrap items-center gap-2">
+          {/* Поиск */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Поиск по названию…"
+              className="h-8 pl-7 text-xs"
+            />
+          </div>
+
+          {/* Фильтр станций */}
+          <Select
+            value={stationFilter.length === 0 ? 'all' : stationFilter.length === 1 ? String(stationFilter[0]) : 'multi'}
+            onValueChange={(v) => setStationFilter(v === 'all' ? [] : [Number(v)])}
+          >
+            <SelectTrigger className="h-8 text-xs w-[150px]">
+              <SelectValue placeholder="Все станции" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">Все станции</SelectItem>
+              {allStations.map((sid) => (
+                <SelectItem key={sid} value={String(sid)} className="text-xs">
+                  Станция {sid}
+                </SelectItem>
               ))}
-              {items.length > 200 && (
-                <p className="text-xs text-muted-foreground py-2 text-center">
-                  … и ещё {items.length - 200}
-                </p>
-              )}
-            </div>
+            </SelectContent>
+          </Select>
+
+          {/* Фильтр месяца */}
+          <Select value={monthFilter} onValueChange={setMonthFilter}>
+            <SelectTrigger className="h-8 text-xs w-[160px]">
+              <SelectValue placeholder="Все периоды" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">Все периоды</SelectItem>
+              {allMonths.map((m) => {
+                const [y, mm] = m.split('-').map(Number)
+                const label = `${MONTH_NAMES_RU[(mm ?? 1) - 1]} ${y}`
+                return (
+                  <SelectItem key={m} value={m} className="text-xs">{label}</SelectItem>
+                )
+              })}
+            </SelectContent>
+          </Select>
+
+          {/* Сортировка */}
+          <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
+            <SelectTrigger className="h-8 text-xs w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="date_desc" className="text-xs">Дата ↓ (новые сверху)</SelectItem>
+              <SelectItem value="date_asc" className="text-xs">Дата ↑ (старые сверху)</SelectItem>
+              <SelectItem value="station" className="text-xs">По станции</SelectItem>
+              <SelectItem value="shift_no" className="text-xs">По номеру смены ↓</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {hasFilters && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs gap-1 text-muted-foreground"
+              onClick={clearFilters}>
+              <Trash2 className="h-3 w-3" />
+              Сброс
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="text-sm text-muted-foreground">
+        {hasFilters
+          ? `Показано ${filteredDocs.length} из ${allDocs.length}`
+          : `Загружено ${allDocs.length} документов`}
+      </p>
+
+      {filteredDocs.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center text-xs text-muted-foreground">
+            По текущим фильтрам ничего не найдено.
           </CardContent>
         </Card>
-      ))}
+      ) : (
+        Array.from(grouped.entries()).map(([type, items]) => (
+          <Card key={type}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">{docTypeLabel(type)}</CardTitle>
+              <CardDescription className="text-xs">{items.length} документов</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-[420px] overflow-y-auto -mx-2 px-2 space-y-0.5">
+                {items.slice(0, 200).map((doc) => (
+                  <div key={doc.id} className="flex items-center gap-3 text-xs py-1.5 px-2 rounded hover:bg-accent/30">
+                    <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="font-medium flex-1 truncate">{doc.title}</span>
+                    <Badge variant="outline" className="text-[9px] h-4 px-1 shrink-0 font-mono">
+                      {doc.stationId}
+                    </Badge>
+                    <span className="text-muted-foreground shrink-0 w-[78px] text-right">
+                      {format(new Date(doc.date), 'dd.MM.yyyy')}
+                    </span>
+                  </div>
+                ))}
+                {items.length > 200 && (
+                  <p className="text-xs text-muted-foreground py-2 text-center">
+                    … и ещё {items.length - 200}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))
+      )}
     </div>
   )
 }
