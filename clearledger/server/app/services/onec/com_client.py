@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import subprocess
+import sys
+from collections.abc import AsyncIterator
+from typing import Any
+
+from app.services.onec.exceptions import (
+    OneCAuthError,
+    OneCConnectionError,
+    OneCError,
+)
+
+logger = logging.getLogger("clearledger.onec.com")
+
+
+# Команда запуска воркера в 32-bit Python. Берётся из ENV если переопределена,
+# иначе — по умолчанию py launcher с явным выбором 32-bit интерпретатора.
+COM_WORKER_CMD = os.environ.get(
+    "CL_ONEC_COM_PYTHON",
+    "py" if sys.platform == "win32" else "python",
+)
+COM_WORKER_FLAGS = os.environ.get(
+    "CL_ONEC_COM_FLAGS",
+    "-3.13-32" if sys.platform == "win32" else "",
+).split()
+
+
+class OneCComClient:
+    """COM-клиент для стенда GIG Base2 (V83.COMConnector через subprocess 32-bit).
+
+    Запускает дочерний 32-bit Python с com_worker.py, общается через
+    stdin/stdout JSON-Lines. Реализует тот же публичный интерфейс, что и
+    OneCODataClient — sync_service использует через factory.
+
+    Использует СИНХРОННЫЙ subprocess в run_in_executor — потому что под
+    Windows uvicorn идёт на SelectorEventLoop (для совместимости с asyncpg),
+    а asyncio.create_subprocess_exec работает только на ProactorEventLoop.
+
+    connection_string — в формате 1С COMConnector:
+        File="D:\\...\\GIG Base2";Usr="...";Pwd="...";
+    или для серверной:
+        Srvr="host:port";Ref="GIG";Usr="...";Pwd="..."
+    """
+
+    def __init__(self, connection_string: str) -> None:
+        if not connection_string:
+            raise ValueError("connection_string не может быть пустым")
+        self.connection_string = connection_string
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._lock = asyncio.Lock()
+
+    async def aclose(self) -> None:
+        proc = self._proc
+        self._proc = None
+        if proc and proc.poll() is None:
+            try:
+                if proc.stdin and not proc.stdin.closed:
+                    proc.stdin.write(b'{"op":"exit"}\n')
+                    proc.stdin.flush()
+                    proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, proc.wait, 3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+    async def __aenter__(self) -> OneCComClient:
+        await self._ensure_started()
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.aclose()
+
+    async def _ensure_started(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            return
+
+        worker_path = os.path.join(os.path.dirname(__file__), "com_worker.py")
+        cmd = [COM_WORKER_CMD, *COM_WORKER_FLAGS, worker_path]
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
+        def _spawn() -> subprocess.Popen[bytes]:
+            return subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                bufsize=0,
+            )
+
+        loop = asyncio.get_running_loop()
+        try:
+            self._proc = await loop.run_in_executor(None, _spawn)
+        except FileNotFoundError as exc:
+            raise OneCConnectionError(f"Не найден python для COM-воркера: {cmd}") from exc
+
+        connect_result = await self._call("connect", {"conn_string": self.connection_string})
+        logger.info(
+            "COM connect OK: %s v%s",
+            connect_result.get("config_synonym"),
+            connect_result.get("config_version"),
+        )
+
+    async def _call(self, op: str, args: dict[str, Any] | None = None) -> Any:
+        if op != "connect" and (self._proc is None or self._proc.poll() is not None):
+            await self._ensure_started()
+
+        assert self._proc is not None
+        assert self._proc.stdin is not None
+        assert self._proc.stdout is not None
+        assert self._proc.stderr is not None
+        proc = self._proc
+
+        payload: dict[str, Any] = {"op": op}
+        if args is not None:
+            payload["args"] = args
+        line = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+
+        def _send_and_read() -> bytes:
+            proc.stdin.write(line)
+            proc.stdin.flush()
+            return proc.stdout.readline()
+
+        loop = asyncio.get_running_loop()
+        async with self._lock:
+            response_bytes = await loop.run_in_executor(None, _send_and_read)
+
+        if not response_bytes:
+            stderr = await loop.run_in_executor(None, proc.stderr.read)
+            raise OneCConnectionError(
+                f"COM worker exited unexpectedly. stderr: {stderr.decode('utf-8', errors='replace')[:500]}"
+            )
+        try:
+            response = json.loads(response_bytes.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise OneCError(f"Bad JSON from COM worker: {response_bytes!r}") from exc
+
+        if not response.get("ok"):
+            err = str(response.get("error", "unknown COM error"))
+            if "Невозможно установить соединение" in err or "пользователь" in err.lower():
+                raise OneCAuthError(err)
+            raise OneCError(err)
+        return response.get("result")
+
+    # ─── публичный API совместимый с OneCODataClient ─────────────────
+
+    async def metadata_catalogs(self) -> list[str]:
+        result = await self._call("metadata_catalogs")
+        return list(result) if result else []
+
+    async def fetch_entity(
+        self,
+        entity: str,
+        *,
+        select: list[str] | None = None,
+        filter_expr: str | None = None,
+        orderby: str | None = None,
+        top: int | None = None,
+        skip: int | None = None,
+    ) -> list[dict[str, Any]]:
+        args: dict[str, Any] = {"entity": entity}
+        if select is not None:
+            args["select"] = select
+        if filter_expr is not None:
+            args["filter"] = filter_expr
+        if orderby is not None:
+            args["orderby"] = orderby
+        if top is not None:
+            args["top"] = top
+        if skip is not None:
+            args["skip"] = skip
+        return await self._call("fetch_entity", args)
+
+    async def iter_entity(
+        self,
+        entity: str,
+        *,
+        select: list[str] | None = None,
+        filter_expr: str | None = None,
+        orderby: str | None = None,
+        page_size: int = 500,
+    ) -> AsyncIterator[dict[str, Any]]:
+        skip = 0
+        while True:
+            batch = await self.fetch_entity(
+                entity,
+                select=select,
+                filter_expr=filter_expr,
+                orderby=orderby,
+                top=page_size,
+                skip=skip,
+            )
+            if not batch:
+                return
+            for item in batch:
+                yield item
+            if len(batch) < page_size:
+                return
+            skip += page_size
+
+    async def count_entity(
+        self,
+        entity: str,
+        *,
+        filter_expr: str | None = None,
+    ) -> int:
+        args: dict[str, Any] = {"entity": entity}
+        if filter_expr is not None:
+            args["filter"] = filter_expr
+        result = await self._call("count_entity", args)
+        return int(result or 0)

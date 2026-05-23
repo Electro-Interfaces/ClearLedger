@@ -13,8 +13,10 @@ from app.models import Company, User
 
 logger = logging.getLogger("clearledger.seed")
 
-# 5 компаний — данные совпадают с config/companies.ts (defaultCompanies)
+# Компании — данные совпадают с config/companies.ts (defaultCompanies).
+# Для GIG Ledger основная — gig (ООО ГИГ / ГазИнвестГрупп). Остальные — legacy.
 COMPANIES = [
+    {"slug": "gig", "name": "ООО ГИГ (ГазИнвестГрупп)", "short_name": "ГИГ", "profile_id": "fuel", "color": "#3b82f6", "inn": "7839124578"},
     {"slug": "npk", "name": "НПК", "short_name": "НПК", "profile_id": "fuel", "color": "#3b82f6"},
     {"slug": "rti", "name": "РТИ", "short_name": "РТИ", "profile_id": "fuel", "color": "#8b5cf6"},
     {"slug": "ts94", "name": "ТС-94", "short_name": "ТС-94", "profile_id": "trade", "color": "#10b981"},

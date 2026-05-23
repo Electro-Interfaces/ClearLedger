@@ -1275,6 +1275,10 @@ class OneCConnection(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # mode='odata' — HTTP-публикация, odata_url хранит URL.
+    # mode='com'  — V83.COMConnector, odata_url хранит строку соединения
+    # (File=... или Srvr=...;Ref=...). См. services/onec/com_client.py.
+    mode: Mapped[str] = mapped_column(String(10), nullable=False, default="odata")
     odata_url: Mapped[str] = mapped_column(String(500), nullable=False)
     username: Mapped[str] = mapped_column(String(255), nullable=False)
     password_encrypted: Mapped[str] = mapped_column(String(1024), nullable=False)

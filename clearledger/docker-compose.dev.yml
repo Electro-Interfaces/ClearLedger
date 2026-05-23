@@ -1,0 +1,27 @@
+# Dev-стек: только Postgres в контейнере, FastAPI запускается нативно для
+# удобной разработки (живой код, отладчик, прямой доступ к COM-коннектору 1С).
+#
+# Запуск: docker compose -f docker-compose.dev.yml up -d
+# Останов: docker compose -f docker-compose.dev.yml down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: clearledger-db-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clearledger
+      POSTGRES_PASSWORD: clearledger
+      POSTGRES_DB: clearledger
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clearledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata_dev:

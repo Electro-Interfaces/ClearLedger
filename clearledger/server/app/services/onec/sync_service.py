@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    AccountingDoc,
     Counterparty,
     NomenclatureItem,
     OneCConnection,
@@ -16,15 +17,27 @@ from app.models import (
     Organization,
     Warehouse,
 )
+from app.services.onec.com_client import OneCComClient
 from app.services.onec.crypto import decrypt_password
 from app.services.onec.exceptions import OneCError
 from app.services.onec.odata_client import (
     ENTITY_COUNTERPARTIES,
+    ENTITY_DOC_CORRECTION,
+    ENTITY_DOC_OPZS,
+    ENTITY_DOC_ORP,
+    ENTITY_DOC_PTU,
     ENTITY_NOMENCLATURE,
     ENTITY_ORGANIZATIONS,
     ENTITY_WAREHOUSES,
     OneCODataClient,
 )
+
+
+# Тип объединения — формальная аннотация интерфейса. OneCComClient и
+# OneCODataClient имеют одинаковый публичный API (metadata_catalogs,
+# fetch_entity, iter_entity, count_entity, aclose, __aenter__/__aexit__),
+# поэтому sync_service работает с любым из них.
+OneCClient = OneCODataClient | OneCComClient
 
 logger = logging.getLogger("clearledger.onec.sync")
 
@@ -51,8 +64,24 @@ class OneCSyncService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def _open_client(self, connection: OneCConnection) -> OneCODataClient:
+    async def _open_client(self, connection: OneCConnection) -> OneCClient:
         password = decrypt_password(connection.password_encrypted)
+        mode = (connection.mode or "odata").lower()
+        if mode == "com":
+            # odata_url для COM хранит либо путь к файловой БД, либо ConnString.
+            # Если задан простой путь — собираем ConnString автоматически.
+            url = connection.odata_url.strip()
+            if "=" not in url:
+                conn_string = (
+                    f'File="{url}";'
+                    f'Usr="{connection.username}";'
+                    f'Pwd="{password}";'
+                )
+            else:
+                conn_string = url
+            client = OneCComClient(conn_string)
+            await client._ensure_started()  # noqa: SLF001 — выносим инициализацию из ленивого пути
+            return client
         return OneCODataClient(
             base_url=connection.odata_url,
             username=connection.username,
@@ -116,15 +145,158 @@ class OneCSyncService:
         return log
 
     async def sync_documents(self, connection: OneCConnection) -> OneCSyncLog:
-        """Заглушка для следующей итерации.
+        """Pull шапок документов БП ГИГ в AccountingDoc.
 
-        Документы (ПТУ, ОРП, ОПЗС) требуют отдельной схемы хранения и
-        фильтра по checkpoint — реализую после того, как pull НСИ
-        стабилизируется на боевой публикации OData.
+        Покрывает четыре ключевых типа для GIG Ledger:
+        - ПТУ (поступление от поставщиков)
+        - ОРП (отчёт о розничных продажах)
+        - ОПЗС (отчёт производства за смену — общепит)
+        - КорректировкаПоступления (возвраты/правки в БП 3.0)
+
+        Идемпотентно: upsert по external_id = Ref_Key. Имена контрагента
+        и организации подтягиваются из локальной БД по external_ref
+        (по дизайну, сначала надо запустить sync_catalogs).
+        Фильтр по checkpoint появится в следующем шаге — пока берём
+        ограниченное окно от last_sync_at (если задано) или 100 свежих.
         """
         log = await self._start_log(connection, sync_type="documents")
-        await self._finish_log(log, "completed", {"note": "documents-sync not implemented yet"})
+        details: dict[str, Any] = {}
+        try:
+            async with await self._open_client(connection) as client:
+                # Прежде чем грузить документы — построим карту GUID→имя из локальной БД.
+                local_cp = await self._build_local_index(Counterparty, connection.company_id)
+                local_org = await self._build_local_index(Organization, connection.company_id)
+                # Для склада берём code (≤ 20 символов в БД), не name.
+                local_wh = await self._build_local_index(Warehouse, connection.company_id, by="code")
+
+                for entity, doc_type in [
+                    (ENTITY_DOC_PTU,        "ПТУ"),
+                    (ENTITY_DOC_ORP,        "ОРП"),
+                    (ENTITY_DOC_OPZS,       "ОПЗС"),
+                    (ENTITY_DOC_CORRECTION, "КорректировкаПоступления"),
+                ]:
+                    details[doc_type] = await self._sync_doc_type(
+                        client=client,
+                        connection=connection,
+                        log=log,
+                        entity=entity,
+                        doc_type=doc_type,
+                        local_cp=local_cp,
+                        local_org=local_org,
+                        local_wh=local_wh,
+                    )
+            await self._finish_log(log, "completed", details)
+        except Exception as exc:
+            await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})
+            raise
         return log
+
+    async def _build_local_index(
+        self, model: type, company_id: Any, *, by: str = "name"
+    ) -> dict[str, str]:
+        """{external_ref → attribute} для подстановки имени или кода."""
+        rows = (await self.session.execute(
+            select(model).where(
+                model.company_id == company_id,
+                model.external_ref.is_not(None),
+            )
+        )).scalars().all()
+        return {r.external_ref: getattr(r, by) for r in rows if r.external_ref}
+
+    async def _sync_doc_type(
+        self,
+        *,
+        client: Any,
+        connection: OneCConnection,
+        log: OneCSyncLog,
+        entity: str,
+        doc_type: str,
+        local_cp: dict[str, str],
+        local_org: dict[str, str],
+        local_wh: dict[str, str],
+    ) -> dict[str, int]:
+        stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
+
+        # Шапки документов БП 3.0 — поля заметно различаются между типами.
+        # СуммаДокумента есть у ПТУ/ОРП/КП, нет у ОПЗС (производство).
+        select_fields = ["Ref_Key", "DeletionMark", "Posted", "Number", "Date"]
+        has_amount = entity in (ENTITY_DOC_PTU, ENTITY_DOC_ORP, ENTITY_DOC_CORRECTION)
+        if has_amount:
+            select_fields.append("СуммаДокумента")
+        if entity in (ENTITY_DOC_PTU, ENTITY_DOC_CORRECTION):
+            select_fields.append("Контрагент_Key")
+        select_fields.append("Организация_Key")
+        if entity in (ENTITY_DOC_PTU, ENTITY_DOC_ORP):
+            select_fields.append("Склад_Key")
+
+        filter_expr: str | None = None
+        if connection.last_sync_at:
+            ts = connection.last_sync_at.strftime("%Y-%m-%dT%H:%M:%S")
+            filter_expr = f"Date ge datetime'{ts}'"
+
+        async for item in client.iter_entity(entity, select=select_fields, filter_expr=filter_expr, orderby="Ref_Key", page_size=500):
+            stats["processed"] += 1
+            if item.get("DeletionMark"):
+                stats["skipped"] += 1
+                continue
+            ref_key = item.get("Ref_Key")
+            if not ref_key:
+                stats["errors"] += 1
+                continue
+            try:
+                existing = (await self.session.execute(
+                    select(AccountingDoc).where(
+                        AccountingDoc.company_id == connection.company_id,
+                        AccountingDoc.external_id == ref_key,
+                    )
+                )).scalar_one_or_none()
+
+                cp_key = item.get("Контрагент_Key")
+                org_key = item.get("Организация_Key")
+                wh_key = item.get("Склад_Key")
+                cp_name = local_cp.get(cp_key, "") if cp_key else ""
+                org_name = local_org.get(org_key, "") if org_key else ""
+                wh_code = (local_wh.get(wh_key, "") or "")[:20] if wh_key else None
+
+                number = str(item.get("Number") or "").strip() or ref_key[:8]
+                # AccountingDoc.date — VARCHAR(20). ISO-datetime занимает 25
+                # символов, обрезаем до даты "YYYY-MM-DD" (10 символов).
+                date_str = str(item.get("Date") or "").strip()[:10]
+                amount = float(item.get("СуммаДокумента") or 0) if has_amount else 0.0
+                status_1c = "Проведён" if item.get("Posted") else "Записан"
+
+                if existing is None:
+                    self.session.add(AccountingDoc(
+                        id=uuid.uuid4(),
+                        company_id=connection.company_id,
+                        external_id=ref_key,
+                        doc_type=doc_type,
+                        number=number,
+                        date=date_str,
+                        counterparty_name=cp_name,
+                        organization_name=org_name or None,
+                        amount=amount,
+                        status_1c=status_1c,
+                        warehouse_code=wh_code,
+                        lines=[],
+                    ))
+                    stats["created"] += 1
+                else:
+                    existing.number = number
+                    existing.date = date_str
+                    existing.counterparty_name = cp_name or existing.counterparty_name
+                    existing.organization_name = org_name or existing.organization_name
+                    existing.amount = amount
+                    existing.status_1c = status_1c
+                    if wh_code:
+                        existing.warehouse_code = wh_code
+                    stats["updated"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"] += 1
+                logger.warning("Doc %s upsert failed (Ref_Key=%s): %s", doc_type, ref_key, exc)
+
+        self._merge_log_stats(log, stats)
+        return stats
 
     # ─── upsert по каждой сущности ──────────────────────────────────
 
@@ -135,7 +307,7 @@ class OneCSyncService:
         log: OneCSyncLog,
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
-        async for item in client.iter_entity(ENTITY_COUNTERPARTIES, select=COUNTERPARTY_SELECT, page_size=500):
+        async for item in client.iter_entity(ENTITY_COUNTERPARTIES, select=COUNTERPARTY_SELECT, orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1
@@ -180,7 +352,7 @@ class OneCSyncService:
         log: OneCSyncLog,
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
-        async for item in client.iter_entity(ENTITY_ORGANIZATIONS, select=ORGANIZATION_SELECT, page_size=500):
+        async for item in client.iter_entity(ENTITY_ORGANIZATIONS, select=ORGANIZATION_SELECT, orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1
@@ -225,7 +397,7 @@ class OneCSyncService:
         log: OneCSyncLog,
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
-        async for item in client.iter_entity(ENTITY_WAREHOUSES, select=WAREHOUSE_SELECT, page_size=500):
+        async for item in client.iter_entity(ENTITY_WAREHOUSES, select=WAREHOUSE_SELECT, orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1
@@ -270,7 +442,7 @@ class OneCSyncService:
         log: OneCSyncLog,
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
-        async for item in client.iter_entity(ENTITY_NOMENCLATURE, select=NOMENCLATURE_SELECT, page_size=500):
+        async for item in client.iter_entity(ENTITY_NOMENCLATURE, select=NOMENCLATURE_SELECT, orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1

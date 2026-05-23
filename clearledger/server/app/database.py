@@ -47,6 +47,12 @@ async def create_all() -> None:
                 "ALTER TABLE companies ADD COLUMN IF NOT EXISTS cloud_api_key VARCHAR(128) UNIQUE"
             )
         )
+        # v0.7: mode для OneCConnection (odata | com) — поддержка стенда через COMConnector
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE onec_connections ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'odata'"
+            )
+        )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -605,10 +605,14 @@ export type OneCSyncDirection = 'inbound' | 'outbound'
 export type OneCSyncType = 'catalogs' | 'documents' | 'full' | 'export'
 export type OneCSyncStatus = 'running' | 'success' | 'error'
 
+export type OneCConnectionMode = 'odata' | 'com'
+
 export interface OneCConnection {
   id: string
   companyId: string
   name: string
+  mode: OneCConnectionMode
+  /** Для mode=odata — URL публикации; для mode=com — путь к файловой БД или ConnString. */
   odataUrl: string
   username: string
   exchangePath?: string
