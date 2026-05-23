@@ -8,6 +8,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { GlobalFilters } from './GlobalFilters'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -27,7 +28,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
           </Button>
         )}
 
-        <Link to="/" className="flex items-center gap-2.5 mr-auto">
+        <Link to="/" className="flex items-center gap-2.5 shrink-0">
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 border border-primary/20">
             <Fuel className="h-4 w-4 text-primary" />
           </div>
@@ -36,6 +37,11 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             <span className="text-[10px] text-muted-foreground font-medium">ГазИнвестГрупп</span>
           </div>
         </Link>
+
+        {/* Глобальные фильтры менеджера — компания, точки, типы документов */}
+        <div className="flex-1 flex justify-center min-w-0 px-4">
+          <GlobalFilters />
+        </div>
 
         <Button
           variant="ghost"

@@ -3,6 +3,7 @@ import { createBrowserRouter, RouterProvider, Outlet, Link } from 'react-router-
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { CompanyProvider } from '@/contexts/CompanyContext'
+import { FilterProvider } from '@/contexts/FilterContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { MainLayout } from '@/components/layout/MainLayout'
@@ -48,10 +49,12 @@ function Providers() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <CompanyProvider>
-          <TooltipProvider>
-            <Outlet />
-            <Toaster position="bottom-right" richColors closeButton />
-          </TooltipProvider>
+          <FilterProvider>
+            <TooltipProvider>
+              <Outlet />
+              <Toaster position="bottom-right" richColors closeButton />
+            </TooltipProvider>
+          </FilterProvider>
         </CompanyProvider>
       </QueryClientProvider>
     </ErrorBoundary>
