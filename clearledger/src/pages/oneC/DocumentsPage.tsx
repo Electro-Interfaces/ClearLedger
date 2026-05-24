@@ -44,12 +44,23 @@ const DOC_TYPES = [
   { value: 'КорректировкаПоступления', label: 'Корректировка' },
 ]
 
-const MATCH_STATUSES = [
-  { value: 'all',         label: 'Все статусы' },
-  { value: 'pending',     label: 'Не сверен' },
-  { value: 'matched',     label: 'Сверен' },
-  { value: 'discrepancy', label: 'Расхождение' },
-  { value: 'unmatched',   label: 'Без пары' },
+// Состояние сверки (см. docs/sverka-spec.md §7a) — приходит в discrepancyStatus.
+// matchStatus оставлен для обратной совместимости (пока не пересчитан).
+const DISCREPANCY_STATUSES = [
+  { value: 'all',       label: 'Все' },
+  { value: 'pending',   label: 'Не сверен' },
+  { value: 'none',      label: 'OK' },
+  { value: 'rounding',  label: 'Округление' },
+  { value: 'minor',     label: 'Малое' },
+  { value: 'material',  label: 'Значимое' },
+  { value: 'critical',  label: 'Критичное' },
+  { value: 'unmatched', label: 'Без пары' },
+]
+
+const PERIOD_STATUSES = [
+  { value: 'all',    label: 'Все периоды' },
+  { value: 'open',   label: 'Открытые' },
+  { value: 'closed', label: 'Закрытые' },
 ]
 
 const SORT_OPTIONS: { value: DocSort; label: string; icon: typeof ArrowDown }[] = [
@@ -59,11 +70,21 @@ const SORT_OPTIONS: { value: DocSort; label: string; icon: typeof ArrowDown }[] 
   { value: 'amount_asc',  label: 'Сумма ↑', icon: ArrowUp },
 ]
 
-const STATUS_STYLE: Record<string, string> = {
-  matched:     'border-emerald-400/50 text-emerald-300/80',
-  discrepancy: 'border-amber-400/50 text-amber-300/80',
-  unmatched:   'border-zinc-600 text-zinc-400',
-  pending:     'border-blue-400/50 text-blue-300/80',
+// Цветовая палитра расхождений. В закрытом периоде те же градации, но
+// в UI ниже добавляется красный outline+замок к строкам closed-периодов.
+const DISCREPANCY_STYLE: Record<string, string> = {
+  none:      'border-emerald-400/50 text-emerald-300/80',
+  rounding:  'border-yellow-600/50  text-yellow-400/80',
+  minor:     'border-amber-400/50   text-amber-300/80',
+  material:  'border-orange-400/50  text-orange-300/80',
+  critical:  'border-red-400/50     text-red-300/80',
+  unmatched: 'border-zinc-600       text-zinc-400',
+  pending:   'border-blue-400/50    text-blue-300/80',
+}
+
+const STATUS_1C_STYLE: Record<string, string> = {
+  'Проведён': 'border-emerald-400/50 text-emerald-300/80',
+  'Записан':  'border-blue-400/50    text-blue-300/80',
 }
 
 function formatRub(n: number): string {
@@ -87,7 +108,8 @@ export function DocumentsPage() {
 
   const [q, setQ] = useState('')
   const [docType, setDocType] = useState<string>('all')
-  const [matchStatus, setMatchStatus] = useState<string>('all')
+  const [discrepancyStatus, setDiscrepancyStatus] = useState<string>('all')
+  const [periodStatus, setPeriodStatus] = useState<string>('all')
   const [sort, setSort] = useState<DocSort>('date_desc')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -96,13 +118,14 @@ export function DocumentsPage() {
   const params = useMemo(() => ({
     q,
     docType: docType === 'all' ? undefined : docType,
-    matchStatus: matchStatus === 'all' ? undefined : matchStatus,
+    discrepancyStatus: discrepancyStatus === 'all' ? undefined : discrepancyStatus,
+    periodStatus: periodStatus === 'all' ? undefined : periodStatus,
     sort,
     dateFrom: dateFrom || undefined,
     dateTo: dateTo || undefined,
     limit: PAGE_SIZE,
     offset,
-  }), [q, docType, matchStatus, sort, dateFrom, dateTo, offset])
+  }), [q, docType, discrepancyStatus, periodStatus, sort, dateFrom, dateTo, offset])
 
   const { data, isFetching, error } = useQuery({
     queryKey: ['acc-docs', companyId, params],
@@ -219,16 +242,26 @@ export function DocumentsPage() {
               </Select>
             </div>
             <div className="md:col-span-2">
-              <Select value={matchStatus} onValueChange={(v) => { setMatchStatus(v); resetOffset() }}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+              <Select value={discrepancyStatus} onValueChange={(v) => { setDiscrepancyStatus(v); resetOffset() }}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Сверка" /></SelectTrigger>
                 <SelectContent>
-                  {MATCH_STATUSES.map((s) => (
+                  {DISCREPANCY_STATUSES.map((s) => (
                     <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="md:col-span-2">
+              <Select value={periodStatus} onValueChange={(v) => { setPeriodStatus(v); resetOffset() }}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Период" /></SelectTrigger>
+                <SelectContent>
+                  {PERIOD_STATUSES.map((s) => (
+                    <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="md:col-span-1">
               <Input type="date"
                 value={dateFrom}
                 onChange={(e) => { setDateFrom(e.target.value); resetOffset() }}
@@ -236,7 +269,7 @@ export function DocumentsPage() {
                 className="h-8 text-xs"
               />
             </div>
-            <div className="md:col-span-2">
+            <div className="md:col-span-1">
               <Input type="date"
                 value={dateTo}
                 onChange={(e) => { setDateTo(e.target.value); resetOffset() }}
@@ -272,25 +305,39 @@ export function DocumentsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="h-7 text-[10px] w-24">Тип</TableHead>
-                <TableHead className="h-7 text-[10px] w-28">Номер</TableHead>
+                <TableHead className="h-7 text-[10px] w-20">Тип</TableHead>
+                <TableHead className="h-7 text-[10px] w-32">Номер / ТТН №</TableHead>
                 <TableHead className="h-7 text-[10px] w-24">Дата</TableHead>
                 <TableHead className="h-7 text-[10px]">Контрагент</TableHead>
                 <TableHead className="h-7 text-[10px]">Организация</TableHead>
                 <TableHead className="h-7 text-[10px] w-32 text-right">Сумма, ₽</TableHead>
-                <TableHead className="h-7 text-[10px] w-24">Статус</TableHead>
-                <TableHead className="h-7 text-[10px] w-24">Сверка</TableHead>
+                <TableHead className="h-7 text-[10px] w-20">Период</TableHead>
+                <TableHead className="h-7 text-[10px] w-24">Статус 1С</TableHead>
+                <TableHead className="h-7 text-[10px] w-28">Сверка</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(data?.items ?? []).map((d) => (
-                <TableRow key={d.id} className="text-xs">
+              {(data?.items ?? []).map((d) => {
+                const isClosed = d.periodStatus === 'closed'
+                const ds = d.discrepancyStatus || 'pending'
+                // В закрытом периоде ЛЮБОЕ расхождение (даже rounding) тревожнее
+                // см. docs/sverka-spec.md §7a.4 — добавляем красный outline на строку.
+                const rowAttention = isClosed && ['rounding','minor','material','critical'].includes(ds)
+                return (
+                <TableRow key={d.id} className={`text-xs ${rowAttention ? 'bg-red-500/5' : ''}`}>
                   <TableCell className="py-1.5">
                     <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
                       {d.docType === 'КорректировкаПоступления' ? 'Корр.' : d.docType}
                     </Badge>
                   </TableCell>
-                  <TableCell className="py-1.5 font-mono text-[11px]">{d.number || '—'}</TableCell>
+                  <TableCell className="py-1.5 font-mono text-[11px]">
+                    <div>{d.number || '—'}</div>
+                    {d.externalNumber && (
+                      <div className="text-[9px] text-muted-foreground">
+                        ТТН №{d.externalNumber} {d.externalDate ? `от ${formatDate(d.externalDate)}` : ''}
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="py-1.5 text-[11px]">{formatDate(d.date)}</TableCell>
                   <TableCell className="py-1.5">
                     <div>{d.counterpartyName || '—'}</div>
@@ -304,17 +351,49 @@ export function DocumentsPage() {
                   <TableCell className="py-1.5 text-right font-mono text-[11px]">
                     {formatRub(d.amount)}
                   </TableCell>
-                  <TableCell className="py-1.5 text-[10px] text-muted-foreground">{d.status1c}</TableCell>
                   <TableCell className="py-1.5">
-                    <Badge variant="outline" className={`text-[9px] h-4 px-1 ${STATUS_STYLE[d.matchStatus] ?? ''}`}>
-                      {MATCH_STATUSES.find((s) => s.value === d.matchStatus)?.label ?? d.matchStatus}
+                    <Badge
+                      variant="outline"
+                      className={`text-[9px] h-4 px-1 ${isClosed
+                        ? 'border-red-400/50 text-red-300/80'
+                        : 'border-emerald-400/50 text-emerald-300/80'}`}
+                      title={isClosed
+                        ? 'Период закрыт — изменения требуют корректировки'
+                        : 'Период открыт'}
+                    >
+                      {isClosed ? '🔒 закрыт' : 'открыт'}
                     </Badge>
                   </TableCell>
+                  <TableCell className="py-1.5">
+                    <Badge variant="outline" className={`text-[9px] h-4 px-1 ${STATUS_1C_STYLE[d.status1c] ?? ''}`}>
+                      {d.status1c}
+                    </Badge>
+                    {d.operationType && (
+                      <div className="text-[9px] text-muted-foreground mt-0.5 truncate" title={d.operationType}>
+                        {d.operationType}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="py-1.5">
+                    <Badge
+                      variant="outline"
+                      className={`text-[9px] h-4 px-1 ${DISCREPANCY_STYLE[ds] ?? ''}`}
+                      title={d.discrepancySummary || DISCREPANCY_STATUSES.find((s) => s.value === ds)?.label}
+                    >
+                      {DISCREPANCY_STATUSES.find((s) => s.value === ds)?.label ?? ds}
+                    </Badge>
+                    {d.discrepancySummary && (
+                      <div className="text-[9px] text-muted-foreground mt-0.5 truncate" title={d.discrepancySummary}>
+                        {d.discrepancySummary}
+                      </div>
+                    )}
+                  </TableCell>
                 </TableRow>
-              ))}
+                )
+              })}
               {data && data.items.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center text-[11px] text-muted-foreground py-6">
+                  <TableCell colSpan={9} className="text-center text-[11px] text-muted-foreground py-6">
                     Документы не найдены — измените фильтры или обновите из 1С
                   </TableCell>
                 </TableRow>

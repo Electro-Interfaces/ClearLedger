@@ -518,6 +518,14 @@ class AccountingDocResponse(BaseModel):
     matchStatus: str
     matchDetails: dict | None = None
     warehouseCode: str | None = None
+    # Расширенные поля для сверки (docs/sverka-spec.md §7a):
+    externalNumber: str | None = None      # № входящего документа поставщика (ТТН №)
+    externalDate: str | None = None        # дата входящего документа (ТТН дата)
+    operationType: str | None = None       # ВидОперации из 1С
+    periodStatus: str = "open"             # open | closed (из таблицы periods)
+    discrepancyStatus: str = "pending"     # pending | none | rounding | minor | material | critical | unmatched
+    discrepancySummary: str | None = None  # короткая свёртка для строки таблицы
+    discrepancyDetails: list | dict | None = None  # полный список расхождений
     createdAt: str
     updatedAt: str
 

@@ -384,6 +384,31 @@ class AccountingDoc(Base):
     match_status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     match_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     warehouse_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Реквизиты входящего документа поставщика (ТТН №+дата).
+    # Композитный ключ сверки ТТН-файл ↔ ПТУ —
+    # (counterparty_inn + external_number + external_date + amount).
+    external_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    external_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # ВидОперации из 1С — критичен для интерпретации проводок ОРП:
+    # ОтчетККМОПродажах vs НТТО дают разные формулы НДС/выручки.
+    operation_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Статус периода — кэш от Period.status на момент загрузки документа.
+    # open | closed. В closed-периоде любое расхождение подсвечивается строже
+    # (требование МАГ — см. docs/sverka-spec.md §7a).
+    period_status: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="open"
+    )
+    # Состояние сверки этого документа с парной ClearLedger.DataEntry.
+    # pending | none | rounding | minor | material | critical | unmatched
+    discrepancy_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )
+    # Короткая свёртка расхождений для строки таблицы UI.
+    discrepancy_summary: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    # Полный список расхождений с формулами (см. §7a.3 спецификации).
+    discrepancy_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

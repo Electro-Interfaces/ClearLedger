@@ -15,6 +15,7 @@ from app.models import (
     OneCConnection,
     OneCSyncLog,
     Organization,
+    Period,
     Warehouse,
 )
 from app.services.onec.com_client import OneCComClient
@@ -203,6 +204,43 @@ class OneCSyncService:
         )).scalars().all()
         return {r.external_ref: getattr(r, by) for r in rows if r.external_ref}
 
+    async def _build_inn_index(self, model: type, company_id: Any) -> dict[str, str]:
+        """{external_ref → ИНН} для подстановки в counterparty_inn AccountingDoc.
+        Нужен для композитного ключа сверки ТТН-файл ↔ ПТУ."""
+        rows = (await self.session.execute(
+            select(model).where(
+                model.company_id == company_id,
+                model.external_ref.is_not(None),
+            )
+        )).scalars().all()
+        return {r.external_ref: (r.inn or "").strip() for r in rows if r.external_ref and (r.inn or "").strip()}
+
+    async def _build_period_index(self, company_id: Any) -> dict[tuple[int, int], str]:
+        """{(year, month) → status} — кэш статусов периодов для компании.
+        Используется при sync_documents чтобы проставить period_status каждому
+        AccountingDoc одним запросом, а не N+1."""
+        rows = (await self.session.execute(
+            select(Period.year, Period.month, Period.status).where(
+                Period.company_id == company_id,
+            )
+        )).all()
+        return {(int(y), int(m)): (s or "open") for y, m, s in rows}
+
+    @staticmethod
+    def _lookup_period_status(
+        period_index: dict[tuple[int, int], str], date_str: str,
+    ) -> str:
+        """Период не заведён в БД ⇒ считаем открытым. Это безопасный дефолт —
+        бухгалтер заведёт периоды через UI /1c/periods, и тогда статус
+        пересчитается в фоне (см. §7a.5 спецификации)."""
+        if not date_str or len(date_str) < 7:
+            return "open"
+        try:
+            y, m = int(date_str[:4]), int(date_str[5:7])
+        except ValueError:
+            return "open"
+        return period_index.get((y, m), "open")
+
     async def _sync_doc_type(
         self,
         *,
@@ -217,14 +255,33 @@ class OneCSyncService:
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
 
+        # Локальный индекс периодов (year,month) → status. Заполняется один раз
+        # на компанию и используется для проставления period_status каждому
+        # документу без N+1 запросов.
+        period_index = await self._build_period_index(connection.company_id)
+
+        # Локальный индекс ИНН контрагентов для заполнения counterparty_inn
+        # без дополнительного round-trip (нужен для композитного ключа сверки ТТН).
+        local_cp_inn = await self._build_inn_index(Counterparty, connection.company_id)
+
         # Шапки документов БП 3.0 — поля заметно различаются между типами.
-        # СуммаДокумента есть у ПТУ/ОРП/КП, нет у ОПЗС (производство).
+        # СуммаДокумента — у ПТУ/ОРП/КП; ОПЗС (производство) её не имеет.
+        # СуммаНДС в шапке ПТУ ОТСУТСТВУЕТ (только в ТЧ Товары/Услуги) — берётся
+        # позже через проводки 19.03 или агрегацию ТЧ. Аналогично СуммаНаличных ОРП.
         select_fields = ["Ref_Key", "DeletionMark", "Posted", "Number", "Date"]
         has_amount = entity in (ENTITY_DOC_PTU, ENTITY_DOC_ORP, ENTITY_DOC_CORRECTION)
         if has_amount:
             select_fields.append("СуммаДокумента")
         if entity in (ENTITY_DOC_PTU, ENTITY_DOC_CORRECTION):
-            select_fields.append("Контрагент_Key")
+            select_fields.extend([
+                "Контрагент_Key",
+                "Договор_Key",
+                "НомерВходящегоДокумента",
+                "ДатаВходящегоДокумента",
+                "СуммаВключаетНДС",
+            ])
+        # ВидОперации есть у всех 4 типов — критичен для интерпретации проводок.
+        select_fields.append("ВидОперации")
         select_fields.append("Организация_Key")
         if entity in (ENTITY_DOC_PTU, ENTITY_DOC_ORP):
             select_fields.append("Склад_Key")
@@ -263,7 +320,19 @@ class OneCSyncService:
                 # символов, обрезаем до даты "YYYY-MM-DD" (10 символов).
                 date_str = str(item.get("Date") or "").strip()[:10]
                 amount = float(item.get("СуммаДокумента") or 0) if has_amount else 0.0
+                # vat_amount берётся через ТЧ/проводки на следующем шаге
+                # (см. docs/sverka-spec.md §3.2 — ленивая загрузка ТЧ).
+                vat_amount = None
                 status_1c = "Проведён" if item.get("Posted") else "Записан"
+
+                # Новые поля шапки для сверки (см. docs/sverka-spec.md):
+                op_type = (item.get("ВидОперации") or "").strip()[:100] or None
+                ext_number = (item.get("НомерВходящегоДокумента") or "").strip()[:200] or None
+                ext_date = (item.get("ДатаВходящегоДокумента") or "").strip()[:10] or None
+                cp_inn = local_cp_inn.get(cp_key) if cp_key else None
+
+                # period_status — статус месяца этого документа.
+                p_status = self._lookup_period_status(period_index, date_str)
 
                 if existing is None:
                     self.session.add(AccountingDoc(
@@ -274,19 +343,33 @@ class OneCSyncService:
                         number=number,
                         date=date_str,
                         counterparty_name=cp_name,
+                        counterparty_inn=cp_inn,
                         organization_name=org_name or None,
                         amount=amount,
+                        vat_amount=vat_amount,
                         status_1c=status_1c,
                         warehouse_code=wh_code,
                         lines=[],
+                        external_number=ext_number,
+                        external_date=ext_date,
+                        operation_type=op_type,
+                        period_status=p_status,
+                        discrepancy_status="pending",
                     ))
                     stats["created"] += 1
                 else:
                     existing.number = number
                     existing.date = date_str
                     existing.counterparty_name = cp_name or existing.counterparty_name
+                    existing.counterparty_inn = cp_inn or existing.counterparty_inn
                     existing.organization_name = org_name or existing.organization_name
                     existing.amount = amount
+                    if vat_amount is not None:
+                        existing.vat_amount = vat_amount
+                    existing.external_number = ext_number or existing.external_number
+                    existing.external_date = ext_date or existing.external_date
+                    existing.operation_type = op_type or existing.operation_type
+                    existing.period_status = p_status
                     existing.status_1c = status_1c
                     if wh_code:
                         existing.warehouse_code = wh_code

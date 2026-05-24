@@ -63,6 +63,13 @@ def _doc_resp(d: AccountingDoc) -> AccountingDocResponse:
         matchStatus=d.match_status,
         matchDetails=d.match_details,
         warehouseCode=d.warehouse_code,
+        externalNumber=d.external_number,
+        externalDate=d.external_date,
+        operationType=d.operation_type,
+        periodStatus=d.period_status,
+        discrepancyStatus=d.discrepancy_status,
+        discrepancySummary=d.discrepancy_summary,
+        discrepancyDetails=d.discrepancy_details,
         createdAt=_ts(d.created_at),
         updatedAt=_ts(d.updated_at),
     )
@@ -114,6 +121,8 @@ async def search_accounting_docs(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     match_status: str | None = Query(None),
+    period_status: str | None = Query(None, description="open | closed"),
+    discrepancy_status: str | None = Query(None, description="pending | none | rounding | minor | material | critical | unmatched"),
     sort: str = Query("date_desc", pattern="^(date_desc|date_asc|amount_desc|amount_asc)$"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -133,6 +142,7 @@ async def search_accounting_docs(
             AccountingDoc.counterparty_inn.ilike(like),
             AccountingDoc.organization_name.ilike(like),
             AccountingDoc.external_id.ilike(like),
+            AccountingDoc.external_number.ilike(like),
         ))
     if date_from:
         base = base.where(AccountingDoc.date >= date_from)
@@ -140,6 +150,10 @@ async def search_accounting_docs(
         base = base.where(AccountingDoc.date <= date_to)
     if match_status:
         base = base.where(AccountingDoc.match_status == match_status)
+    if period_status:
+        base = base.where(AccountingDoc.period_status == period_status)
+    if discrepancy_status:
+        base = base.where(AccountingDoc.discrepancy_status == discrepancy_status)
 
     total = (await db.execute(
         select(func.count()).select_from(base.subquery())

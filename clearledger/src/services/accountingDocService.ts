@@ -419,6 +419,13 @@ export interface AccountingDocSummary {
   status1c: string
   matchStatus: string
   warehouseCode?: string | null
+  // Расширенные поля для сверки (docs/sverka-spec.md §7a):
+  externalNumber?: string | null      // ТТН №
+  externalDate?: string | null        // ТТН дата
+  operationType?: string | null       // ВидОперации 1С
+  periodStatus?: 'open' | 'closed'    // период открыт/закрыт
+  discrepancyStatus?: string          // pending|none|rounding|minor|material|critical|unmatched
+  discrepancySummary?: string | null  // короткая свёртка расхождений
   createdAt: string
   updatedAt: string
 }
@@ -444,6 +451,8 @@ export interface DocSearchParams {
   dateFrom?: string
   dateTo?: string
   matchStatus?: string
+  periodStatus?: string         // 'open' | 'closed'
+  discrepancyStatus?: string    // 'pending' | 'none' | 'rounding' | 'minor' | 'material' | 'critical' | 'unmatched'
   sort?: DocSort
   limit?: number
   offset?: number
@@ -460,6 +469,8 @@ export async function searchAccountingDocs(
     date_from: params.dateFrom || undefined,
     date_to: params.dateTo || undefined,
     match_status: params.matchStatus || undefined,
+    period_status: params.periodStatus || undefined,
+    discrepancy_status: params.discrepancyStatus || undefined,
     sort: params.sort ?? 'date_desc',
     limit: params.limit ?? 50,
     offset: params.offset ?? 0,

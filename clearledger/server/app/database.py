@@ -53,6 +53,22 @@ async def create_all() -> None:
                 "ALTER TABLE onec_connections ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'odata'"
             )
         )
+        # v0.8: реквизиты входящего документа (ТТН №+дата) и ВидОперации
+        # для сверки ТТН-файл ↔ ПТУ и интерпретации проводок ОРП.
+        # + period_status и discrepancy_* (см. docs/sverka-spec.md §7a):
+        # обязательная отметка «закрытый период» и расхождений (включая копеечные).
+        for stmt in (
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS external_number VARCHAR(200)",
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS external_date VARCHAR(20)",
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS operation_type VARCHAR(100)",
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS period_status VARCHAR(10) NOT NULL DEFAULT 'open'",
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS discrepancy_status VARCHAR(20) NOT NULL DEFAULT 'pending'",
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS discrepancy_summary VARCHAR(500)",
+            "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS discrepancy_details JSONB",
+            "CREATE INDEX IF NOT EXISTS idx_accdoc_period_status ON accounting_docs(company_id, period_status)",
+            "CREATE INDEX IF NOT EXISTS idx_accdoc_discrepancy_status ON accounting_docs(company_id, discrepancy_status)",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
