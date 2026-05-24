@@ -19,6 +19,8 @@ import { RefreshCw, Sparkles, Play, GitCompare, BarChart3, Landmark, BookOpen, R
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
+import { useRunNormalizationPipeline } from '@/hooks/useNormalization'
+import { toast } from 'sonner'
 
 export function WorkspaceToolbar() {
   const settings = getSettings()
@@ -42,9 +44,16 @@ export function WorkspaceToolbar() {
     queryClient.invalidateQueries({ queryKey: ['sts-receipts'] })
   }
 
+  const runPipeline = useRunNormalizationPipeline()
+
   function handleRunNormalization() {
-    // TODO: запуск процедуры нормализации с normParams
     setNormOpen(false)
+    runPipeline.mutate(undefined, {
+      onSuccess: (r) => toast.success('Нормализация выполнена', {
+        description: `Проверено ${r.summary.totalEntries} записей: ${r.summary.validPercent}% валидных, ${r.summary.complianceFindings} находок`,
+      }),
+      onError: (e) => toast.error(e instanceof Error ? e.message : 'Ошибка нормализации'),
+    })
   }
 
   return (

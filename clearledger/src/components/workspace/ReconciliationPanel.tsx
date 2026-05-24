@@ -345,7 +345,7 @@ function TransportView() {
       <ReconcileParamsForm
         params={params}
         setParams={setParams}
-        onRun={() => {}}
+        onRun={() => toast.info('Сверка по транспортным компаниям пока не подключена — данные перевозок появятся после интеграции с TradeFrame')}
         description="Включая станции без перевозок"
       />
     </div>
@@ -354,17 +354,12 @@ function TransportView() {
 
 function CorporateCardsView() {
   const [params, setParams] = useReconcileParams()
-
-  function handleRun() {
-    // TODO: запуск сверки TradeCorp
-  }
-
   return (
     <div className="p-4 space-y-0">
       <ReconcileParamsForm
         params={params}
         setParams={setParams}
-        onRun={handleRun}
+        onRun={() => toast.info('Сверка корпоративных карт пока не подключена — нужна интеграция с TradeCorp/процессингом')}
         description="Включая без корп. карт"
       />
     </div>

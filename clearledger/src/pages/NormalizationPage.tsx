@@ -14,7 +14,7 @@ import { NormalizationProgress } from '@/components/normalization/NormalizationP
 import { ValidationResultsTable } from '@/components/normalization/ValidationResultsTable'
 import { EnrichmentResultsTable } from '@/components/normalization/EnrichmentResultsTable'
 import { ComplianceReport } from '@/components/normalization/ComplianceReport'
-import { AuditTab, DEMO_AUDIT_RESULT } from '@/components/normalization/AuditTab'
+import { AuditTab } from '@/components/normalization/AuditTab'
 import type { AuditorNormResult } from '@/types'
 import {
   useNormalizationSummary,
@@ -22,6 +22,9 @@ import {
   useRunNormalizationPipeline,
   useApplyEnrichment,
 } from '@/hooks/useNormalization'
+import { useCompany } from '@/contexts/CompanyContext'
+import { post } from '@/services/apiClient'
+import { searchAccountingDocs } from '@/services/accountingDocService'
 
 interface ProgressInfo {
   phase: string
@@ -30,6 +33,7 @@ interface ProgressInfo {
 }
 
 export function NormalizationPage() {
+  const { companyId } = useCompany()
   const { data: summary } = useNormalizationSummary()
   const { data: state } = useNormalizationState()
   const runPipeline = useRunNormalizationPipeline()
@@ -39,17 +43,81 @@ export function NormalizationPage() {
   const [auditResult, setAuditResult] = useState<AuditorNormResult | null>(null)
   const [isAuditing, setIsAuditing] = useState(false)
 
-  const handleRunAudit = useCallback(() => {
+  const handleRunAudit = useCallback(async () => {
     setIsAuditing(true)
-    // Заглушка: имитация вызова TSupport AI
-    setTimeout(() => {
-      setAuditResult(DEMO_AUDIT_RESULT)
-      setIsAuditing(false)
-      toast.success('Аудит TSupport завершён', {
-        description: `Проверено ${DEMO_AUDIT_RESULT.totalChecked} документов 1С, ${DEMO_AUDIT_RESULT.findings.length} находок`,
+    try {
+      // Реальный аудит: дёргаем reconciliation/run на бэке, получаем
+      // фактические matched/discrepancy/unmatched по AccountingDoc + строим
+      // AuditorNormResult из реальных топ-документов.
+      const rec = await post<{
+        matched: number; unmatched: number; discrepancy: number; total: number;
+        by_severity?: Record<string, number>; via_station_mapping?: number;
+      }>(`/api/reconciliation/run?company_id=${companyId}`)
+
+      // Топ матчей и расхождений для отображения в табах AuditTab
+      const [matchedDocs, discrepancyDocs, unmatchedDocs] = await Promise.all([
+        searchAccountingDocs(companyId, { matchStatus: 'matched',     limit: 20, sort: 'amount_desc' }),
+        searchAccountingDocs(companyId, { matchStatus: 'discrepancy', limit: 20, sort: 'amount_desc' }),
+        searchAccountingDocs(companyId, { matchStatus: 'unmatched',   limit: 20, sort: 'amount_desc' }),
+      ])
+
+      const real: AuditorNormResult = {
+        companyId,
+        status: 'done',
+        totalChecked: rec.total,
+        matchedCount: rec.matched + rec.discrepancy,
+        findings: [],
+        verifiedEntries: matchedDocs.items.slice(0, 10).map((d) => ({
+          entryId:     d.id,
+          entryTitle:  `${d.docType} ${d.number}`,
+          accDocNumber: d.number,
+          accDocDate:   d.date,
+        })),
+        enrichmentProposals: [],
+        correspondences: [
+          ...matchedDocs.items.slice(0, 10).map((d) => ({
+            entryId:     d.id,
+            entryTitle:  `${d.docType} ${d.number}`,
+            accDocNumber: d.number,
+            accDocType:   d.docType,
+            accDocDate:   d.date,
+            accDocAmount: d.amount,
+            entryAmount:  d.amount,
+            matchScore:   100,
+          })),
+          ...discrepancyDocs.items.slice(0, 10).map((d) => ({
+            entryId:     d.id,
+            entryTitle:  `${d.docType} ${d.number}`,
+            accDocNumber: d.number,
+            accDocType:   d.docType,
+            accDocDate:   d.date,
+            accDocAmount: d.amount,
+            entryAmount:  0,
+            matchScore:   60,
+          })),
+        ],
+        missingEntries: unmatchedDocs.items.slice(0, 10).map((d) => ({
+          id:             d.id,
+          accDocNumber:   d.number,
+          accDocType:     d.docType,
+          accDocDate:     d.date,
+          counterpartyName: d.counterpartyName,
+          amount:         d.amount,
+          proposedEntry:  null,
+        })),
+        startedAt:  new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      }
+      setAuditResult(real)
+      toast.success('Аудит выполнен', {
+        description: `Всего: ${rec.total}, сверено: ${real.matchedCount}, расхождений: ${rec.discrepancy}, без пары: ${rec.unmatched}`,
       })
-    }, 2500)
-  }, [])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось выполнить аудит')
+    } finally {
+      setIsAuditing(false)
+    }
+  }, [companyId])
 
   const handleRun = useCallback(() => {
     setProgress({ phase: 'preparing', done: 0, total: 0 })
