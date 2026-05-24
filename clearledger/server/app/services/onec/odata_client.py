@@ -284,6 +284,21 @@ class OneCODataClient:
 
     # ─── удобные обёртки ────────────────────────────────────────────
 
+    async def fetch_postings(self, doc_type: str, doc_ref: str) -> list[dict[str, Any]]:
+        """Проводки документа из AccountingRegister_Хозрасчетный.
+
+        OData: фильтр по Регистратор. Имя регистратора — тип документа
+        с префиксом 'Document.', cast через @odata.type."""
+        # Самый простой подход для OData 1С — отдельный URL вида
+        # AccountingRegister_Хозрасчетный?$filter=Регистратор/Ref_Key eq guid'...'
+        # либо через $expand на сам документ. Для простоты — берём все
+        # движения где Ref_Key регистратора = doc_ref.
+        return await self.fetch_entity(
+            "AccountingRegister_Хозрасчетный",
+            filter_expr=f"Регистратор_Key eq guid'{doc_ref}'",
+            orderby="Period",
+        )
+
     async def fetch_doc_lines(
         self,
         doc_type: str,

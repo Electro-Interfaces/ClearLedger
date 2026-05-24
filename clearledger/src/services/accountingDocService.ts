@@ -493,7 +493,17 @@ export async function loadDocumentLines(connectionId: string, docId: string): Pr
   doc_id: string
   doc_type: string
   tabular_counts: Record<string, number>
+  postings_count?: number
   fetched_at: string
 }> {
   return post(`/api/onec/connections/${connectionId}/document-lines/${docId}`)
+}
+
+/** Batch-резолв Catalog.Номенклатура — нужен для конвертации тонн→литры на ТТН.
+ *  Возвращает { ref: { name, unit, density?, article } }. */
+export async function enrichNomenclature(connectionId: string, refs: string[]): Promise<
+  Record<string, { name: string; unit?: string; density?: number; article?: string }>
+> {
+  if (refs.length === 0) return {}
+  return post(`/api/onec/connections/${connectionId}/nomenclature-enrich`, { refs })
 }

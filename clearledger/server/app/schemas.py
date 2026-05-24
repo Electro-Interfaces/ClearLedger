@@ -513,7 +513,10 @@ class AccountingDocResponse(BaseModel):
     amount: float
     vatAmount: float | None = None
     status1c: str
-    lines: list[AccountingDocLineSchema]
+    # lines может быть list (старая структура — построчные данные ClearLedger)
+    # или dict {tabular, postings, fetched_at} (новая — данные из 1С через
+    # fetch_doc_lines + fetch_postings). См. docs/sverka-spec.md §3.1.
+    lines: list[AccountingDocLineSchema] | dict
     matchedEntryId: str | None = None
     matchStatus: str
     matchDetails: dict | None = None

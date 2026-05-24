@@ -426,12 +426,19 @@ async def fetch_document_lines(
                 rows = []
                 tabular[f"_error_{name}"] = str(exc)[:200]
             tabular[name] = rows
+        # Проводки — обязательная часть для цикла сверки (см. требование МАГ).
+        try:
+            postings = await client.fetch_postings(onec_type, doc.external_id)
+        except Exception as exc:  # noqa: BLE001
+            postings = []
+            tabular["_error_postings"] = str(exc)[:200]
     finally:
         await client.aclose()
 
-    # Сохраняем как {tabular: {...}, fetched_at: ...}
+    # Сохраняем как {tabular: {...}, postings: [...], fetched_at: ...}
     new_lines = {
         "tabular": tabular,
+        "postings": postings,
         "fetched_at": datetime.utcnow().isoformat(),
     }
     doc.lines = new_lines
@@ -440,5 +447,29 @@ async def fetch_document_lines(
         "doc_id": str(doc.id),
         "doc_type": doc.doc_type,
         "tabular_counts": {k: len(v) if isinstance(v, list) else 0 for k, v in tabular.items()},
+        "postings_count": len(postings),
         "fetched_at": new_lines["fetched_at"],
     }
+
+
+@router.post("/connections/{connection_id}/nomenclature-enrich")
+async def enrich_nomenclature(
+    connection_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> dict:
+    """Batch-резолв Catalog.Номенклатура по GUID → имя/ед.изм/плотность/артикул.
+    Нужен для конвертации тонн→литры на ТТН (см. docs/sverka-spec.md §5.3)."""
+    conn = await _get_connection_or_404(connection_id, db)
+    refs = body.get("refs") or []
+    if not refs:
+        return {}
+
+    service = OneCSyncService(db)
+    client = await service._open_client(conn)  # noqa: SLF001
+    try:
+        result = await client.enrich_nomenclature(refs)
+    finally:
+        await client.aclose()
+    return result

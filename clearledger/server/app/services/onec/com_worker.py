@@ -292,6 +292,117 @@ def op_fetch_doc_lines(
     return rows
 
 
+def op_enrich_nomenclature(refs: list[str]) -> dict[str, dict[str, Any]]:
+    """Для списка GUID Номенклатуры — вернуть {guid: {name, unit, density}}.
+
+    Тонна↔литр конвертация для топлива требует плотности (Catalog.Номенклатура.
+    Плотность — это доп.реквизит в БП ГИГ). Если поля нет — возвращаем None."""
+    ib = _require_ib()
+    if not refs:
+        return {}
+    # Передаём массив через параметр запроса.
+    arr = ib.NewObject("Array")
+    cat_mgr = ib.Catalogs.Номенклатура
+    for guid_str in refs:
+        try:
+            uid = ib.NewObject("УникальныйИдентификатор", guid_str)
+            arr.Add(cat_mgr.GetRef(uid))
+        except Exception:
+            continue
+    q = ib.NewObject("Запрос")
+    # Плотность в БП ГИГ — обычно реквизит "Плотность". Если не существует,
+    # fallback — отсутствует в результате, в UI просто не будет конвертации.
+    q.Текст = (
+        "ВЫБРАТЬ "
+        "Т.Ссылка КАК Ref, "
+        "Т.Наименование КАК Name, "
+        "ПРЕДСТАВЛЕНИЕ(Т.ЕдиницаИзмерения) КАК Unit, "
+        "Т.Артикул КАК Article "
+        "ИЗ Справочник.Номенклатура КАК Т "
+        "ГДЕ Т.Ссылка В (&Refs)"
+    )
+    q.УстановитьПараметр("Refs", arr)
+    sel = q.Выполнить().Выбрать()
+    result: dict[str, dict[str, Any]] = {}
+    while sel.Следующий():
+        ref_guid = _val(sel.Ref)
+        if not ref_guid:
+            continue
+        result[str(ref_guid)] = {
+            "name": _val(sel.Name),
+            "unit": _val(sel.Unit),
+            "article": _val(sel.Article),
+            # Плотность пока не тянем — пробуем добавить отдельным запросом
+            # с защитой от отсутствия поля.
+        }
+    # Пытаемся подтянуть Плотность отдельным запросом — если упадёт,
+    # просто пропустим без enrichment плотности.
+    try:
+        q2 = ib.NewObject("Запрос")
+        q2.Текст = (
+            "ВЫБРАТЬ Т.Ссылка КАК Ref, Т.Плотность КАК Density "
+            "ИЗ Справочник.Номенклатура КАК Т ГДЕ Т.Ссылка В (&Refs)"
+        )
+        q2.УстановитьПараметр("Refs", arr)
+        sel2 = q2.Выполнить().Выбрать()
+        while sel2.Следующий():
+            ref = _val(sel2.Ref)
+            if ref and ref in result:
+                d = _val(sel2.Density)
+                if d:
+                    result[ref]["density"] = float(d)
+    except Exception:
+        pass
+    return result
+
+
+def op_fetch_postings(
+    doc_type: str,
+    doc_ref: str,
+) -> list[dict[str, Any]]:
+    """Достать проводки документа из РегистрБухгалтерии.Хозрасчетный.
+
+    Через запрос языка 1С с параметром-ссылкой на регистратор. Возвращает
+    Период / СчетДт / СчетКт / Сумма / Субконто*. Все ссылочные поля
+    конвертируются в строки через _val (GUID или представление)."""
+    ib = _require_ib()
+    doc_manager = getattr(ib.Documents, doc_type)
+    uid_obj = ib.NewObject("УникальныйИдентификатор", doc_ref)
+    doc_ref_obj = doc_manager.GetRef(uid_obj)
+    if doc_ref_obj is None:
+        return []
+
+    q = ib.NewObject("Запрос")
+    # Минимум — Период/Счета/Сумма. Субконто в БП 3.0 имеют разную
+    # структуру реквизитов (Субконто1..3 vs СубконтоДт/СубконтоКт в
+    # зависимости от настроек плана счетов), берём расширение позже
+    # после смотра реального ответа.
+    q.Текст = (
+        "ВЫБРАТЬ "
+        "Р.Период КАК Period, "
+        "ПРЕДСТАВЛЕНИЕ(Р.СчетДт) КАК AccountDt, "
+        "ПРЕДСТАВЛЕНИЕ(Р.СчетКт) КАК AccountCt, "
+        "Р.Сумма КАК Amount "
+        "ИЗ РегистрБухгалтерии.Хозрасчетный КАК Р "
+        "ГДЕ Р.Регистратор = &Регистратор"
+    )
+    q.УстановитьПараметр("Регистратор", doc_ref_obj)
+    sel = q.Выполнить().Выбрать()
+    fields = ["Period", "AccountDt", "AccountCt", "Amount"]
+    rows: list[dict[str, Any]] = []
+    i = 0
+    while sel.Следующий():
+        i += 1
+        out: dict[str, Any] = {"LineNumber": i}
+        for f in fields:
+            try:
+                out[f] = _val(getattr(sel, f))
+            except Exception:
+                out[f] = None
+        rows.append(out)
+    return rows
+
+
 def op_count_entity(entity: str, filter: str | None = None) -> int:  # noqa: A002
     ib = _require_ib()
     qualified = _resolve_entity(entity)
@@ -329,6 +440,10 @@ def main() -> int:
                 result = op_count_entity(**args)
             elif op == "fetch_doc_lines":
                 result = op_fetch_doc_lines(**args)
+            elif op == "fetch_postings":
+                result = op_fetch_postings(**args)
+            elif op == "enrich_nomenclature":
+                result = op_enrich_nomenclature(**args)
             elif op == "exit":
                 return 0
             else:

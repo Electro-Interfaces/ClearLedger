@@ -218,6 +218,18 @@ class OneCComClient:
         result = await self._call("count_entity", args)
         return int(result or 0)
 
+    async def fetch_postings(self, doc_type: str, doc_ref: str) -> list[dict[str, Any]]:
+        """Проводки документа из РегистрБухгалтерии.Хозрасчетный."""
+        result = await self._call("fetch_postings", {
+            "doc_type": doc_type, "doc_ref": doc_ref,
+        })
+        return list(result or [])
+
+    async def enrich_nomenclature(self, refs: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch-резолв Catalog.Номенклатура по GUID → {ref: {name, unit, density, article}}."""
+        result = await self._call("enrich_nomenclature", {"refs": refs})
+        return dict(result or {})
+
     async def fetch_doc_lines(
         self,
         doc_type: str,

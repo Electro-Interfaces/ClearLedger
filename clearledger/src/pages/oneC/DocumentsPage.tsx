@@ -36,6 +36,7 @@ import {
   getAccountingDocsStats,
   getAccountingDocDetails,
   loadDocumentLines,
+  enrichNomenclature,
   type DocSort,
 } from '@/services/accountingDocService'
 
@@ -174,25 +175,43 @@ export function DocumentsPage() {
   return (
     <div className="space-y-4 max-w-7xl">
       {/* Заголовок */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Документы из 1С</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Импортированные учётные документы БП ГИГ: ПТУ, ОРП, ОПЗС, корректировки.
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={handleSync}
-          disabled={!connection || syncMutation.isPending}
-          className="gap-1.5 shrink-0"
-        >
-          {syncMutation.isPending
-            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            : <RefreshCw className="h-3.5 w-3.5" />}
-          Обновить из 1С
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="h-8 text-xs"
+            onClick={() => {
+              setDocType('ОРП'); setDateFrom('2026-05-01'); setDateTo('2026-05-31');
+              setSort('date_asc'); resetOffset()
+            }}
+          >
+            ОРП май 2026
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs"
+            onClick={() => {
+              setDocType('ПТУ'); setDateFrom(''); setDateTo('');
+              setSort('date_desc'); resetOffset()
+            }}
+          >
+            Все ТТН
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSync}
+            disabled={!connection || syncMutation.isPending}
+            className="gap-1.5 shrink-0"
+          >
+            {syncMutation.isPending
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="h-3.5 w-3.5" />}
+            Обновить из 1С
+          </Button>
+        </div>
       </div>
 
       {/* KPI */}
@@ -450,6 +469,53 @@ export function DocumentsPage() {
 
 // ─── Sheet деталей одного документа ─────────────────────────────────
 
+// ─── Инварианты розничной модели ОРП (см. docs/sverka-spec.md §1.2.5) ──
+// Для розничной ОРП БП 3.0 (ВидОп=ОтчетККМОПродажах) должно выполняться:
+//   Σ Кт 90.01.1 = СуммаДокумента (выручка с НДС)
+//   Σ Кт 68.02   = round(СуммаДок × 22/122, 2) (выделение НДС)
+//   Σ Дт 62.Р    = Σ Кт 62.Р = СуммаДокумента (баланс по контрагенту)
+// Эти три проверки даём бухгалтеру прямо в UI.
+function OrpInvariantsPanel({ postings, amount }: { postings: Array<Record<string, unknown>>; amount: number }) {
+  function sumByAccount(side: 'AccountDt' | 'AccountCt', accountPrefix: string): number {
+    return postings
+      .filter((p) => String(p[side] ?? '').startsWith(accountPrefix))
+      .reduce((acc, p) => acc + Number(p.Amount || 0), 0)
+  }
+  const k9001 = sumByAccount('AccountCt', '90.01')
+  const k6802 = sumByAccount('AccountCt', '68.02')
+  const dt62R = sumByAccount('AccountDt', '62')
+  const k62R  = sumByAccount('AccountCt', '62')
+  const expectedVat = Math.round((amount * 22 / 122) * 100) / 100
+
+  const checks = [
+    { label: 'Σ Кт 90.01.* = СуммаДок',  actual: k9001, expected: amount,       formula: `${k9001.toFixed(2)} vs ${amount.toFixed(2)}` },
+    { label: 'Σ Кт 68.02 ≈ Док × 22/122', actual: k6802, expected: expectedVat,  formula: `${k6802.toFixed(2)} vs ${expectedVat.toFixed(2)}` },
+    { label: 'Σ Дт 62.* = Σ Кт 62.*',     actual: dt62R, expected: k62R,         formula: `${dt62R.toFixed(2)} vs ${k62R.toFixed(2)}` },
+  ]
+  return (
+    <div className="mt-2 pt-2 border-t border-border/40">
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-1">
+        Инварианты розничной модели ОРП
+      </div>
+      <div className="space-y-1">
+        {checks.map((c) => {
+          const delta = c.actual - c.expected
+          const ok = Math.abs(delta) <= 0.01
+          return (
+            <div key={c.label} className="flex items-center gap-2 text-[10px]">
+              <Badge variant="outline" className={`text-[9px] h-4 px-1 ${ok ? 'border-emerald-400/50 text-emerald-300/80' : 'border-red-400/50 text-red-300/80'}`}>
+                {ok ? 'OK' : 'Δ'}
+              </Badge>
+              <span>{c.label}</span>
+              <span className="font-mono text-muted-foreground ml-auto">{c.formula}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 interface DetailSheetProps {
   docId: string | null
   companyId: string
@@ -469,7 +535,7 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
     mutationFn: () => loadDocumentLines(connectionId!, docId!),
     onSuccess: async (r) => {
       const totals = Object.entries(r.tabular_counts).map(([k, v]) => `${k}: ${v}`).join(', ')
-      toast.success(`Позиции загружены из 1С (${totals})`)
+      toast.success(`Позиции из 1С: ${totals}${r.postings_count != null ? ` · проводок: ${r.postings_count}` : ''}`)
       await refetch()
       onLinesLoaded()
     },
@@ -478,12 +544,25 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
     },
   })
 
+  // Enrich Номенклатуры — собираем GUID из всех Товаров и тянем имя+плотность.
+  // Для ПТУ это даёт колонку «Литры» в ТЧ Товары.
+  const [nomenclature, setNomenclature] = useState<Record<string, { name: string; unit?: string; density?: number; article?: string }>>({})
+  const enrichMutation = useMutation({
+    mutationFn: (refs: string[]) => enrichNomenclature(connectionId!, refs),
+    onSuccess: (data) => setNomenclature((prev) => ({ ...prev, ...data })),
+  })
+
   if (!docId) return null
 
-  const lines = (doc?.lines as { tabular?: Record<string, unknown[]>; fetched_at?: string } | unknown[]) || null
+  const lines = (doc?.lines as {
+    tabular?: Record<string, unknown[]>;
+    postings?: Array<Record<string, unknown>>;
+    fetched_at?: string;
+  } | unknown[]) || null
   const tabular = lines && !Array.isArray(lines) ? lines.tabular || {} : {}
+  const postings = lines && !Array.isArray(lines) ? (lines.postings || []) : []
   const fetchedAt = lines && !Array.isArray(lines) ? lines.fetched_at : null
-  const hasLines = Object.keys(tabular).length > 0
+  const hasLines = Object.keys(tabular).length > 0 || postings.length > 0
 
   return (
     <Sheet open={!!docId} onOpenChange={(open) => !open && onClose()}>
@@ -584,6 +663,49 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
               </CardContent>
             </Card>
 
+            {/* Проводки — что 1С реально записала в РегистрБухгалтерии.Хозрасчетный */}
+            <Card className="py-3 gap-1">
+              <CardHeader className="pb-0">
+                <CardTitle className="text-xs uppercase text-muted-foreground flex items-center justify-between">
+                  <span>Проводки <span className="font-mono text-[10px] ml-1">({postings.length})</span></span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 text-xs">
+                {postings.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground italic">
+                    Проводки не подгружены — нажми «Загрузить из 1С» ниже.
+                  </p>
+                )}
+                {postings.length > 0 && (
+                  <>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="h-6 text-[10px] w-12">№</TableHead>
+                          <TableHead className="h-6 text-[10px]">Дт</TableHead>
+                          <TableHead className="h-6 text-[10px]">Кт</TableHead>
+                          <TableHead className="h-6 text-[10px] text-right">Сумма, ₽</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {postings.map((p, i) => (
+                          <TableRow key={i} className="text-[10px]">
+                            <TableCell className="py-1 font-mono text-muted-foreground">{i + 1}</TableCell>
+                            <TableCell className="py-1 font-mono">{String(p.AccountDt ?? '—')}</TableCell>
+                            <TableCell className="py-1 font-mono">{String(p.AccountCt ?? '—')}</TableCell>
+                            <TableCell className="py-1 text-right font-mono">
+                              {p.Amount != null ? new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2 }).format(Number(p.Amount)) : '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    {doc.docType === 'ОРП' && <OrpInvariantsPanel postings={postings} amount={doc.amount} />}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
             {/* ТЧ */}
             <Card className="py-3 gap-1">
               <CardHeader className="pb-0">
@@ -610,35 +732,102 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
                     это вызов /api/onec/connections/{'{id}'}/document-lines/{'{doc}'}.
                   </p>
                 )}
-                {hasLines && Object.entries(tabular).map(([tabName, rows]) => (
-                  <div key={tabName} className="mb-3">
-                    <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-1">{tabName} ({(rows as unknown[]).length})</div>
-                    {((rows as Array<Record<string, unknown>>).length > 0) ? (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            {Object.keys((rows as Array<Record<string, unknown>>)[0]).map((k) => (
-                              <TableHead key={k} className="h-6 text-[10px]">{k}</TableHead>
-                            ))}
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(rows as Array<Record<string, unknown>>).slice(0, 20).map((row, i) => (
-                            <TableRow key={i} className="text-[10px]">
-                              {Object.keys((rows as Array<Record<string, unknown>>)[0]).map((k) => (
-                                <TableCell key={k} className="py-1 font-mono truncate max-w-[140px]" title={String(row[k] ?? '')}>
-                                  {row[k] == null ? '—' : String(row[k]).slice(0, 24)}
-                                </TableCell>
+                {hasLines && Object.entries(tabular).filter(([k]) => !k.startsWith('_')).map(([tabName, rows]) => {
+                  const list = rows as Array<Record<string, unknown>>
+                  if (list.length === 0) {
+                    return (
+                      <div key={tabName} className="mb-3">
+                        <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-1">{tabName} (0)</div>
+                        <p className="text-[10px] text-muted-foreground italic">пусто</p>
+                      </div>
+                    )
+                  }
+                  const isTovary = tabName === 'Товары'
+                  // Для ПТУ.Товары — собираем GUIDы Номенклатуры и автоматически дёргаем enrich
+                  if (doc.docType === 'ПТУ' && isTovary && connectionId) {
+                    const guids = list.map((r) => String(r.Номенклатура || '')).filter((g) => g && !nomenclature[g])
+                    if (guids.length > 0 && !enrichMutation.isPending) {
+                      enrichMutation.mutate(guids)
+                    }
+                  }
+                  return (
+                    <div key={tabName} className="mb-3">
+                      <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-1">
+                        {tabName} ({list.length})
+                        {doc.docType === 'ПТУ' && isTovary && enrichMutation.isPending && (
+                          <Loader2 className="inline h-2.5 w-2.5 animate-spin ml-1" />
+                        )}
+                      </div>
+                      {doc.docType === 'ПТУ' && isTovary ? (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="h-6 text-[10px]">Номенклатура</TableHead>
+                              <TableHead className="h-6 text-[10px] text-right">Кол-во</TableHead>
+                              <TableHead className="h-6 text-[10px] w-12">Ед.</TableHead>
+                              <TableHead className="h-6 text-[10px] text-right">Литры</TableHead>
+                              <TableHead className="h-6 text-[10px] text-right">Цена</TableHead>
+                              <TableHead className="h-6 text-[10px] text-right">Сумма</TableHead>
+                              <TableHead className="h-6 text-[10px] text-right">НДС</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {list.map((row, i) => {
+                              const ref = String(row.Номенклатура || '')
+                              const enr = nomenclature[ref] || {}
+                              const qty = Number(row.Количество ?? 0)
+                              const density = enr.density
+                              const unit = (enr.unit || '').toLowerCase()
+                              // Если ед.изм похожа на тонны/кг — посчитать литры через плотность.
+                              let liters: number | null = null
+                              if (density && density > 0) {
+                                if (unit.includes('тонн') || unit === 'т') liters = qty * 1000 / density
+                                else if (unit.includes('кг'))               liters = qty / density
+                                else if (unit.includes('литр') || unit === 'л') liters = qty
+                              }
+                              return (
+                                <TableRow key={i} className="text-[10px]">
+                                  <TableCell className="py-1 max-w-[200px] truncate" title={enr.name || ref}>
+                                    {enr.name || <span className="font-mono text-muted-foreground">{ref.slice(0, 8)}…</span>}
+                                  </TableCell>
+                                  <TableCell className="py-1 text-right font-mono">{qty.toLocaleString('ru-RU')}</TableCell>
+                                  <TableCell className="py-1 text-muted-foreground">{enr.unit || '—'}</TableCell>
+                                  <TableCell className="py-1 text-right font-mono text-emerald-600 dark:text-emerald-300">
+                                    {liters != null ? liters.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) : '—'}
+                                  </TableCell>
+                                  <TableCell className="py-1 text-right font-mono">{row.Цена != null ? Number(row.Цена).toFixed(2) : '—'}</TableCell>
+                                  <TableCell className="py-1 text-right font-mono">{row.Сумма != null ? Number(row.Сумма).toFixed(2) : '—'}</TableCell>
+                                  <TableCell className="py-1 text-right font-mono">{row.СуммаНДС != null ? Number(row.СуммаНДС).toFixed(2) : '—'}</TableCell>
+                                </TableRow>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      ) : (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              {Object.keys(list[0]).map((k) => (
+                                <TableHead key={k} className="h-6 text-[10px]">{k}</TableHead>
                               ))}
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    ) : (
-                      <p className="text-[10px] text-muted-foreground italic">пусто</p>
-                    )}
-                  </div>
-                ))}
+                          </TableHeader>
+                          <TableBody>
+                            {list.slice(0, 50).map((row, i) => (
+                              <TableRow key={i} className="text-[10px]">
+                                {Object.keys(list[0]).map((k) => (
+                                  <TableCell key={k} className="py-1 font-mono truncate max-w-[140px]" title={String(row[k] ?? '')}>
+                                    {row[k] == null ? '—' : String(row[k]).slice(0, 24)}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </div>
+                  )
+                })}
               </CardContent>
             </Card>
           </div>
