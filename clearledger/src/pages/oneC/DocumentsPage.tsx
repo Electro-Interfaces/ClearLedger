@@ -40,6 +40,7 @@ import {
   packetsByDoc,
   getEntryLineage,
   normalizeEntry,
+  getRelatedDocs,
   type DocSort,
   type ExportPacketBrief,
   type EntryLineage,
@@ -53,6 +54,8 @@ const DOC_TYPES = [
   { value: 'ОРП', label: 'ОРП (розница)' },
   { value: 'ОПЗС', label: 'ОПЗС (производство)' },
   { value: 'КорректировкаПоступления', label: 'Корректировка' },
+  { value: 'ПеремещениеТоваров', label: 'Перемещение (виртуальные склады)' },
+  { value: 'СписаниеТоваров', label: 'Списание (по прочим)' },
 ]
 
 // Состояние сверки (см. docs/sverka-spec.md §7a) — приходит в discrepancyStatus.
@@ -221,19 +224,24 @@ export function DocumentsPage() {
 
       {/* KPI */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
           <Card className="py-2 gap-0">
             <CardContent className="p-3">
               <div className="text-[10px] text-muted-foreground uppercase">Всего</div>
               <div className="text-lg font-semibold mt-0.5">{stats.total.toLocaleString('ru-RU')}</div>
             </CardContent>
           </Card>
-          {(['ПТУ', 'ОРП', 'ОПЗС', 'КорректировкаПоступления'] as const).map((t) => (
+          {([
+            ['ПТУ', 'ПТУ'],
+            ['ОРП', 'ОРП'],
+            ['ПеремещениеТоваров', 'Перем.'],
+            ['СписаниеТоваров', 'Спис.'],
+            ['ОПЗС', 'ОПЗС'],
+            ['КорректировкаПоступления', 'Корр.'],
+          ] as const).map(([t, label]) => (
             <Card key={t} className="py-2 gap-0">
               <CardContent className="p-3">
-                <div className="text-[10px] text-muted-foreground uppercase truncate">
-                  {t === 'КорректировкаПоступления' ? 'Корр.' : t}
-                </div>
+                <div className="text-[10px] text-muted-foreground uppercase truncate">{label}</div>
                 <div className="text-lg font-semibold mt-0.5">
                   {(stats.byType[t] ?? 0).toLocaleString('ru-RU')}
                 </div>
@@ -466,6 +474,7 @@ export function DocumentsPage() {
         onLinesLoaded={() => {
           qc.invalidateQueries({ queryKey: ['acc-docs', companyId] })
         }}
+        onNavigate={(id) => setSelectedDocId(id)}
       />
     </div>
   )
@@ -518,6 +527,68 @@ function OrpInvariantsPanel({ postings, amount }: { postings: Array<Record<strin
         })}
       </div>
     </div>
+  )
+}
+
+// ─── Связанные документы для ОРП ─────────────────────────────────
+// При проведении ОРП в БП формируются Перемещения на виртуальные склады
+// (Талоны/Карты/Ведомости/Яндекс) и Списания «по прочим». Они не
+// являются регистраторами ОРП, но связаны через Склад+Дата.
+function RelatedDocsPanel({
+  companyId, docId, onOpen,
+}: { companyId: string; docId: string; onOpen: (id: string) => void }) {
+  const { data: related = [], isLoading } = useQuery({
+    queryKey: ['related-docs', docId],
+    queryFn: () => getRelatedDocs(companyId, docId),
+    enabled: !!docId,
+  })
+  if (!isLoading && related.length === 0) return null
+  return (
+    <Card className="py-3 gap-1">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-xs uppercase text-muted-foreground">
+          Связанные документы <span className="font-mono text-[10px] ml-1">({related.length})</span>
+        </CardTitle>
+        <CardDescription className="text-[10px]">
+          Перемещения на виртуальные склады (Талоны/Карты/Ведомости/Яндекс)
+          и Списания «по прочим» за тот же день со склада ОРП.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0 text-xs">
+        {isLoading && <Loader2 className="h-3 w-3 animate-spin inline mr-1" />}
+        {related.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="h-6 text-[10px] w-32">Тип</TableHead>
+                <TableHead className="h-6 text-[10px]">Номер</TableHead>
+                <TableHead className="h-6 text-[10px] w-24">Дата</TableHead>
+                <TableHead className="h-6 text-[10px] text-right">Сумма, ₽</TableHead>
+                <TableHead className="h-6 text-[10px] w-24">Статус 1С</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {related.map((d) => (
+                <TableRow key={d.id} className="text-[10px] cursor-pointer hover:bg-muted/40"
+                  onClick={() => onOpen(d.id)}>
+                  <TableCell className="py-1">
+                    <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
+                      {d.docType === 'ПеремещениеТоваров' ? 'Перем.' : 'Спис.'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="py-1 font-mono">{d.number}</TableCell>
+                  <TableCell className="py-1 font-mono">{d.date}</TableCell>
+                  <TableCell className="py-1 text-right font-mono">
+                    {(d.amount ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 })}
+                  </TableCell>
+                  <TableCell className="py-1 text-muted-foreground">{d.status1c}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -801,9 +872,10 @@ interface DetailSheetProps {
   connectionId: string | undefined
   onClose: () => void
   onLinesLoaded: () => void
+  onNavigate?: (id: string) => void
 }
 
-function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesLoaded }: DetailSheetProps) {
+function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesLoaded, onNavigate }: DetailSheetProps) {
   const { data: doc, isLoading, refetch } = useQuery({
     queryKey: ['acc-doc-detail', docId],
     queryFn: () => getAccountingDocDetails(companyId, docId!),
@@ -988,6 +1060,11 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
                 )}
               </CardContent>
             </Card>
+
+            {/* Связанные документы — Перемещения на виртуальные склады и Списания */}
+            {doc.docType === 'ОРП' && onNavigate && (
+              <RelatedDocsPanel companyId={companyId} docId={doc.id} onOpen={onNavigate} />
+            )}
 
             {/* Виды нефтепродуктов — группировка ТЧ Товары по Catalog.Номенклатура */}
             {Array.isArray((tabular as Record<string, unknown>).Товары) && ((tabular as Record<string, unknown>).Товары as unknown[]).length > 0 && (

@@ -537,3 +537,8 @@ export async function getEntryLineage(entryId: string): Promise<EntryLineage> {
 export async function normalizeEntry(entryId: string, metaPatch?: Record<string, unknown>) {
   return post(`/api/entries/${entryId}/normalize`, { meta_patch: metaPatch || {} })
 }
+
+/** Связанные документы для ОРП: Перемещения (виртуальные склады) и Списания. */
+export async function getRelatedDocs(companyId: string, docId: string): Promise<AccountingDocSummary[]> {
+  return get<AccountingDocSummary[]>(`/api/accounting-docs/${docId}/related`, { company_id: companyId })
+}

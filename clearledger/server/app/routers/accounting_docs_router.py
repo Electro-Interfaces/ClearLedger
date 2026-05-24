@@ -205,6 +205,39 @@ async def accounting_docs_stats(
 # GET ONE
 # ---------------------------------------------------------------------------
 
+@router.get("/{doc_id}/related", response_model=list[AccountingDocResponse])
+async def get_related_docs(
+    doc_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Связанные документы для ОРП: ПеремещениеТоваров (на виртуальные склады
+    Талоны/Карты/Ведомости/Яндекс) и СписаниеТоваров (по прочим) за тот же
+    день со склада-источника. Не регистраторы ОРП, но фактически
+    бухгалтерская цепочка одной смены."""
+    uid = _parse_uuid(doc_id)
+    cid = await resolve_company_id(company_id, db)
+    doc = (await db.execute(
+        select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
+    )).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Документ не найден")
+    if doc.doc_type != "ОРП":
+        return []
+    # Ищем перемещения и списания за ту же дату с тем же warehouse_code.
+    # date в AccountingDoc хранится как YYYY-MM-DD, warehouse_code — код 1С.
+    candidates = (await db.execute(
+        select(AccountingDoc).where(
+            AccountingDoc.company_id == cid,
+            AccountingDoc.date == doc.date,
+            AccountingDoc.warehouse_code == doc.warehouse_code,
+            AccountingDoc.doc_type.in_(["ПеремещениеТоваров", "СписаниеТоваров"]),
+        )
+    )).scalars().all()
+    return [_doc_resp(d) for d in candidates]
+
+
 @router.get("/{doc_id}", response_model=AccountingDocResponse)
 async def get_accounting_doc(
     doc_id: str,

@@ -27,6 +27,8 @@ from app.services.onec.odata_client import (
     ENTITY_DOC_OPZS,
     ENTITY_DOC_ORP,
     ENTITY_DOC_PTU,
+    ENTITY_DOC_TRANSFER,
+    ENTITY_DOC_WRITEOFF,
     ENTITY_NOMENCLATURE,
     ENTITY_ORGANIZATIONS,
     ENTITY_WAREHOUSES,
@@ -175,6 +177,12 @@ class OneCSyncService:
                     (ENTITY_DOC_ORP,        "ОРП"),
                     (ENTITY_DOC_OPZS,       "ОПЗС"),
                     (ENTITY_DOC_CORRECTION, "КорректировкаПоступления"),
+                    # Связанные с ОРП документы — перемещения на виртуальные
+                    # склады (Талоны/Карты/Ведомости/Яндекс) и списания
+                    # «по прочие». Регистратором ОРП они не являются, но
+                    # привязаны к нему через Склад+Дата (один день).
+                    (ENTITY_DOC_TRANSFER,   "ПеремещениеТоваров"),
+                    (ENTITY_DOC_WRITEOFF,   "СписаниеТоваров"),
                 ]:
                     details[doc_type] = await self._sync_doc_type(
                         client=client,
@@ -334,11 +342,14 @@ class OneCSyncService:
         local_cp_inn = await self._build_inn_index(Counterparty, connection.company_id)
 
         # Шапки документов БП 3.0 — поля заметно различаются между типами.
-        # СуммаДокумента — у ПТУ/ОРП/КП; ОПЗС (производство) её не имеет.
-        # СуммаНДС в шапке ПТУ ОТСУТСТВУЕТ (только в ТЧ Товары/Услуги) — берётся
-        # позже через проводки 19.03 или агрегацию ТЧ. Аналогично СуммаНаличных ОРП.
+        # СуммаДокумента — у ПТУ/ОРП/КП/Списание; ОПЗС (производство) и
+        # ПеремещениеТоваров её не имеют (расчёт идёт из ТЧ).
+        # СуммаНДС в шапке ПТУ ОТСУТСТВУЕТ (только в ТЧ Товары/Услуги).
         select_fields = ["Ref_Key", "DeletionMark", "Posted", "Number", "Date"]
-        has_amount = entity in (ENTITY_DOC_PTU, ENTITY_DOC_ORP, ENTITY_DOC_CORRECTION)
+        has_amount = entity in (
+            ENTITY_DOC_PTU, ENTITY_DOC_ORP, ENTITY_DOC_CORRECTION,
+            ENTITY_DOC_WRITEOFF,
+        )
         if has_amount:
             select_fields.append("СуммаДокумента")
         if entity in (ENTITY_DOC_PTU, ENTITY_DOC_CORRECTION):
@@ -349,11 +360,14 @@ class OneCSyncService:
                 "ДатаВходящегоДокумента",
                 "СуммаВключаетНДС",
             ])
-        # ВидОперации есть у всех 4 типов — критичен для интерпретации проводок.
+        # ВидОперации есть у всех типов — критичен для интерпретации проводок.
         select_fields.append("ВидОперации")
         select_fields.append("Организация_Key")
-        if entity in (ENTITY_DOC_PTU, ENTITY_DOC_ORP):
+        if entity in (ENTITY_DOC_PTU, ENTITY_DOC_ORP, ENTITY_DOC_WRITEOFF):
             select_fields.append("Склад_Key")
+        # У ПеремещениеТоваров склад зовётся СкладОтправитель — пока не тянем
+        # (нет соответствующего поля в AccountingDoc; для UI «связанные доки»
+        # склад берётся из шапки ОРП, а перемещение приземляется по дате+док-типу).
 
         filter_expr: str | None = None
         if connection.last_sync_at:
