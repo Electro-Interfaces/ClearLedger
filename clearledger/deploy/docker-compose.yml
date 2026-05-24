@@ -74,4 +74,4 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "10.10.70.51:8090:80"  # HAProxy на rproxy будет ходить сюда
+      - "8090:80"  # HAProxy на rproxy будет ходить сюда (10.10.70.51:8090)
