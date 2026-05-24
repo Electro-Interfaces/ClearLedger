@@ -114,6 +114,19 @@ class DataEntry(Base):
 
     source_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # Слой данных (см. docs/sverka-spec.md §0):
+    # 'raw' (L1) — сырьё из внешнего источника как пришло (status='new'|'recognized')
+    # 'clean' (L2) — нормализовано бухгалтером/AI, готово к выгрузке (status='verified')
+    # Поле упрощает фильтрацию вместо производной по status.
+    layer: Mapped[str] = mapped_column(String(10), nullable=False, default="raw")
+
+    # Lineage: какой raw-Entry породил этот clean-Entry (для diff L1↔L2).
+    # NULL для raw-entries и для clean-entries без явной raw-предтечи.
+    derived_from_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_entries.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -426,6 +439,67 @@ class AccountingDoc(Base):
 # и записями в Catalog.Склады / Catalog.Номенклатура / Catalog.ВидыОплат БП.
 # Используется reconciliation_service для построчного матчинга
 # (см. docs/sverka-spec.md §2.5 — каскад артикул → код → имя → AI).
+
+# ---------------------------------------------------------------------------
+# ExportPacket (L3 — что мы выгружаем в 1С)
+# ---------------------------------------------------------------------------
+# Пакет данных, подготовленный для загрузки в БП ГИГ через её расширение
+# (TradeLedger.cfe тянет через HTTP API ClearLedger). Один пакет = один или
+# несколько target-документов в 1С (агрегация смен в один ОРП, разделение
+# ТТН на ПТУ+ПКО и т.п.). См. docs/sverka-spec.md §0.
+
+class ExportPacket(Base):
+    __tablename__ = "export_packets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Тип пакета — определяет какой документ ожидается в 1С на выходе.
+    # 'shift_orp'   — смена АЗС → ОРП
+    # 'purchase_ttn' — ТТН поставщика → ПТУ
+    # 'cash_pko'    — кассовая операция → ПКО
+    # 'production'  — общепит → ОПЗС
+    # 'correction'  — корректировка поступления
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+
+    # Какие clean-DataEntry (L2) пошли в пакет. Может быть несколько при
+    # агрегации (5 смен дня → 1 ОРП). JSONB-массив UUID.
+    source_entry_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+    # Жизненный цикл пакета:
+    # 'draft'    — подготовлен в ClearLedger, не отправлен
+    # 'queued'   — поставлен в очередь HTTP-обмена (TradeLedger ещё не забрал)
+    # 'sent'     — отдан расширению 1С (получен запросом extension'а)
+    # 'acked'    — 1С квитировала: пакет загружен, ссылка на документ известна
+    # 'rejected' — 1С отвергла (с указанием причины в reject_reason)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+
+    # Полезная нагрузка, что мы реально отправили (JSON, сериализация L3).
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Когда 1С квитировала — сюда ставится id AccountingDoc, который
+    # представляет L4-snapshot этого пакета. Связь L3↔L4.
+    target_doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounting_docs.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
 
 class ReconcileMapping(Base):
     __tablename__ = "reconcile_mappings"

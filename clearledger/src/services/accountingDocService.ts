@@ -507,3 +507,28 @@ export async function enrichNomenclature(connectionId: string, refs: string[]): 
   if (refs.length === 0) return {}
   return post(`/api/onec/connections/${connectionId}/nomenclature-enrich`, { refs })
 }
+
+/** L3 — какие пакеты выгрузки привели к этому L4-документу. */
+export interface ExportPacketBrief {
+  id: string
+  kind: string
+  status: string
+  sentAt?: string | null
+  ackedAt?: string | null
+  targetDocId?: string | null
+  sourceEntryIds: string[]
+}
+export async function packetsByDoc(docId: string): Promise<ExportPacketBrief[]> {
+  return get<ExportPacketBrief[]>(`/api/export-packets/by-doc/${docId}`)
+}
+
+/** L1↔L2 — lineage одного DataEntry. */
+export interface EntryLineage {
+  raw: { id: string; layer: string; metadata: Record<string, unknown> } | null
+  clean: { id: string; layer: string; metadata: Record<string, unknown> } | null
+  diff: Array<{ key: string; raw: unknown; clean: unknown; changed: boolean }>
+  diffStats: { total: number; changed: number }
+}
+export async function getEntryLineage(entryId: string): Promise<EntryLineage> {
+  return get<EntryLineage>(`/api/entries/${entryId}/lineage`)
+}

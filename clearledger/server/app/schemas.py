@@ -160,6 +160,9 @@ class DataEntryResponse(BaseModel):
     metadata: dict[str, str]
     ocr_data: dict | None = None
     source_id: str | None = None
+    # Слой данных (см. docs/sverka-spec.md §0): raw (L1) | clean (L2).
+    layer: str = "raw"
+    derived_from_entry_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -754,6 +757,44 @@ class OneCSyncStatusResponse(BaseModel):
     current_log: OneCSyncLogResponse | None = None
     connection_status: str
     last_sync_at: datetime | None = None
+
+
+# ===== Export Packets (L3 — docs/sverka-spec.md §0) =====
+
+ExportPacketKind = Literal["shift_orp", "purchase_ttn", "cash_pko", "production", "correction"]
+ExportPacketStatus = Literal["draft", "queued", "sent", "acked", "rejected"]
+
+
+class ExportPacketCreate(BaseModel):
+    company_id: str
+    kind: ExportPacketKind
+    source_entry_ids: list[str] = Field(default_factory=list)
+    payload: dict = Field(default_factory=dict)
+
+
+class ExportPacketUpdate(BaseModel):
+    status: ExportPacketStatus | None = None
+    payload: dict | None = None
+    sent_at: datetime | None = None
+    acked_at: datetime | None = None
+    reject_reason: str | None = None
+    target_doc_id: str | None = None
+
+
+class ExportPacketResponse(BaseModel):
+    id: str
+    companyId: str = Field(alias="company_id")
+    kind: str
+    sourceEntryIds: list[str] = Field(alias="source_entry_ids")
+    status: str
+    payload: dict
+    sentAt: datetime | None = Field(default=None, alias="sent_at")
+    ackedAt: datetime | None = Field(default=None, alias="acked_at")
+    rejectReason: str | None = Field(default=None, alias="reject_reason")
+    targetDocId: str | None = Field(default=None, alias="target_doc_id")
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
+    model_config = {"populate_by_name": True}
 
 
 # ===== Reconcile Mappings (docs/sverka-spec.md §4) =====

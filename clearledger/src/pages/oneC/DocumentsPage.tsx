@@ -37,7 +37,11 @@ import {
   getAccountingDocDetails,
   loadDocumentLines,
   enrichNomenclature,
+  packetsByDoc,
+  getEntryLineage,
   type DocSort,
+  type ExportPacketBrief,
+  type EntryLineage,
 } from '@/services/accountingDocService'
 
 const PAGE_SIZE = 50
@@ -516,6 +520,148 @@ function OrpInvariantsPanel({ postings, amount }: { postings: Array<Record<strin
   )
 }
 
+// ─── Цепочка слоёв L1→L2→L3→L4 (docs/sverka-spec.md §0) ─────────────
+// Узлы: RAW (L1) — CLEAN (L2) — EXPORT (L3) — 1C_REF (L4)
+// Между узлами — индикаторы: зелёный (есть и совпадает), жёлтый (есть с
+// расхождениями), красный (разрыв), серый (нет данных для слоя).
+function LayerChainPanel({ docId, matchedEntryId }: { docId: string; matchedEntryId: string | null | undefined }) {
+  // L3: пакеты выгрузки, привязанные к этому документу
+  const { data: packets = [] } = useQuery<ExportPacketBrief[]>({
+    queryKey: ['packets-by-doc', docId],
+    queryFn: () => packetsByDoc(docId),
+    enabled: !!docId,
+  })
+  // L1↔L2: lineage через matched DataEntry (если сверка нашла пару)
+  const { data: lineage } = useQuery<EntryLineage>({
+    queryKey: ['entry-lineage', matchedEntryId],
+    queryFn: () => getEntryLineage(matchedEntryId!),
+    enabled: !!matchedEntryId,
+  })
+
+  const hasL4 = true                                       // мы внутри документа — L4 точно есть
+  const hasL3 = packets.length > 0
+  const hasL2 = !!lineage?.clean
+  const hasL1 = !!lineage?.raw
+
+  // Состояние переходов
+  const l1l2 = !hasL1 || !hasL2 ? 'gray'
+              : (lineage!.diffStats.changed === 0 ? 'green' : 'yellow')
+  const l2l3 = !hasL2 || !hasL3 ? 'gray'
+              : (packets.some((p) => p.status === 'rejected') ? 'red'
+                : packets.every((p) => p.status === 'acked') ? 'green' : 'yellow')
+  const l3l4 = !hasL3 ? 'gray'
+              : (packets.some((p) => p.targetDocId) ? 'green' : 'yellow')
+
+  function nodeBadge(label: string, has: boolean, hint: string) {
+    return (
+      <div
+        className={`px-2 py-1 rounded border text-[10px] font-mono ${
+          has ? 'border-emerald-400/50 text-emerald-300/80 bg-emerald-500/5' : 'border-zinc-600 text-zinc-500'
+        }`}
+        title={hint}
+      >
+        {label}
+      </div>
+    )
+  }
+  function edge(state: 'green' | 'yellow' | 'red' | 'gray') {
+    const styles = {
+      green:  'border-emerald-400/50 text-emerald-300/80',
+      yellow: 'border-amber-400/50   text-amber-300/80',
+      red:    'border-red-400/50     text-red-300/80',
+      gray:   'border-zinc-600       text-zinc-500',
+    }
+    const icons = { green: '✓', yellow: '≈', red: '✕', gray: '—' }
+    return (
+      <div className={`flex items-center h-5 px-1 text-[10px] border-t border-b ${styles[state]}`}>
+        {icons[state]}
+      </div>
+    )
+  }
+  return (
+    <Card className="py-3 gap-1">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-xs uppercase text-muted-foreground">
+          Цепочка слоёв
+        </CardTitle>
+        <CardDescription className="text-[10px]">
+          L1 RAW (сырьё) → L2 CLEAN (норма) → L3 EXPORT (выгрузка) → L4 1C_REF (в БП ГИГ)
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="flex items-stretch gap-0.5 mt-1">
+          {nodeBadge('L1 RAW', hasL1, hasL1 ? `raw: ${lineage!.raw!.id.slice(0, 8)}…` : 'сырьё-пара не найдена')}
+          {edge(l1l2)}
+          {nodeBadge('L2 CLEAN', hasL2, hasL2 ? `clean: ${lineage!.clean!.id.slice(0, 8)}…` : 'нормализованная версия не найдена')}
+          {edge(l2l3)}
+          {nodeBadge('L3 EXPORT', hasL3, hasL3 ? `пакетов: ${packets.length}` : 'выгрузка в 1С не зафиксирована')}
+          {edge(l3l4)}
+          {nodeBadge('L4 1C_REF', hasL4, 'этот документ из БП ГИГ')}
+        </div>
+        {(hasL1 || hasL2 || hasL3) && (
+          <div className="text-[10px] text-muted-foreground mt-2 space-y-0.5">
+            {hasL1 && hasL2 && (
+              <div>L1↔L2: {lineage!.diffStats.changed}/{lineage!.diffStats.total} полей с правками</div>
+            )}
+            {hasL3 && (
+              <div>L3: {packets.map((p) => `${p.kind}/${p.status}`).join(', ')}</div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── Инварианты ПТУ (см. docs/sverka-spec.md §2.4) ────────────────────
+// Для типового поступления товаров и услуг:
+//   Σ Кт 60.01      = СуммаДокумента (вся задолженность поставщику с НДС)
+//   Σ Дт 19.03      = СуммаНДС (входной НДС к вычету)
+//   Σ Дт (41/10/26) = СуммаДокумента − СуммаНДС (товары/материалы без НДС)
+function PtuInvariantsPanel({ postings, amount }: { postings: Array<Record<string, unknown>>; amount: number }) {
+  function sumByAccount(side: 'AccountDt' | 'AccountCt', accountPrefix: string): number {
+    return postings
+      .filter((p) => String(p[side] ?? '').startsWith(accountPrefix))
+      .reduce((acc, p) => acc + Number(p.Amount || 0), 0)
+  }
+  const k60   = sumByAccount('AccountCt', '60.01')
+  const dt19  = sumByAccount('AccountDt', '19.03')
+  // Товары: 41.01 (опт-тонны), 41.02 (литры/розница), 10.* (материалы)
+  const dt41  = sumByAccount('AccountDt', '41')
+  const dt10  = sumByAccount('AccountDt', '10')
+  const dtGoods = dt41 + dt10
+  const expectedGoods = Math.max(0, amount - dt19)
+
+  const checks = [
+    { label: 'Σ Кт 60.01 = СуммаДок',        actual: k60,      expected: amount,         formula: `${k60.toFixed(2)} vs ${amount.toFixed(2)}` },
+    { label: 'Σ Дт 41.* + 10.* ≈ Док − НДС', actual: dtGoods,  expected: expectedGoods,  formula: `${dtGoods.toFixed(2)} vs ${expectedGoods.toFixed(2)}` },
+    { label: 'Σ Дт 19.03 (входной НДС)',     actual: dt19,     expected: dt19,           formula: `${dt19.toFixed(2)} ₽ к вычету` },
+  ]
+  return (
+    <div className="mt-2 pt-2 border-t border-border/40">
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-1">
+        Инварианты ПТУ
+      </div>
+      <div className="space-y-1">
+        {checks.map((c) => {
+          const delta = c.actual - c.expected
+          const ok = Math.abs(delta) <= 0.01
+          const isInfoOnly = c.label.includes('к вычету')
+          return (
+            <div key={c.label} className="flex items-center gap-2 text-[10px]">
+              <Badge variant="outline" className={`text-[9px] h-4 px-1 ${isInfoOnly ? 'border-blue-400/50 text-blue-300/80' : ok ? 'border-emerald-400/50 text-emerald-300/80' : 'border-red-400/50 text-red-300/80'}`}>
+                {isInfoOnly ? 'ℹ' : ok ? 'OK' : 'Δ'}
+              </Badge>
+              <span>{c.label}</span>
+              <span className="font-mono text-muted-foreground ml-auto">{c.formula}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 interface DetailSheetProps {
   docId: string | null
   companyId: string
@@ -585,6 +731,9 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
 
         {doc && (
           <div className="px-4 pb-6 space-y-3">
+            {/* Цепочка слоёв L1→L2→L3→L4 */}
+            <LayerChainPanel docId={doc.id} matchedEntryId={doc.matchedEntryId} />
+
             {/* Шапка */}
             <Card className="py-3 gap-1">
               <CardHeader className="pb-0">
@@ -701,6 +850,7 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
                       </TableBody>
                     </Table>
                     {doc.docType === 'ОРП' && <OrpInvariantsPanel postings={postings} amount={doc.amount} />}
+                    {doc.docType === 'ПТУ' && <PtuInvariantsPanel postings={postings} amount={doc.amount} />}
                   </>
                 )}
               </CardContent>

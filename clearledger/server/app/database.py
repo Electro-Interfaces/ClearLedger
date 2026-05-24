@@ -70,6 +70,16 @@ async def create_all() -> None:
             # v0.9: уникальные маппинги source_key → target_ref в рамках (company_id, kind)
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_reconcile_mappings ON reconcile_mappings(company_id, kind, source_key)",
             "CREATE INDEX IF NOT EXISTS idx_reconcile_mappings_target ON reconcile_mappings(company_id, kind, target_ref)",
+            # v1.0: layer + derived_from_entry_id для DataEntry — 4-слойная архитектура §0.
+            "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS layer VARCHAR(10) NOT NULL DEFAULT 'raw'",
+            "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS derived_from_entry_id UUID REFERENCES data_entries(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS idx_data_entries_layer ON data_entries(company_id, layer)",
+            "CREATE INDEX IF NOT EXISTS idx_data_entries_derived_from ON data_entries(derived_from_entry_id)",
+            # Backfill: проставляем layer по существующему status — 'verified'/'transferred' → clean.
+            "UPDATE data_entries SET layer = 'clean' WHERE layer = 'raw' AND status IN ('verified','transferred')",
+            # v1.1: ExportPacket — L3 слой (что мы выгружаем в 1С).
+            "CREATE INDEX IF NOT EXISTS idx_export_packets_status ON export_packets(company_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_export_packets_kind ON export_packets(company_id, kind)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

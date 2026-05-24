@@ -23,6 +23,7 @@ from app.routers import (
     entries_router,
     export_router,
     fuel_router,
+    export_packets_router,
     intake_router,
     mappings_router,
     ocr_router,
@@ -109,6 +110,7 @@ app.include_router(source_types_router.router, prefix=API_PREFIX)
 app.include_router(onec_router.router, prefix=API_PREFIX)
 app.include_router(periods_router.router, prefix=API_PREFIX)
 app.include_router(mappings_router.router, prefix=API_PREFIX)
+app.include_router(export_packets_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

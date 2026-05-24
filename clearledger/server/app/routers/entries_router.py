@@ -47,6 +47,8 @@ def _entry_response(entry: DataEntry) -> DataEntryResponse:
         metadata=entry.meta or {},
         ocr_data=entry.ocr_data,
         source_id=entry.source_id,
+        layer=entry.layer,
+        derived_from_entry_id=str(entry.derived_from_entry_id) if entry.derived_from_entry_id else None,
         created_at=entry.created_at,
         updated_at=entry.updated_at,
     )
@@ -394,3 +396,61 @@ async def include_entry(
         details=f"Восстановлена в статус: {restore_to}",
     )
     return _entry_response(entry)
+
+
+# ---------------------------------------------------------------------------
+# Lineage L1 ↔ L2 (см. docs/sverka-spec.md §0)
+# ---------------------------------------------------------------------------
+
+def _diff_meta(raw: dict, clean: dict) -> list[dict]:
+    """Простой пер-ключевой diff. Возвращает list[{key, raw, clean, changed}]."""
+    keys = sorted(set((raw or {}).keys()) | set((clean or {}).keys()))
+    out = []
+    for k in keys:
+        rv = (raw or {}).get(k)
+        cv = (clean or {}).get(k)
+        out.append({"key": k, "raw": rv, "clean": cv, "changed": rv != cv})
+    return out
+
+
+@router.get("/{entry_id}/lineage")
+async def get_entry_lineage(
+    entry_id: str,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Цепочка L1→L2 для одного DataEntry.
+
+    Если entry — clean (layer='clean') — ищем raw через derived_from_entry_id.
+    Если entry — raw — ищем clean-потомков (может быть несколько).
+    Возвращаем оба + diff по meta для UI «Распознавание».
+    """
+    entry = await _get_entry_or_404(entry_id, db)
+
+    raw: DataEntry | None = None
+    clean: DataEntry | None = None
+    if entry.layer == "clean":
+        clean = entry
+        if entry.derived_from_entry_id:
+            raw = (await db.execute(
+                select(DataEntry).where(DataEntry.id == entry.derived_from_entry_id)
+            )).scalar_one_or_none()
+    else:
+        raw = entry
+        clean = (await db.execute(
+            select(DataEntry)
+            .where(DataEntry.derived_from_entry_id == entry.id, DataEntry.layer == "clean")
+            .order_by(DataEntry.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+
+    diff = _diff_meta(raw.meta if raw else {}, clean.meta if clean else {}) if raw and clean else []
+    return {
+        "raw":   _entry_response(raw).model_dump() if raw else None,
+        "clean": _entry_response(clean).model_dump() if clean else None,
+        "diff":  diff,
+        "diffStats": {
+            "total":   len(diff),
+            "changed": sum(1 for d in diff if d["changed"]),
+        },
+    }
