@@ -23,7 +23,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     FuelStation, FuelShift, FuelTank, FuelPump,
-    FuelReceipt, FuelExportDoc, User,
+    FuelReceipt, FuelExportDoc, User, DataEntry,
 )
 from app.services.sts_client import (
     sts_get_shifts, sts_get_shift_report, sts_get_receipts,
@@ -402,6 +402,96 @@ async def normalize_shifts(
                 diff_mass=fact_mass - doc_mass,
                 received_at=_parse_dt(r.get("dt")),
                 status="new",
+            ))
+
+        # L1 DataEntry — копия смены в общую таблицу для 4-слойного reconcile.
+        # Дедупликация по shift_id+station_code в meta (sts-api source).
+        shift_l1_marker = f"sts-shift-{body.system_code}-{body.station_code}-{shift_num}"
+        exists_l1 = (await db.execute(
+            select(DataEntry).where(
+                DataEntry.company_id == company_id,
+                DataEntry.source_label == shift_l1_marker,
+            ).limit(1)
+        )).scalar_one_or_none()
+        if not exists_l1:
+            shift_date = shift.opened_at.date().isoformat() if shift.opened_at else ""
+            db.add(DataEntry(
+                id=uuid.uuid4(),
+                title=f"Смена №{shift_num} АЗС {body.station_code} от {shift_date}",
+                category_id="operational",
+                subcategory_id="shifts",
+                doc_type_id="shift_orp",
+                company_id=company_id,
+                status="recognized",
+                source="api",
+                source_label=shift_l1_marker,
+                layer="raw",
+                meta={
+                    "shift_id":     str(shift_num),
+                    "shift_number": str(shift_num),
+                    "station_code": str(body.station_code),
+                    "system_code":  str(body.system_code),
+                    "shift_date":   shift_date,
+                    "docDate":      shift_date,
+                    "amount":       str(total_amount),
+                    "totalAmount":  str(total_amount),
+                    "totalLiters":  str(total_liters),
+                    "cash":         str(cash),
+                    "card":         str(card),
+                    "voucher":      str(voucher),
+                    "fuel_shift_id": str(shift.id),
+                },
+            ))
+
+        # L1 DataEntry per ТТН (для сверки ТТН-файл ↔ ПТУ)
+        for r in report.get("receipt", []):
+            ttn_no = (r.get("ttn") or "").strip()
+            if not ttn_no:
+                continue
+            ttn_marker = f"sts-ttn-{body.station_code}-{shift_num}-{ttn_no}"
+            exists_ttn = (await db.execute(
+                select(DataEntry).where(
+                    DataEntry.company_id == company_id,
+                    DataEntry.source_label == ttn_marker,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if exists_ttn:
+                continue
+            doc = r.get("doc", {})
+            fact = r.get("fact", {})
+            svc = r.get("service", {})
+            base = r.get("base", {})
+            ttn_date = _parse_dt(r.get("dt"))
+            ttn_date_iso = ttn_date.date().isoformat() if ttn_date else ""
+            db.add(DataEntry(
+                id=uuid.uuid4(),
+                title=f"ТТН {ttn_no} · {svc.get('service_name', '')} · {base.get('name', '')}",
+                category_id="primary",
+                subcategory_id="ttn",
+                doc_type_id="purchase_ttn",
+                company_id=company_id,
+                status="recognized",
+                source="api",
+                source_label=ttn_marker,
+                layer="raw",
+                meta={
+                    "ttn_number":    ttn_no,
+                    "docNumber":     ttn_no,
+                    "ttn_date":      ttn_date_iso,
+                    "docDate":       ttn_date_iso,
+                    "supplier_name": base.get("name", ""),
+                    "supplier_inn":  base.get("inn", ""),
+                    "inn":           base.get("inn", ""),
+                    "fuel_name":     svc.get("service_name", ""),
+                    "fuel_code":     str(svc.get("service_code", "") or ""),
+                    "doc_volume_l":  str(doc.get("volume", 0)),
+                    "doc_mass_kg":   str(doc.get("amount", 0)),
+                    "fact_volume_l": str(fact.get("volume", 0)),
+                    "fact_mass_kg":  str(fact.get("amount", 0)),
+                    "density":       str(doc.get("density", "") or ""),
+                    "station_code":  str(body.station_code),
+                    "shift_id":      str(shift_num),
+                },
             ))
 
         created += 1

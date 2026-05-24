@@ -168,6 +168,226 @@ async def packet_stats(
     return {"total": sum(by_status.values()), "byStatus": by_status, "byKind": by_kind}
 
 
+@router.post("/build")
+async def build_packets_from_clean(
+    company_id: str = Query(...),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Собрать ExportPackets из L2 (DataEntry layer='clean') за период.
+
+    Правила агрегации:
+      shift_orp:   все смены одной АЗС за один день → 1 пакет
+      purchase_ttn: одна ТТН = один пакет
+
+    Идемпотентно: если для группы уже есть draft/queued/sent пакет — пропускаем.
+    """
+    from app.models import DataEntry  # local import чтобы не плодить top-level
+
+    cid = await _resolve_company_id(company_id, db)
+    stmt = select(DataEntry).where(
+        DataEntry.company_id == cid,
+        DataEntry.layer == "clean",
+    )
+    if date_from:
+        # docDate из meta — фильтр на стороне Python (JSONB filter сложнее)
+        pass
+    rows = (await db.execute(stmt)).scalars().all()
+
+    # Группировка
+    shift_groups: dict[tuple[str, str], list] = {}     # (station_code, date) -> entries
+    ttn_entries: list = []
+    for e in rows:
+        meta = e.meta or {}
+        d = (meta.get("docDate") or meta.get("shift_date") or "")[:10]
+        if date_from and d and d < date_from:
+            continue
+        if date_to and d and d > date_to:
+            continue
+        if e.doc_type_id == "shift_orp" or e.subcategory_id == "shifts":
+            station = str(meta.get("station_code") or "?")
+            shift_groups.setdefault((station, d), []).append(e)
+        elif e.doc_type_id == "purchase_ttn" or e.subcategory_id == "ttn":
+            ttn_entries.append(e)
+
+    created_packets = 0
+    skipped = 0
+
+    # shift_orp: один пакет на (станция, день)
+    for (station, day), entries in shift_groups.items():
+        marker = f"shift_orp:{station}:{day}"
+        existing = (await db.execute(
+            select(ExportPacket).where(
+                ExportPacket.company_id == cid,
+                ExportPacket.kind == "shift_orp",
+                ExportPacket.payload["marker"].astext == marker,
+                ExportPacket.status.in_(["draft", "queued", "sent", "acked"]),
+            )
+        )).scalar_one_or_none()
+        if existing:
+            skipped += 1
+            continue
+        total = sum(float(e.meta.get("totalAmount") or 0) for e in entries)
+        total_liters = sum(float(e.meta.get("totalLiters") or 0) for e in entries)
+        db.add(ExportPacket(
+            id=uuid.uuid4(),
+            company_id=cid,
+            kind="shift_orp",
+            source_entry_ids=[str(e.id) for e in entries],
+            status="draft",
+            payload={
+                "marker": marker,
+                "station_code": station,
+                "date": day,
+                "shifts_count": len(entries),
+                "total_amount": total,
+                "total_liters": total_liters,
+            },
+        ))
+        created_packets += 1
+
+    # purchase_ttn: 1:1
+    for e in ttn_entries:
+        meta = e.meta or {}
+        ttn_no = meta.get("docNumber") or meta.get("ttn_number") or ""
+        marker = f"purchase_ttn:{ttn_no}:{(meta.get('docDate') or '')[:10]}"
+        existing = (await db.execute(
+            select(ExportPacket).where(
+                ExportPacket.company_id == cid,
+                ExportPacket.kind == "purchase_ttn",
+                ExportPacket.payload["marker"].astext == marker,
+                ExportPacket.status.in_(["draft", "queued", "sent", "acked"]),
+            )
+        )).scalar_one_or_none()
+        if existing:
+            skipped += 1
+            continue
+        db.add(ExportPacket(
+            id=uuid.uuid4(),
+            company_id=cid,
+            kind="purchase_ttn",
+            source_entry_ids=[str(e.id)],
+            status="draft",
+            payload={
+                "marker": marker,
+                "ttn_number": ttn_no,
+                "ttn_date": meta.get("docDate") or "",
+                "supplier_inn": meta.get("inn", ""),
+                "supplier_name": meta.get("supplier_name", ""),
+                "fuel_name": meta.get("fuel_name", ""),
+                "doc_volume_l": meta.get("doc_volume_l", ""),
+                "fact_volume_l": meta.get("fact_volume_l", ""),
+            },
+        ))
+        created_packets += 1
+
+    await db.flush()
+    return {
+        "created": created_packets,
+        "skipped": skipped,
+        "considered_clean_entries": len(rows),
+    }
+
+
+# ─── HTTP API для расширения 1С (TradeLedger.cfe тянет/квитирует) ────
+
+@router.get("/queue", response_model=list[ExportPacketResponse])
+async def queue_for_extension(
+    company_id: str = Query(...),
+    kind: str | None = Query(None),
+    mark_as_sent: bool = Query(True, description="Перевести выданные пакеты в status=sent"),
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Очередь пакетов для расширения 1С. Возвращает draft+queued.
+    При mark_as_sent=true (по умолчанию) — атомарно меняет их статус
+    на 'sent' и заполняет sent_at, чтобы расширение их видело только
+    один раз (idempotent от своей стороны через ack)."""
+    cid = await _resolve_company_id(company_id, db)
+    stmt = select(ExportPacket).where(
+        ExportPacket.company_id == cid,
+        ExportPacket.status.in_(["draft", "queued"]),
+    )
+    if kind:
+        stmt = stmt.where(ExportPacket.kind == kind)
+    stmt = stmt.order_by(ExportPacket.created_at)
+    packets = (await db.execute(stmt)).scalars().all()
+
+    if mark_as_sent and packets:
+        now = datetime.now(tz=timezone.utc)
+        for p in packets:
+            p.status = "sent"
+            p.sent_at = now
+        await db.flush()
+
+    return [_resp(p) for p in packets]
+
+
+@router.post("/{packet_id}/ack")
+async def ack_packet(
+    packet_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Расширение 1С квитирует загрузку пакета.
+
+    Body может содержать:
+      target_doc_external_id: GUID документа в БП (Ref_Key из 1С)
+      target_doc_id:          UUID AccountingDoc в ClearLedger (если расширение
+                              предварительно его узнало через sync_documents)
+      reject_reason:          если status='rejected'
+
+    Если ни target_doc_external_id ни target_doc_id не передано — auto-link
+    проверится позже при следующем sync_documents.
+    """
+    from app.models import AccountingDoc
+    try:
+        pid = uuid.UUID(packet_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
+    p = (await db.execute(select(ExportPacket).where(ExportPacket.id == pid))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Packet not found")
+
+    reject = body.get("reject_reason")
+    if reject:
+        p.status = "rejected"
+        p.reject_reason = str(reject)[:1000]
+    else:
+        p.status = "acked"
+        p.acked_at = datetime.now(tz=timezone.utc)
+        # Опциональный auto-link на L4
+        target_ext = body.get("target_doc_external_id")
+        target_id = body.get("target_doc_id")
+        if target_id:
+            try:
+                p.target_doc_id = uuid.UUID(target_id)
+            except ValueError:
+                pass
+        elif target_ext:
+            doc = (await db.execute(
+                select(AccountingDoc).where(
+                    AccountingDoc.company_id == p.company_id,
+                    AccountingDoc.external_id == str(target_ext),
+                )
+            )).scalar_one_or_none()
+            if doc:
+                p.target_doc_id = doc.id
+
+    await db.flush()
+    await db.refresh(p)
+    return {
+        "id": str(p.id),
+        "status": p.status,
+        "target_doc_id": str(p.target_doc_id) if p.target_doc_id else None,
+        "acked_at": p.acked_at.isoformat() if p.acked_at else None,
+        "reject_reason": p.reject_reason,
+    }
+
+
 @router.get("/by-doc/{doc_id}", response_model=list[ExportPacketResponse])
 async def packets_by_doc(
     doc_id: str,

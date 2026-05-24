@@ -186,11 +186,80 @@ class OneCSyncService:
                         local_org=local_org,
                         local_wh=local_wh,
                     )
+            # Auto-link L3↔L4: после sync пытаемся связать acked-пакеты без
+            # target_doc_id с только что обновлёнными AccountingDoc.
+            linked = await self._autolink_acked_packets(connection.company_id)
+            if linked:
+                details["autolink_l3_l4"] = linked
+
             await self._finish_log(log, "completed", details)
         except Exception as exc:
             await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})
             raise
         return log
+
+    async def _autolink_acked_packets(self, company_id: Any) -> dict[str, int]:
+        """Acked ExportPackets без target_doc_id ищут себе AccountingDoc по
+        composite key из payload.marker.
+
+        Соответствие kind → правило поиска:
+          shift_orp:   AccountingDoc.date startswith payload.date AND
+                       warehouse_code == payload.station_code AND
+                       abs(amount - payload.total_amount) < 0.05 AND
+                       doc_type='ОРП'
+          purchase_ttn: external_number == payload.ttn_number AND
+                        external_date startswith payload.ttn_date AND
+                        doc_type='ПТУ'"""
+        from app.models import AccountingDoc, ExportPacket
+        stats = {"matched": 0, "skipped": 0}
+        packets = (await self.session.execute(
+            select(ExportPacket).where(
+                ExportPacket.company_id == company_id,
+                ExportPacket.status == "acked",
+                ExportPacket.target_doc_id.is_(None),
+            )
+        )).scalars().all()
+        for p in packets:
+            payload = p.payload or {}
+            doc = None
+            if p.kind == "shift_orp":
+                date = payload.get("date") or ""
+                station = payload.get("station_code") or ""
+                total = float(payload.get("total_amount") or 0)
+                if date and station:
+                    candidates = (await self.session.execute(
+                        select(AccountingDoc).where(
+                            AccountingDoc.company_id == company_id,
+                            AccountingDoc.doc_type == "ОРП",
+                            AccountingDoc.date == date,
+                            AccountingDoc.warehouse_code == station,
+                        )
+                    )).scalars().all()
+                    # Выбираем по близости суммы
+                    if candidates:
+                        candidates.sort(key=lambda c: abs((c.amount or 0) - total))
+                        if abs((candidates[0].amount or 0) - total) < 0.05:
+                            doc = candidates[0]
+            elif p.kind == "purchase_ttn":
+                ttn_no = payload.get("ttn_number") or ""
+                ttn_date = (payload.get("ttn_date") or "")[:10]
+                if ttn_no:
+                    doc = (await self.session.execute(
+                        select(AccountingDoc).where(
+                            AccountingDoc.company_id == company_id,
+                            AccountingDoc.doc_type == "ПТУ",
+                            AccountingDoc.external_number == ttn_no,
+                            *([AccountingDoc.external_date == ttn_date] if ttn_date else []),
+                        ).limit(1)
+                    )).scalar_one_or_none()
+            if doc is not None:
+                p.target_doc_id = doc.id
+                stats["matched"] += 1
+            else:
+                stats["skipped"] += 1
+        if stats["matched"]:
+            await self.session.flush()
+        return stats
 
     async def _build_local_index(
         self, model: type, company_id: Any, *, by: str = "name"

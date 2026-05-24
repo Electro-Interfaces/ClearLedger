@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AccountingDoc, DataEntry
+from app.models import AccountingDoc, DataEntry, ReconcileMapping
 
 
 # ---------------------------------------------------------------------------
@@ -260,16 +260,39 @@ def classify_discrepancy(
     return status, summary
 
 
+async def _load_mappings(db: AsyncSession, company_id: uuid.UUID, kind: str) -> dict[str, str]:
+    """{source_key → target_ref} для kind."""
+    rows = (await db.execute(
+        select(ReconcileMapping.source_key, ReconcileMapping.target_ref)
+        .where(ReconcileMapping.company_id == company_id, ReconcileMapping.kind == kind)
+    )).all()
+    return {sk: tr for sk, tr in rows}
+
+
 async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
     """
     Запуск авто-сверки для компании.
     Возвращает статистику: matched, unmatched, discrepancy.
+
+    Дополнительно: для смен (shift_orp/operational+shifts) если в meta есть
+    station_code — резолвим через ReconcileMapping('station') и привязываем
+    к AccountingDoc по warehouse_code + дате. Это работает без ИНН-матчинга.
     """
+    # Маппинги — для быстрого резолва на стороне Python
+    station_map = await _load_mappings(db, company_id, "station")
+    fuel_map = await _load_mappings(db, company_id, "fuel")  # пока не используется в score, для будущей построчной сверки
+
     # Загружаем все документы 1С компании
     docs_result = await db.execute(
         select(AccountingDoc).where(AccountingDoc.company_id == company_id)
     )
     docs = docs_result.scalars().all()
+
+    # Индекс ORP-документов по (warehouse_code, date) для быстрого матча смен
+    orp_by_station_date: dict[tuple[str, str], list[AccountingDoc]] = {}
+    for d in docs:
+        if d.doc_type == "ОРП" and d.warehouse_code:
+            orp_by_station_date.setdefault((d.warehouse_code, d.date[:10]), []).append(d)
 
     # Загружаем все entries компании
     entries_result = await db.execute(
@@ -277,7 +300,8 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
     )
     entries = entries_result.scalars().all()
 
-    stats = {"matched": 0, "unmatched": 0, "discrepancy": 0, "total": len(docs)}
+    stats = {"matched": 0, "unmatched": 0, "discrepancy": 0, "total": len(docs),
+             "via_station_mapping": 0}
 
     # Индекс entries по ИНН для O(1) lookup (ИНН даёт +40, основной критерий)
     entries_by_inn: dict[str, list[DataEntry]] = {}
@@ -290,7 +314,59 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
     # Множество уже использованных entries (1 entry : 1 doc)
     used_entries: set[uuid.UUID] = set()
 
+    # ── Фаза 0: смены ↔ ОРП через ReconcileMapping('station') ──
+    # Это специализированный быстрый матчинг по композитному ключу
+    # (station_code → warehouse_code + date), независимый от ИНН-скоринга.
+    used_docs: set[uuid.UUID] = set()
+    if station_map:
+        for entry in entries:
+            meta = entry.meta or {}
+            station_code = str(meta.get("station_code") or "")
+            doc_date = (meta.get("shift_date") or meta.get("docDate") or "")[:10]
+            if not station_code or not doc_date:
+                continue
+            # Ключ маппинга — внешний station_code STS. target_ref — это
+            # external_ref Warehouse, но для матча с AccountingDoc.warehouse_code
+            # удобнее искать просто по station_code если warehouse.code == station_code.
+            # Альтернатива: подтянуть Warehouse.code по target_ref.
+            candidates = orp_by_station_date.get((station_code, doc_date), [])
+            for cand in candidates:
+                if cand.id in used_docs:
+                    continue
+                entry_amount = entry_meta_amount(entry)
+                doc_amount = cand.amount or 0
+                amount_diff = (doc_amount - entry_amount) if entry_amount is not None else None
+                d_status, d_summary = classify_discrepancy(
+                    amount_delta=amount_diff,
+                    inn_match=None,  # для смен ИНН не релевантен
+                    date_diff_days=0,
+                    period_status=cand.period_status or "open",
+                )
+                cand.matched_entry_id = entry.id
+                cand.match_status = "matched" if d_status in ("none", "rounding") else "discrepancy"
+                cand.match_details = {
+                    "method": "station_mapping",
+                    "amountDiff": amount_diff,
+                    "station_code": station_code,
+                    "date": doc_date,
+                }
+                cand.discrepancy_status = d_status
+                cand.discrepancy_summary = d_summary
+                cand.discrepancy_details = [
+                    {"field": "shift_amount", "source": entry_amount, "target": doc_amount,
+                     "delta": amount_diff, "severity": d_status, "method": "station_mapping"}
+                ]
+                used_docs.add(cand.id)
+                used_entries.add(entry.id)
+                stats["via_station_mapping"] += 1
+                stats["matched" if cand.match_status == "matched" else "discrepancy"] += 1
+                stats.setdefault("by_severity", {}).setdefault(d_status, 0)
+                stats["by_severity"][d_status] += 1
+                break  # одна смена → один ОРП
+
     for doc in docs:
+        if doc.id in used_docs:
+            continue  # уже сматчили через station mapping
         best_score = 0
         best_entry: DataEntry | None = None
         best_details: dict = {}

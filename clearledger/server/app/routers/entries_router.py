@@ -402,6 +402,79 @@ async def include_entry(
 # Lineage L1 ↔ L2 (см. docs/sverka-spec.md §0)
 # ---------------------------------------------------------------------------
 
+@router.post("/{entry_id}/normalize", response_model=DataEntryResponse)
+async def normalize_entry(
+    entry_id: str,
+    payload: dict = None,  # body опционален — может содержать meta_patch
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Создаёт L2-копию (layer='clean') существующего L1 (layer='raw').
+
+    Сценарий: бухгалтер открывает RAW-документ, поправил opechatки в meta,
+    нажимает «Подтвердить как нормализованную». Создаётся новая запись
+    layer='clean' с derived_from_entry_id, status='verified'. Если у RAW
+    уже есть clean-потомок — обновляется он, а не создаётся дубль.
+
+    payload (опционально): {meta_patch: {...}} — точечные правки meta.
+    """
+    raw = await _get_entry_or_404(entry_id, db)
+    if raw.layer != "raw":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Нормализовать можно только raw-entry, у этой layer='{raw.layer}'",
+        )
+
+    meta_patch = (payload or {}).get("meta_patch") or {}
+    merged_meta = {**(raw.meta or {}), **meta_patch}
+
+    # Если у raw уже есть clean-потомок — обновляем его (idempotent).
+    existing_clean = (await db.execute(
+        select(DataEntry).where(
+            DataEntry.derived_from_entry_id == raw.id,
+            DataEntry.layer == "clean",
+        ).limit(1)
+    )).scalar_one_or_none()
+
+    if existing_clean is not None:
+        existing_clean.meta = merged_meta
+        existing_clean.status = "verified"
+        existing_clean.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+        await _create_audit(
+            db, current_user, "updated", existing_clean.company_id, existing_clean.id,
+            details=f"Перенормализован из raw {raw.id}",
+        )
+        return _entry_response(existing_clean)
+
+    clean = DataEntry(
+        id=uuid.uuid4(),
+        title=raw.title,
+        category_id=raw.category_id,
+        subcategory_id=raw.subcategory_id,
+        doc_type_id=raw.doc_type_id,
+        company_id=raw.company_id,
+        status="verified",
+        source=raw.source,
+        source_label=raw.source_label + "-clean",
+        file_url=raw.file_url,
+        file_type=raw.file_type,
+        file_size=raw.file_size,
+        meta=merged_meta,
+        ocr_data=raw.ocr_data,
+        source_id=raw.source_id,
+        layer="clean",
+        derived_from_entry_id=raw.id,
+    )
+    db.add(clean)
+    await db.flush()
+    await _create_audit(
+        db, current_user, "verified", clean.company_id, clean.id,
+        details=f"Нормализован из raw {raw.id}",
+    )
+    return _entry_response(clean)
+
+
 def _diff_meta(raw: dict, clean: dict) -> list[dict]:
     """Простой пер-ключевой diff. Возвращает list[{key, raw, clean, changed}]."""
     keys = sorted(set((raw or {}).keys()) | set((clean or {}).keys()))
