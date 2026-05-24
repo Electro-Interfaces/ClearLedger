@@ -34,6 +34,28 @@ ENTITY_DOC_WRITEOFF = "Document_СписаниеТоваров"
 ENTITY_DOC_PKO = "Document_ПриходныйКассовыйОрдер"
 ENTITY_DOC_TRANSFER = "Document_ПеремещениеТоваров"
 ENTITY_DOC_CORRECTION = "Document_КорректировкаПоступления"
+
+# Табличные части документов БП 3.0 — OData publishes их как отдельные сущности
+# с суффиксом _<ИмяТЧ>. URL запрашиваются с filter Ref_Key eq guid'<doc_ref>'.
+TABULAR_PARTS: dict[str, list[str]] = {
+    ENTITY_DOC_PTU: [
+        "ПоступлениеТоваровУслуг_Товары",
+        "ПоступлениеТоваровУслуг_Услуги",
+    ],
+    ENTITY_DOC_ORP: [
+        "ОтчетОРозничныхПродажах_Товары",
+        "ОтчетОРозничныхПродажах_ОплатаПлатежнымиКартами",
+        "ОтчетОРозничныхПродажах_ДенежныеСредства",
+    ],
+    ENTITY_DOC_OPZS: [
+        "ОтчетПроизводстваЗаСмену_Продукция",
+        "ОтчетПроизводстваЗаСмену_Материалы",
+    ],
+    ENTITY_DOC_CORRECTION: [
+        "КорректировкаПоступления_Товары",
+        "КорректировкаПоступления_Услуги",
+    ],
+}
 ENTITY_ACC_REGISTER = "AccountingRegister_Хозрасчетный"
 
 # Регистры расширения TradeLedger.cfe — публикуются только при включённой
@@ -261,6 +283,29 @@ class OneCODataClient:
         return int(response.text.strip())
 
     # ─── удобные обёртки ────────────────────────────────────────────
+
+    async def fetch_doc_lines(
+        self,
+        doc_type: str,
+        doc_ref: str,
+        tabular_name: str,
+        select: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Прочитать табличную часть документа.
+
+        doc_type — короткое имя без префикса 'Document_' (например
+        'ПоступлениеТоваровУслуг'). tabular_name — имя ТЧ ('Товары',
+        'Услуги', 'ОплатаПлатежнымиКартами', ...).
+
+        OData публикует ТЧ как отдельную сущность '<DocType>_<TabularName>'.
+        Фильтрация — по Ref_Key (ссылке на родительский документ).
+        """
+        entity = f"{doc_type}_{tabular_name}"
+        return await self.fetch_entity(
+            entity,
+            select=select,
+            filter_expr=f"Ref_Key eq guid'{doc_ref}'",
+        )
 
     async def get_counterparty_by_inn(self, inn: str) -> dict[str, Any] | None:
         """Найти контрагента по ИНН. Возвращает первую запись или None."""

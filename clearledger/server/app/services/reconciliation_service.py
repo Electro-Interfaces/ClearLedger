@@ -177,9 +177,18 @@ def classify_discrepancy(
     inn_match: bool | None,
     date_diff_days: int | None,
     vat_delta: float | None = None,
+    period_status: str = "open",
 ) -> tuple[str, str]:
     """Возвращает (status, summary). status ∈ {none, rounding, minor, material,
-    critical}. summary — короткая фраза для UI tooltip."""
+    critical}. summary — короткая фраза для UI tooltip.
+
+    В закрытом периоде (period_status='closed') пороги жёстче (правило §7a.4
+    спеки): даже rounding промоутится до minor, потому что бухгалтерия уже
+    сдала отчётность и любая корректировка требует Бух.справки.
+    Карта промоушенов:
+        rounding → minor
+        minor    → material
+    Material и critical остаются как есть (они и так требуют действий)."""
     parts: list[str] = []
     severities: list[str] = []
 
@@ -238,7 +247,16 @@ def classify_discrepancy(
     # Берём максимальную серьёзность среди критериев.
     order = ["none", "rounding", "minor", "material", "critical"]
     status = max(severities, key=lambda s: order.index(s) if s in order else 0)
+
+    # Period-aware промоушен — в закрытом периоде микрорасхождения становятся
+    # требующими внимания (см. §7a.4 спеки).
+    if period_status == "closed":
+        promote = {"rounding": "minor", "minor": "material"}
+        status = promote.get(status, status)
+
     summary = "; ".join(parts) if parts else "точное совпадение"
+    if period_status == "closed" and status in ("minor", "material", "critical"):
+        summary = "🔒 закрытый период · " + summary
     return status, summary
 
 
@@ -333,6 +351,7 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
                 amount_delta=best_details.get("amountDiff"),
                 inn_match=best_details.get("innMatch"),
                 date_diff_days=best_details.get("dateDiff"),
+                period_status=doc.period_status or "open",
             )
             doc.discrepancy_status = d_status
             doc.discrepancy_summary = d_summary

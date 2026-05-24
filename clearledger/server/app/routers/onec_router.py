@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Company, OneCConnection, OneCSyncLog, User
+from app.models import AccountingDoc, Company, OneCConnection, OneCSyncLog, User
 from app.schemas import (
     OneCConnectionCreate,
     OneCConnectionResponse,
@@ -344,3 +344,101 @@ async def get_export_status(
 ) -> dict:
     await _get_connection_or_404(connection_id, db)
     return {"status": "not_implemented", "files": [], "error": None}
+
+
+# ─── 14. Ленивая загрузка ТЧ документа из 1С ────────────────────────
+# Тянет одну/несколько табличных частей конкретного AccountingDoc из БП ГИГ
+# и кладёт в AccountingDoc.lines (JSONB) как dict {tabular_name: [rows...]}.
+# Используется при открытии детального просмотра в /1c/documents.
+# Шаг 3 спеки docs/sverka-spec.md §3.2 (ленивая загрузка ТЧ).
+
+# Карта ТЧ по типу документа БП → список имён реквизитов и полей которые тянем.
+# Для ПТУ интересны Товары/Услуги (СтавкаНДС/СуммаНДС для сверки).
+# Для ОРП — Товары (артикул/количество для сверки со сменой STS) + Оплата.
+# Для ОПЗС — Продукция (выпуск) + Материалы (списание).
+# Для КорректировкаПоступления — Товары/Услуги (как у ПТУ).
+_DOC_TYPE_TO_1C: dict[str, str] = {
+    "ПТУ":                       "ПоступлениеТоваровУслуг",
+    "ОРП":                       "ОтчетОРозничныхПродажах",
+    "ОПЗС":                      "ОтчетПроизводстваЗаСмену",
+    "КорректировкаПоступления":  "КорректировкаПоступления",
+}
+
+_TABULAR_BY_DOC_TYPE: dict[str, list[tuple[str, list[str]]]] = {
+    "ПТУ": [
+        ("Товары",  ["Номенклатура", "Количество", "Цена", "Сумма", "СтавкаНДС", "СуммаНДС", "Всего", "СчетУчета"]),
+        ("Услуги",  ["Номенклатура", "Содержание", "Количество", "Цена", "Сумма", "СтавкаНДС", "СуммаНДС", "Всего", "СчетЗатрат"]),
+    ],
+    "ОРП": [
+        ("Товары",                       ["Номенклатура", "Количество", "Цена", "Сумма", "СтавкаНДС", "СуммаНДС", "Всего", "СчетУчетаНоменклатуры", "СчетУчетаДоходов"]),
+        ("ОплатаПлатежнымиКартами",      ["ВидОплаты", "Сумма", "Эквайер", "СчетУчетаРасчетов"]),
+        ("ДенежныеСредства",             ["СчетКассы", "СуммаНаличными"]),
+    ],
+    "ОПЗС": [
+        ("Продукция",  ["Номенклатура", "Количество", "Цена", "Сумма", "СчетУчета"]),
+        ("Материалы",  ["Номенклатура", "Количество", "Сумма", "СчетУчета"]),
+    ],
+    "КорректировкаПоступления": [
+        ("Товары",  ["Номенклатура", "Количество", "Цена", "Сумма", "СтавкаНДС", "СуммаНДС", "Всего", "СчетУчета"]),
+        ("Услуги",  ["Номенклатура", "Содержание", "Количество", "Цена", "Сумма", "СтавкаНДС", "СуммаНДС", "Всего", "СчетЗатрат"]),
+    ],
+}
+
+
+@router.post("/connections/{connection_id}/document-lines/{doc_id}")
+async def fetch_document_lines(
+    connection_id: str,
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> dict:
+    """Тянет ТЧ конкретного AccountingDoc из 1С и кэширует в doc.lines.
+    Идемпотентно — при повторном вызове перезатирает кэш."""
+    conn = await _get_connection_or_404(connection_id, db)
+
+    try:
+        doc_uuid = uuid.UUID(doc_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid doc id") from exc
+
+    doc = (await db.execute(
+        select(AccountingDoc).where(AccountingDoc.id == doc_uuid)
+    )).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    onec_type = _DOC_TYPE_TO_1C.get(doc.doc_type)
+    tabs = _TABULAR_BY_DOC_TYPE.get(doc.doc_type)
+    if not onec_type or not tabs:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Тип документа '{doc.doc_type}' не поддерживается для ленивой загрузки ТЧ",
+        )
+
+    service = OneCSyncService(db)
+    client = await service._open_client(conn)  # noqa: SLF001
+    try:
+        tabular: dict[str, list] = {}
+        for name, fields in tabs:
+            try:
+                rows = await client.fetch_doc_lines(onec_type, doc.external_id, name, fields)
+            except Exception as exc:  # noqa: BLE001 — некритичная ТЧ может отсутствовать
+                rows = []
+                tabular[f"_error_{name}"] = str(exc)[:200]
+            tabular[name] = rows
+    finally:
+        await client.aclose()
+
+    # Сохраняем как {tabular: {...}, fetched_at: ...}
+    new_lines = {
+        "tabular": tabular,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+    doc.lines = new_lines
+    await db.flush()
+    return {
+        "doc_id": str(doc.id),
+        "doc_type": doc.doc_type,
+        "tabular_counts": {k: len(v) if isinstance(v, list) else 0 for k, v in tabular.items()},
+        "fetched_at": new_lines["fetched_at"],
+    }

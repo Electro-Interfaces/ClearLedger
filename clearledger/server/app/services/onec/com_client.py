@@ -217,3 +217,22 @@ class OneCComClient:
             args["filter"] = filter_expr
         result = await self._call("count_entity", args)
         return int(result or 0)
+
+    async def fetch_doc_lines(
+        self,
+        doc_type: str,
+        doc_ref: str,
+        tabular_name: str,
+        select: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Та же сигнатура что у OneCODataClient.fetch_doc_lines, но через
+        прямой доступ к ОбъектДокумента в 1С (Документы.<Тип>.НайтиПоИдент…
+        →.ПолучитьОбъект()→.<ТЧ>). Не строим SQL — это быстрее и надёжнее
+        чем конструировать `Т.Ссылка = ССЫЛКА(<Тип>, "<guid>")`."""
+        result = await self._call("fetch_doc_lines", {
+            "doc_type": doc_type,
+            "doc_ref": doc_ref,
+            "tabular_name": tabular_name,
+            "select": select or [],
+        })
+        return list(result or [])

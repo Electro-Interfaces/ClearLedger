@@ -6,7 +6,7 @@
  */
 
 import { useState, useMemo } from 'react'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useQuery, useMutation, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from '@/components/ui/card'
@@ -20,8 +20,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from '@/components/ui/sheet'
+import {
   FileText, Search, RefreshCw, Loader2, ChevronLeft, ChevronRight,
-  ArrowDown, ArrowUp,
+  ArrowDown, ArrowUp, Download,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -31,6 +34,8 @@ import { useOneCConnections, useSyncDocuments } from '@/hooks/useOneCSync'
 import {
   searchAccountingDocs,
   getAccountingDocsStats,
+  getAccountingDocDetails,
+  loadDocumentLines,
   type DocSort,
 } from '@/services/accountingDocService'
 
@@ -114,6 +119,8 @@ export function DocumentsPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [offset, setOffset] = useState(0)
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
+  const qc = useQueryClient()
 
   const params = useMemo(() => ({
     q,
@@ -324,7 +331,11 @@ export function DocumentsPage() {
                 // см. docs/sverka-spec.md §7a.4 — добавляем красный outline на строку.
                 const rowAttention = isClosed && ['rounding','minor','material','critical'].includes(ds)
                 return (
-                <TableRow key={d.id} className={`text-xs ${rowAttention ? 'bg-red-500/5' : ''}`}>
+                <TableRow
+                  key={d.id}
+                  className={`text-xs cursor-pointer hover:bg-muted/40 ${rowAttention ? 'bg-red-500/5' : ''}`}
+                  onClick={() => setSelectedDocId(d.id)}
+                >
                   <TableCell className="py-1.5">
                     <Badge variant="outline" className="text-[9px] h-4 px-1 font-mono">
                       {d.docType === 'КорректировкаПоступления' ? 'Корр.' : d.docType}
@@ -422,6 +433,218 @@ export function DocumentsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <DocumentDetailSheet
+        docId={selectedDocId}
+        companyId={companyId}
+        connectionId={connection?.id}
+        onClose={() => setSelectedDocId(null)}
+        onLinesLoaded={() => {
+          qc.invalidateQueries({ queryKey: ['acc-docs', companyId] })
+        }}
+      />
     </div>
   )
 }
+
+
+// ─── Sheet деталей одного документа ─────────────────────────────────
+
+interface DetailSheetProps {
+  docId: string | null
+  companyId: string
+  connectionId: string | undefined
+  onClose: () => void
+  onLinesLoaded: () => void
+}
+
+function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesLoaded }: DetailSheetProps) {
+  const { data: doc, isLoading, refetch } = useQuery({
+    queryKey: ['acc-doc-detail', docId],
+    queryFn: () => getAccountingDocDetails(companyId, docId!),
+    enabled: !!docId,
+  })
+
+  const loadMutation = useMutation({
+    mutationFn: () => loadDocumentLines(connectionId!, docId!),
+    onSuccess: async (r) => {
+      const totals = Object.entries(r.tabular_counts).map(([k, v]) => `${k}: ${v}`).join(', ')
+      toast.success(`Позиции загружены из 1С (${totals})`)
+      await refetch()
+      onLinesLoaded()
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Не удалось загрузить позиции')
+    },
+  })
+
+  if (!docId) return null
+
+  const lines = (doc?.lines as { tabular?: Record<string, unknown[]>; fetched_at?: string } | unknown[]) || null
+  const tabular = lines && !Array.isArray(lines) ? lines.tabular || {} : {}
+  const fetchedAt = lines && !Array.isArray(lines) ? lines.fetched_at : null
+  const hasLines = Object.keys(tabular).length > 0
+
+  return (
+    <Sheet open={!!docId} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent className="!max-w-2xl overflow-y-auto p-0">
+        <SheetHeader className="p-4 pb-2">
+          <SheetTitle className="text-base flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            {doc ? `${doc.docType} ${doc.number}` : 'Документ'}
+          </SheetTitle>
+          <SheetDescription className="text-xs">
+            {doc?.organizationName ?? '—'}
+          </SheetDescription>
+        </SheetHeader>
+
+        {isLoading && (
+          <div className="p-4 flex items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {doc && (
+          <div className="px-4 pb-6 space-y-3">
+            {/* Шапка */}
+            <Card className="py-3 gap-1">
+              <CardHeader className="pb-0">
+                <CardTitle className="text-xs uppercase text-muted-foreground">Шапка</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                <div className="text-muted-foreground">Дата</div>
+                <div>{doc.date}</div>
+                <div className="text-muted-foreground">Сумма</div>
+                <div className="font-mono">{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2 }).format(doc.amount)} ₽</div>
+                {doc.vatAmount != null && (<>
+                  <div className="text-muted-foreground">НДС</div>
+                  <div className="font-mono">{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2 }).format(doc.vatAmount)} ₽</div>
+                </>)}
+                <div className="text-muted-foreground">Контрагент</div>
+                <div>{doc.counterpartyName || '—'}{doc.counterpartyInn ? ` · ИНН ${doc.counterpartyInn}` : ''}</div>
+                {doc.externalNumber && (<>
+                  <div className="text-muted-foreground">№ входящего</div>
+                  <div className="font-mono">{doc.externalNumber}{doc.externalDate ? ` от ${doc.externalDate}` : ''}</div>
+                </>)}
+                {doc.operationType && (<>
+                  <div className="text-muted-foreground">ВидОперации</div>
+                  <div>{doc.operationType}</div>
+                </>)}
+                <div className="text-muted-foreground">Склад</div>
+                <div className="font-mono">{doc.warehouseCode || '—'}</div>
+                <div className="text-muted-foreground">Период</div>
+                <div>
+                  <Badge variant="outline" className={`text-[9px] h-4 px-1 ${doc.periodStatus === 'closed' ? 'border-red-400/50 text-red-300/80' : 'border-emerald-400/50 text-emerald-300/80'}`}>
+                    {doc.periodStatus === 'closed' ? '🔒 закрыт' : 'открыт'}
+                  </Badge>
+                </div>
+                <div className="text-muted-foreground">Статус 1С</div>
+                <div>{doc.status1c}</div>
+              </CardContent>
+            </Card>
+
+            {/* Сверка */}
+            <Card className="py-3 gap-1">
+              <CardHeader className="pb-0">
+                <CardTitle className="text-xs uppercase text-muted-foreground">Сверка</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 text-xs">
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge variant="outline" className={`text-[10px] h-5 px-1.5 ${DISCREPANCY_STYLE[doc.discrepancyStatus ?? 'pending'] ?? ''}`}>
+                    {DISCREPANCY_STATUSES.find((s) => s.value === doc.discrepancyStatus)?.label ?? doc.discrepancyStatus}
+                  </Badge>
+                  <span className="text-muted-foreground">{doc.discrepancySummary || '—'}</span>
+                </div>
+                {Array.isArray((doc as { discrepancyDetails?: unknown }).discrepancyDetails) && (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="h-6 text-[10px]">Поле</TableHead>
+                        <TableHead className="h-6 text-[10px] text-right">ClearLedger</TableHead>
+                        <TableHead className="h-6 text-[10px] text-right">БП ГИГ</TableHead>
+                        <TableHead className="h-6 text-[10px] text-right">Δ</TableHead>
+                        <TableHead className="h-6 text-[10px]">Severity</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {((doc as { discrepancyDetails: Array<{ field: string; source: number | null; target: number | null; delta: number | null; severity: string }> }).discrepancyDetails).map((dd, i) => (
+                        <TableRow key={i} className="text-[10px]">
+                          <TableCell className="py-1">{dd.field}</TableCell>
+                          <TableCell className="py-1 text-right font-mono">{dd.source ?? '—'}</TableCell>
+                          <TableCell className="py-1 text-right font-mono">{dd.target ?? '—'}</TableCell>
+                          <TableCell className="py-1 text-right font-mono">{dd.delta != null ? dd.delta.toFixed(2) : '—'}</TableCell>
+                          <TableCell className="py-1">
+                            <Badge variant="outline" className={`text-[9px] h-4 px-1 ${DISCREPANCY_STYLE[dd.severity] ?? ''}`}>{dd.severity}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ТЧ */}
+            <Card className="py-3 gap-1">
+              <CardHeader className="pb-0">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-xs uppercase text-muted-foreground">Позиции</CardTitle>
+                  <Button
+                    size="sm" variant="outline"
+                    onClick={() => loadMutation.mutate()}
+                    disabled={!connectionId || loadMutation.isPending}
+                    className="h-7 text-xs gap-1.5"
+                  >
+                    {loadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                    {hasLines ? 'Перезагрузить из 1С' : 'Загрузить из 1С'}
+                  </Button>
+                </div>
+                {fetchedAt && (
+                  <CardDescription className="text-[10px]">Подгружено: {format(new Date(fetchedAt), 'dd.MM.yyyy HH:mm')}</CardDescription>
+                )}
+              </CardHeader>
+              <CardContent className="pt-0 text-xs">
+                {!hasLines && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Позиции ещё не подгружены. Нажми «Загрузить из 1С» —
+                    это вызов /api/onec/connections/{'{id}'}/document-lines/{'{doc}'}.
+                  </p>
+                )}
+                {hasLines && Object.entries(tabular).map(([tabName, rows]) => (
+                  <div key={tabName} className="mb-3">
+                    <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-1">{tabName} ({(rows as unknown[]).length})</div>
+                    {((rows as Array<Record<string, unknown>>).length > 0) ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            {Object.keys((rows as Array<Record<string, unknown>>)[0]).map((k) => (
+                              <TableHead key={k} className="h-6 text-[10px]">{k}</TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {(rows as Array<Record<string, unknown>>).slice(0, 20).map((row, i) => (
+                            <TableRow key={i} className="text-[10px]">
+                              {Object.keys((rows as Array<Record<string, unknown>>)[0]).map((k) => (
+                                <TableCell key={k} className="py-1 font-mono truncate max-w-[140px]" title={String(row[k] ?? '')}>
+                                  {row[k] == null ? '—' : String(row[k]).slice(0, 24)}
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground italic">пусто</p>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  )
+}
+

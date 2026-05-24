@@ -251,6 +251,47 @@ def op_fetch_entity(
     return rows
 
 
+def op_fetch_doc_lines(
+    doc_type: str,
+    doc_ref: str,
+    tabular_name: str,
+    select: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Достать ТЧ документа через прямой доступ к объекту.
+
+    Через Документы.<doc_type>.НайтиПоИдентификатору(УИД) → ПолучитьОбъект()
+    → получаем доступ к ТЧ по имени реквизита (Товары/Услуги/...).
+    Поля select — внутренние имена реквизитов 1С (Номенклатура, Количество,
+    Цена, Сумма, СтавкаНДС, СуммаНДС, Всего, СчетУчета и т.п.).
+    Для ссылочных полей _val извлекает GUID через ib.String().
+    """
+    ib = _require_ib()
+    # pywin32 видит у менеджера документа только английские алиасы:
+    # FindByNumber / GetRef / EmptyRef (не НайтиПоИдентификатору). Используем
+    # GetRef(уид) — создаёт ссылку из УИД без обращения к БД, потом GetObject().
+    doc_manager = getattr(ib.Documents, doc_type)
+    uid_obj = ib.NewObject("УникальныйИдентификатор", doc_ref)
+    doc_ref_obj = doc_manager.GetRef(uid_obj)  # alias ПолучитьСсылку
+    if doc_ref_obj is None:
+        return []
+    doc_obj = doc_ref_obj.GetObject()
+    if doc_obj is None:
+        return []
+    tab = getattr(doc_obj, tabular_name)
+    fields = select or []
+    rows: list[dict[str, Any]] = []
+    for i in range(int(tab.Count())):
+        row = tab.Get(i)
+        out: dict[str, Any] = {"LineNumber": i + 1}
+        for f in fields:
+            try:
+                out[f] = _val(getattr(row, f))
+            except Exception:
+                out[f] = None
+        rows.append(out)
+    return rows
+
+
 def op_count_entity(entity: str, filter: str | None = None) -> int:  # noqa: A002
     ib = _require_ib()
     qualified = _resolve_entity(entity)
@@ -286,6 +327,8 @@ def main() -> int:
                 result = op_fetch_entity(**args)
             elif op == "count_entity":
                 result = op_count_entity(**args)
+            elif op == "fetch_doc_lines":
+                result = op_fetch_doc_lines(**args)
             elif op == "exit":
                 return 0
             else:

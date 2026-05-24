@@ -480,3 +480,20 @@ export async function searchAccountingDocs(
 export async function getAccountingDocsStats(companyId: string): Promise<AccountingDocsStats> {
   return get<AccountingDocsStats>('/api/accounting-docs/stats', { company_id: companyId })
 }
+
+/** Полный документ с lines (ТЧ если уже подгружена в БД). */
+export async function getAccountingDocDetails(companyId: string, id: string): Promise<AccountingDocSummary & { lines: unknown }> {
+  return get(`/api/accounting-docs/${id}`, { company_id: companyId })
+}
+
+/** Подгрузить ТЧ из 1С через /api/onec/connections/{cid}/document-lines/{did}.
+ *  Перезаписывает doc.lines в БД. После — вызывать getAccountingDoc для свежих данных.
+ */
+export async function loadDocumentLines(connectionId: string, docId: string): Promise<{
+  doc_id: string
+  doc_type: string
+  tabular_counts: Record<string, number>
+  fetched_at: string
+}> {
+  return post(`/api/onec/connections/${connectionId}/document-lines/${docId}`)
+}
