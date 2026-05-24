@@ -157,7 +157,9 @@ class DataEntryResponse(BaseModel):
     file_url: str | None = None
     file_type: str | None = None
     file_size: int | None = None
-    metadata: dict[str, str]
+    # meta может содержать произвольные структуры (fuel_breakdown[], массивы
+    # видов оплат, вложенные dict) — не ограничиваем str.
+    metadata: dict
     ocr_data: dict | None = None
     source_id: str | None = None
     # Слой данных (см. docs/sverka-spec.md §0): raw (L1) | clean (L2).

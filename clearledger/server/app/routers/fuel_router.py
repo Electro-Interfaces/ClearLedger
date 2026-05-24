@@ -404,6 +404,24 @@ async def normalize_shifts(
                 status="new",
             ))
 
+        # Раскладка по видам топлива из psm.total (для UI и сверки по литрам).
+        # Каждый элемент psm.total — { service: {service_code, service_name},
+        #                              release: {quantity (литры), amount (₽)} }
+        fuel_breakdown = []
+        for t in psm_total:
+            svc = t.get("service") or {}
+            rel = t.get("release") or {}
+            code = str(svc.get("service_code") or "").strip()
+            name = str(svc.get("service_name") or "").strip()
+            if not code and not name:
+                continue
+            fuel_breakdown.append({
+                "fuel_code":  code,
+                "fuel_name":  name,
+                "liters":     float(rel.get("quantity") or 0),
+                "amount":     float(rel.get("amount") or 0),
+            })
+
         # L1 DataEntry — копия смены в общую таблицу для 4-слойного reconcile.
         # Дедупликация по shift_id+station_code в meta (sts-api source).
         shift_l1_marker = f"sts-shift-{body.system_code}-{body.station_code}-{shift_num}"
@@ -440,6 +458,9 @@ async def normalize_shifts(
                     "card":         str(card),
                     "voucher":      str(voucher),
                     "fuel_shift_id": str(shift.id),
+                    # Разрез по видам нефтепродуктов — для UI и построчной сверки
+                    # ОРП.ТЧ.Товары ↔ shift.fuel_breakdown через ReconcileMapping('fuel').
+                    "fuel_breakdown": fuel_breakdown,
                 },
             ))
 

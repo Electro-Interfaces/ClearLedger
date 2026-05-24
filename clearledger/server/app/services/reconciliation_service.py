@@ -342,6 +342,58 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
                     date_diff_days=0,
                     period_status=cand.period_status or "open",
                 )
+                # Построчная сверка по видам топлива через fuel_map.
+                # Источник: entry.meta.fuel_breakdown[{fuel_code, liters, amount}]
+                # Цель:     cand.lines.tabular.Товары[{Номенклатура (GUID), Количество, Сумма}]
+                fuel_line_diffs: list[dict] = []
+                if fuel_map and isinstance(cand.lines, dict):
+                    tovary = (cand.lines.get("tabular", {}) or {}).get("Товары") or []
+                    # Агрегируем ТЧ Товары ОРП по Номенклатура_Key
+                    target_by_nom: dict[str, dict[str, float]] = {}
+                    for row in tovary:
+                        nom = str((row or {}).get("Номенклатура") or "")
+                        if not nom:
+                            continue
+                        cur = target_by_nom.setdefault(nom, {"qty": 0.0, "sum": 0.0})
+                        cur["qty"] += float(row.get("Количество") or 0)
+                        cur["sum"] += float(row.get("Сумма") or 0)
+                    # Для каждого вида топлива из смены — резолв через fuel_map
+                    for fb in (meta.get("fuel_breakdown") or []):
+                        code = str(fb.get("fuel_code") or "").strip()
+                        if not code:
+                            continue
+                        nom_ref = fuel_map.get(code)
+                        src_liters = float(fb.get("liters") or 0)
+                        src_amount = float(fb.get("amount") or 0)
+                        if nom_ref and nom_ref in target_by_nom:
+                            tg = target_by_nom[nom_ref]
+                            qty_d = (tg["qty"] - src_liters)
+                            sum_d = (tg["sum"] - src_amount)
+                            fuel_line_diffs.append({
+                                "field":   f"fuel:{code}:{fb.get('fuel_name','')}",
+                                "source_liters":  src_liters,
+                                "target_liters":  tg["qty"],
+                                "delta_liters":   qty_d,
+                                "source_amount":  src_amount,
+                                "target_amount":  tg["sum"],
+                                "delta_amount":   sum_d,
+                                "severity": "none" if abs(sum_d) < 0.05 and abs(qty_d) < 0.1
+                                            else "rounding" if abs(sum_d) < 1.0 and abs(qty_d) < 1.0
+                                            else "minor" if abs(sum_d) < 100 else "material",
+                                "method":   "fuel_mapping",
+                            })
+                        else:
+                            fuel_line_diffs.append({
+                                "field":   f"fuel:{code}:{fb.get('fuel_name','')}",
+                                "source_liters":  src_liters,
+                                "target_liters":  None,
+                                "source_amount":  src_amount,
+                                "target_amount":  None,
+                                "severity": "unmatched",
+                                "method":   "fuel_mapping",
+                                "reason":   "mapping не настроен" if not nom_ref else "вид топлива отсутствует в ОРП",
+                            })
+
                 cand.matched_entry_id = entry.id
                 cand.match_status = "matched" if d_status in ("none", "rounding") else "discrepancy"
                 cand.match_details = {
@@ -349,12 +401,25 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
                     "amountDiff": amount_diff,
                     "station_code": station_code,
                     "date": doc_date,
+                    "fuel_lines": len(fuel_line_diffs),
+                    "fuel_lines_diff": sum(1 for f in fuel_line_diffs if f.get("severity") not in ("none", "rounding")),
                 }
+                # Если по итогам построчной сверки есть minor/material/critical —
+                # эскалируем общий severity документа до максимума.
+                line_sev_order = {"none": 0, "rounding": 1, "minor": 2, "material": 3, "critical": 4, "unmatched": 2}
+                max_line_sev = max(
+                    (line_sev_order.get(str(f.get("severity")), 0) for f in fuel_line_diffs),
+                    default=0,
+                )
+                if max_line_sev > line_sev_order.get(d_status, 0):
+                    d_status = [k for k, v in line_sev_order.items() if v == max_line_sev][0]
+                    d_summary = f"{d_summary}; топливо: {sum(1 for f in fuel_line_diffs if line_sev_order.get(str(f.get('severity')), 0) >= 2)} расхожд."
                 cand.discrepancy_status = d_status
                 cand.discrepancy_summary = d_summary
                 cand.discrepancy_details = [
                     {"field": "shift_amount", "source": entry_amount, "target": doc_amount,
-                     "delta": amount_diff, "severity": d_status, "method": "station_mapping"}
+                     "delta": amount_diff, "severity": d_status, "method": "station_mapping"},
+                    *fuel_line_diffs,
                 ]
                 used_docs.add(cand.id)
                 used_entries.add(entry.id)

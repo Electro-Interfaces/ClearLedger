@@ -231,6 +231,21 @@ async def build_packets_from_clean(
             continue
         total = sum(float(e.meta.get("totalAmount") or 0) for e in entries)
         total_liters = sum(float(e.meta.get("totalLiters") or 0) for e in entries)
+        # Агрегация по видам топлива из всех смен дня
+        fuel_agg: dict[str, dict[str, float | str]] = {}
+        for e in entries:
+            for fb in (e.meta.get("fuel_breakdown") or []):
+                code = str(fb.get("fuel_code") or fb.get("fuel_name") or "")
+                if not code:
+                    continue
+                row = fuel_agg.setdefault(code, {
+                    "fuel_code": code,
+                    "fuel_name": fb.get("fuel_name") or "",
+                    "liters":    0.0,
+                    "amount":    0.0,
+                })
+                row["liters"] = float(row["liters"]) + float(fb.get("liters") or 0)
+                row["amount"] = float(row["amount"]) + float(fb.get("amount") or 0)
         db.add(ExportPacket(
             id=uuid.uuid4(),
             company_id=cid,
@@ -244,6 +259,7 @@ async def build_packets_from_clean(
                 "shifts_count": len(entries),
                 "total_amount": total,
                 "total_liters": total_liters,
+                "fuel_breakdown": list(fuel_agg.values()),
             },
         ))
         created_packets += 1
