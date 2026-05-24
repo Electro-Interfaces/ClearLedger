@@ -21,6 +21,7 @@ const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m)
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
 const PeriodsPage = lazy(() => import('@/pages/oneC/PeriodsPage').then((m) => ({ default: m.PeriodsPage })))
 const DocumentsPage = lazy(() => import('@/pages/oneC/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
+const MappingsPage = lazy(() => import('@/pages/oneC/MappingsPage').then((m) => ({ default: m.MappingsPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -81,6 +82,7 @@ const router = createBrowserRouter([
           { path: '/1c/references', element: <LazyPage><ReferencesPage /></LazyPage> },
           { path: '/1c/documents', element: <LazyPage><DocumentsPage /></LazyPage> },
           { path: '/1c/periods', element: <LazyPage><PeriodsPage /></LazyPage> },
+          { path: '/1c/mappings', element: <LazyPage><MappingsPage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
         ],

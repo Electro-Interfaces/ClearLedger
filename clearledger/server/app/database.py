@@ -67,6 +67,9 @@ async def create_all() -> None:
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS discrepancy_details JSONB",
             "CREATE INDEX IF NOT EXISTS idx_accdoc_period_status ON accounting_docs(company_id, period_status)",
             "CREATE INDEX IF NOT EXISTS idx_accdoc_discrepancy_status ON accounting_docs(company_id, discrepancy_status)",
+            # v0.9: уникальные маппинги source_key → target_ref в рамках (company_id, kind)
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_reconcile_mappings ON reconcile_mappings(company_id, kind, source_key)",
+            "CREATE INDEX IF NOT EXISTS idx_reconcile_mappings_target ON reconcile_mappings(company_id, kind, target_ref)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

@@ -409,6 +409,48 @@ class AccountingDoc(Base):
     )
     # Полный список расхождений с формулами (см. §7a.3 спецификации).
     discrepancy_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# ReconcileMapping (маппинг внешний ключ → запись в БП ГИГ)
+# ---------------------------------------------------------------------------
+# Соответствия между ключами источников ClearLedger (station_id из STS,
+# артикул топлива, код вида оплаты, артикул номенклатуры из ТТН-файла)
+# и записями в Catalog.Склады / Catalog.Номенклатура / Catalog.ВидыОплат БП.
+# Используется reconciliation_service для построчного матчинга
+# (см. docs/sverka-spec.md §2.5 — каскад артикул → код → имя → AI).
+
+class ReconcileMapping(Base):
+    __tablename__ = "reconcile_mappings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Тип маппинга: 'station' | 'fuel' | 'paytype' | 'nomenclature' | 'counterparty'
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Ключ во внешнем источнике (station_id STS, артикул поставщика, pay_type STS).
+    source_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    # external_ref записи в Catalog (GUID в БП) — JOIN на Counterparty/Warehouse/...
+    target_ref: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Имя цели для UI (кеш — обновляется при sync_catalogs)
+    target_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 0..100, насколько уверены в маппинге
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    # Как создан: 'manual' | 'auto' | 'ai' | 'imported_from_bp'
+    method: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    # Комментарий пользователя
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

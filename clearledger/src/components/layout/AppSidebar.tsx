@@ -15,7 +15,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen,
   Upload, FileText, Radio, Database, ChevronDown,
-  Plug, BookOpen, CalendarClock, MapPin,
+  Plug, BookOpen, CalendarClock, MapPin, Link2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -34,6 +34,7 @@ const oneCItems = [
   { to: '/1c/references', icon: BookOpen, label: 'Справочники' },
   { to: '/1c/documents',  icon: FileText, label: 'Документы' },
   { to: '/1c/periods',    icon: CalendarClock, label: 'Периоды' },
+  { to: '/1c/mappings',   icon: Link2, label: 'Маппинги' },
 ]
 
 const settingsItems = [

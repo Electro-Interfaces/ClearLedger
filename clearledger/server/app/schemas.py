@@ -751,3 +751,44 @@ class OneCSyncStatusResponse(BaseModel):
     current_log: OneCSyncLogResponse | None = None
     connection_status: str
     last_sync_at: datetime | None = None
+
+
+# ===== Reconcile Mappings (docs/sverka-spec.md §4) =====
+
+ReconcileMappingKind = Literal["station", "fuel", "paytype", "nomenclature", "counterparty"]
+ReconcileMappingMethod = Literal["manual", "auto", "ai", "imported_from_bp"]
+
+
+class ReconcileMappingCreate(BaseModel):
+    company_id: str
+    kind: ReconcileMappingKind
+    source_key: str = Field(min_length=1, max_length=255)
+    target_ref: str = Field(min_length=1, max_length=36)
+    target_name: str | None = None
+    confidence: int = Field(default=100, ge=0, le=100)
+    method: ReconcileMappingMethod = "manual"
+    note: str | None = None
+
+
+class ReconcileMappingUpdate(BaseModel):
+    source_key: str | None = Field(default=None, max_length=255)
+    target_ref: str | None = Field(default=None, max_length=36)
+    target_name: str | None = None
+    confidence: int | None = Field(default=None, ge=0, le=100)
+    method: ReconcileMappingMethod | None = None
+    note: str | None = None
+
+
+class ReconcileMappingResponse(BaseModel):
+    id: str
+    companyId: str = Field(alias="company_id")
+    kind: str
+    sourceKey: str = Field(alias="source_key")
+    targetRef: str = Field(alias="target_ref")
+    targetName: str | None = Field(default=None, alias="target_name")
+    confidence: int
+    method: str
+    note: str | None = None
+    createdAt: datetime = Field(alias="created_at")
+    updatedAt: datetime = Field(alias="updated_at")
+    model_config = {"populate_by_name": True, "from_attributes": True}
