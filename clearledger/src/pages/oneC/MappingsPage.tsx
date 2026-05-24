@@ -28,7 +28,10 @@ import {
 } from '@/components/ui/sheet'
 import {
   Plus, Pencil, Trash2, Loader2, Link2, Building2, Fuel, CreditCard, Package, Users,
+  Sparkles, CheckCircle2, AlertCircle, ArrowRight,
 } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { post } from '@/services/apiClient'
 import { toast } from 'sonner'
 
 import { useCompany } from '@/contexts/CompanyContext'
@@ -52,12 +55,35 @@ const METHOD_STYLE: Record<string, string> = {
   imported_from_bp: 'border-zinc-600 text-zinc-400',
 }
 
+// ─── Автосопряжение ──────────────────────────────────────────────────
+
+interface AutoSuggestion {
+  kind: MappingKind
+  source_key: string
+  source_label: string
+  target_ref: string
+  target_name: string
+  confidence: number
+  method: string
+  note: string | null
+}
+
+interface AutoDetectResponse {
+  total: number
+  by_kind: Record<string, number>
+  by_confidence: { high: number; medium: number; low: number }
+  suggestions: AutoSuggestion[]
+}
+
 export function MappingsPage() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const [kind, setKind] = useState<MappingKind>('station')
   const [editing, setEditing] = useState<ReconcileMapping | null>(null)
   const [creating, setCreating] = useState(false)
+  const [autoOpen, setAutoOpen] = useState(false)
+  const [autoData, setAutoData] = useState<AutoDetectResponse | null>(null)
+  const [selectedIdx, setSelectedIdx] = useState<Set<number>>(new Set())
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ['mappings', companyId, kind],
@@ -79,6 +105,43 @@ export function MappingsPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Ошибка удаления'),
   })
 
+  const detectMut = useMutation({
+    mutationFn: () => post<AutoDetectResponse>(
+      `/api/reconcile/mappings/auto-detect?company_id=${encodeURIComponent(companyId)}&kind=${encodeURIComponent(kind)}`,
+    ),
+    onSuccess: (data) => {
+      setAutoData(data)
+      // По умолчанию выделяем все с confidence >= 90
+      const sel = new Set<number>()
+      data.suggestions.forEach((s, i) => { if (s.confidence >= 90) sel.add(i) })
+      setSelectedIdx(sel)
+      setAutoOpen(true)
+      toast.success(`Найдено ${data.total} предложений`, {
+        description: `Высокая уверенность: ${data.by_confidence.high}, средняя: ${data.by_confidence.medium}, низкая: ${data.by_confidence.low}`,
+      })
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Ошибка анализа'),
+  })
+
+  const applyMut = useMutation({
+    mutationFn: () => {
+      const picked = (autoData?.suggestions ?? []).filter((_, i) => selectedIdx.has(i))
+      return post<{ created: number; skipped_existing: number; skipped_low_confidence: number }>(
+        '/api/reconcile/mappings/auto-apply',
+        { company_id: companyId, suggestions: picked, min_confidence: 0 },
+      )
+    },
+    onSuccess: (r) => {
+      toast.success(`Создано маппингов: ${r.created}`, {
+        description: `Пропущено существующих: ${r.skipped_existing}, низкая уверенность: ${r.skipped_low_confidence}`,
+      })
+      setAutoOpen(false)
+      qc.invalidateQueries({ queryKey: ['mappings'] })
+      qc.invalidateQueries({ queryKey: ['mappings-stats', companyId] })
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Ошибка применения'),
+  })
+
   const meta = KINDS.find((k) => k.value === kind)!
 
   return (
@@ -91,9 +154,22 @@ export function MappingsPage() {
             Используется при построчной сверке документов.
           </p>
         </div>
-        <Button size="sm" onClick={() => { setCreating(true); setEditing(null) }} className="gap-1.5 shrink-0">
-          <Plus className="h-3.5 w-3.5" /> Добавить
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => detectMut.mutate()}
+            disabled={detectMut.isPending}
+            className="gap-1.5"
+            title={`Анализ соответствий только для вкладки «${meta.label}»`}
+          >
+            {detectMut.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 text-amber-400" />}
+            Автосопряжение · {meta.label}
+          </Button>
+          <Button size="sm" onClick={() => { setCreating(true); setEditing(null) }} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> Добавить
+          </Button>
+        </div>
       </div>
 
       {stats && (
@@ -202,7 +278,139 @@ export function MappingsPage() {
           qc.invalidateQueries({ queryKey: ['mappings-stats', companyId] })
         }}
       />
+
+      <AutoDetectSheet
+        open={autoOpen}
+        data={autoData}
+        kindLabel={meta.label}
+        selected={selectedIdx}
+        onToggle={(i) => {
+          const n = new Set(selectedIdx)
+          if (n.has(i)) n.delete(i)
+          else n.add(i)
+          setSelectedIdx(n)
+        }}
+        onSelectAll={(filter) => {
+          if (!autoData) return
+          const n = new Set<number>()
+          autoData.suggestions.forEach((s, i) => { if (filter(s)) n.add(i) })
+          setSelectedIdx(n)
+        }}
+        onClose={() => setAutoOpen(false)}
+        onApply={() => applyMut.mutate()}
+        applying={applyMut.isPending}
+      />
     </div>
+  )
+}
+
+function AutoDetectSheet({
+  open,
+  data,
+  kindLabel,
+  selected,
+  onToggle,
+  onSelectAll,
+  onClose,
+  onApply,
+  applying,
+}: {
+  open: boolean
+  data: AutoDetectResponse | null
+  kindLabel: string
+  selected: Set<number>
+  onToggle: (i: number) => void
+  onSelectAll: (filter: (s: AutoSuggestion) => boolean) => void
+  onClose: () => void
+  onApply: () => void
+  applying: boolean
+}) {
+  const KIND_LABEL: Record<string, string> = {
+    counterparty: 'Контрагент',
+    fuel: 'Топливо',
+    station: 'АЗС',
+    paytype: 'Оплата',
+    nomenclature: 'Номенклатура',
+  }
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="right" className="sm:max-w-[760px] overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-amber-400" />
+            Автосопряжение · {kindLabel}
+          </SheetTitle>
+          <SheetDescription className="text-xs">
+            Анализ только для вкладки «{kindLabel}». Найдено {data?.total ?? 0} предложений.{' '}
+            <span className="text-emerald-400">{data?.by_confidence.high ?? 0} высоких</span>,{' '}
+            <span className="text-amber-400">{data?.by_confidence.medium ?? 0} средних</span>,{' '}
+            <span className="text-red-400">{data?.by_confidence.low ?? 0} низких</span>.
+          </SheetDescription>
+        </SheetHeader>
+
+        <div className="flex items-center gap-2 mt-3 pb-2 border-b text-xs">
+          <span className="text-muted-foreground">Выбрать:</span>
+          <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => onSelectAll(() => true)}>Всё</Button>
+          <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => onSelectAll((s) => s.confidence >= 90)}>≥90%</Button>
+          <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => onSelectAll((s) => s.confidence >= 70)}>≥70%</Button>
+          <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => onSelectAll(() => false)}>Ничего</Button>
+          <span className="ml-auto text-muted-foreground">Выбрано: <span className="text-foreground font-mono">{selected.size}</span></span>
+        </div>
+
+        <div className="mt-3 space-y-1.5">
+          {(data?.suggestions ?? []).map((s, i) => {
+            const isSelected = selected.has(i)
+            const conf = s.confidence >= 90 ? 'emerald' : s.confidence >= 70 ? 'amber' : 'red'
+            return (
+              <Card
+                key={i}
+                className={`cursor-pointer transition-colors ${isSelected ? 'border-primary/60 bg-primary/5' : ''}`}
+                onClick={() => onToggle(i)}
+              >
+                <CardContent className="p-3 text-xs">
+                  <div className="flex items-start gap-3">
+                    <Checkbox checked={isSelected} className="mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Badge variant="outline" className="text-[10px]">{KIND_LABEL[s.kind] ?? s.kind}</Badge>
+                        <Badge variant="outline" className={`text-[10px] border-${conf}-400/50 text-${conf}-300/80`}>
+                          {s.confidence}%
+                        </Badge>
+                        <span className="text-[10px] text-muted-foreground font-mono">{s.method}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="truncate font-medium">{s.source_label || s.source_key}</span>
+                        <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <span className="truncate text-muted-foreground">{s.target_name}</span>
+                      </div>
+                      {s.note && (
+                        <div className="text-[10px] text-muted-foreground mt-0.5 italic">{s.note}</div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+          {(!data || data.suggestions.length === 0) && (
+            <Card>
+              <CardContent className="pt-6 text-xs text-muted-foreground text-center flex flex-col items-center gap-2">
+                <CheckCircle2 className="h-8 w-8 text-emerald-400/60" />
+                Все возможные маппинги уже заведены, либо для автосопряжения недостаточно данных.
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        <div className="flex gap-2 mt-4 pt-3 border-t sticky bottom-0 bg-background pb-2">
+          <Button size="sm" onClick={onApply} disabled={applying || selected.size === 0} className="gap-1.5">
+            {applying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+            Применить выбранные ({selected.size})
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>Закрыть</Button>
+        </div>
+      </SheetContent>
+    </Sheet>
   )
 }
 

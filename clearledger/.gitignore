@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Deploy secrets
+deploy/.env
+deploy/data/
+deploy/backups/
+server/probe_*.py

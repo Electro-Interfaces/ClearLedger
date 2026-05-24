@@ -218,6 +218,26 @@ class OneCComClient:
         result = await self._call("count_entity", args)
         return int(result or 0)
 
+    async def metadata_registers(self, name_substring: str = "") -> list[str]:
+        """Список InformationRegister_<имя> с опциональным фильтром по подстроке."""
+        result = await self._call("metadata_registers", {"name_substring": name_substring})
+        return list(result or [])
+
+    async def describe_entity(self, entity: str) -> dict[str, list[str]]:
+        """Возвращает {dimensions, resources, attributes} объекта метаданных 1С.
+        Нужен для устойчивого построения запросов к УчетнойПолитике и другим
+        регистрам с переменным составом реквизитов от версии к версии БП."""
+        result = await self._call("describe_entity", {"entity": entity})
+        return dict(result or {})
+
+    async def find_docs_by_nomenclature(self, nomenclature_ref: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Прямой поиск ПТУ-документов по GUID Номенклатуры в ТЧ Товары."""
+        result = await self._call("find_docs_by_nomenclature", {
+            "nomenclature_ref": nomenclature_ref,
+            "limit": limit,
+        })
+        return list(result or [])
+
     async def fetch_postings(self, doc_type: str, doc_ref: str) -> list[dict[str, Any]]:
         """Проводки документа из РегистрБухгалтерии.Хозрасчетный."""
         result = await self._call("fetch_postings", {

@@ -58,7 +58,7 @@ function DesktopWorkspace() {
   const fmtN = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(n)
 
   return (
-    <div className="h-[calc(100vh-var(--header-height))] overflow-hidden flex flex-col">
+    <div className="h-full min-h-0 overflow-hidden flex flex-col">
       <WorkspaceToolbar />
 
       <ResizablePanelGroup orientation="horizontal" className="flex-1">

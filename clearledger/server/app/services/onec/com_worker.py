@@ -125,10 +125,27 @@ def op_metadata_catalogs() -> list[str]:
     return catalogs
 
 
+def op_metadata_registers(name_substring: str = "") -> list[str]:
+    """Список всех InformationRegister_ имён через Метаданные.РегистрыСведений.
+    Опционально фильтрует по подстроке в имени (case-insensitive)."""
+    ib = _require_ib()
+    out: list[str] = []
+    coll = ib.Метаданные.РегистрыСведений
+    ns = name_substring.lower()
+    for i in range(coll.Количество()):
+        item = coll.Получить(i)
+        nm = _val(item.Имя) or ""
+        if not ns or ns in str(nm).lower():
+            out.append(f"InformationRegister_{nm}")
+    return out
+
+
 # Маппинг имён полей OData → выражения языка запросов 1С.
 # Если поля нет в карте — берём как Т.<поле> (кириллица as-is).
 ODATA_TO_QUERY_FIELDS: dict[str, str] = {
     "Ref_Key":            "Т.Ссылка",
+    "Period":             "Т.Период",
+    "Recorder_Key":       "Т.Регистратор",
     "DeletionMark":       "Т.ПометкаУдаления",
     "Posted":             "Т.Проведен",
     "Description":        "Т.Наименование",
@@ -154,6 +171,18 @@ ODATA_TO_QUERY_FIELDS: dict[str, str] = {
 }
 
 
+def _resolve_field(field: str) -> str:
+    """ODATA-имя → выражение в языке запросов 1С.
+    Поля типа 'X_Key' маппятся в Т.X (просто отбрасываем суффикс _Key).
+    Кириллические имена — добавляем алиас Т.<имя>."""
+    if field in ODATA_TO_QUERY_FIELDS:
+        return ODATA_TO_QUERY_FIELDS[field]
+    if field.endswith("_Key"):
+        base = field[:-4]
+        return f"Т.{base}"
+    return f"Т.{field}"
+
+
 def _build_query_text(
     qualified_entity: str,
     select: list[str] | None,
@@ -165,14 +194,11 @@ def _build_query_text(
     fields = select if select else ["Ref_Key"]
     alias_pairs = []
     for f in fields:
-        if f in ODATA_TO_QUERY_FIELDS:
-            alias_pairs.append(f"{ODATA_TO_QUERY_FIELDS[f]} КАК {f}")
-        elif f.startswith("RAW:"):
+        if f.startswith("RAW:"):
             # `RAW:<sql>` — встроенное выражение без преобразований
             alias_pairs.append(f[4:])
         else:
-            # Кириллические поля (ИНН, КПП, Артикул, СуммаДокумента ...) — как есть.
-            alias_pairs.append(f"Т.{f} КАК {f}")
+            alias_pairs.append(f"{_resolve_field(f)} КАК {f}")
 
     select_clause = ", ".join(alias_pairs)
     top_clause = f"ПЕРВЫЕ {top}" if top else ""
@@ -204,6 +230,63 @@ def _build_query_text(
         f"{where_clause} {order_clause}".strip()
     )
     return text, {}
+
+
+def op_describe_entity(entity: str) -> dict[str, list[str]]:
+    """Возвращает структуру метаданных объекта 1С:
+    {dimensions, resources, attributes, std_attributes}.
+
+    Универсальный probe для УчетнойПолитики и других регистров/справочников,
+    где состав реквизитов меняется от версии к версии БП.
+    Имена возвращаем в формате 'Имя' (как в языке запросов 1С).
+    """
+    ib = _require_ib()
+    qualified = _resolve_entity(entity)
+    qualifier, _, name = qualified.partition(".")
+    # Доступ к Метаданные.<категория>.Получить(имя)
+    md = ib.Метаданные
+    coll_map = {
+        "Справочник": "Справочники",
+        "Документ": "Документы",
+        "РегистрСведений": "РегистрыСведений",
+        "РегистрНакопления": "РегистрыНакопления",
+        "РегистрБухгалтерии": "РегистрыБухгалтерии",
+        "Перечисление": "Перечисления",
+        "Константа": "Константы",
+    }
+    coll_name = coll_map.get(qualifier)
+    if not coll_name:
+        raise ValueError(f"Не поддерживаемый квалификатор: {qualifier}")
+    coll = getattr(md, coll_name)
+    obj = coll.Найти(name)
+    if obj is None:
+        raise ValueError(f"Объект метаданных не найден: {qualified}")
+
+    def _names(collection: Any) -> list[str]:
+        out: list[str] = []
+        try:
+            n = int(collection.Количество())
+        except Exception:
+            return out
+        for i in range(n):
+            try:
+                item = collection.Получить(i)
+                out.append(str(item.Имя))
+            except Exception:
+                continue
+        return out
+
+    result: dict[str, list[str]] = {
+        "dimensions": [],
+        "resources": [],
+        "attributes": [],
+    }
+    for attr_name, key in (("Измерения", "dimensions"), ("Ресурсы", "resources"), ("Реквизиты", "attributes")):
+        try:
+            result[key] = _names(getattr(obj, attr_name))
+        except AttributeError:
+            result[key] = []
+    return result
 
 
 def op_fetch_entity(
@@ -238,16 +321,71 @@ def op_fetch_entity(
                 return []
 
     fields = select if select else ["Ref_Key"]
+    # Парсим RAW:<expr> КАК <alias> — берём alias как имя ключа в row
+    field_to_attr: list[tuple[str, str]] = []  # (output_key, attr_in_selection)
+    import re
+    for f in fields:
+        if f.startswith("RAW:"):
+            body = f[4:].strip()
+            m = re.search(r"\s+КАК\s+([A-Za-zА-Яа-я_][A-Za-zА-Яа-я0-9_]*)\s*$", body, re.IGNORECASE)
+            if m:
+                alias = m.group(1)
+                field_to_attr.append((alias, alias))
+            # без alias — пропускаем (нет имени для row)
+        else:
+            field_to_attr.append((f, f))
     rows: list[dict[str, Any]] = []
     while sel.Следующий():
         row: dict[str, Any] = {}
-        for f in fields:
-            if f.startswith("RAW:"):
-                # raw-выражение оставляет только последний КАК-алиас в SELECT,
-                # а сюда передавать имя с прицепленным алиасом нельзя — пропускаем.
-                continue
-            row[f] = _val(getattr(sel, f))
+        for out_key, attr in field_to_attr:
+            row[out_key] = _val(getattr(sel, attr))
         rows.append(row)
+    return rows
+
+
+def op_find_docs_by_nomenclature(nomenclature_ref: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Поиск ПТУ + КорректировкаПоступления где есть данная номенклатура в ТЧ Товары.
+
+    Прямой Запрос в 1С — соединяем ТЧ ПТУ.Товары с шапкой по Ссылке,
+    фильтр по Номенклатура = заданный GUID."""
+    ib = _require_ib()
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        f"ВЫБРАТЬ ПЕРВЫЕ {int(limit)} "
+        "Т.Ссылка.Ссылка КАК Ссылка, "
+        "Т.Ссылка.Номер КАК Номер, "
+        "Т.Ссылка.Дата КАК Дата, "
+        "Т.Ссылка.Контрагент.Наименование КАК КонтрагентИмя, "
+        "Т.Ссылка.Контрагент.ИНН КАК ИНН, "
+        "Т.Ссылка.Организация.Наименование КАК ОрганизацияИмя, "
+        "Т.Ссылка.СуммаДокумента КАК СуммаДок, "
+        "Т.Количество КАК Количество, "
+        "Т.Цена КАК Цена, "
+        "Т.Сумма КАК Сумма, "
+        "\"ПТУ\" КАК ТипДок "
+        "ИЗ Документ.ПоступлениеТоваровУслуг.Товары КАК Т "
+        "ГДЕ Т.Номенклатура = &Ном "
+        "УПОРЯДОЧИТЬ ПО Дата УБЫВ"
+    )
+    uid_obj = ib.NewObject("УникальныйИдентификатор", nomenclature_ref)
+    nom_ref = ib.Catalogs.Номенклатура.GetRef(uid_obj)
+    q.УстановитьПараметр("Ном", nom_ref)
+    sel = q.Выполнить().Выбрать()
+    rows: list[dict[str, Any]] = []
+    while sel.Следующий():
+        rows.append({
+            "external_id": _val(sel.Ссылка),
+            "number": _val(sel.Номер),
+            "date": _val(sel.Дата),
+            "counterparty_name": _val(sel.КонтрагентИмя) or "",
+            "counterparty_inn": _val(sel.ИНН),
+            "organization_name": _val(sel.ОрганизацияИмя),
+            "amount": float(_val(sel.СуммаДок) or 0),
+            "line_quantity": float(_val(sel.Количество) or 0),
+            "line_price": float(_val(sel.Цена) or 0),
+            "line_sum": float(_val(sel.Сумма) or 0),
+            "doc_type": _val(sel.ТипДок),
+        })
     return rows
 
 
@@ -488,12 +626,18 @@ def main() -> int:
                 result = op_connect(args["conn_string"])
             elif op == "metadata_catalogs":
                 result = op_metadata_catalogs()
+            elif op == "metadata_registers":
+                result = op_metadata_registers(**args)
             elif op == "fetch_entity":
                 result = op_fetch_entity(**args)
+            elif op == "describe_entity":
+                result = op_describe_entity(**args)
             elif op == "count_entity":
                 result = op_count_entity(**args)
             elif op == "fetch_doc_lines":
                 result = op_fetch_doc_lines(**args)
+            elif op == "find_docs_by_nomenclature":
+                result = op_find_docs_by_nomenclature(**args)
             elif op == "fetch_postings":
                 result = op_fetch_postings(**args)
             elif op == "enrich_nomenclature":

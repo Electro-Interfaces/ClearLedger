@@ -23,6 +23,11 @@ const PeriodsPage = lazy(() => import('@/pages/oneC/PeriodsPage').then((m) => ({
 const DocumentsPage = lazy(() => import('@/pages/oneC/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
 const MappingsPage = lazy(() => import('@/pages/oneC/MappingsPage').then((m) => ({ default: m.MappingsPage })))
 const ExportPacketsPage = lazy(() => import('@/pages/oneC/ExportPacketsPage').then((m) => ({ default: m.ExportPacketsPage })))
+const PolicyPage = lazy(() => import('@/pages/oneC/PolicyPage').then((m) => ({ default: m.PolicyPage })))
+const PostingTemplatesPage = lazy(() => import('@/pages/oneC/PostingTemplatesPage').then((m) => ({ default: m.PostingTemplatesPage })))
+const PricesPage = lazy(() => import('@/pages/oneC/PricesPage').then((m) => ({ default: m.PricesPage })))
+const BatchesPage = lazy(() => import('@/pages/oneC/BatchesPage').then((m) => ({ default: m.BatchesPage })))
+const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -85,6 +90,11 @@ const router = createBrowserRouter([
           { path: '/1c/periods', element: <LazyPage><PeriodsPage /></LazyPage> },
           { path: '/1c/mappings', element: <LazyPage><MappingsPage /></LazyPage> },
           { path: '/1c/export', element: <LazyPage><ExportPacketsPage /></LazyPage> },
+          { path: '/1c/policy', element: <LazyPage><PolicyPage /></LazyPage> },
+          { path: '/1c/posting-templates', element: <LazyPage><PostingTemplatesPage /></LazyPage> },
+          { path: '/1c/prices', element: <LazyPage><PricesPage /></LazyPage> },
+          { path: '/1c/batches', element: <LazyPage><BatchesPage /></LazyPage> },
+          { path: '/forecast', element: <LazyPage><MonthCloseForecastPage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
         ],

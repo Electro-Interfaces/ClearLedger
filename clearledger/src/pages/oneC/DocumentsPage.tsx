@@ -5,7 +5,7 @@
  * сверки. Сортировка по дате/сумме. Пагинация.
  */
 
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useQuery, useMutation, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
@@ -30,6 +30,7 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 
 import { useCompany } from '@/contexts/CompanyContext'
+import { get } from '@/services/apiClient'
 import { useOneCConnections, useSyncDocuments } from '@/hooks/useOneCSync'
 import {
   searchAccountingDocs,
@@ -130,6 +131,13 @@ export function DocumentsPage() {
   const [offset, setOffset] = useState(0)
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null)
   const qc = useQueryClient()
+
+  // Открыть документ по query-param ?selected=<docId> (вызывается из /1c/prices)
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    const sel = sp.get('selected')
+    if (sel) setSelectedDocId(sel)
+  }, [])
 
   const params = useMemo(() => ({
     q,
@@ -482,6 +490,70 @@ export function DocumentsPage() {
 
 
 // ─── Sheet деталей одного документа ─────────────────────────────────
+
+// ─── Подсветка факт vs шаблон проводок (см. /1c/posting-templates) ────
+// Тянет /api/accounting-docs/{id}/postings/match — сервер сопоставляет
+// фактические проводки документа с эталонным шаблоном по (doc_type, ВидОп)
+// и помечает каждую строку статусом ok|missing|extra|mismatch.
+function PostingsMatchPanel({ docId }: { docId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['postings-match', docId],
+    queryFn: () => get<{
+      template_id: string | null
+      template_name: string | null
+      doc_type: string
+      operation_type: string | null
+      base_amount: number
+      lines: Array<{
+        dt: string
+        kt: string
+        fact_amount: number | null
+        expected_formula: string | null
+        expected_amount: number | null
+        status: 'ok' | 'missing' | 'extra' | 'mismatch'
+        delta: number | null
+        comment: string | null
+      }>
+      summary: Record<string, number>
+    }>(`/api/accounting-docs/${docId}/postings/match`),
+  })
+  if (isLoading || !data || !data.template_id) return null
+  const STATUS_META: Record<string, { label: string; cls: string }> = {
+    ok:       { label: 'OK',  cls: 'border-emerald-400/50 text-emerald-300/80' },
+    missing:  { label: '—',   cls: 'border-amber-400/50 text-amber-300/80' },
+    extra:    { label: '+',   cls: 'border-blue-400/50 text-blue-300/80' },
+    mismatch: { label: 'Δ',   cls: 'border-red-400/50 text-red-300/80' },
+  }
+  return (
+    <div className="mt-2 pt-2 border-t border-border/40">
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground mb-1 flex items-center gap-2">
+        <span>Шаблон: {data.template_name}</span>
+        <span className="font-mono normal-case">
+          OK {data.summary.ok} · нет {data.summary.missing} · лишних {data.summary.extra} · откл. {data.summary.mismatch}
+        </span>
+      </div>
+      <div className="space-y-1">
+        {data.lines.map((l, i) => {
+          const m = STATUS_META[l.status]
+          return (
+            <div key={i} className="flex items-center gap-2 text-[10px]">
+              <Badge variant="outline" className={`text-[9px] h-4 px-1 ${m.cls}`}>{m.label}</Badge>
+              <span className="font-mono text-blue-300">{l.dt}</span>
+              <span className="font-mono text-amber-300">/{l.kt}</span>
+              <span className="text-muted-foreground ml-2 truncate flex-1">{l.comment ?? ''}</span>
+              <span className="font-mono text-muted-foreground">
+                {l.fact_amount != null ? new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2 }).format(l.fact_amount) : '—'}
+                {l.expected_amount != null && (
+                  <> / <span className="text-foreground/60">{new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2 }).format(l.expected_amount)}</span></>
+                )}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 // ─── Инварианты розничной модели ОРП (см. docs/sverka-spec.md §1.2.5) ──
 // Для розничной ОРП БП 3.0 (ВидОп=ОтчетККМОПродажах) должно выполняться:
@@ -1054,6 +1126,7 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
                         ))}
                       </TableBody>
                     </Table>
+                    <PostingsMatchPanel docId={doc.id} />
                     {doc.docType === 'ОРП' && <OrpInvariantsPanel postings={postings} amount={doc.amount} />}
                     {doc.docType === 'ПТУ' && <PtuInvariantsPanel postings={postings} amount={doc.amount} />}
                   </>

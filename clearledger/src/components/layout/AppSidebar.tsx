@@ -16,12 +16,14 @@ import {
   LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen,
   Upload, FileText, Radio, Database, ChevronDown,
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
+  Landmark, ScrollText, Tag, Layers, CalendarCheck2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const mainItems = [
   { to: '/', icon: LayoutDashboard, label: 'Рабочий стол', end: true },
+  { to: '/forecast', icon: CalendarCheck2, label: 'Закрытие месяца' },
 ]
 
 const intakeItems = [
@@ -30,12 +32,16 @@ const intakeItems = [
 ]
 
 const oneCItems = [
-  { to: '/1c/connection', icon: Plug, label: 'Подключение' },
-  { to: '/1c/references', icon: BookOpen, label: 'Справочники' },
-  { to: '/1c/documents',  icon: FileText, label: 'Документы' },
-  { to: '/1c/periods',    icon: CalendarClock, label: 'Периоды' },
-  { to: '/1c/mappings',   icon: Link2, label: 'Маппинги' },
-  { to: '/1c/export',     icon: Package, label: 'Выгрузка' },
+  { to: '/1c/connection',         icon: Plug,          label: 'Подключение' },
+  { to: '/1c/references',         icon: BookOpen,      label: 'Справочники' },
+  { to: '/1c/documents',          icon: FileText,      label: 'Документы' },
+  { to: '/1c/periods',            icon: CalendarClock, label: 'Периоды' },
+  { to: '/1c/policy',             icon: Landmark,      label: 'Учётная политика' },
+  { to: '/1c/posting-templates',  icon: ScrollText,    label: 'Схема проводок' },
+  { to: '/1c/prices',             icon: Tag,           label: 'Цены' },
+  { to: '/1c/batches',            icon: Layers,        label: 'Партии (FIFO)' },
+  { to: '/1c/mappings',           icon: Link2,         label: 'Маппинги' },
+  { to: '/1c/export',             icon: Package,       label: 'Выгрузка' },
 ]
 
 const settingsItems = [
@@ -81,7 +87,7 @@ export function AppSidebar() {
   const [oneCOpen, setOneCOpen] = useState(true)
 
   return (
-    <Sidebar collapsible="icon" className="pt-[var(--header-height)] border-r border-border/40">
+    <Sidebar collapsible="icon" className="border-r border-border/40 pt-[var(--header-height)] pb-12">
       <SidebarContent className="px-1.5 py-1">
         {/* Toggle button */}
         <div className={`flex ${collapsed ? 'justify-center' : 'justify-end'} px-1 py-1.5`}>

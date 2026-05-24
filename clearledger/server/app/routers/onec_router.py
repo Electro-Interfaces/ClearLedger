@@ -258,15 +258,75 @@ async def sync_documents(
     return _sync_result_from_log(log)
 
 
+@router.post("/connections/{connection_id}/sync/batches", response_model=OneCSyncResult)
+async def sync_batches(
+    connection_id: str,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> OneCSyncResult:
+    """Pull остатков партий товаров (FIFO) из РегистрНакопления.ПартииТоваровНаСкладах."""
+    conn = await _get_connection_or_404(connection_id, db)
+    service = OneCSyncService(db)
+    log = await service.sync_batches(conn)
+    conn.last_sync_at = log.finished_at
+    await db.flush()
+    return _sync_result_from_log(log)
+
+
+@router.post("/connections/{connection_id}/sync/prices", response_model=OneCSyncResult)
+async def sync_prices(
+    connection_id: str,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> OneCSyncResult:
+    """Pull РегС.ЦеныНоменклатуры — последняя цена на пару (Номенклатура, ВидЦен)."""
+    conn = await _get_connection_or_404(connection_id, db)
+    service = OneCSyncService(db)
+    log = await service.sync_prices(conn)
+    conn.last_sync_at = log.finished_at
+    await db.flush()
+    return _sync_result_from_log(log)
+
+
+@router.post("/connections/{connection_id}/sync/policy", response_model=OneCSyncResult)
+async def sync_policy(
+    connection_id: str,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> OneCSyncResult:
+    """Pull РегС.УчетнаяПолитика для всех организаций компании из БП.
+    Хранит последнюю запись на организацию в OneCPolicy (settings JSONB +
+    плоские колонки mpz_method/tax_system/vat_rate/pbu_18_02)."""
+    conn = await _get_connection_or_404(connection_id, db)
+    service = OneCSyncService(db)
+    log = await service.sync_policy(conn)
+    conn.last_sync_at = log.finished_at
+    await db.flush()
+    return _sync_result_from_log(log)
+
+
 @router.post("/connections/{connection_id}/sync/full", response_model=OneCSyncResult)
 async def sync_full(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ) -> OneCSyncResult:
+    """Catalogs → Policy → Documents в одном вызове. Возвращает агрегат
+    последнего этапа (documents) для совместимости со старой схемой."""
     conn = await _get_connection_or_404(connection_id, db)
     service = OneCSyncService(db)
-    log = await service.sync_catalogs(conn)
+    await service.sync_catalogs(conn)
+    try:
+        await service.sync_policy(conn)
+    except Exception:
+        # Политика не должна валить весь sync — у некоторых ЮЛ её нет.
+        pass
+    try:
+        await service.sync_prices(conn)
+    except Exception:
+        # Цены тоже опциональны — если регистр пуст или нет прав.
+        pass
+    log = await service.sync_documents(conn)
     conn.last_sync_at = log.finished_at
     await db.flush()
     return _sync_result_from_log(log)

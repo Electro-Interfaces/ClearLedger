@@ -197,6 +197,36 @@ class OneCODataClient:
             catalogs.append(match.group(1))
         return catalogs
 
+    async def metadata_registers(self, name_substring: str = "") -> list[str]:
+        """Список InformationRegister_* через $metadata с фильтром по подстроке."""
+        response = await self._request("GET", "/$metadata", params={})
+        import re
+        ns = name_substring.lower()
+        out: list[str] = []
+        for m in re.finditer(r'EntitySet\s+Name="(InformationRegister_[^"]+)"', response.text):
+            name = m.group(1)
+            if not ns or ns in name.lower():
+                out.append(name)
+        return out
+
+    async def describe_entity(self, entity: str) -> dict[str, list[str]]:
+        """OData-аналог: парсит реквизиты из $metadata. Возвращает {attributes: [...]}.
+        Измерения/ресурсы для InformationRegister в OData разделить трудно — даём
+        общий attributes-список."""
+        response = await self._request("GET", "/$metadata", params={})
+        import re
+        # ищем <EntityType Name="entity">..</EntityType>
+        m = re.search(r'<EntityType\s+Name="' + re.escape(entity) + r'">(.+?)</EntityType>', response.text, re.DOTALL)
+        attributes: list[str] = []
+        if m:
+            for p in re.finditer(r'<Property\s+Name="([^"]+)"', m.group(1)):
+                nm = p.group(1)
+                if nm.endswith("_Key"):
+                    nm = nm[:-4]
+                if nm not in ("Period", "Recorder", "Ref", "LineNumber", "DeletionMark"):
+                    attributes.append(nm)
+        return {"dimensions": [], "resources": [], "attributes": attributes}
+
     async def fetch_entity(
         self,
         entity: str,

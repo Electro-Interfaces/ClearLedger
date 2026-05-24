@@ -11,8 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     AccountingDoc,
     Counterparty,
+    InventoryBatch,
     NomenclatureItem,
+    NomenclaturePrice,
     OneCConnection,
+    OneCPolicy,
     OneCSyncLog,
     Organization,
     Period,
@@ -72,7 +75,6 @@ class OneCSyncService:
         mode = (connection.mode or "odata").lower()
         if mode == "com":
             # odata_url для COM хранит либо путь к файловой БД, либо ConnString.
-            # Если задан простой путь — собираем ConnString автоматически.
             url = connection.odata_url.strip()
             if "=" not in url:
                 conn_string = (
@@ -82,8 +84,16 @@ class OneCSyncService:
                 )
             else:
                 conn_string = url
+            # Если задан COM_AGENT_URL — идём через удалённого агента (production deploy
+            # на Linux/Miran). Иначе локальный subprocess (dev на Windows).
+            import os
+            if os.environ.get("COM_AGENT_URL"):
+                from app.services.onec.http_agent_client import OneCHttpAgentClient
+                client_http = OneCHttpAgentClient(conn_string)
+                await client_http._ensure_started()  # noqa: SLF001
+                return client_http
             client = OneCComClient(conn_string)
-            await client._ensure_started()  # noqa: SLF001 — выносим инициализацию из ленивого пути
+            await client._ensure_started()  # noqa: SLF001
             return client
         return OneCODataClient(
             base_url=connection.odata_url,
@@ -141,6 +151,494 @@ class OneCSyncService:
                 details["counterparties"] = await self._sync_counterparties(client, connection, log)
                 details["warehouses"] = await self._sync_warehouses(client, connection, log)
                 details["nomenclature"] = await self._sync_nomenclature(client, connection, log)
+            await self._finish_log(log, "completed", details)
+        except Exception as exc:
+            await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})
+            raise
+        return log
+
+    async def sync_policy(self, connection: OneCConnection) -> OneCSyncLog:
+        """Pull всех регистров УчетнойПолитики из БП ГИГ.
+
+        В БП 3.0 настройки разнесены по 8+ регистрам:
+          УчетнаяПолитика, УчетнаяПолитикаНалоговогоУчета,
+          УчетнаяПолитикаНДС, СпособыОценкиМПЗ, ПорядокУчетаНДСНаСчете_19,
+          УчетнаяПолитикаПоНалогуНаПрибыль и т.д.
+
+        Через metadata_registers находим все регистры с "УчетнаяПолитика"
+        либо "СпособыОценки" в имени и тянем каждый.
+        Результат — один OneCPolicy на организацию с settings[register_name] =
+        {fields}."""
+        log = await self._start_log(connection, sync_type="policy")
+        details: dict[str, Any] = {"organizations": 0, "policies": 0, "registers": []}
+        try:
+            async with await self._open_client(connection) as client:
+                # 1) Находим все регистры по подстрокам (case-insensitive)
+                # В БП 3.0.194 реальные настройки лежат в:
+                #   - УчетнаяПолитика (общий)
+                #   - НастройкиСистемыНалогообложения (ОСН/УСН/ЕНВД)
+                #   - НастройкиУчетаНДС, НастройкиРасчетаНДС
+                #   - НастройкиУчетаНалогаНаПрибыль (+ Постоянные)
+                #   - НастройкиУчетаУСН, НастройкиУчетаЕНС
+                #   - МетодыОпределенияПрямыхРасходовПроизводстваВНУ
+                #   - ПорядокОтраженияЗарплатыВБухУчете
+                #   - и ~15 других НастройкиУчета*
+                candidates: set[str] = set()
+                # Берём только регистры по подстрокам, исключая "Удалить*" и "Версия*"
+                for substr in (
+                    "учетнаяполитика", "учётнаяполитика",
+                    "настройкисистемы", "настройкирасчетандс",
+                    "настройкиучета", "настройкиучёта",
+                    "методыопределения", "порядокотражения",
+                    "способоценки",
+                ):
+                    try:
+                        for r in await client.metadata_registers(substr):
+                            short = r.replace("InformationRegister_", "")
+                            if short.startswith("Удалить") or "Версия" in short:
+                                continue
+                            candidates.add(r)
+                    except Exception:
+                        continue
+                if not candidates:
+                    raise OneCError("Регистры учётной политики не найдены в БП")
+                details["registers"] = sorted(candidates)
+
+                # 2) Для каждого регистра — describe → fetch с реальными полями
+                # Накопитель: {org_ref: {register_name: {field: value, ...}}}
+                per_org: dict[str, dict[str, dict[str, Any]]] = {}
+                # Накопитель самой ранней/последней даты для отображения
+                per_org_period: dict[str, str] = {}
+
+                policy_entity_main = None  # для совместимости с UI
+
+                for reg in sorted(candidates):
+                    try:
+                        d = await client.describe_entity(reg)
+                    except Exception:
+                        continue
+                    avail = set(d.get("dimensions", []) + d.get("resources", []) + d.get("attributes", []))
+                    org_field = next((x for x in ("Организация", "Контрагент") if x in avail), None)
+                    if not org_field:
+                        continue
+                    # Поля: Period + Организация + всё остальное что в регистре есть.
+                    # Берём ВСЕ реквизиты — это и есть «снимок настроек».
+                    OPTIONAL_ALL = sorted(avail - {org_field, "Период", "Регистратор"})
+                    fields = ["Period", f"{org_field}_Key"] + OPTIONAL_ALL
+                    try:
+                        rows = await client.fetch_entity(reg, select=fields, orderby="Period")
+                    except Exception as exc:
+                        # Если регистр непригоден (например, измерение не Организация) — пропускаем.
+                        details.setdefault("skipped_registers", []).append(f"{reg}: {type(exc).__name__}")
+                        continue
+                    # Накопление по хронологии: для каждого поля ОТДЕЛЬНО
+                    # берём ПОСЛЕДНЕЕ не-null значение по всем периодам.
+                    # У периодического РС: позднее не-null перекрывает раннее.
+                    # Это даёт «действующую» политику с учётом всех изменений.
+                    org_key = f"{org_field}_Key"
+                    # сортируем по Period ASC
+                    rows_sorted = sorted(rows, key=lambda r: str(r.get("Period") or ""))
+                    accumulated: dict[str, dict[str, Any]] = {}  # org → merged record
+                    latest_period: dict[str, str] = {}
+                    for r in rows_sorted:
+                        org = str(r.get(org_key) or "")
+                        if not org:
+                            continue
+                        bucket = accumulated.setdefault(org, {})
+                        bucket[org_key] = org
+                        for k, v in r.items():
+                            if k in (org_key,):
+                                continue
+                            # Перекрываем только если новое значение НЕ null/пусто.
+                            # False допускаем — это значимое значение для bool флагов
+                            # (например ПлательщикНДС=False), но GUID-нули пропускаем.
+                            if v is None or v == "" or v == "00000000-0000-0000-0000-000000000000":
+                                continue
+                            bucket[k] = v
+                        pd = str(r.get("Period") or "")
+                        if pd > latest_period.get(org, ""):
+                            latest_period[org] = pd
+                        bucket["Period"] = latest_period[org]
+                    short_name = reg.replace("InformationRegister_", "")
+                    for org_ref, raw in accumulated.items():
+                        per_org.setdefault(org_ref, {})[short_name] = raw
+                        pd = str(raw.get("Period") or "")[:19]
+                        if pd:
+                            cur_p = per_org_period.get(org_ref, "")
+                            if not cur_p or pd > cur_p:
+                                per_org_period[org_ref] = pd
+                    if not policy_entity_main and short_name == "УчетнаяПолитика":
+                        policy_entity_main = reg
+
+                details["raw_rows"] = sum(len(v) for v in per_org.values())
+                details["policy_entity"] = policy_entity_main or sorted(candidates)[0]
+                # Для нижестоящего кода: latest = per_org, поля плоские извлекутся
+                # из «главной» УчетнаяПолитика или из любого регистра, где найдём
+                # ключевые поля.
+                latest = {org: {"_per_register": regs, "Period": per_org_period.get(org, "")}
+                          for org, regs in per_org.items()}
+
+                # Подтянем имена организаций из локальной БД
+                local_orgs = {
+                    o.external_ref: o.name
+                    for o in (await self.session.execute(
+                        select(Organization).where(
+                            Organization.company_id == connection.company_id,
+                            Organization.external_ref.is_not(None),
+                        )
+                    )).scalars().all()
+                    if o.external_ref
+                }
+
+                # ── Чистка старых снимков политики (одна запись на организацию)
+                from sqlalchemy import delete
+                if latest:
+                    await self.session.execute(
+                        delete(OneCPolicy).where(
+                            OneCPolicy.company_id == connection.company_id,
+                            OneCPolicy.organization_external_ref.in_(list(latest.keys())),
+                        )
+                    )
+
+                for org_ref, raw in latest.items():
+                    period_iso = str(raw.get("Period") or "")[:19]
+                    # Достаём плоские поля из всех регистров — _find() сканирует
+                    # все регистры и возвращает первое значимое значение по списку имён.
+                    regs_data: dict[str, dict[str, Any]] = raw.get("_per_register") or {}
+                    def _find(*field_names: str, allow_false: bool = False) -> Any:
+                        for r in regs_data.values():
+                            for fn in field_names:
+                                v = r.get(fn)
+                                if v is None or v == "":
+                                    continue
+                                if not allow_false and v is False:
+                                    continue
+                                return v
+                        return None
+                    # МПЗ (Способ оценки) — нет в БП ГИГ, default null
+                    mpz_val = _find("СпособОценкиМПЗ", "СпособОценкиЗапасов", "СпособОценкиМПЗПостроки")
+                    # Система налогообложения: в БП 3.0.194 определяется по флагам
+                    # НастройкиСистемыНалогообложения.{ПлательщикНДС, ПлательщикНалогаНаПрибыль, ПрименяетсяУСН}
+                    plat_nds = _find("ПлательщикНДС")
+                    plat_pribyl = _find("ПлательщикНалогаНаПрибыль")
+                    primen_usn = _find("ПрименяетсяУСН", "ПрименяетсяУпрощеннаяСистемаНалогообложения")
+                    primen_osn = _find("ПрименяетсяОбщаяСистемаНалогообложения", "ПрименяетсяОСН")
+                    sys_enum = _find("СистемаНалогообложения", "ТипНалогообложения")
+                    tax_system = (
+                        "УСН" if primen_usn else
+                        "ОСН" if (primen_osn or (plat_nds and plat_pribyl)) else
+                        (str(sys_enum) if sys_enum else None)
+                    )
+                    # Ставка налога на прибыль = СтавкаФБ + СтавкаСубъектРФ
+                    stavka_fb = _find("СтавкаФБ", "СтавкаНалогаНаПрибыльФБ")
+                    stavka_sub = _find("СтавкаСубъектРФ", "СтавкаНалогаНаПрибыльСубъектРФ")
+                    profit_rate = None
+                    if stavka_fb is not None or stavka_sub is not None:
+                        try:
+                            profit_rate = f"{float(stavka_fb or 0) + float(stavka_sub or 0):.0f}%"
+                        except (TypeError, ValueError):
+                            pass
+                    # Ставка НДС: явная или 22% дефолт для ОСН с НДС
+                    vat = _find("СтавкаНДС", "ОсновнаяСтавкаНДС", "СтавкаНДСОсновная")
+                    vat_rate = str(vat) if vat else (
+                        f"НДС 22% / Прибыль {profit_rate}" if profit_rate and plat_nds else
+                        (profit_rate if profit_rate else None)
+                    )
+                    flat = {
+                        "mpz_method": str(mpz_val) if mpz_val else None,
+                        "tax_system": tax_system,
+                        "vat_rate": vat_rate,
+                        # bool флаги — пробуем найти ИСТИНУ в любой записи
+                        "pbu_18_02": bool(_find("ПоддержкаПБУ18", "ПрименяетсяПБУ18", "ПрименяетсяПБУ_18_02", "ПрименяетсяПБУ18_02", "УчитыватьРазницыПБУ18")),
+                        "separate_vat_accounting": bool(_find("ВедетсяРаздельныйУчетНДС", "РаздельныйУчетНДС", "ВестиРаздельныйУчетНДС", "ВедетсяРаздельныйУчет")),
+                    }
+                    self.session.add(OneCPolicy(
+                        id=uuid.uuid4(),
+                        company_id=connection.company_id,
+                        organization_external_ref=org_ref,
+                        organization_name=local_orgs.get(org_ref),
+                        period=period_iso,
+                        settings=raw,
+                        **flat,
+                    ))
+                    details["policies"] += 1
+                details["organizations"] = len(latest)
+            await self._finish_log(log, "completed", details)
+        except Exception as exc:
+            await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})
+            raise
+        return log
+
+    async def sync_prices(self, connection: OneCConnection) -> OneCSyncLog:
+        """Pull цен номенклатуры из БП ГИГ.
+
+        Источники (БП 3.0):
+          1. РегС.ЦеныНоменклатуры — справочные цены (измерения ТипЦен+Номенклатура)
+             Часто пуст или содержит мало записей — используется опционально.
+          2. РегС.ЦеныНоменклатурыДокументов — ФАКТИЧЕСКИЕ цены из ПТУ.
+             Каждое поступление пишет сюда цену → история закупочных цен.
+        """
+        log = await self._start_log(connection, sync_type="prices")
+        details: dict[str, Any] = {"prices": 0, "skipped": 0, "from_catalog": 0, "from_documents": 0}
+        try:
+            async with await self._open_client(connection) as client:
+                # ── чистим старые цены этой компании
+                from sqlalchemy import delete
+                await self.session.execute(
+                    delete(NomenclaturePrice).where(NomenclaturePrice.company_id == connection.company_id)
+                )
+
+                nom_names = {
+                    n.external_ref: n.name
+                    for n in (await self.session.execute(
+                        select(NomenclatureItem).where(
+                            NomenclatureItem.company_id == connection.company_id,
+                            NomenclatureItem.external_ref.is_not(None),
+                        )
+                    )).scalars().all()
+                    if n.external_ref
+                }
+                # дедуп: (nom, price_type) → latest row
+                latest: dict[tuple[str, str], dict[str, Any]] = {}
+
+                # ── 1. РегС.ЦеныНоменклатуры (справочные)
+                try:
+                    d1 = await client.describe_entity("InformationRegister_ЦеныНоменклатуры")
+                    avail = set(d1.get("dimensions", []) + d1.get("resources", []) + d1.get("attributes", []))
+                    # В БП 3.0 измерение называется ТипЦен (НЕ ВидЦены)
+                    type_field = next((x for x in ("ТипЦен", "ВидЦены") if x in avail), None)
+                    fields = ["Period", "Номенклатура_Key"]
+                    if type_field:
+                        fields.append(f"{type_field}_Key")
+                    if "Цена" in avail:
+                        fields.append("Цена")
+                    if "Валюта" in avail:
+                        fields.append("Валюта_Key")
+                    rows = await client.fetch_entity("InformationRegister_ЦеныНоменклатуры", select=fields, orderby="Period")
+                    for r in rows:
+                        nom = str(r.get("Номенклатура_Key") or "")
+                        if not nom:
+                            details["skipped"] += 1
+                            continue
+                        pt = str(r.get(f"{type_field}_Key") or "") if type_field else "catalog"
+                        if not pt:
+                            pt = "catalog"
+                        key = (nom, f"catalog:{pt}")
+                        cur = latest.get(key)
+                        if cur is None or str(r.get("Period") or "") > str(cur.get("Period") or ""):
+                            r["_source"] = "catalog"
+                            r["_pt_name"] = "Справочная"
+                            latest[key] = r
+                    details["from_catalog"] = sum(1 for k in latest if k[1].startswith("catalog"))
+                except Exception as e:
+                    details.setdefault("warnings", []).append(f"ЦеныНоменклатуры: {type(e).__name__}: {e}")
+
+                # ── 2. РегС.ЦеныНоменклатурыДокументов (фактические цены)
+                # НЕЗАВИСИМЫЙ регистр в БП 3.0 — без Period/Recorder.
+                # Измерения: Номенклатура + СпособЗаполненияЦены.
+                # Это закупочные цены из ПТУ + установленные вручную.
+                try:
+                    d2 = await client.describe_entity("InformationRegister_ЦеныНоменклатурыДокументов")
+                    avail2 = set(d2.get("dimensions", []) + d2.get("resources", []) + d2.get("attributes", []))
+                    fields2 = []
+                    nom_dim = next((x for x in ("Номенклатура",) if x in avail2), None)
+                    if not nom_dim:
+                        raise OneCError("Нет измерения Номенклатура")
+                    fields2.append(f"{nom_dim}_Key")
+                    sposob_dim = next((x for x in ("СпособЗаполненияЦены",) if x in avail2), None)
+                    if sposob_dim:
+                        fields2.append(f"{sposob_dim}_Key")
+                    for f in ("Цена", "ЦенаВключаетНДС", "Стоимость"):
+                        if f in avail2:
+                            fields2.append(f)
+                    if "Валюта" in avail2:
+                        fields2.append("Валюта_Key")
+                    rows2 = await client.fetch_entity(
+                        "InformationRegister_ЦеныНоменклатурыДокументов",
+                        select=fields2,
+                    )
+                    # Дедуп по (nom, sposob) — последняя запись (нет даты, перекрытие любое)
+                    for r in rows2:
+                        nom = str(r.get("Номенклатура_Key") or "")
+                        if not nom:
+                            details["skipped"] += 1
+                            continue
+                        sposob = str(r.get("СпособЗаполненияЦены_Key") or "default") if sposob_dim else "default"
+                        key = (nom, f"documents:{sposob}")
+                        r["_source"] = "documents"
+                        r["_pt_name"] = "Закупочная (документы)"
+                        latest[key] = r  # перекрываем — берём последнее
+                    details["from_documents"] = sum(1 for k in latest if k[1].startswith("documents"))
+                except Exception as e:
+                    details.setdefault("warnings", []).append(f"ЦеныНоменклатурыДокументов: {type(e).__name__}: {str(e)[:200]}")
+
+                # ── INSERT
+                for (nom, pt), raw in latest.items():
+                    period_iso = str(raw.get("Period") or "")[:19]
+                    price_val = float(raw.get("Цена") or raw.get("Стоимость") or 0.0)
+                    self.session.add(NomenclaturePrice(
+                        id=uuid.uuid4(),
+                        company_id=connection.company_id,
+                        nomenclature_ref=nom,
+                        nomenclature_name=nom_names.get(nom),
+                        price_type_ref=pt,
+                        price_type_name=raw.get("_pt_name"),
+                        period=period_iso,
+                        price=price_val,
+                        currency="RUB",
+                    ))
+                    details["prices"] += 1
+            await self._finish_log(log, "completed", details)
+        except Exception as exc:
+            await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})
+            raise
+        return log
+
+    async def sync_batches(self, connection: OneCConnection) -> OneCSyncLog:
+        """Pull остатков партий товаров (FIFO) из БП ГИГ.
+
+        Источник — РегистрНакопления.ПартииТоваровНаСкладах. Берём всё
+        активные движения (Период не фильтруем — текущая суммарная позиция).
+        Берём НЕ виртуальную «Остатки» (её COM-доступ требует параметров),
+        а сами движения и суммируем приход − расход в Python."""
+        log = await self._start_log(connection, sync_type="batches")
+        details: dict[str, Any] = {"raw_movements": 0, "batches": 0, "skipped_empty": 0}
+        try:
+            async with await self._open_client(connection) as client:
+                # Для РегистраНакопления Period это поле документа, а ВидДвижения —
+                # перечисление {Приход, Расход}. Берём количество и сумму со знаком.
+                # Поиск регистра партий. В БП 3.0 партионный учёт ОПЦИОНАЛЕН
+                # и в дефолтной конфигурации (ГИГ-стиль) обычно ВЫКЛЮЧЕН.
+                # Если регистра партий нет — fallback на ТоварыНаСкладах (остатки без FIFO).
+                batch_entity = None
+                describe: dict[str, list[str]] = {}
+                fallback_source = None
+                for cand in (
+                    "AccumulationRegister_ПартииТоваровНаСкладах",
+                    "AccumulationRegister_ПартииТоваров",
+                    "AccumulationRegister_ПартииТоваровБухгалтерскийУчет",
+                ):
+                    try:
+                        describe = await client.describe_entity(cand)
+                        batch_entity = cand
+                        break
+                    except Exception:
+                        continue
+                if not batch_entity:
+                    # Fallback: ТоварыНаСкладах — остатки без партий
+                    for cand in (
+                        "AccumulationRegister_ТоварыНаСкладах",
+                        "AccumulationRegister_ТоварыОрганизаций",
+                    ):
+                        try:
+                            describe = await client.describe_entity(cand)
+                            batch_entity = cand
+                            fallback_source = cand.replace("AccumulationRegister_", "")
+                            break
+                        except Exception:
+                            continue
+                if not batch_entity:
+                    details["info"] = (
+                        "Партионный учёт в БП ГИГ не ведётся, и регистр ТоварыНаСкладах недоступен. "
+                        "Для ГИГ типична работа без партий (БП 3.0 базовая поставка, не Управление торговлей). "
+                        "Раздел остаётся пустым — это нормальное состояние."
+                    )
+                    await self._finish_log(log, "completed", details)
+                    return log
+                details["fallback_source"] = fallback_source
+                avail = set(describe.get("dimensions", []) + describe.get("resources", []) + describe.get("attributes", []))
+                details["batch_entity"] = batch_entity
+                # Минимум: Period, Recorder, Номенклатура. Остальное — что есть.
+                fields = ["Period", "Recorder_Key", "Номенклатура_Key", "ВидДвижения"]
+                for f in ("Склад", "Организация"):
+                    if f in avail:
+                        fields.append(f + "_Key")
+                for f in ("Количество", "Стоимость", "Сумма"):
+                    if f in avail:
+                        fields.append(f)
+                rows = await client.fetch_entity(batch_entity, select=fields)
+                details["raw_movements"] = len(rows)
+
+                # Группировка: (батч, ном, склад) → накопленный остаток.
+                agg: dict[tuple, dict[str, Any]] = {}
+                for r in rows:
+                    batch_ref = str(r.get("Recorder_Key") or "")
+                    nom = str(r.get("Номенклатура_Key") or "")
+                    wh = str(r.get("Склад_Key") or "")
+                    org = str(r.get("Организация_Key") or "")
+                    if not batch_ref or not nom:
+                        continue
+                    key = (batch_ref, nom, wh)
+                    qty = float(r.get("Количество") or 0.0)
+                    # Стоимость / Сумма — в разных версиях именуется по-разному
+                    amt = float(r.get("Стоимость") or r.get("Сумма") or 0.0)
+                    # ВидДвижения: 'Приход' (+) / 'Расход' (−).
+                    vd = str(r.get("ВидДвижения") or "")
+                    sign = -1.0 if "Расход" in vd else 1.0
+                    bucket = agg.setdefault(key, {
+                        "batch_doc_ref": batch_ref,
+                        "nomenclature_ref": nom,
+                        "warehouse_ref": wh or None,
+                        "organization_ref": org or None,
+                        "qty": 0.0,
+                        "amt": 0.0,
+                    })
+                    bucket["qty"] += sign * qty
+                    bucket["amt"] += sign * amt
+
+                # Имена номенклатуры и складов из локальной БД.
+                nom_names = {
+                    n.external_ref: n.name
+                    for n in (await self.session.execute(
+                        select(NomenclatureItem).where(
+                            NomenclatureItem.company_id == connection.company_id,
+                            NomenclatureItem.external_ref.is_not(None),
+                        )
+                    )).scalars().all()
+                    if n.external_ref
+                }
+                wh_names = {
+                    w.external_ref: w.name
+                    for w in (await self.session.execute(
+                        select(Warehouse).where(
+                            Warehouse.company_id == connection.company_id,
+                            Warehouse.external_ref.is_not(None),
+                        )
+                    )).scalars().all()
+                    if w.external_ref
+                }
+
+                # Чистка предыдущего среза перед перезаписью (все источники).
+                from sqlalchemy import delete
+                await self.session.execute(
+                    delete(InventoryBatch).where(
+                        InventoryBatch.company_id == connection.company_id,
+                    )
+                )
+
+                source_label = "register" if not fallback_source else f"fallback:{fallback_source}"
+                for bucket in agg.values():
+                    qty = round(bucket["qty"], 4)
+                    if abs(qty) < 1e-4:
+                        details["skipped_empty"] += 1
+                        continue
+                    amt = round(bucket["amt"], 2)
+                    self.session.add(InventoryBatch(
+                        id=uuid.uuid4(),
+                        company_id=connection.company_id,
+                        batch_doc_type=None,
+                        batch_doc_ref=bucket["batch_doc_ref"],
+                        nomenclature_ref=bucket["nomenclature_ref"],
+                        nomenclature_name=nom_names.get(bucket["nomenclature_ref"]),
+                        warehouse_ref=bucket["warehouse_ref"],
+                        warehouse_name=wh_names.get(bucket["warehouse_ref"]) if bucket["warehouse_ref"] else None,
+                        organization_ref=bucket["organization_ref"],
+                        quantity_remaining=qty,
+                        amount_remaining=amt,
+                        unit_price=round(amt / qty, 4) if abs(qty) > 1e-4 else None,
+                        source=source_label,
+                    ))
+                    details["batches"] += 1
             await self._finish_log(log, "completed", details)
         except Exception as exc:
             await self._finish_log(log, "error", {"error": f"{type(exc).__name__}: {exc}", **details})

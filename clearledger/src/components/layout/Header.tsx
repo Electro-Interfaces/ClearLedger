@@ -20,7 +20,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const { theme, setTheme } = useTheme()
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 h-[var(--header-height)] border-b border-border/50 bg-card backdrop-blur-xl">
+    <header className="h-[var(--header-height)] shrink-0 border-b border-border/50 bg-card backdrop-blur-xl">
       <div className="flex h-full items-center px-4 gap-3">
         {isMobile && (
           <Button variant="ghost" size="icon" className="shrink-0" onClick={onMobileMenuToggle}>

@@ -501,6 +501,150 @@ class ExportPacket(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# OneCPolicy — учётная политика организации (срез из РегС.УчетнаяПолитика БП 3.0)
+# ---------------------------------------------------------------------------
+# Хранит последнюю запись УчетнаяПолитики на организацию. Используется для:
+# - Понимания метода оценки МПЗ (FIFO/Средняя) при сверке ОРП/Списания.
+# - Режима налогообложения (ОСН/УСН), ставки НДС.
+# - Раздельного учёта НДС.
+
+class OneCPolicy(Base):
+    __tablename__ = "onec_policies"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    organization_external_ref: Mapped[str] = mapped_column(
+        String(36), nullable=False, index=True,
+    )
+    organization_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    period: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Произвольные поля среза учётной политики из БП (PBU/НДС/ставки/раздельный учёт).
+    settings: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Отдельные часто используемые поля для быстрого SQL-фильтра в UI.
+    mpz_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    tax_system: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    vat_rate: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    pbu_18_02: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    separate_vat_accounting: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+
+# ---------------------------------------------------------------------------
+# PostingTemplate — справочник ожидаемых проводок по ВидОперации
+# ---------------------------------------------------------------------------
+# При проведении документа определённого ВидОперации 1С формирует
+# характерный набор проводок (например ОРП ВидОп=ОтчетККМОПродажах →
+# 90.02.1/41.02 + 62.Р/90.01.1 + 50.01/62.Р + 90.03/68.02).
+# Этот шаблон храним локально для подсветки соответствия факт vs ожидание
+# в UI Sheet документа.
+
+class PostingTemplate(Base):
+    __tablename__ = "posting_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=True, index=True,
+    )
+    doc_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    operation_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Массив объектов {dt, kt, formula, comment} — что ожидаем.
+    expected: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class NomenclaturePrice(Base):
+    """Срез РегС.ЦеныНоменклатуры из БП ГИГ — оптовые/розничные/закупочные
+    цены номенклатуры на дату. Используем для:
+      - проверки входной цены ТТН против актуальной закупочной цены
+      - сверки розничной выручки против актуальной розничной цены
+      - подсветки отклонений в DocumentsPage.
+    Уникальность по (company_id, nomenclature_ref, price_type, period)."""
+    __tablename__ = "nomenclature_prices"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # GUID Catalog.Номенклатура — джойнится с NomenclatureItem.external_ref.
+    nomenclature_ref: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    nomenclature_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # GUID Catalog.ВидыЦен (Оптовая, Розничная, Закупочная и т.п.)
+    price_type_ref: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    price_type_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    period: Mapped[str] = mapped_column(String(20), nullable=False)
+    price: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True, default="RUB")
+    unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class InventoryBatch(Base):
+    """Партия товара (FIFO) — остаток по регистратору-документу.
+
+    В БП 3.0 ред.3 источник:
+      1) РегистрНакопления.ПартииТоваровНаСкладах (виртуальная Остатки) —
+         основной канал. Если регистр пуст (часто на розничных АЗС с
+         учётом по средней) — пробуем второй вариант.
+      2) Аналитика по счёту 41.01 через СубконтоДт2 (партии-документы)
+         регистра РегистрБухгалтерии.Хозрасчетный.
+
+    Регистратор-партия — обычно ПТУ или ВводОстатков.
+    """
+    __tablename__ = "inventory_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Документ-регистратор партии (ПТУ/ВводОстатков/Корректировка)
+    batch_doc_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    batch_doc_ref: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    batch_doc_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    batch_doc_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Аналитика
+    nomenclature_ref: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    nomenclature_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    warehouse_ref: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    warehouse_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    organization_ref: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Остатки на момент среза
+    quantity_remaining: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
+    amount_remaining: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False, default=0)
+    unit_price: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    # Источник данных: 'register' (РегистрНакопления) | 'postings' (бухсчёт)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="register")
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ReconcileMapping(Base):
     __tablename__ = "reconcile_mappings"
 

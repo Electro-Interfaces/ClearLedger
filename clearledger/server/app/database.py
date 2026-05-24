@@ -80,6 +80,23 @@ async def create_all() -> None:
             # v1.1: ExportPacket — L3 слой (что мы выгружаем в 1С).
             "CREATE INDEX IF NOT EXISTS idx_export_packets_status ON export_packets(company_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_export_packets_kind ON export_packets(company_id, kind)",
+            # v1.2: OneCPolicy + PostingTemplate — учётная политика и схема проводок.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_onec_policies ON onec_policies(company_id, organization_external_ref, period)",
+            "CREATE INDEX IF NOT EXISTS idx_posting_templates ON posting_templates(doc_type, operation_type)",
+            # v1.3: NomenclaturePrice — срез РегС.ЦеныНоменклатуры.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_nomenclature_prices ON nomenclature_prices(company_id, nomenclature_ref, price_type_ref, period)",
+            "CREATE INDEX IF NOT EXISTS idx_nomenclature_prices_lookup ON nomenclature_prices(company_id, nomenclature_ref, period DESC)",
+            # v1.4: InventoryBatch — партии FIFO (РегистрНакопления.ПартииТоваровНаСкладах).
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_inventory_batches ON inventory_batches(company_id, batch_doc_ref, nomenclature_ref, warehouse_ref)",
+            "CREATE INDEX IF NOT EXISTS idx_inventory_batches_nom ON inventory_batches(company_id, nomenclature_ref)",
+            # v1.5: расширяем поля учётной политики (vat_rate может содержать "НДС 22% / Прибыль 25%")
+            "ALTER TABLE onec_policies ALTER COLUMN vat_rate TYPE VARCHAR(100)",
+            "ALTER TABLE onec_policies ALTER COLUMN mpz_method TYPE VARCHAR(100)",
+            "ALTER TABLE onec_policies ALTER COLUMN tax_system TYPE VARCHAR(50)",
+            # v1.6: source у InventoryBatch для меток "fallback:ТоварыНаСкладах"
+            "ALTER TABLE inventory_batches ALTER COLUMN source TYPE VARCHAR(50)",
+            # v1.7: price_type_ref с префиксом "catalog:" / "documents:" длиннее 36
+            "ALTER TABLE nomenclature_prices ALTER COLUMN price_type_ref TYPE VARCHAR(64)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

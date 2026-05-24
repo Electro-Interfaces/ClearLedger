@@ -1,0 +1,77 @@
+# ClearLedger production stack для services-01 (10.10.70.51, Miran)
+# Развёртывание: docker compose up -d
+# Доступ: HAProxy на rproxy → http://services-01:8090
+#
+# Переменные через .env рядом (см. .env.example):
+#   POSTGRES_PASSWORD — пароль для postgres
+#   COM_AGENT_URL    — http://10.10.70.45:8080 (1c-dev-01)
+#   COM_AGENT_TOKEN  — Bearer secret COM-агента
+#   JWT_SECRET       — секрет для JWT-токенов backend
+#   CORS_ORIGINS     — https://ledger.dataworker.ru
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ledger-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: clearledger
+      POSTGRES_USER: clearledger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./backups:/backups
+    ports:
+      - "127.0.0.1:5433:5432"  # экспорт только на loopback (для бэкапов)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clearledger"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ../server
+      dockerfile: ../deploy/backend.Dockerfile
+    container_name: ledger-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://clearledger:${POSTGRES_PASSWORD}@postgres:5432/clearledger
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://ledger.dataworker.ru}
+      COM_AGENT_URL: ${COM_AGENT_URL:-http://10.10.70.45:8080}
+      COM_AGENT_TOKEN: ${COM_AGENT_TOKEN}
+      LOG_LEVEL: INFO
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ../
+      dockerfile: deploy/frontend.Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-https://ledger.dataworker.ru/api}
+    container_name: ledger-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  nginx:
+    image: nginx:alpine
+    container_name: ledger-nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "10.10.70.51:8090:80"  # HAProxy на rproxy будет ходить сюда

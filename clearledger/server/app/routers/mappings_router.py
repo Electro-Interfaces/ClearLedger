@@ -141,6 +141,106 @@ async def delete_mapping(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Mapping not found")
 
 
+# ─── Автосопряжение ──────────────────────────────────────────────────
+
+
+@router.post("/auto-detect", response_model=dict)
+async def auto_detect_mappings(
+    company_id: str = Query(...),
+    kind: str | None = Query(None, description="Фильтр по kind: station|fuel|paytype|nomenclature|counterparty. None = все"),
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Анализирует данные локальной БД и возвращает предложения маппинга.
+    НЕ записывает в БД — только предложения. Применить через /auto-apply.
+    Если задан kind — фильтрует предложения только этого вида."""
+    from app.services.mapping_autodetect_service import MappingAutoDetectService
+    cid = await _resolve_company_id(company_id, db)
+    svc = MappingAutoDetectService(db)
+    suggestions = await svc.detect_all(cid)
+    if kind:
+        suggestions = [s for s in suggestions if s.kind == kind]
+    # Группируем по kind для KPI
+    by_kind: dict[str, int] = {}
+    by_confidence: dict[str, int] = {"high": 0, "medium": 0, "low": 0}
+    for s in suggestions:
+        by_kind[s.kind] = by_kind.get(s.kind, 0) + 1
+        if s.confidence >= 90:
+            by_confidence["high"] += 1
+        elif s.confidence >= 70:
+            by_confidence["medium"] += 1
+        else:
+            by_confidence["low"] += 1
+    return {
+        "total": len(suggestions),
+        "by_kind": by_kind,
+        "by_confidence": by_confidence,
+        "suggestions": [
+            {
+                "kind": s.kind,
+                "source_key": s.source_key,
+                "source_label": s.source_label,
+                "target_ref": s.target_ref,
+                "target_name": s.target_name,
+                "confidence": s.confidence,
+                "method": s.method,
+                "note": s.note,
+            } for s in suggestions
+        ],
+    }
+
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class SuggestionItem(BaseModel):
+    kind: str
+    source_key: str
+    source_label: str | None = None
+    target_ref: str
+    target_name: str | None = None
+    confidence: int
+    method: str
+    note: str | None = None
+
+
+class AutoApplyPayload(BaseModel):
+    company_id: str
+    suggestions: list[SuggestionItem]
+    min_confidence: int = 80
+
+
+@router.post("/auto-apply", response_model=dict)
+async def auto_apply_mappings(
+    payload: AutoApplyPayload,
+    db: AsyncSession = Depends(get_db),
+    _u: User = Depends(get_current_user),
+):
+    """Применяет полученный список предложений с confidence ≥ min_confidence.
+    UI обычно сначала вызывает /auto-detect, даёт пользователю отфильтровать,
+    потом передаёт оставшиеся в этот endpoint."""
+    from app.services.mapping_autodetect_service import (
+        MappingAutoDetectService,
+        MappingSuggestion,
+    )
+    cid = await _resolve_company_id(payload.company_id, db)
+    svc = MappingAutoDetectService(db)
+    sugg = [
+        MappingSuggestion(
+            kind=s.kind,
+            source_key=s.source_key,
+            source_label=s.source_label or "",
+            target_ref=s.target_ref,
+            target_name=s.target_name or "",
+            confidence=s.confidence,
+            method=s.method,
+            note=s.note,
+        ) for s in payload.suggestions
+    ]
+    details = await svc.apply(cid, sugg, min_confidence=payload.min_confidence)
+    return details
+
+
 @router.get("/stats", response_model=dict)
 async def mapping_stats(
     company_id: str = Query(...),
