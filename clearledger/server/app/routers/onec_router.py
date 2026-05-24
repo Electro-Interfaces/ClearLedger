@@ -206,7 +206,7 @@ async def delete_connection(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
-) -> None:
+):
     conn = await _get_connection_or_404(connection_id, db)
     await db.delete(conn)
 

@@ -186,7 +186,7 @@ async def delete_posting_template(
     template_id: str,
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
-) -> None:
+):
     try:
         tid = uuid.UUID(template_id)
     except ValueError as exc:
