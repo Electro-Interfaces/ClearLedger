@@ -532,3 +532,8 @@ export interface EntryLineage {
 export async function getEntryLineage(entryId: string): Promise<EntryLineage> {
   return get<EntryLineage>(`/api/entries/${entryId}/lineage`)
 }
+
+/** Нормализовать raw-entry — создать или обновить clean-копию (layer L2). */
+export async function normalizeEntry(entryId: string, metaPatch?: Record<string, unknown>) {
+  return post(`/api/entries/${entryId}/normalize`, { meta_patch: metaPatch || {} })
+}

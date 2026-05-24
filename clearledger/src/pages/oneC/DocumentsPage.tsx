@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/sheet'
 import {
   FileText, Search, RefreshCw, Loader2, ChevronLeft, ChevronRight,
-  ArrowDown, ArrowUp, Download,
+  ArrowDown, ArrowUp, Download, CheckCircle2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -39,6 +39,7 @@ import {
   enrichNomenclature,
   packetsByDoc,
   getEntryLineage,
+  normalizeEntry,
   type DocSort,
   type ExportPacketBrief,
   type EntryLineage,
@@ -520,11 +521,123 @@ function OrpInvariantsPanel({ postings, amount }: { postings: Array<Record<strin
   )
 }
 
+// ─── Разбивка по видам нефтепродуктов ─────────────────────────────────
+// Группирует строки ТЧ Товары по Catalog.Номенклатура (резолв через
+// enrich) и считает суммы кол-ва/литров/денег по каждому виду.
+// Применимо к ПТУ и ОРП.
+function FuelBreakdownPanel({
+  tovary,
+  nomenclature,
+}: {
+  tovary: Array<Record<string, unknown>>
+  nomenclature: Record<string, { name: string; unit?: string; density?: number; article?: string }>
+}) {
+  if (tovary.length === 0) return null
+  type Row = { name: string; unit: string; qty: number; liters: number; sum: number; vat: number; rows: number }
+  const groups = new Map<string, Row>()
+  for (const row of tovary) {
+    const ref = String(row.Номенклатура || '')
+    const enr = nomenclature[ref] || {}
+    const name = enr.name || ref.slice(0, 8) + '…'
+    const unit = (enr.unit || '').toLowerCase()
+    const qty = Number(row.Количество ?? 0)
+    let liters = 0
+    if (enr.density && enr.density > 0) {
+      if (unit.includes('тонн') || unit === 'т') liters = qty * 1000 / enr.density
+      else if (unit.includes('кг'))               liters = qty / enr.density
+      else if (unit.includes('литр') || unit === 'л') liters = qty
+    } else if (unit.includes('литр') || unit === 'л') {
+      liters = qty
+    }
+    const sum = Number(row.Сумма ?? 0)
+    const vat = Number(row.СуммаНДС ?? 0)
+    const key = name
+    const g = groups.get(key)
+    if (g) {
+      g.qty += qty; g.liters += liters; g.sum += sum; g.vat += vat; g.rows += 1
+    } else {
+      groups.set(key, { name, unit: enr.unit || '', qty, liters, sum, vat, rows: 1 })
+    }
+  }
+  const totals = Array.from(groups.values()).sort((a, b) => b.sum - a.sum)
+  const total_qty = totals.reduce((a, r) => a + r.qty, 0)
+  const total_liters = totals.reduce((a, r) => a + r.liters, 0)
+  const total_sum = totals.reduce((a, r) => a + r.sum, 0)
+  const total_vat = totals.reduce((a, r) => a + r.vat, 0)
+
+  return (
+    <Card className="py-3 gap-1">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-xs uppercase text-muted-foreground">
+          Виды нефтепродуктов <span className="font-mono text-[10px] ml-1">({totals.length})</span>
+        </CardTitle>
+        <CardDescription className="text-[10px]">
+          Группировка позиций ТЧ по Catalog.Номенклатура (имя через enrich).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0 text-xs">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="h-6 text-[10px]">Номенклатура</TableHead>
+              <TableHead className="h-6 text-[10px] text-right">Строк</TableHead>
+              <TableHead className="h-6 text-[10px] text-right">Кол-во</TableHead>
+              <TableHead className="h-6 text-[10px] w-10">Ед.</TableHead>
+              <TableHead className="h-6 text-[10px] text-right">Литры</TableHead>
+              <TableHead className="h-6 text-[10px] text-right">Сумма, ₽</TableHead>
+              <TableHead className="h-6 text-[10px] text-right">НДС, ₽</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {totals.map((r) => (
+              <TableRow key={r.name} className="text-[10px]">
+                <TableCell className="py-1">{r.name}</TableCell>
+                <TableCell className="py-1 text-right font-mono">{r.rows}</TableCell>
+                <TableCell className="py-1 text-right font-mono">
+                  {r.qty.toLocaleString('ru-RU', { maximumFractionDigits: 3 })}
+                </TableCell>
+                <TableCell className="py-1 text-muted-foreground">{r.unit || '—'}</TableCell>
+                <TableCell className="py-1 text-right font-mono text-emerald-600 dark:text-emerald-300">
+                  {r.liters > 0 ? r.liters.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) : '—'}
+                </TableCell>
+                <TableCell className="py-1 text-right font-mono">
+                  {r.sum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </TableCell>
+                <TableCell className="py-1 text-right font-mono">
+                  {r.vat ? r.vat.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                </TableCell>
+              </TableRow>
+            ))}
+            <TableRow className="text-[10px] font-semibold border-t-2">
+              <TableCell className="py-1.5">Итого</TableCell>
+              <TableCell className="py-1.5 text-right font-mono">{tovary.length}</TableCell>
+              <TableCell className="py-1.5 text-right font-mono">
+                {total_qty.toLocaleString('ru-RU', { maximumFractionDigits: 3 })}
+              </TableCell>
+              <TableCell className="py-1.5"></TableCell>
+              <TableCell className="py-1.5 text-right font-mono text-emerald-600 dark:text-emerald-300">
+                {total_liters > 0 ? total_liters.toLocaleString('ru-RU', { maximumFractionDigits: 1 }) : '—'}
+              </TableCell>
+              <TableCell className="py-1.5 text-right font-mono">
+                {total_sum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </TableCell>
+              <TableCell className="py-1.5 text-right font-mono">
+                {total_vat ? total_vat.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ─── Цепочка слоёв L1→L2→L3→L4 (docs/sverka-spec.md §0) ─────────────
 // Узлы: RAW (L1) — CLEAN (L2) — EXPORT (L3) — 1C_REF (L4)
 // Между узлами — индикаторы: зелёный (есть и совпадает), жёлтый (есть с
 // расхождениями), красный (разрыв), серый (нет данных для слоя).
 function LayerChainPanel({ docId, matchedEntryId }: { docId: string; matchedEntryId: string | null | undefined }) {
+  const qc = useQueryClient()
   // L3: пакеты выгрузки, привязанные к этому документу
   const { data: packets = [] } = useQuery<ExportPacketBrief[]>({
     queryKey: ['packets-by-doc', docId],
@@ -536,6 +649,16 @@ function LayerChainPanel({ docId, matchedEntryId }: { docId: string; matchedEntr
     queryKey: ['entry-lineage', matchedEntryId],
     queryFn: () => getEntryLineage(matchedEntryId!),
     enabled: !!matchedEntryId,
+  })
+
+  // Normalize L1→L2 кнопка
+  const normalizeMut = useMutation({
+    mutationFn: () => normalizeEntry(lineage!.raw!.id),
+    onSuccess: () => {
+      toast.success('L2 clean-копия создана/обновлена')
+      qc.invalidateQueries({ queryKey: ['entry-lineage', matchedEntryId] })
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Ошибка нормализации'),
   })
 
   const hasL4 = true                                       // мы внутри документа — L4 точно есть
@@ -606,6 +729,16 @@ function LayerChainPanel({ docId, matchedEntryId }: { docId: string; matchedEntr
             {hasL3 && (
               <div>L3: {packets.map((p) => `${p.kind}/${p.status}`).join(', ')}</div>
             )}
+          </div>
+        )}
+        {hasL1 && !hasL2 && (
+          <div className="mt-2 pt-2 border-t border-border/40">
+            <Button size="sm" variant="outline" onClick={() => normalizeMut.mutate()}
+              disabled={normalizeMut.isPending}
+              className="h-7 text-xs gap-1.5">
+              {normalizeMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+              Подтвердить как нормализованную (L1 → L2)
+            </Button>
           </div>
         )}
       </CardContent>
@@ -855,6 +988,14 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
                 )}
               </CardContent>
             </Card>
+
+            {/* Виды нефтепродуктов — группировка ТЧ Товары по Catalog.Номенклатура */}
+            {Array.isArray((tabular as Record<string, unknown>).Товары) && ((tabular as Record<string, unknown>).Товары as unknown[]).length > 0 && (
+              <FuelBreakdownPanel
+                tovary={(tabular as Record<string, unknown>).Товары as Array<Record<string, unknown>>}
+                nomenclature={nomenclature}
+              />
+            )}
 
             {/* ТЧ */}
             <Card className="py-3 gap-1">
