@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     cloud_api_key: str = ""
     instance_id: str = "dev-local"
 
+    # Сверки — внешние API (прокси на стороне сервера, секреты не уходят на фронт)
+    tradecorp_api_url: str = ""
+    tradecorp_login: str = ""
+    tradecorp_password: str = ""
+    tradecorp_emitent_id: int = 15
+    msto_api_url: str = ""
+    msto_username: str = ""
+    msto_password: str = ""
+
     # CORS (через запятую: "http://localhost:3000,https://app.example.com")
     cors_origins: str = "http://localhost:3000,http://localhost:3010,http://localhost:8080"
 
