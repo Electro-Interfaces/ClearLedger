@@ -536,6 +536,10 @@ async def compliance_check(
 # 8. POST /audit-data/webhook
 # ---------------------------------------------------------------------------
 
+# Severity, не требующие grounding (информационные/нулевые расхождения)
+_INFO_SEVERITIES = {"info", "none", "ok", "rounding", "low"}
+
+
 class FindingItem(BaseModel):
     finding_type: str
     severity: str
@@ -544,6 +548,7 @@ class FindingItem(BaseModel):
     description: str | None = None
     affected_entry_ids: list[str] = []
     recommendation: str | None = None
+    citation: str | None = None  # ссылка на НПА для учётной трактовки (агенты A7/A8)
 
 
 class WebhookRequest(BaseModel):
@@ -556,12 +561,63 @@ async def receive_findings(
     company: Company = Depends(get_company_by_api_key),
     db: AsyncSession = Depends(get_db),
 ):
-    """Приём findings от TSupport аудитора. Сохранение в audit_events."""
-    from app.models import AuditEvent
+    """Приём findings от TSupport аудитора → audit_events.
 
-    saved = 0
-    for f in body.findings:
-        event = AuditEvent(
+    Grounding-валидация (блокер №2, стратегия §7.6): finding с severity выше
+    информационного ОБЯЗАН ссылаться на реальный entry_id ЭТОЙ компании.
+    Finding без основания НЕ сохраняется — чтобы ИИ-вывод без привязки к
+    данным не влиял на compliance. affected_entry_ids проверяются на
+    существование и принадлежность company_id.
+    """
+    from app.models import AuditEvent, DataEntry
+
+    findings = body.findings
+
+    # 1. Проверить все упомянутые entry_id: валидный UUID + существует + наш.
+    referenced: set[str] = set()
+    for f in findings:
+        referenced.update(f.affected_entry_ids)
+    valid_ids: set[str] = set()
+    if referenced:
+        parsed: list[uuid.UUID] = []
+        for s in referenced:
+            try:
+                parsed.append(uuid.UUID(str(s)))
+            except (ValueError, AttributeError, TypeError):
+                pass  # битый UUID → просто не попадёт в valid_ids
+        if parsed:
+            rows = (await db.execute(
+                select(DataEntry.id).where(
+                    DataEntry.company_id == company.id,
+                    DataEntry.id.in_(parsed),
+                )
+            )).scalars().all()
+            valid_ids = {str(r) for r in rows}
+
+    # 2. Разделить на принятые / отклонённые.
+    accepted: list[FindingItem] = []
+    rejected: list[dict] = []
+    for f in findings:
+        sev = (f.severity or "").strip().lower()
+        grounded = [eid for eid in f.affected_entry_ids if eid in valid_ids]
+        bad_refs = [eid for eid in f.affected_entry_ids if eid not in valid_ids]
+        if sev not in _INFO_SEVERITIES and not grounded:
+            rejected.append({
+                "title": f.title, "severity": f.severity,
+                "reason": "severity выше info требует grounding: хотя бы один "
+                          "реальный affected_entry_id этой компании",
+            })
+        elif bad_refs:
+            rejected.append({
+                "title": f.title, "severity": f.severity,
+                "reason": f"affected_entry_ids не найдены/не принадлежат компании: {bad_refs}",
+            })
+        else:
+            accepted.append(f)
+
+    # 3. Сохранить только обоснованные finding-и.
+    for f in accepted:
+        db.add(AuditEvent(
             company_id=company.id,
             user_id="tsupport-auditor",
             user_name="TSupport AI Аудитор",
@@ -570,14 +626,21 @@ async def receive_findings(
                 f"[{f.severity.upper()}] {f.title}"
                 + (f"\n{f.description}" if f.description else "")
                 + (f"\nРекомендация: {f.recommendation}" if f.recommendation else "")
+                + (f"\nНПА: {f.citation}" if f.citation else "")
+                + (f"\nОснование (entry_id): {f.affected_entry_ids}" if f.affected_entry_ids else "")
             ),
-        )
-        db.add(event)
-        saved += 1
-
+        ))
     await db.commit()
 
+    # 4. Если не принято ничего, а отклонения были — ошибка контракта (422).
+    if rejected and not accepted:
+        raise HTTPException(
+            status_code=422,
+            detail={"received": len(findings), "saved": 0, "rejected": rejected},
+        )
+
     return {
-        "received": len(body.findings),
-        "saved": saved,
+        "received": len(findings),
+        "saved": len(accepted),
+        "rejected": rejected,
     }
