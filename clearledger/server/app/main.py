@@ -32,6 +32,7 @@ from app.routers import (
     periods_router,
     policy_router,
     reconciliation_router,
+    reconciliation_proxy_router,
     references_router,
     reports_router,
     settings_router,
@@ -105,6 +106,7 @@ app.include_router(intake_router.router, prefix=API_PREFIX)
 app.include_router(references_router.router, prefix=API_PREFIX)
 app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
+app.include_router(reconciliation_proxy_router.router, prefix=API_PREFIX)  # прокси «Сверки»: /api/tradecorp/*, /api/msto/*
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)

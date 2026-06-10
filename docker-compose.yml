@@ -19,6 +19,14 @@ services:
       - INSTANCE_ID=${INSTANCE_ID:-dev-local}
       - RATE_LIMIT=${RATE_LIMIT:-60/minute}
       - RATE_LIMIT_AUTH=${RATE_LIMIT_AUTH:-10/minute}
+      # Сверки — внешние API (значения в host .env на сервере, НЕ в git)
+      - TRADECORP_API_URL=${TRADECORP_API_URL:-}
+      - TRADECORP_LOGIN=${TRADECORP_LOGIN:-}
+      - TRADECORP_PASSWORD=${TRADECORP_PASSWORD:-}
+      - TRADECORP_EMITENT_ID=${TRADECORP_EMITENT_ID:-15}
+      - MSTO_API_URL=${MSTO_API_URL:-}
+      - MSTO_USERNAME=${MSTO_USERNAME:-}
+      - MSTO_PASSWORD=${MSTO_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy

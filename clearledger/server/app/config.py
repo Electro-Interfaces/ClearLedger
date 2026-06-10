@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     ocr_max_file_size: int = 10 * 1024 * 1024  # 10 МБ
     ocr_timeout: int = 30  # секунд
 
+    # Сверки — внешние API (прокси на стороне сервера, секреты не уходят на фронт)
+    tradecorp_api_url: str = ""
+    tradecorp_login: str = ""
+    tradecorp_password: str = ""
+    tradecorp_emitent_id: int = 15
+    msto_api_url: str = ""
+    msto_username: str = ""
+    msto_password: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         """Разбирает CORS_ORIGINS в список."""
