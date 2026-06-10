@@ -20,7 +20,7 @@ export interface TokenResponse {
 
 /** Логин по email + пароль */
 export async function login(email: string, password: string): Promise<TokenResponse> {
-  const result = await api.post<TokenResponse>('/api/auth/login', { email, password })
+  const result = await api.post<TokenResponse>('/auth/login', { email, password })
   api.setToken(result.access_token)
   return result
 }
@@ -33,19 +33,19 @@ export async function register(data: {
   company_id: string
   role?: string
 }): Promise<TokenResponse> {
-  const result = await api.post<TokenResponse>('/api/auth/register', data)
+  const result = await api.post<TokenResponse>('/auth/register', data)
   api.setToken(result.access_token)
   return result
 }
 
 /** Получить текущего пользователя по токену */
 export async function getMe(): Promise<AuthUser> {
-  return api.get<AuthUser>('/api/auth/me')
+  return api.get<AuthUser>('/auth/me')
 }
 
 /** Продлить токен (выдаёт новый JWT) */
 export async function refreshToken(): Promise<TokenResponse> {
-  const result = await api.post<TokenResponse>('/api/auth/refresh')
+  const result = await api.post<TokenResponse>('/auth/refresh')
   api.setToken(result.access_token)
   return result
 }

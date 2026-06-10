@@ -29,6 +29,7 @@ const PricesPage = lazy(() => import('@/pages/oneC/PricesPage').then((m) => ({ d
 const BatchesPage = lazy(() => import('@/pages/oneC/BatchesPage').then((m) => ({ default: m.BatchesPage })))
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
+const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -76,6 +77,7 @@ const router = createBrowserRouter([
   {
     element: <Providers />,
     children: [
+      { path: '/login', element: <LazyPage><LoginPage /></LazyPage> },
       {
         element: <MainLayout />,
         children: [

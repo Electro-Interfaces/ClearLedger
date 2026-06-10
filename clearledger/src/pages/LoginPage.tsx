@@ -4,11 +4,10 @@
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '@/contexts/AuthContext'
+import { login as authLogin } from '@/services/authService'
 import { FileText, Loader2 } from 'lucide-react'
 
 export function LoginPage() {
-  const { login } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -20,7 +19,7 @@ export function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      await authLogin(email, password)
       navigate('/', { replace: true })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Ошибка входа'
