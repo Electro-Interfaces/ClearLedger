@@ -179,7 +179,11 @@ async def build_packets_from_clean(
     """Собрать ExportPackets из L2 (DataEntry layer='clean') за период.
 
     Правила агрегации:
-      shift_orp:   все смены одной АЗС за один день → 1 пакет
+      shift_orp:    ОДНА смена = 1 пакет; ключ TL|СМЕНА|{system}|{station}|{shift}
+                    (= натуральный ключ нативного пути .cfe, Module.bsl:1297).
+                    НЕ группируем по дню: иначе многосменные дни склеиваются и
+                    ПолучитьСтатус в .cfe не находит документ → задвоение на
+                    живой бухгалтерии. Нет полного натурального ключа → пакет НЕ строим.
       purchase_ttn: одна ТТН = один пакет
 
     Идемпотентно: если для группы уже есть draft/queued/sent пакет — пропускаем.
@@ -196,9 +200,12 @@ async def build_packets_from_clean(
         pass
     rows = (await db.execute(stmt)).scalars().all()
 
-    # Группировка
-    shift_groups: dict[tuple[str, str], list] = {}     # (station_code, date) -> entries
+    # Группировка.
+    # shift_orp группируем по ПОЛНОМУ натуральному ключу (система, станция, смена) —
+    # одна смена = один пакет. Это ровно ключ нативного пути .cfe.
+    shift_groups: dict[tuple[str, str, str], list] = {}  # (system, station, shift) -> entries
     ttn_entries: list = []
+    skipped_no_key = 0
     for e in rows:
         meta = e.meta or {}
         d = (meta.get("docDate") or meta.get("shift_date") or "")[:10]
@@ -207,17 +214,27 @@ async def build_packets_from_clean(
         if date_to and d and d > date_to:
             continue
         if e.doc_type_id == "shift_orp" or e.subcategory_id == "shifts":
-            station = str(meta.get("station_code") or "?")
-            shift_groups.setdefault((station, d), []).append(e)
+            # Натуральный ключ ДОЛЖЕН присутствовать целиком; иначе пакет НЕ строим
+            # (fail-safe: лучше пропустить, чем выгрузить смену под неоднозначным
+            # ключом и задвоить документ в .cfe на живой бухгалтерии).
+            system = str(meta.get("system_code") or "").strip()
+            station = str(meta.get("station_code") or "").strip()
+            shift = str(meta.get("shift_number") or meta.get("shift_id") or "").strip()
+            if not (system and station and shift):
+                skipped_no_key += 1
+                continue
+            shift_groups.setdefault((system, station, shift), []).append(e)
         elif e.doc_type_id == "purchase_ttn" or e.subcategory_id == "ttn":
             ttn_entries.append(e)
 
     created_packets = 0
     skipped = 0
 
-    # shift_orp: один пакет на (станция, день)
-    for (station, day), entries in shift_groups.items():
-        marker = f"shift_orp:{station}:{day}"
+    # shift_orp: один пакет на (система, станция, смена) = натуральный ключ .cfe
+    for (system, station, shift), entries in shift_groups.items():
+        # = КлючЗагрузки нативного пути (NefteUchet TL_Загрузка Module.bsl:1297)
+        marker = f"TL|СМЕНА|{system}|{station}|{shift}"
+        day = (entries[0].meta.get("docDate") or entries[0].meta.get("shift_date") or "")[:10]
         existing = (await db.execute(
             select(ExportPacket).where(
                 ExportPacket.company_id == cid,
@@ -231,7 +248,7 @@ async def build_packets_from_clean(
             continue
         total = sum(float(e.meta.get("totalAmount") or 0) for e in entries)
         total_liters = sum(float(e.meta.get("totalLiters") or 0) for e in entries)
-        # Агрегация по видам топлива из всех смен дня
+        # Агрегация по видам топлива в пределах ОДНОЙ смены
         fuel_agg: dict[str, dict[str, float | str]] = {}
         for e in entries:
             for fb in (e.meta.get("fuel_breakdown") or []):
@@ -253,10 +270,14 @@ async def build_packets_from_clean(
             source_entry_ids=[str(e.id) for e in entries],
             status="draft",
             payload={
-                "marker": marker,
+                "marker": marker,                       # = idem_key (натуральный ключ .cfe)
+                "idem_key": marker,
+                "natural_key": {"system": system, "station": station, "shift": shift},
+                "system_code": system,
                 "station_code": station,
+                "shift_number": shift,
                 "date": day,
-                "shifts_count": len(entries),
+                "entries_count": len(entries),
                 "total_amount": total,
                 "total_liters": total_liters,
                 "fuel_breakdown": list(fuel_agg.values()),
@@ -268,6 +289,8 @@ async def build_packets_from_clean(
     for e in ttn_entries:
         meta = e.meta or {}
         ttn_no = meta.get("docNumber") or meta.get("ttn_number") or ""
+        # TODO(blocker#1): привести к нативному ключу .cfe TL|ТТН|... (Module.bsl:1378) —
+        # точная форма ключа ТТН требует сверки с боевым расширением.
         marker = f"purchase_ttn:{ttn_no}:{(meta.get('docDate') or '')[:10]}"
         existing = (await db.execute(
             select(ExportPacket).where(
@@ -303,6 +326,7 @@ async def build_packets_from_clean(
     return {
         "created": created_packets,
         "skipped": skipped,
+        "skipped_no_natural_key": skipped_no_key,
         "considered_clean_entries": len(rows),
     }
 
