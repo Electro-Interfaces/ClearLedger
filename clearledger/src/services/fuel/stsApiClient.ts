@@ -6,7 +6,7 @@
  * В prod-режиме нужен свой proxy или прямой доступ.
  */
 
-import type { StsShift, StsShiftReport, StsReceipt, StsPrice } from './types'
+import type { StsShift, StsShiftReport, StsReceipt, StsPrice, StsTransaction } from './types'
 import { getSettings } from '../settingsService'
 
 const TOKEN_KEY = 'gig-sts-token'
@@ -174,6 +174,56 @@ export async function stsGetPrices(station: number, system?: number): Promise<St
     station: String(station),
   })
   return authFetch(`/v1/prices?${params}`) as Promise<StsPrice[]>
+}
+
+/**
+ * Пооперационный факт отпуска на ТРК — STS `/v2/transactions`.
+ *
+ * Запрос (как ходит TradeFrame STSApiService): `system` + `dt_beg`/`dt_end`
+ * (границы суток `YYYY-MM-DD HH:mm:ss`). Параметр `station` опционален —
+ * без него API отдаёт операции по всем станциям системы.
+ *
+ * Ответ STS: `[{ system, number, total, items: [...] }]`. Здесь массив
+ * «расплющивается» в плоский список операций с добавленным `stationNumber`
+ * (взятым из обёртки `number`). Никакой фильтрации/нормализации тут нет —
+ * это делает вызывающий dataFetcher (фильтр по корп.картам/online, датам).
+ *
+ * @param dateFrom — YYYY-MM-DD (начало периода)
+ * @param dateTo   — YYYY-MM-DD (конец периода, включительно)
+ * @param station  — номер станции (опционально; без него — все станции)
+ * @param system   — код системы STS (по умолчанию из настроек)
+ */
+export async function stsGetTransactions(
+  dateFrom: string,
+  dateTo: string,
+  station?: number,
+  system?: number,
+): Promise<StsTransaction[]> {
+  const settings = getSettings()
+  const sys = system ?? settings.stsSystemCode
+
+  const params = new URLSearchParams({ system: String(sys) })
+  // STS ожидает границы суток в формате "YYYY-MM-DD HH:mm:ss"
+  if (dateFrom) params.set('dt_beg', `${dateFrom} 00:00:00`)
+  if (dateTo) params.set('dt_end', `${dateTo} 23:59:59`)
+  if (station != null) params.set('station', String(station))
+
+  const data = await authFetch(`/v2/transactions?${params}`)
+
+  // Ответ: [{ system, number, total, items: [...] }]
+  const flat: StsTransaction[] = []
+  if (Array.isArray(data)) {
+    for (const stationBlock of data as Array<{ number?: number; items?: unknown[] }>) {
+      const items = Array.isArray(stationBlock?.items) ? stationBlock.items : []
+      for (const tx of items) {
+        flat.push({
+          ...(tx as Record<string, unknown>),
+          stationNumber: (tx as { stationNumber?: number }).stationNumber ?? stationBlock.number ?? 0,
+        } as StsTransaction)
+      }
+    }
+  }
+  return flat
 }
 
 // ─── Discover stations ──────────────────────────────────────

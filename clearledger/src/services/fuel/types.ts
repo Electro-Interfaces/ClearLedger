@@ -129,6 +129,48 @@ export interface StsPrice {
   services: { id: number; name: string; price: number }[]
 }
 
+// ─── STS API: Пооперационные транзакции (/v2/transactions) ──
+//
+// /v2/transactions возвращает массив по станциям:
+//   [{ system, number, total, items: [ {dt, pay_type, fuel_name, quantity, ...}, ... ] }]
+// Здесь — «плоская» строка-операция с добавленным stationNumber.
+// Поля приходят как есть из STS (часть — строки), поэтому индексная сигнатура.
+
+export interface StsTransaction {
+  /** Номер станции (из обёртки {number, items}) */
+  stationNumber: number
+  /** Дата/время операции (ISO/строка STS) */
+  dt?: string
+  /** Канал оплаты */
+  pay_type?: { id?: number; name?: string }
+  /** Название топлива */
+  fuel_name?: string
+  /** Услуга (вид топлива) */
+  service?: { service_code?: number; service_name?: string }
+  /** Литры (строка или число) */
+  quantity?: string | number
+  /** Цена за литр */
+  price?: string | number
+  /** Сумма */
+  cost?: string | number
+  /** Отпуск (объём/цена/сумма) */
+  release?: { volume?: string | number; price?: string | number; cost?: string | number }
+  /** Номер карты (строка или объект) */
+  card?: string | { number?: string }
+  /** ID транзакции */
+  id?: number
+  /** Внутренний номер транзакции */
+  transaction?: string
+  number?: number
+  /** Номер смены */
+  shift?: number
+  /** Колонка / пистолет */
+  pos?: number
+  nozzle?: number
+  // Прочие поля STS
+  [key: string]: unknown
+}
+
 // ─── Нормализованные типы ───────────────────────────────────
 
 /** Итог продаж по виду топлива */

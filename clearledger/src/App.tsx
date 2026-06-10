@@ -28,6 +28,7 @@ const PostingTemplatesPage = lazy(() => import('@/pages/oneC/PostingTemplatesPag
 const PricesPage = lazy(() => import('@/pages/oneC/PricesPage').then((m) => ({ default: m.PricesPage })))
 const BatchesPage = lazy(() => import('@/pages/oneC/BatchesPage').then((m) => ({ default: m.BatchesPage })))
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
+const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -95,6 +96,7 @@ const router = createBrowserRouter([
           { path: '/1c/prices', element: <LazyPage><PricesPage /></LazyPage> },
           { path: '/1c/batches', element: <LazyPage><BatchesPage /></LazyPage> },
           { path: '/forecast', element: <LazyPage><MonthCloseForecastPage /></LazyPage> },
+          { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
         ],

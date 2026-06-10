@@ -1,172 +1,255 @@
+// Типы для трёхсторонней сверки корпоративного процессинга
+// Corp (TradeCorp) ↔ TF (TradePoint /v2/transactions) ↔ Смена (shift_report)
+
 /**
- * Типы для сверки данных между источниками.
+ * Параметры запуска сверки
  */
-
-// ─── Статусы ────────────────────────────────────────
-
-export type ReconciliationTransactionStatus =
-  | 'matched'        // Все источники совпали
-  | 'msto_wait_done' // MSTO=WAIT, но TF отпущено
-  | 'only_msto'      // Только в MSTO (заказ не отпущен)
-  | 'only_tf'        // Только в TF (ручной отпуск)
-  | 'only_shift'     // Только в смене
-  | 'mismatch'       // Расхождение суммы/объёма
-
-export type ReconciliationStatus = 'ok' | 'error'
-
-// ─── Параметры ──────────────────────────────────────
-
 export interface ReconciliationParams {
-  dateFrom: string
-  dateTo: string
-  stationCodes: number[]
-  allStations: boolean
-  allShifts: boolean
-  systemCode: number
+  dateFrom: string; // YYYY-MM-DD
+  dateTo: string;   // YYYY-MM-DD
+  stationIds: number[]; // Пустой массив = все станции
+  showAllShifts?: boolean; // Показать все смены (включая без корп. карт)
+  systemId?: number; // ID эмитента (system) из настроек сети
 }
 
-// ─── Строка результата (транзакция) ─────────────────
+/**
+ * Статус строки сверки (построчная Corp ↔ TF)
+ */
+export type ReconciliationTransactionStatus =
+  | 'matched'      // Corp и TF совпали по всем критериям
+  | 'only_corp'    // Есть в Corp, нет в TF ("лишняя" в процессинге)
+  | 'only_tf'      // Есть в TF, нет в Corp ("лишняя" в TradePoint)
+  | 'mismatch';    // Найдено по времени/станции/топливу, но литры разные
 
+/**
+ * Статус сверки (ok/error)
+ */
+export type ReconciliationStatus = 'ok' | 'error';
+
+/**
+ * Строка построчной сверки Corp ↔ TF
+ */
 export interface ReconciliationTransaction {
-  id: string
-  date: string
-  stationId: number
-  stationName: string
-  fuelType: string
-  aggregatorName: string
-  shiftNumber: number | null
-
-  // MSTO
-  mstoSum: number | null
-  mstoVolume: number | null
-  mstoTransactionId?: number
-  mstoOperationResult?: string
-
-  // TF (операции отпуска)
-  tfSum: number | null
-  tfVolume: number | null
-  tfTransactionId?: number
-
-  // Смена
-  shiftSum: number | null
-  shiftVolume: number | null
-
-  status: ReconciliationTransactionStatus
+  id: string;                              // Уникальный ID для React key
+  date: string;                            // ISO datetime
+  stationId: number;                       // ID станции
+  stationName: string;                     // Название станции
+  fuelType: string;                        // Название топлива
+  cardNumber: string;                      // Номер карты
+  shiftId: number | null;                  // Определённая смена
+  corpLiters: number | null;               // Литры Corp
+  tfLiters: number | null;                 // Литры TF
+  corpTransactionId?: number;              // ID транзакции Corp
+  tfTransactionId?: number;                // ID транзакции TF
+  status: ReconciliationTransactionStatus; // Статус сопоставления
 }
 
-// ─── Агрегации ──────────────────────────────────────
-
-export interface ReconciliationByAggregator {
-  aggregatorName: string
-  mstoSum: number
-  mstoVolume: number
-  mstoCount: number
-  tfSum: number
-  tfVolume: number
-  tfCount: number
-  sumDiff: number
-  volumeDiff: number
-  status: ReconciliationStatus
-}
-
+/**
+ * Сверка по виду топлива (три источника)
+ */
 export interface ReconciliationByFuel {
-  fuelName: string
-  mstoSum: number
-  mstoVolume: number
-  tfSum: number
-  tfVolume: number
-  shiftSum: number
-  shiftVolume: number
-  status: ReconciliationStatus
+  fuelName: string;
+  // Три источника данных (литры)
+  corpLiters: number;     // Сумма Corp за период
+  tfLiters: number;       // Сумма TF за период
+  shiftLiters: number;    // Из сменного отчёта
+  // Расхождения
+  corpVsTfDiff: number;   // Corp - TF
+  tfVsShiftDiff: number;  // TF - Смена
+  status: ReconciliationStatus;
 }
 
+/**
+ * Данные по смене для конкретного топлива
+ */
+export interface ReconciliationShiftData {
+  shiftId: number;
+  shiftDate: string;           // Дата смены
+  shiftOpenedAt: string;       // Время открытия
+  shiftClosedAt: string | null; // Время закрытия (null = не закрыта)
+  corpLiters: number;
+  tfLiters: number;
+  shiftLiters: number;
+  status: ReconciliationStatus;
+}
+
+/**
+ * Сверка по топливу с разбивкой по сменам (новая структура)
+ */
+export interface ReconciliationByFuelWithShifts {
+  fuelName: string;
+  byShift: ReconciliationShiftData[];  // Разбивка по сменам
+  // Итоги по топливу
+  corpLitersTotal: number;
+  tfLitersTotal: number;
+  shiftLitersTotal: number;
+  status: ReconciliationStatus;
+}
+
+/**
+ * Сверка по смене с разбивкой по топливу (старая структура, для совместимости)
+ */
 export interface ReconciliationByShift {
-  shiftNumber: number
-  shiftDate: string
-  openedAt: string
-  closedAt: string | null
-  mstoSum: number
-  mstoVolume: number
-  tfSum: number
-  tfVolume: number
-  shiftSbpRevenue: number
-  shiftNonCashVolume: number
-  byAggregator: ReconciliationByAggregator[]
-  byFuel: ReconciliationByFuel[]
-  status: ReconciliationStatus
+  stationId: number;
+  stationName: string;
+  shiftId: number;
+  shiftDate: string;           // Дата смены
+  shiftOpenedAt: string;       // Время открытия
+  shiftClosedAt: string | null; // Время закрытия (null = не закрыта)
+  byFuel: ReconciliationByFuel[];
+  // Итоги по смене
+  corpLitersTotal: number;     // Corp литры
+  tfLitersTotal: number;       // TF литры
+  shiftLitersTotal: number;    // Смена литры
+  status: ReconciliationStatus;
 }
 
+/**
+ * Сверка по станции (новая структура: АЗС → Топливо → Смены)
+ */
 export interface ReconciliationByStation {
-  stationId: number
-  stationName: string
-  byShift: ReconciliationByShift[]
-  mstoSum: number
-  mstoVolume: number
-  tfSum: number
-  tfVolume: number
-  shiftSbpRevenue: number
-  status: ReconciliationStatus
+  stationId: number;
+  stationName: string;
+  byFuel: ReconciliationByFuelWithShifts[];  // Разбивка по топливу
+  byShift?: ReconciliationByShift[];  // Старая структура (для совместимости)
+  // Итоги по станции
+  corpLitersTotal: number;
+  tfLitersTotal: number;
+  shiftLitersTotal: number;
+  status: ReconciliationStatus;
 }
 
-// ─── Итоговый результат ─────────────────────────────
-
+/**
+ * Сводка результатов сверки
+ */
 export interface ReconciliationSummary {
-  totalMstoSum: number
-  totalMstoVolume: number
-  totalMstoCount: number
-  totalTfSum: number
-  totalTfVolume: number
-  totalTfCount: number
-  totalShiftSbpRevenue: number
-  totalShiftNonCashVolume: number
-
-  mstoVsTfSumDiff: number
-  mstoVsTfVolumeDiff: number
-  tfVsShiftSumDiff: number
-  tfVsShiftVolumeDiff: number
-
-  matched: number
-  mstoWaitDone: number
-  onlyMsto: number
-  onlyTf: number
-  onlyShift: number
-  mismatch: number
-
-  hasErrors: boolean
+  // Итого литров по источникам
+  totalCorpLiters: number;
+  totalTfLiters: number;
+  totalShiftLiters: number;
+  // Статистика транзакций
+  matched: number;      // Совпавших транзакций Corp ↔ TF
+  onlyCorp: number;     // Только в Corp
+  onlyTf: number;       // Только в TF
+  mismatch: number;     // С расхождением литров
+  // Общий статус
+  hasErrors: boolean;
 }
 
+/**
+ * Полный результат сверки
+ */
 export interface ReconciliationResult {
-  params: ReconciliationParams
-  summary: ReconciliationSummary
-  byStation: ReconciliationByStation[]
-  byAggregator: ReconciliationByAggregator[]
-  transactions: ReconciliationTransaction[]
-  executedAt: string
-  duration: number
+  params: ReconciliationParams;              // Параметры запроса
+  summary: ReconciliationSummary;            // Общая статистика
+  byStation: ReconciliationByStation[];      // По станциям с разбивкой по сменам
+  transactions: ReconciliationTransaction[]; // Построчная сверка Corp ↔ TF
+  executedAt: string;                        // Время выполнения
+  duration: number;                          // Длительность (мс)
 }
 
-// ─── Константы ──────────────────────────────────────
+// ============================================
+// Типы для работы с источниками данных
+// ============================================
 
-export const TIME_TOLERANCE_MS = 30 * 60 * 1000  // ±30 минут
-export const VOLUME_TOLERANCE = 1                  // ±1 литр
-export const SUM_TOLERANCE = 10                    // ±10 руб
-export const UI_SUM_TOLERANCE = 50                 // для UI статуса
-export const UI_VOLUME_TOLERANCE = 1               // для UI статуса
-
-export const STATUS_COLORS: Record<ReconciliationTransactionStatus, string> = {
-  matched: 'text-emerald-500',
-  msto_wait_done: 'text-amber-500',
-  only_msto: 'text-cyan-500',
-  only_tf: 'text-blue-500',
-  only_shift: 'text-purple-500',
-  mismatch: 'text-red-500',
+/**
+ * Транзакция Corp (TradeCorp API)
+ */
+export interface CorpTransaction {
+  id: number;
+  date: string;            // ISO datetime
+  cardNumber: string;
+  cardId: number;
+  stationId: number;
+  stationNumber: number;
+  stationName: string;
+  operationName: string;
+  quantity: number;        // Литры
+  cost: number;            // Сумма в рублях
+  price: number;           // Цена за литр
+  productName: string;     // Название топлива
+  cheque: {
+    productName: string;
+    quantity: number;
+    cost: number;
+    price: number;
+  }[];
 }
 
-export const STATUS_LABELS: Record<ReconciliationTransactionStatus, string> = {
-  matched: 'Совпадает',
-  msto_wait_done: 'MSTO ожидание',
-  only_msto: 'Только MSTO',
-  only_tf: 'Только TF',
-  only_shift: 'Только смена',
-  mismatch: 'Расхождение',
+/**
+ * Транзакция TF (TradePoint /v2/transactions)
+ */
+export interface TfTransaction {
+  id: number;
+  transactionId: string;
+  date: string;            // ISO datetime
+  stationId: number;
+  stationName: string;
+  fuelType: string;        // Название топлива
+  volume: number;          // Литры
+  price: number;           // Цена за литр
+  total: number;           // Сумма
+  cardNumber?: string;     // Номер карты
+  paymentMethod?: string;  // Способ оплаты (КР = корп.карта)
 }
+
+/**
+ * Информация о смене
+ */
+export interface ShiftInfo {
+  id: number;
+  stationId: number;
+  stationName: string;
+  openedAt: string;        // ISO datetime
+  closedAt: string | null; // ISO datetime или null если не закрыта
+  // Данные из сменного отчёта по топливу
+  fuelSales: {
+    fuelName: string;
+    quantity: number;      // Литры по корп. картам (КР)
+  }[];
+}
+
+/**
+ * Транзакция TradeCorp (как отдаёт backend-прокси /api/tradecorp/transactions).
+ * По форме совпадает с CorpTransaction.
+ */
+export type TradecorpTransaction = CorpTransaction;
+
+/**
+ * Ответ от TradeCorp API
+ */
+export interface TradecorpTransactionsResponse {
+  success: boolean;
+  count: number;
+  transactions: TradecorpTransaction[];
+}
+
+/**
+ * Строка сводки по станции (агрегат TradeCorp)
+ */
+export interface TradecorpStationSummary {
+  stationNumber: number;
+  stationName: string;
+  totalQuantity: number;
+  totalCost: number;
+  transactionsCount: number;
+}
+
+/**
+ * Ответ сводки TradeCorp (/api/tradecorp/transactions/summary)
+ */
+export interface TradecorpSummaryResponse {
+  success: boolean;
+  summary: TradecorpStationSummary[];
+}
+
+/**
+ * Нормализованное название топлива для сопоставления
+ */
+export type NormalizedFuelName = string;
+
+// ============================================
+// Константы (реэкспорт из constants.ts)
+// ============================================
+
+export { TIME_TOLERANCE_MS, COST_TOLERANCE, LITERS_TOLERANCE } from '@/services/reconciliation/constants';

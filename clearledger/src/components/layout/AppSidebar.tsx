@@ -16,13 +16,14 @@ import {
   LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen,
   Upload, FileText, Radio, Database, ChevronDown,
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
-  Landmark, ScrollText, Tag, Layers, CalendarCheck2,
+  Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const mainItems = [
   { to: '/', icon: LayoutDashboard, label: 'Рабочий стол', end: true },
+  { to: '/reconciliation', icon: GitCompare, label: 'Сверки' },
   { to: '/forecast', icon: CalendarCheck2, label: 'Закрытие месяца' },
 ]
 
