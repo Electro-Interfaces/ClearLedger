@@ -267,6 +267,7 @@ async def build_packets_from_clean(
             id=uuid.uuid4(),
             company_id=cid,
             kind="shift_orp",
+            idem_key=marker,            # = натуральный ключ .cfe (DB-страховка от задвоения)
             source_entry_ids=[str(e.id) for e in entries],
             status="draft",
             payload={
@@ -307,6 +308,7 @@ async def build_packets_from_clean(
             id=uuid.uuid4(),
             company_id=cid,
             kind="purchase_ttn",
+            idem_key=marker,            # TODO: привести к нативному ключу .cfe TL|ТТН|...
             source_entry_ids=[str(e.id)],
             status="draft",
             payload={

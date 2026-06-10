@@ -97,6 +97,17 @@ async def create_all() -> None:
             "ALTER TABLE inventory_batches ALTER COLUMN source TYPE VARCHAR(50)",
             # v1.7: price_type_ref с префиксом "catalog:" / "documents:" длиннее 36
             "ALTER TABLE nomenclature_prices ALTER COLUMN price_type_ref TYPE VARCHAR(64)",
+            # v1.8 (блокер №1): натуральный ключ идемпотентности ExportPacket =
+            # КлючЗагрузки нативного пути .cfe. Частичный UNIQUE среди НЕ-rejected
+            # пакетов — DB-страховка от задвоения смены на живой бухгалтерии.
+            "ALTER TABLE export_packets ADD COLUMN IF NOT EXISTS idem_key VARCHAR(120)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_export_packets_active_idem "
+            "ON export_packets(company_id, idem_key) "
+            "WHERE idem_key IS NOT NULL AND status <> 'rejected'",
+            # Backfill idem_key из ранее записанного payload.marker (новые маркеры
+            # уже = натуральному ключу; старые shift_orp:* останутся как есть).
+            "UPDATE export_packets SET idem_key = payload->>'marker' "
+            "WHERE idem_key IS NULL AND payload ? 'marker'",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

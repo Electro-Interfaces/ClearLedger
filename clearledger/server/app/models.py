@@ -466,8 +466,14 @@ class ExportPacket(Base):
     # 'correction'  — корректировка поступления
     kind: Mapped[str] = mapped_column(String(30), nullable=False)
 
-    # Какие clean-DataEntry (L2) пошли в пакет. Может быть несколько при
-    # агрегации (5 смен дня → 1 ОРП). JSONB-массив UUID.
+    # Натуральный ключ идемпотентности = КлючЗагрузки нативного пути .cfe
+    # (например TL|СМЕНА|{system}|{station}|{shift}). Частичный UNIQUE-индекс
+    # (company_id, idem_key) WHERE status<>'rejected' не даёт задвоить смену
+    # при пере-источивании на живой бухгалтерии (блокер №1, см. database.py).
+    idem_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    # Какие clean-DataEntry (L2) пошли в пакет. Один пакет = одна смена
+    # (натуральный ключ); JSONB-массив UUID.
     source_entry_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
     # Жизненный цикл пакета:
