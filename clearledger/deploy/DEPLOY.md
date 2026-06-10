@@ -144,3 +144,43 @@ Stop-Service ClearLedgerCOMAgent
 
 # rproxy: убрать ledger из haproxy.cfg, перезагрузить
 ```
+
+## Сверки (reconciliation) — деплой модуля (перенос из TradeFrame)
+
+Модуль «Сверки» (корп-карты TradeCorp + онлайн-заказы MSTO) перенесён из TradeFrame.
+Backend-прокси держит секреты внешних API на сервере; фронт ходит в `/api/tradecorp/*`, `/api/msto/*`.
+
+### 1. Секреты в `deploy/.env` (значения — из TradeFrame `server/.env` на dw-prod)
+```
+TRADECORP_API_URL=...
+TRADECORP_LOGIN=...
+TRADECORP_PASSWORD=...
+TRADECORP_EMITENT_ID=15
+MSTO_API_URL=...
+MSTO_USERNAME=...
+MSTO_PASSWORD=...
+```
+
+### 2. Пересборка backend + frontend
+```bash
+cd /data/ledger/deploy && docker compose up -d --build backend frontend
+docker compose logs -f backend | grep -i reconcil
+```
+
+### 3. Проверка прокси (под JWT авторизованного пользователя)
+```bash
+# health TradeCorp (должен вернуть status: ok, tokenValid: true)
+curl -s -H "Authorization: Bearer <JWT>" https://ledger.dataworker.ru/api/tradecorp/health
+```
+
+### 4. Приёмочная сверка чисел 1-в-1 с TradeFrame
+- Открыть `/reconciliation`, режим «Корп. процессинг»: выбрать станции (справочник Location
+  с заполненным `config.station`) + ту же смену/период, что в TF, сверить итоги/расхождения.
+- Режим «Онлайн-заказы»: то же с MSTO.
+- Условие приёмки: совпадение с TF на одной смене. После — Фаза 3 (удаление сверки из TradeFrame).
+
+### Предпосылки
+- Справочник `Location` (АЗС) заполнен STS-привязками (`config.system_id` + `config.station`)
+  через UI «Объекты» — иначе сверка не сопоставит станции.
+- `settings.stsSystemCode` = нужная STS-система (по умолч. 65 = ГИГ).
+- STS-доступ фронта рабочий (как для существующих фуэл-фич: shifts/shift_report).
