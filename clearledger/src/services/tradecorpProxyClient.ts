@@ -23,7 +23,7 @@ export async function getTradecorpTransactions(
   dateTo: string,
   stationIds?: number[]
 ): Promise<TradecorpTransaction[]> {
-  const response = await post<TradecorpTransactionsResponse>('/api/tradecorp/transactions', {
+  const response = await post<TradecorpTransactionsResponse>('/tradecorp/transactions', {
     dateFrom,
     dateTo,
     stationIds: stationIds || []
@@ -44,7 +44,7 @@ export async function getTradecorpSummary(
   dateTo: string,
   stationIds?: number[]
 ): Promise<TradecorpSummaryResponse['summary']> {
-  const response = await post<TradecorpSummaryResponse>('/api/tradecorp/transactions/summary', {
+  const response = await post<TradecorpSummaryResponse>('/tradecorp/transactions/summary', {
     dateFrom,
     dateTo,
     stationIds: stationIds || []
@@ -71,7 +71,7 @@ export async function checkTradecorpHealth(): Promise<{
       status: 'ok' | 'error';
       emitentId: number;
       tokenValid: boolean;
-    }>('/api/tradecorp/health');
+    }>('/tradecorp/health');
   } catch (error) {
     return {
       status: 'error',
