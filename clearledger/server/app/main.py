@@ -33,10 +33,12 @@ from app.routers import (
     policy_router,
     reconciliation_router,
     reconciliation_proxy_router,
+    channel_templates_router,
     references_router,
     reports_router,
     settings_router,
     source_types_router,
+    sources_router,
     stats_router,
 )
 from app.seed import seed_data
@@ -111,6 +113,8 @@ app.include_router(audit_data_router.router, prefix=API_PREFIX)
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(source_types_router.router, prefix=API_PREFIX)
+app.include_router(sources_router.router, prefix=API_PREFIX)
+app.include_router(channel_templates_router.router, prefix=API_PREFIX)
 app.include_router(onec_router.router, prefix=API_PREFIX)
 app.include_router(periods_router.router, prefix=API_PREFIX)
 app.include_router(mappings_router.router, prefix=API_PREFIX)

@@ -103,4 +103,22 @@ STS shift_report (ОПОРНЫЙ)
 2. **Транспорт `onec_operational` pull** — выбрать из COM / OData / HTTP-сервис (COM уже работает в probe-доступе к `azs_centre`; OData/HTTP требуют публикации в ЦБ).
 3. **Маппинг pay_type → разрез сверки** — закрепить таблицу (cards→TradeCorp, online→MSTO, retail_card→эквайринг, retail_cash→ОФД) как `reconcileAxes` профиля ГИГ.
 
-Связано: `GLOSSARY.md`, `TRADELEDGER_STRATEGY.md` §6.3/§9, `docs/sverka-spec.md`, память `project_channels_architecture`, `project_tradeledger_prod_settings_20260525`, `reference_tradecorp_api`.
+---
+
+## 7. Каналы обработки — справочник
+
+Второй справочник (параллель источникам): **канал** = конвейер, связывающий 1+ источников и несущий стадии предобработки → преобразования → сверки → сохранения. Реализован в `server/app/channel_catalog.py`; `GET /channel-templates` отдаёт шаблоны. Из шаблона создаётся экземпляр `Channel` (+`ChannelStream` на источник, +`ChannelStage` на стадию).
+
+| Шаблон | Направление | Потоки (источники) | Стадии | Сверки | Статус |
+|---|---|---|---|---|---|
+| `fuel_shift` | топливо | sts(опорный) + tradecorp/msto/acquiring_sber/ofd | fetch→normalize→transform→reconcile→validate→save | 4 (корп/онлайн/банк/фиск) | partial |
+| `fuel_delivery` | топливо | sts.receipt | fetch→normalize→save | — | partial |
+| `sidegoods` | сопутка | onec_operational(5 док) + chestny_znak/ofd/acquiring_sber | full | 3 | planned |
+| `food` | общепит | onec_operational(блюда/выпуск/ТТК) + ofd/acquiring_sber | full (+разворот по ТТК) | 1 | planned |
+| `reference_1c` | эталон | onec_accounting (НСИ/закр.период/политика) | fetch(sync)→snapshot | — | partial |
+
+> ⚠ Фронтовый `channelTemplateService.ts` (`CHANNEL_TEMPLATES`) использует СТАРЫЙ словарь source_type (`rest`/`1c`/`cloud`/`email`) — подлежит выравниванию под backend-реестр (sts/onec_operational/…). Канон — backend `channel_catalog.py`.
+
+Следующий слой: `channels_router` — CRUD экземпляров `Channel` (создать из шаблона + привязать источники + настроить стадии + запуск).
+
+Связано: `GLOSSARY.md`, `TRADELEDGER_STRATEGY.md` §6.3/§9, `docs/sverka-spec.md`, память `project_channels_architecture`, `project_gig_sources_catalog`, `reference_tradecorp_api`.
