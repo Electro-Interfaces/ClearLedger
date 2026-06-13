@@ -238,6 +238,26 @@ class OneCComClient:
         })
         return list(result or [])
 
+    async def fetch_cb_shifts(
+        self,
+        period_from: str,
+        period_to: str,
+        station: str = "208",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Извлечь смены ЦБ ЭЛСИ.АЗК (сопутка/общепит) за период → пакеты v2.
+
+        Опорный — ОРП; Товары с КлассSKU/ЭтоБлюдо; блюда + recipe (ТТК).
+        Результат — список пакетов для cb_normalize.normalize_shift_package.
+        """
+        result = await self._call("fetch_cb_shifts", {
+            "period_from": period_from,
+            "period_to": period_to,
+            "station": station,
+            "limit": limit,
+        })
+        return list(result or [])
+
     async def fetch_postings(self, doc_type: str, doc_ref: str) -> list[dict[str, Any]]:
         """Проводки документа из РегистрБухгалтерии.Хозрасчетный."""
         result = await self._call("fetch_postings", {

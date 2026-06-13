@@ -20,6 +20,7 @@ from app.channel_catalog import get_channel_template
 from app.database import get_db
 from app.models import Channel, ChannelStage, ChannelStream, ChannelSyncLog, Source
 from app.services.cb_intake import ingest_packages
+from app.services.channel_orchestrator import run_channel as orchestrate_channel
 from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/channels", tags=["channels"])
@@ -204,26 +205,36 @@ async def delete_channel(channel_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 @router.post("/{channel_id}/run")
 async def run_channel(channel_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """Запустить прогон канала. Создаёт ChannelSyncLog.
+    """Прогон канала: fetch (pull смен из ЦБ) → normalize → save (L2 DataEntry).
 
-    ⚠ Рантайм-оркестратор (fetch→normalize→reconcile→save) + ReconcileEngine
-    пока не подключены — лог создаётся, исполнение помечается как pending.
+    Для каналов с источником onec_operational оркестратор тянет смены через
+    COM (com_worker) и записывает в L2. ⚠ В проде fetch идёт через COM-Agent;
+    при недоступности COM прогон вернёт ошибку в логе (не падает на клиента).
     """
     ch = await db.get(Channel, channel_id)
     if not ch:
         raise HTTPException(404, "Канал не найден")
+    try:
+        result = await orchestrate_channel(db, ch)
+        status = result.get("status", "success")
+        msg = (f"смен={result.get('shifts', 0)} создано={result.get('created', 0)} "
+               f"обновлено={result.get('updated', 0)}") if status == "success" \
+            else result.get("message", "")
+        level = "info" if status in ("success", "skipped") else "error"
+    except Exception as exc:  # COM недоступен / ошибка извлечения — не роняем запрос
+        status, msg, level, result = "error", f"{type(exc).__name__}: {exc}", "error", {}
     log = ChannelSyncLog(
-        channel_id=ch.id, status="partial",
-        events=[{
-            "level": "warn", "event": "engine_pending",
-            "message": "Оркестратор/ReconcileEngine не подключены — прогон не исполнен.",
-        }],
+        channel_id=ch.id,
+        status="success" if status == "success" else ("partial" if status == "skipped" else "error"),
+        loaded=result.get("created", 0),
+        duplicates=result.get("updated", 0),
+        events=[{"level": level, "event": "run", "message": msg}],
         finished_at=datetime.now(timezone.utc),
     )
     db.add(log)
     ch.last_sync_at = datetime.now(timezone.utc)
     await db.flush()
-    return {"sync_log_id": str(log.id), "status": log.status, "note": "execution pending engine"}
+    return {"sync_log_id": str(log.id), "status": status, "message": msg, **result}
 
 
 class IngestRequest(BaseModel):
