@@ -18,8 +18,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.database import get_db
+from app.models import DataEntry
 from app.reconcile_catalog import list_reconcile_rules
+from app.selfcheck_catalog import list_selfchecks
+from app.services.reconcile import selfcheck
 from app.services.reconcile.engine import run_reconcile
 from app.services.recon_run import run_rule as run_rule_live
 from app.utils import resolve_company_id
@@ -77,6 +82,46 @@ async def run_rule_endpoint(req: RunRuleRequest, db: AsyncSession = Depends(get_
         system=req.system, station_ids=req.station_ids,
         db=db, company_id=cid, channel_id=chid,
     )
+
+
+@router.get("/selfchecks")
+async def list_selfcheck_rules():
+    """Справочник правил самосверки L2 (внутренняя ось, без внешних источников)."""
+    return list_selfchecks()
+
+
+class SelfCheckRequest(BaseModel):
+    company_id: str
+    rule_ids: list[str] | None = None    # None → все правила
+    limit: int = 500
+
+
+@router.post("/selfcheck/run")
+async def selfcheck_run(req: SelfCheckRequest, db: AsyncSession = Depends(get_db)):
+    """Прогнать самосверку над сохранённым L2 (DataEntry компании) → сводка+нарушения.
+
+    Арифметические инварианты смены (баланс оплаты↔продажи, НДС 22/122, итог
+    документа) на наших данных — без TradeCorp/MSTO/ОФД. Ловит ошибки до экспорта.
+    """
+    cid = await resolve_company_id(req.company_id, db)
+    rules = list_selfchecks()
+    if req.rule_ids:
+        rules = [r for r in rules if r["id"] in set(req.rule_ids)]
+    # записи, к которым применима хоть одна выбранная самосверка
+    doc_types = sorted({dt for r in rules for dt in (r.get("applies_to", {}).get("doc_type_id") or [])})
+    q = select(DataEntry).where(DataEntry.company_id == cid)
+    if doc_types:
+        q = q.where(DataEntry.doc_type_id.in_(doc_types))
+    q = q.order_by(DataEntry.created_at.desc()).limit(req.limit)
+    rows = (await db.execute(q)).scalars().all()
+    entries = [
+        {"source_id": e.source_id, "title": e.title, "doc_type_id": e.doc_type_id,
+         "category_id": e.category_id, "meta": e.meta or {}}
+        for e in rows
+    ]
+    report = selfcheck.run_selfchecks(rules, entries)
+    return {"company_id": str(cid), "rules": [r["id"] for r in rules],
+            "entries": len(entries), **report}
 
 
 @router.post("/diff")

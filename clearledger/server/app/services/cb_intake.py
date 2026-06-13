@@ -17,8 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DataEntry
+from app.selfcheck_catalog import list_selfchecks
 from app.services import mapping
 from app.services.cb_normalize import normalize_shift_package
+from app.services.reconcile import selfcheck
 
 
 def _apply_paytype(entry: dict, paymap: dict[str, str]) -> None:
@@ -46,6 +48,9 @@ async def ingest_packages(
     shifts = 0
     skipped: list[str] = []
     paymap = await mapping.load_kind_map(db, company_id, "paytype", channel_id)
+    sc_rules = list_selfchecks()
+    sc_violations: list[dict] = []
+    sc_checked = 0
 
     for pkg in packages:
         res = normalize_shift_package(pkg)
@@ -53,6 +58,16 @@ async def ingest_packages(
         skipped.extend(res.get("skipped", []))
         for _e in res["entries"]:
             _apply_paytype(_e, paymap)
+            # самосверка L2 (внутренняя ось): вердикт в meta, неблокирующе
+            verdict = selfcheck.verdict_for_entry(sc_rules, _e)
+            if verdict is not None:
+                _e["meta"]["Самосверка"] = verdict
+                sc_checked += 1
+                if verdict["статус"] != "ok":
+                    sc_violations.append({
+                        "source_id": _e.get("source_id"), "title": _e.get("title"),
+                        "тяжесть": verdict["тяжесть"], "нарушения": verdict["нарушения"],
+                    })
 
         for draft in res["entries"]:
             sid = draft["source_id"]
@@ -99,4 +114,9 @@ async def ingest_packages(
         "created": created,
         "updated": updated,
         "skipped_kinds": sorted(set(skipped)),
+        "selfcheck": {
+            "checked": sc_checked,
+            "violations": len(sc_violations),
+            "details": sc_violations,
+        },
     }
