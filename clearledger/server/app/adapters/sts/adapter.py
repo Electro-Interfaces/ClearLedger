@@ -95,6 +95,15 @@ class STSAdapter(SourceAdapter):
             ),
             category="fuel",
         ),
+        SourceDocType(
+            id="transactions",
+            name="Операции отпуска (TF)",
+            description=(
+                "Пооперационные транзакции отпуска топлива (STS /v2/transactions) "
+                "— зерно сверки против корп-карт (TradeCorp) и онлайн (MSTO)."
+            ),
+            category="fuel",
+        ),
     ]
 
     # ----- Реализация контракта -----

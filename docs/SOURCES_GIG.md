@@ -109,16 +109,34 @@ STS shift_report (ОПОРНЫЙ)
 
 Второй справочник (параллель источникам): **канал** = конвейер, связывающий 1+ источников и несущий стадии предобработки → преобразования → сверки → сохранения. Реализован в `server/app/channel_catalog.py`; `GET /channel-templates` отдаёт шаблоны. Из шаблона создаётся экземпляр `Channel` (+`ChannelStream` на источник, +`ChannelStage` на стадию).
 
-| Шаблон | Направление | Потоки (источники) | Стадии | Сверки | Статус |
+| Шаблон | Направление | Потоки (источники) | Стадии | Разрезы (id) | Статус |
 |---|---|---|---|---|---|
-| `fuel_shift` | топливо | sts(опорный) + tradecorp/msto/acquiring_sber/ofd | fetch→normalize→transform→reconcile→validate→save | 4 (корп/онлайн/банк/фиск) | partial |
+| `fuel_shift` | топливо | sts(опорный) + tradecorp/msto/acquiring_sber/ofd | fetch→normalize→transform→reconcile→validate→save | corp_fuel · online_fuel · acquiring_fuel · receipts_ofd | partial |
 | `fuel_delivery` | топливо | sts.receipt | fetch→normalize→save | — | partial |
-| `sidegoods` | сопутка | onec_operational(5 док) + chestny_znak/ofd/acquiring_sber | full | 3 | planned |
-| `food` | общепит | onec_operational(блюда/выпуск/ТТК) + ofd/acquiring_sber | full (+разворот по ТТК) | 1 | planned |
+| `sidegoods` | сопутка | onec_operational(5 док) + chestny_znak/ofd/acquiring_sber | full | marking_sidegoods · receipts_ofd | planned |
+| `food` | общепит | onec_operational(блюда/выпуск/ТТК) + ofd/acquiring_sber | full (+разворот по ТТК) | receipts_ofd | planned |
 | `reference_1c` | эталон | onec_accounting (НСИ/закр.период/политика) | fetch(sync)→snapshot | — | partial |
 
 > ⚠ Фронтовый `channelTemplateService.ts` (`CHANNEL_TEMPLATES`) использует СТАРЫЙ словарь source_type (`rest`/`1c`/`cloud`/`email`) — подлежит выравниванию под backend-реестр (sts/onec_operational/…). Канон — backend `channel_catalog.py`.
 
 Следующий слой: `channels_router` — CRUD экземпляров `Channel` (создать из шаблона + привязать источники + настроить стадии + запуск).
 
-Связано: `GLOSSARY.md`, `TRADELEDGER_STRATEGY.md` §6.3/§9, `docs/sverka-spec.md`, память `project_channels_architecture`, `project_gig_sources_catalog`, `reference_tradecorp_api`.
+---
+
+## 8. Разрезы сверки — справочник
+
+Третий справочник: **разрез** = переиспользуемый компонент сверки из **6 кубиков** (§6.2: потоки+роли · предикат · ключ · match · compare · severity). Реализован в `server/app/reconcile_catalog.py`; `GET /reconcile-rules`. Каналы подключают разрезы по `id`; исполняет один (целевой) `ReconcileEngine`.
+
+| id | Модуль | Потоки (роли) | Ключ | Допуски | Статус |
+|---|---|---|---|---|---|
+| `corp_fuel` | топливо | tf(anchor)·tradecorp(external)·смена(control) | station,fuel | 90с / 0.01л / 1₽ | **imperative (golden)** |
+| `online_fuel` | топливо | tf(anchor)·msto(external)·смена(control) | station,fuel | 30мин / 1л / 10₽ | **imperative (golden)** |
+| `acquiring_fuel` | топливо | смена(anchor)·эквайринг(external) | station,date | ±1₽ | planned |
+| `receipts_ofd` | f/s/food | смена(anchor)·ОФД(external) | station,shift | Σ ±1₽ | planned |
+| `marking_sidegoods` | сопутка | ОРП(anchor)·ЧЗ(external) | gtin,datamatrix | шт | planned |
+
+**`corp_fuel`/`online_fuel` — golden:** рабочие императивные движки (`src/services/reconciliation`, `mstoReconciliation`), декларативная форма = §6.2. Дисциплина §6.4: (1) вынесены в данные при сохранении императивных движков → (2) снять golden на боевых ГИГ → (3) унифицировать в один `ReconcileEngine` byte-for-byte. doc↔entry по ИНН — ОТДЕЛЬНАЯ ось.
+
+Следующий слой: `channels_router` (экземпляры Channel) + backend `ReconcileEngine` (исполнение разрезов; пока императивные TS-движки = golden).
+
+Связано: `GLOSSARY.md`, `TRADELEDGER_STRATEGY.md` §6.2/§6.3/§6.4/§9, `docs/sverka-spec.md`, память `project_channels_architecture`, `project_gig_sources_catalog`, `reference_tradecorp_api`.

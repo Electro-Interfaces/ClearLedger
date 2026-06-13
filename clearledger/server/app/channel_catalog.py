@@ -43,17 +43,6 @@ class StageDecl:
 
 
 @dataclass
-class ReconcileAxisDecl:
-    """Разрез сверки внутри канала (опорный срез ↔ внешний источник)."""
-
-    name: str
-    anchor: str               # срез опорного потока (напр. "shift.cards")
-    against: str              # source_type, против которого сверяем
-    key: list[str]            # поля разбиения на корзины
-    tolerance: str = ""       # человекочитаемый допуск
-
-
-@dataclass
 class ChannelTemplateDecl:
     """Запись справочника каналов."""
 
@@ -66,7 +55,7 @@ class ChannelTemplateDecl:
     status: str               # available | partial | planned
     streams: list[StreamDecl]
     stages: list[StageDecl]
-    reconcile_axes: list[ReconcileAxisDecl] = field(default_factory=list)
+    reconcile_rules: list[str] = field(default_factory=list)  # id из reconcile_catalog
     schedule: dict = field(default_factory=lambda: {"mode": "manual"})
 
 
@@ -117,12 +106,7 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
             StreamDecl("ofd", "fiscal_receipts", "control", "Фискальные Σ"),
         ],
         stages=_STAGES_FULL,
-        reconcile_axes=[
-            ReconcileAxisDecl("Корп-карты", "shift.cards", "tradecorp", ["station", "fuel"]),
-            ReconcileAxisDecl("Онлайн", "shift.online", "msto", ["station", "fuel"]),
-            ReconcileAxisDecl("Банк-карты", "shift.retail_card", "acquiring_sber", ["station", "date"], "±1 ₽"),
-            ReconcileAxisDecl("Фискализация", "shift.total", "ofd", ["station", "shift"], "Σ чеков"),
-        ],
+        reconcile_rules=["corp_fuel", "online_fuel", "acquiring_fuel", "receipts_ofd"],
         schedule=_SCHED_HOURLY,
     ),
     ChannelTemplateDecl(
@@ -161,11 +145,7 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
             StreamDecl("acquiring_sber", "card_payments", "control", "Банк-карты"),
         ],
         stages=_STAGES_FULL,
-        reconcile_axes=[
-            ReconcileAxisDecl("Маркируемые", "orp.marked", "chestny_znak", ["gtin", "datamatrix"]),
-            ReconcileAxisDecl("Фискализация", "orp.total", "ofd", ["station", "shift"], "Σ чеков"),
-            ReconcileAxisDecl("Банк-карты", "orp.retail_card", "acquiring_sber", ["station", "date"], "±1 ₽"),
-        ],
+        reconcile_rules=["marking_sidegoods", "receipts_ofd"],
         schedule=_SCHED_DAILY,
     ),
 
@@ -197,9 +177,7 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
             StageDecl("validate", "Контроль"),
             StageDecl("save", "Сохранение"),
         ],
-        reconcile_axes=[
-            ReconcileAxisDecl("Фискализация", "orp.total", "ofd", ["station", "shift"], "Σ чеков"),
-        ],
+        reconcile_rules=["receipts_ofd"],
         schedule=_SCHED_DAILY,
     ),
 
