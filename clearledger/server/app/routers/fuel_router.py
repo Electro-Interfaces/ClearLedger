@@ -252,6 +252,19 @@ async def normalize_shifts(
 ):
     """Загрузить смены из STS API, нормализовать и сохранить в БД."""
     company_id = await _company_id(user, db)
+    return await ingest_fuel_shifts(body, company_id, db)
+
+
+async def ingest_fuel_shifts(
+    body: NormalizeRequest,
+    company_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict:
+    """Ядро fuel-ingest (STS → FuelShift/FuelReceipt/L1-маркеры).
+
+    Единая точка приёма топливных смен: зовётся и роутером /fuel/normalize,
+    и оркестратором канала (run_channel). Логика без изменений.
+    """
 
     # Получить или создать станцию
     result = await db.execute(
