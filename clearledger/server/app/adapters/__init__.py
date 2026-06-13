@@ -95,6 +95,7 @@ def list_adapters() -> list[dict]:
             "category": cls.category,
             "description": cls.description,
             "icon": cls.icon,
+            "status": cls.status,
             "setup_schema": [
                 {
                     "key": f.key,
@@ -130,3 +131,4 @@ def list_adapters() -> list[dict]:
 # Когда добавляется новый адаптер — добавить строку импорта здесь.
 
 from app.adapters import sts  # noqa: E402, F401
+from app.adapters import catalog  # noqa: E402, F401 — справочник planned-типов

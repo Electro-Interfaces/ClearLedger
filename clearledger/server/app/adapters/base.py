@@ -123,6 +123,13 @@ class SourceAdapter(ABC):
     # Иконка (имя из lucide-react, для UI).
     icon: str = "Box"
 
+    # Готовность в справочнике (метка, не строгий enum):
+    #   "available" — поведение реализовано (test/fetch работают);
+    #   "planned"   — только запись каталога (метаданные есть, fetch/test = NotImplemented);
+    #   "partial"   — особый источник, идёт отдельным механизмом, реализован частично
+    #                 (напр. 1С:Бухгалтерия-эталон через onec_router).
+    status: str = "available"
+
     # Поля формы настроек.
     setup_schema: list[SetupField] = []
 
