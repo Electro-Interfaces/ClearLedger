@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from app.reconcile_catalog import list_reconcile_rules
 from app.services.reconcile.engine import run_reconcile
+from app.services.recon_run import run_rule as run_rule_live
 
 router = APIRouter(prefix="/reconcile", tags=["reconcile"])
 
@@ -41,6 +42,31 @@ async def run(req: RunRequest):
 class DiffRequest(BaseModel):
     engine: dict[str, Any]   # результат ReconcileEngine
     golden: dict[str, Any]   # результат императивного движка (golden)
+
+
+class RunRuleRequest(BaseModel):
+    rule_id: str                 # corp_fuel | online_fuel
+    date_from: str               # YYYY-MM-DD
+    date_to: str
+    base_url: str = "https://pos.autooplata.ru/tms"
+    login: str
+    password: str
+    system: int = 65
+    station_ids: list[Any] | None = None
+
+
+@router.post("/run-rule")
+async def run_rule_endpoint(req: RunRuleRequest):
+    """Backend-исполнение разреза corp/online на живых потоках (КАНДИДАТ, §6.4).
+
+    Тянет TF (STS) + внешний (TradeCorp/MSTO), прогоняет ReconcileEngine.
+    Сверять с golden (frontend) через /reconcile/diff до замены.
+    """
+    return await run_rule_live(
+        req.rule_id, req.date_from, req.date_to,
+        base_url=req.base_url, login=req.login, password=req.password,
+        system=req.system, station_ids=req.station_ids,
+    )
 
 
 @router.post("/diff")

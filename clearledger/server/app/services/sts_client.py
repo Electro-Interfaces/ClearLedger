@@ -109,6 +109,36 @@ async def sts_get_receipts(
     return await _auth_get(base_url, login, password, f"/v1/report/receipts?{params}")
 
 
+async def sts_get_transactions(
+    base_url: str, login: str, password: str,
+    system: int, date_from: str, date_to: str, station: int | None = None,
+) -> list[dict]:
+    """Пооперационные транзакции отпуска на ТРК (TF) — STS /v2/transactions.
+
+    Опорный поток (anchor) для разрезов corp_fuel/online_fuel. Ответ STS —
+    блоки по станциям [{number, items:[...]}]; возвращаем плоский список
+    items с проставленной станцией.
+    """
+    from urllib.parse import urlencode
+    q: dict[str, Any] = {
+        "system": system,
+        "dt_beg": f"{date_from} 00:00:00",
+        "dt_end": f"{date_to} 23:59:59",
+    }
+    if station is not None:
+        q["station"] = station
+    data = await _auth_get(base_url, login, password, f"/v2/transactions?{urlencode(q)}")
+    flat: list[dict] = []
+    if isinstance(data, list):
+        for block in data:
+            num = (block or {}).get("number")
+            for tx in (block.get("items") or []):
+                t = dict(tx)
+                t.setdefault("station", num)
+                flat.append(t)
+    return flat
+
+
 async def sts_test_connection(
     base_url: str, login: str, password: str, system: int,
 ) -> dict:
