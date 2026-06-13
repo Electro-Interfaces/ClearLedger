@@ -69,7 +69,7 @@ export function ChannelWizard({ open, onOpenChange }: Props) {
 
     try {
       // 1. Create source from connection values
-      const source = createSource({
+      const source = await createSource({
         name: `${selectedTemplate.name} — Источник`,
         type: selectedTemplate.sourceType,
         connection: { ...selectedTemplate.defaultConnection, ...fieldValues },
@@ -85,7 +85,7 @@ export function ChannelWizard({ open, onOpenChange }: Props) {
       }
 
       // 3. Create channel
-      const channel = createChannel({
+      const channel = await createChannel({
         name: channelName,
         sourceIds: [source.id],
         templateId: selectedTemplate.id,

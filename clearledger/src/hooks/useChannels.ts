@@ -15,7 +15,7 @@ export function useChannels() {
   const { companyId } = useCompany()
   return useQuery({
     queryKey: keys.all(companyId),
-    queryFn: () => svc.getChannels(companyId),
+    queryFn: () => svc.loadChannels(companyId),
     refetchInterval: 30_000,
   })
 }

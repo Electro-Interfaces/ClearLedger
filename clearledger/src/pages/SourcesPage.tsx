@@ -3,7 +3,7 @@
  * Настройка URL, credentials, типов документов.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +14,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { getSources, createSource, updateSource, deleteSource } from '@/services/sourceService'
+import { getSources, loadSources, createSource, updateSource, deleteSource } from '@/services/sourceService'
+import { useCompany } from '@/contexts/CompanyContext'
 import { SOURCE_TYPE_META, type SourceType, type Source } from '@/types/channel'
 import { stsTestConnection } from '@/services/fuel/stsApiClient'
 import { mstoTestConnection } from '@/services/msto/mstoApiClient'
@@ -67,8 +68,8 @@ function RestConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s
     else toast.error(result.error ?? 'Ошибка подключения')
   }
 
-  function handleSave() {
-    const updated = updateSource(source.id, {
+  async function handleSave() {
+    const updated = await updateSource(source.id, {
       connection: { url, login, password, systemCode },
       status: testOk ? 'connected' : source.status,
     })
@@ -156,8 +157,8 @@ function MstoConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s
     else toast.error(result.error ?? 'Ошибка подключения MSTO')
   }
 
-  function handleSave() {
-    const updated = updateSource(source.id, {
+  async function handleSave() {
+    const updated = await updateSource(source.id, {
       connection: { url, login, password },
       status: testOk ? 'connected' : source.status,
     })
@@ -239,8 +240,8 @@ function TradecorpConnectionForm({ source, onUpdate }: { source: Source; onUpdat
     else toast.error(result.error ?? 'Ошибка подключения TradeCorp')
   }
 
-  function handleSave() {
-    const updated = updateSource(source.id, {
+  async function handleSave() {
+    const updated = await updateSource(source.id, {
       connection: { url, login, password, emitentId },
       status: testOk ? 'connected' : source.status,
     })
@@ -383,21 +384,27 @@ export function SourcesPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<SourceType>('rest')
+  const { companyId } = useCompany()
 
   function refresh() { setSources(getSources()) }
 
-  function handleCreate() {
+  // API-режим: гидрация кэша источников из бэкенда при монтировании
+  useEffect(() => {
+    void loadSources(companyId).then(refresh).catch(() => { /* офлайн → localStorage */ })
+  }, [companyId])
+
+  async function handleCreate() {
     if (!newName.trim()) return
-    createSource({ name: newName, type: newType })
+    await createSource({ name: newName, type: newType })
     refresh()
     setDialogOpen(false)
     setNewName('')
     toast.success('Источник создан')
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     if (!confirm('Удалить источник?')) return
-    deleteSource(id)
+    await deleteSource(id)
     refresh()
     toast.success('Источник удалён')
   }

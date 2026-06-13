@@ -41,7 +41,7 @@ export async function quickSetup(params: QuickSetupParams): Promise<QuickSetupRe
   // 2. Найти или создать источник STS
   let source = getSources().find((s) => s.type === 'rest' && s.name.includes('STS'))
   if (!source) {
-    source = createSource({
+    source = await createSource({
       name: 'STS API ГИГ',
       type: 'rest',
       description: 'API системы управления АЗС (pos.autooplata.ru/tms)',
@@ -54,14 +54,14 @@ export async function quickSetup(params: QuickSetupParams): Promise<QuickSetupRe
     })
   } else {
     // Обновить credentials
-    source = updateSource(source.id, {
+    source = (await updateSource(source.id, {
       connection: {
         url: 'https://pos.autooplata.ru/tms',
         login: params.login,
         password: params.password,
         systemCode: String(systemCode),
       },
-    })!
+    }))!
   }
 
   // 3. Проверить подключение
@@ -79,7 +79,7 @@ export async function quickSetup(params: QuickSetupParams): Promise<QuickSetupRe
   // 4. Найти или создать канал
   let channel = getChannels().find((ch) => ch.name === 'Загрузка сменных отчётов')
   if (!channel) {
-    channel = createChannel({
+    channel = await createChannel({
       name: 'Загрузка сменных отчётов',
       sourceIds: [source.id],
       description: `Сменные отчёты с АЗС сети ГИГ (сеть ${systemCode})`,

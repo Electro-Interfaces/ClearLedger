@@ -44,6 +44,14 @@ class ChannelUpdate(BaseModel):
     status: str | None = None          # active | paused | draft
     schedule: dict[str, Any] | None = None
     duplicate_policy: str | None = None
+    config: dict[str, Any] | None = None    # станции, reconcile_rules и пр.
+    period_days: int | None = None
+
+
+class StreamCreate(BaseModel):
+    source_id: str
+    doc_type_id: str | None = None
+    name: str | None = None
 
 
 class ChannelResponse(BaseModel):
@@ -55,6 +63,9 @@ class ChannelResponse(BaseModel):
     template_id: str | None
     schedule: dict[str, Any]
     duplicate_policy: str
+    config: dict[str, Any] = {}
+    period_days: int = 30
+    last_sync_at: str | None = None
     streams: list[dict]
     stages: list[dict]
     skipped_streams: list[str] = []     # потоки без привязанного источника
@@ -101,6 +112,8 @@ async def _resp(db: AsyncSession, ch: Channel, skipped: list[str] | None = None)
         id=str(ch.id), company_id=str(ch.company_id), name=ch.name,
         description=ch.description, status=ch.status, template_id=ch.template_id,
         schedule=ch.schedule or {}, duplicate_policy=ch.duplicate_policy,
+        config=ch.config or {}, period_days=int(ch.period_days or 30),
+        last_sync_at=ch.last_sync_at.isoformat() if ch.last_sync_at else None,
         streams=[{
             "id": str(s.id), "source_id": str(s.source_id),
             "doc_type_id": s.doc_type_id, "name": s.name, "enabled": s.enabled,
@@ -190,6 +203,10 @@ async def update_channel(
         ch.schedule = payload.schedule
     if payload.duplicate_policy is not None:
         ch.duplicate_policy = payload.duplicate_policy
+    if payload.config is not None:
+        ch.config = {**(ch.config or {}), **payload.config}   # мердж (станции/правила)
+    if payload.period_days is not None:
+        ch.period_days = payload.period_days
     await db.flush()
     return await _resp(db, ch)
 
@@ -201,6 +218,40 @@ async def delete_channel(channel_id: uuid.UUID, db: AsyncSession = Depends(get_d
         raise HTTPException(404, "Канал не найден")
     await db.delete(ch)   # streams/stages каскадом (FK ondelete=CASCADE)
     return {"deleted": str(channel_id)}
+
+
+@router.post("/{channel_id}/streams", response_model=ChannelResponse)
+async def add_stream(
+    channel_id: uuid.UUID, payload: StreamCreate, db: AsyncSession = Depends(get_db)
+):
+    """Привязать источник (поток) к каналу."""
+    ch = await db.get(Channel, channel_id)
+    if not ch:
+        raise HTTPException(404, "Канал не найден")
+    src = await db.get(Source, uuid.UUID(payload.source_id))
+    if not src:
+        raise HTTPException(404, "Источник не найден")
+    db.add(ChannelStream(
+        channel_id=ch.id, source_id=src.id,
+        doc_type_id=payload.doc_type_id, name=payload.name or src.name,
+    ))
+    await db.flush()
+    return await _resp(db, ch)
+
+
+@router.delete("/{channel_id}/streams/{stream_id}", response_model=ChannelResponse)
+async def remove_stream(
+    channel_id: uuid.UUID, stream_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+):
+    """Отвязать поток от канала."""
+    ch = await db.get(Channel, channel_id)
+    if not ch:
+        raise HTTPException(404, "Канал не найден")
+    st = await db.get(ChannelStream, stream_id)
+    if st and st.channel_id == ch.id:
+        await db.delete(st)
+        await db.flush()
+    return await _resp(db, ch)
 
 
 @router.post("/{channel_id}/run")

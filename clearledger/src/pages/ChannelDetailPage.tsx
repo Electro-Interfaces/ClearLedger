@@ -3,7 +3,7 @@
  * /channels/:id — вкладки: Обзор, Источники, Обработка, Сверка, Данные, Лог.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -12,8 +12,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { getChannel, updateChannel, addSourceToChannel, removeSourceFromChannel } from '@/services/channelService'
-import { getSources } from '@/services/sourceService'
+import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel } from '@/services/channelService'
+import { getSources, loadSources } from '@/services/sourceService'
+import { isApiEnabled } from '@/services/apiClient'
+import { useCompany } from '@/contexts/CompanyContext'
 import { getLocations } from '@/services/locationService'
 import { useFilters } from '@/contexts/FilterContext'
 import { StationsSelectorDialog } from '@/components/stations/StationsSelectorDialog'
@@ -92,10 +94,10 @@ function ScheduleCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: 
     current.mode === 'manual' ? 'manual' :
     current.interval ? `i${current.interval}` : 'manual'
 
-  function pick(key: string) {
+  async function pick(key: string) {
     const preset = SCHEDULE_PRESETS.find((p) => p.key === key)
     if (!preset) return
-    const updated = updateChannel(channel.id, {
+    const updated = await updateChannel(channel.id, {
       schedule: preset.mode === 'manual'
         ? { mode: 'manual', pauseOnError: true, maxRetries: 3 }
         : { mode: 'interval', intervalMinutes: preset.intervalMinutes, pauseOnError: true, maxRetries: 3 },
@@ -159,9 +161,9 @@ function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
   const months = useMemo(() => lastNMonths(12), [])
   const selected = useMemo(() => new Set(cfgMonths), [cfgMonths.join(',')])
 
-  function save(next: Set<string>) {
+  async function save(next: Set<string>) {
     const arr = months.filter((m) => next.has(m))
-    const updated = updateChannel(channel.id, {
+    const updated = await updateChannel(channel.id, {
       config: { ...channel.config, months: arr },
     })
     if (updated) onUpdate(updated)
@@ -291,9 +293,9 @@ function StationsCard({
     [stsSource?.id, channel.id, channelStations.length],
   )
 
-  function saveSelected(next: Array<{ code: number; systemId: number; name: string; locationId?: string }>) {
+  async function saveSelected(next: Array<{ code: number; systemId: number; name: string; locationId?: string }>) {
     next.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
-    const updated = updateChannel(channel.id, {
+    const updated = await updateChannel(channel.id, {
       config: { ...channel.config, stations: next, stationCodes: undefined },
     })
     if (updated) onUpdate(updated)
@@ -565,9 +567,9 @@ function SourcesTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
   const connected = allSources.filter((s) => channelSourceIds.includes(s.id))
   const [addingSourceId, setAddingSourceId] = useState('')
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!addingSourceId) return
-    const updated = addSourceToChannel(channel.id, addingSourceId)
+    const updated = await addSourceToChannel(channel.id, addingSourceId)
     if (updated) {
       onUpdate(updated)
       setAddingSourceId('')
@@ -575,8 +577,8 @@ function SourcesTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
     }
   }
 
-  function handleRemove(sourceId: string) {
-    const updated = removeSourceFromChannel(channel.id, sourceId)
+  async function handleRemove(sourceId: string) {
+    const updated = await removeSourceFromChannel(channel.id, sourceId)
     if (updated) {
       onUpdate(updated)
       toast.success('Источник отключён')
@@ -629,8 +631,8 @@ function SourcesTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
                         {streams.map((st) => (
                           <div key={st.id} className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Checkbox checked={st.enabled} className="h-3 w-3"
-                              onCheckedChange={(checked) => {
-                                const updated = updateChannel(channel.id, {
+                              onCheckedChange={async (checked) => {
+                                const updated = await updateChannel(channel.id, {
                                   streams: channel.streams.map((s) =>
                                     s.id === st.id ? { ...s, enabled: !!checked } : s
                                   ),
@@ -682,8 +684,8 @@ function SourcesTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
 function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
   const stages = [...channel.stages].sort((a, b) => a.order - b.order)
 
-  function toggleStage(stageId: string) {
-    const updated = updateChannel(channel.id, {
+  async function toggleStage(stageId: string) {
+    const updated = await updateChannel(channel.id, {
       stages: channel.stages.map((s) =>
         s.id === stageId ? { ...s, enabled: !s.enabled } : s
       ),
@@ -691,8 +693,8 @@ function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
     if (updated) onUpdate(updated)
   }
 
-  function removeStage(stageId: string) {
-    const updated = updateChannel(channel.id, {
+  async function removeStage(stageId: string) {
+    const updated = await updateChannel(channel.id, {
       stages: channel.stages.filter((s) => s.id !== stageId),
     })
     if (updated) onUpdate(updated)
@@ -781,15 +783,15 @@ function ProcessingParametersCard({
   const primaryDocType = channel.streams?.find((s) => s.enabled)?.docTypeId
   const cfg = channel.config ?? {}
 
-  function update(patch: Record<string, any>) {
-    const updated = updateChannel(channel.id, {
+  async function update(patch: Record<string, any>) {
+    const updated = await updateChannel(channel.id, {
       config: { ...channel.config, ...patch },
     })
     if (updated) onUpdate(updated)
   }
 
-  function updatePolicy(value: DuplicatePolicy) {
-    const updated = updateChannel(channel.id, { duplicatePolicy: value })
+  async function updatePolicy(value: DuplicatePolicy) {
+    const updated = await updateChannel(channel.id, { duplicatePolicy: value })
     if (updated) onUpdate(updated)
   }
 
@@ -1348,6 +1350,14 @@ export function ChannelDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>('overview')
   const [syncing, setSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState('')
+  const { companyId } = useCompany()
+
+  // API-режим: гидрация источников+каналов из бэкенда при монтировании
+  useEffect(() => {
+    void Promise.all([loadSources(companyId), loadChannels(companyId)])
+      .then(() => { if (id) setChannel(getChannel(id)) })
+      .catch(() => { /* офлайн → localStorage */ })
+  }, [companyId, id])
 
   if (!channel) {
     return (
@@ -1368,7 +1378,14 @@ export function ChannelDetailPage() {
     setSyncing(true)
     setSyncProgress('Запуск...')
     try {
-      // Если канал извлекает из сменных отчётов — другой pipeline
+      if (isApiEnabled()) {
+        // API-режим: прогон через бэкенд-оркестратор (fetch→normalize→save)
+        const res = await runChannel(channel.id)
+        refresh()
+        toast.success(res?.message || 'Канал запущен (бэкенд)')
+        return
+      }
+      // localStorage-режим: клиентский pipeline
       if (channel.config?.extractFrom === 'shift_reports') {
         await extractDeliveries(channel, {
           onProgress: (_l, _t, msg) => setSyncProgress(msg),

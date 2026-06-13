@@ -3,19 +3,21 @@
  * Клик → /channels/:id (детальная страница с вкладками).
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { getChannels, deleteChannel } from '@/services/channelService'
-import { getSources } from '@/services/sourceService'
+import { getChannels, loadChannels, deleteChannel } from '@/services/channelService'
+import { getSources, loadSources } from '@/services/sourceService'
+import { useCompany } from '@/contexts/CompanyContext'
 import { getChannelSourceIds } from '@/types/channel'
 import type { Channel } from '@/types/channel'
-import { Plus, Trash2, Radio, Database, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Radio, Database, ChevronRight, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ChannelWizard } from '@/components/channels/ChannelWizard'
+import { ScheduleOverview } from '@/components/channels/ScheduleOverview'
 
 const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   active: { label: 'Активен', variant: 'default' },
@@ -82,13 +84,21 @@ function ChannelListItem({ channel, onDelete }: { channel: Channel; onDelete: ()
 export function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>(getChannels)
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const navigate = useNavigate()
+  const { companyId } = useCompany()
 
   function refresh() { setChannels(getChannels()) }
 
-  function handleDelete(id: string) {
+  // API-режим: гидрация источников+каналов из бэкенда при монтировании
+  useEffect(() => {
+    void Promise.all([loadSources(companyId), loadChannels(companyId)])
+      .then(refresh).catch(() => { /* офлайн → localStorage */ })
+  }, [companyId])
+
+  async function handleDelete(id: string) {
     if (!confirm('Удалить обработку и все её данные?')) return
-    deleteChannel(id)
+    await deleteChannel(id)
     refresh()
   }
 
@@ -101,13 +111,20 @@ export function ChannelsPage() {
             Комбинация источников → загрузка → сверка → результат
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setWizardOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Создать обработку
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setScheduleOpen(true)}>
+            <Clock className="h-4 w-4" />
+            Расписание
+          </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setWizardOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Создать обработку
+          </Button>
+        </div>
       </div>
 
       <ChannelWizard open={wizardOpen} onOpenChange={(v) => { setWizardOpen(v); if (!v) refresh() }} />
+      <ScheduleOverview open={scheduleOpen} onOpenChange={setScheduleOpen} />
 
       {channels.length === 0 ? (
         <Card>

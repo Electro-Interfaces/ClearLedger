@@ -33,6 +33,8 @@ export interface Source {
   docTypes: SourceDocType[]
   /** Сообщение об ошибке */
   errorMessage?: string
+  /** Реальный source_type бэкенда (sts|onec_operational|…) — round-trip в API-режиме */
+  backendType?: string
   createdAt: string
   updatedAt: string
 }

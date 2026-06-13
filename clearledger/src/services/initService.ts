@@ -4,13 +4,17 @@
 
 import { getSources, createSource, updateSource } from './sourceService'
 import { getChannels, createChannel, updateChannel } from './channelService'
+import { isApiEnabled } from './apiClient'
 import { getSettings } from './settingsService'
 import { getLocations, createLocation } from './locationService'
 import { nanoid } from 'nanoid'
 
 const INIT_KEY = 'gig-initialized'
 
-export function initDefaults() {
+export async function initDefaults() {
+  // В API-режиме данные ведёт бэкенд — НЕ сеем localStorage-дефолты
+  // (кэш при старте пуст → иначе создались бы дубли источников/каналов).
+  if (isApiEnabled()) return
   if (localStorage.getItem(INIT_KEY)) {
     initReconciliationSources()
     initServiceLocations()
@@ -28,7 +32,7 @@ export function initDefaults() {
   // Источник STS — единый для всей сети АЗС ГИГ.
   // system_id 65 и 15 — технические коды STS, не разные компании.
   // Канал/импорт выбирает нужную сеть из списка через filters.
-  const source = createSource({
+  const source = await createSource({
     name: 'STS API ГИГ',
     type: 'rest',
     description: 'API управления АЗС ГИГ (pos.autooplata.ru/tms) — обе технические сети 65 и 15',
@@ -43,7 +47,7 @@ export function initDefaults() {
   // Канал 1: «Загрузка сменных отчётов»
   // Стартовый набор — пилотная АЗС 5 в сети 65. Менеджер добавит остальные
   // станции через UI (диалог «Выбрать из справочника»).
-  const shiftChannel = createChannel({
+  const shiftChannel = await createChannel({
     name: 'Загрузка сменных отчётов',
     sourceIds: [source.id],
     description: 'Сменные отчёты с АЗС сети ГИГ',
