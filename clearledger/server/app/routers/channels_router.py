@@ -253,7 +253,7 @@ async def ingest_channel(
     ch = await db.get(Channel, channel_id)
     if not ch:
         raise HTTPException(404, "Канал не найден")
-    result = await ingest_packages(db, ch.company_id, payload.packages)
+    result = await ingest_packages(db, ch.company_id, payload.packages, channel_id=ch.id)
     log = ChannelSyncLog(
         channel_id=ch.id,
         status="success" if not result["skipped_kinds"] else "partial",

@@ -17,24 +17,42 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DataEntry
+from app.services import mapping
 from app.services.cb_normalize import normalize_shift_package
+
+
+def _apply_paytype(entry: dict, paymap: dict[str, str]) -> None:
+    """Резолв канонической формы оплаты в секции 'оплаты' (канальный маппинг)."""
+    sec = (entry.get("meta", {}).get("Секции", {}) or {}).get("оплаты")
+    if not sec:
+        return
+    for row in sec.get("строки", []):
+        row["ФормаОплатыКанон"] = mapping.apply("paytype", row.get("ФормаОплаты"), paymap)
 
 
 async def ingest_packages(
     db: AsyncSession,
     company_id: uuid.UUID,
     packages: list[dict],
+    channel_id: uuid.UUID | None = None,
 ) -> dict:
-    """Нормализовать пакеты смен и идемпотентно записать в L2 (DataEntry)."""
+    """Нормализовать пакеты смен и идемпотентно записать в L2 (DataEntry).
+
+    Маппинг уровня канала применяется в рантайме: форма оплаты → канон
+    (channel-override → company-default → сид) через services/mapping.
+    """
     created = 0
     updated = 0
     shifts = 0
     skipped: list[str] = []
+    paymap = await mapping.load_kind_map(db, company_id, "paytype", channel_id)
 
     for pkg in packages:
         res = normalize_shift_package(pkg)
         shifts += 1
         skipped.extend(res.get("skipped", []))
+        for _e in res["entries"]:
+            _apply_paytype(_e, paymap)
 
         for draft in res["entries"]:
             sid = draft["source_id"]

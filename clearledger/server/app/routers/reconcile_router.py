@@ -11,14 +11,18 @@ TS-движков на боевых ГИГ) — операционный шаг,
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import get_db
 from app.reconcile_catalog import list_reconcile_rules
 from app.services.reconcile.engine import run_reconcile
 from app.services.recon_run import run_rule as run_rule_live
+from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/reconcile", tags=["reconcile"])
 
@@ -53,19 +57,25 @@ class RunRuleRequest(BaseModel):
     password: str
     system: int = 65
     station_ids: list[Any] | None = None
+    company_id: str | None = None   # для канального маппинга топлива/станций
+    channel_id: str | None = None
 
 
 @router.post("/run-rule")
-async def run_rule_endpoint(req: RunRuleRequest):
+async def run_rule_endpoint(req: RunRuleRequest, db: AsyncSession = Depends(get_db)):
     """Backend-исполнение разреза corp/online на живых потоках (КАНДИДАТ, §6.4).
 
-    Тянет TF (STS) + внешний (TradeCorp/MSTO), прогоняет ReconcileEngine.
-    Сверять с golden (frontend) через /reconcile/diff до замены.
+    Тянет TF (STS) + внешний (TradeCorp/MSTO), прогоняет ReconcileEngine с
+    канальным маппингом топлива/станций. Сверять с golden (frontend) через
+    /reconcile/diff до замены.
     """
+    cid = await resolve_company_id(req.company_id, db) if req.company_id else None
+    chid = uuid.UUID(req.channel_id) if req.channel_id else None
     return await run_rule_live(
         req.rule_id, req.date_from, req.date_to,
         base_url=req.base_url, login=req.login, password=req.password,
         system=req.system, station_ids=req.station_ids,
+        db=db, company_id=cid, channel_id=chid,
     )
 
 

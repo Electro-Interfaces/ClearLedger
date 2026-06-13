@@ -35,11 +35,14 @@ def _last4(card: Any) -> str:
     return s[-4:] if len(s) >= 4 else s
 
 
-def _fuel(name: Any) -> str:
-    """Нормализация топлива — канон-СИД (services/mapping). Канальный override
-    (ReconcileMapping channel_id) применяется через mapping.resolve при наличии
-    db+channel контекста (стадия нормализации потока канала)."""
-    return mapping.normalize_default("fuel", name)
+def _fuel(name: Any, fmap: dict[str, str] | None = None) -> str:
+    """Топливо → канон: канальный маппинг (fmap) поверх канон-сида."""
+    return mapping.apply("fuel", name, fmap or {})
+
+
+def _station(st: Any, smap: dict[str, str] | None = None) -> str:
+    """Станция → канон по канальному маппингу (если задан)."""
+    return mapping.apply("station", st, smap or {})
 
 
 def _ts(val: Any) -> float | None:
@@ -57,13 +60,13 @@ def _ts(val: Any) -> float | None:
         return None
 
 
-def _tf_record(tx: dict) -> dict:
+def _tf_record(tx: dict, fmap: dict, smap: dict) -> dict:
     """STS /v2/transactions item → запись движка (anchor)."""
     svc = tx.get("service") or {}
     card = tx.get("card") or {}
     return {
-        "station": str(tx.get("station") or ""),
-        "fuel": _fuel(svc.get("service_name") or svc.get("service_code") or tx.get("fuel")),
+        "station": _station(tx.get("station"), smap),
+        "fuel": _fuel(svc.get("service_name") or svc.get("service_code") or tx.get("fuel"), fmap),
         "occurred_at": _ts(tx.get("dt") or tx.get("time") or tx.get("date")),
         "amount": float(tx.get("cost") or tx.get("amount") or 0),
         "volume": float(tx.get("volume") or tx.get("quantity") or 0),
@@ -71,12 +74,12 @@ def _tf_record(tx: dict) -> dict:
     }
 
 
-def _corp_record(tx: dict) -> dict:
+def _corp_record(tx: dict, fmap: dict, smap: dict) -> dict:
     """TradeCorp normalized tx → запись движка (external corp)."""
     cheque = (tx.get("cheque") or [{}])[0]
     return {
-        "station": str(tx.get("stationNumber") or ""),
-        "fuel": _fuel(cheque.get("productName") or tx.get("operationName")),
+        "station": _station(tx.get("stationNumber"), smap),
+        "fuel": _fuel(cheque.get("productName") or tx.get("operationName"), fmap),
         "occurred_at": _ts(tx.get("date")),
         "amount": float(tx.get("cost") or 0),
         "volume": float(tx.get("quantity") or 0),
@@ -84,11 +87,11 @@ def _corp_record(tx: dict) -> dict:
     }
 
 
-def _msto_record(tx: dict) -> dict:
+def _msto_record(tx: dict, fmap: dict, smap: dict) -> dict:
     """MSTO tx → запись движка (external online)."""
     return {
-        "station": str(tx.get("stationNumber") or tx.get("servicePointId") or ""),
-        "fuel": _fuel(tx.get("fuelName") or tx.get("productName")),
+        "station": _station(tx.get("stationNumber") or tx.get("servicePointId"), smap),
+        "fuel": _fuel(tx.get("fuelName") or tx.get("productName"), fmap),
         "occurred_at": _ts(tx.get("date") or tx.get("orderDate")),
         "amount": float(tx.get("amount") or tx.get("cost") or 0),
         "volume": float(tx.get("volume") or tx.get("quantity") or 0),
@@ -105,8 +108,15 @@ async def run_rule(
     password: str,
     system: int,
     station_ids: list | None = None,
+    db: Any = None,
+    company_id: Any = None,
+    channel_id: Any = None,
 ) -> dict[str, Any]:
-    """Исполнить разрез corp_fuel/online_fuel движком на живых потоках (КАНДИДАТ)."""
+    """Исполнить разрез corp_fuel/online_fuel движком на живых потоках (КАНДИДАТ).
+
+    Маппинг топлива/станций — канальный (channel_id) поверх company-default и
+    канон-сида (services/mapping), если передан db+company_id; иначе только сид.
+    """
     rule = _RULES.get(rule_id)
     if not rule:
         return {"status": "error", "message": f"разрез '{rule_id}' не найден"}
@@ -114,19 +124,26 @@ async def run_rule(
     if ext_type is None:
         return {"status": "error", "message": f"для '{rule_id}' нет backend-фетча внешнего потока"}
 
+    # карты маппинга (канал → компания → сид)
+    if db is not None and company_id is not None:
+        fmap = await mapping.load_kind_map(db, company_id, "fuel", channel_id)
+        smap = await mapping.load_kind_map(db, company_id, "station", channel_id)
+    else:
+        fmap, smap = {}, {}
+
     # anchor: TF (STS транзакции)
     tf = await sts_get_transactions(base_url, login, password, system, date_from, date_to)
-    anchor = [_tf_record(t) for t in tf]
+    anchor = [_tf_record(t, fmap, smap) for t in tf]
 
     # external: TradeCorp | MSTO
     if ext_type == "tradecorp":
         resp = await reconciliation_proxy.tradecorp_transactions(date_from, date_to, station_ids)
-        external = [_corp_record(t) for t in (resp.get("transactions") or [])]
+        external = [_corp_record(t, fmap, smap) for t in (resp.get("transactions") or [])]
     else:
         resp = await reconciliation_proxy.msto_transactions(
             {"dt_beg": date_from, "dt_end": date_to})
         items = resp if isinstance(resp, list) else (resp.get("transactions") or resp.get("items") or [])
-        external = [_msto_record(t) for t in items]
+        external = [_msto_record(t, fmap, smap) for t in items]
 
     result = run_reconcile(rule, {"anchor": anchor, "external": external})
     result["provenance"]["status"] = "candidate"

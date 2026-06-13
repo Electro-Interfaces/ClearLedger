@@ -78,7 +78,7 @@ async def _run_cb(db: AsyncSession, channel: Channel, src: Source) -> dict[str, 
     pf, pt = _period(channel)
     async with OneCComClient(conn) as client:
         packages = await client.fetch_cb_shifts(pf, pt, station=station, limit=200)
-    result = await ingest_packages(db, channel.company_id, packages)
+    result = await ingest_packages(db, channel.company_id, packages, channel_id=channel.id)
     return {"status": "success", "kind": "cb", "period": [pf, pt], "station": station, **result}
 
 

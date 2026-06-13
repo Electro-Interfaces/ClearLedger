@@ -54,6 +54,45 @@ def normalize_default(kind: str, source_key) -> str:
     return _SEEDS.get(kind, {}).get(raw.lower(), raw)
 
 
+async def load_kind_map(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    kind: str,
+    channel_id: uuid.UUID | None = None,
+) -> dict[str, str]:
+    """Карта {source_key.lower(): target} для вида — ОДНИМ запросом на прогон.
+
+    channel-override поверх company-default (channel выигрывает). Применять через
+    apply(); чего нет в карте — фолбэк на канон-сид (normalize_default).
+    """
+    rows = (
+        await db.execute(
+            select(ReconcileMapping).where(
+                ReconcileMapping.company_id == company_id,
+                ReconcileMapping.kind == kind,
+            )
+        )
+    ).scalars().all()
+    company_map: dict[str, str] = {}
+    channel_map: dict[str, str] = {}
+    for m in rows:
+        tgt = m.target_name or m.target_ref
+        if not tgt:
+            continue
+        key = str(m.source_key or "").strip().lower()
+        if m.channel_id is None:
+            company_map[key] = tgt
+        elif channel_id is not None and m.channel_id == channel_id:
+            channel_map[key] = tgt
+    return {**company_map, **channel_map}
+
+
+def apply(kind: str, value, kind_map: dict[str, str]) -> str:
+    """Применить загруженную карту: override → канон-сид → как есть."""
+    raw = str(value or "").strip()
+    return kind_map.get(raw.lower()) or normalize_default(kind, raw)
+
+
 async def resolve(
     db: AsyncSession,
     company_id: uuid.UUID,
