@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.channel_catalog import get_channel_template
 from app.database import get_db
 from app.models import Channel, ChannelStage, ChannelStream, ChannelSyncLog, Source
+from app.services.cb_intake import ingest_packages
 from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/channels", tags=["channels"])
@@ -223,3 +224,36 @@ async def run_channel(channel_id: uuid.UUID, db: AsyncSession = Depends(get_db))
     ch.last_sync_at = datetime.now(timezone.utc)
     await db.flush()
     return {"sync_log_id": str(log.id), "status": log.status, "note": "execution pending engine"}
+
+
+class IngestRequest(BaseModel):
+    packages: list[dict[str, Any]]   # пакеты смен ЦБ (контракт .epf v2)
+
+
+@router.post("/{channel_id}/ingest")
+async def ingest_channel(
+    channel_id: uuid.UUID, payload: IngestRequest, db: AsyncSession = Depends(get_db)
+):
+    """Принять пакеты смен ЦБ в L2 (нормализация + идемпотентная запись DataEntry).
+
+    Стадии normalize+save канала сопутки/общепита. Пакеты даёт стадия fetch
+    (onec_operational через com_worker) — здесь принимаем готовые пакеты.
+    """
+    ch = await db.get(Channel, channel_id)
+    if not ch:
+        raise HTTPException(404, "Канал не найден")
+    result = await ingest_packages(db, ch.company_id, payload.packages)
+    log = ChannelSyncLog(
+        channel_id=ch.id,
+        status="success" if not result["skipped_kinds"] else "partial",
+        loaded=result["created"],
+        duplicates=result["updated"],
+        events=[{"level": "info", "event": "ingest",
+                 "message": f"смен={result['shifts']} создано={result['created']} "
+                            f"обновлено={result['updated']} пропущено_kind={result['skipped_kinds']}"}],
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(log)
+    ch.last_sync_at = datetime.now(timezone.utc)
+    await db.flush()
+    return {"sync_log_id": str(log.id), **result}
