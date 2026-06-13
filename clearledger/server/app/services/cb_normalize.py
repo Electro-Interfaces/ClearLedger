@@ -60,6 +60,52 @@ def _expand_dish(line: dict, recipes: dict[str, list[dict]]) -> list[dict]:
     return out
 
 
+def _sum(rows: list[dict], field: str = "Сумма") -> float:
+    return round(sum(float(r.get(field, 0) or 0) for r in rows), 2)
+
+
+def _build_sections(doc: dict, recipes: dict[str, list[dict]]) -> tuple[dict, bool]:
+    """Разбить ОРП на ТИПИЗИРОВАННЫЕ секции (разное действие у каждой).
+
+    Возврат: ({секция: {действие, строки, сумма,…}}, содержит_блюда).
+    """
+    soputka: list[dict] = []
+    obshepit: list[dict] = []
+    has_dish = False
+
+    for ln in doc.get("Товары", []) or []:
+        is_dish = bool(ln.get("ЭтоБлюдо")) or str(ln.get("КлассSKU", "")).strip() == "Общепит"
+        if is_dish:
+            has_dish = True
+            ln = dict(ln)
+            ing = _expand_dish(ln, recipes)
+            if ing:
+                ln["Ингредиенты"] = ing
+            obshepit.append(ln)
+        else:
+            soputka.append(ln)
+
+    vozvraty = list(doc.get("ВозвращенныеТовары", []) or [])
+    oplaty = list(doc.get("Оплаты", []) or [])
+
+    sections: dict[str, Any] = {}
+    if soputka:
+        sections["продажа_сопутка"] = {
+            "действие": "розн_продажа_товара",  # Кт 90.01.1 / Дт 90.02.1 Кт 41.02 (товар)
+            "строки": soputka, "сумма": _sum(soputka), "сумма_ндс": _sum(soputka, "СуммаНДС"),
+        }
+    if obshepit:
+        sections["продажа_общепит"] = {
+            "действие": "розн_продажа_блюда_разворот_ТТК",  # Дт 90.02.1 Кт 41.02 (ингредиенты)
+            "строки": obshepit, "сумма": _sum(obshepit), "сумма_ндс": _sum(obshepit, "СуммаНДС"),
+        }
+    if vozvraty:
+        sections["возвраты"] = {"действие": "сторно_продажи", "строки": vozvraty, "сумма": _sum(vozvraty)}
+    if oplaty:
+        sections["оплаты"] = {"действие": "разнесение_оплат", "строки": oplaty}
+    return sections, has_dish
+
+
 def normalize_shift_package(package: dict) -> dict:
     """Пакет смены ЦБ → черновики DataEntry (L2 CLEAN).
 
@@ -96,19 +142,22 @@ def normalize_shift_package(package: dict) -> dict:
             continue
 
         doc_meta: dict[str, Any] = dict(d)
-
-        # Разворот блюд для розничной продажи (модель B)
-        has_dish = False
-        if kind == "retail_sale_sidegoods":
-            for ln in doc_meta.get("Товары", []) or []:
-                if ln.get("ЭтоБлюдо") or str(ln.get("КлассSKU", "")).strip() == "Общепит":
-                    has_dish = True
-                    ing = _expand_dish(ln, recipes)
-                    if ing:
-                        ln["Ингредиенты"] = ing
-
         src_uuid = str(d.get("ИсточникUUID", ""))
         title = f"{kind} · АЗС {station} · смена {shift.get('НомерСмены', '')}"
+        meta: dict[str, Any] = {"Смена": shift_meta, "kind": kind}
+
+        if kind == "retail_sale_sidegoods":
+            # ОРП → типизированные СЕКЦИИ (разное действие у каждой)
+            sections, has_dish = _build_sections(doc_meta, recipes)
+            # шапка документа без построчных ТЧ (строки — в секциях)
+            header = {k: v for k, v in doc_meta.items()
+                      if k not in ("Товары", "ВозвращенныеТовары", "Оплаты")}
+            meta["Документ"] = header
+            meta["Секции"] = sections
+            meta["СодержитБлюда"] = has_dish
+        else:
+            # одно-действийные документы (purchase/production_release/…) — без секций
+            meta["Документ"] = doc_meta
 
         entries.append({
             "title": title,
@@ -121,12 +170,7 @@ def normalize_shift_package(package: dict) -> dict:
             "source_id": f"{skey}:{kind}:{src_uuid}",
             "layer": "clean",
             "status": "verified",
-            "meta": {
-                "Смена": shift_meta,
-                "kind": kind,
-                "СодержитБлюда": has_dish,
-                "Документ": doc_meta,
-            },
+            "meta": meta,
         })
 
     return {"shift_key": skey, "station": station, "entries": entries, "skipped": skipped}

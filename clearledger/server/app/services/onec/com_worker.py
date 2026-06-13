@@ -608,6 +608,115 @@ def op_count_entity(entity: str, filter: str | None = None) -> int:  # noqa: A00
     return int(_val(sel.Cnt) or 0)
 
 
+def _xs(ib: Any, ref: Any) -> str:
+    """GUID-строка из ссылки (через XMLСтрока — str() COM-UUID не сериализует)."""
+    try:
+        return str(ib.XMLСтрока(ref.УникальныйИдентификатор()))
+    except Exception:
+        return ""
+
+
+def _dt_lit(s: str, end: bool = False) -> str:
+    """'2026-06-01' → литерал ДАТАВРЕМЯ(2026,6,1,0,0,0) / (…,23,59,59) для end."""
+    d = (s or "").strip()[:10].split("-")
+    if len(d) != 3:
+        return "2020,1,1,0,0,0"
+    tail = "23,59,59" if end else "0,0,0"
+    return f"{int(d[0])},{int(d[1])},{int(d[2])},{tail}"
+
+
+def _recipe_for_dish(ib: Any, nom_ref: Any) -> list[dict[str, Any]]:
+    """Актуальная ТТК блюда → ингредиенты [{НоменклатураUUID, Количество=Брутто}]."""
+    try:
+        q = ib.NewObject("Запрос")
+        q.Текст = ("ВЫБРАТЬ ПЕРВЫЕ 1 Документ КАК Док ИЗ "
+                   "РегистрСведений.ЗначенияТТКНоменклатуры.СрезПоследних ГДЕ Номенклатура = &Ном")
+        q.УстановитьПараметр("Ном", nom_ref)
+        s = q.Выполнить().Выбрать()
+        if not s.Следующий():
+            return []
+        ttk = s.Док.ПолучитьОбъект()
+        out = []
+        for j in range(ttk.Товары.Количество()):
+            rr = ttk.Товары.Получить(j)
+            out.append({"НоменклатураUUID": _xs(ib, rr.Номенклатура),
+                        "Количество": float(_val(rr.Брутто) or 0)})
+        return out
+    except Exception:
+        return []
+
+
+def _build_shift_package(ib: Any, orp: Any, station: str) -> dict[str, Any]:
+    """ОРП (объект) → пакет смены v2 (контракт .epf): Смена + retail_sale + recipe."""
+    tovary = []
+    recipes: list[dict[str, Any]] = []
+    seen_dish: set[str] = set()
+    for i in range(orp.Товары.Количество()):
+        r = orp.Товары.Получить(i)
+        klass = "Сопутка"
+        try:
+            if str(r.Номенклатура.ВидНоменклатуры).strip() == "Набор - комплект":
+                klass = "Общепит"
+        except Exception:
+            pass
+        nom_uuid = _xs(ib, r.Номенклатура)
+        is_dish = klass == "Общепит"
+        tovary.append({
+            "НомерСтроки": i + 1, "Номенклатура": nom_uuid,
+            "Количество": float(_val(r.Количество) or 0),
+            "Цена": float(_val(r.Цена) or 0), "Сумма": float(_val(r.Сумма) or 0),
+            "СуммаНДС": float(_val(getattr(r, "СуммаНДС", 0)) or 0),
+            "КлассSKU": klass, "ЭтоБлюдо": is_dish,
+        })
+        if is_dish and nom_uuid not in seen_dish:
+            seen_dish.add(nom_uuid)
+            ing = _recipe_for_dish(ib, r.Номенклатура)
+            if ing:
+                recipes.append({"Тип": "recipe", "БлюдоUUID": nom_uuid, "Ингредиенты": ing})
+
+    nomer = str(_val(orp.Номер) or "").strip()
+    doc = {
+        "Тип": "retail_sale_sidegoods", "ИсточникUUID": _xs(ib, orp.Ссылка),
+        "Номер": nomer, "Дата": str(_val(orp.Дата)),
+        "СуммаДокумента": float(_val(getattr(orp, "СуммаДокумента", 0)) or 0),
+        "Товары": tovary,
+    }
+    return {
+        "ВерсияФормата": "2",
+        "Смена": {
+            "КодАЗС": station, "НомерСмены": nomer, "ОСЭНомер": nomer,
+            "Открытие": str(_val(getattr(orp, "ДатаВремяОткрытия", ""))),
+            "Закрытие": str(_val(getattr(orp, "ДатаВремяЗакрытия", ""))),
+            "Склад": _xs(ib, orp.Склад), "Организация": _xs(ib, orp.Организация),
+        },
+        "Документы": recipes + [doc],
+    }
+
+
+def op_fetch_cb_shifts(period_from: str, period_to: str,
+                       station: str = "208", limit: int = 50) -> list[dict[str, Any]]:
+    """Извлечь смены ЦБ (сопутка/общепит) за период → пакеты v2 для cb_normalize.
+
+    Опорный = ОРП; Товары с КлассSKU/ЭтоБлюдо; блюда + recipe (ТТК). Read-only.
+    """
+    ib = _require_ib()
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        f"ВЫБРАТЬ ПЕРВЫЕ {int(limit)} Т.Ссылка КАК Ссылка ИЗ Документ.ОтчетОРозничныхПродажах КАК Т "
+        f"ГДЕ Т.Дата >= ДАТАВРЕМЯ({_dt_lit(period_from)}) И Т.Дата <= ДАТАВРЕМЯ({_dt_lit(period_to, True)}) "
+        f'И (Т.Склад.Наименование ПОДОБНО "%{station}%" ИЛИ Т.Подразделение.Наименование ПОДОБНО "%{station}%") '
+        f"УПОРЯДОЧИТЬ ПО Т.Дата"
+    )
+    sel = q.Выполнить().Выбрать()
+    packages = []
+    while sel.Следующий():
+        orp = sel.Ссылка.ПолучитьОбъект()
+        if orp.Товары.Количество() == 0:
+            continue
+        packages.append(_build_shift_package(ib, orp, station))
+    return packages
+
+
 def main() -> int:
     while True:
         line = sys.stdin.readline()
@@ -636,6 +745,8 @@ def main() -> int:
                 result = op_count_entity(**args)
             elif op == "fetch_doc_lines":
                 result = op_fetch_doc_lines(**args)
+            elif op == "fetch_cb_shifts":
+                result = op_fetch_cb_shifts(**args)
             elif op == "find_docs_by_nomenclature":
                 result = op_find_docs_by_nomenclature(**args)
             elif op == "fetch_postings":
