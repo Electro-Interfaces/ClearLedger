@@ -647,30 +647,40 @@ def _recipe_for_dish(ib: Any, nom_ref: Any) -> list[dict[str, Any]]:
 
 
 def _build_shift_package(ib: Any, orp: Any, station: str) -> dict[str, Any]:
-    """ОРП (объект) → пакет смены v2 (контракт .epf): Смена + retail_sale + recipe."""
+    """ОРП (объект) → пакет смены v2 (контракт .epf): Смена + retail_sale + recipe.
+
+    КлассSKU берём ЗАПРОСОМ через ПРЕДСТАВЛЕНИЕ(...ВидНоменклатуры): str() COM-объекта
+    enum'а не сериализуется (даёт <COMObject>), поэтому объектный доступ к виду НЕ
+    работает в Python-COM. «Набор - комплект» → Общепит (подтверждено на НЛ-208).
+    """
     tovary = []
     recipes: list[dict[str, Any]] = []
     seen_dish: set[str] = set()
-    for i in range(orp.Товары.Количество()):
-        r = orp.Товары.Получить(i)
-        klass = "Сопутка"
-        try:
-            if str(r.Номенклатура.ВидНоменклатуры).strip() == "Набор - комплект":
-                klass = "Общепит"
-        except Exception:
-            pass
-        nom_uuid = _xs(ib, r.Номенклатура)
+
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        "ВЫБРАТЬ Т.НомерСтроки КАК НС, Т.Номенклатура КАК Ном, "
+        "ПРЕДСТАВЛЕНИЕ(Т.Номенклатура.ВидНоменклатуры) КАК Вид, "
+        "Т.Количество КАК Кол, Т.Цена КАК Цена, Т.Сумма КАК Сум, Т.СуммаНДС КАК СНДС "
+        "ИЗ Документ.ОтчетОРозничныхПродажах.Товары КАК Т "
+        "ГДЕ Т.Ссылка = &Док УПОРЯДОЧИТЬ ПО Т.НомерСтроки"
+    )
+    q.УстановитьПараметр("Док", orp.Ссылка)
+    s = q.Выполнить().Выбрать()
+    while s.Следующий():
+        klass = "Общепит" if str(_val(s.Вид) or "").strip() == "Набор - комплект" else "Сопутка"
+        nom_uuid = _xs(ib, s.Ном)
         is_dish = klass == "Общепит"
         tovary.append({
-            "НомерСтроки": i + 1, "Номенклатура": nom_uuid,
-            "Количество": float(_val(r.Количество) or 0),
-            "Цена": float(_val(r.Цена) or 0), "Сумма": float(_val(r.Сумма) or 0),
-            "СуммаНДС": float(_val(getattr(r, "СуммаНДС", 0)) or 0),
+            "НомерСтроки": int(_val(s.НС) or 0), "Номенклатура": nom_uuid,
+            "Количество": float(_val(s.Кол) or 0),
+            "Цена": float(_val(s.Цена) or 0), "Сумма": float(_val(s.Сум) or 0),
+            "СуммаНДС": float(_val(s.СНДС) or 0),
             "КлассSKU": klass, "ЭтоБлюдо": is_dish,
         })
         if is_dish and nom_uuid not in seen_dish:
             seen_dish.add(nom_uuid)
-            ing = _recipe_for_dish(ib, r.Номенклатура)
+            ing = _recipe_for_dish(ib, s.Ном)
             if ing:
                 recipes.append({"Тип": "recipe", "БлюдоUUID": nom_uuid, "Ингредиенты": ing})
 
