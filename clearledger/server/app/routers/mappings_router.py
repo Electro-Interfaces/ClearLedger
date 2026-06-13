@@ -45,6 +45,7 @@ def _resp(m: ReconcileMapping) -> ReconcileMappingResponse:
     return ReconcileMappingResponse(
         id=str(m.id),
         companyId=str(m.company_id),
+        channelId=str(m.channel_id) if m.channel_id else None,
         kind=m.kind,
         sourceKey=m.source_key,
         targetRef=m.target_ref,
@@ -61,6 +62,7 @@ def _resp(m: ReconcileMapping) -> ReconcileMappingResponse:
 async def list_mappings(
     company_id: str = Query(...),
     kind: str | None = Query(None),
+    channel_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _u: User = Depends(get_current_user),
 ):
@@ -68,6 +70,9 @@ async def list_mappings(
     stmt = select(ReconcileMapping).where(ReconcileMapping.company_id == cid)
     if kind:
         stmt = stmt.where(ReconcileMapping.kind == kind)
+    if channel_id:
+        import uuid as _uuid
+        stmt = stmt.where(ReconcileMapping.channel_id == _uuid.UUID(channel_id))
     stmt = stmt.order_by(ReconcileMapping.kind, ReconcileMapping.source_key)
     rows = (await db.execute(stmt)).scalars().all()
     return [_resp(m) for m in rows]
@@ -83,6 +88,7 @@ async def create_mapping(
     m = ReconcileMapping(
         id=uuid.uuid4(),
         company_id=cid,
+        channel_id=uuid.UUID(payload.channel_id) if payload.channel_id else None,
         kind=payload.kind,
         source_key=payload.source_key.strip(),
         target_ref=payload.target_ref.strip(),

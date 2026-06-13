@@ -108,6 +108,11 @@ async def create_all() -> None:
             # уже = натуральному ключу; старые shift_orp:* останутся как есть).
             "UPDATE export_packets SET idem_key = payload->>'marker' "
             "WHERE idem_key IS NULL AND payload ? 'marker'",
+            # v1.9: маппинг уровня КАНАЛА — channel_id (NULL=дефолт компании).
+            # Значения топлива/оплат/станций различаются между системами →
+            # настройка/оптимизация маппинга на уровне канала.
+            "ALTER TABLE reconcile_mappings ADD COLUMN IF NOT EXISTS channel_id UUID "
+            "REFERENCES channels(id) ON DELETE CASCADE",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

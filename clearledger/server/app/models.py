@@ -661,6 +661,13 @@ class ReconcileMapping(Base):
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
+    # Маппинг уровня КАНАЛА (override) — значения в STS/TradeCorp/MSTO/ЦБ
+    # называются по-разному. NULL = дефолт компании (общий для всех каналов).
+    # Резолв: channel_id-specific → company-default(NULL) → канон-сид.
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="CASCADE"),
+        nullable=True, index=True,
+    )
     # Тип маппинга: 'station' | 'fuel' | 'paytype' | 'nomenclature' | 'counterparty'
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     # Ключ во внешнем источнике (station_id STS, артикул поставщика, pay_type STS).

@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any
 
 from app.reconcile_catalog import list_reconcile_rules
-from app.services import reconciliation_proxy
+from app.services import mapping, reconciliation_proxy
 from app.services.reconcile.engine import run_reconcile
 from app.services.sts_client import sts_get_transactions
 
@@ -36,7 +36,10 @@ def _last4(card: Any) -> str:
 
 
 def _fuel(name: Any) -> str:
-    return str(name or "").strip().lower()
+    """Нормализация топлива — канон-СИД (services/mapping). Канальный override
+    (ReconcileMapping channel_id) применяется через mapping.resolve при наличии
+    db+channel контекста (стадия нормализации потока канала)."""
+    return mapping.normalize_default("fuel", name)
 
 
 def _ts(val: Any) -> float | None:

@@ -807,6 +807,7 @@ ReconcileMappingMethod = Literal["manual", "auto", "ai", "imported_from_bp"]
 
 class ReconcileMappingCreate(BaseModel):
     company_id: str
+    channel_id: str | None = None   # маппинг уровня канала (NULL = дефолт компании)
     kind: ReconcileMappingKind
     source_key: str = Field(min_length=1, max_length=255)
     target_ref: str = Field(min_length=1, max_length=36)
@@ -828,6 +829,7 @@ class ReconcileMappingUpdate(BaseModel):
 class ReconcileMappingResponse(BaseModel):
     id: str
     companyId: str = Field(alias="company_id")
+    channelId: str | None = Field(default=None, alias="channel_id")
     kind: str
     sourceKey: str = Field(alias="source_key")
     targetRef: str = Field(alias="target_ref")
