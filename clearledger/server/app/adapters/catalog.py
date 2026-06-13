@@ -219,6 +219,26 @@ class AcquiringSberAdapter(PlannedAdapter):
     ]
 
 
+@register_adapter("inkassation")
+class InkassationAdapter(PlannedAdapter):
+    label = "Инкассация (реестр внесений)"
+    category = "Платежи и эквайринг"
+    description = (
+        "Реестр инкассации наличных (банк-выписка/инкассатор) — контроль "
+        "фактически внесённых в банк наличных против наличной выручки смены."
+    )
+    icon = "Banknote"
+    setup_schema = [
+        SetupField(key="bank_api_url", label="API/файл выписки", field_type="text", required=False),
+        SetupField(key="inn", label="ИНН", field_type="text"),
+        SetupField(key="account", label="Расчётный счёт", field_type="text", required=False),
+        SetupField(key="token", label="Токен/ключ", field_type="password", secret=True),
+    ]
+    available_doc_types = [
+        SourceDocType(id="cash_deposits", name="Внесения наличных (инкассация)", category="control"),
+    ]
+
+
 @register_adapter("ofd")
 class OfdAdapter(PlannedAdapter):
     label = "ОФД (оператор фискальных данных)"

@@ -213,6 +213,92 @@ RECONCILE_RULES: list[ReconRuleDecl] = [
         compare=[CompareField("quantity", 0.0, "шт")],
         severity=SeveritySpec(thresholds={"none": 0.0, "material": 1.0}, critical_fields=["datamatrix"]),
     ),
+
+    # ── PLANNED: инкассация (наличные смены ↔ внесения в банк) ──
+    ReconRuleDecl(
+        id="inkassation",
+        label="Инкассация: наличные смены ↔ банк",
+        module="fuel,sidegoods,food",
+        description="Наличная выручка смены ↔ фактически инкассировано в банк (контроль недостач).",
+        status="planned",
+        streams=[
+            StreamRef("anchor", "sts", "shift_report", "Смена (наличные)"),
+            StreamRef("external", "inkassation", "cash_deposits", "Реестр инкассации"),
+        ],
+        key=["station", "date"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("amount", 1.0, "₽")],
+        severity=SeveritySpec(thresholds={"none": 1.0, "minor": 100.0, "material": 1000.0},
+                              critical_fields=["station"]),
+    ),
+
+    # ── PLANNED: НДС (ставки/суммы смены ↔ ОФД) ──
+    ReconRuleDecl(
+        id="vat_check",
+        label="НДС: смена ↔ ОФД",
+        module="fuel,sidegoods,food",
+        description="Контроль НДС (ставки/суммы) против фискальных данных ОФД.",
+        status="planned",
+        streams=[
+            StreamRef("anchor", "sts", "shift_report", "Смена (НДС)"),
+            StreamRef("external", "ofd", "fiscal_receipts", "ОФД (НДС)"),
+        ],
+        key=["station", "shift"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("vat", 1.0, "₽")],
+        severity=SeveritySpec(thresholds={"none": 1.0, "minor": 10.0, "material": 100.0}),
+    ),
+
+    # ── PLANNED: возвраты (ОРП ↔ чеки возврата ОФД) ──
+    ReconRuleDecl(
+        id="returns",
+        label="Возвраты: ОРП ↔ ОФД",
+        module="sidegoods,food",
+        description="Возвращённые товары смены ↔ чеки возврата ОФД.",
+        status="planned",
+        streams=[
+            StreamRef("anchor", "onec_operational", "orp_sidegoods", "Возвраты ОРП"),
+            StreamRef("external", "ofd", "fiscal_receipts", "ОФД (возвраты)"),
+        ],
+        key=["station", "shift"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("amount", 1.0, "₽")],
+        severity=SeveritySpec(thresholds={"none": 1.0, "minor": 50.0, "material": 500.0}),
+    ),
+
+    # ── PLANNED: талоны (смена ↔ расчёты эмитента/договор) ──
+    ReconRuleDecl(
+        id="voucher",
+        label="Талоны: смена ↔ расчёты эмитента",
+        module="fuel",
+        description="Продажи по талонам ↔ расчёты с эмитентом талонов (договор/БП).",
+        status="planned",
+        streams=[
+            StreamRef("anchor", "sts", "shift_report", "Смена (талоны)"),
+            StreamRef("external", "onec_accounting", "closed_period_docs", "Расчёты по талонам (БП)"),
+        ],
+        key=["station", "date"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("amount", 1.0, "₽")],
+        severity=SeveritySpec(thresholds={"none": 1.0, "minor": 50.0, "material": 500.0}),
+    ),
+
+    # ── PLANNED: ведомости (постоплата ↔ дебиторка 62.Р) ──
+    ReconRuleDecl(
+        id="ledger",
+        label="Ведомости: смена ↔ дебиторка (62.Р)",
+        module="fuel,sidegoods",
+        description="Отпуск по ведомостям ↔ дебиторка контрагента-ведомости в БП.",
+        status="planned",
+        streams=[
+            StreamRef("anchor", "sts", "shift_report", "Смена (ведомости)"),
+            StreamRef("external", "onec_accounting", "closed_period_docs", "Дебиторка ведомостей (БП)"),
+        ],
+        key=["station", "contractor"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("amount", 1.0, "₽")],
+        severity=SeveritySpec(thresholds={"none": 1.0, "minor": 100.0, "material": 1000.0}),
+    ),
 ]
 
 

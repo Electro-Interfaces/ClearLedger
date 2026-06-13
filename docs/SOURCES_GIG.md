@@ -134,6 +134,13 @@ STS shift_report (ОПОРНЫЙ)
 | `acquiring_fuel` | топливо | смена(anchor)·эквайринг(external) | station,date | ±1₽ | planned |
 | `receipts_ofd` | f/s/food | смена(anchor)·ОФД(external) | station,shift | Σ ±1₽ | planned |
 | `marking_sidegoods` | сопутка | ОРП(anchor)·ЧЗ(external) | gtin,datamatrix | шт | planned |
+| `inkassation` | все | смена-наличные·инкассация(банк) | station,date | ±1₽ (недостача) | planned |
+| `vat_check` | все | смена-НДС·ОФД | station,shift | НДС ±1₽ | planned |
+| `returns` | сопутка/общепит | ОРП-возвраты·ОФД | station,shift | ±1₽ | planned |
+| `voucher` | топливо | смена-талоны·расчёты эмитента(БП) | station,date | ±1₽ | planned |
+| `ledger` | топливо/сопутка | смена-ведомости·дебиторка 62.Р(БП) | station,contractor | ±1₽ | planned |
+
+> Новые разрезы выведены из реальных полей ОРП (`ФормаОплаты`: «Карты МПС»→эквайринг, «Наличные»→инкассация+ОФД; `СтавкаНДС/СуммаНДС`→ОФД; `ВозвращенныеТовары`→возвраты) + секций STS (`sales`/`money`). **Тройная сверка наличных**: смена ↔ ОФД (фискал) ↔ инкассация (банк) — сильный контроль недостач. Новый источник `inkassation` (банк-выписка/инкассатор) добавлен в реестр.
 
 **`corp_fuel`/`online_fuel` — golden:** рабочие императивные движки (`src/services/reconciliation`, `mstoReconciliation`), декларативная форма = §6.2. Дисциплина §6.4: (1) вынесены в данные при сохранении императивных движков → (2) снять golden на боевых ГИГ → (3) унифицировать в один `ReconcileEngine` byte-for-byte. doc↔entry по ИНН — ОТДЕЛЬНАЯ ось.
 
