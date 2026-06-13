@@ -76,7 +76,7 @@ export function RegisterPage() {
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <FileText className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-bold">ClearLedger</h1>
+          <h1 className="text-2xl font-bold">TradeLedger</h1>
           <p className="text-sm text-muted-foreground">Регистрация</p>
         </div>
 
