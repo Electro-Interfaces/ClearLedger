@@ -34,6 +34,8 @@ from app.routers import (
     reconciliation_router,
     reconciliation_proxy_router,
     channel_templates_router,
+    channels_router,
+    reconcile_router,
     reconcile_rules_router,
     references_router,
     reports_router,
@@ -116,6 +118,8 @@ app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(source_types_router.router, prefix=API_PREFIX)
 app.include_router(sources_router.router, prefix=API_PREFIX)
 app.include_router(channel_templates_router.router, prefix=API_PREFIX)
+app.include_router(channels_router.router, prefix=API_PREFIX)
+app.include_router(reconcile_router.router, prefix=API_PREFIX)
 app.include_router(reconcile_rules_router.router, prefix=API_PREFIX)
 app.include_router(onec_router.router, prefix=API_PREFIX)
 app.include_router(periods_router.router, prefix=API_PREFIX)

@@ -210,3 +210,8 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
 def list_channel_templates() -> list[dict]:
     """Справочник шаблонов каналов для UI/API (сериализованный)."""
     return [asdict(t) for t in CHANNEL_TEMPLATES]
+
+
+def get_channel_template(template_id: str) -> ChannelTemplateDecl | None:
+    """Шаблон канала по id (для создания экземпляра Channel)."""
+    return next((t for t in CHANNEL_TEMPLATES if t.id == template_id), None)
