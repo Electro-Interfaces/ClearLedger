@@ -66,7 +66,9 @@ services:
       context: ../
       dockerfile: deploy/frontend.Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-https://ledger.dataworker.ru/api}
+        # ВАЖНО: origin БЕЗ /api — пути сервисов фронта уже содержат /api/...
+        # (иначе двойной /api/api → 404 на логине и всех запросах).
+        VITE_API_URL: ${VITE_API_URL:-https://ledger.dataworker.ru}
     container_name: ledger-frontend
     restart: unless-stopped
     expose:

@@ -199,7 +199,7 @@ export async function getMstoTransactions(
     queryParams.operationResult = params.operationResults.join(',');
   }
 
-  const response = await get<any>('/msto/transactions', queryParams);
+  const response = await get<any>('/api/msto/transactions', queryParams);
 
   // MSTO возвращает { operationStatus, totalCount, models: [...] }
   let rawTransactions: any[] = [];
@@ -222,7 +222,7 @@ export async function getMstoTransactions(
  * Получить список станций MSTO
  */
 export async function getMstoServicePoints(): Promise<MSTOServicePoint[]> {
-  const response = await get<MSTOServicePoint[] | { servicePoints: MSTOServicePoint[] }>('/msto/servicePoints');
+  const response = await get<MSTOServicePoint[] | { servicePoints: MSTOServicePoint[] }>('/api/msto/servicePoints');
 
   if (Array.isArray(response)) {
     return response;
@@ -239,7 +239,7 @@ export async function getMstoServicePoints(): Promise<MSTOServicePoint[]> {
  * Получить список тарифов (агрегаторов) MSTO
  */
 export async function getMstoTariffs(): Promise<MSTOTariff[]> {
-  const response = await get<MSTOTariff[] | { tariffs: MSTOTariff[] }>('/msto/tariffs');
+  const response = await get<MSTOTariff[] | { tariffs: MSTOTariff[] }>('/api/msto/tariffs');
 
   if (Array.isArray(response)) {
     return response;
@@ -261,7 +261,7 @@ export async function checkMstoHealth(): Promise<{
   tokenValid?: boolean;
 }> {
   try {
-    const response = await get<any>('/msto/health');
+    const response = await get<any>('/api/msto/health');
     return {
       status: response.status || 'ok',
       tokenValid: response.tokenValid
