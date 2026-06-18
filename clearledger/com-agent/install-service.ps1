@@ -32,19 +32,21 @@ function Write-Warn($msg) { Write-Host "[!] $msg" -ForegroundColor Yellow }
 
 # ── 1. NSSM ───────────────────────────────────────────────────────────
 Write-Step "Проверка NSSM"
-$nssmPath = "C:\Tools\nssm\nssm.exe"
-if (-not (Test-Path $nssmPath)) {
-    Write-Step "Скачивание NSSM 2.24"
-    $tmp = "$env:TEMP\nssm.zip"
-    Invoke-WebRequest "https://nssm.cc/release/nssm-2.24.zip" -OutFile $tmp -UseBasicParsing
-    Expand-Archive $tmp -DestinationPath "$env:TEMP\nssm-ext" -Force
-    New-Item -ItemType Directory -Path "C:\Tools\nssm" -Force | Out-Null
-    Copy-Item "$env:TEMP\nssm-ext\nssm-2.24\win64\nssm.exe" $nssmPath -Force
-    Remove-Item $tmp,"$env:TEMP\nssm-ext" -Recurse -Force
-    Write-OK "NSSM установлен в $nssmPath"
-} else {
-    Write-OK "NSSM уже есть: $nssmPath"
+$nssmPath = $null
+foreach ($candidate in @("C:\Tools\nssm\nssm.exe", "C:\ProgramData\chocolatey\bin\nssm.exe",
+                          "C:\ProgramData\chocolatey\lib\NSSM\tools\nssm-2.24-101-g897c7ad\win64\nssm.exe")) {
+    if (Test-Path $candidate) { $nssmPath = $candidate; break }
 }
+if (-not $nssmPath) {
+    $cmd = Get-Command nssm -ErrorAction SilentlyContinue
+    if ($cmd) { $nssmPath = $cmd.Path }
+}
+if (-not $nssmPath) {
+    Write-Step "Установка NSSM через Chocolatey"
+    & choco install nssm -y --no-progress | Out-Null
+    $nssmPath = (Get-Command nssm).Path
+}
+Write-OK "NSSM: $nssmPath"
 
 # ── 2. Копирование исходников ────────────────────────────────────────
 Write-Step "Копирование агента в $InstallDir"

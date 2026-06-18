@@ -1,5 +1,6 @@
 fastapi==0.115.0
-uvicorn[standard]==0.30.6
-pywin32==306
+uvicorn==0.30.6
+h11>=0.14.0
+pywin32>=307
 pydantic==2.9.2
 python-dotenv==1.0.1
