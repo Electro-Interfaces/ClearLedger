@@ -263,7 +263,7 @@ export function StationsSelectorDialog({
           {filtered.length === 0 ? (
             <p className="text-xs text-muted-foreground py-8 text-center">
               {universe.length === 0
-                ? 'Нет точек в справочнике. Откройте «Настройки → Точки обслуживания».'
+                ? 'Нет точек в справочнике. Откройте «Загрузка → Точки обслуживания».'
                 : 'Нет станций по фильтру.'}
             </p>
           ) : (

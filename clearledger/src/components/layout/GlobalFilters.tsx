@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/popover'
 import { MapPin, FileText, Filter, X, ChevronDown } from 'lucide-react'
 import { useFilters } from '@/contexts/FilterContext'
-import { getLocations } from '@/services/locationService'
+import { useLocations } from '@/hooks/useLocations'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { StationsSelectorDialog, type StationOption } from '@/components/stations/StationsSelectorDialog'
 
@@ -41,7 +41,7 @@ const ALL_DOC_TYPES: { id: string; label: string }[] = [
 
 function LocationsFilterButton() {
   const { locationIds, setLocationIds } = useFilters()
-  const locations = useMemo(() => getLocations(), [])
+  const locations = useLocations()   // активная компания, рефетч при переключении
 
   const selectedLocations = useMemo(
     () => locations.filter((l) => locationIds.includes(l.id)),
