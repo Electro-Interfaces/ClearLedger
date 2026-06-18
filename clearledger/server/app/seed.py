@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import hash_password
-from app.models import Company, PostingTemplate, User, UserCompany
+from app.location_type_defaults import BUILTIN_LOCATION_TYPES
+from app.models import Company, LocationTypeDef, PostingTemplate, User, UserCompany
 
 logger = logging.getLogger("clearledger.seed")
 
@@ -88,8 +89,28 @@ async def seed_data(db: AsyncSession) -> None:
     # --- Шаблоны проводок (глобальные, company_id=NULL) ---
     await _seed_posting_templates(db)
 
+    # --- Встроенные типы точек (company_id=NULL) ---
+    await _seed_builtin_location_types(db)
+
     await db.commit()
     logger.info("Seed завершён")
+
+
+async def _seed_builtin_location_types(db: AsyncSession) -> None:
+    """Встроенные типы точек (company_id=NULL, is_builtin). Идемпотентно.
+    Дублирует миграцию v2.4 (database.py) для пути ORM create_all (тесты)."""
+    res = await db.execute(
+        select(LocationTypeDef.code).where(LocationTypeDef.company_id.is_(None))
+    )
+    existing = set(res.scalars().all())
+    for t in BUILTIN_LOCATION_TYPES:
+        if t["code"] in existing:
+            continue
+        db.add(LocationTypeDef(
+            company_id=None, code=t["code"], name=t["name"], icon=t["icon"],
+            unit=t["unit"], nomenclature_kind=t["nomenclature_kind"],
+            fields=t["fields"], is_builtin=True, sort_order=t["sort_order"],
+        ))
 
 
 # Типовые шаблоны проводок БП 3.0 — глобальные (company_id=NULL).

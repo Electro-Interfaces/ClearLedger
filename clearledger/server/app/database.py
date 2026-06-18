@@ -169,6 +169,30 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.4: встроенный каталог типов точек. Таблица location_types создаётся
+        # через metadata.create_all; здесь — идемпотентный сид системных типов
+        # (company_id=NULL, is_builtin=true). ON CONFLICT DO NOTHING ловит
+        # частичный uq-индекс по коду встроенных типов.
+        import json as _json
+        import uuid as _uuid
+        from app.location_type_defaults import BUILTIN_LOCATION_TYPES
+        _ins_lt = __import__("sqlalchemy").text(
+            "INSERT INTO location_types "
+            "(id, company_id, code, name, icon, unit, nomenclature_kind, fields, "
+            " is_builtin, sort_order, status) "
+            "VALUES (CAST(:id AS UUID), NULL, :code, :name, :icon, :unit, :kind, "
+            " CAST(:fields AS JSONB), true, :sort, 'active') "
+            "ON CONFLICT DO NOTHING"
+        )
+        for _t in BUILTIN_LOCATION_TYPES:
+            await conn.execute(_ins_lt, {
+                "id": str(_uuid.uuid4()),
+                "code": _t["code"], "name": _t["name"], "icon": _t["icon"],
+                "unit": _t["unit"], "kind": _t["nomenclature_kind"],
+                "fields": _json.dumps(_t["fields"], ensure_ascii=False),
+                "sort": _t["sort_order"],
+            })
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

@@ -7,7 +7,13 @@
  * связана с STS API через `system_id` + `station`).
  */
 
-export type LocationType = 'fuel_station' | 'retail' | 'office' | 'warehouse' | 'other'
+/**
+ * Код типа точки. Раньше — фиксированный union; теперь типы заданы в
+ * редактируемом каталоге (см. useLocationTypes / LocationTypeDef), поэтому это
+ * просто строка-код. Нижестоящий код опирается на стабильные коды встроенных
+ * типов (например 'fuel_station'). LOCATION_TYPE_META — фолбэк меты.
+ */
+export type LocationType = string
 
 export type LocationStatus = 'active' | 'closed' | 'planned'
 
@@ -43,9 +49,12 @@ export interface ServiceLocation {
   updatedAt: string
 }
 
-export const LOCATION_TYPE_META: Record<LocationType, { label: string; description: string; icon: string }> = {
+/** Фолбэк-мета встроенных типов (когда каталог ещё не загружен). */
+export const LOCATION_TYPE_META: Record<string, { label: string; description: string; icon: string }> = {
   fuel_station: { label: 'АЗС', description: 'Автозаправочная станция', icon: 'Fuel' },
-  retail: { label: 'Торговая точка', description: 'Магазин, киоск, павильон', icon: 'Store' },
+  ev_charging: { label: 'Электрозарядная станция', description: 'Зарядка электромобилей (кВт·ч)', icon: 'Zap' },
+  retail: { label: 'Магазин / сопутка', description: 'Магазин, киоск, павильон', icon: 'Store' },
+  food: { label: 'Общепит', description: 'Кафе, столовая, кухня', icon: 'Utensils' },
   office: { label: 'Офис', description: 'Административный офис, представительство', icon: 'Building2' },
   warehouse: { label: 'Склад', description: 'Складское помещение', icon: 'Warehouse' },
   other: { label: 'Другое', description: 'Другой тип объекта', icon: 'MapPin' },

@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Plus, Trash2, Fuel, Store, Building2, Warehouse, MapPin, Pencil,
-  Download, Loader2,
+  Download, Loader2, Zap, Utensils, Flame, SlidersHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -34,6 +34,9 @@ import {
 } from '@/services/locationService'
 import { getSources, loadSources } from '@/services/sourceService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useLocationTypes } from '@/hooks/useLocationTypes'
+import { MetadataFieldsRenderer } from '@/components/manual/MetadataFieldsRenderer'
+import { LocationTypesManager } from '@/components/locationTypes/LocationTypesManager'
 import { stsGetPoints, type StsPoint } from '@/services/fuel/stsApiClient'
 import { getSettings } from '@/services/settingsService'
 import { mstoGetServicePoints } from '@/services/msto/mstoApiClient'
@@ -42,13 +45,14 @@ import {
   LOCATION_TYPE_META, LOCATION_STATUS_META,
   type LocationStatus, type LocationType, type ServiceLocation,
 } from '@/types/location'
+import type { LocationTypeDef } from '@/types/locationType'
 
-const ICON_MAP: Record<LocationType, React.ComponentType<{ className?: string }>> = {
-  fuel_station: Fuel,
-  retail: Store,
-  office: Building2,
-  warehouse: Warehouse,
-  other: MapPin,
+// Реестр иконок по ИМЕНИ (icon из каталога типов), резолв с фолбэком на MapPin.
+const ICON_REGISTRY: Record<string, React.ComponentType<{ className?: string }>> = {
+  Fuel, Zap, Store, Building2, Warehouse, MapPin, Utensils, Flame,
+}
+function resolveIcon(name?: string): React.ComponentType<{ className?: string }> {
+  return (name && ICON_REGISTRY[name]) || MapPin
 }
 
 const STATUS_BADGE_COLOR: Record<LocationStatus, string> = {
@@ -60,13 +64,16 @@ const STATUS_BADGE_COLOR: Record<LocationStatus, string> = {
 
 function LocationCard({
   location,
+  typeDef,
   onChange,
 }: {
   location: ServiceLocation
+  typeDef?: LocationTypeDef
   onChange: () => void
 }) {
-  const Icon = ICON_MAP[location.type]
-  const typeMeta = LOCATION_TYPE_META[location.type]
+  const fallbackMeta = LOCATION_TYPE_META[location.type]
+  const Icon = resolveIcon(typeDef?.icon ?? fallbackMeta?.icon)
+  const typeLabel = typeDef?.name ?? fallbackMeta?.label ?? location.type
   const statusMeta = LOCATION_STATUS_META[location.status]
 
   function handleDelete() {
@@ -94,7 +101,7 @@ function LocationCard({
               </Badge>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              {typeMeta.label}
+              {typeLabel}
               {location.address && <span> · {location.address}</span>}
             </div>
             {location.sourceBindings.length > 0 && (
@@ -157,23 +164,45 @@ function LocationEditDialog({
 }) {
   const isEdit = !!location
   const [open, setOpen] = useState(false)
+  const types = useLocationTypes()
   const [code, setCode] = useState(location?.code ?? '')
   const [name, setName] = useState(location?.name ?? '')
   const [type, setType] = useState<LocationType>(location?.type ?? 'fuel_station')
   const [status, setStatus] = useState<LocationStatus>(location?.status ?? 'active')
   const [address, setAddress] = useState(location?.address ?? '')
   const [description, setDescription] = useState(location?.description ?? '')
+  // Значения полей выбранного типа точки (динамические) → в location.metadata.
+  const [metadata, setMetadata] = useState<Record<string, string>>(() => {
+    const m: Record<string, string> = {}
+    const src = (location?.metadata ?? {}) as Record<string, unknown>
+    for (const [k, v] of Object.entries(src)) {
+      if (v !== null && v !== undefined && typeof v !== 'object') m[k] = String(v)
+    }
+    return m
+  })
+  const selectedType = types.find((t) => t.code === type)
 
   function handleSave() {
     if (!code.trim() || !name.trim()) {
       toast.error('Код и название обязательны')
       return
     }
+    const missing = (selectedType?.fields ?? []).filter(
+      (f) => f.required && !(metadata[f.key] ?? '').trim(),
+    )
+    if (missing.length > 0) {
+      toast.error(`Заполните поля типа: ${missing.map((f) => f.label).join(', ')}`)
+      return
+    }
+    const cleanMeta: Record<string, string> = {}
+    for (const [k, v] of Object.entries(metadata)) if (v.trim()) cleanMeta[k] = v
+    const meta = Object.keys(cleanMeta).length ? cleanMeta : undefined
     if (isEdit && location) {
       updateLocation(location.id, {
         code: code.trim(), name: name.trim(),
         type, status, address: address.trim() || undefined,
         description: description.trim() || undefined,
+        metadata: meta,
       })
       toast.success(`Сохранена точка «${name}»`)
     } else {
@@ -182,6 +211,7 @@ function LocationEditDialog({
         type, status,
         address: address.trim() || undefined,
         description: description.trim() || undefined,
+        metadata: meta,
       })
       toast.success(`Создана точка «${name}»`)
     }
@@ -192,7 +222,7 @@ function LocationEditDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEdit ? 'Редактировать точку обслуживания' : 'Новая точка обслуживания'}
@@ -214,11 +244,11 @@ function LocationEditDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="loc-type">Тип</Label>
-              <Select value={type} onValueChange={(v) => setType(v as LocationType)}>
+              <Select value={type} onValueChange={(v) => setType(v)}>
                 <SelectTrigger id="loc-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(LOCATION_TYPE_META) as LocationType[]).map((k) => (
-                    <SelectItem key={k} value={k}>{LOCATION_TYPE_META[k].label}</SelectItem>
+                  {types.map((t) => (
+                    <SelectItem key={t.code} value={t.code}>{t.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -245,6 +275,21 @@ function LocationEditDialog({
             <Textarea id="loc-desc" value={description} onChange={(e) => setDescription(e.target.value)}
               placeholder="Доп. примечания" rows={2} />
           </div>
+
+          {/* Свойства, специфичные для выбранного типа точки */}
+          {selectedType && selectedType.fields.length > 0 && (
+            <div className="space-y-3 border-t border-border/50 pt-3">
+              <div className="text-xs font-medium text-muted-foreground">
+                Свойства типа «{selectedType.name}»
+                {selectedType.unit && <span> · единица: {selectedType.unit}</span>}
+              </div>
+              <MetadataFieldsRenderer
+                fields={selectedType.fields}
+                values={metadata}
+                onChange={(k, v) => setMetadata((m) => ({ ...m, [k]: v }))}
+              />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
@@ -600,7 +645,8 @@ function TradecorpImportButton({ onDone }: { onDone: () => void }) {
 export function LocationsPage() {
   const [_tick, setTick] = useState(0)
   const refresh = () => setTick((t) => t + 1)
-  const { companyId } = useCompany()
+  const { companyId, isCompanyAdmin } = useCompany()
+  const types = useLocationTypes()
 
   // Гидрация источников (для STS-импорта) + точек обслуживания (из бэкенда)
   useEffect(() => {
@@ -611,13 +657,15 @@ export function LocationsPage() {
 
   const locations = getLocations()
   const sourcesCount = getSources().length
+  const typeByCode = new Map(types.map((t) => [t.code, t]))
 
-  // Группировка по типу
-  const byType: Record<LocationType, ServiceLocation[]> = {
-    fuel_station: [], retail: [], office: [], warehouse: [], other: [],
-  }
-  for (const l of locations) byType[l.type].push(l)
-  const order: LocationType[] = ['fuel_station', 'retail', 'office', 'warehouse', 'other']
+  // Группировка по типам каталога (в порядке sort_order) + «прочие» коды,
+  // которых нет в каталоге (на всякий случай, чтобы точки не пропадали).
+  const groups = types
+    .map((t) => ({ type: t, items: locations.filter((l) => l.type === t.code) }))
+    .filter((g) => g.items.length > 0)
+  const knownCodes = new Set(types.map((t) => t.code))
+  const unknownItems = locations.filter((l) => !knownCodes.has(l.type))
 
   return (
     <div className="flex-1 min-w-0">
@@ -635,6 +683,14 @@ export function LocationsPage() {
             <StsImportButton onDone={refresh} />
             <MstoImportButton onDone={refresh} />
             <TradecorpImportButton onDone={refresh} />
+            {isCompanyAdmin && (
+              <LocationTypesManager onChanged={refresh}>
+                <Button variant="outline">
+                  <SlidersHorizontal className="h-4 w-4 mr-2" />
+                  Типы точек
+                </Button>
+              </LocationTypesManager>
+            )}
             <LocationEditDialog onSaved={refresh}>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -654,21 +710,33 @@ export function LocationsPage() {
             </CardContent>
           </Card>
         ) : (
-          order
-            .filter((t) => byType[t].length > 0)
-            .map((t) => (
-              <div key={t} className="space-y-2">
+          <>
+            {groups.map((g) => (
+              <div key={g.type.code} className="space-y-2">
                 <div className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wide">
-                  {LOCATION_TYPE_META[t].label}{' '}
-                  <span className="text-muted-foreground/50">· {byType[t].length}</span>
+                  {g.type.name}{' '}
+                  <span className="text-muted-foreground/50">· {g.items.length}</span>
                 </div>
                 <div className="space-y-2">
-                  {byType[t].map((l) => (
+                  {g.items.map((l) => (
+                    <LocationCard key={l.id} location={l} typeDef={typeByCode.get(l.type)} onChange={refresh} />
+                  ))}
+                </div>
+              </div>
+            ))}
+            {unknownItems.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wide">
+                  Прочие <span className="text-muted-foreground/50">· {unknownItems.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {unknownItems.map((l) => (
                     <LocationCard key={l.id} location={l} onChange={refresh} />
                   ))}
                 </div>
               </div>
-            ))
+            )}
+          </>
         )}
       </div>
     </div>

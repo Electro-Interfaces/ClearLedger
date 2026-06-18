@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -1751,4 +1752,65 @@ class ServiceLocation(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# LocationTypeDef (Каталог типов точек обслуживания — редактируемый)
+# ---------------------------------------------------------------------------
+# Тип точки = код + единица + набор полей (схема). Встроенные типы:
+# company_id IS NULL (доступны всем, is_builtin=true, не удаляются); кастомные
+# типы компании: company_id задан. Значения полей конкретной точки хранятся в
+# ServiceLocation.extra_metadata. Нижестоящий код опирается на стабильный `code`
+# (например 'fuel_station'), а не на лейбл.
+# ---------------------------------------------------------------------------
+class LocationTypeDef(Base):
+    __tablename__ = "location_types"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    # NULL = встроенный (системный) тип; задан = кастомный тип компании
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=True, index=True,
+    )
+    code: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    icon: Mapped[str] = mapped_column(String(40), nullable=False, default="MapPin")
+    # Единица измерения по умолчанию: л / кВт·ч / шт / "" (нет)
+    unit: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("''"))
+    # fuel | energy | goods | food | none — задел под единицы/сверку
+    nomenclature_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="none", server_default=text("'none'")
+    )
+    # Схема полей типа: [{key,label,type,options?,unit?,required?}] (форма MetadataField)
+    fields: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    is_builtin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="active", server_default=text("'active'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # Код уникален среди встроенных типов (company_id IS NULL)
+        Index(
+            "uq_location_types_builtin_code", "code",
+            unique=True, postgresql_where=text("company_id IS NULL"),
+        ),
+        # Код уникален в пределах компании (кастомные типы)
+        Index(
+            "uq_location_types_company_code", "company_id", "code",
+            unique=True, postgresql_where=text("company_id IS NOT NULL"),
+        ),
     )
