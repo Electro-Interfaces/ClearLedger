@@ -19,7 +19,6 @@ import { nanoid } from 'nanoid'
 
 const STS_LEGACY_TYPES = new Set(['sts-ops', 'sts-prices', 'sts-coupons', 'sts-tanks'])
 
-const STORAGE_KEY = 'gig-sources'
 const MIGRATION_KEY = 'gig-sources-migration-v2'
 
 // ─── API-режим: соответствие таксономий + кэш ─────────────────────────────
@@ -79,6 +78,21 @@ function fromApi(r: ApiSource): Source {
 let _cache: Source[] | null = null
 let _companyId: string | null = null
 
+// Ключ localStorage — per-company (офлайн-режим без перемешивания компаний).
+function lsKey(): string {
+  return `tl-sources-${_companyId ?? '_'}`
+}
+
+/** Активная компания (из CompanyContext) — задаёт ключ хранилища (офлайн). */
+export function setActiveCompany(id: string) {
+  _companyId = id
+}
+/** Сброс кэша при смене компании / выходе. */
+export function resetCache() {
+  _cache = null
+  _companyId = null
+}
+
 function _requireCompany(): string {
   if (!_companyId) throw new Error('sourceService: companyId не задан (нужна loadSources до записи)')
   return _companyId
@@ -112,9 +126,9 @@ function migrateStsSourcesV2(sources: any[]): { sources: any[]; changed: boolean
 }
 
 function lsGetSources(): Source[] {
-  const raw = getItem<Source[]>(STORAGE_KEY, [])
+  const raw = getItem<Source[]>(lsKey(), [])
   const { sources, changed } = migrateStsSourcesV2(raw as any[])
-  if (changed) setItem(STORAGE_KEY, sources)
+  if (changed) setItem(lsKey(), sources)
   return sources as Source[]
 }
 
@@ -175,7 +189,7 @@ export async function createSource(data: {
   }
   const sources = lsGetSources()
   sources.push(source)
-  setItem(STORAGE_KEY, sources)
+  setItem(lsKey(), sources)
   return source
 }
 
@@ -194,7 +208,7 @@ export async function updateSource(id: string, updates: Partial<Source>): Promis
   const idx = sources.findIndex((s) => s.id === id)
   if (idx === -1) return undefined
   sources[idx] = { ...sources[idx], ...updates, updatedAt: new Date().toISOString() }
-  setItem(STORAGE_KEY, sources)
+  setItem(lsKey(), sources)
   return sources[idx]
 }
 
@@ -207,6 +221,6 @@ export async function deleteSource(id: string): Promise<boolean> {
   const sources = lsGetSources()
   const filtered = sources.filter((s) => s.id !== id)
   if (filtered.length === sources.length) return false
-  setItem(STORAGE_KEY, filtered)
+  setItem(lsKey(), filtered)
   return true
 }

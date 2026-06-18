@@ -21,14 +21,26 @@ import type {
 } from '@/types/location'
 import { nanoid } from 'nanoid'
 
-const STORAGE_KEY = 'gig-locations'
 let _companyId: string | null = null
 
+// Ключ localStorage — per-company, чтобы точки разных компаний не перемешивались.
+function lsKey(): string {
+  return `tl-locations-${_companyId ?? '_'}`
+}
 function lsGet(): ServiceLocation[] {
-  return getItem<ServiceLocation[]>(STORAGE_KEY, [])
+  return getItem<ServiceLocation[]>(lsKey(), [])
 }
 function lsSet(v: ServiceLocation[]) {
-  setItem(STORAGE_KEY, v)
+  setItem(lsKey(), v)
+}
+
+/** Активная компания (вызывается из CompanyContext) — задаёт ключ хранилища. */
+export function setActiveCompany(id: string) {
+  _companyId = id
+}
+/** Сброс модульного состояния при смене компании / выходе. */
+export function resetCache() {
+  _companyId = null
 }
 
 // ─── Чтения (sync) ───────────────────────────────────────────────────────

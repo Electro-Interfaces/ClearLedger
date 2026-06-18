@@ -16,10 +16,10 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from '@/components/ui/popover'
-import { Building2, MapPin, FileText, Filter, X, ChevronDown } from 'lucide-react'
-import { useCompany } from '@/contexts/CompanyContext'
+import { MapPin, FileText, Filter, X, ChevronDown } from 'lucide-react'
 import { useFilters } from '@/contexts/FilterContext'
 import { getLocations } from '@/services/locationService'
+import { CompanySelector } from '@/components/company/CompanySelector'
 import { StationsSelectorDialog, type StationOption } from '@/components/stations/StationsSelectorDialog'
 
 /** Пилюля-селектор в стиле TradePoint: тёмный фон, бордер, иконка + текст + шеврон. */
@@ -180,51 +180,13 @@ function DocTypesFilterButton() {
 }
 
 
-function CompanyButton() {
-  const { company, companies } = useCompany()
-  // Сейчас одна компания, дропдаун всё равно показываем — задел на будущее
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" className={pillCls}>
-          <Building2 className="h-4 w-4 opacity-70" />
-          <span className="hidden lg:inline truncate max-w-[140px]">{company.name}</span>
-          <ChevronDown className="h-4 w-4 opacity-60" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-56 p-1">
-        <div className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide px-2 py-1">
-          Компания
-        </div>
-        {companies.map((c) => (
-          <button
-            key={c.id}
-            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs text-left hover:bg-accent/40 ${
-              c.id === company.id ? 'bg-accent/30' : ''
-            }`}
-            disabled
-          >
-            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="truncate">{c.name}</span>
-            {c.id === company.id && <span className="ml-auto text-[10px] text-primary">●</span>}
-          </button>
-        ))}
-        <div className="text-[10px] text-muted-foreground/60 px-2 py-1.5 border-t border-border/40 mt-1">
-          Переключение пока недоступно — одна компания
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-
 export function GlobalFilters() {
   const { locationIds, docTypeIds, clearAll } = useFilters()
   const total = locationIds.length + docTypeIds.length
 
   return (
     <div className="flex items-center gap-2">
-      <CompanyButton />
+      <CompanySelector />
       <div className="w-px h-6 bg-border/50 mx-0.5" />
       <LocationsFilterButton />
       <DocTypesFilterButton />

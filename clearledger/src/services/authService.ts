@@ -4,18 +4,42 @@
 
 import * as api from './apiClient'
 
+/** Краткая карточка компании (как в backend CompanyBrief, snake_case по проводу). */
+export interface CompanyRef {
+  id: string
+  slug: string
+  name: string
+  short_name?: string | null
+  color?: string | null
+  profile_id: string
+}
+
+/** Ответ /api/auth/me — пользователь + доступные компании (мультитенантность). */
 export interface AuthUser {
   id: string
   email: string
   name: string
   role: string
-  is_active: boolean
+  is_superadmin: boolean
+  default_company_id?: string | null
+  companies: CompanyRef[]
+}
+
+/** Базовый пользователь из login/register (без списка компаний). */
+export interface BasicUser {
+  id: string
+  email: string
+  name: string
+  role: string
+  company_id?: string | null
+  is_superadmin?: boolean
+  is_active?: boolean
 }
 
 export interface TokenResponse {
   access_token: string
   token_type: string
-  user: AuthUser
+  user: BasicUser
 }
 
 /** Логин по email + пароль */
@@ -38,7 +62,7 @@ export async function register(data: {
   return result
 }
 
-/** Получить текущего пользователя по токену */
+/** Получить текущего пользователя + список доступных компаний по токену */
 export async function getMe(): Promise<AuthUser> {
   return api.get<AuthUser>('/api/auth/me')
 }

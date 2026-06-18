@@ -16,8 +16,6 @@ import type {
 } from '@/types/channel'
 import { nanoid } from 'nanoid'
 
-const STORAGE_KEY = 'gig-channels'
-
 export interface ChannelStats {
   total: number
   active: number
@@ -83,6 +81,21 @@ function chFromApi(r: ApiChannel): Channel {
 
 let _cache: Channel[] | null = null
 let _companyId: string | null = null
+
+// Ключ localStorage — per-company (офлайн-режим без перемешивания компаний).
+function lsKey(): string {
+  return `tl-channels-${_companyId ?? '_'}`
+}
+
+/** Активная компания (из CompanyContext) — задаёт ключ хранилища (офлайн). */
+export function setActiveCompany(id: string) {
+  _companyId = id
+}
+/** Сброс кэша при смене компании / выходе. */
+export function resetCache() {
+  _cache = null
+  _companyId = null
+}
 
 function _requireCompany(): string {
   if (!_companyId) throw new Error('channelService: companyId не задан (нужна loadChannels до записи)')
@@ -153,7 +166,7 @@ function migrateChannel(ch: any): Channel {
 }
 
 function lsGetChannels(): Channel[] {
-  return getItem<any[]>(STORAGE_KEY, []).map(migrateChannel)
+  return getItem<any[]>(lsKey(), []).map(migrateChannel)
 }
 
 // ─── Публичный API ────────────────────────────────────────────────────────
@@ -228,7 +241,7 @@ export async function createChannel(data: {
   }
   const channels = lsGetChannels()
   channels.push(channel)
-  setItem(STORAGE_KEY, channels)
+  setItem(lsKey(), channels)
   return channel
 }
 
@@ -252,7 +265,7 @@ export async function updateChannel(id: string, updates: Partial<Channel>): Prom
   const idx = channels.findIndex((c) => c.id === id)
   if (idx === -1) return undefined
   channels[idx] = { ...channels[idx], ...updates, updatedAt: new Date().toISOString() }
-  setItem(STORAGE_KEY, channels)
+  setItem(lsKey(), channels)
   return channels[idx]
 }
 
@@ -265,7 +278,7 @@ export async function deleteChannel(id: string): Promise<boolean> {
   const channels = lsGetChannels()
   const filtered = channels.filter((c) => c.id !== id)
   if (filtered.length === channels.length) return false
-  setItem(STORAGE_KEY, filtered)
+  setItem(lsKey(), filtered)
   return true
 }
 
@@ -283,7 +296,7 @@ export async function addSyncLog(channelId: string, entries: SyncLogEntry[]): Pr
   channels[idx].syncLog = [...entries, ...(channels[idx].syncLog || [])].slice(0, 100)
   channels[idx].lastSync = new Date().toISOString()
   channels[idx].updatedAt = new Date().toISOString()
-  setItem(STORAGE_KEY, channels)
+  setItem(lsKey(), channels)
 }
 
 /** Запустить канал (API-режим: бэкенд-оркестратор; localStorage: см. channelSyncService). */

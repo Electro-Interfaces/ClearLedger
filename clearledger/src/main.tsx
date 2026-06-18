@@ -5,24 +5,31 @@ import './index.css'
 
 import { initDefaults } from './services/initService'
 import { startScheduler } from './services/channelScheduler'
+import { isApiEnabled } from './services/apiClient'
+import { setServicesCompany } from './services/cacheReset'
+import { defaultCompanyId } from './config/companies'
 
-// Миграция: очистить данные старого формата при смене схемы
-const SCHEMA_VERSION = '4'
+// Миграция схемы: per-company ключи (tl-*-${companyId}) вместо глобальных gig-*.
+const SCHEMA_VERSION = '5'
 if (localStorage.getItem('gig-schema') !== SCHEMA_VERSION) {
-  localStorage.removeItem('gig-channels')
-  localStorage.removeItem('gig-sources')
-  localStorage.removeItem('gig-initialized')
+  // Старые глобальные ключи (до мультитенантности) больше не читаются.
+  for (const k of ['gig-channels', 'gig-sources', 'gig-initialized']) {
+    localStorage.removeItem(k)
+  }
   localStorage.setItem('gig-schema', SCHEMA_VERSION)
-  console.log('[GIG Fuel] Schema migrated to v' + SCHEMA_VERSION)
+  console.log('[TradeLedger] Schema migrated to v' + SCHEMA_VERSION)
 }
 
-// Авто-инициализация: источник STS + канал «Загрузка сменных отчётов»
-initDefaults()
+// Офлайн-демо (без VITE_API_URL): инициализация дефолтов + планировщик для
+// активной компании. В API-режиме это ведёт бэкенд (seed) + ручной/канальный
+// запуск под авторизацией — на старте без сессии планировщик не запускаем.
+if (!isApiEnabled()) {
+  setServicesCompany(defaultCompanyId)
+  initDefaults()
+  startScheduler()
+}
 
-// Запуск планировщика автозагрузки каналов
-startScheduler()
-
-console.log('[GIG Fuel] Starting...')
+console.log('[TradeLedger] Starting...')
 
 try {
   createRoot(document.getElementById('root')!).render(

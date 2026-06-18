@@ -11,6 +11,7 @@ import {
 import { useSidebar } from '@/components/ui/sidebar'
 import { APP_VERSION } from '@/config/version'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useAuth } from '@/contexts/AuthContext'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { GlobalFilters } from './GlobalFilters'
 
@@ -23,7 +24,14 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const navigate = useNavigate()
   const { theme, toggle } = useTheme()
   const { company } = useCompany()
+  const { user, logout } = useAuth()
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
+  const userName = user?.name ?? 'Пользователь'
+
+  function handleLogout() {
+    logout()
+    navigate('/login')
+  }
 
   // Пилюля-кнопка взаимодействия в стиле TradeFrame: синий акцент, активное состояние.
   const btnCls = (active: boolean) =>
@@ -132,14 +140,14 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
                   <User className="h-[18px] w-[18px] text-white" />
                 </div>
                 <div className="hidden lg:flex flex-col items-start leading-none">
-                  <span className="text-sm font-medium text-foreground">Менеджер</span>
+                  <span className="text-sm font-medium text-foreground truncate max-w-[140px]">{userName}</span>
                   <span className="mt-1 text-xs text-muted-foreground truncate max-w-[140px]">{company.name}</span>
                 </div>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 p-1">
               <div className="border-b border-border/30 px-3 py-2.5">
-                <div className="text-sm font-semibold text-foreground">Менеджер</div>
+                <div className="text-sm font-semibold text-foreground truncate">{userName}</div>
                 <div className="text-xs text-muted-foreground truncate">{company.name}</div>
               </div>
               <DropdownMenuItem onClick={() => navigate('/settings')} className="gap-2.5 cursor-pointer">
@@ -150,7 +158,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
                 {theme === 'dark' ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Moon className="h-4 w-4 text-muted-foreground" />}
                 {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => navigate('/login')} className="gap-2.5 cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400">
+              <DropdownMenuItem onClick={handleLogout} className="gap-2.5 cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400">
                 <LogOut className="h-4 w-4" />
                 Выйти
               </DropdownMenuItem>
