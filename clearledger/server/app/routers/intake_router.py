@@ -13,11 +13,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.models import SourceFile, User
-from app.utils import resolve_company_id_optional
 
 router = APIRouter(tags=["Intake / Файлы"])
 
@@ -66,10 +65,13 @@ async def upload_file(
     with open(storage_path, "wb") as f:
         f.write(content)
 
-    # Определяем company_id (slug или UUID)
-    cid = await resolve_company_id_optional(company_id, db)
-    if cid is None:
+    # Определяем company_id (slug или UUID) с проверкой членства
+    if company_id:
+        cid = await assert_company_member(company_id, current_user, db)
+    else:
         cid = current_user.company_id
+        if cid is None:
+            raise HTTPException(status_code=400, detail="Укажите company_id")
 
     # Запись в БД
     source = SourceFile(

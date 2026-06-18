@@ -10,9 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.utils import resolve_company_id
 from app.models import (
     BankAccount,
     Contract,
@@ -93,7 +92,7 @@ async def list_counterparties(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(Counterparty)
         .where(Counterparty.company_id == cid)
@@ -111,7 +110,7 @@ async def search_counterparties(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     base = select(Counterparty).where(Counterparty.company_id == cid)
     if q:
         like = f"%{q.strip()}%"
@@ -144,7 +143,7 @@ async def create_counterparty(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     cp = Counterparty(
         company_id=cid,
         inn=body.inn,
@@ -228,7 +227,7 @@ async def list_organizations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(Organization)
         .where(Organization.company_id == cid)
@@ -246,7 +245,7 @@ async def search_organizations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     base = select(Organization).where(Organization.company_id == cid)
     if q:
         like = f"%{q.strip()}%"
@@ -278,7 +277,7 @@ async def create_organization(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     org = Organization(
         company_id=cid,
         inn=body.inn,
@@ -361,7 +360,7 @@ async def list_nomenclature(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(NomenclatureItem)
         .where(NomenclatureItem.company_id == cid)
@@ -379,7 +378,7 @@ async def search_nomenclature(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     base = select(NomenclatureItem).where(NomenclatureItem.company_id == cid)
     if q:
         like = f"%{q.strip()}%"
@@ -411,7 +410,7 @@ async def create_nomenclature(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     n = NomenclatureItem(
         company_id=cid,
         code=body.code,
@@ -492,7 +491,7 @@ async def list_contracts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(Contract)
         .where(Contract.company_id == cid)
@@ -511,7 +510,7 @@ async def create_contract(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     c = Contract(
         company_id=cid,
         number=body.number,
@@ -593,7 +592,7 @@ async def list_warehouses(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(Warehouse)
         .where(Warehouse.company_id == cid)
@@ -611,7 +610,7 @@ async def search_warehouses(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     base = select(Warehouse).where(Warehouse.company_id == cid)
     if q:
         like = f"%{q.strip()}%"
@@ -644,7 +643,7 @@ async def create_warehouse(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     w = Warehouse(
         company_id=cid,
         code=body.code,
@@ -722,7 +721,7 @@ async def list_bank_accounts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(BankAccount)
         .where(BankAccount.company_id == cid)
@@ -741,7 +740,7 @@ async def create_bank_account(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     ba = BankAccount(
         company_id=cid,
         number=body.number,

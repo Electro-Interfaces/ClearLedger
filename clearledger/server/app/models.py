@@ -49,6 +49,10 @@ class Company(Base):
 
     # Связи
     users: Mapped[list["User"]] = relationship(back_populates="company")
+    # Члены компании (M2M через user_companies) — источник истины прав доступа.
+    members: Mapped[list["User"]] = relationship(
+        secondary="user_companies", back_populates="companies", viewonly=False
+    )
     entries: Mapped[list["DataEntry"]] = relationship(back_populates="company")
     audit_events: Mapped[list["AuditEvent"]] = relationship(back_populates="company")
     connectors: Mapped[list["Connector"]] = relationship(back_populates="company")
@@ -63,19 +67,50 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    # Компания по умолчанию (какую показать первой). Источник истины ПРАВ —
+    # user_companies. Nullable: суперадмин может не иметь дефолтной компании.
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=True
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
+    # Суперадмин видит и переключает ВСЕ компании без записей в user_companies.
+    is_superadmin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
     # Связи
-    company: Mapped["Company"] = relationship(back_populates="users")
+    company: Mapped["Company | None"] = relationship(back_populates="users")
+    # Доступные компании (M2M через user_companies).
+    companies: Mapped[list["Company"]] = relationship(
+        secondary="user_companies", back_populates="members", viewonly=False
+    )
+
+
+# ---------------------------------------------------------------------------
+# UserCompany — членство пользователя в компании (M2M, источник истины прав)
+# ---------------------------------------------------------------------------
+class UserCompany(Base):
+    __tablename__ = "user_companies"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -15,10 +15,12 @@ from app.auth import (
     verify_password,
 )
 from app.database import get_db
-from app.models import Company, User
+from app.models import Company, User, UserCompany
 from app.utils import resolve_company_id
 from app.schemas import (
+    CompanyBrief,
     LoginRequest,
+    MeResponse,
     RegisterRequest,
     TokenResponse,
     UserResponse,
@@ -74,6 +76,10 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.flush()
 
+    # Членство в компании (источник истины прав доступа).
+    db.add(UserCompany(user_id=user.id, company_id=company_uuid))
+    await db.flush()
+
     token = create_access_token(str(user.id), user.email)
     return TokenResponse(
         access_token=token,
@@ -91,19 +97,54 @@ async def refresh_token(current_user: User = Depends(get_current_user)):
     )
 
 
-@router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
-    """Возвращает текущего авторизованного пользователя."""
-    return _user_response(current_user)
+@router.get("/me", response_model=MeResponse)
+async def get_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Текущий пользователь + список доступных компаний.
+    Суперадмин получает все компании; обычный — только из user_companies.
+    """
+    if current_user.is_superadmin:
+        rows = (
+            await db.execute(select(Company).order_by(Company.name))
+        ).scalars().all()
+    else:
+        rows = (
+            await db.execute(
+                select(Company)
+                .join(UserCompany, UserCompany.company_id == Company.id)
+                .where(UserCompany.user_id == current_user.id)
+                .order_by(Company.name)
+            )
+        ).scalars().all()
+
+    return MeResponse(
+        id=str(current_user.id),
+        email=current_user.email,
+        name=current_user.name,
+        role=current_user.role,
+        is_superadmin=current_user.is_superadmin,
+        default_company_id=str(current_user.company_id) if current_user.company_id else None,
+        companies=[
+            CompanyBrief(
+                id=str(c.id), slug=c.slug, name=c.name,
+                short_name=c.short_name, color=c.color, profile_id=c.profile_id,
+            )
+            for c in rows
+        ],
+    )
 
 
 def _user_response(user: User) -> UserResponse:
-    """Конвертирует ORM-объект User в схему ответа."""
+    """Конвертирует ORM-объект User в схему ответа (login/register/refresh)."""
     return UserResponse(
         id=str(user.id),
         email=user.email,
         name=user.name,
         role=user.role,
-        company_id=str(user.company_id),
+        company_id=str(user.company_id) if user.company_id else None,
+        is_superadmin=user.is_superadmin,
         created_at=user.created_at,
     )

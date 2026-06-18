@@ -8,10 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.deps import get_owned
 from app.models import DocumentLink, DataEntry, User
-from app.utils import resolve_company_id_optional
 from app.schemas import DocumentLinkCreate, DocumentLinkResponse
 
 router = APIRouter(prefix="/document-links", tags=["Связи документов"])
@@ -42,8 +42,13 @@ async def list_links(
     if link_type:
         query = query.where(DocumentLink.link_type == link_type)
 
-    # Изоляция данных по компании
-    cid = await resolve_company_id_optional(company_id, db) or current_user.company_id
+    # Изоляция данных по компании (проверяем членство при явном company_id)
+    if company_id:
+        cid = await assert_company_member(company_id, current_user, db)
+    else:
+        cid = current_user.company_id
+        if cid is None:
+            raise HTTPException(status_code=400, detail="Укажите company_id")
     query = query.join(
         DataEntry,
         or_(
@@ -69,6 +74,9 @@ async def get_links_for_entry(
         uid = uuid.UUID(entry_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Невалидный ID записи")
+
+    # Изоляция: доступ к связям только для своей записи (иначе 404).
+    await get_owned(DataEntry, uid, current_user, db)
 
     query = select(DocumentLink).where(
         or_(
@@ -98,6 +106,12 @@ async def create_link(
         tgt_id = uuid.UUID(body.target_entry_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Невалидные ID записей")
+
+    # Изоляция: обе записи должны принадлежать доступной компании (иначе 404).
+    src_entry = await get_owned(DataEntry, src_id, current_user, db)
+    tgt_entry = await get_owned(DataEntry, tgt_id, current_user, db)
+    if src_entry.company_id != tgt_entry.company_id:
+        raise HTTPException(status_code=400, detail="Записи из разных компаний")
 
     # Проверяем дубликат
     existing = await db.execute(
@@ -143,4 +157,6 @@ async def delete_link(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Связь не найдена",
         )
+    # Изоляция: связь принадлежит компании своих записей — проверяем членство.
+    await get_owned(DataEntry, link.source_entry_id, current_user, db)
     await db.delete(link)

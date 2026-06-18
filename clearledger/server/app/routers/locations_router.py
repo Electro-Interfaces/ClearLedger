@@ -12,9 +12,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import ServiceLocation
-from app.utils import resolve_company_id
+from app.deps import CompanyDep, get_owned
+from app.models import ServiceLocation, User
 
 router = APIRouter(prefix="/locations", tags=["Точки обслуживания"])
 
@@ -69,8 +70,7 @@ def _out(l: ServiceLocation) -> LocationOut:
 
 
 @router.get("", response_model=list[LocationOut])
-async def list_locations(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
-    cid = await resolve_company_id(company_id, db)
+async def list_locations(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
     res = await db.execute(
         select(ServiceLocation).where(ServiceLocation.company_id == cid)
         .order_by(ServiceLocation.code)
@@ -79,11 +79,17 @@ async def list_locations(company_id: str = Query(...), db: AsyncSession = Depend
 
 
 @router.post("", response_model=LocationOut)
-async def create_location(payload: LocationIn, db: AsyncSession = Depends(get_db)):
-    cid = await resolve_company_id(payload.company_id, db)
+async def create_location(
+    payload: LocationIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_member(payload.company_id, current_user, db)
     existing = await db.get(ServiceLocation, payload.id)
     if existing:
-        # upsert по клиентскому id
+        # upsert по клиентскому id — но чужую точку (другой компании) перехватить
+        # нельзя: get_owned бросит 404, если нет членства в её компании.
+        await get_owned(ServiceLocation, payload.id, current_user, db)
         existing.company_id = cid
         existing.code = payload.code
         existing.name = payload.name
@@ -107,10 +113,13 @@ async def create_location(payload: LocationIn, db: AsyncSession = Depends(get_db
 
 
 @router.patch("/{location_id}", response_model=LocationOut)
-async def update_location(location_id: str, payload: LocationUpdate, db: AsyncSession = Depends(get_db)):
-    loc = await db.get(ServiceLocation, location_id)
-    if not loc:
-        raise HTTPException(404, "Точка не найдена")
+async def update_location(
+    location_id: str,
+    payload: LocationUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    loc = await get_owned(ServiceLocation, location_id, current_user, db)
     data = payload.model_dump(exclude_unset=True)
     if "sourceBindings" in data:
         loc.source_bindings = data.pop("sourceBindings")
@@ -123,8 +132,11 @@ async def update_location(location_id: str, payload: LocationUpdate, db: AsyncSe
 
 
 @router.delete("/{location_id}")
-async def delete_location(location_id: str, db: AsyncSession = Depends(get_db)):
-    loc = await db.get(ServiceLocation, location_id)
-    if loc:
-        await db.delete(loc)
+async def delete_location(
+    location_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    loc = await get_owned(ServiceLocation, location_id, current_user, db)
+    await db.delete(loc)
     return {"ok": True}

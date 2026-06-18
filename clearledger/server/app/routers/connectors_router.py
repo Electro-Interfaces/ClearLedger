@@ -9,10 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import Connector, User
-from app.utils import resolve_company_id, resolve_company_id_optional
 from app.schemas import ConnectorCreate, ConnectorResponse, ConnectorUpdate
 
 router = APIRouter(prefix="/connectors", tags=["Коннекторы"])
@@ -68,7 +67,12 @@ async def list_connectors(
     query = select(Connector)
 
     # Изоляция данных по компании
-    cid = await resolve_company_id_optional(company_id, db) or current_user.company_id
+    if company_id:
+        cid = await assert_company_member(company_id, current_user, db)
+    else:
+        cid = current_user.company_id
+        if cid is None:
+            raise HTTPException(status_code=400, detail="Укажите company_id")
     query = query.where(Connector.company_id == cid)
 
     query = query.order_by(Connector.created_at.desc())
@@ -99,7 +103,7 @@ async def create_connector(
     current_user: User = Depends(get_current_user),
 ):
     """Создать новый коннектор."""
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
 
     conn = Connector(
         name=body.name,

@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
 from app.database import get_db
 from app.models import AccountingDoc, DataEntry, User
 from app.schemas import (
@@ -19,8 +18,8 @@ from app.schemas import (
     ReconciliationSummaryResponse,
     UnmatchRequest,
 )
+from app.auth import assert_company_member, get_current_user
 from app.services.reconciliation_service import run_reconciliation
-from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/reconciliation", tags=["Сверка"])
 
@@ -91,7 +90,7 @@ async def run_reconciliation_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await run_reconciliation(db, cid)
     return result
 
@@ -106,7 +105,7 @@ async def get_summary(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     # Считаем статусы документов 1С (один запрос, без N+1)
     docs_result = await db.execute(
@@ -156,7 +155,7 @@ async def get_unmatched_1c(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(AccountingDoc)
         .where(
@@ -178,7 +177,7 @@ async def get_unmatched_cl(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     # ID всех сопоставленных entries
     matched_result = await db.execute(
@@ -211,7 +210,7 @@ async def get_discrepancies(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(AccountingDoc)
         .where(
@@ -233,7 +232,7 @@ async def manual_match(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     doc_uuid = uuid.UUID(body.doc_id)
     entry_uuid = uuid.UUID(body.entry_id)
 
@@ -268,7 +267,7 @@ async def unmatch(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     doc_uuid = uuid.UUID(body.doc_id)
     doc_result = await db.execute(
         select(AccountingDoc).where(AccountingDoc.id == doc_uuid, AccountingDoc.company_id == cid)

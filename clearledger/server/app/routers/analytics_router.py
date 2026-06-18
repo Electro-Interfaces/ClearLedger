@@ -14,30 +14,17 @@ from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import Company, User
+from app.models import User
 from app.services.analytics_service import AnalyticsService, PeriodFilter
 
 router = APIRouter(prefix="/analytics", tags=["Аналитика"])
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
-
-async def _resolve_company_id(value: str, db: AsyncSession) -> uuid.UUID:
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        pass
-    result = await db.execute(select(Company).where(Company.slug == value))
-    company = result.scalar_one_or_none()
-    if company is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Unknown company: {value}")
-    return company.id
-
 
 def _parse_iso_date(s: str, field: str) -> date:
     try:
@@ -48,9 +35,9 @@ def _parse_iso_date(s: str, field: str) -> date:
 
 async def _filter_from_query(
     company_id: str, date_from: str, date_to: str, station_id: str | None,
-    db: AsyncSession,
+    db: AsyncSession, current_user: User,
 ) -> PeriodFilter:
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     df = _parse_iso_date(date_from, "date_from")
     dt = _parse_iso_date(date_to, "date_to")
     sid: uuid.UUID | None = None
@@ -72,10 +59,10 @@ async def get_pnl(
     group_by: str = Query("station", pattern="^(station|fuel|month)$"),
     station_id: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """P&L: выручка, себестоимость, маржа. group_by=station|fuel|month."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db)
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user)
     svc = AnalyticsService(db)
     return await svc.pnl(f, group_by=group_by)
 
@@ -87,10 +74,10 @@ async def get_payment_mix(
     date_to: str,
     station_id: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Маркетинг: доли cash/card/voucher + средний чек по сменам."""
-    f = await _filter_from_query(company_id, date_from, date_to, station_id, db)
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user)
     svc = AnalyticsService(db)
     return await svc.payment_mix(f)
 
@@ -103,10 +90,10 @@ async def get_cash_flow(
     date_from: str,
     date_to: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Обороты по 50/51/52/57/55."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db)
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user)
     svc = AnalyticsService(db)
     return await svc.cash_flow(f)
 
@@ -117,10 +104,10 @@ async def get_payables_receivables(
     date_from: str,
     date_to: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Дебиторка (62) и кредиторка (60.01) по контрагентам."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db)
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user)
     svc = AnalyticsService(db)
     return await svc.payables_receivables(f)
 
@@ -133,10 +120,10 @@ async def get_vat(
     date_from: str,
     date_to: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Позиция НДС: исходящий (68.02) − входящий (19.03)."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db)
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user)
     svc = AnalyticsService(db)
     return await svc.vat_position(f)
 
@@ -147,10 +134,10 @@ async def get_profit(
     date_from: str,
     date_to: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Налог на прибыль: оценочный финрезультат."""
-    f = await _filter_from_query(company_id, date_from, date_to, None, db)
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user)
     svc = AnalyticsService(db)
     return await svc.profit_position(f)
 
@@ -164,10 +151,10 @@ async def get_month_forecast(
     month: int = Query(..., ge=1, le=12),
     station_id: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Прогноз закрытия месяца: экстраполяция, недостающие документы, риски."""
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     sid: uuid.UUID | None = None
     if station_id:
         try:

@@ -17,25 +17,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import Company, InventoryBatch, NomenclaturePrice, OneCPolicy, PostingTemplate, User
+from app.models import InventoryBatch, NomenclaturePrice, OneCPolicy, PostingTemplate, User
 
 router = APIRouter(tags=["1С политика и схема проводок"])
-
-
-# ─── helpers ─────────────────────────────────────────────────────────
-
-async def _resolve_company_id(value: str, db: AsyncSession) -> uuid.UUID:
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        pass
-    result = await db.execute(select(Company).where(Company.slug == value))
-    company = result.scalar_one_or_none()
-    if company is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Unknown company: {value}")
-    return company.id
 
 
 # ─── схемы ───────────────────────────────────────────────────────────
@@ -89,9 +75,9 @@ class PostingTemplateCreate(BaseModel):
 async def list_policies(
     company_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[OneCPolicyResponse]:
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     rows = (await db.execute(
         select(OneCPolicy)
         .where(OneCPolicy.company_id == cid)
@@ -124,11 +110,11 @@ async def list_posting_templates(
     company_id: str | None = None,
     doc_type: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[PostingTemplateResponse]:
     stmt = select(PostingTemplate)
     if company_id:
-        cid = await _resolve_company_id(company_id, db)
+        cid = await assert_company_member(company_id, current_user, db)
         # Возвращаем шаблоны компании + глобальные (company_id IS NULL)
         from sqlalchemy import or_
         stmt = stmt.where(or_(PostingTemplate.company_id == cid, PostingTemplate.company_id.is_(None)))
@@ -154,9 +140,9 @@ async def list_posting_templates(
 async def create_posting_template(
     payload: PostingTemplateCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> PostingTemplateResponse:
-    cid = await _resolve_company_id(payload.company_id, db) if payload.company_id else None
+    cid = await assert_company_member(payload.company_id, current_user, db) if payload.company_id else None
     t = PostingTemplate(
         id=uuid.uuid4(),
         company_id=cid,
@@ -242,9 +228,9 @@ async def list_prices(
     nomenclature_ref: str | None = None,
     limit: int = 500,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[PriceRow]:
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     stmt = select(NomenclaturePrice).where(NomenclaturePrice.company_id == cid)
     if nomenclature_ref:
         stmt = stmt.where(NomenclaturePrice.nomenclature_ref == nomenclature_ref)
@@ -298,9 +284,9 @@ async def list_batches(
     nomenclature_ref: str | None = None,
     limit: int = 1000,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[BatchRow]:
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     stmt = select(InventoryBatch).where(InventoryBatch.company_id == cid)
     if warehouse_ref:
         stmt = stmt.where(InventoryBatch.warehouse_ref == warehouse_ref)
@@ -359,7 +345,7 @@ async def list_nomenclature_purchase_docs(
     company_id: str,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[PurchaseDocRow]:
     """ПТУ-документы где упомянута данная номенклатура.
 
@@ -371,7 +357,7 @@ async def list_nomenclature_purchase_docs(
     from app.models import AccountingDoc, OneCConnection
     from app.services.onec.sync_service import OneCSyncService
     from sqlalchemy import text, select
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     # 1. Локальный JSONB-поиск
     sql = text("""
         SELECT id, external_id, doc_type, number, date, counterparty_name,

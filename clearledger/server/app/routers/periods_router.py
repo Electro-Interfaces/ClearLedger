@@ -16,10 +16,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import AccountingDoc, Period, User
-from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/periods", tags=["Учётные периоды"])
 
@@ -74,7 +73,7 @@ async def periods_summary(
     - status, closedAt, closureSource берутся из таблицы Period — если
       записи нет, статус "open", источник "derived".
     """
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     # 1) Агрегат из документов. SUBSTR(date, 1, 4)/(6,2) — у нас даты строкой.
     year_col = func.substring(AccountingDoc.date, 1, 4)
@@ -147,7 +146,7 @@ async def toggle_period(
     оперативный инструмент пока репликация ДатыЗапретаИзменения
     не реализована.
     """
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     if not (1 <= body.month <= 12):
         raise HTTPException(400, "month must be 1..12")
 

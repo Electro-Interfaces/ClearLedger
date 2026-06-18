@@ -9,10 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AuditEvent, DataEntry, User
-from app.utils import resolve_company_id, resolve_company_id_optional
+from app.models import AuditEvent, DataEntry, User, UserCompany
 from app.schemas import (
     DataEntryCreate,
     DataEntryResponse,
@@ -55,9 +54,10 @@ def _entry_response(entry: DataEntry) -> DataEntryResponse:
 
 
 async def _get_entry_or_404(
-    entry_id: str, db: AsyncSession
+    entry_id: str, current_user: User, db: AsyncSession
 ) -> DataEntry:
-    """Получает запись или бросает 404."""
+    """Получает запись или бросает 404. Изолирует по компании: чужая запись
+    (нет членства) — тоже 404 (не раскрываем существование чужих данных)."""
     try:
         uid = uuid.UUID(entry_id)
     except ValueError:
@@ -70,6 +70,18 @@ async def _get_entry_or_404(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Запись не найдена",
         )
+    if not current_user.is_superadmin:
+        member = await db.execute(
+            select(UserCompany.company_id).where(
+                UserCompany.user_id == current_user.id,
+                UserCompany.company_id == entry.company_id,
+            )
+        )
+        if member.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Запись не найдена",
+            )
     return entry
 
 
@@ -115,8 +127,14 @@ async def list_entries(
     query = select(DataEntry)
     count_query = select(func.count(DataEntry.id))
 
-    # Фильтр по компании (обязательный — изоляция данных)
-    cid = await resolve_company_id_optional(company_id, db) or current_user.company_id
+    # Фильтр по компании (обязательный — изоляция данных).
+    # Передан company_id → проверяем членство; иначе компания по умолчанию.
+    if company_id:
+        cid = await assert_company_member(company_id, current_user, db)
+    else:
+        cid = current_user.company_id
+        if cid is None:
+            raise HTTPException(status_code=400, detail="Укажите company_id")
     query = query.where(DataEntry.company_id == cid)
     count_query = count_query.where(DataEntry.company_id == cid)
 
@@ -171,7 +189,7 @@ async def get_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Получить запись по ID."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     return _entry_response(entry)
 
 
@@ -186,7 +204,7 @@ async def create_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Создать новую запись."""
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
 
     entry = DataEntry(
         title=body.title,
@@ -220,7 +238,7 @@ async def update_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Частичное обновление записи."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
 
     update_data = body.model_dump(exclude_unset=True)
     # Схема: metadata → модель: meta
@@ -246,7 +264,7 @@ async def delete_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Удаление записи (hard delete)."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     company_id = entry.company_id
     await _create_audit(
         db, current_user, "archived", company_id, entry_id,
@@ -266,7 +284,7 @@ async def verify_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Верифицировать запись."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     entry.status = "verified"
     entry.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -282,7 +300,7 @@ async def reject_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Отклонить запись с опциональной причиной."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     entry.status = "error"
     entry.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -312,13 +330,24 @@ async def transfer_entries(
 
         result = await db.execute(select(DataEntry).where(DataEntry.id == uid))
         entry = result.scalar_one_or_none()
-        if entry and entry.status == "verified":
-            entry.status = "transferred"
-            entry.updated_at = datetime.now(timezone.utc)
-            transferred_ids.append(raw_id)
-            await _create_audit(
-                db, current_user, "transferred", entry.company_id, entry.id,
+        if not entry or entry.status != "verified":
+            continue
+        # Изоляция: чужие записи (нет членства) молча пропускаем.
+        if not current_user.is_superadmin:
+            member = await db.execute(
+                select(UserCompany.company_id).where(
+                    UserCompany.user_id == current_user.id,
+                    UserCompany.company_id == entry.company_id,
+                )
             )
+            if member.scalar_one_or_none() is None:
+                continue
+        entry.status = "transferred"
+        entry.updated_at = datetime.now(timezone.utc)
+        transferred_ids.append(raw_id)
+        await _create_audit(
+            db, current_user, "transferred", entry.company_id, entry.id,
+        )
 
     await db.flush()
     return {"transferred": transferred_ids, "count": len(transferred_ids)}
@@ -331,7 +360,7 @@ async def archive_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Архивировать запись."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     entry.status = "archived"
     entry.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -346,7 +375,7 @@ async def restore_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Восстановить запись из архива (→ new)."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     entry.status = "new"
     entry.updated_at = datetime.now(timezone.utc)
     await db.flush()
@@ -361,7 +390,7 @@ async def exclude_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Исключить запись."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     # Сохраняем предыдущий статус в metadata
     prev_status = entry.status
     meta = dict(entry.meta or {})
@@ -384,7 +413,7 @@ async def include_entry(
     current_user: User = Depends(get_current_user),
 ):
     """Вернуть ранее исключённую запись."""
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
     meta = dict(entry.meta or {})
     restore_to = meta.pop("_excluded_from", "new")
     entry.meta = meta
@@ -418,7 +447,7 @@ async def normalize_entry(
 
     payload (опционально): {meta_patch: {...}} — точечные правки meta.
     """
-    raw = await _get_entry_or_404(entry_id, db)
+    raw = await _get_entry_or_404(entry_id, current_user, db)
     if raw.layer != "raw":
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -490,7 +519,7 @@ def _diff_meta(raw: dict, clean: dict) -> list[dict]:
 async def get_entry_lineage(
     entry_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Цепочка L1→L2 для одного DataEntry.
 
@@ -498,7 +527,7 @@ async def get_entry_lineage(
     Если entry — raw — ищем clean-потомков (может быть несколько).
     Возвращаем оба + diff по meta для UI «Распознавание».
     """
-    entry = await _get_entry_or_404(entry_id, db)
+    entry = await _get_entry_or_404(entry_id, current_user, db)
 
     raw: DataEntry | None = None
     clean: DataEntry | None = None

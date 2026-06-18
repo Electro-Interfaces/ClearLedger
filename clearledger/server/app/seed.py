@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import hash_password
-from app.models import Company, PostingTemplate, User
+from app.models import Company, PostingTemplate, User, UserCompany
 
 logger = logging.getLogger("clearledger.seed")
 
@@ -50,12 +50,16 @@ async def seed_data(db: AsyncSession) -> None:
     if created_companies:
         await db.flush()  # получить ID
 
-    # --- Демо-пользователь ---
+    # --- Демо-пользователь (суперадмин: видит все компании) ---
+    # is_superadmin проставляем и при создании, и для уже существующего —
+    # на чистой тестовой БД (ORM create_all) DDL-миграция v2.0 не выполняется,
+    # поэтому флаг должен ставить сам seed.
     result = await db.execute(
         select(User).where(User.email == DEMO_USER["email"])
     )
-    if result.scalar_one_or_none() is None:
-        # Привязываем к первой компании (НПК)
+    demo = result.scalar_one_or_none()
+    if demo is None:
+        # Компания по умолчанию — НПК (членство суперадмину не обязательно).
         first_company = await db.execute(
             select(Company).where(Company.slug == "npk")
         )
@@ -67,13 +71,19 @@ async def seed_data(db: AsyncSession) -> None:
                 name=DEMO_USER["name"],
                 role=DEMO_USER["role"],
                 company_id=company.id,
+                is_superadmin=True,
             )
             db.add(user)
+            await db.flush()
+            db.add(UserCompany(user_id=user.id, company_id=company.id))
             logger.info(
-                "Создан демо-пользователь: %s / %s",
+                "Создан демо-пользователь (суперадмин): %s / %s",
                 DEMO_USER["email"],
                 DEMO_USER["password"],
             )
+    elif not demo.is_superadmin:
+        demo.is_superadmin = True
+        logger.info("Демо-пользователь повышен до суперадмина")
 
     # --- Шаблоны проводок (глобальные, company_id=NULL) ---
     await _seed_posting_templates(db)

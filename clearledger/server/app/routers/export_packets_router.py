@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import Company, ExportPacket, User
+from app.models import ExportPacket, User
 from app.schemas import (
     ExportPacketCreate,
     ExportPacketResponse,
@@ -21,18 +21,6 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/export-packets", tags=["Выгрузка в 1С (L3)"])
-
-
-async def _resolve_company_id(value: str, db: AsyncSession) -> uuid.UUID:
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        pass
-    result = await db.execute(select(Company).where(Company.slug == value))
-    company = result.scalar_one_or_none()
-    if company is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Unknown company: {value}")
-    return company.id
 
 
 def _resp(p: ExportPacket) -> ExportPacketResponse:
@@ -58,9 +46,9 @@ async def list_packets(
     kind: str | None = Query(None),
     pkt_status: str | None = Query(None, alias="status"),
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     stmt = select(ExportPacket).where(ExportPacket.company_id == cid)
     if kind:
         stmt = stmt.where(ExportPacket.kind == kind)
@@ -75,9 +63,9 @@ async def list_packets(
 async def create_packet(
     payload: ExportPacketCreate,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    cid = await _resolve_company_id(payload.company_id, db)
+    cid = await assert_company_member(payload.company_id, current_user, db)
     p = ExportPacket(
         id=uuid.uuid4(),
         company_id=cid,
@@ -152,9 +140,9 @@ async def delete_packet(
 async def packet_stats(
     company_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     rows = (await db.execute(
         select(ExportPacket.status, ExportPacket.kind, func.count())
         .where(ExportPacket.company_id == cid)
@@ -174,7 +162,7 @@ async def build_packets_from_clean(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Собрать ExportPackets из L2 (DataEntry layer='clean') за период.
 
@@ -190,7 +178,7 @@ async def build_packets_from_clean(
     """
     from app.models import DataEntry  # local import чтобы не плодить top-level
 
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     stmt = select(DataEntry).where(
         DataEntry.company_id == cid,
         DataEntry.layer == "clean",
@@ -341,13 +329,13 @@ async def queue_for_extension(
     kind: str | None = Query(None),
     mark_as_sent: bool = Query(True, description="Перевести выданные пакеты в status=sent"),
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Очередь пакетов для расширения 1С. Возвращает draft+queued.
     При mark_as_sent=true (по умолчанию) — атомарно меняет их статус
     на 'sent' и заполняет sent_at, чтобы расширение их видело только
     один раз (idempotent от своей стороны через ack)."""
-    cid = await _resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     stmt = select(ExportPacket).where(
         ExportPacket.company_id == cid,
         ExportPacket.status.in_(["draft", "queued"]),

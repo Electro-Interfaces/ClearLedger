@@ -10,10 +10,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Company, User
+from app.models import Company, User, UserCompany
 from app.schemas import CompanyCreate, CompanyResponse, CompanyUpdate
 
 router = APIRouter(prefix="/companies", tags=["Компании"])
+
+
+async def _is_member(user: User, company_id: uuid.UUID, db: AsyncSession) -> bool:
+    """Имеет ли пользователь доступ к компании (суперадмин — ко всем)."""
+    if user.is_superadmin:
+        return True
+    res = await db.execute(
+        select(UserCompany.company_id).where(
+            UserCompany.user_id == user.id,
+            UserCompany.company_id == company_id,
+        )
+    )
+    return res.scalar_one_or_none() is not None
+
+
+def _require_superadmin(user: User) -> None:
+    """Управление компаниями (create/update/delete) — только суперадмин."""
+    if not user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Только суперадмин управляет компаниями",
+        )
 
 
 def _company_response(company: Company) -> CompanyResponse:
@@ -60,8 +82,16 @@ async def list_companies(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Список всех компаний."""
-    query = select(Company).order_by(Company.created_at.desc())
+    """Список доступных компаний (суперадмин — все, иначе только свои)."""
+    if current_user.is_superadmin:
+        query = select(Company).order_by(Company.created_at.desc())
+    else:
+        query = (
+            select(Company)
+            .join(UserCompany, UserCompany.company_id == Company.id)
+            .where(UserCompany.user_id == current_user.id)
+            .order_by(Company.created_at.desc())
+        )
     result = await db.execute(query)
     companies = result.scalars().all()
     return [_company_response(c) for c in companies]
@@ -73,8 +103,12 @@ async def get_company(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Получить компанию по ID."""
+    """Получить компанию по ID (только доступную)."""
     company = await _get_company_or_404(company_id, db)
+    if not await _is_member(current_user, company.id, db):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Компания не найдена"
+        )
     return _company_response(company)
 
 
@@ -89,6 +123,7 @@ async def create_company(
     current_user: User = Depends(get_current_user),
 ):
     """Создать новую компанию."""
+    _require_superadmin(current_user)
     # Проверка уникальности slug
     existing = await db.execute(
         select(Company).where(Company.slug == body.slug)
@@ -120,6 +155,7 @@ async def update_company(
     current_user: User = Depends(get_current_user),
 ):
     """Частичное обновление компании."""
+    _require_superadmin(current_user)
     company = await _get_company_or_404(company_id, db)
 
     update_data = body.model_dump(exclude_unset=True)
@@ -137,5 +173,6 @@ async def delete_company(
     current_user: User = Depends(get_current_user),
 ):
     """Удаление компании."""
+    _require_superadmin(current_user)
     company = await _get_company_or_404(company_id, db)
     await db.delete(company)

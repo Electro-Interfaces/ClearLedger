@@ -16,12 +16,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import assert_company_member, get_current_user
 from app.channel_catalog import get_channel_template
 from app.database import get_db
-from app.models import Channel, ChannelStage, ChannelStream, ChannelSyncLog, Source
+from app.deps import CompanyDep, get_owned
+from app.models import Channel, ChannelStage, ChannelStream, ChannelSyncLog, Source, User
 from app.services.cb_intake import ingest_packages
 from app.services.channel_orchestrator import run_channel as orchestrate_channel
-from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/channels", tags=["channels"])
 
@@ -130,9 +131,13 @@ async def _resp(db: AsyncSession, ch: Channel, skipped: list[str] | None = None)
 # CRUD
 # ---------------------------------------------------------------------------
 @router.post("", response_model=ChannelResponse)
-async def create_channel(payload: ChannelCreate, db: AsyncSession = Depends(get_db)):
+async def create_channel(
+    payload: ChannelCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Создать канал (из шаблона справочника или пустой) и привязать к компании."""
-    cid = await resolve_company_id(payload.company_id, db)
+    cid = await assert_company_member(payload.company_id, current_user, db)
     tpl = get_channel_template(payload.template_id) if payload.template_id else None
     if payload.template_id and not tpl:
         raise HTTPException(404, f"Шаблон канала '{payload.template_id}' не найден")
@@ -170,8 +175,7 @@ async def create_channel(payload: ChannelCreate, db: AsyncSession = Depends(get_
 
 
 @router.get("", response_model=list[ChannelResponse])
-async def list_channels(company_id: str = Query(...), db: AsyncSession = Depends(get_db)):
-    cid = await resolve_company_id(company_id, db)
+async def list_channels(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
     res = await db.execute(
         select(Channel).where(Channel.company_id == cid).order_by(Channel.created_at)
     )
@@ -179,20 +183,23 @@ async def list_channels(company_id: str = Query(...), db: AsyncSession = Depends
 
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
-async def get_channel(channel_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    ch = await db.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "Канал не найден")
+async def get_channel(
+    channel_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ch = await get_owned(Channel, channel_id, current_user, db)
     return await _resp(db, ch)
 
 
 @router.patch("/{channel_id}", response_model=ChannelResponse)
 async def update_channel(
-    channel_id: uuid.UUID, payload: ChannelUpdate, db: AsyncSession = Depends(get_db)
+    channel_id: uuid.UUID,
+    payload: ChannelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    ch = await db.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "Канал не найден")
+    ch = await get_owned(Channel, channel_id, current_user, db)
     if payload.name is not None:
         ch.name = payload.name
     if payload.description is not None:
@@ -212,25 +219,29 @@ async def update_channel(
 
 
 @router.delete("/{channel_id}")
-async def delete_channel(channel_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    ch = await db.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "Канал не найден")
+async def delete_channel(
+    channel_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ch = await get_owned(Channel, channel_id, current_user, db)
     await db.delete(ch)   # streams/stages каскадом (FK ondelete=CASCADE)
     return {"deleted": str(channel_id)}
 
 
 @router.post("/{channel_id}/streams", response_model=ChannelResponse)
 async def add_stream(
-    channel_id: uuid.UUID, payload: StreamCreate, db: AsyncSession = Depends(get_db)
+    channel_id: uuid.UUID,
+    payload: StreamCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Привязать источник (поток) к каналу."""
-    ch = await db.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "Канал не найден")
-    src = await db.get(Source, uuid.UUID(payload.source_id))
-    if not src:
-        raise HTTPException(404, "Источник не найден")
+    ch = await get_owned(Channel, channel_id, current_user, db)
+    # Источник должен принадлежать той же компании (защита от кросс-привязки).
+    src = await get_owned(Source, uuid.UUID(payload.source_id), current_user, db)
+    if src.company_id != ch.company_id:
+        raise HTTPException(400, "Источник принадлежит другой компании")
     db.add(ChannelStream(
         channel_id=ch.id, source_id=src.id,
         doc_type_id=payload.doc_type_id, name=payload.name or src.name,
@@ -241,12 +252,13 @@ async def add_stream(
 
 @router.delete("/{channel_id}/streams/{stream_id}", response_model=ChannelResponse)
 async def remove_stream(
-    channel_id: uuid.UUID, stream_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    channel_id: uuid.UUID,
+    stream_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Отвязать поток от канала."""
-    ch = await db.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "Канал не найден")
+    ch = await get_owned(Channel, channel_id, current_user, db)
     st = await db.get(ChannelStream, stream_id)
     if st and st.channel_id == ch.id:
         await db.delete(st)
@@ -255,16 +267,18 @@ async def remove_stream(
 
 
 @router.post("/{channel_id}/run")
-async def run_channel(channel_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def run_channel(
+    channel_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Прогон канала: fetch (pull смен из ЦБ) → normalize → save (L2 DataEntry).
 
     Для каналов с источником onec_operational оркестратор тянет смены через
     COM (com_worker) и записывает в L2. ⚠ В проде fetch идёт через COM-Agent;
     при недоступности COM прогон вернёт ошибку в логе (не падает на клиента).
     """
-    ch = await db.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "Канал не найден")
+    ch = await get_owned(Channel, channel_id, current_user, db)
     try:
         result = await orchestrate_channel(db, ch)
         status = result.get("status", "success")
@@ -294,16 +308,17 @@ class IngestRequest(BaseModel):
 
 @router.post("/{channel_id}/ingest")
 async def ingest_channel(
-    channel_id: uuid.UUID, payload: IngestRequest, db: AsyncSession = Depends(get_db)
+    channel_id: uuid.UUID,
+    payload: IngestRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Принять пакеты смен ЦБ в L2 (нормализация + идемпотентная запись DataEntry).
 
     Стадии normalize+save канала сопутки/общепита. Пакеты даёт стадия fetch
     (onec_operational через com_worker) — здесь принимаем готовые пакеты.
     """
-    ch = await db.get(Channel, channel_id)
-    if not ch:
-        raise HTTPException(404, "Канал не найден")
+    ch = await get_owned(Channel, channel_id, current_user, db)
     result = await ingest_packages(db, ch.company_id, payload.packages, channel_id=ch.id)
     log = ChannelSyncLog(
         channel_id=ch.id,

@@ -20,14 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
 
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import DataEntry
+from app.models import DataEntry, User
 from app.reconcile_catalog import list_reconcile_rules
 from app.selfcheck_catalog import list_selfchecks
 from app.services.reconcile import selfcheck
 from app.services.reconcile.engine import run_reconcile
 from app.services.recon_run import run_rule as run_rule_live
-from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/reconcile", tags=["reconcile"])
 
@@ -67,14 +67,18 @@ class RunRuleRequest(BaseModel):
 
 
 @router.post("/run-rule")
-async def run_rule_endpoint(req: RunRuleRequest, db: AsyncSession = Depends(get_db)):
+async def run_rule_endpoint(
+    req: RunRuleRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Backend-исполнение разреза corp/online на живых потоках (КАНДИДАТ, §6.4).
 
     Тянет TF (STS) + внешний (TradeCorp/MSTO), прогоняет ReconcileEngine с
     канальным маппингом топлива/станций. Сверять с golden (frontend) через
     /reconcile/diff до замены.
     """
-    cid = await resolve_company_id(req.company_id, db) if req.company_id else None
+    cid = await assert_company_member(req.company_id, current_user, db) if req.company_id else None
     chid = uuid.UUID(req.channel_id) if req.channel_id else None
     return await run_rule_live(
         req.rule_id, req.date_from, req.date_to,
@@ -97,13 +101,17 @@ class SelfCheckRequest(BaseModel):
 
 
 @router.post("/selfcheck/run")
-async def selfcheck_run(req: SelfCheckRequest, db: AsyncSession = Depends(get_db)):
+async def selfcheck_run(
+    req: SelfCheckRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Прогнать самосверку над сохранённым L2 (DataEntry компании) → сводка+нарушения.
 
     Арифметические инварианты смены (баланс оплаты↔продажи, НДС 22/122, итог
     документа) на наших данных — без TradeCorp/MSTO/ОФД. Ловит ошибки до экспорта.
     """
-    cid = await resolve_company_id(req.company_id, db)
+    cid = await assert_company_member(req.company_id, current_user, db)
     rules = list_selfchecks()
     if req.rule_ids:
         rules = [r for r in rules if r["id"] in set(req.rule_ids)]

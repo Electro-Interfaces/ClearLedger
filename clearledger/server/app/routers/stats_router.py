@@ -10,10 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import DataEntry, User
-from app.utils import resolve_company_id
 from app.schemas import CategoryStatResponse, KpiResponse
 
 router = APIRouter(prefix="/stats", tags=["Статистика"])
@@ -26,7 +25,7 @@ async def get_kpi(
     current_user: User = Depends(get_current_user),
 ):
     """KPI для дашборда: загрузки за сегодня, верифицировано, в обработке, ошибки, передано."""
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -68,7 +67,7 @@ async def get_category_stats(
     current_user: User = Depends(get_current_user),
 ):
     """Распределение записей по категориям (для диаграммы)."""
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     query = (
         select(DataEntry.category_id, func.count(DataEntry.id).label("cnt"))

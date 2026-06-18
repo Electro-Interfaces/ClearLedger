@@ -9,10 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import DataEntry, User
-from app.utils import resolve_company_id
 from app.schemas import CounterpartyStat, ErrorStat, PeriodReport, SourceStat
 
 router = APIRouter(prefix="/reports", tags=["Отчёты"])
@@ -41,7 +40,7 @@ async def report_period(
     current_user: User = Depends(get_current_user),
 ):
     """Отчёт по периоду: количество по статусам."""
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     query = (
         select(DataEntry)
@@ -76,7 +75,7 @@ async def report_counterparties(
     current_user: User = Depends(get_current_user),
 ):
     """Статистика по контрагентам (из metadata._counterparty или metadata.counterparty)."""
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     query = select(DataEntry).where(DataEntry.company_id == cid)
     if date_from:
@@ -121,7 +120,7 @@ async def report_sources(
     current_user: User = Depends(get_current_user),
 ):
     """Статистика по источникам документов."""
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     query = select(DataEntry).where(DataEntry.company_id == cid)
     if date_from:
@@ -155,7 +154,7 @@ async def report_errors(
     current_user: User = Depends(get_current_user),
 ):
     """Статистика по ошибкам (записи со статусом error)."""
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
 
     query = (
         select(DataEntry)

@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
 from app.database import get_db
 from app.models import AccountingDoc, User
 from app.schemas import (
@@ -22,7 +21,7 @@ from app.schemas import (
     AccountingDocsStats,
     AccountingDocUpdate,
 )
-from app.utils import resolve_company_id
+from app.auth import assert_company_member, get_current_user
 
 router = APIRouter(prefix="/accounting-docs", tags=["Учётные документы 1С"])
 
@@ -90,7 +89,7 @@ async def list_accounting_docs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     q = select(AccountingDoc).where(AccountingDoc.company_id == cid)
 
     if doc_type:
@@ -129,7 +128,7 @@ async def search_accounting_docs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     base = select(AccountingDoc).where(AccountingDoc.company_id == cid)
 
     if doc_type:
@@ -180,7 +179,7 @@ async def accounting_docs_stats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     total = (await db.execute(
         select(func.count(AccountingDoc.id)).where(AccountingDoc.company_id == cid)
     )).scalar_one()
@@ -217,7 +216,7 @@ async def get_related_docs(
     день со склада-источника. Не регистраторы ОРП, но фактически
     бухгалтерская цепочка одной смены."""
     uid = _parse_uuid(doc_id)
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     doc = (await db.execute(
         select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
     )).scalar_one_or_none()
@@ -246,7 +245,7 @@ async def get_accounting_doc(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(doc_id)
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
     )
@@ -270,7 +269,7 @@ async def create_accounting_doc(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     doc = AccountingDoc(
         company_id=cid,
         external_id=body.external_id,
@@ -301,7 +300,7 @@ async def import_accounting_docs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cid = await resolve_company_id(body.company_id, db)
+    cid = await assert_company_member(body.company_id, current_user, db)
     errors: list[str] = []
     created = 0
     updated = 0
@@ -377,7 +376,7 @@ async def update_accounting_doc(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(doc_id)
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
     )
@@ -408,7 +407,7 @@ async def delete_accounting_doc(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(doc_id)
-    cid = await resolve_company_id(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db)
     result = await db.execute(
         select(AccountingDoc).where(AccountingDoc.id == uid, AccountingDoc.company_id == cid)
     )

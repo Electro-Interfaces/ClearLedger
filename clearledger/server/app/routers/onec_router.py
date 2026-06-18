@@ -16,9 +16,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AccountingDoc, Company, OneCConnection, OneCSyncLog, User
+from app.models import AccountingDoc, OneCConnection, OneCSyncLog, User
 from app.schemas import (
     OneCConnectionCreate,
     OneCConnectionResponse,
@@ -71,20 +71,6 @@ def _synclog_response(log: OneCSyncLog) -> OneCSyncLogResponse:
     )
 
 
-async def _resolve_company_id(value: str, db: AsyncSession) -> uuid.UUID:
-    """Принимает UUID или slug компании, возвращает UUID. CompanyContext во
-    фронте хранит slug ('gig', 'npk', 'rti'), а БД — UUID."""
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        pass
-    result = await db.execute(select(Company).where(Company.slug == value))
-    company = result.scalar_one_or_none()
-    if company is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Unknown company: {value}")
-    return company.id
-
-
 async def _get_connection_or_404(connection_id: str, db: AsyncSession) -> OneCConnection:
     try:
         cid = uuid.UUID(connection_id)
@@ -117,11 +103,11 @@ def _sync_result_from_log(log: OneCSyncLog) -> OneCSyncResult:
 async def list_connections(
     company_id: str | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[OneCConnectionResponse]:
     stmt = select(OneCConnection)
     if company_id:
-        cid = await _resolve_company_id(company_id, db)
+        cid = await assert_company_member(company_id, current_user, db)
         stmt = stmt.where(OneCConnection.company_id == cid)
     result = await db.execute(stmt.order_by(OneCConnection.created_at.desc()))
     return [_connection_response(c) for c in result.scalars().all()]
@@ -145,9 +131,9 @@ async def get_connection(
 async def create_connection(
     payload: OneCConnectionCreate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCConnectionResponse:
-    cid = await _resolve_company_id(payload.company_id, db)
+    cid = await assert_company_member(payload.company_id, current_user, db)
 
     conn = OneCConnection(
         id=uuid.uuid4(),

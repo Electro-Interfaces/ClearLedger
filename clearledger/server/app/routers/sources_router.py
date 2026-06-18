@@ -18,10 +18,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters import get_adapter
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import Source, SourceCredentials
+from app.deps import CompanyDep, get_owned
+from app.models import Source, SourceCredentials, User
 from app.services.onec.crypto import decrypt_password, encrypt_password
-from app.utils import resolve_company_id
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -109,10 +110,14 @@ def _resp(src: Source, secret_keys: list[str]) -> SourceResponse:
 # CRUD
 # ---------------------------------------------------------------------------
 @router.post("", response_model=SourceResponse)
-async def create_source(payload: SourceCreate, db: AsyncSession = Depends(get_db)):
+async def create_source(
+    payload: SourceCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Создать источник из записи справочника и привязать к компании."""
     _require_adapter(payload.source_type)
-    cid = await resolve_company_id(payload.company_id, db)
+    cid = await assert_company_member(payload.company_id, current_user, db)
 
     public, secrets = _split_config(payload.source_type, payload.config)
     src = Source(
@@ -137,11 +142,10 @@ async def create_source(payload: SourceCreate, db: AsyncSession = Depends(get_db
 
 @router.get("", response_model=list[SourceResponse])
 async def list_sources(
-    company_id: str = Query(...),
+    cid: CompanyDep,
     db: AsyncSession = Depends(get_db),
 ):
     """Источники компании."""
-    cid = await resolve_company_id(company_id, db)
     res = await db.execute(
         select(Source).where(Source.company_id == cid).order_by(Source.created_at)
     )
@@ -153,10 +157,12 @@ async def list_sources(
 
 
 @router.get("/{source_id}", response_model=SourceResponse)
-async def get_source(source_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    src = await db.get(Source, source_id)
-    if not src:
-        raise HTTPException(404, "Источник не найден")
+async def get_source(
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    src = await get_owned(Source, source_id, current_user, db)
     cr = await _creds(db, src.id)
     return _resp(src, list((cr.encrypted_values or {}).keys()) if cr else [])
 
@@ -166,10 +172,9 @@ async def update_source(
     source_id: uuid.UUID,
     payload: SourceUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    src = await db.get(Source, source_id)
-    if not src:
-        raise HTTPException(404, "Источник не найден")
+    src = await get_owned(Source, source_id, current_user, db)
     if payload.name is not None:
         src.name = payload.name
     if payload.description is not None:
@@ -191,20 +196,24 @@ async def update_source(
 
 
 @router.delete("/{source_id}")
-async def delete_source(source_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    src = await db.get(Source, source_id)
-    if not src:
-        raise HTTPException(404, "Источник не найден")
+async def delete_source(
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    src = await get_owned(Source, source_id, current_user, db)
     await db.delete(src)  # SourceCredentials каскадом (FK ondelete=CASCADE)
     return {"deleted": str(source_id)}
 
 
 @router.post("/{source_id}/test")
-async def test_source(source_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def test_source(
+    source_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Проверить подключение источника (через адаптер)."""
-    src = await db.get(Source, source_id)
-    if not src:
-        raise HTTPException(404, "Источник не найден")
+    src = await get_owned(Source, source_id, current_user, db)
     adapter = _require_adapter(src.source_type)()
 
     # connection = публичные поля + расшифрованные секреты

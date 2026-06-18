@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import Company, User
+from app.models import Company, User, UserCompany
+from app.utils import resolve_company_id
 
 settings = get_settings()
 
@@ -107,6 +108,56 @@ async def get_current_user(
         )
 
     return user
+
+
+async def assert_company_member(
+    company_ref: str,
+    user: User,
+    db: AsyncSession,
+) -> uuid.UUID:
+    """
+    Резолвит company_ref (UUID|slug) в UUID и проверяет, что пользователь
+    имеет к этой компании доступ.
+
+    Суперадмин — доступ ко всем. Иначе требуется членство в user_companies.
+    Бросает 400 при неизвестной компании, 403 при отсутствии членства.
+    Единая точка проверки прав на компанию для всех эндпоинтов данных.
+    """
+    cid = await resolve_company_id(company_ref, db)  # 400, если нет такой компании
+    if user.is_superadmin:
+        return cid
+    result = await db.execute(
+        select(UserCompany.company_id).where(
+            UserCompany.user_id == user.id,
+            UserCompany.company_id == cid,
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Нет доступа к компании",
+        )
+    return cid
+
+
+def CompanyScope(query_param: str = "company_id"):
+    """
+    Фабрика FastAPI-зависимости для эндпоинтов, где company_id приходит в query.
+    Достаёт company_id, проверяет членство, возвращает UUID компании.
+
+    Использование:
+        cid: uuid.UUID = Depends(CompanyScope())
+    или через alias app.deps.CompanyDep.
+    """
+
+    async def _dep(
+        company_id: str = Query(..., alias=query_param),
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> uuid.UUID:
+        return await assert_company_member(company_id, current_user, db)
+
+    return _dep
 
 
 async def get_company_by_api_key(

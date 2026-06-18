@@ -10,11 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import AuditEvent, User
 from app.schemas import AuditEventResponse
-from app.utils import resolve_company_id, resolve_company_id_optional
 
 
 class AuditEventCreate(BaseModel):
@@ -50,7 +49,7 @@ async def create_audit_event(
     current_user: User = Depends(get_current_user),
 ):
     """Создать событие аудита (используется фронтендом для логирования действий)."""
-    cid = await resolve_company_id(body.companyId, db)
+    cid = await assert_company_member(body.companyId, current_user, db)
 
     entry_id = None
     if body.entryId:
@@ -88,7 +87,12 @@ async def list_audit_events(
     query = select(AuditEvent)
 
     # Изоляция данных по компании
-    cid = await resolve_company_id_optional(company_id, db) or current_user.company_id
+    if company_id:
+        cid = await assert_company_member(company_id, current_user, db)
+    else:
+        cid = current_user.company_id
+        if cid is None:
+            raise HTTPException(status_code=400, detail="Укажите company_id")
     query = query.where(AuditEvent.company_id == cid)
 
     if action:

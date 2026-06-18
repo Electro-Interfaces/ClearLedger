@@ -121,6 +121,23 @@ async def create_all() -> None:
             "ON reconcile_mappings(company_id, kind, source_key) WHERE channel_id IS NULL",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_reconcile_mappings_channel "
             "ON reconcile_mappings(company_id, kind, source_key, channel_id) WHERE channel_id IS NOT NULL",
+            # v2.0: мультитенантность — членство user↔company (M2M) + суперадмин.
+            # Порядок важен: сначала колонка, потом снять NOT NULL с company_id,
+            # затем таблица членства, затем backfill из текущей company_id, затем
+            # демо-админ → суперадмин (иначе он привязан только к npk и теряет
+            # доступ к остальным компаниям).
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ALTER COLUMN company_id DROP NOT NULL",
+            "CREATE TABLE IF NOT EXISTS user_companies ("
+            "  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+            "  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,"
+            "  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+            "  PRIMARY KEY (user_id, company_id))",
+            "CREATE INDEX IF NOT EXISTS idx_user_companies_company ON user_companies(company_id)",
+            "INSERT INTO user_companies (user_id, company_id) "
+            "SELECT id, company_id FROM users WHERE company_id IS NOT NULL "
+            "ON CONFLICT DO NOTHING",
+            "UPDATE users SET is_superadmin = TRUE WHERE email = 'admin@clearledger.ru'",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

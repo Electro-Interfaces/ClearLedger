@@ -13,10 +13,9 @@ from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import AuditEvent, DataEntry, User
-from app.utils import resolve_company_id_optional
 
 router = APIRouter(prefix="/export", tags=["Экспорт"])
 
@@ -27,13 +26,17 @@ router = APIRouter(prefix="/export", tags=["Экспорт"])
 
 async def _fetch_entries(
     db: AsyncSession,
+    current_user: User,
     company_id: str | None = None,
     status_filter: str | None = None,
     fallback_company_id: uuid.UUID | None = None,
 ) -> list[DataEntry]:
     """Получает записи для экспорта."""
     query = select(DataEntry)
-    cid = await resolve_company_id_optional(company_id, db) or fallback_company_id
+    if company_id:
+        cid = await assert_company_member(company_id, current_user, db)
+    else:
+        cid = fallback_company_id
     if cid:
         query = query.where(DataEntry.company_id == cid)
     if status_filter and status_filter != "all":
@@ -100,11 +103,11 @@ async def export_json(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в JSON (массив объектов)."""
-    entries = await _fetch_entries(db, company_id, status, current_user.company_id)
+    entries = await _fetch_entries(db, current_user, company_id, status, current_user.company_id)
     data = [_entry_to_dict(e) for e in entries]
 
     # Аудит экспорта
-    cid = await resolve_company_id_optional(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db) if company_id else None
     if cid:
         event = AuditEvent(
             company_id=cid,
@@ -130,7 +133,7 @@ async def export_excel(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в Excel (.xlsx)."""
-    entries = await _fetch_entries(db, company_id, status, current_user.company_id)
+    entries = await _fetch_entries(db, current_user, company_id, status, current_user.company_id)
 
     wb = Workbook()
     ws = wb.active
@@ -164,7 +167,7 @@ async def export_excel(
     buffer.seek(0)
 
     # Аудит
-    cid = await resolve_company_id_optional(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db) if company_id else None
     if cid:
         event = AuditEvent(
             company_id=cid,
@@ -197,7 +200,7 @@ async def export_csv(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в CSV (UTF-8 с BOM для Excel)."""
-    entries = await _fetch_entries(db, company_id, status, current_user.company_id)
+    entries = await _fetch_entries(db, current_user, company_id, status, current_user.company_id)
 
     buffer = io.StringIO()
     # BOM для корректного открытия кириллицы в Excel
@@ -216,7 +219,7 @@ async def export_csv(
         writer.writerow(_entry_to_dict(entry))
 
     # Аудит
-    cid = await resolve_company_id_optional(company_id, db)
+    cid = await assert_company_member(company_id, current_user, db) if company_id else None
     if cid:
         event = AuditEvent(
             company_id=cid,

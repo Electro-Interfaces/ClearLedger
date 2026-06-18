@@ -14,9 +14,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import Company, ReconcileMapping, User
+from app.deps import CompanyDep, get_owned
+from app.models import Channel, ReconcileMapping, User
 from app.schemas import (
     ReconcileMappingCreate,
     ReconcileMappingResponse,
@@ -24,19 +25,6 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/reconcile/mappings", tags=["Сверка / Маппинги"])
-
-
-async def _resolve_company_id(value: str, db: AsyncSession) -> uuid.UUID:
-    """Принимает UUID или slug компании, возвращает UUID."""
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        pass
-    result = await db.execute(select(Company).where(Company.slug == value))
-    company = result.scalar_one_or_none()
-    if company is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Unknown company: {value}")
-    return company.id
 
 
 def _resp(m: ReconcileMapping) -> ReconcileMappingResponse:
@@ -60,12 +48,11 @@ def _resp(m: ReconcileMapping) -> ReconcileMappingResponse:
 
 @router.get("", response_model=list[ReconcileMappingResponse])
 async def list_mappings(
-    company_id: str = Query(...),
+    cid: CompanyDep,
     kind: str | None = Query(None),
     channel_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    cid = await _resolve_company_id(company_id, db)
     stmt = select(ReconcileMapping).where(ReconcileMapping.company_id == cid)
     if kind:
         stmt = stmt.where(ReconcileMapping.kind == kind)
@@ -81,8 +68,14 @@ async def list_mappings(
 async def create_mapping(
     payload: ReconcileMappingCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    cid = await _resolve_company_id(payload.company_id, db)
+    cid = await assert_company_member(payload.company_id, current_user, db)
+    # Маппинг-override на канал — канал должен принадлежать той же компании.
+    if payload.channel_id:
+        ch = await get_owned(Channel, uuid.UUID(payload.channel_id), current_user, db)
+        if ch.company_id != cid:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Канал другой компании")
     m = ReconcileMapping(
         id=uuid.uuid4(),
         company_id=cid,
@@ -112,14 +105,13 @@ async def update_mapping(
     mapping_id: str,
     payload: ReconcileMappingUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         mid = uuid.UUID(mapping_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
-    m = (await db.execute(select(ReconcileMapping).where(ReconcileMapping.id == mid))).scalar_one_or_none()
-    if m is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Mapping not found")
+    m = await get_owned(ReconcileMapping, mid, current_user, db)
     for field in ("source_key", "target_ref", "target_name", "confidence", "method", "note"):
         v = getattr(payload, field)
         if v is not None:
@@ -133,14 +125,14 @@ async def update_mapping(
 async def delete_mapping(
     mapping_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         mid = uuid.UUID(mapping_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
-    res = await db.execute(delete(ReconcileMapping).where(ReconcileMapping.id == mid))
-    if res.rowcount == 0:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Mapping not found")
+    m = await get_owned(ReconcileMapping, mid, current_user, db)
+    await db.delete(m)
 
 
 # ─── Автосопряжение ──────────────────────────────────────────────────
@@ -148,7 +140,7 @@ async def delete_mapping(
 
 @router.post("/auto-detect", response_model=dict)
 async def auto_detect_mappings(
-    company_id: str = Query(...),
+    cid: CompanyDep,
     kind: str | None = Query(None, description="Фильтр по kind: station|fuel|paytype|nomenclature|counterparty. None = все"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -156,7 +148,6 @@ async def auto_detect_mappings(
     НЕ записывает в БД — только предложения. Применить через /auto-apply.
     Если задан kind — фильтрует предложения только этого вида."""
     from app.services.mapping_autodetect_service import MappingAutoDetectService
-    cid = await _resolve_company_id(company_id, db)
     svc = MappingAutoDetectService(db)
     suggestions = await svc.detect_all(cid)
     if kind:
@@ -215,6 +206,7 @@ class AutoApplyPayload(BaseModel):
 async def auto_apply_mappings(
     payload: AutoApplyPayload,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Применяет полученный список предложений с confidence ≥ min_confidence.
     UI обычно сначала вызывает /auto-detect, даёт пользователю отфильтровать,
@@ -223,7 +215,7 @@ async def auto_apply_mappings(
         MappingAutoDetectService,
         MappingSuggestion,
     )
-    cid = await _resolve_company_id(payload.company_id, db)
+    cid = await assert_company_member(payload.company_id, current_user, db)
     svc = MappingAutoDetectService(db)
     sugg = [
         MappingSuggestion(
@@ -243,12 +235,11 @@ async def auto_apply_mappings(
 
 @router.get("/stats", response_model=dict)
 async def mapping_stats(
-    company_id: str = Query(...),
+    cid: CompanyDep,
     db: AsyncSession = Depends(get_db),
 ):
     """Сколько маппингов каждого вида заведено для компании.
     Используется в UI для KPI «Готовность сверки к запуску»."""
-    cid = await _resolve_company_id(company_id, db)
     rows = (await db.execute(
         select(ReconcileMapping.kind, ReconcileMapping.method)
         .where(ReconcileMapping.company_id == cid)

@@ -28,7 +28,8 @@ class UserResponse(BaseModel):
     email: str
     name: str
     role: str
-    company_id: str
+    company_id: str | None = None  # компания по умолчанию (может быть None у суперадмина)
+    is_superadmin: bool = False
     is_active: bool = True
     created_at: datetime
 
@@ -39,6 +40,27 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse | None = None
+
+
+class CompanyBrief(BaseModel):
+    """Краткая карточка компании для списка доступных пользователю (/auth/me)."""
+    id: str
+    slug: str
+    name: str
+    short_name: str | None = None
+    color: str | None = None
+    profile_id: str
+
+
+class MeResponse(BaseModel):
+    """Текущий пользователь + список доступных компаний (для мультитенантности)."""
+    id: str
+    email: str
+    name: str
+    role: str
+    is_superadmin: bool
+    default_company_id: str | None = None
+    companies: list[CompanyBrief]
 
 
 # ===== Company =====
