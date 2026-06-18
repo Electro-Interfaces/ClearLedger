@@ -16,8 +16,10 @@ export const BUILTIN_LOCATION_TYPES: LocationTypeDef[] = [
     name: 'Электрозарядная станция', icon: 'Zap', unit: 'кВт·ч',
     nomenclatureKind: 'energy', isBuiltin: true, sortOrder: 20, status: 'active',
     fields: [
+      { key: 'number', label: 'Номер станции', type: 'text' },
       { key: 'serialNumber', label: 'Серийный № (HubEx)', type: 'text' },
       { key: 'ownerTitle', label: 'Владелец', type: 'text' },
+      { key: 'ownerId', label: 'ID владельца', type: 'number' },
       { key: 'federalSubject', label: 'Регион', type: 'text' },
       { key: 'cityName', label: 'Город', type: 'text' },
       { key: 'latitude', label: 'Широта', type: 'number' },
@@ -28,6 +30,7 @@ export const BUILTIN_LOCATION_TYPES: LocationTypeDef[] = [
       { key: 'connectorTypes', label: 'Типы коннекторов (коды)', type: 'text' },
       { key: 'maxPowerKw', label: 'Макс. мощность', type: 'number', unit: 'кВт' },
       { key: 'protocolOcpp', label: 'Протокол OCPP', type: 'select', options: ['Нет', 'OCPP 1.6', 'OCPP 2.0.1'] },
+      { key: 'stage', label: 'Стадия', type: 'text' },
       { key: 'hubexAssetId', label: 'HubEx asset_id', type: 'number' },
       { key: 'hubexName', label: 'HubEx название', type: 'text' },
       { key: 'linkStatus', label: 'Статус связки HubEx', type: 'select', options: ['ok', 'review', 'conflict', 'test', 'no_match'] },

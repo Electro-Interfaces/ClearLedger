@@ -41,7 +41,7 @@ const LINK_META: Record<string, { label: string; cls: string }> = {
   test: { label: 'test', cls: 'bg-muted text-muted-foreground' },
 }
 
-type SortKey = 'code' | 'name' | 'region' | 'city' | 'owner' | 'power'
+type SortKey = 'number' | 'code' | 'name' | 'region' | 'city' | 'owner' | 'power'
 
 export function LocationsTable({
   locations,
@@ -90,7 +90,7 @@ export function LocationsTable({
       if (link !== 'all' && m(l, 'linkStatus') !== link) return false
       if (qq) {
         const hay = [
-          l.code, l.name, l.address ?? '', m(l, 'cityName'),
+          m(l, 'number'), l.code, l.name, l.address ?? '', m(l, 'cityName'),
           m(l, 'serialNumber'), m(l, 'ownerTitle'),
         ].join(' ').toLowerCase()
         if (!hay.includes(qq)) return false
@@ -99,6 +99,7 @@ export function LocationsTable({
     })
     const val = (l: ServiceLocation): string | number => {
       switch (sort) {
+        case 'number': return m(l, 'number')
         case 'code': return l.code
         case 'region': return m(l, 'federalSubject')
         case 'city': return m(l, 'cityName')
@@ -150,7 +151,7 @@ export function LocationsTable({
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="Поиск: название, код, серийник, город, владелец…" className="pl-8 h-9" />
+            placeholder="Поиск: номер, серийник, название, город, владелец…" className="pl-8 h-9" />
         </div>
         {typeCodes.length > 1 && (
           <Select value={typeF} onValueChange={setTypeF}>
@@ -204,7 +205,8 @@ export function LocationsTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-[40px]"></TableHead>
-              <SortHead k="code" className="w-[140px]">Код</SortHead>
+              <SortHead k="number" className="w-[90px]">Номер</SortHead>
+              <SortHead k="code" className="w-[150px]">Серийник</SortHead>
               <SortHead k="name">Название</SortHead>
               <SortHead k="region" className="hidden md:table-cell">Регион</SortHead>
               <SortHead k="city" className="hidden lg:table-cell">Город</SortHead>
@@ -222,7 +224,8 @@ export function LocationsTable({
               return (
                 <TableRow key={l.id}>
                   <TableCell><Icon className="h-4 w-4 text-muted-foreground" /></TableCell>
-                  <TableCell className="font-mono text-xs">{l.code}</TableCell>
+                  <TableCell className="font-mono text-xs font-medium">{m(l, 'number')}</TableCell>
+                  <TableCell className="font-mono text-[11px] text-muted-foreground">{l.code}</TableCell>
                   <TableCell className="font-medium">{l.name}</TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">{m(l, 'federalSubject')}</TableCell>
                   <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'cityName')}</TableCell>
@@ -275,7 +278,7 @@ export function LocationsTable({
             })}
             {slice.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-sm text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-sm text-muted-foreground py-8">
                   Ничего не найдено по фильтрам.
                 </TableCell>
               </TableRow>

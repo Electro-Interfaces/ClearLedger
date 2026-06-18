@@ -30,8 +30,10 @@ BUILTIN_LOCATION_TYPES: list[dict] = [
         # Реальный набор реестра РусГидро (HubEx/Onder). connectorTypes — коды 0–6
         # как в источнике; недостоверные dev-поля (статус/связь/прошивка) не храним.
         "fields": [
+            {"key": "number", "label": "Номер станции", "type": "text"},
             {"key": "serialNumber", "label": "Серийный № (HubEx)", "type": "text"},
             {"key": "ownerTitle", "label": "Владелец", "type": "text"},
+            {"key": "ownerId", "label": "ID владельца", "type": "number"},
             {"key": "federalSubject", "label": "Регион", "type": "text"},
             {"key": "cityName", "label": "Город", "type": "text"},
             {"key": "latitude", "label": "Широта", "type": "number"},
@@ -43,6 +45,7 @@ BUILTIN_LOCATION_TYPES: list[dict] = [
             {"key": "maxPowerKw", "label": "Макс. мощность", "type": "number", "unit": "кВт"},
             {"key": "protocolOcpp", "label": "Протокол OCPP", "type": "select",
              "options": ["Нет", "OCPP 1.6", "OCPP 2.0.1"]},
+            {"key": "stage", "label": "Стадия", "type": "text"},
             # Связка с HubEx (asset_id) — ключ будущего HubEx-адаптера.
             {"key": "hubexAssetId", "label": "HubEx asset_id", "type": "number"},
             {"key": "hubexName", "label": "HubEx название", "type": "text"},
