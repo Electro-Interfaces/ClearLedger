@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { getSettings, saveSettings, type AppSettings } from '@/services/settingsService'
 import { stsTestConnection, clearToken } from '@/services/fuel/stsApiClient'
 import { Loader2, CheckCircle2, XCircle, Wifi } from 'lucide-react'
+import { AdminSection } from '@/components/settings/AdminSection'
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>(getSettings)
@@ -60,6 +61,9 @@ export function SettingsPage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold">Настройки</h1>
+
+      {/* Профиль организации + пользователи (по роли, API-режим) */}
+      <AdminSection />
 
       {/* STS API */}
       <Card>

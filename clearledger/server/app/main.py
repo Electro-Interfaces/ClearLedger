@@ -42,6 +42,7 @@ from app.routers import (
     reports_router,
     settings_router,
     source_types_router,
+    users_router,
     sources_router,
     stats_router,
 )
@@ -99,6 +100,7 @@ app.add_middleware(
 API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
+app.include_router(users_router.router, prefix=API_PREFIX)
 app.include_router(companies_router.router, prefix=API_PREFIX)
 app.include_router(entries_router.router, prefix=API_PREFIX)
 app.include_router(audit_router.router, prefix=API_PREFIX)

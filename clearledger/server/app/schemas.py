@@ -63,6 +63,30 @@ class MeResponse(BaseModel):
     companies: list[CompanyBrief]
 
 
+# ===== Управление пользователями (админ компании) =====
+
+class UserCreate(BaseModel):
+    company_id: str
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=6)
+    role: Literal["user", "admin"] = "user"
+
+
+class UserAdminUpdate(BaseModel):
+    company_id: str            # контекст компании, в которой админ управляет
+    name: str | None = None
+    role: Literal["user", "admin"] | None = None
+
+
+class UserAdminResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    role: str
+    is_superadmin: bool
+
+
 # ===== Company =====
 
 class CompanyCreate(BaseModel):

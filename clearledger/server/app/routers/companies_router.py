@@ -154,9 +154,15 @@ async def update_company(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Частичное обновление компании."""
-    _require_superadmin(current_user)
+    """Частичное обновление компании (профиль организации).
+    Разрешено суперадмину и админу-члену этой компании."""
     company = await _get_company_or_404(company_id, db)
+    if not current_user.is_superadmin:
+        if current_user.role != "admin" or not await _is_member(current_user, company.id, db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Требуются права администратора компании",
+            )
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():

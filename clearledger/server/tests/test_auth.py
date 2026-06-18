@@ -43,8 +43,21 @@ async def test_login_nonexistent_email(client: AsyncClient):
 # ---------------------------------------------------------------------------
 
 
-async def test_register_new_user(client: AsyncClient):
+async def test_register_requires_superadmin(client: AsyncClient):
+    # Саморегистрация закрыта — без авторизации 401/403.
     resp = await client.post(
+        "/api/auth/register",
+        json={
+            "email": "x@test.com", "password": "secret123",
+            "name": "X", "company_id": "npk",
+        },
+    )
+    assert resp.status_code in (401, 403)
+
+
+async def test_register_new_user(auth_client: AsyncClient):
+    # Суперадмин (admin@clearledger.ru) может регистрировать.
+    resp = await auth_client.post(
         "/api/auth/register",
         json={
             "email": "newuser@test.com",
@@ -60,8 +73,8 @@ async def test_register_new_user(client: AsyncClient):
     assert data["user"]["name"] == "Тестовый Пользователь"
 
 
-async def test_register_duplicate_email(client: AsyncClient):
-    resp = await client.post(
+async def test_register_duplicate_email(auth_client: AsyncClient):
+    resp = await auth_client.post(
         "/api/auth/register",
         json={
             "email": "admin@clearledger.ru",

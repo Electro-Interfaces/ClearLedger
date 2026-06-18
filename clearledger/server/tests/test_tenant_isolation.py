@@ -15,24 +15,33 @@ def _h(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _register(client: AsyncClient, email: str, company: str) -> str:
-    """Регистрирует не-суперадмина с членством в company, возвращает токен.
-    Если email уже есть (повторный прогон в сессии) — логинится."""
-    r = await client.post("/api/auth/register", json={
-        "email": email, "name": email.split("@")[0],
-        "password": "secret123", "company_id": company,
+async def _admin_token(client: AsyncClient) -> str:
+    r = await client.post("/api/auth/login", json={
+        "email": "admin@clearledger.ru", "password": "admin123",
     })
-    if r.status_code == 409:
-        r = await client.post("/api/auth/login", json={"email": email, "password": "secret123"})
-    assert r.status_code in (200, 201), r.text
+    assert r.status_code == 200, r.text
     return r.json()["access_token"]
+
+
+async def _create_user(client: AsyncClient, admin: str, email: str, company: str) -> str:
+    """Суперадмин создаёт пользователя в company; возвращает токен этого юзера.
+    Идемпотентно (повторный прогон в сессии — вернёт существующего + членство)."""
+    r = await client.post("/api/users", headers=_h(admin), json={
+        "company_id": company, "email": email, "name": email.split("@")[0],
+        "password": "secret123", "role": "user",
+    })
+    assert r.status_code in (200, 201), r.text
+    lr = await client.post("/api/auth/login", json={"email": email, "password": "secret123"})
+    assert lr.status_code == 200, lr.text
+    return lr.json()["access_token"]
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_cross_company_isolation(client: AsyncClient):
-    # Два не-суперадмина: A в npk, B в gig.
-    a = await _register(client, "iso_a@test.ru", "npk")
-    b = await _register(client, "iso_b@test.ru", "gig")
+    # Два не-суперадмина: A в npk, B в gig (создаёт суперадмин через /api/users).
+    admin = await _admin_token(client)
+    a = await _create_user(client, admin, "iso_a@test.ru", "npk")
+    b = await _create_user(client, admin, "iso_b@test.ru", "gig")
 
     # /auth/me: A видит только npk и не суперадмин.
     me = (await client.get("/api/auth/me", headers=_h(a))).json()
@@ -124,3 +133,53 @@ async def test_superadmin_sees_all(client: AsyncClient, auth_client: AsyncClient
     assert me["is_superadmin"] is True
     slugs = {c["slug"] for c in me["companies"]}
     assert {"gig", "npk", "rti"}.issubset(slugs)
+
+
+async def _login(client: AsyncClient, email: str) -> str:
+    r = await client.post("/api/auth/login", json={"email": email, "password": "secret123"})
+    assert r.status_code == 200, r.text
+    return r.json()["access_token"]
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_user_management(client: AsyncClient):
+    admin = await _admin_token(client)
+
+    # Суперадмин заводит АДМИНА компании npk.
+    r = await client.post("/api/users", headers=_h(admin), json={
+        "company_id": "npk", "email": "mgr@test.ru", "name": "Mgr",
+        "password": "secret123", "role": "admin",
+    })
+    assert r.status_code in (200, 201), r.text
+    mgr = await _login(client, "mgr@test.ru")
+
+    # Админ npk заводит обычного пользователя.
+    r = await client.post("/api/users", headers=_h(mgr), json={
+        "company_id": "npk", "email": "emp@test.ru", "name": "Emp",
+        "password": "secret123", "role": "user",
+    })
+    assert r.status_code in (200, 201), r.text
+    emp_id = r.json()["id"]
+
+    # Обычный пользователь НЕ может управлять пользователями (403).
+    emp = await _login(client, "emp@test.ru")
+    assert (await client.get("/api/users", headers=_h(emp), params={"company_id": "npk"})).status_code == 403
+
+    # Админ видит список своей компании (вкл. emp).
+    lst = (await client.get("/api/users", headers=_h(mgr), params={"company_id": "npk"})).json()
+    assert any(u["email"] == "emp@test.ru" for u in lst)
+
+    # Админ npk НЕ может управлять чужой компанией gig.
+    assert (await client.get("/api/users", headers=_h(mgr), params={"company_id": "gig"})).status_code == 403
+
+    # Смена роли.
+    r = await client.patch(f"/api/users/{emp_id}", headers=_h(mgr),
+                           json={"company_id": "npk", "role": "admin"})
+    assert r.status_code == 200 and r.json()["role"] == "admin"
+
+    # Удаление из компании (отзыв членства).
+    r = await client.delete(f"/api/users/{emp_id}", headers=_h(mgr), params={"company_id": "npk"})
+    assert r.status_code == 204
+    # После отзыва единственного членства пользователь удалён → логин не проходит.
+    bad = await client.post("/api/auth/login", json={"email": "emp@test.ru", "password": "secret123"})
+    assert bad.status_code == 401

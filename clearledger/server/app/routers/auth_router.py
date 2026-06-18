@@ -53,8 +53,18 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     response_model=TokenResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """Регистрация нового пользователя."""
+async def register(
+    body: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Регистрация нового пользователя — ТОЛЬКО суперадмин (саморегистрация
+    закрыта; пользователей заводит админ компании через /api/users)."""
+    if not current_user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Регистрация доступна только суперадмину",
+        )
     # Проверка дубликата email
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none() is not None:
