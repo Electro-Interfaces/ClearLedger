@@ -20,6 +20,7 @@ const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
 const CatalogPage = lazy(() => import('@/pages/CatalogPage').then((m) => ({ default: m.CatalogPage })))
 const LocationsPage = lazy(() => import('@/pages/LocationsPage').then((m) => ({ default: m.LocationsPage })))
+const ContractorsPage = lazy(() => import('@/pages/ContractorsPage').then((m) => ({ default: m.ContractorsPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AdminPage = lazy(() => import('@/pages/AdminPage').then((m) => ({ default: m.AdminPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
@@ -99,6 +100,7 @@ const router = createBrowserRouter([
           { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
           { path: '/catalog', element: <LazyPage><CatalogPage /></LazyPage> },
           { path: '/locations', element: <LazyPage><LocationsPage /></LazyPage> },
+          { path: '/contractors', element: <LazyPage><ContractorsPage /></LazyPage> },
           { path: '/1c/connection', element: <LazyPage><ConnectionPage /></LazyPage> },
           { path: '/1c/references', element: <LazyPage><ReferencesPage /></LazyPage> },
           { path: '/1c/documents', element: <LazyPage><DocumentsPage /></LazyPage> },

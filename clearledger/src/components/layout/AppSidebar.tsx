@@ -17,7 +17,7 @@ import {
   Upload, FileText, Radio, Database, ChevronDown,
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
   Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
-  Library, ShieldCheck,
+  Library, ShieldCheck, Building2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -33,6 +33,7 @@ const intakeItems = [
   { to: '/intake', icon: FileText, label: 'Файлы и документы' },
   { to: '/channels', icon: Radio, label: 'Каналы' },
   { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
+  { to: '/contractors', icon: Building2, label: 'Контрагенты' },
 ]
 
 const oneCItems = [
