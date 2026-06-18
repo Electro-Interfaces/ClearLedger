@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
+import { getStsStationsFromLocations } from '@/services/locationService'
 import { executeMstoReconciliation } from '@/services/mstoReconciliation'
 import { MSTOReconciliationResults } from '@/components/reconciliation/MSTOReconciliationResults'
 import type { MSTOReconciliationResult, StationInfo } from '@/types/mstoReconciliation'
@@ -70,7 +71,8 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
   description: string
   loading?: boolean
 }) {
-  const settings = getSettings()
+  // Станции из точек обслуживания (settings.stations — легаси-стор, для ГИГ пуст)
+  const stations = getStsStationsFromLocations()
 
   function toggleStation(code: number) {
     setParams((p) => {
@@ -87,7 +89,7 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
       <div className="flex items-end gap-4 flex-wrap">
         {/* Период */}
         <div className="space-y-1">
-          <Label className="text-[10px] text-muted-foreground">Период</Label>
+          <Label className="text-xs text-muted-foreground">Период</Label>
           <div className="flex items-center gap-1.5">
             <Input
               type="date"
@@ -95,7 +97,7 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
               value={params.dateFrom}
               onChange={(e) => setParams((p) => ({ ...p, dateFrom: e.target.value }))}
             />
-            <span className="text-[10px] text-muted-foreground">—</span>
+            <span className="text-xs text-muted-foreground">—</span>
             <Input
               type="date"
               className="h-7 text-xs w-[130px]"
@@ -107,21 +109,21 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
 
         {/* Станции */}
         <div className="space-y-1">
-          <Label className="text-[10px] text-muted-foreground">Станции</Label>
+          <Label className="text-xs text-muted-foreground">Станции</Label>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setParams((p) => ({ ...p, allStations: true, selectedStations: [] }))}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
+              className={`px-2.5 py-1 rounded text-sm font-medium border transition-colors ${
                 params.allStations
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-border text-muted-foreground hover:border-foreground/30'
               }`}
             >
-              Все ({settings.stations.length})
+              Все ({stations.length})
             </button>
             <button
               onClick={() => setParams((p) => ({ ...p, allStations: false }))}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
+              className={`px-2.5 py-1 rounded text-sm font-medium border transition-colors ${
                 !params.allStations
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-border text-muted-foreground hover:border-foreground/30'
@@ -129,11 +131,11 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
             >
               Выбрать
             </button>
-            {!params.allStations && settings.stations.map((s) => (
+            {!params.allStations && stations.map((s) => (
               <button
                 key={s.code}
                 onClick={() => toggleStation(s.code)}
-                className={`px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+                className={`px-2 py-1 rounded text-sm font-medium border transition-colors ${
                   params.selectedStations.includes(s.code)
                     ? 'border-primary bg-primary/10 text-primary'
                     : 'border-border text-muted-foreground hover:border-foreground/30'
@@ -152,7 +154,7 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
             checked={params.allShifts}
             onCheckedChange={(v) => setParams((p) => ({ ...p, allShifts: v }))}
           />
-          <label htmlFor="all-shifts" className="text-[11px] text-muted-foreground cursor-pointer">
+          <label htmlFor="all-shifts" className="text-sm text-muted-foreground cursor-pointer">
             {description}
           </label>
         </div>
@@ -176,16 +178,17 @@ function OnlineOrdersView() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<MSTOReconciliationResult | null>(null)
   const settings = getSettings()
+  const stsStations = getStsStationsFromLocations()
   const { setLastReconcileResult } = useWorkspace()
 
   async function handleRun() {
     setLoading(true)
     try {
       const stationCodes = params.allStations
-        ? settings.stations.map((s) => s.code)
+        ? stsStations.map((s) => s.code)
         : params.selectedStations
-      // Минимальная StationInfo из настроек (без MSTO-маппинга — берётся из транзакций)
-      const stations: StationInfo[] = settings.stations
+      // Минимальная StationInfo из точек обслуживания (MSTO-маппинг — из транзакций)
+      const stations: StationInfo[] = stsStations
         .filter((s) => params.allStations || stationCodes.includes(s.code))
         .map((s) => ({
           code: String(s.code),
@@ -317,7 +320,8 @@ function CorporateCardsView() {
 }
 
 export function ReconciliationPanel() {
-  const [tab, setTab] = useState<ReconcileTab>('dashboard')
+  // Первый рабочий разрез — Онлайн-заказы — открыт по умолчанию.
+  const [tab, setTab] = useState<ReconcileTab>('online')
 
   return (
     <CentralPanelLayout items={RECONCILE_MENU} activeKey={tab} onSelect={(k) => setTab(k as ReconcileTab)}>

@@ -95,7 +95,7 @@ function PipelineView() {
             >
               <stage.icon className={`h-4 w-4 ${stage.color}`} />
               <div className="text-left">
-                <p className="text-[10px] text-muted-foreground">{stage.label}</p>
+                <p className="text-xs text-muted-foreground">{stage.label}</p>
                 <p className="text-sm font-bold">{stage.count}</p>
               </div>
             </button>
@@ -108,18 +108,18 @@ function PipelineView() {
 
       {/* Управление */}
       <div className="flex items-center gap-2">
-        <Button size="sm" className="h-7 text-xs gap-1.5">
+        <Button size="sm" className="gap-1.5">
           <Play className="h-3 w-3" />
           Запустить обработку
         </Button>
-        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+        <Button size="sm" variant="outline" className="gap-1.5">
           <Bot className="h-3 w-3" />
           Подключить агента
         </Button>
         {filterStage && (
           <button
             onClick={() => setFilterStage(null)}
-            className="text-[11px] text-muted-foreground hover:text-foreground ml-auto"
+            className="text-sm text-muted-foreground hover:text-foreground ml-auto"
           >
             Показать все
           </button>
@@ -129,57 +129,57 @@ function PipelineView() {
       {/* Таблица документов */}
       <Table>
         <TableHeader>
-          <TableRow className="text-[10px]">
-            <TableHead className="h-7 px-2">Документ</TableHead>
-            <TableHead className="h-7">Тип</TableHead>
-            <TableHead className="h-7">Источник</TableHead>
-            <TableHead className="h-7">Дата</TableHead>
-            <TableHead className="h-7 text-center">v</TableHead>
-            <TableHead className="h-7 text-center">Проблемы</TableHead>
-            <TableHead className="h-7">Статус</TableHead>
-            <TableHead className="h-7 text-right">Действия</TableHead>
+          <TableRow className="text-xs">
+            <TableHead className="h-9 px-2">Документ</TableHead>
+            <TableHead className="h-9">Тип</TableHead>
+            <TableHead className="h-9">Источник</TableHead>
+            <TableHead className="h-9">Дата</TableHead>
+            <TableHead className="h-9 text-center">v</TableHead>
+            <TableHead className="h-9 text-center">Проблемы</TableHead>
+            <TableHead className="h-9">Статус</TableHead>
+            <TableHead className="h-9 text-right">Действия</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {filteredDocs.map((doc) => {
             const badge = STATUS_BADGE[doc.status]
             return (
-              <TableRow key={doc.id} className="text-[11px]">
-                <TableCell className="py-1.5 px-2 font-medium">{doc.name}</TableCell>
-                <TableCell className="py-1.5 text-muted-foreground">{doc.type}</TableCell>
-                <TableCell className="py-1.5 text-muted-foreground">{doc.source}</TableCell>
-                <TableCell className="py-1.5">{doc.date}</TableCell>
-                <TableCell className="py-1.5 text-center">
+              <TableRow key={doc.id} className="text-sm">
+                <TableCell className="py-2 px-2 font-medium">{doc.name}</TableCell>
+                <TableCell className="py-2 text-muted-foreground">{doc.type}</TableCell>
+                <TableCell className="py-2 text-muted-foreground">{doc.source}</TableCell>
+                <TableCell className="py-2">{doc.date}</TableCell>
+                <TableCell className="py-2 text-center">
                   {doc.version > 1 ? (
                     <span className="text-primary font-medium">v{doc.version}</span>
                   ) : (
                     <span className="text-muted-foreground">v{doc.version}</span>
                   )}
                 </TableCell>
-                <TableCell className="py-1.5 text-center">
+                <TableCell className="py-2 text-center">
                   {doc.issues > 0 ? (
                     <span className="text-amber-500 font-medium">{doc.issues}</span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
                 </TableCell>
-                <TableCell className="py-1.5">
-                  <Badge variant={badge.variant} className="text-[9px] h-4 px-1.5">{badge.label}</Badge>
+                <TableCell className="py-2">
+                  <Badge variant={badge.variant} className="text-xs h-5 px-2">{badge.label}</Badge>
                 </TableCell>
-                <TableCell className="py-1.5 text-right">
+                <TableCell className="py-2 text-right">
                   <div className="flex items-center justify-end gap-1">
                     {doc.status === 'review' && (
                       <>
-                        <Button variant="ghost" size="icon" className="h-5 w-5" title="Принять">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Принять">
                           <CheckCircle2 className="h-3 w-3 text-emerald-500" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-5 w-5" title="Отклонить">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Отклонить">
                           <XCircle className="h-3 w-3 text-red-500" />
                         </Button>
                       </>
                     )}
                     {doc.status === 'queue' && (
-                      <Button variant="ghost" size="icon" className="h-5 w-5" title="Обработать">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Обработать">
                         <Play className="h-3 w-3" />
                       </Button>
                     )}
@@ -219,7 +219,7 @@ function RulesView() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">Правила трансформации входных данных</p>
-        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+        <Button size="sm" variant="outline" className="gap-1.5">
           <Settings2 className="h-3 w-3" />
           Добавить правило
         </Button>
@@ -234,12 +234,12 @@ function RulesView() {
                   <div className="flex items-center gap-2">
                     <ListChecks className="h-4 w-4 text-primary shrink-0" />
                     <p className="text-sm font-medium">{rule.name}</p>
-                    {rule.auto && <Badge variant="outline" className="text-[9px] h-4 px-1.5">Авто</Badge>}
+                    {rule.auto && <Badge variant="outline" className="text-xs h-5 px-2">Авто</Badge>}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">{rule.description}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{rule.description}</p>
                   <div className="flex items-center gap-1 mt-1.5">
                     {rule.docTypes.map((dt) => (
-                      <span key={dt} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{dt}</span>
+                      <span key={dt} className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{dt}</span>
                     ))}
                   </div>
                 </div>
@@ -278,7 +278,7 @@ function MappingView() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">Таблицы соответствия: входные данные → внутренний формат</p>
-        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+        <Button size="sm" variant="outline" className="gap-1.5">
           <ArrowRightLeft className="h-3 w-3" />
           Редактировать
         </Button>
@@ -286,26 +286,26 @@ function MappingView() {
 
       <Table>
         <TableHeader>
-          <TableRow className="text-[10px]">
-            <TableHead className="h-7 px-2">Источник</TableHead>
-            <TableHead className="h-7 px-2">
+          <TableRow className="text-xs">
+            <TableHead className="h-9 px-2">Источник</TableHead>
+            <TableHead className="h-9 px-2">
               <ArrowRight className="h-3 w-3 inline" />
             </TableHead>
-            <TableHead className="h-7">Целевое значение</TableHead>
-            <TableHead className="h-7">Тип</TableHead>
-            <TableHead className="h-7 text-right">Точность</TableHead>
+            <TableHead className="h-9">Целевое значение</TableHead>
+            <TableHead className="h-9">Тип</TableHead>
+            <TableHead className="h-9 text-right">Точность</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {DEMO_MAPPINGS.map((m, i) => (
-            <TableRow key={i} className="text-[11px]">
-              <TableCell className="py-1.5 px-2 font-mono text-xs">{m.source}</TableCell>
-              <TableCell className="py-1.5 px-2">
+            <TableRow key={i} className="text-sm">
+              <TableCell className="py-2 px-2 font-mono text-xs">{m.source}</TableCell>
+              <TableCell className="py-2 px-2">
                 <ArrowRight className="h-3 w-3 text-muted-foreground" />
               </TableCell>
-              <TableCell className="py-1.5 font-medium">{m.target}</TableCell>
-              <TableCell className="py-1.5 text-muted-foreground">{m.type}</TableCell>
-              <TableCell className="py-1.5 text-right">
+              <TableCell className="py-2 font-medium">{m.target}</TableCell>
+              <TableCell className="py-2 text-muted-foreground">{m.type}</TableCell>
+              <TableCell className="py-2 text-right">
                 <span className={m.confidence === 100 ? 'text-emerald-500' : 'text-amber-500'}>
                   {m.confidence}%
                 </span>
@@ -347,7 +347,7 @@ function AgentsView() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">AI-агенты для глубокого анализа и обработки</p>
-        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+        <Button size="sm" variant="outline" className="gap-1.5">
           <Bot className="h-3 w-3" />
           Настроить
         </Button>
@@ -366,11 +366,11 @@ function AgentsView() {
                       <p className="text-sm font-medium">{agent.name}</p>
                       <div className="flex items-center gap-1.5">
                         <div className={`h-1.5 w-1.5 rounded-full ${st.color}`} />
-                        <span className="text-[10px] text-muted-foreground">{st.label}</span>
+                        <span className="text-xs text-muted-foreground">{st.label}</span>
                       </div>
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-1">{agent.description}</p>
-                    <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
+                    <p className="text-sm text-muted-foreground mt-1">{agent.description}</p>
+                    <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
                       {agent.tasks > 0 && <span>В работе: <strong className="text-foreground">{agent.tasks}</strong></span>}
                       <span>Обработано: <strong className="text-foreground">{agent.processed}</strong></span>
                     </div>
@@ -425,7 +425,7 @@ function LogView() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">История обработки документов</p>
-        <Button size="sm" variant="ghost" className="h-7 text-xs gap-1.5">
+        <Button size="sm" variant="ghost" className="gap-1.5">
           <History className="h-3 w-3" />
           Полный журнал
         </Button>
@@ -435,16 +435,16 @@ function LogView() {
         {DEMO_LOG.map((entry, i) => {
           const { icon: Icon, color } = LOG_ICON[entry.result]
           return (
-            <div key={i} className="flex items-start gap-2 py-1.5 border-b border-border/30 last:border-0">
-              <span className="text-[10px] text-muted-foreground w-10 shrink-0 pt-0.5">{entry.time}</span>
+            <div key={i} className="flex items-start gap-2 py-2 border-b border-border/30 last:border-0">
+              <span className="text-xs text-muted-foreground w-10 shrink-0 pt-0.5">{entry.time}</span>
               <Icon className={`h-3.5 w-3.5 ${color} shrink-0 mt-0.5`} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-medium">{entry.action}</span>
-                  <span className="text-[11px] text-muted-foreground">→</span>
-                  <span className="text-[11px]">{entry.doc}</span>
+                  <span className="text-sm font-medium">{entry.action}</span>
+                  <span className="text-sm text-muted-foreground">→</span>
+                  <span className="text-sm">{entry.doc}</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground">{entry.details}</p>
+                <p className="text-xs text-muted-foreground">{entry.details}</p>
               </div>
             </div>
           )

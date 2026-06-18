@@ -102,7 +102,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
               №{shift.shiftNumber}
             </h2>
             <span className="text-xs text-muted-foreground">{shift.stationName}</span>
-            <Badge variant={shift.status === 'open' ? 'default' : 'secondary'} className="text-[10px] h-5">
+            <Badge variant={shift.status === 'open' ? 'default' : 'secondary'} className="text-xs h-5">
               {shift.status === 'open' ? 'Открыта' : 'Закрыта'}
             </Badge>
           </div>
@@ -124,7 +124,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
                       <Fuel className="h-4 w-4 text-amber-500 shrink-0" />
                       <div>
                         <p className="text-lg font-bold">{fmt(shift.totalSalesLiters)}</p>
-                        <p className="text-[10px] text-muted-foreground">литров</p>
+                        <p className="text-xs text-muted-foreground">литров</p>
                       </div>
                     </div>
                   </CardContent>
@@ -135,7 +135,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
                       <CreditCard className="h-4 w-4 text-emerald-500 shrink-0" />
                       <div>
                         <p className="text-lg font-bold">{fmt(shift.totalSalesAmount)}</p>
-                        <p className="text-[10px] text-muted-foreground">руб.</p>
+                        <p className="text-xs text-muted-foreground">руб.</p>
                       </div>
                     </div>
                   </CardContent>
@@ -146,7 +146,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
                       <Truck className="h-4 w-4 text-blue-500 shrink-0" />
                       <div>
                         <p className="text-lg font-bold">{receipts?.length ?? 0}</p>
-                        <p className="text-[10px] text-muted-foreground">ТТН</p>
+                        <p className="text-xs text-muted-foreground">ТТН</p>
                       </div>
                     </div>
                   </CardContent>
@@ -173,7 +173,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
-                    <TableRow className="text-[11px]">
+                    <TableRow className="text-sm">
                       <TableHead className="h-8 px-3">№</TableHead>
                       <TableHead className="h-8">Топливо</TableHead>
                       <TableHead className="h-8 text-right">Начало</TableHead>
@@ -237,7 +237,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
-                    <TableRow className="text-[11px]">
+                    <TableRow className="text-sm">
                       <TableHead className="h-8 px-3">ТРК</TableHead>
                       <TableHead className="h-8">Топливо</TableHead>
                       <TableHead className="h-8 text-right">Объём, л</TableHead>
@@ -268,7 +268,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
-                    <TableRow className="text-[11px]">
+                    <TableRow className="text-sm">
                       <TableHead className="h-8 px-3">ТТН</TableHead>
                       <TableHead className="h-8">Топливо</TableHead>
                       <TableHead className="h-8 text-right">Док, л</TableHead>

@@ -78,7 +78,7 @@ function TreeView({ fsTree, path, depth, selectedShiftNumber, selectedStationId,
           <div key={node.path}>
             <button
               onClick={() => isFolder ? toggle(node.name) : onSelectFile(node)}
-              className={`w-full flex items-center gap-1.5 py-1 pr-2 text-[11px] hover:bg-accent/40 transition-colors ${
+              className={`w-full flex items-center gap-1.5 py-1 pr-2 text-sm hover:bg-accent/40 transition-colors ${
                 isSelected ? 'bg-primary/10' : ''
               }`}
               style={{ paddingLeft: `${pl + 8}px` }}
@@ -528,7 +528,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
                   {i > 0 && <ChevronRight className="h-3 w-3 text-muted-foreground/40 mx-0.5" />}
                   <button
                     onClick={() => navigateTo(part.path)}
-                    className={`text-[11px] px-1 py-0.5 rounded hover:bg-accent/50 transition-colors ${
+                    className={`text-sm px-1 py-0.5 rounded hover:bg-accent/50 transition-colors ${
                       i === breadcrumbParts.length - 1 ? 'font-semibold text-foreground' : 'text-muted-foreground'
                     }`}
                   >
@@ -538,7 +538,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
               ))}
             </>
           ) : (
-            <span className="text-[11px] font-semibold text-foreground px-1">Все документы</span>
+            <span className="text-sm font-semibold text-foreground px-1">Все документы</span>
           )}
         </div>
 
@@ -547,7 +547,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
           <div className="flex items-center gap-0.5 px-2 py-0.5 overflow-x-auto border-t border-border/20">
             {openTabs.map((tab) => (
               <div key={tab.path}
-                className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] cursor-pointer transition-colors shrink-0 ${
+                className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs cursor-pointer transition-colors shrink-0 ${
                   activeTabId === tab.path
                     ? 'bg-primary/15 text-primary font-semibold'
                     : 'text-muted-foreground hover:bg-accent/40'
@@ -569,7 +569,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
 
       {/* Плашка-индикатор глобального фильтра шапки */}
       {hasGlobalFilters && (
-        <div className="px-2 py-1 border-b border-border/30 bg-primary/5 text-[10px] text-muted-foreground flex items-center gap-1.5">
+        <div className="px-2 py-1 border-b border-border/30 bg-primary/5 text-xs text-muted-foreground flex items-center gap-1.5">
           <span className="text-primary/80">●</span>
           {globalStationCodes.length === 1 ? (
             <span>
@@ -624,15 +624,15 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
           {/* Период */}
           <div className="flex items-center gap-1.5">
             <Input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)}
-              className="h-7 text-[11px] flex-1" placeholder="С" />
-            <span className="text-[10px] text-muted-foreground">—</span>
+              className="h-7 text-sm flex-1" placeholder="С" />
+            <span className="text-xs text-muted-foreground">—</span>
             <Input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)}
-              className="h-7 text-[11px] flex-1" placeholder="По" />
+              className="h-7 text-sm flex-1" placeholder="По" />
           </div>
           {/* Тип + статус */}
           <div className="flex items-center gap-1.5">
             <Select value={filterDocType} onValueChange={(v) => setFilterDocType(v as typeof filterDocType)}>
-              <SelectTrigger className="h-7 flex-1 text-[11px]">
+              <SelectTrigger className="h-7 flex-1 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -642,7 +642,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
               </SelectContent>
             </Select>
             <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as typeof filterStatus)}>
-              <SelectTrigger className="h-7 flex-1 text-[11px]">
+              <SelectTrigger className="h-7 flex-1 text-sm">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -677,7 +677,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
             </p>
           ) : (
             <div>
-              <div className="flex items-center gap-2 px-3 py-1 border-b border-border/30 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">
+              <div className="flex items-center gap-2 px-3 py-1 border-b border-border/30 text-xs font-medium text-muted-foreground/60 uppercase tracking-wider">
                 <span className="flex-1">Имя</span>
                 <span className="w-28 text-right">Дата</span>
                 <span className="w-16 text-right">Тип</span>
@@ -696,7 +696,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
                       {node.name}
                     </span>
                     <span className="w-28 text-right text-muted-foreground">{node.date ?? '—'}</span>
-                    <span className="w-16 text-right text-muted-foreground text-[10px]">
+                    <span className="w-16 text-right text-muted-foreground text-xs">
                       {node.name.startsWith('ТТН') ? 'ТТН' : 'Смена'}
                     </span>
                     <span className="w-14 text-right">
@@ -730,8 +730,8 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
                       isSelected ? 'bg-primary/10 ring-1 ring-primary/30' : ''
                     }`}>
                     <FileText className={`h-8 w-8 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <span className="text-[11px] font-medium truncate w-full">{node.name}</span>
-                    {node.date && <span className="text-[9px] text-muted-foreground">{node.date}</span>}
+                    <span className="text-sm font-medium truncate w-full">{node.name}</span>
+                    {node.date && <span className="text-xs text-muted-foreground">{node.date}</span>}
                   </button>
                 )
               })}
@@ -753,7 +753,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
       </div>
 
       {/* Footer — статус */}
-      <div className="px-3 py-1 border-t border-border/50 text-[10px] text-muted-foreground flex items-center justify-between">
+      <div className="px-3 py-1 border-t border-border/50 text-xs text-muted-foreground flex items-center justify-between">
         <span>{viewMode === 'tree' ? `${currentNodes.length} элементов` : `${flatFiles.length} документов`}</span>
         <span>{viewMode === 'tree' && currentPath.length > 0 ? currentPath.join(' / ') : 'Хранилище'}</span>
       </div>

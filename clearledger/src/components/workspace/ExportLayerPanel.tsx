@@ -83,7 +83,7 @@ function DocumentsView() {
           <button
             key={label}
             onClick={() => setFilterStatus(key)}
-            className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${
+            className={`px-2.5 py-1 rounded text-sm font-medium border transition-colors ${
               filterStatus === key
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-border/50 text-muted-foreground hover:border-border'
@@ -97,7 +97,7 @@ function DocumentsView() {
       {/* Таблица документов */}
       <Table>
         <TableHeader>
-          <TableRow className="text-[10px]">
+          <TableRow className="text-xs">
             <TableHead className="h-7 px-2">Документ</TableHead>
             <TableHead className="h-7">Тип 1С</TableHead>
             <TableHead className="h-7">Первичный</TableHead>
@@ -111,7 +111,7 @@ function DocumentsView() {
           {docs.map((doc) => {
             const st = DOC_STATUS[doc.status]
             return (
-              <TableRow key={doc.id} className="text-[11px]">
+              <TableRow key={doc.id} className="text-sm">
                 <TableCell className="py-1.5 px-2">
                   <div className="flex items-center gap-1.5">
                     <FileOutput className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -139,7 +139,7 @@ function DocumentsView() {
                 <TableCell className="py-1.5">{doc.period}</TableCell>
                 <TableCell className="py-1.5 text-right font-mono text-xs">{doc.amount}</TableCell>
                 <TableCell className="py-1.5">
-                  <span className={`text-[10px] font-medium ${st.color}`}>{st.label}</span>
+                  <span className={`text-xs font-medium ${st.color}`}>{st.label}</span>
                 </TableCell>
               </TableRow>
             )
@@ -167,7 +167,7 @@ function PreviewView() {
               <FileText className="h-4 w-4 text-muted-foreground" />
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Первичный (v2)</p>
             </div>
-            <div className="space-y-2 text-[11px]">
+            <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Документ</span><span>Смена №1847</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Станция</span><span>АКАЗС Витебский</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Дата</span><span>05.04.2026</span></div>
@@ -189,13 +189,13 @@ function PreviewView() {
               <p className="text-xs font-semibold uppercase tracking-wider text-primary">Для 1С</p>
               <Badge variant="outline" className="text-[8px] h-3.5 px-1 text-amber-500 border-amber-500/30 ml-auto">корр.</Badge>
             </div>
-            <div className="space-y-2 text-[11px]">
+            <div className="space-y-2 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Тип</span><span>Отчёт о розничных продажах</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Склад</span><span>АЗС Витебский (розница)</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Дата</span><span>05.04.2026</span></div>
               <div className="border-t border-border/30 pt-2" />
               <div className="flex justify-between"><span className="text-muted-foreground">АИ-92 (л)</span><span>1 245.50 л / 78 467.50 ₽</span></div>
-              <div className="flex justify-between bg-amber-500/5 -mx-1 px-1 rounded"><span className="text-amber-600 dark:text-amber-400">АИ-95 (л)</span><span className="text-amber-600 dark:text-amber-400">876.20 л / 58 982.50 ₽ <span className="text-[9px]">↑ корр.</span></span></div>
+              <div className="flex justify-between bg-amber-500/5 -mx-1 px-1 rounded"><span className="text-amber-600 dark:text-amber-400">АИ-95 (л)</span><span className="text-amber-600 dark:text-amber-400">876.20 л / 58 982.50 ₽ <span className="text-xs">↑ корр.</span></span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">ДТ (л)</span><span>2 100.00 л / 150 000.00 ₽</span></div>
               <div className="border-t border-border/30 pt-2" />
               <div className="flex justify-between font-bold"><span>Итого</span><span>287 450.00 ₽</span></div>
@@ -254,9 +254,9 @@ function ValidationView() {
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">Проверка документов перед загрузкой в 1С</p>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-emerald-500">{passCount} ✓</span>
-          {warnCount > 0 && <span className="text-[10px] text-amber-500">{warnCount} ⚠</span>}
-          {failCount > 0 && <span className="text-[10px] text-red-500">{failCount} ✗</span>}
+          <span className="text-xs text-emerald-500">{passCount} ✓</span>
+          {warnCount > 0 && <span className="text-xs text-amber-500">{warnCount} ⚠</span>}
+          {failCount > 0 && <span className="text-xs text-red-500">{failCount} ✗</span>}
         </div>
       </div>
 
@@ -267,8 +267,8 @@ function ValidationView() {
             <div key={check.name} className="flex items-start gap-2.5 py-2 border-b border-border/30 last:border-0">
               <Icon className={`h-4 w-4 ${color} shrink-0 mt-0.5`} />
               <div className="flex-1">
-                <p className="text-[11px] font-medium">{check.name}</p>
-                <p className="text-[10px] text-muted-foreground">{check.details}</p>
+                <p className="text-sm font-medium">{check.name}</p>
+                <p className="text-xs text-muted-foreground">{check.details}</p>
               </div>
             </div>
           )
@@ -330,13 +330,13 @@ function UploadView() {
                     <st.icon className={`h-4 w-4 ${st.color} shrink-0`} />
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="text-[11px] font-medium">{batch.date}</p>
-                        <span className="text-[10px] text-muted-foreground">{batch.docsCount} док.</span>
+                        <p className="text-sm font-medium">{batch.date}</p>
+                        <span className="text-xs text-muted-foreground">{batch.docsCount} док.</span>
                       </div>
-                      <p className="text-[10px] text-muted-foreground">{batch.result}</p>
+                      <p className="text-xs text-muted-foreground">{batch.result}</p>
                     </div>
                   </div>
-                  <span className={`text-[10px] font-medium ${st.color}`}>{st.label}</span>
+                  <span className={`text-xs font-medium ${st.color}`}>{st.label}</span>
                 </div>
               </CardContent>
             </Card>
@@ -408,7 +408,7 @@ function AnalysisView() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <Shield className={`h-4 w-4 ${warnChecks > 0 ? 'text-amber-500' : 'text-emerald-500'}`} />
-            <span className="text-[11px] font-medium">{okChecks}/{totalChecks}</span>
+            <span className="text-sm font-medium">{okChecks}/{totalChecks}</span>
           </div>
           <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
             <Search className="h-3 w-3" />
@@ -420,15 +420,15 @@ function AnalysisView() {
       <div className="space-y-4">
         {DEMO_ANALYSIS.map((group) => (
           <div key={group.category}>
-            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">{group.category}</p>
+            <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">{group.category}</p>
             <div className="space-y-0.5">
               {group.checks.map((check) => {
                 const { icon: Icon, color } = ANALYSIS_ICON[check.status]
                 return (
                   <div key={check.name} className="flex items-center gap-2.5 py-1.5">
                     <Icon className={`h-3.5 w-3.5 ${color} shrink-0`} />
-                    <span className="text-[11px] flex-1">{check.name}</span>
-                    <span className={`text-[11px] font-mono ${check.status === 'ok' ? 'text-muted-foreground' : check.status === 'warning' ? 'text-amber-500' : 'text-red-500'}`}>
+                    <span className="text-sm flex-1">{check.name}</span>
+                    <span className={`text-sm font-mono ${check.status === 'ok' ? 'text-muted-foreground' : check.status === 'warning' ? 'text-amber-500' : 'text-red-500'}`}>
                       {check.value}
                     </span>
                   </div>
@@ -440,7 +440,7 @@ function AnalysisView() {
       </div>
 
       <div className="rounded-lg border border-border/50 bg-muted/30 p-3">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           <strong>Замыкание цикла:</strong> Все загруженные документы проверены.
           Проводки соответствуют первичным данным. Отрицательный остаток АИ-95 на 41.02 — норма для АЗС (недопоставка, ожидается ТТН).
         </p>

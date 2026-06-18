@@ -76,7 +76,7 @@ function DesktopWorkspace() {
                 <PanelLeftOpen className="h-3.5 w-3.5" />
               </Button>
               <ClipboardList className="h-4 w-4 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
+              <span className="text-xs text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
                 Загруженные
               </span>
             </div>
@@ -112,7 +112,7 @@ function DesktopWorkspace() {
                 <PanelLeftOpen className="h-3.5 w-3.5" />
               </Button>
               <Database className="h-4 w-4 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
+              <span className="text-xs text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
                 Данные
               </span>
             </div>
@@ -127,24 +127,24 @@ function DesktopWorkspace() {
                 {coreMode === 'reconcile' && reconResult && (
                   <div className="flex items-center gap-1.5">
                     <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
-                      <span className="text-[10px] text-muted-foreground">MSTO</span>
-                      <span className="text-[11px] font-semibold">{fmtN(reconResult.summary.totalMstoVolume)} л</span>
-                      <span className="text-[10px] text-muted-foreground">{fmtN(reconResult.summary.totalMstoSum)} ₽</span>
+                      <span className="text-xs text-muted-foreground">MSTO</span>
+                      <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalMstoVolume)} л</span>
+                      <span className="text-xs text-muted-foreground">{fmtN(reconResult.summary.totalMstoSum)} ₽</span>
                     </div>
                     <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
-                      <span className="text-[10px] text-muted-foreground">TF</span>
-                      <span className="text-[11px] font-semibold">{fmtN(reconResult.summary.totalTfVolume)} л</span>
+                      <span className="text-xs text-muted-foreground">TF</span>
+                      <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalTfVolume)} л</span>
                     </div>
                     <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
-                      <span className="text-[10px] text-muted-foreground">Смены</span>
-                      <span className="text-[11px] font-semibold">{fmtN(reconResult.summary.totalShiftNonCashVolume)} л</span>
+                      <span className="text-xs text-muted-foreground">Смены</span>
+                      <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalShiftNonCashVolume)} л</span>
                     </div>
                     <div className={`flex items-center gap-1 px-2 py-0.5 rounded border ${reconResult.summary.hasErrors ? 'bg-red-500/5 border-red-500/30' : 'bg-emerald-500/5 border-emerald-500/30'}`}>
-                      <span className="text-[10px] text-muted-foreground">Δ</span>
-                      <span className={`text-[11px] font-bold ${Math.abs(reconResult.summary.mstoVsTfVolumeDiff) > 1 ? 'text-red-500' : 'text-emerald-500'}`}>
+                      <span className="text-xs text-muted-foreground">Δ</span>
+                      <span className={`text-sm font-bold ${Math.abs(reconResult.summary.mstoVsTfVolumeDiff) > 1 ? 'text-red-500' : 'text-emerald-500'}`}>
                         {reconResult.summary.mstoVsTfVolumeDiff > 0 ? '+' : ''}{fmtN(reconResult.summary.mstoVsTfVolumeDiff)} л
                       </span>
-                      <span className="text-[10px] text-muted-foreground">{reconResult.summary.matched}✓{reconResult.summary.mismatch > 0 ? ` ${reconResult.summary.mismatch}✗` : ''}</span>
+                      <span className="text-xs text-muted-foreground">{reconResult.summary.matched}✓{reconResult.summary.mismatch > 0 ? ` ${reconResult.summary.mismatch}✗` : ''}</span>
                     </div>
                   </div>
                 )}
@@ -189,7 +189,7 @@ function DesktopWorkspace() {
                   </span>
                 )}
               </div>
-              <span className="text-[10px] text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
+              <span className="text-xs text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
                 Для 1С
               </span>
             </div>
@@ -233,7 +233,7 @@ function MobileWorkspace() {
             <FileOutput className="h-3.5 w-3.5" />
             Для 1С
             {exportDocs.length > 0 && (
-              <span className="ml-1 bg-primary text-primary-foreground text-[9px] rounded-full h-4 min-w-[16px] flex items-center justify-center px-1">
+              <span className="ml-1 bg-primary text-primary-foreground text-xs rounded-full h-4 min-w-[16px] flex items-center justify-center px-1">
                 {exportDocs.length}
               </span>
             )}

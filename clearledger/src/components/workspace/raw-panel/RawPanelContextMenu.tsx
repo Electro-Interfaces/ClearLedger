@@ -32,7 +32,7 @@ export function RawPanelContextMenu({ children, node, onOpen, onRefresh }: Props
         <ContextMenuItem onClick={() => onOpen(node)}>
           <FileText className="mr-2 h-4 w-4" />
           Открыть
-          {isFile && <span className="ml-auto text-[10px] text-muted-foreground">Enter</span>}
+          {isFile && <span className="ml-auto text-xs text-muted-foreground">Enter</span>}
         </ContextMenuItem>
 
         {isFile && (
@@ -41,7 +41,7 @@ export function RawPanelContextMenu({ children, node, onOpen, onRefresh }: Props
             <ContextMenuItem onClick={handleCopyJson}>
               <Copy className="mr-2 h-4 w-4" />
               Копировать данные (JSON)
-              <span className="ml-auto text-[10px] text-muted-foreground">Ctrl+C</span>
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+C</span>
             </ContextMenuItem>
           </>
         )}
@@ -51,14 +51,14 @@ export function RawPanelContextMenu({ children, node, onOpen, onRefresh }: Props
         <ContextMenuItem onClick={onRefresh}>
           <RefreshCw className="mr-2 h-4 w-4" />
           Обновить
-          <span className="ml-auto text-[10px] text-muted-foreground">F5</span>
+          <span className="ml-auto text-xs text-muted-foreground">F5</span>
         </ContextMenuItem>
 
         {isFile && (
           <ContextMenuItem disabled>
             <Info className="mr-2 h-4 w-4" />
             Свойства
-            <span className="ml-auto text-[10px] text-muted-foreground">Alt+Enter</span>
+            <span className="ml-auto text-xs text-muted-foreground">Alt+Enter</span>
           </ContextMenuItem>
         )}
       </ContextMenuContent>

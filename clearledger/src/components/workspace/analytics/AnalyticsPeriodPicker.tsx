@@ -95,7 +95,7 @@ export function AnalyticsPeriodPicker({ period, onChange }: Props) {
             key={p.label}
             variant="ghost"
             size="sm"
-            className="h-7 text-[10px] px-2"
+            className="h-7 text-xs px-2"
             onClick={() => onChange(p.value())}
           >
             {p.label}
@@ -120,9 +120,9 @@ export function KpiCard({ label, value, hint, accent }: {
   }
   return (
     <div className="rounded-md border bg-card/40 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className={`text-lg font-semibold mt-1 ${accent ? accentCls[accent] : ''}`}>{value}</div>
-      {hint && <div className="text-[10px] text-muted-foreground mt-0.5">{hint}</div>}
+      {hint && <div className="text-xs text-muted-foreground mt-0.5">{hint}</div>}
     </div>
   )
 }

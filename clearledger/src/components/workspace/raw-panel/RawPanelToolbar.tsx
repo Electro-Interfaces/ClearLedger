@@ -65,7 +65,7 @@ export function RawPanelToolbar({ state, isFetching, onRefresh }: Props) {
       >
         <SlidersHorizontal className="h-3 w-3" />
         {activeFilterCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] rounded-full bg-primary text-primary-foreground text-[9px] flex items-center justify-center px-0.5">
+          <span className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center px-0.5">
             {activeFilterCount}
           </span>
         )}

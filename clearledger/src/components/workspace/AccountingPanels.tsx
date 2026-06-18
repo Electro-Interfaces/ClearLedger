@@ -120,7 +120,7 @@ function MgmtOverview({ companyId, dateFrom, dateTo }: { companyId: string; date
                 <PayBar key={k} label={LABELS[k]} amount={m.breakdown[k]} pct={m.shares_pct[k]} />
               ))}
             </div>
-            <div className="mt-3 pt-2 border-t text-[11px] text-muted-foreground">
+            <div className="mt-3 pt-2 border-t text-sm text-muted-foreground">
               Средний чек на смену: <span className="font-mono text-foreground">{fmtMoney(m.avg_per_shift)} ₽</span>
             </div>
           </CardContent>
@@ -138,7 +138,7 @@ function MgmtOverview({ companyId, dateFrom, dateTo }: { companyId: string; date
                     <span className="font-medium truncate">{l.label}</span>
                     <span className="font-mono">{fmtMoneyShort(l.revenue)} ₽</span>
                   </div>
-                  <div className="text-[10px] text-muted-foreground flex items-center justify-between">
+                  <div className="text-xs text-muted-foreground flex items-center justify-between">
                     <span>Маржа {fmtPct(l.gross_margin_pct)}</span>
                     <span>{fmtLiters(l.liters)}</span>
                   </div>

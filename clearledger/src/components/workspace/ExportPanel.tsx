@@ -42,7 +42,7 @@ export function ExportPanel({ hideHeader = false }: { hideHeader?: boolean }) {
             Для 1С
           </h2>
           {exportDocs.length > 0 && (
-            <Badge variant="default" className="text-[10px] h-5">
+            <Badge variant="default" className="text-xs h-5">
               {exportDocs.length}
             </Badge>
           )}
@@ -62,7 +62,7 @@ export function ExportPanel({ hideHeader = false }: { hideHeader?: boolean }) {
             <SelectItem value="exported">Выгруж.</SelectItem>
           </SelectContent>
         </Select>
-        <Badge variant="secondary" className="text-[9px] h-4 px-1.5 ml-auto">
+        <Badge variant="secondary" className="text-xs h-4 px-1.5 ml-auto">
           {filteredDocs.length} / {exportDocs.length}
         </Badge>
       </div>
@@ -84,18 +84,18 @@ export function ExportPanel({ hideHeader = false }: { hideHeader?: boolean }) {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5 mb-1">
-                      <Badge variant="outline" className="text-[9px] h-4 px-1.5 shrink-0">
+                      <Badge variant="outline" className="text-xs h-4 px-1.5 shrink-0">
                         {TYPE_LABELS[doc.type] ?? doc.type}
                       </Badge>
                       <Badge
                         variant={doc.status === 'exported' ? 'default' : 'secondary'}
-                        className="text-[9px] h-4 px-1.5"
+                        className="text-xs h-4 px-1.5"
                       >
                         {STATUS_LABELS[doc.status]}
                       </Badge>
                     </div>
                     <p className="text-xs font-medium truncate">{doc.label}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       {format(new Date(doc.createdAt), 'dd.MM.yyyy HH:mm')}
                     </p>
                   </div>
