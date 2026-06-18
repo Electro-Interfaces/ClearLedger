@@ -166,6 +166,18 @@ async def create_all() -> None:
             # v2.3: должность сотрудника (per-company) + в приглашении.
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS position VARCHAR(150)",
             "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS position VARCHAR(150)",
+            # v2.5: универсальные справочники — raw-снимок всех реквизитов 1С + промо.
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS raw JSONB",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS full_name VARCHAR(1000)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS okpo VARCHAR(20)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS head_ref VARCHAR(36)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'external'",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS raw JSONB",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS kind VARCHAR(40)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS currency VARCHAR(10)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS valid_until VARCHAR(20)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS is_closed BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS scope_type VARCHAR(20) NOT NULL DEFAULT 'unassigned'",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
@@ -176,13 +188,19 @@ async def create_all() -> None:
         import json as _json
         import uuid as _uuid
         from app.location_type_defaults import BUILTIN_LOCATION_TYPES
+        # UPSERT: код-канонические встроенные типы обновляются из кода
+        # (новые поля/лейблы доезжают на старте). Кастомные типы компаний не
+        # затрагиваются (частичный uq-индекс по company_id IS NULL).
         _ins_lt = __import__("sqlalchemy").text(
             "INSERT INTO location_types "
             "(id, company_id, code, name, icon, unit, nomenclature_kind, fields, "
             " is_builtin, sort_order, status) "
             "VALUES (CAST(:id AS UUID), NULL, :code, :name, :icon, :unit, :kind, "
             " CAST(:fields AS JSONB), true, :sort, 'active') "
-            "ON CONFLICT DO NOTHING"
+            "ON CONFLICT (code) WHERE company_id IS NULL DO UPDATE SET "
+            " name = EXCLUDED.name, icon = EXCLUDED.icon, unit = EXCLUDED.unit, "
+            " nomenclature_kind = EXCLUDED.nomenclature_kind, "
+            " fields = EXCLUDED.fields, sort_order = EXCLUDED.sort_order"
         )
         for _t in BUILTIN_LOCATION_TYPES:
             await conn.execute(_ins_lt, {

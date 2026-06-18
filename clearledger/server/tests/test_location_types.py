@@ -48,7 +48,7 @@ async def test_builtin_types_listed(auth_client: AsyncClient):
     assert ev["unit"] == "кВт·ч"
     assert ev["nomenclature_kind"] == "energy"
     field_keys = {f["key"] for f in ev["fields"]}
-    assert {"connectorType", "maxPowerKw", "tariff"}.issubset(field_keys)
+    assert {"serialNumber", "maxPowerKw", "connectorTypes"}.issubset(field_keys)
 
 
 @pytest.mark.asyncio(loop_scope="session")

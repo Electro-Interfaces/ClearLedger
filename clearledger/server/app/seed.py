@@ -97,20 +97,24 @@ async def seed_data(db: AsyncSession) -> None:
 
 
 async def _seed_builtin_location_types(db: AsyncSession) -> None:
-    """Встроенные типы точек (company_id=NULL, is_builtin). Идемпотентно.
+    """Встроенные типы точек (company_id=NULL, is_builtin) — UPSERT из кода.
     Дублирует миграцию v2.4 (database.py) для пути ORM create_all (тесты)."""
     res = await db.execute(
-        select(LocationTypeDef.code).where(LocationTypeDef.company_id.is_(None))
+        select(LocationTypeDef).where(LocationTypeDef.company_id.is_(None))
     )
-    existing = set(res.scalars().all())
+    existing = {t.code: t for t in res.scalars().all()}
     for t in BUILTIN_LOCATION_TYPES:
-        if t["code"] in existing:
-            continue
-        db.add(LocationTypeDef(
-            company_id=None, code=t["code"], name=t["name"], icon=t["icon"],
-            unit=t["unit"], nomenclature_kind=t["nomenclature_kind"],
-            fields=t["fields"], is_builtin=True, sort_order=t["sort_order"],
-        ))
+        cur = existing.get(t["code"])
+        if cur is None:
+            db.add(LocationTypeDef(
+                company_id=None, code=t["code"], name=t["name"], icon=t["icon"],
+                unit=t["unit"], nomenclature_kind=t["nomenclature_kind"],
+                fields=t["fields"], is_builtin=True, sort_order=t["sort_order"],
+            ))
+        else:
+            cur.name = t["name"]; cur.icon = t["icon"]; cur.unit = t["unit"]
+            cur.nomenclature_kind = t["nomenclature_kind"]
+            cur.fields = t["fields"]; cur.sort_order = t["sort_order"]
 
 
 # Типовые шаблоны проводок БП 3.0 — глобальные (company_id=NULL).

@@ -26,6 +26,7 @@ import {
 import {
   Plus, Trash2, Fuel, Store, Building2, Warehouse, MapPin, Pencil,
   Download, Loader2, Zap, Utensils, Flame, SlidersHorizontal,
+  LayoutGrid, Table2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -37,6 +38,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsRenderer } from '@/components/manual/MetadataFieldsRenderer'
 import { LocationTypesManager } from '@/components/locationTypes/LocationTypesManager'
+import { LocationsTable } from '@/components/locations/LocationsTable'
 import { stsGetPoints, type StsPoint } from '@/services/fuel/stsApiClient'
 import { getSettings } from '@/services/settingsService'
 import { mstoGetServicePoints } from '@/services/msto/mstoApiClient'
@@ -667,6 +669,10 @@ export function LocationsPage() {
   const knownCodes = new Set(types.map((t) => t.code))
   const unknownItems = locations.filter((l) => !knownCodes.has(l.type))
 
+  // Режим отображения: при большом числе точек по умолчанию таблица.
+  const [viewOverride, setViewOverride] = useState<'cards' | 'table' | null>(null)
+  const view: 'cards' | 'table' = viewOverride ?? (locations.length > 50 ? 'table' : 'cards')
+
   return (
     <div className="flex-1 min-w-0">
       <div className="px-6 py-6 space-y-6">
@@ -680,6 +686,18 @@ export function LocationsPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
+            {locations.length > 0 && (
+              <div className="inline-flex rounded-md border border-border/60 p-0.5">
+                <Button variant={view === 'cards' ? 'secondary' : 'ghost'} size="icon"
+                  className="h-8 w-8" title="Карточки" onClick={() => setViewOverride('cards')}>
+                  <LayoutGrid className="h-4 w-4" />
+                </Button>
+                <Button variant={view === 'table' ? 'secondary' : 'ghost'} size="icon"
+                  className="h-8 w-8" title="Таблица" onClick={() => setViewOverride('table')}>
+                  <Table2 className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
             <StsImportButton onDone={refresh} />
             <MstoImportButton onDone={refresh} />
             <TradecorpImportButton onDone={refresh} />
@@ -709,6 +727,15 @@ export function LocationsPage() {
                 : 'Сначала настройте хотя бы один источник в разделе «Настройки → Источники».'}
             </CardContent>
           </Card>
+        ) : view === 'table' ? (
+          <LocationsTable
+            locations={locations}
+            typeByCode={typeByCode}
+            onChanged={refresh}
+            renderEdit={(l, child) => (
+              <LocationEditDialog location={l} onSaved={refresh}>{child}</LocationEditDialog>
+            )}
+          />
         ) : (
           <>
             {groups.map((g) => (

@@ -27,15 +27,22 @@ BUILTIN_LOCATION_TYPES: list[dict] = [
         "unit": "кВт·ч",
         "nomenclature_kind": "energy",
         "sort_order": 20,
+        # Реальный набор реестра РусГидро (HubEx/Onder). connectorTypes — коды 0–6
+        # как в источнике; недостоверные dev-поля (статус/связь/прошивка) не храним.
         "fields": [
-            {
-                "key": "connectorType", "label": "Тип коннектора", "type": "select",
-                "options": ["Type 2", "CCS Combo 2", "CHAdeMO", "GB/T"],
-            },
-            {"key": "connectorCount", "label": "Число коннекторов", "type": "number"},
+            {"key": "serialNumber", "label": "Серийный № (HubEx)", "type": "text"},
+            {"key": "ownerTitle", "label": "Владелец", "type": "text"},
+            {"key": "federalSubject", "label": "Регион", "type": "text"},
+            {"key": "cityName", "label": "Город", "type": "text"},
+            {"key": "latitude", "label": "Широта", "type": "number"},
+            {"key": "longitude", "label": "Долгота", "type": "number"},
+            {"key": "manufacturer", "label": "Бренд", "type": "text"},
+            {"key": "model", "label": "Модель", "type": "text"},
+            {"key": "connectorCount", "label": "Кол-во коннекторов", "type": "number"},
+            {"key": "connectorTypes", "label": "Типы коннекторов (коды)", "type": "text"},
             {"key": "maxPowerKw", "label": "Макс. мощность", "type": "number", "unit": "кВт"},
-            {"key": "currentType", "label": "Тип тока", "type": "select", "options": ["AC", "DC"]},
-            {"key": "tariff", "label": "Тариф", "type": "number", "unit": "₽/кВт·ч"},
+            {"key": "protocolOcpp", "label": "Протокол OCPP", "type": "select",
+             "options": ["Нет", "OCPP 1.6", "OCPP 2.0.1"]},
         ],
     },
     {
