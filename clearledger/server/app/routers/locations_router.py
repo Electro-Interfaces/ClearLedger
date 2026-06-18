@@ -17,6 +17,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
 from app.models import AuditEvent, ServiceLocation, User
+from app.services import hubex_service
 
 OP_STATUSES = {"working", "not_working", "on_repair", "maintenance", "unknown"}
 
@@ -214,3 +215,24 @@ async def operational_status_history(
             "from": d.get("from"), "to": d.get("to"), "reason": d.get("reason", ""),
         })
     return out
+
+
+@router.get("/{location_id}/hubex-tasks")
+async def hubex_tasks(
+    location_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сервисные заявки HubEx FSM по станции (по metadata.hubexAssetId)."""
+    loc = await get_owned(ServiceLocation, location_id, current_user, db)
+    asset_id = (loc.extra_metadata or {}).get("hubexAssetId")
+    if not hubex_service.is_configured():
+        return {"configured": False, "assetId": asset_id, "tasks": [], "total": 0}
+    if asset_id in (None, "", 0):
+        return {"configured": True, "assetId": None, "tasks": [], "total": 0}
+    try:
+        res = await hubex_service.get_asset_tasks(int(asset_id))
+        return {"configured": True, "assetId": int(asset_id), **res}
+    except Exception as e:  # внешний API недоступен — не роняем cockpit
+        return {"configured": True, "assetId": asset_id, "tasks": [], "total": 0,
+                "error": str(e)[:200]}

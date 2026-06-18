@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     msto_username: str = ""
     msto_password: str = ""
 
+    # HubEx FSM — сервисные заявки/ремонты ЭЗС РусГидро (прокси на сервере,
+    # сервисный токен НЕ уходит на фронт). Пусто → вкладка «Сервис» без заявок.
+    hubex_service_token: str = ""
+    hubex_base_url: str = "https://api.hubex.ru/fsm"
+    hubex_app_id: str = "5"
+    hubex_tasks_limit: int = 30
+
     @property
     def cors_origin_list(self) -> list[str]:
         """Разбирает CORS_ORIGINS в список."""
