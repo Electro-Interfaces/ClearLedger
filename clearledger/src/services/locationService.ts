@@ -98,6 +98,7 @@ interface ApiLocation {
   name: string
   type: string
   status: string
+  operationalStatus?: string
   address: string | null
   description: string | null
   sourceBindings: LocationSourceBinding[]
@@ -113,6 +114,7 @@ function fromApi(r: ApiLocation): ServiceLocation {
     name: r.name,
     type: r.type as LocationType,
     status: r.status as LocationStatus,
+    operationalStatus: r.operationalStatus ?? 'unknown',
     address: r.address ?? undefined,
     description: r.description ?? undefined,
     sourceBindings: r.sourceBindings ?? [],
@@ -226,4 +228,33 @@ export function deleteLocation(id: string): boolean {
   lsSet(filtered)
   mirrorDelete(id)
   return true
+}
+
+// ─── Операционный статус (работает / не работает / на ремонте / ...) ───────
+export interface OpStatusHistoryItem {
+  at: string
+  user: string
+  from: string | null
+  to: string | null
+  reason: string
+}
+
+/** Сменить операционный статус станции (бэкенд пишет запись в журнал). */
+export async function setOperationalStatus(
+  id: string, status: string, reason?: string,
+): Promise<void> {
+  await patch(`/api/locations/${id}/operational-status`, { status, reason })
+  const all = lsGet()
+  const idx = all.findIndex((l) => l.id === id)
+  if (idx !== -1) {
+    all[idx] = { ...all[idx], operationalStatus: status }
+    lsSet(all)
+  }
+}
+
+/** Журнал смен операционного статуса. */
+export async function getOperationalStatusHistory(
+  id: string,
+): Promise<OpStatusHistoryItem[]> {
+  return get<OpStatusHistoryItem[]>(`/api/locations/${id}/operational-status/history`)
 }

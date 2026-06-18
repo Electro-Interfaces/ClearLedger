@@ -90,6 +90,32 @@ async def test_builtin_not_deletable(auth_client: AsyncClient):
 
 
 @pytest.mark.asyncio(loop_scope="session")
+async def test_operational_status(auth_client: AsyncClient):
+    import uuid as _uuid
+    lid = _uuid.uuid4().hex[:10]
+    r = await auth_client.post("/api/locations", json={
+        "id": lid, "company_id": "rushydro", "code": "EVTST", "name": "EV test",
+        "type": "ev_charging", "status": "active",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["operationalStatus"] == "unknown"
+
+    r = await auth_client.patch(
+        f"/api/locations/{lid}/operational-status", json={"status": "on_repair", "reason": "ТО"})
+    assert r.status_code == 200 and r.json()["operationalStatus"] == "on_repair"
+
+    # недопустимый статус → 400
+    assert (await auth_client.patch(
+        f"/api/locations/{lid}/operational-status", json={"status": "bogus"})).status_code == 400
+
+    hist = (await auth_client.get(f"/api/locations/{lid}/operational-status/history")).json()
+    assert len(hist) >= 1
+    assert hist[0]["to"] == "on_repair" and hist[0]["reason"] == "ТО"
+
+    await auth_client.delete(f"/api/locations/{lid}")
+
+
+@pytest.mark.asyncio(loop_scope="session")
 async def test_permissions_and_isolation(client: AsyncClient):
     admin = await _admin_token(client)
     # Обычный пользователь gig (роль user) и пользователь npk.

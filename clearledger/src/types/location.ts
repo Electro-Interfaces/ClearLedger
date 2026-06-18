@@ -35,8 +35,10 @@ export interface ServiceLocation {
   name: string
   /** Тип точки */
   type: LocationType
-  /** Статус */
+  /** Жизненный статус */
   status: LocationStatus
+  /** Операционный статус: working|not_working|on_repair|maintenance|unknown */
+  operationalStatus?: string
   /** Адрес */
   address?: string
   /** Свободное описание */

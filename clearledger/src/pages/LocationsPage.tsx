@@ -39,6 +39,7 @@ import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsRenderer } from '@/components/manual/MetadataFieldsRenderer'
 import { LocationTypesManager } from '@/components/locationTypes/LocationTypesManager'
 import { LocationsTable } from '@/components/locations/LocationsTable'
+import { LocationCockpitModal } from '@/components/locations/LocationCockpitModal'
 import { LocationContractsPopover } from '@/components/reference/LocationContractsPopover'
 import { stsGetPoints, type StsPoint } from '@/services/fuel/stsApiClient'
 import { getSettings } from '@/services/settingsService'
@@ -677,6 +678,9 @@ export function LocationsPage() {
   const [viewOverride, setViewOverride] = useState<'cards' | 'table' | null>(null)
   const view: 'cards' | 'table' = viewOverride ?? (locations.length > 50 ? 'table' : 'cards')
 
+  // Окно станции (cockpit) — открывается кликом по строке/карточке.
+  const [cockpit, setCockpit] = useState<ServiceLocation | null>(null)
+
   return (
     <div className="flex-1 min-w-0">
       <div className="px-6 py-6 space-y-6">
@@ -739,6 +743,7 @@ export function LocationsPage() {
             renderEdit={(l, child) => (
               <LocationEditDialog location={l} onSaved={refresh}>{child}</LocationEditDialog>
             )}
+            onSelectLocation={setCockpit}
           />
         ) : (
           <>
@@ -770,6 +775,15 @@ export function LocationsPage() {
           </>
         )}
       </div>
+
+      <LocationCockpitModal
+        location={cockpit ? (locations.find((l) => l.id === cockpit.id) ?? cockpit) : null}
+        onClose={() => setCockpit(null)}
+        onChanged={refresh}
+        renderEdit={(l, child) => (
+          <LocationEditDialog location={l} onSaved={refresh}>{child}</LocationEditDialog>
+        )}
+      />
     </div>
   )
 }

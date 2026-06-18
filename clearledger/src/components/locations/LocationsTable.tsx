@@ -48,12 +48,15 @@ export function LocationsTable({
   typeByCode,
   onChanged,
   renderEdit,
+  onSelectLocation,
 }: {
   locations: ServiceLocation[]
   typeByCode: Map<string, LocationTypeDef>
   onChanged: () => void
   /** Триггер редактирования (оборачивает строку в LocationEditDialog из страницы). */
   renderEdit: (location: ServiceLocation, child: ReactNode) => ReactNode
+  /** Клик по строке → открыть окно станции (cockpit). */
+  onSelectLocation?: (location: ServiceLocation) => void
 }) {
   const [q, setQ] = useState('')
   const [typeF, setTypeF] = useState('all')
@@ -222,7 +225,9 @@ export function LocationsTable({
               const Icon = resolveLocationIcon(typeByCode.get(l.type)?.icon)
               const st = LOCATION_STATUS_META[l.status]
               return (
-                <TableRow key={l.id}>
+                <TableRow key={l.id}
+                  className={onSelectLocation ? 'cursor-pointer hover:bg-secondary/50' : undefined}
+                  onClick={onSelectLocation ? () => onSelectLocation(l) : undefined}>
                   <TableCell><Icon className="h-4 w-4 text-muted-foreground" /></TableCell>
                   <TableCell className="font-mono text-xs font-medium">{m(l, 'number')}</TableCell>
                   <TableCell className="font-mono text-[11px] text-muted-foreground">{l.code}</TableCell>
@@ -248,7 +253,7 @@ export function LocationsTable({
                     {st && <Badge variant="secondary" className="text-[10px]">{st.label}</Badge>}
                   </TableCell>
                   <TableCell>
-                    <div className="flex gap-0.5 justify-end">
+                    <div className="flex gap-0.5 justify-end" onClick={(e) => e.stopPropagation()}>
                       {renderEdit(l, (
                         <Button variant="ghost" size="icon" className="h-7 w-7">
                           <Pencil className="h-3.5 w-3.5" />
