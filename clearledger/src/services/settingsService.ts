@@ -28,10 +28,8 @@ const defaults: AppSettings = {
   stsApiUrl: 'https://pos.autooplata.ru/tms',
   stsLogin: 'UserApi',
   stsPassword: 'lHQfLZHzB3tn',
-  stsSystemCode: 65,
-  stations: [
-    { code: 5, name: 'АКАЗС №5' },
-  ],
+  stsSystemCode: 15,
+  stations: [],
 }
 
 export function getSettings(): AppSettings {

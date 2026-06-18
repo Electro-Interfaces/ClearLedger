@@ -83,11 +83,16 @@ async def _auth_get(
 async def sts_get_shifts(
     base_url: str, login: str, password: str,
     system: int, station: int | None = None,
+    date_from: str | None = None, date_to: str | None = None,
 ) -> list[dict]:
-    """Список смен."""
+    """Список смен (опц. период date_from/date_to = YYYY-MM-DD)."""
     params = f"system={system}"
     if station is not None:
         params += f"&station={station}"
+    if date_from:
+        params += f"&date_from={date_from}"
+    if date_to:
+        params += f"&date_to={date_to}"
     return await _auth_get(base_url, login, password, f"/v1/shifts?{params}")
 
 
@@ -104,9 +109,28 @@ async def sts_get_receipts(
     base_url: str, login: str, password: str,
     system: int, station: int, shift: int,
 ) -> list[dict]:
-    """ТТН (поступления) по смене."""
+    """ТТН (поступления) по смене — плоский список позиций приёма.
+
+    STS отдаёт вложенную форму [{system, number, shifts:[{number, receipt:[...]}]}];
+    разворачиваем в плоский список ТТН-позиций, проставляя номер смены.
+    """
     params = f"system={system}&station={station}&shift={shift}"
-    return await _auth_get(base_url, login, password, f"/v1/report/receipts?{params}")
+    data = await _auth_get(base_url, login, password, f"/v1/report/receipts?{params}")
+    flat: list[dict] = []
+    if isinstance(data, list):
+        for block in data:
+            if not isinstance(block, dict):
+                continue
+            for sh in (block.get("shifts") or []):
+                for rc in (sh.get("receipt") or []):
+                    item = dict(rc)
+                    item.setdefault("shift", sh.get("number"))
+                    flat.append(item)
+    elif isinstance(data, dict):
+        # на случай иной (плоской) формы ответа
+        for rc in (data.get("receipt") or []):
+            flat.append(dict(rc))
+    return flat
 
 
 async def sts_get_transactions(

@@ -66,7 +66,7 @@ def _tf_record(tx: dict, fmap: dict, smap: dict) -> dict:
     card = tx.get("card") or {}
     return {
         "station": _station(tx.get("station"), smap),
-        "fuel": _fuel(svc.get("service_name") or svc.get("service_code") or tx.get("fuel"), fmap),
+        "fuel": _fuel(svc.get("service_code") or svc.get("service_name") or tx.get("fuel"), fmap),
         "occurred_at": _ts(tx.get("dt") or tx.get("time") or tx.get("date")),
         "amount": float(tx.get("cost") or tx.get("amount") or 0),
         "volume": float(tx.get("volume") or tx.get("quantity") or 0),

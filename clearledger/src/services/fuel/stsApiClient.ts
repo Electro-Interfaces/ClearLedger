@@ -144,6 +144,21 @@ export async function stsGetShifts(system?: number, station?: number): Promise<S
   return authFetch(`/v1/shifts?${params}`) as Promise<StsShift[]>
 }
 
+/** Торговая точка STS (GET /v1/points) — авто-discovery станций сети. */
+export interface StsPoint {
+  id?: number
+  number?: number
+  name?: string
+  address?: string
+}
+
+/** Список торговых точек системы (GET /v1/points?system=). */
+export async function stsGetPoints(system?: number): Promise<StsPoint[]> {
+  const settings = getSettings()
+  const sys = system ?? settings.stsSystemCode
+  return authFetch(`/v1/points?system=${sys}`) as Promise<StsPoint[]>
+}
+
 export async function stsGetShiftReport(station: number, shift: number, system?: number): Promise<StsShiftReport> {
   const settings = getSettings()
   const sys = system ?? settings.stsSystemCode

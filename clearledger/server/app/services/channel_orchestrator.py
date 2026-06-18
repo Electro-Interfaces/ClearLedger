@@ -62,6 +62,13 @@ def _conn_string(src: Source, password: str) -> str:
 
 
 def _period(channel: Channel) -> tuple[str, str]:
+    """Период прогона: явный диапазон config.dateFrom/dateTo (UI «Период загрузки»)
+    в приоритете; иначе фолбэк к period_days как глубине от сегодня."""
+    cfg = channel.config or {}
+    df = cfg.get("dateFrom") or cfg.get("date_from")
+    dt = cfg.get("dateTo") or cfg.get("date_to")
+    if df and dt:
+        return str(df)[:10], str(dt)[:10]
     days = int(channel.period_days or 30)
     until = datetime.now(timezone.utc)
     since = until - timedelta(days=days)
@@ -83,38 +90,92 @@ async def _run_cb(db: AsyncSession, channel: Channel, src: Source) -> dict[str, 
 
 
 # ---------------------------------------------------------------------------
-# Ветка STS (топливо + ТТН)
+# Ветка STS (топливо). Раздельно, как в расширении БП: продажи (ОбработатьСмену)
+# и приём ТТН (ОбработатьТТН) — это РАЗНЫЕ каналы с разными разрезами.
+#   • fuel_shift    → shift_report → FuelShift (продажи), без ТТН.
+#   • fuel_delivery → receipts     → FuelReceipt + L1 ТТН (приём).
 # ---------------------------------------------------------------------------
-async def _run_fuel(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
-    from app.routers.fuel_router import NormalizeRequest, ingest_fuel_shifts
-
+async def _fuel_context(db: AsyncSession, channel: Channel, src: Source):
+    """Общий контекст STS-прогона: креды, период, станции канала."""
     cfg = src.connection_config or {}
     pwd = await _decrypt_pwd(db, src.id)
-    station = str((channel.config or {}).get("station") or cfg.get("default_station") or "").strip()
+    login = str(cfg.get("login") or "")
+    base_url = str(cfg.get("base_url") or "https://pos.autooplata.ru/tms")
     sysids = str(cfg.get("default_system_ids") or "65")
-    system_code = int((sysids.split(",")[0].strip() or "65"))
-    body = NormalizeRequest(
-        station_code=int(station or 0),
-        base_url=str(cfg.get("base_url") or "https://pos.autooplata.ru/tms"),
-        login=str(cfg.get("login") or ""),
-        password=pwd,
-        system_code=system_code,
-    )
-    result = await ingest_fuel_shifts(body, channel.company_id, db)
-    return {"status": "success", "kind": "fuel", "station": station, **result}
+    default_system = int((sysids.split(",")[0].strip() or "65"))
+    pf, pt = _period(channel)  # период канала — НЕ грузить всю историю
+
+    # Станции канала: список config.stations [{code, systemId}] ИЛИ единственная config.station
+    ch_cfg = channel.config or {}
+    stations = list(ch_cfg.get("stations") or [])
+    if not stations:
+        single = ch_cfg.get("station") or cfg.get("default_station")
+        if single:
+            stations = [{"code": single, "systemId": default_system}]
+    return login, pwd, base_url, default_system, pf, pt, stations
+
+
+async def _run_sts_stations(db, channel, src, ingest_fn, kind: str) -> dict[str, Any]:
+    """Перебор станций канала с per-станционным savepoint; ingest_fn — ветка."""
+    from app.routers.fuel_router import NormalizeRequest
+
+    login, pwd, base_url, default_system, pf, pt, stations = await _fuel_context(db, channel, src)
+    by_station: list[dict[str, Any]] = []
+    for st in stations:
+        code = int(st.get("code") or st.get("station") or 0)
+        if not code:
+            continue
+        system_code = int(st.get("systemId") or st.get("system_id") or default_system)
+        body = NormalizeRequest(
+            station_code=code, base_url=base_url, login=login,
+            password=pwd, system_code=system_code,
+            date_from=pf, date_to=pt,
+        )
+        try:
+            # savepoint: сбой одной станции откатывается локально и НЕ отравляет
+            # общую сессию (иначе PendingRollbackError валит все следующие станции)
+            async with db.begin_nested():
+                r = await ingest_fn(body, channel.company_id, db)
+            by_station.append({"station": code, **r})
+        except Exception as e:  # одна станция не валит весь прогон
+            by_station.append({"station": code, "error": str(e)[:200]})
+
+    ok = sum(1 for r in by_station if "error" not in r)
+    return {"status": "success", "kind": kind,
+            "stations_total": len(stations), "stations_ok": ok,
+            "by_station": by_station}
+
+
+async def _run_fuel(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+    """Канал продаж (fuel_shift): shift_report → FuelShift, БЕЗ ТТН."""
+    from app.routers.fuel_router import ingest_fuel_shifts
+
+    async def _ingest(body, cid, db):
+        return await ingest_fuel_shifts(body, cid, db, with_receipts=False)
+
+    return await _run_sts_stations(db, channel, src, _ingest, "fuel_shift")
+
+
+async def _run_fuel_delivery(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+    """Канал приёма (fuel_delivery): receipts → FuelReceipt + L1 ТТН."""
+    from app.routers.fuel_router import ingest_fuel_deliveries
+
+    return await _run_sts_stations(db, channel, src, ingest_fuel_deliveries, "fuel_delivery")
 
 
 # ---------------------------------------------------------------------------
 # Диспетчер
 # ---------------------------------------------------------------------------
 async def run_channel(db: AsyncSession, channel: Channel) -> dict[str, Any]:
-    """Прогон канала: fetch→normalize→save, ветка по типу источника."""
+    """Прогон канала: fetch→normalize→save, ветка по типу источника и шаблону."""
     src = await _channel_source(db, channel.id)
     if src is None:
         return {"status": "skipped", "message": "в потоках канала нет источника"}
     if src.source_type == "onec_operational":
         return await _run_cb(db, channel, src)
     if src.source_type == "sts":
+        if (channel.template_id or "") == "fuel_delivery":
+            return await _run_fuel_delivery(db, channel, src)
         return await _run_fuel(db, channel, src)
     return {"status": "skipped",
             "message": f"тип источника '{src.source_type}' оркестратором пока не исполняется"}

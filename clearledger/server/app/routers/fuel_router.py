@@ -13,6 +13,27 @@ def _parse_dt(val: str | None) -> datetime | None:
         return None
     return datetime.fromisoformat(val)
 
+
+def _density(val) -> float | None:
+    """Плотность → г/см³ (кг/л), как «Плотность» в 1С (поле Numeric(6,4)).
+
+    STS отдаёт плотность в кг/м³ (≈700-900) — не влезает в Numeric(6,4).
+    Нормализуем к г/см³ (÷1000), страхуемся от выхода за диапазон столбца.
+    """
+    if val in (None, ""):
+        return None
+    try:
+        d = float(val)
+    except (TypeError, ValueError):
+        return None
+    if d == 0:
+        return None
+    if abs(d) > 10:          # кг/м³ → г/см³
+        d = d / 1000.0
+    if abs(d) >= 100:        # страховка под Numeric(6,4)
+        return None
+    return round(d, 4)
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -129,6 +150,8 @@ class NormalizeRequest(BaseModel):
     login: str
     password: str
     system_code: int = 65
+    date_from: str | None = None  # YYYY-MM-DD — ограничение периода смен
+    date_to: str | None = None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -259,11 +282,16 @@ async def ingest_fuel_shifts(
     body: NormalizeRequest,
     company_id: uuid.UUID,
     db: AsyncSession,
+    *,
+    with_receipts: bool = True,
 ) -> dict:
-    """Ядро fuel-ingest (STS → FuelShift/FuelReceipt/L1-маркеры).
+    """Ядро fuel-ingest продаж (STS shift_report → FuelShift + L1-маркеры смен).
 
-    Единая точка приёма топливных смен: зовётся и роутером /fuel/normalize,
-    и оркестратором канала (run_channel). Логика без изменений.
+    Зовётся роутером /fuel/normalize и оркестратором канала продаж (fuel_shift).
+    with_receipts: если False — ТТН (приём) НЕ создаются здесь; приём идёт
+    отдельным каналом fuel_delivery через ingest_fuel_deliveries (как в расширении
+    БП: ОбработатьСмену и ОбработатьТТН — раздельные ветки). По умолчанию True
+    для обратной совместимости /fuel/normalize.
     """
 
     # Получить или создать станцию
@@ -291,7 +319,20 @@ async def ingest_fuel_shifts(
         shifts_to_process = await sts_get_shifts(
             body.base_url, body.login, body.password,
             body.system_code, body.station_code,
+            body.date_from, body.date_to,
         )
+        # Клиентский фильтр периода: STS API не всегда фильтрует надёжно,
+        # иначе загрузится вся история станции.
+        if body.date_from:
+            _df = body.date_from
+            _dt = body.date_to or "9999-12-31"
+
+            def _opened(s: dict) -> str:
+                return str(s.get("dt_open") or s.get("opened") or s.get("dt") or "")[:10]
+
+            shifts_to_process = [
+                s for s in shifts_to_process if _df <= _opened(s) <= _dt
+            ]
 
     created = 0
     skipped = 0
@@ -370,7 +411,7 @@ async def ingest_fuel_shifts(
                 volume_start=float(doc_beg.get("volume", 0)),
                 volume_end=float(doc_end.get("volume", 0)),
                 sales=float(rel.get("volume", 0)),
-                density=t.get("density_end"),
+                density=_density(t.get("density_end")),
             ))
 
         # ТРК — из psm.data[]
@@ -386,8 +427,9 @@ async def ingest_fuel_shifts(
                 amount=float(rel.get("cost", 0)),
             ))
 
-        # ТТН — из receipt[]
-        for r in report.get("receipt", []):
+        # ТТН — из receipt[]. Только если with_receipts (для /fuel/normalize);
+        # в канале продаж приём отключён — он идёт каналом fuel_delivery.
+        for r in (report.get("receipt", []) if with_receipts else []):
             doc = r.get("doc", {})
             fact = r.get("fact", {})
             doc_vol = float(doc.get("volume", 0))
@@ -410,7 +452,7 @@ async def ingest_fuel_shifts(
                 fact_volume_liters=fact_vol,
                 fact_mass_kg=fact_mass,
                 fact_cost=0,
-                density=doc.get("density"),
+                density=_density(doc.get("density")),
                 diff_volume=fact_vol - doc_vol,
                 diff_mass=fact_mass - doc_mass,
                 received_at=_parse_dt(r.get("dt")),
@@ -477,8 +519,8 @@ async def ingest_fuel_shifts(
                 },
             ))
 
-        # L1 DataEntry per ТТН (для сверки ТТН-файл ↔ ПТУ)
-        for r in report.get("receipt", []):
+        # L1 DataEntry per ТТН (для сверки ТТН-файл ↔ ПТУ) — только with_receipts.
+        for r in (report.get("receipt", []) if with_receipts else []):
             ttn_no = (r.get("ttn") or "").strip()
             if not ttn_no:
                 continue
@@ -531,6 +573,175 @@ async def ingest_fuel_shifts(
         created += 1
 
     return {"created": created, "skipped": skipped, "station": station.name}
+
+
+async def ingest_fuel_deliveries(
+    body: NormalizeRequest,
+    company_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict:
+    """Ядро fuel-ingest приёма (STS /v1/report/receipts → FuelReceipt + L1 ТТН).
+
+    Отдельный канал fuel_delivery — зеркало ветки ОбработатьТТН расширения БП:
+    приём топлива по ТТН → в БП это Перемещение(тонны, Дт 41.01) + Комплектация
+    (литры, Дт 41.02) с пересчётом масса→объём по плотности. Здесь формируем L1:
+    физический приём (FuelReceipt) + DataEntry-маркер с метаданными для двухзвенной
+    проводки (масса в тоннах, плотность, объём в литрах, код топлива, поставщик).
+
+    Идемпотентность по STS-тройке: sts-ttn-{system}-{station}-{ttn}[-{code}] —
+    совпадает с нативным ключом .cfe TL|ТТН|система|станция|номер_ТТН[|код_топлива],
+    что выравнивает cutover (без задвоения приёма на живой бухгалтерии).
+    """
+    # станция (get-or-create)
+    station = (await db.execute(
+        select(FuelStation).where(
+            FuelStation.company_id == company_id,
+            FuelStation.code == body.station_code,
+        )
+    )).scalar_one_or_none()
+    if not station:
+        station = FuelStation(
+            company_id=company_id, code=body.station_code,
+            name=f"АЗС №{body.station_code}", sts_system_code=body.system_code,
+        )
+        db.add(station)
+        await db.flush()
+
+    # смены периода — приём STS отдаётся в разрезе смен, перебираем их
+    shifts = await sts_get_shifts(
+        body.base_url, body.login, body.password,
+        body.system_code, body.station_code, body.date_from, body.date_to,
+    )
+    if body.date_from:
+        _df = body.date_from
+        _dt = body.date_to or "9999-12-31"
+
+        def _opened(s: dict) -> str:
+            return str(s.get("dt_open") or s.get("opened") or s.get("dt") or "")[:10]
+
+        shifts = [s for s in shifts if _df <= _opened(s) <= _dt]
+
+    created = 0
+    skipped = 0
+    scanned = 0
+    seen_keys: set[str] = set()
+
+    for shift_info in shifts:
+        shift_num = shift_info.get("shift")
+        if shift_num is None:
+            continue
+        scanned += 1
+        receipts = await sts_get_receipts(
+            body.base_url, body.login, body.password,
+            body.system_code, body.station_code, shift_num,
+        )
+        for r in receipts:
+            ttn_no = str(r.get("ttn") or "").strip()
+            if not ttn_no:
+                continue
+            svc = r.get("service") or {}
+            code = svc.get("service_code")
+            fuel_code = int(code) if code not in (None, "") else None
+
+            marker = f"sts-ttn-{body.system_code}-{body.station_code}-{ttn_no}"
+            if fuel_code is not None:
+                marker += f"-{fuel_code}"
+            if marker in seen_keys:
+                continue
+            seen_keys.add(marker)
+
+            exists = (await db.execute(
+                select(DataEntry).where(
+                    DataEntry.company_id == company_id,
+                    DataEntry.source_label == marker,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if exists:
+                skipped += 1
+                continue
+
+            doc = r.get("doc") or {}
+            fact = r.get("fact") or {}
+            base = r.get("base") or {}
+            doc_vol = float(doc.get("volume") or 0)    # литры
+            doc_mass = float(doc.get("amount") or 0)   # кг
+            fact_vol = float(fact.get("volume") or 0)
+            fact_mass = float(fact.get("amount") or 0)
+            dens = _density(doc.get("density") or fact.get("density"))
+            ttn_dt = _parse_dt(r.get("dt"))
+            ttn_date_iso = ttn_dt.date().isoformat() if ttn_dt else ""
+            fuel_name = svc.get("service_name") or ""
+            supplier = base.get("name") or ""
+            mass_t = round(doc_mass / 1000.0, 3)       # тонны для Перемещения (Дт 41.01)
+
+            # физический приём — дедуп по (company, station, ttn, code)
+            rcpt_exists = (await db.execute(
+                select(FuelReceipt).where(
+                    FuelReceipt.company_id == company_id,
+                    FuelReceipt.station_id == station.id,
+                    FuelReceipt.ttn == ttn_no,
+                    FuelReceipt.fuel_code == fuel_code,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if not rcpt_exists:
+                db.add(FuelReceipt(
+                    company_id=company_id,
+                    station_id=station.id,
+                    shift_id=None,  # приём — событие поставки, не кассовая смена
+                    ttn=ttn_no,
+                    fuel_name=fuel_name,
+                    fuel_code=fuel_code,
+                    supplier=supplier,
+                    doc_volume_liters=doc_vol,
+                    doc_mass_kg=doc_mass,
+                    doc_cost=0,
+                    fact_volume_liters=fact_vol,
+                    fact_mass_kg=fact_mass,
+                    fact_cost=0,
+                    density=dens,
+                    diff_volume=fact_vol - doc_vol,
+                    diff_mass=fact_mass - doc_mass,
+                    received_at=ttn_dt,
+                    status="new",
+                ))
+
+            db.add(DataEntry(
+                id=uuid.uuid4(),
+                title=f"ТТН {ttn_no} · {fuel_name} · {supplier}",
+                category_id="primary",
+                subcategory_id="ttn",
+                doc_type_id="purchase_ttn",
+                company_id=company_id,
+                status="recognized",
+                source="api",
+                source_label=marker,
+                layer="raw",
+                meta={
+                    "ttn_number":    ttn_no,
+                    "docNumber":     ttn_no,
+                    "ttn_date":      ttn_date_iso,
+                    "docDate":       ttn_date_iso,
+                    "supplier_name": supplier,
+                    "supplier_inn":  base.get("inn", ""),
+                    "inn":           base.get("inn", ""),
+                    "fuel_name":     fuel_name,
+                    "fuel_code":     str(code or ""),
+                    "tank":          str(r.get("tank", "") or ""),
+                    "doc_volume_l":  str(doc_vol),
+                    "doc_mass_kg":   str(doc_mass),
+                    "doc_mass_t":    str(mass_t),   # тонны → Перемещение (Дт 41.01)
+                    "fact_volume_l": str(fact_vol),
+                    "fact_mass_kg":  str(fact_mass),
+                    "density":       str(dens if dens is not None else ""),
+                    "station_code":  str(body.station_code),
+                    "system_code":   str(body.system_code),
+                    "shift":         str(shift_num),
+                },
+            ))
+            created += 1
+
+    return {"created": created, "skipped": skipped,
+            "shifts_scanned": scanned, "station": station.name}
 
 
 # ═══════════════════════════════════════════════════════════════
