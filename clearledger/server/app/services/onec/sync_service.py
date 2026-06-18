@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AccountingDoc,
+    Contract,
     Counterparty,
     InventoryBatch,
     NomenclatureItem,
@@ -25,6 +26,7 @@ from app.services.onec.com_client import OneCComClient
 from app.services.onec.crypto import decrypt_password
 from app.services.onec.exceptions import OneCError
 from app.services.onec.odata_client import (
+    ENTITY_CONTRACTS,
     ENTITY_COUNTERPARTIES,
     ENTITY_DOC_CORRECTION,
     ENTITY_DOC_OPZS,
@@ -54,6 +56,46 @@ COUNTERPARTY_SELECT = ["Ref_Key", "DeletionMark", "Description", "ИНН", "КП
 NOMENCLATURE_SELECT = ["Ref_Key", "DeletionMark", "Description", "Артикул", "Код"]
 ORGANIZATION_SELECT = ["Ref_Key", "DeletionMark", "Description", "ИНН", "КПП"]
 WAREHOUSE_SELECT    = ["Ref_Key", "DeletionMark", "Description", "Код"]
+
+# Контрагенты и договоры — расширенный набор реквизитов 1С (промо-колонки + raw-снимок).
+# Имена ссылок с суффиксом _Key одинаково понятны OData и COM-воркеру (Owner_Key→Т.Владелец
+# и пр., см. com_worker._resolve_field), выходной ключ сохраняется. select=None на COM
+# вернул бы лишь Ref_Key — поэтому список явный. Расширять по мере надобности (промо/raw).
+# См. TRADELEDGER_COUNTERPARTY_AXIS, SCHEMA_REFS_GIG.
+COUNTERPARTY_FETCH = [
+    "Ref_Key", "DeletionMark", "Description", "Code",
+    "ИНН", "КПП", "НаименованиеПолное", "КодПоОКПО",
+    "ЮридическоеФизическоеЛицо", "ИндивидуальныйПредприниматель",
+    "ГоловнойКонтрагент_Key", "Комментарий",
+]
+CONTRACT_FETCH = [
+    "Ref_Key", "DeletionMark", "Description", "Code",
+    "Owner_Key", "Организация_Key", "Номер", "Дата", "ВидДоговора",
+    "ВалютаВзаиморасчетов_Key", "ВидВзаиморасчетов_Key",
+    "СрокДействия", "ДоговорЗакрыт", "Сумма", "СуммаВключаетНДС", "Комментарий",
+]
+
+_EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
+
+
+def _clean_ref(val: Any) -> str | None:
+    """Ref_Key → None для пустой ссылки (all-zero GUID) или пустого значения."""
+    if not val:
+        return None
+    s = val.strip() if isinstance(val, str) else val
+    if not s or s == _EMPTY_GUID:
+        return None
+    return s
+
+
+def _resolve_cp_type(item: dict[str, Any]) -> str:
+    """ЮЛ / ФЛ / ИП из реквизитов 1С контрагента."""
+    if item.get("ИндивидуальныйПредприниматель"):
+        return "ИП"
+    uf = str(item.get("ЮридическоеФизическоеЛицо") or "")
+    if "Физическ" in uf or uf.endswith("ФизическоеЛицо"):
+        return "ФЛ"
+    return "ЮЛ"
 
 
 class OneCSyncService:
@@ -149,6 +191,7 @@ class OneCSyncService:
             async with await self._open_client(connection) as client:
                 details["organizations"] = await self._sync_organizations(client, connection, log)
                 details["counterparties"] = await self._sync_counterparties(client, connection, log)
+                details["contracts"] = await self._sync_contracts(client, connection, log)
                 details["warehouses"] = await self._sync_warehouses(client, connection, log)
                 details["nomenclature"] = await self._sync_nomenclature(client, connection, log)
             await self._finish_log(log, "completed", details)
@@ -971,7 +1014,8 @@ class OneCSyncService:
         log: OneCSyncLog,
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
-        async for item in client.iter_entity(ENTITY_COUNTERPARTIES, select=COUNTERPARTY_SELECT, orderby="Ref_Key", page_size=500):
+        # Расширенный pull: промо-поля + raw-снимок выбранных реквизитов.
+        async for item in client.iter_entity(ENTITY_COUNTERPARTIES, select=COUNTERPARTY_FETCH, orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1
@@ -987,24 +1031,113 @@ class OneCSyncService:
                         Counterparty.external_ref == ref_key,
                     )
                 )).scalar_one_or_none()
+                name = (item.get("Description") or "").strip() or "(без названия)"
+                inn = (item.get("ИНН") or "").strip()
+                kpp = (item.get("КПП") or "").strip() or None
+                full_name = (item.get("НаименованиеПолное") or "").strip() or None
+                okpo = (item.get("КодПоОКПО") or "").strip() or None
+                head_ref = _clean_ref(item.get("ГоловнойКонтрагент_Key"))
+                if head_ref == ref_key:  # сам себе головной — не иерархия
+                    head_ref = None
+                cp_type = _resolve_cp_type(item)
                 if existing is None:
                     self.session.add(Counterparty(
                         id=uuid.uuid4(),
                         company_id=connection.company_id,
                         external_ref=ref_key,
-                        name=(item.get("Description") or "").strip() or "(без названия)",
-                        inn=(item.get("ИНН") or "").strip(),
-                        kpp=((item.get("КПП") or "").strip() or None),
+                        name=name, inn=inn, kpp=kpp,
+                        full_name=full_name, okpo=okpo, head_ref=head_ref,
+                        type=cp_type, kind="external", raw=item,
                     ))
                     stats["created"] += 1
                 else:
-                    existing.name = (item.get("Description") or existing.name).strip() or existing.name
-                    existing.inn = (item.get("ИНН") or existing.inn or "").strip()
-                    existing.kpp = ((item.get("КПП") or "").strip() or None) or existing.kpp
+                    existing.name = name or existing.name
+                    existing.inn = inn or existing.inn
+                    existing.kpp = kpp or existing.kpp
+                    existing.full_name = full_name or existing.full_name
+                    existing.okpo = okpo or existing.okpo
+                    existing.head_ref = head_ref or existing.head_ref
+                    existing.type = cp_type or existing.type
+                    existing.raw = item
                     stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
                 stats["errors"] += 1
                 logger.warning("Counterparty upsert failed (Ref_Key=%s): %s", ref_key, exc)
+
+        self._merge_log_stats(log, stats)
+        return stats
+
+    async def _sync_contracts(
+        self,
+        client: OneCODataClient,
+        connection: OneCConnection,
+        log: OneCSyncLog,
+    ) -> dict[str, int]:
+        """Договоры контрагентов. Владелец (Owner_Key) → контрагент (по external_ref/GUID);
+        Организация_Key → организация. Универсальный pull всех реквизитов в raw.
+        scope_type (охват по точкам) — НАШ слой: задаётся в UI, при ресинхронизации
+        НЕ перезаписывается. См. TRADELEDGER_COUNTERPARTY_AXIS §5."""
+        stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
+        async for item in client.iter_entity(ENTITY_CONTRACTS, select=CONTRACT_FETCH, orderby="Ref_Key", page_size=500):
+            stats["processed"] += 1
+            if item.get("DeletionMark"):
+                stats["skipped"] += 1
+                continue
+            ref_key = item.get("Ref_Key")
+            if not ref_key:
+                stats["errors"] += 1
+                continue
+            try:
+                existing = (await self.session.execute(
+                    select(Contract).where(
+                        Contract.company_id == connection.company_id,
+                        Contract.external_ref == ref_key,
+                    )
+                )).scalar_one_or_none()
+                owner = _clean_ref(item.get("Owner_Key") or item.get("Владелец_Key")) or ""
+                org = _clean_ref(item.get("Организация_Key")) or ""
+                number = (item.get("Номер") or item.get("Description") or "").strip()
+                date = (item.get("Дата") or "")[:10]
+                kind = str(item.get("ВидДоговора") or "").strip() or None
+                valid_until = (item.get("СрокДействия") or "")[:10] or None
+                is_closed = bool(item.get("ДоговорЗакрыт"))
+                amount = item.get("Сумма")
+                amount_limit = float(amount) if isinstance(amount, (int, float)) else None
+                if existing is None:
+                    self.session.add(Contract(
+                        id=uuid.uuid4(),
+                        company_id=connection.company_id,
+                        external_ref=ref_key,
+                        number=number or "(без номера)",
+                        date=date,
+                        counterparty_id=owner,
+                        organization_id=org,
+                        type=kind or "",
+                        kind=kind,
+                        valid_until=valid_until,
+                        is_closed=is_closed,
+                        amount_limit=amount_limit,
+                        scope_type="unassigned",
+                        raw=item,
+                    ))
+                    stats["created"] += 1
+                else:
+                    existing.number = number or existing.number
+                    existing.date = date or existing.date
+                    existing.counterparty_id = owner or existing.counterparty_id
+                    existing.organization_id = org or existing.organization_id
+                    existing.type = kind or existing.type
+                    existing.kind = kind or existing.kind
+                    existing.valid_until = valid_until
+                    existing.is_closed = is_closed
+                    if amount_limit is not None:
+                        existing.amount_limit = amount_limit
+                    existing.raw = item
+                    # scope_type НЕ трогаем — наш слой охвата, не из 1С
+                    stats["updated"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"] += 1
+                logger.warning("Contract upsert failed (Ref_Key=%s): %s", ref_key, exc)
 
         self._merge_log_stats(log, stats)
         return stats

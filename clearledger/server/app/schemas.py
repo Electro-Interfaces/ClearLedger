@@ -460,8 +460,12 @@ class CounterpartyResponse(BaseModel):
     kpp: str | None = None
     name: str
     shortName: str | None = None
+    fullName: str | None = None
+    okpo: str | None = None
     type: str
+    kind: str = "external"
     aliases: list[str]
+    externalRef: str | None = None
     createdAt: str
     updatedAt: str
 
@@ -535,6 +539,10 @@ class ContractCreate(BaseModel):
     organizationId: str
     type: str
     amountLimit: float | None = None
+    kind: str | None = None
+    currency: str | None = None
+    validUntil: str | None = None
+    scopeType: str = "unassigned"
 
 
 class ContractUpdate(BaseModel):
@@ -544,6 +552,11 @@ class ContractUpdate(BaseModel):
     organizationId: str | None = None
     type: str | None = None
     amountLimit: float | None = None
+    kind: str | None = None
+    currency: str | None = None
+    validUntil: str | None = None
+    isClosed: bool | None = None
+    scopeType: str | None = None
 
 
 class ContractResponse(BaseModel):
@@ -555,8 +568,61 @@ class ContractResponse(BaseModel):
     organizationId: str
     type: str
     amountLimit: float | None = None
+    kind: str | None = None
+    currency: str | None = None
+    validUntil: str | None = None
+    isClosed: bool = False
+    scopeType: str = "unassigned"
+    externalRef: str | None = None
     createdAt: str
     updatedAt: str
+
+
+# ===== Ось договор ↔ торговые точки (Фаза 2) =====
+
+class LocationBrief(BaseModel):
+    id: str
+    code: str
+    name: str
+    type: str
+
+
+class CounterpartyBrief(BaseModel):
+    externalRef: str | None = None
+    name: str
+    inn: str | None = None
+
+
+class ContractScopeUpdate(BaseModel):
+    """Установить охват договора по точкам. Для company/unassigned — locationIds игнор."""
+    scopeType: str  # company | locations | unassigned
+    locationIds: list[str] = Field(default_factory=list)
+
+
+class CounterpartyLocationsResponse(BaseModel):
+    """Где работает контрагент (агрегат по его договорам)."""
+    scope: str                      # company | locations | none
+    locations: list[LocationBrief]
+    contractsCount: int
+    unassignedCount: int
+
+
+class LocationContractBrief(BaseModel):
+    id: str
+    number: str
+    date: str
+    kind: str | None = None
+    scopeType: str
+    companyWide: bool               # True = общекомпанейский (scope=company)
+    counterpartyId: str
+    counterpartyName: str | None = None
+    counterpartyInn: str | None = None
+
+
+class LocationContractsResponse(BaseModel):
+    """Договоры точки: адресные (точка ∈ contract_locations) + общекомпанейские."""
+    contracts: list[LocationContractBrief]
+    counterparties: list[CounterpartyBrief]
 
 
 # ===== AccountingDoc (Учётные документы 1С) =====

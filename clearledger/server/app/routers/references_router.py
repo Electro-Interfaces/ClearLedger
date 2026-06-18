@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -15,9 +15,11 @@ from app.database import get_db
 from app.models import (
     BankAccount,
     Contract,
+    ContractLocation,
     Counterparty,
     NomenclatureItem,
     Organization,
+    ServiceLocation,
     User,
     Warehouse,
 )
@@ -27,8 +29,14 @@ from app.schemas import (
     BankAccountUpdate,
     ContractCreate,
     ContractResponse,
+    ContractScopeUpdate,
     ContractUpdate,
+    CounterpartyBrief,
+    CounterpartyLocationsResponse,
     CounterpartiesPage,
+    LocationBrief,
+    LocationContractBrief,
+    LocationContractsResponse,
     CounterpartyCreate,
     CounterpartyResponse,
     CounterpartyUpdate,
@@ -79,8 +87,12 @@ def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
         kpp=cp.kpp,
         name=cp.name,
         shortName=cp.short_name,
+        fullName=cp.full_name,
+        okpo=cp.okpo,
         type=cp.type,
+        kind=cp.kind,
         aliases=cp.aliases or [],
+        externalRef=cp.external_ref,
         createdAt=_ts(cp.created_at),
         updatedAt=_ts(cp.updated_at),
     )
@@ -480,6 +492,12 @@ def _contract_resp(c: Contract) -> ContractResponse:
         organizationId=c.organization_id,
         type=c.type,
         amountLimit=c.amount_limit,
+        kind=c.kind,
+        currency=c.currency,
+        validUntil=c.valid_until,
+        isClosed=c.is_closed,
+        scopeType=c.scope_type,
+        externalRef=c.external_ref,
         createdAt=_ts(c.created_at),
         updatedAt=_ts(c.updated_at),
     )
@@ -488,15 +506,15 @@ def _contract_resp(c: Contract) -> ContractResponse:
 @router.get("/contracts", response_model=list[ContractResponse])
 async def list_contracts(
     company_id: str = Query(...),
+    counterparty_id: str | None = Query(None, description="Фильтр по GUID контрагента (Владелец)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(company_id, current_user, db)
-    result = await db.execute(
-        select(Contract)
-        .where(Contract.company_id == cid)
-        .order_by(Contract.date.desc())
-    )
+    stmt = select(Contract).where(Contract.company_id == cid)
+    if counterparty_id:
+        stmt = stmt.where(Contract.counterparty_id == counterparty_id)
+    result = await db.execute(stmt.order_by(Contract.date.desc()))
     return [_contract_resp(c) for c in result.scalars().all()]
 
 
@@ -519,6 +537,10 @@ async def create_contract(
         organization_id=body.organizationId,
         type=body.type,
         amount_limit=body.amountLimit,
+        kind=body.kind,
+        currency=body.currency,
+        valid_until=body.validUntil,
+        scope_type=body.scopeType,
     )
     db.add(c)
     await db.flush()
@@ -550,6 +572,16 @@ async def update_contract(
         c.type = body.type
     if body.amountLimit is not None:
         c.amount_limit = body.amountLimit
+    if body.kind is not None:
+        c.kind = body.kind
+    if body.currency is not None:
+        c.currency = body.currency
+    if body.validUntil is not None:
+        c.valid_until = body.validUntil
+    if body.isClosed is not None:
+        c.is_closed = body.isClosed
+    if body.scopeType is not None:
+        c.scope_type = body.scopeType
 
     await db.flush()
     return _contract_resp(c)
@@ -567,6 +599,192 @@ async def delete_contract(
     if not c:
         raise HTTPException(status_code=404, detail="Договор не найден")
     await db.delete(c)
+
+
+# ---------------------------------------------------------------------------
+# Ось договор ↔ торговые точки (Фаза 2)
+# ---------------------------------------------------------------------------
+
+def _location_brief(loc: ServiceLocation) -> LocationBrief:
+    return LocationBrief(id=loc.id, code=loc.code, name=loc.name, type=loc.type)
+
+
+def _cp_keys(cp: Counterparty) -> list[str]:
+    """Идентификаторы контрагента в Contract.counterparty_id: GUID 1С (external_ref)
+    и наш UUID (для договоров, созданных вручную)."""
+    return [k for k in (cp.external_ref, str(cp.id)) if k]
+
+
+@router.put("/contracts/{item_id}/scope", response_model=ContractResponse)
+async def set_contract_scope(
+    item_id: str,
+    body: ContractScopeUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Установить охват договора: company | locations (набор точек) | unassigned."""
+    if body.scopeType not in ("company", "locations", "unassigned"):
+        raise HTTPException(status_code=422, detail="Недопустимый scopeType")
+    uid = _parse_uuid(item_id)
+    c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+
+    c.scope_type = body.scopeType
+    # Связи пересобираем заново (для company/unassigned — очищаем).
+    await db.execute(delete(ContractLocation).where(ContractLocation.contract_id == c.id))
+    if body.scopeType == "locations":
+        ids = list(dict.fromkeys(body.locationIds))  # уникальные, порядок сохранён
+        if ids:
+            valid = set((await db.execute(
+                select(ServiceLocation.id).where(
+                    ServiceLocation.company_id == c.company_id,
+                    ServiceLocation.id.in_(ids),
+                )
+            )).scalars().all())
+            for lid in ids:
+                if lid in valid:
+                    db.add(ContractLocation(
+                        company_id=c.company_id, contract_id=c.id, location_id=lid,
+                    ))
+    await db.flush()
+    return _contract_resp(c)
+
+
+@router.get("/contracts/{item_id}/locations", response_model=list[LocationBrief])
+async def get_contract_locations(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Точки конкретного договора (для scope=locations)."""
+    uid = _parse_uuid(item_id)
+    c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+    rows = (await db.execute(
+        select(ServiceLocation)
+        .join(ContractLocation, ContractLocation.location_id == ServiceLocation.id)
+        .where(ContractLocation.contract_id == c.id)
+        .order_by(ServiceLocation.name)
+    )).scalars().all()
+    return [_location_brief(loc) for loc in rows]
+
+
+@router.get("/counterparties/{item_id}/locations", response_model=CounterpartyLocationsResponse)
+async def get_counterparty_locations(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Где работает контрагент: объединение охватов его договоров.
+    Есть company-договор → «Вся компания»; иначе union точек locations-договоров."""
+    uid = _parse_uuid(item_id)
+    cp = (await db.execute(select(Counterparty).where(Counterparty.id == uid))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="Контрагент не найден")
+    await assert_company_member(str(cp.company_id), current_user, db)
+
+    contracts = (await db.execute(
+        select(Contract).where(
+            Contract.company_id == cp.company_id,
+            Contract.counterparty_id.in_(_cp_keys(cp)),
+        )
+    )).scalars().all()
+    if not contracts:
+        return CounterpartyLocationsResponse(scope="none", locations=[], contractsCount=0, unassignedCount=0)
+
+    unassigned = sum(1 for c in contracts if c.scope_type == "unassigned")
+    if any(c.scope_type == "company" for c in contracts):
+        return CounterpartyLocationsResponse(
+            scope="company", locations=[], contractsCount=len(contracts), unassignedCount=unassigned,
+        )
+    loc_ids = [c.id for c in contracts if c.scope_type == "locations"]
+    locs: list[ServiceLocation] = []
+    if loc_ids:
+        locs = (await db.execute(
+            select(ServiceLocation).distinct()
+            .join(ContractLocation, ContractLocation.location_id == ServiceLocation.id)
+            .where(ContractLocation.contract_id.in_(loc_ids))
+            .order_by(ServiceLocation.name)
+        )).scalars().all()
+    return CounterpartyLocationsResponse(
+        scope="locations" if locs else "none",
+        locations=[_location_brief(loc) for loc in locs],
+        contractsCount=len(contracts),
+        unassignedCount=unassigned,
+    )
+
+
+@router.get("/locations/{loc_id}/contracts", response_model=LocationContractsResponse)
+async def get_location_contracts(
+    loc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Договоры точки: адресные (точка ∈ contract_locations) + общекомпанейские
+    (scope=company). Контрагенты — distinct владельцы этих договоров."""
+    loc = (await db.execute(
+        select(ServiceLocation).where(ServiceLocation.id == loc_id)
+    )).scalar_one_or_none()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Точка не найдена")
+    await assert_company_member(str(loc.company_id), current_user, db)
+
+    addressed = (await db.execute(
+        select(ContractLocation.contract_id).where(ContractLocation.location_id == loc.id)
+    )).scalars().all()
+    cond = Contract.scope_type == "company"
+    if addressed:
+        cond = or_(cond, Contract.id.in_(addressed))
+    contracts = (await db.execute(
+        select(Contract).where(Contract.company_id == loc.company_id, cond)
+        .order_by(Contract.date.desc())
+    )).scalars().all()
+
+    # Резолв имён контрагентов по counterparty_id (GUID external_ref или наш UUID).
+    keys = {c.counterparty_id for c in contracts if c.counterparty_id}
+    cp_map: dict[str, Counterparty] = {}
+    if keys:
+        uuid_keys = []
+        for k in keys:
+            try:
+                uuid_keys.append(uuid.UUID(k))
+            except (ValueError, AttributeError, TypeError):
+                pass
+        cp_cond = Counterparty.external_ref.in_(keys)
+        if uuid_keys:
+            cp_cond = or_(cp_cond, Counterparty.id.in_(uuid_keys))
+        cps = (await db.execute(
+            select(Counterparty).where(
+                Counterparty.company_id == loc.company_id, cp_cond,
+            )
+        )).scalars().all()
+        for cp in cps:
+            if cp.external_ref:
+                cp_map[cp.external_ref] = cp
+            cp_map[str(cp.id)] = cp
+
+    briefs: list[LocationContractBrief] = []
+    seen: dict[str, CounterpartyBrief] = {}
+    for c in contracts:
+        cp = cp_map.get(c.counterparty_id)
+        briefs.append(LocationContractBrief(
+            id=str(c.id), number=c.number, date=c.date, kind=c.kind,
+            scopeType=c.scope_type, companyWide=(c.scope_type == "company"),
+            counterpartyId=c.counterparty_id,
+            counterpartyName=cp.name if cp else None,
+            counterpartyInn=cp.inn if cp else None,
+        ))
+        if c.counterparty_id and c.counterparty_id not in seen:
+            seen[c.counterparty_id] = CounterpartyBrief(
+                externalRef=cp.external_ref if cp else c.counterparty_id,
+                name=cp.name if cp else "(неизвестный контрагент)",
+                inn=cp.inn if cp else None,
+            )
+    return LocationContractsResponse(contracts=briefs, counterparties=list(seen.values()))
 
 
 # ---------------------------------------------------------------------------

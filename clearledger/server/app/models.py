@@ -360,6 +360,17 @@ class Counterparty(Base):
     aliases: Mapped[list] = mapped_column(ARRAY(String), nullable=False, default=list)
     # Ref_Key из БП ГИГ (OData) — связка записей справочника с источником
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # v2.5: универсальный снимок ВСЕХ реквизитов источника (L1 RAW) + промо-колонки.
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    full_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    okpo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Ref_Key головного контрагента (иерархия), если задан
+    head_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Ось контрагента: external (внешний) | retail (служебный розничный) |
+    # internal (наша организация для внутренних движений). См. TRADELEDGER_COUNTERPARTY_AXIS §6.
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="external", server_default=text("'external'")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -440,11 +451,63 @@ class Contract(Base):
     type: Mapped[str] = mapped_column(String(100), nullable=False)
     amount_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # v2.5: универсальный снимок ВСЕХ реквизитов 1С (L1 RAW) + промо-колонки.
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # ВидДоговора 1С: СПокупателем | СПоставщиком | СКомитентом | ... (см. SCHEMA_REFS_GIG §2)
+    kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # СрокДействия (ISO-дата строкой) и ДоговорЗакрыт
+    valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_closed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Охват договора по торговым точкам (НАШ слой, не из 1С):
+    # company (вся компания) | locations (набор contract_locations) | unassigned (дефолт).
+    # См. TRADELEDGER_COUNTERPARTY_AXIS §5, SCHEMA_REFS_GIG §2a.
+    scope_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unassigned", server_default=text("'unassigned'")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# ContractLocation (связь договор ↔ торговая точка — НАШ слой охвата)
+# ---------------------------------------------------------------------------
+# Заполняется только при Contract.scope_type='locations' (ad-hoc набор точек).
+# Для 'company' (вся компания) и 'unassigned' — пусто. Точки контрагента =
+# производное (объединение охватов его договоров). См.
+# TRADELEDGER_COUNTERPARTY_AXIS §5, SCHEMA_REFS_GIG §2a.
+# ---------------------------------------------------------------------------
+class ContractLocation(Base):
+    __tablename__ = "contract_locations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    contract_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_contract_locations", "contract_id", "location_id", unique=True),
     )
 
 
