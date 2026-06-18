@@ -17,6 +17,7 @@ from app.services.onec.odata_client import ENTITY_CONTRACTS, ENTITY_COUNTERPARTI
 from app.services.onec.sync_service import (
     OneCSyncService,
     _clean_ref,
+    _norm_contract_kind,
     _resolve_cp_type,
 )
 
@@ -69,6 +70,15 @@ def test_clean_ref():
     assert _clean_ref("") is None
     assert _clean_ref(None) is None
     assert _clean_ref("  abc  ") == "abc"
+
+
+def test_norm_contract_kind():
+    assert _norm_contract_kind("С поставщиком") == "СПоставщиком"   # синоним (COM)
+    assert _norm_contract_kind("СПоставщиком") == "СПоставщиком"    # уже код (OData)
+    assert _norm_contract_kind("Заём полученный") == "ЗаемПолученный"
+    assert _norm_contract_kind(None) is None
+    assert _norm_contract_kind("") is None
+    assert _norm_contract_kind("Неизвестный вид") == "Неизвестный вид"
 
 
 # ─── pull в БД ──────────────────────────────────────────────────────

@@ -649,6 +649,9 @@ async def set_contract_scope(
                         company_id=c.company_id, contract_id=c.id, location_id=lid,
                     ))
     await db.flush()
+    # execute(delete)/insert истекают атрибуты c — освежаем перед сериализацией
+    # (иначе lazy-load в async-контексте → MissingGreenlet).
+    await db.refresh(c)
     return _contract_resp(c)
 
 
