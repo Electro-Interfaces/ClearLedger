@@ -109,6 +109,9 @@ async def create_location(
         )
         db.add(loc)
     await db.flush()
+    # onupdate=func.now() истекает updated_at после flush на UPDATE-ветке upsert
+    # → _out не должен триггерить синхронную дозагрузку (MissingGreenlet).
+    await db.refresh(loc)
     return _out(loc)
 
 
@@ -128,6 +131,7 @@ async def update_location(
     for k, v in data.items():
         setattr(loc, k, v)
     await db.flush()
+    await db.refresh(loc)
     return _out(loc)
 
 
