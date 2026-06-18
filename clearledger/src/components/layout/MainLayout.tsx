@@ -3,6 +3,7 @@ import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { AppSidebar } from './AppSidebar'
 import { Header } from './Header'
+import InteractionHost from '@/components/support/InteractionHost'
 import { Outlet, useLocation } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
 
@@ -19,7 +20,10 @@ export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isMobile = useIsMobile()
   const location = useLocation()
-  const isWorkspace = location.pathname === '/'
+  // Рабочие области с фиксированной высотой (без скролла страницы, h-full внутри):
+  // рабочий стол и отдельная область разрезов «Сверка данных».
+  const isWorkspace =
+    location.pathname === '/' || location.pathname === '/reconciliation'
 
   return (
     <SidebarProvider
@@ -58,6 +62,9 @@ export function MainLayout() {
           )}
         </SidebarInset>
       </div>
+
+      {/* Глобальные модалки Чат / Заявки / Инфо */}
+      <InteractionHost />
     </SidebarProvider>
   )
 }

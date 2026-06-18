@@ -16,11 +16,17 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from '@/components/ui/popover'
-import { Building2, MapPin, FileText, Filter, X } from 'lucide-react'
+import { Building2, MapPin, FileText, Filter, X, ChevronDown } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { getLocations } from '@/services/locationService'
 import { StationsSelectorDialog, type StationOption } from '@/components/stations/StationsSelectorDialog'
+
+/** Пилюля-селектор в стиле TradePoint: тёмный фон, бордер, иконка + текст + шеврон. */
+const pillCls =
+  'h-11 gap-2 rounded-xl px-3.5 text-sm font-medium bg-secondary dark:bg-di-surface-high ' +
+  'border border-border/60 dark:border-di-outline-variant/25 text-foreground ' +
+  'hover:bg-accent dark:hover:bg-di-surface-highest hover:border-primary/40 transition-all'
 
 const ALL_DOC_TYPES: { id: string; label: string }[] = [
   { id: 'shift_report', label: 'Сменные отчёты' },
@@ -101,14 +107,15 @@ function LocationsFilterButton() {
       selected={selectedKeys}
       onSave={onSave}
       trigger={
-        <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
-          <MapPin className="h-3.5 w-3.5" />
+        <Button variant="ghost" className={pillCls}>
+          <MapPin className="h-4 w-4 opacity-70" />
           <span className="hidden sm:inline truncate max-w-[180px]">{summary}</span>
           {locationIds.length > 0 && (
-            <Badge variant="secondary" className="h-4 text-[9px] px-1 ml-0.5">
+            <Badge variant="secondary" className="h-4 text-[9px] px-1">
               {locationIds.length}
             </Badge>
           )}
+          <ChevronDown className="h-4 w-4 opacity-60" />
         </Button>
       }
     />
@@ -129,14 +136,15 @@ function DocTypesFilterButton() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
-          <FileText className="h-3.5 w-3.5" />
+        <Button variant="ghost" className={pillCls}>
+          <FileText className="h-4 w-4 opacity-70" />
           <span className="hidden md:inline">{summary}</span>
           {docTypeIds.length > 0 && (
-            <Badge variant="secondary" className="h-4 text-[9px] px-1 ml-0.5">
+            <Badge variant="secondary" className="h-4 text-[9px] px-1">
               {docTypeIds.length}
             </Badge>
           )}
+          <ChevronDown className="h-4 w-4 opacity-60" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-72 p-0">
@@ -178,9 +186,10 @@ function CompanyButton() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
-          <Building2 className="h-3.5 w-3.5" />
+        <Button variant="ghost" className={pillCls}>
+          <Building2 className="h-4 w-4 opacity-70" />
           <span className="hidden lg:inline truncate max-w-[140px]">{company.name}</span>
+          <ChevronDown className="h-4 w-4 opacity-60" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-56 p-1">
@@ -214,25 +223,25 @@ export function GlobalFilters() {
   const total = locationIds.length + docTypeIds.length
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-2">
       <CompanyButton />
-      <div className="w-px h-5 bg-border/50 mx-1" />
+      <div className="w-px h-6 bg-border/50 mx-0.5" />
       <LocationsFilterButton />
       <DocTypesFilterButton />
       {total > 0 && (
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+          className="h-9 px-2.5 text-xs gap-1 text-muted-foreground hover:text-foreground"
           onClick={clearAll}
         >
-          <X className="h-3 w-3" />
+          <X className="h-3.5 w-3.5" />
           Сброс ({total})
         </Button>
       )}
       {total === 0 && (
-        <div className="hidden xl:flex items-center gap-1 ml-1 text-[10px] text-muted-foreground/60">
-          <Filter className="h-3 w-3" />
+        <div className="hidden xl:flex items-center gap-1.5 ml-1 text-xs text-muted-foreground/60">
+          <Filter className="h-3.5 w-3.5" />
           Без фильтров
         </div>
       )}

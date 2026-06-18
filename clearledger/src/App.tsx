@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { CompanyProvider } from '@/contexts/CompanyContext'
 import { FilterProvider } from '@/contexts/FilterContext'
+import { SupportProvider } from '@/contexts/SupportContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { MainLayout } from '@/components/layout/MainLayout'
@@ -15,6 +16,7 @@ const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ defaul
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
 const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
+const CatalogPage = lazy(() => import('@/pages/CatalogPage').then((m) => ({ default: m.CatalogPage })))
 const LocationsPage = lazy(() => import('@/pages/LocationsPage').then((m) => ({ default: m.LocationsPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
@@ -60,10 +62,12 @@ function Providers() {
       <QueryClientProvider client={queryClient}>
         <CompanyProvider>
           <FilterProvider>
-            <TooltipProvider>
-              <Outlet />
-              <Toaster position="bottom-right" richColors closeButton />
-            </TooltipProvider>
+            <SupportProvider>
+              <TooltipProvider>
+                <Outlet />
+                <Toaster position="bottom-right" richColors closeButton />
+              </TooltipProvider>
+            </SupportProvider>
           </FilterProvider>
         </CompanyProvider>
       </QueryClientProvider>
@@ -86,6 +90,7 @@ const router = createBrowserRouter([
           { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
           { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
           { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
+          { path: '/catalog', element: <LazyPage><CatalogPage /></LazyPage> },
           { path: '/locations', element: <LazyPage><LocationsPage /></LazyPage> },
           { path: '/1c/connection', element: <LazyPage><ConnectionPage /></LazyPage> },
           { path: '/1c/references', element: <LazyPage><ReferencesPage /></LazyPage> },

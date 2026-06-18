@@ -1,4 +1,4 @@
-import { User, Menu, Sun, Moon, Fuel } from 'lucide-react'
+import { User, Menu, Sun, Moon, Fuel, ChevronsLeft, ChevronsRight, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle } from 'lucide-react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useSidebar } from '@/components/ui/sidebar'
+import { APP_VERSION } from '@/config/version'
+import { useCompany } from '@/contexts/CompanyContext'
+import { useSupportContext } from '@/contexts/SupportContext'
 import { GlobalFilters } from './GlobalFilters'
 
 interface HeaderProps {
@@ -17,53 +21,142 @@ interface HeaderProps {
 
 export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
+  const { theme, toggle } = useTheme()
+  const { company } = useCompany()
+  const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
+
+  // Пилюля-кнопка взаимодействия в стиле TradeFrame: синий акцент, активное состояние.
+  const btnCls = (active: boolean) =>
+    `relative h-11 px-3 gap-2 rounded-xl transition-all duration-200 font-medium border ${
+      active
+        ? 'bg-primary text-white border-primary'
+        : 'bg-primary/10 dark:bg-primary/20 hover:bg-primary text-primary dark:text-primary/80 hover:text-white border-primary/30 dark:border-primary/50 hover:border-primary'
+    }`
+
+  // Header может рендериться вне SidebarProvider (тесты/изолированные layout'ы)
+  let sidebarState: 'expanded' | 'collapsed' = 'expanded'
+  let toggleSidebar: (() => void) | null = null
+  try {
+    const sidebar = useSidebar()
+    sidebarState = sidebar.state
+    toggleSidebar = sidebar.toggleSidebar
+  } catch {
+    /* нет провайдера — кнопка свёртки просто не рисуется */
+  }
 
   return (
-    <header className="h-[var(--header-height)] shrink-0 border-b border-border/50 bg-card backdrop-blur-xl">
-      <div className="flex h-full items-center px-4 gap-3">
-        {isMobile && (
-          <Button variant="ghost" size="icon" className="shrink-0" onClick={onMobileMenuToggle}>
-            <Menu className="h-5 w-5" />
-          </Button>
-        )}
+    <header className="h-[var(--header-height)] shrink-0 border-b border-border/50 bg-card/95 backdrop-blur-xl">
+      <div className="flex h-full items-center justify-between gap-3 px-4 md:px-6">
+        {/* Левый блок: бургер (моб.) + лого + бренд + свёртка сайдбара */}
+        <div className="flex items-center gap-3 md:gap-4 shrink-0">
+          {isMobile && (
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={onMobileMenuToggle}>
+              <Menu className="h-5 w-5" />
+            </Button>
+          )}
 
-        <Link to="/" className="flex items-center gap-2.5 shrink-0">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 border border-primary/20">
-            <Fuel className="h-4 w-4 text-primary" />
-          </div>
-          <div className="flex flex-col leading-none">
-            <span className="font-bold text-sm tracking-tight">GIG Fuel Ledger</span>
-            <span className="text-[10px] text-muted-foreground font-medium">ГазИнвестГрупп</span>
-          </div>
-        </Link>
+          <Link to="/" className="flex items-center gap-3 shrink-0">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
+              <Fuel className="h-5 w-5 text-white" />
+            </div>
+            <div className="hidden sm:flex flex-col leading-none">
+              <h1 className="font-semibold tracking-tight text-foreground text-lg">TradeLedger</h1>
+              <p className="text-xs text-muted-foreground">v{APP_VERSION}</p>
+            </div>
+          </Link>
 
-        {/* Глобальные фильтры менеджера — компания, точки, типы документов */}
-        <div className="flex-1 flex justify-center min-w-0 px-4">
-          <GlobalFilters />
+          {!isMobile && toggleSidebar && (
+            <button
+              onClick={toggleSidebar}
+              className="ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-all hover:bg-secondary hover:text-foreground active:scale-90 dark:hover:bg-di-surface-high"
+              title={sidebarState === 'collapsed' ? 'Развернуть меню (Ctrl+B)' : 'Свернуть меню (Ctrl+B)'}
+            >
+              {sidebarState === 'collapsed' ? <ChevronsRight className="h-5 w-5" /> : <ChevronsLeft className="h-5 w-5" />}
+            </button>
+          )}
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </Button>
+        {/* Центр: глобальные фильтры-пилюли + кнопки взаимодействия */}
+        <div className="flex flex-1 items-center justify-center min-w-0 gap-2 px-2">
+          <GlobalFilters />
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8">
-              <User className="h-4 w-4" />
+          <div className="hidden md:flex items-center gap-2 pl-1">
+            <div className="w-px h-6 bg-border/50" />
+            {/* Чат */}
+            <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={btnCls(interactionSection === 'chat')} title="Чат с поддержкой">
+              <MessageCircle className="h-4 w-4" />
+              <span className="hidden lg:inline">Чат</span>
+              {unreadCounts.chat > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                  {unreadCounts.chat}
+                </span>
+              )}
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => navigate('/settings')}>
-              Настройки
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            {/* Заявки */}
+            <Button variant="outline" size="sm" onClick={() => toggleInteraction('tickets')} className={btnCls(interactionSection === 'tickets')} title="Заявки в поддержку">
+              <LifeBuoy className="h-4 w-4" />
+              <span className="hidden lg:inline">Заявки</span>
+              {unreadCounts.tickets > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                  {unreadCounts.tickets}
+                </span>
+              )}
+            </Button>
+            {/* Инфо */}
+            <Button variant="outline" size="sm" onClick={() => toggleInteraction('help')} className={btnCls(interactionSection === 'help')} title="Инфо (Ctrl+K)">
+              <HelpCircle className="h-4 w-4" />
+              <span className="hidden lg:inline">Инфо</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Правый блок: переключатель темы + профиль */}
+        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground"
+            onClick={toggle}
+            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          >
+            {theme === 'dark' ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+          </Button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                className="flex h-10 items-center gap-3 rounded-xl border-none px-1.5 md:px-2.5 hover:bg-accent"
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary">
+                  <User className="h-[18px] w-[18px] text-white" />
+                </div>
+                <div className="hidden lg:flex flex-col items-start leading-none">
+                  <span className="text-sm font-medium text-foreground">Менеджер</span>
+                  <span className="mt-1 text-xs text-muted-foreground truncate max-w-[140px]">{company.name}</span>
+                </div>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 p-1">
+              <div className="border-b border-border/30 px-3 py-2.5">
+                <div className="text-sm font-semibold text-foreground">Менеджер</div>
+                <div className="text-xs text-muted-foreground truncate">{company.name}</div>
+              </div>
+              <DropdownMenuItem onClick={() => navigate('/settings')} className="gap-2.5 cursor-pointer">
+                <Settings className="h-4 w-4 text-muted-foreground" />
+                Настройки
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={toggle} className="gap-2.5 cursor-pointer">
+                {theme === 'dark' ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Moon className="h-4 w-4 text-muted-foreground" />}
+                {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/login')} className="gap-2.5 cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400">
+                <LogOut className="h-4 w-4" />
+                Выйти
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </header>
   )

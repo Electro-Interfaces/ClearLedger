@@ -95,63 +95,63 @@
 
 @layer base {
   :root {
-    /* Light theme — Deep Intel Design System */
-    --background: 210 18% 93%;
-    --foreground: 195 14% 19%;
+    /* Light theme — TradeFrame Design System (M3 PrecisionFleet reference) */
+    --background: 224 50% 96%;
+    --foreground: 218 60% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 195 14% 19%;
+    --card-foreground: 218 60% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 195 14% 19%;
-    --primary: 224 10% 40%;
+    --popover-foreground: 218 60% 12%;
+    --primary: 226 71% 40%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 20% 93%;
-    --secondary-foreground: 195 14% 19%;
-    --muted: 210 18% 95%;
-    --muted-foreground: 215 15% 47%;
-    --accent: 210 20% 94%;
-    --accent-foreground: 195 14% 19%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 200 12% 70%;
-    --input: 200 12% 87%;
-    --ring: 217 91% 55%;
+    --secondary: 224 100% 96%;
+    --secondary-foreground: 227 25% 42%;
+    --muted: 221 100% 97%;
+    --muted-foreground: 230 10% 46%;
+    --accent: 224 100% 96%;
+    --accent-foreground: 227 25% 42%;
+    --destructive: 0 69% 42%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 216 20% 88%;
+    --input: 221 100% 97%;
+    --ring: 226 71% 40%;
     --radius: 0.75rem;
 
-    /* Deep Intel surface tokens */
-    --di-bg: #f7f9fb;
-    --di-surface: #f0f4f7;
-    --di-surface-low: #f7f9fb;
+    /* Deep Intel surface tokens — TradeFrame light */
+    --di-bg: #f8f9ff;
+    --di-surface: #f8f9ff;
+    --di-surface-low: #f8f9fc;
     --di-surface-lowest: #ffffff;
     --di-surface-mid: #ffffff;
-    --di-surface-high: #ffffff;
-    --di-surface-highest: #f0f4f7;
+    --di-surface-high: #dce9ff;
+    --di-surface-highest: #d5e3fc;
     --di-surface-bright: #ffffff;
-    --di-on-surface: #2a3439;
-    --di-on-surface-variant: #566166;
-    --di-primary: #565e74;
-    --di-primary-light: #3b82f6;
-    --di-tertiary: #605c78;
-    --di-tertiary-container: #9f403d;
-    --di-outline: #717c82;
-    --di-outline-variant: #c5cdd3;
-    --di-error-container: #fe8983;
+    --di-on-surface: #0d1c2e;
+    --di-on-surface-variant: #444653;
+    --di-primary: #00288e;
+    --di-primary-light: #3755c3;
+    --di-tertiary: #611e00;
+    --di-tertiary-container: #872d00;
+    --di-outline: #757684;
+    --di-outline-variant: #c4c5d5;
+    --di-error-container: #ffdad6;
 
-    /* Chart colors */
-    --chart-1: 217 91% 55%;
-    --chart-2: 160 60% 40%;
-    --chart-3: 30 80% 50%;
-    --chart-4: 280 65% 55%;
+    /* Chart colors — TradeFrame accent palette */
+    --chart-1: 226 71% 40%;
+    --chart-2: 152 69% 31%;
+    --chart-3: 25 95% 53%;
+    --chart-4: 261 40% 50%;
     --chart-5: 340 75% 50%;
 
-    /* Sidebar */
-    --sidebar-background: 210 14% 96%;
-    --sidebar-foreground: 195 14% 19%;
-    --sidebar-primary: 224 10% 40%;
+    /* Sidebar — M3 surfaceContainerLow */
+    --sidebar-background: 221 100% 99%;
+    --sidebar-foreground: 218 60% 12%;
+    --sidebar-primary: 226 71% 40%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 210 14% 93%;
-    --sidebar-accent-foreground: 195 14% 19%;
-    --sidebar-border: 200 12% 87%;
-    --sidebar-ring: 217 91% 55%;
+    --sidebar-accent: 224 100% 93%;
+    --sidebar-accent-foreground: 218 60% 12%;
+    --sidebar-border: 220 40% 91%;
+    --sidebar-ring: 226 71% 40%;
 
     /* Platform accent colors */
     --accent-blue: 221 100% 38%;
@@ -167,32 +167,32 @@
     /* Layout */
     --header-height: 5rem;
 
-    /* Shadows */
-    --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04);
-    --shadow-medium: 0 2px 8px rgba(0, 0, 0, 0.06);
-    --shadow-large: 0 4px 16px rgba(0, 0, 0, 0.08);
+    /* Shadows — subtle navy-tinted elevation */
+    --shadow-soft: 0 1px 3px rgba(13, 28, 46, 0.06), 0 1px 2px rgba(13, 28, 46, 0.04);
+    --shadow-medium: 0 4px 12px rgba(13, 28, 46, 0.08), 0 1px 3px rgba(13, 28, 46, 0.05);
+    --shadow-large: 0 8px 24px rgba(13, 28, 46, 0.10), 0 2px 6px rgba(13, 28, 46, 0.06);
   }
 
   .dark {
-    /* Dark theme — Deep Intel Design System */
-    --background: 222 47% 9%;
-    --foreground: 0 0% 95%;
-    --card: 222 33% 13%;
-    --card-foreground: 0 0% 95%;
-    --popover: 222 33% 13%;
-    --popover-foreground: 0 0% 95%;
+    /* Dark theme — TradeFrame Design System */
+    --background: 220 40% 9%;
+    --foreground: 224 56% 91%;
+    --card: 218 30% 15%;
+    --card-foreground: 224 56% 91%;
+    --popover: 218 30% 15%;
+    --popover-foreground: 224 56% 91%;
     --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 217 32% 22%;
-    --secondary-foreground: 0 0% 95%;
-    --muted: 217 32% 14%;
+    --secondary: 218 28% 18%;
+    --secondary-foreground: 224 56% 91%;
+    --muted: 220 30% 12%;
     --muted-foreground: 215 15% 65%;
-    --accent: 217 32% 20%;
-    --accent-foreground: 0 0% 95%;
+    --accent: 218 28% 18%;
+    --accent-foreground: 224 56% 91%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 217 32% 22%;
-    --input: 217 32% 17%;
+    --border: 218 25% 20%;
+    --input: 218 30% 15%;
     --ring: 217 91% 60%;
 
     /* Deep Intel surface tokens */
@@ -214,11 +214,11 @@
     --di-outline-variant: #434655;
     --di-error-container: #93000a;
 
-    /* Chart colors */
+    /* Chart colors — TradeFrame accent palette (dark) */
     --chart-1: 217 91% 60%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
+    --chart-2: 152 69% 45%;
+    --chart-3: 25 100% 55%;
+    --chart-4: 280 65% 65%;
     --chart-5: 340 75% 55%;
 
     /* Sidebar */
@@ -346,38 +346,24 @@
 }
 
 @layer components {
-  /* Selector component */
+  /* Selector component — TradeFrame */
   .sel {
-    @apply h-10 min-w-56 rounded-lg border text-sm font-medium transition-colors;
-    @apply flex items-center justify-between px-3;
-    @apply bg-secondary border-border text-foreground;
+    @apply h-10 min-w-56 rounded-lg bg-input border border-border text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40 flex items-center justify-between px-3 text-sm font-medium transition-colors;
   }
 
-  .sel:hover {
-    @apply bg-accent;
-  }
-
-  /* Panel — Deep Intel surface */
+  /* Panel — TradeFrame card surface */
   .panel {
-    @apply rounded-xl p-4;
-    background: var(--di-surface-mid);
-    border: 1px solid var(--di-outline-variant);
+    @apply bg-card border border-border rounded-lg p-4;
   }
 
   /* Section surface with shadow */
   .section {
-    @apply rounded-xl p-4 md:p-6;
-    background: var(--di-surface-mid);
-    border: 1px solid var(--di-outline-variant);
-    box-shadow: var(--shadow-soft);
+    @apply bg-card border border-border rounded-lg p-4 md:p-6 shadow-soft;
   }
 
   /* Card panel without padding */
   .card-panel {
-    @apply rounded-xl;
-    background: var(--di-surface-mid);
-    border: 1px solid var(--di-outline-variant);
-    box-shadow: var(--shadow-soft);
+    @apply bg-card border border-border rounded-lg shadow-soft;
   }
 
   /* Deep Intel card */

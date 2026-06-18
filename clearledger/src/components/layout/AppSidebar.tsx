@@ -17,6 +17,7 @@ import {
   Upload, FileText, Radio, Database, ChevronDown,
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
   Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
+  Library,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -29,7 +30,7 @@ const mainItems = [
 
 const intakeItems = [
   { to: '/intake', icon: FileText, label: 'Файлы и документы' },
-  { to: '/channels', icon: Radio, label: 'Обработки' },
+  { to: '/channels', icon: Radio, label: 'Каналы' },
 ]
 
 const oneCItems = [
@@ -46,9 +47,10 @@ const oneCItems = [
 ]
 
 const settingsItems = [
-  { to: '/sources', icon: Database, label: 'Источники' },
-  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
   { to: '/settings', icon: Settings, label: 'Параметры' },
+  { to: '/catalog', icon: Library, label: 'Каталоги' },
+  { to: '/sources', icon: Database, label: 'Источники данных' },
+  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
 ]
 
 function NavItem({ to, icon: Icon, label, end, collapsed }: {
