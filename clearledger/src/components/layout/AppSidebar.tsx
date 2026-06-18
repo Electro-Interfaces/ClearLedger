@@ -32,6 +32,7 @@ const mainItems = [
 const intakeItems = [
   { to: '/intake', icon: FileText, label: 'Файлы и документы' },
   { to: '/channels', icon: Radio, label: 'Каналы' },
+  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
 ]
 
 const oneCItems = [
@@ -51,7 +52,6 @@ const settingsItems = [
   { to: '/settings', icon: Settings, label: 'Параметры' },
   { to: '/catalog', icon: Library, label: 'Каталоги' },
   { to: '/sources', icon: Database, label: 'Источники данных' },
-  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
 ]
 
 function NavItem({ to, icon: Icon, label, end, collapsed }: {
