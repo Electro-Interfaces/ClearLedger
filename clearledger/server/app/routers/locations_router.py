@@ -5,6 +5,7 @@ CRUD для ServiceLocation (точки обслуживания) — АЗС/м�
 совпадают с конфигом каналов. Публичный (как sources/channels), company-scoped.
 id — клиентский nanoid (String), чтобы фронт и бэк совпадали.
 """
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,7 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
-from app.models import ServiceLocation, User
+from app.models import AuditEvent, ServiceLocation, User
+
+OP_STATUSES = {"working", "not_working", "on_repair", "maintenance", "unknown"}
 
 router = APIRouter(prefix="/locations", tags=["Точки обслуживания"])
 
@@ -50,6 +53,7 @@ class LocationOut(BaseModel):
     name: str
     type: str
     status: str
+    operationalStatus: str = "unknown"
     address: str | None = None
     description: str | None = None
     sourceBindings: list[Any]
@@ -61,6 +65,7 @@ class LocationOut(BaseModel):
 def _out(l: ServiceLocation) -> LocationOut:
     return LocationOut(
         id=l.id, code=l.code, name=l.name, type=l.type, status=l.status,
+        operationalStatus=getattr(l, "operational_status", "unknown") or "unknown",
         address=l.address, description=l.description,
         sourceBindings=l.source_bindings or [],
         metadata=l.extra_metadata,
@@ -144,3 +149,68 @@ async def delete_location(
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
     await db.delete(loc)
     return {"ok": True}
+
+
+class OpStatusBody(BaseModel):
+    status: str
+    reason: str | None = None
+
+
+@router.patch("/{location_id}/operational-status", response_model=LocationOut)
+async def set_operational_status(
+    location_id: str,
+    body: OpStatusBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сменить операционный статус станции (работает/ремонт/...) + запись в журнал."""
+    if body.status not in OP_STATUSES:
+        raise HTTPException(400, f"Недопустимый статус: {body.status}")
+    loc = await get_owned(ServiceLocation, location_id, current_user, db)
+    prev = loc.operational_status
+    loc.operational_status = body.status
+    db.add(AuditEvent(
+        company_id=loc.company_id,
+        user_id=str(current_user.id),
+        user_name=current_user.name or current_user.email,
+        action="location_op_status",
+        details=json.dumps(
+            {"location_id": loc.id, "from": prev, "to": body.status, "reason": body.reason or ""},
+            ensure_ascii=False, separators=(",", ":"),
+        ),
+    ))
+    await db.flush()
+    await db.refresh(loc)
+    return _out(loc)
+
+
+@router.get("/{location_id}/operational-status/history")
+async def operational_status_history(
+    location_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Журнал смен операционного статуса станции (из audit_events)."""
+    loc = await get_owned(ServiceLocation, location_id, current_user, db)
+    res = await db.execute(
+        select(AuditEvent)
+        .where(
+            AuditEvent.company_id == loc.company_id,
+            AuditEvent.action == "location_op_status",
+            AuditEvent.details.like(f'%"location_id":"{loc.id}"%'),
+        )
+        .order_by(AuditEvent.timestamp.desc())
+        .limit(50)
+    )
+    out: list[dict[str, Any]] = []
+    for ev in res.scalars().all():
+        try:
+            d = json.loads(ev.details or "{}")
+        except (ValueError, TypeError):
+            d = {}
+        out.append({
+            "at": ev.timestamp.isoformat() if ev.timestamp else "",
+            "user": ev.user_name,
+            "from": d.get("from"), "to": d.get("to"), "reason": d.get("reason", ""),
+        })
+    return out

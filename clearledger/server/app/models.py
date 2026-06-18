@@ -1802,8 +1802,12 @@ class ServiceLocation(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     # fuel_station | retail | office | warehouse | other
     type: Mapped[str] = mapped_column(String(30), nullable=False, default="other")
-    # active | closed | planned
+    # active | closed | planned (жизненный цикл точки)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # Операционный статус: working|not_working|on_repair|maintenance|unknown
+    operational_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unknown", server_default=text("'unknown'")
+    )
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Привязки к источникам: [{sourceId, config:{system_id,station}, label}]

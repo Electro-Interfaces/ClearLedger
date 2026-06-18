@@ -211,6 +211,13 @@ async def create_all() -> None:
                 "sort": _t["sort_order"],
             })
 
+        # v2.5: операционный статус точки (работает/ремонт/...) — отдельно от
+        # жизненного цикла status; история смен — в audit_events.
+        await conn.execute(__import__("sqlalchemy").text(
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS "
+            "operational_status VARCHAR(20) NOT NULL DEFAULT 'unknown'"
+        ))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""
