@@ -4,11 +4,12 @@
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login as authLogin } from '@/services/authService'
+import { useAuth } from '@/contexts/AuthContext'
 import { FileText, Loader2 } from 'lucide-react'
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -19,7 +20,9 @@ export function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await authLogin(email, password)
+      // login() из контекста: токен + /me + обновление состояния auth (иначе
+      // ProtectedRoute не увидит авторизацию и вернёт назад на /login).
+      await login(email, password)
       navigate('/', { replace: true })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Ошибка входа'

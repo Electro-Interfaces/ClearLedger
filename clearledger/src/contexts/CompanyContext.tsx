@@ -37,6 +37,13 @@ const CompanyContext = createContext<CompanyContextType | null>(null)
 
 const activeKey = (userId: string) => `tl-active-company-${userId}`
 
+// Плейсхолдер для неавторизованного состояния: company ещё нет, но дочерние
+// провайдеры (FilterProvider) и страница /login должны отрисоваться. Реальные
+// потребители company живут за ProtectedRoute и без логина не монтируются.
+const PLACEHOLDER_COMPANY: Company = {
+  id: '_', name: '', shortName: '', color: '#3b82f6', profileId: 'fuel',
+}
+
 /** CompanyRef (snake_case с бэка) → Company (тип фронта), достраивая из конфига. */
 function toCompany(c: CompanyRef): Company {
   const known = defaultCompanies.find((d) => d.id === c.id)
@@ -105,8 +112,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return <NoCompaniesScreen />
   }
 
-  // Ждём пользователя/активную компанию — не пускаем потребителей на пустом company.
-  if (!company || !profile) {
+  // Авторизован, но активная компания ещё не выбрана (эффект не отработал) —
+  // короткая загрузка. ВАЖНО: блокируем ТОЛЬКО при наличии user, иначе экран
+  // «Загрузка…» перекрыл бы страницу /login для неавторизованного.
+  if (user && (!company || !profile)) {
     return (
       <div className="flex items-center justify-center h-screen text-muted-foreground">
         Загрузка…
@@ -114,14 +123,19 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     )
   }
 
+  // Неавторизован → company ещё нет: даём плейсхолдер, чтобы /login и дочерние
+  // провайдеры отрисовались (ProtectedRoute сам уведёт на /login).
+  const activeCompany: Company = company ?? PLACEHOLDER_COMPANY
+  const activeProfile: CompanyProfile = profile ?? getProfile(activeCompany.profileId)
+
   return (
     <CompanyContext.Provider
       value={{
-        company,
-        companyId,
+        company: activeCompany,
+        companyId: companyId || activeCompany.id,
         companies,
         setCompanyId,
-        profile,
+        profile: activeProfile,
         categories,
         customization: emptyCustomization(),
         effectiveCategories: categories,
