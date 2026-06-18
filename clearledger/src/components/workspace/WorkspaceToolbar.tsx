@@ -5,7 +5,8 @@
 
 import { useState } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
-import { getSettings } from '@/services/settingsService'
+import { getStsStationsFromLocations } from '@/services/locationService'
+import { useLocations } from '@/hooks/useLocations'
 import { useShifts } from '@/hooks/useFuel'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -23,7 +24,8 @@ import { useRunNormalizationPipeline } from '@/hooks/useNormalization'
 import { toast } from 'sonner'
 
 export function WorkspaceToolbar() {
-  const settings = getSettings()
+  useLocations()   // гидратация точек активной компании
+  const stations = getStsStationsFromLocations()
   const queryClient = useQueryClient()
   const { globalStation, setGlobalStation, coreMode, setCoreMode } = useWorkspace()
   const { isFetching } = useShifts(
@@ -65,7 +67,7 @@ export function WorkspaceToolbar() {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">Все станции</SelectItem>
-          {settings.stations.map((s) => (
+          {stations.map((s) => (
             <SelectItem key={s.code} value={String(s.code)}>
               {s.name}
             </SelectItem>

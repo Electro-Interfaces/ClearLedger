@@ -22,7 +22,7 @@ import {
 import { toast } from 'sonner'
 import { nanoid } from 'nanoid'
 import { format } from 'date-fns'
-import { getLocations } from '@/services/locationService'
+import { useLocations } from '@/hooks/useLocations'
 import { useFilters } from '@/contexts/FilterContext'
 
 type DocKind = 'shift_report' | 'receipt' | 'invoice' | 'bank_statement' | 'cash_doc' | 'contract' | 'other'
@@ -77,7 +77,7 @@ export function IntakePage() {
 
   // Параметры для следующей загрузки — применяются ко всем файлам,
   // которые будут загружены drop-zone'ом следующий раз.
-  const locations = useMemo(() => getLocations(), [])
+  const locations = useLocations()   // точки активной компании, рефетч при переключении
   const { locationIds: globalLocIds } = useFilters()
 
   // Если в шапке выбрана ровно одна точка — предзаполняем её

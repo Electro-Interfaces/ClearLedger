@@ -13,6 +13,7 @@ import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import { getStsStationsFromLocations } from '@/services/locationService'
+import { useLocations } from '@/hooks/useLocations'
 import { executeMstoReconciliation } from '@/services/mstoReconciliation'
 import { MSTOReconciliationResults } from '@/components/reconciliation/MSTOReconciliationResults'
 import type { MSTOReconciliationResult, StationInfo } from '@/types/mstoReconciliation'
@@ -71,7 +72,9 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
   description: string
   loading?: boolean
 }) {
-  // Станции из точек обслуживания (settings.stations — легаси-стор, для ГИГ пуст)
+  // Гидратируем точки активной компании (наполняет зеркало + ререндер),
+  // затем собираем станции из точек обслуживания.
+  useLocations()
   const stations = getStsStationsFromLocations()
 
   function toggleStation(code: number) {
