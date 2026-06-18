@@ -51,14 +51,15 @@ async def _access_token() -> str:
         return _token
 
 
-def _norm_task(t: dict) -> dict[str, Any]:
+def _norm_task(t: dict, key: str | None = None) -> dict[str, Any]:
     st = t.get("taskStatus") or {}
     cr = t.get("actualCriticality") or {}
     assignee = t.get("assignedTo") or {}
     ts = t.get("timesheet") or {}
     name = " ".join(x for x in (assignee.get("lastName"), assignee.get("firstName")) if x).strip()
     return {
-        "id": t.get("id"),
+        # id заявки = КЛЮЧ словаря ответа (в самом объекте поля id нет).
+        "id": t.get("id") or key or t.get("number"),
         "number": t.get("number"),
         "status": st.get("name"),
         "statusColor": st.get("color"),
@@ -91,12 +92,15 @@ async def get_asset_tasks(asset_id: int, limit: int | None = None) -> dict[str, 
     if r.status_code not in (200, 206):
         r.raise_for_status()
     data = r.json()
-    items = list(data.values()) if isinstance(data, dict) else (data or [])
-    total = len(items)
+    if isinstance(data, dict):
+        norm = [_norm_task(v, key=k) for k, v in data.items()]
+    else:
+        norm = [_norm_task(v) for v in (data or [])]
+    total = len(norm)
     content_range = r.headers.get("Content-Range", "")  # items=FROM-TILL/TOTAL
     if "/" in content_range:
         try:
             total = int(content_range.rsplit("/", 1)[1])
         except ValueError:
             pass
-    return {"tasks": [_norm_task(t) for t in items], "total": total}
+    return {"tasks": norm, "total": total}

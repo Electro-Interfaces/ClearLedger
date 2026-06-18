@@ -258,3 +258,33 @@ export async function getOperationalStatusHistory(
 ): Promise<OpStatusHistoryItem[]> {
   return get<OpStatusHistoryItem[]>(`/api/locations/${id}/operational-status/history`)
 }
+
+// ─── HubEx FSM — сервисные заявки/ремонты станции ──────────────────────────
+export interface HubexTask {
+  id: number
+  number: string
+  status: string | null
+  statusColor: string | null
+  type: string | null
+  workType: string | null
+  criticality: string | null
+  criticalityColor: string | null
+  assignee: string | null
+  notes: string | null
+  location: string | null
+  deadline: string | null
+  created: string | null
+  lastModified: string | null
+}
+export interface HubexTasksResult {
+  configured: boolean
+  assetId: number | null
+  tasks: HubexTask[]
+  total: number
+  error?: string
+}
+
+/** Заявки HubEx по станции (через серверный прокси; токен на фронт не уходит). */
+export async function getHubexTasks(id: string): Promise<HubexTasksResult> {
+  return get<HubexTasksResult>(`/api/locations/${id}/hubex-tasks`)
+}

@@ -25,7 +25,7 @@ import { toast } from 'sonner'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { useLocationContracts } from '@/hooks/useReferences'
 import {
-  setOperationalStatus, getOperationalStatusHistory,
+  setOperationalStatus, getOperationalStatusHistory, getHubexTasks,
 } from '@/services/locationService'
 import { MetadataFieldsReader } from '@/components/manual/MetadataFieldsReader'
 import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
@@ -71,6 +71,12 @@ export function LocationCockpitModal({
     queryKey: ['op-status-history', locId],
     queryFn: () => getOperationalStatusHistory(locId!),
     enabled: !!locId,
+  })
+  const hubexQ = useQuery({
+    queryKey: ['hubex-tasks', locId],
+    queryFn: () => getHubexTasks(locId!),
+    enabled: !!locId,
+    staleTime: 60_000,
   })
 
   const [opStatus, setOpStatus] = useState('unknown')
@@ -242,20 +248,67 @@ export function LocationCockpitModal({
             {/* ── Сервис (HubEx) ── */}
             <TabsContent value="service" className="h-full m-0">
               <ScrollArea className="h-full">
-                <div className="p-5 space-y-4 max-w-2xl">
-                  {meta.hubexAssetId != null ? (
-                    <Card>
-                      <CardContent className="pt-5 grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-                        <Field label="HubEx asset_id" value={String(meta.hubexAssetId)} mono />
-                        <Field label="Статус связки" value={String(meta.linkStatus ?? '—')} />
-                        <div className="col-span-2"><Field label="HubEx название" value={String(meta.hubexName ?? '—')} /></div>
-                      </CardContent>
-                    </Card>
+                <div className="p-5 space-y-4 max-w-3xl">
+                  {meta.hubexAssetId == null ? (
+                    <Placeholder icon={Wrench} title="Станция не связана с HubEx"
+                      text="Нет HubEx asset_id — сервисные заявки недоступны. Связка проставляется при импорте реестра." />
                   ) : (
-                    <p className="text-sm text-muted-foreground">Станция не связана с HubEx (нет asset_id).</p>
+                    <>
+                      <Card>
+                        <CardContent className="pt-5 grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+                          <Field label="HubEx asset_id" value={String(meta.hubexAssetId)} mono />
+                          <Field label="Статус связки" value={String(meta.linkStatus ?? '—')} />
+                          <div className="col-span-2"><Field label="HubEx название" value={String(meta.hubexName ?? '—')} /></div>
+                        </CardContent>
+                      </Card>
+
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-medium">Сервисные заявки HubEx FSM</div>
+                        {hubexQ.data?.configured && (
+                          <span className="text-xs text-muted-foreground">всего: {hubexQ.data.total}</span>
+                        )}
+                      </div>
+
+                      {hubexQ.isLoading && <p className="text-sm text-muted-foreground">Загрузка заявок…</p>}
+                      {hubexQ.data && !hubexQ.data.configured && (
+                        <p className="text-sm text-muted-foreground">HubEx-интеграция не настроена (нет сервисного токена).</p>
+                      )}
+                      {hubexQ.data?.error && (
+                        <p className="text-sm text-destructive">HubEx недоступен: {hubexQ.data.error}</p>
+                      )}
+                      {hubexQ.data?.configured && !hubexQ.data.error && hubexQ.data.tasks.length === 0 && (
+                        <p className="text-sm text-muted-foreground">Заявок по станции нет.</p>
+                      )}
+
+                      <div className="space-y-2">
+                        {hubexQ.data?.tasks.map((t) => (
+                          <div key={t.id} className="rounded-md border border-border/50 p-3 space-y-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-xs font-medium">#{t.number}</span>
+                              {t.status && (
+                                <Badge variant="secondary" className="text-[10px]"
+                                  style={t.statusColor ? { backgroundColor: `#${t.statusColor}26`, color: `#${t.statusColor}` } : undefined}>
+                                  {t.status}
+                                </Badge>
+                              )}
+                              {t.criticality && (
+                                <Badge variant="outline" className="text-[10px]"
+                                  style={t.criticalityColor ? { borderColor: `#${t.criticalityColor}`, color: `#${t.criticalityColor}` } : undefined}>
+                                  {t.criticality}
+                                </Badge>
+                              )}
+                              {t.type && <span className="text-xs text-muted-foreground">{t.type}</span>}
+                            </div>
+                            {t.notes && <div className="text-sm whitespace-pre-line">{t.notes.trim()}</div>}
+                            <div className="flex gap-4 text-xs text-muted-foreground flex-wrap">
+                              {t.assignee && <span>Исполнитель: {t.assignee}</span>}
+                              {t.deadline && <span>Срок: {new Date(t.deadline).toLocaleString('ru-RU')}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   )}
-                  <Placeholder icon={Wrench} title="Сервисные заявки и ремонты"
-                    text="Раздел заявок/нарядов и устранения неисправностей подключается через HubEx FSM по asset_id станции (нужен токен интеграции)." />
                 </div>
               </ScrollArea>
             </TabsContent>
