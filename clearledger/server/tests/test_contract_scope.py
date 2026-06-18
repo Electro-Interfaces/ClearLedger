@@ -130,6 +130,16 @@ async def test_contract_dimensions(auth_client: AsyncClient):
     assert set(d["dimensions"]["nomenclature"]) == {"nom-AI92", "nom-DT"}
     assert d["dimensions"]["channel"] == ["ch-1"]
 
+    # обратная навигация: договоры по элементу разреза
+    by_dt = (await auth_client.get(
+        "/api/references/dimensions/nomenclature/contracts",
+        params={"ref": "nom-DT", "company_id": "gig"})).json()
+    assert any(c["id"] == ct["id"] for c in by_dt)
+    by_ch = (await auth_client.get(
+        "/api/references/dimensions/channel/contracts",
+        params={"ref": "ch-1", "company_id": "gig"})).json()
+    assert any(c["id"] == ct["id"] for c in by_ch)
+
     # снять ограничение по номенклатуре (пусто) — канал остаётся
     await auth_client.put(
         f"/api/references/contracts/{ct['id']}/dimensions/nomenclature", json={"refs": []})

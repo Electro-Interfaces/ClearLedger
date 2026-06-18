@@ -853,6 +853,30 @@ async def set_contract_dimension(
     return ContractDimensionsResponse(dimensions=_dims_grouped(rows))
 
 
+@router.get("/dimensions/{dim_type}/contracts", response_model=list[ContractResponse])
+async def get_dimension_contracts(
+    dim_type: str,
+    ref: str = Query(..., description="dim_ref элемента разреза (id/код/external_ref)"),
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Обратная навигация: договоры, явно ограниченные данным элементом разреза
+    (например, договоры именно по этой номенклатуре или каналу)."""
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(
+        select(Contract)
+        .join(ContractDimension, ContractDimension.contract_id == Contract.id)
+        .where(
+            Contract.company_id == cid,
+            ContractDimension.dim_type == dim_type,
+            ContractDimension.dim_ref == ref,
+        )
+        .order_by(Contract.date.desc())
+    )).scalars().all()
+    return [_contract_resp(c) for c in rows]
+
+
 # ---------------------------------------------------------------------------
 # Warehouse (Склады / АЗС)
 # ---------------------------------------------------------------------------
