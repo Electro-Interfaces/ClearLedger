@@ -3,7 +3,8 @@
  * Настройка URL, credentials, типов документов.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,9 +15,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { getSources, loadSources, createSource, updateSource, deleteSource } from '@/services/sourceService'
+import { getSources, loadSources, createSource, updateSource, deleteSource, frontendSourceType } from '@/services/sourceService'
 import { useCompany } from '@/contexts/CompanyContext'
-import { SOURCE_TYPE_META, type SourceType, type Source } from '@/types/channel'
+import { SOURCE_TYPE_META, BACKEND_SOURCE_META, type Source } from '@/types/channel'
 import { stsTestConnection } from '@/services/fuel/stsApiClient'
 import { mstoTestConnection } from '@/services/msto/mstoApiClient'
 import { tradecorpTestConnection } from '@/services/tradecorp/tradecorpApiClient'
@@ -25,11 +26,13 @@ import {
   Webhook, FolderOpen, FileCheck, Cloud, Server,
   ChevronDown, Loader2, CheckCircle2, XCircle, Save, Plug,
   Fuel, CreditCard, Activity, Tag, Ticket, Cylinder,
+  BookCheck, Smartphone, Banknote, Receipt, ScanBarcode,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Globe, Database, Mail, HardDrive, Webhook, FolderOpen, FileCheck, Cloud, Fuel, CreditCard, Activity, Tag, Ticket, Cylinder,
+  BookCheck, Smartphone, Banknote, Receipt, ScanBarcode, Server,
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -305,25 +308,58 @@ function TradecorpConnectionForm({ source, onUpdate }: { source: Source; onUpdat
   )
 }
 
-/** Заглушка для других типов */
+/** Реальная мета типа источника (по backend source_type, fallback — укрупнённый type) */
+function sourceMeta(source: Source): { label: string; icon: string; category?: string } {
+  if (source.backendType && BACKEND_SOURCE_META[source.backendType]) {
+    return BACKEND_SOURCE_META[source.backendType]
+  }
+  return SOURCE_TYPE_META[source.type]
+}
+
+/** Какая форма подключения подходит реальному типу источника */
+function sourceFormKind(source: Source): 'sts' | 'msto' | 'tradecorp' | 'generic' {
+  const bt = source.backendType
+  if (bt) {
+    if (bt === 'sts') return 'sts'
+    if (bt === 'msto') return 'msto'
+    if (bt === 'tradecorp') return 'tradecorp'
+    return 'generic'
+  }
+  if (source.type === 'rest') return 'sts'
+  if (source.type === 'msto') return 'msto'
+  if (source.type === 'tradecorp') return 'tradecorp'
+  return 'generic'
+}
+
+/** Заглушка для типов без специализированной формы */
 function GenericConnectionForm({ source }: { source: Source }) {
   return (
     <div className="py-3 text-xs text-muted-foreground">
-      Настройка подключения типа «{SOURCE_TYPE_META[source.type].label}» — в следующей версии.
+      Настройка подключения типа «{sourceMeta(source).label}» — в следующей версии.
     </div>
   )
 }
 
 /** Карточка источника */
-function SourceCard({ source, onUpdate, onDelete }: {
-  source: Source; onUpdate: (s: Source) => void; onDelete: () => void
+function SourceCard({ source, onUpdate, onDelete, autoOpen = false }: {
+  source: Source; onUpdate: (s: Source) => void; onDelete: () => void; autoOpen?: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const meta = SOURCE_TYPE_META[source.type]
+  const [open, setOpen] = useState(autoOpen)
+  const ref = useRef<HTMLDivElement>(null)
+  const meta = sourceMeta(source)
   const IconComp = ICON_MAP[meta.icon] ?? Globe
+  const formKind = sourceFormKind(source)
+
+  // Переход из каталога (?focus=id) — раскрыть и подскроллить к карточке
+  useEffect(() => {
+    if (autoOpen && ref.current) {
+      ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [autoOpen])
 
   return (
-    <Card>
+    <div ref={ref}>
+    <Card className={autoOpen ? 'ring-1 ring-primary/50' : undefined}>
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger asChild>
           <CardHeader className="pb-2 cursor-pointer hover:bg-accent/30 transition-colors rounded-t-lg">
@@ -355,19 +391,24 @@ function SourceCard({ source, onUpdate, onDelete }: {
           </CardHeader>
         </CollapsibleTrigger>
 
-        {!open && source.connection.url && (
-          <CardContent className="pt-0 pb-2">
-            <p className="text-xs text-muted-foreground truncate">{source.connection.url}</p>
+        {!open && (source.description || source.connection.url) && (
+          <CardContent className="pt-0 pb-3 space-y-0.5">
+            {source.description && (
+              <p className="text-xs text-muted-foreground">{source.description}</p>
+            )}
+            {source.connection.url && (
+              <p className="text-[11px] font-mono text-muted-foreground/50 truncate">{source.connection.url}</p>
+            )}
           </CardContent>
         )}
 
         <CollapsibleContent>
           <CardContent className="pt-0 border-t border-border/30 mt-1">
-            {source.type === 'rest' ? (
+            {formKind === 'sts' ? (
               <RestConnectionForm source={source} onUpdate={onUpdate} />
-            ) : source.type === 'msto' ? (
+            ) : formKind === 'msto' ? (
               <MstoConnectionForm source={source} onUpdate={onUpdate} />
-            ) : source.type === 'tradecorp' ? (
+            ) : formKind === 'tradecorp' ? (
               <TradecorpConnectionForm source={source} onUpdate={onUpdate} />
             ) : (
               <GenericConnectionForm source={source} />
@@ -376,6 +417,7 @@ function SourceCard({ source, onUpdate, onDelete }: {
         </CollapsibleContent>
       </Collapsible>
     </Card>
+    </div>
   )
 }
 
@@ -383,8 +425,10 @@ export function SourcesPage() {
   const [sources, setSources] = useState<Source[]>(getSources)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [newName, setNewName] = useState('')
-  const [newType, setNewType] = useState<SourceType>('rest')
+  const [newType, setNewType] = useState<string>('sts')
+  const [focusId, setFocusId] = useState<string | null>(null)
   const { companyId } = useCompany()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   function refresh() { setSources(getSources()) }
 
@@ -393,9 +437,28 @@ export function SourcesPage() {
     void loadSources(companyId).then(refresh).catch(() => { /* офлайн → localStorage */ })
   }, [companyId])
 
+  // Переход из каталога: ?add=1&type=&name= → открыть диалог; ?focus=id → раскрыть карточку
+  useEffect(() => {
+    const add = searchParams.get('add')
+    const type = searchParams.get('type')
+    const name = searchParams.get('name')
+    const focus = searchParams.get('focus')
+    if (add) {
+      setDialogOpen(true)
+      if (type) setNewType(type)
+      if (name) setNewName(name)
+    }
+    if (focus) setFocusId(focus)
+    if (add || focus) {
+      for (const k of ['add', 'type', 'name', 'focus']) searchParams.delete(k)
+      setSearchParams(searchParams, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   async function handleCreate() {
     if (!newName.trim()) return
-    await createSource({ name: newName, type: newType })
+    await createSource({ name: newName, type: frontendSourceType(newType), sourceType: newType })
     refresh()
     setDialogOpen(false)
     setNewName('')
@@ -415,7 +478,7 @@ export function SourcesPage() {
         <div>
           <h1 className="text-xl font-bold">Источники данных</h1>
           <p className="text-sm text-muted-foreground">
-            Подключения к внешним системам. Настройте источник, затем создайте обработку.
+            Подключения к внешним системам. Настройте источник, затем создайте канал.
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -436,12 +499,12 @@ export function SourcesPage() {
               </div>
               <div className="space-y-2">
                 <Label>Тип подключения</Label>
-                <Select value={newType} onValueChange={(v) => setNewType(v as SourceType)}>
+                <Select value={newType} onValueChange={setNewType}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(SOURCE_TYPE_META).map(([key, meta]) => (
+                    {Object.entries(BACKEND_SOURCE_META).map(([key, meta]) => (
                       <SelectItem key={key} value={key}>
-                        {meta.label} — {meta.description}
+                        {meta.label} — {meta.category}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -472,6 +535,7 @@ export function SourcesPage() {
             <SourceCard
               key={src.id}
               source={src}
+              autoOpen={src.id === focusId}
               onUpdate={(updated) => setSources((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
               onDelete={() => handleDelete(src.id)}
             />

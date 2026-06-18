@@ -47,6 +47,11 @@ const FROM_BACKEND: Record<string, SourceType> = {
   acquiring_sber: 'rest', ofd: 'rest', inkassation: 'rest', chestny_znak: 'rest',
 }
 
+/** Публичный маппинг backend source_type → фронтовый тип источника
+ *  (для предвыбора типа в диалоге «Добавить источник», напр. из каталога). */
+export const frontendSourceType = (backendType: string): SourceType =>
+  FROM_BACKEND[backendType] ?? 'rest'
+
 function docTypesFor(backendType: string): SourceDocType[] {
   if (backendType === 'sts') return defaultStsDocTypes()
   if (backendType === 'msto') return defaultMstoDocTypes()
@@ -136,14 +141,17 @@ export async function loadSources(companyId: string): Promise<Source[]> {
 export async function createSource(data: {
   name: string
   type: SourceType
+  /** Реальный backend source_type (sts/onec_accounting/acquiring_sber/…) — приоритетнее укрупнённого type */
+  sourceType?: string
   description?: string
   connection?: Record<string, string>
   docTypes?: SourceDocType[]
 }): Promise<Source> {
+  const backendType = data.sourceType ?? TO_BACKEND[data.type] ?? data.type
   if (isApiEnabled()) {
     const r = await post<ApiSource>('/api/sources', {
       company_id: _requireCompany(),
-      source_type: TO_BACKEND[data.type] ?? data.type,
+      source_type: backendType,
       name: data.name,
       description: data.description,
       config: data.connection ?? {},
@@ -157,15 +165,11 @@ export async function createSource(data: {
     id: nanoid(10),
     name: data.name,
     type: data.type,
+    backendType,
     status: 'draft',
     description: data.description,
     connection: data.connection ?? {},
-    docTypes: data.docTypes ?? (
-      data.type === 'rest' ? defaultStsDocTypes() :
-      data.type === 'msto' ? defaultMstoDocTypes() :
-      data.type === 'tradecorp' ? defaultTradecorpDocTypes() :
-      []
-    ),
+    docTypes: data.docTypes ?? docTypesFor(backendType),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
