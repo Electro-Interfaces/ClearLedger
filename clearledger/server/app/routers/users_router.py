@@ -65,27 +65,30 @@ async def _is_company_admin(user: User, cid: uuid.UUID, db: AsyncSession) -> boo
 async def _memberships(user_id: uuid.UUID, db: AsyncSession) -> list[CompanyMembership]:
     rows = (
         await db.execute(
-            select(Company.slug, Company.name, UserCompany.role)
+            select(Company.slug, Company.name, UserCompany.role, UserCompany.position)
             .join(UserCompany, UserCompany.company_id == Company.id)
             .where(UserCompany.user_id == user_id)
             .order_by(Company.slug)
         )
     ).all()
-    return [CompanyMembership(slug=s, name=n, role=r) for s, n, r in rows]
+    return [CompanyMembership(slug=s, name=n, role=r, position=p) for s, n, r, p in rows]
 
 
 async def _resp(
     u: User, db: AsyncSession, scope_cid: uuid.UUID | None = None
 ) -> UserAdminResponse:
     memberships = await _memberships(u.id, db)
-    # role: в контексте компании — роль в ней; иначе глобальная (легаси-дефолт).
+    # role/position: в контексте компании — из членства; иначе глобальная роль.
     role = u.role
+    position = None
     if scope_cid is not None:
-        m = await _membership_role(u.id, scope_cid, db)
-        role = m or u.role
+        m = await db.get(UserCompany, (u.id, scope_cid))
+        if m is not None:
+            role = m.role
+            position = m.position
     return UserAdminResponse(
         id=str(u.id), email=u.email, name=u.name,
-        role=role, is_superadmin=u.is_superadmin,
+        role=role, position=position, is_superadmin=u.is_superadmin,
         companies=memberships,
     )
 
@@ -130,7 +133,8 @@ async def create_user(
     if existing is not None:
         # Пользователь уже есть — выдаём членство в этой компании с ролью.
         if not await _is_member(existing.id, cid, db):
-            db.add(UserCompany(user_id=existing.id, company_id=cid, role=payload.role))
+            db.add(UserCompany(user_id=existing.id, company_id=cid,
+                               role=payload.role, position=payload.position))
             await db.flush()
         return await _resp(existing, db, scope_cid=cid)
 
@@ -144,7 +148,8 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
-    db.add(UserCompany(user_id=user.id, company_id=cid, role=payload.role))
+    db.add(UserCompany(user_id=user.id, company_id=cid,
+                       role=payload.role, position=payload.position))
     await db.flush()
     return await _resp(user, db, scope_cid=cid)
 
@@ -177,15 +182,18 @@ async def update_user(
     if target.is_superadmin and not current_user.is_superadmin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя менять суперадмина")
     if payload.name is not None:
-        target.name = payload.name
-    if payload.role is not None:
-        # Роль-на-компанию: меняем роль членства в указанной компании.
+        target.name = payload.name   # ФИО — глобально
+    # Роль/должность — per-company (нужен company_id).
+    if payload.role is not None or payload.position is not None:
         if not payload.company_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите company_id для смены роли")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите company_id для роли/должности")
         membership = await db.get(UserCompany, (uid, cid))
         if membership is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не в компании")
-        membership.role = payload.role
+        if payload.role is not None:
+            membership.role = payload.role
+        if payload.position is not None:
+            membership.position = payload.position or None  # "" → очистить
     await db.flush()
     return await _resp(target, db, scope_cid=cid if payload.company_id else None)
 

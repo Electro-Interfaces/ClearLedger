@@ -40,8 +40,8 @@ def _hash(token: str) -> str:
 
 def _resp(inv: Invitation) -> InvitationResponse:
     return InvitationResponse(
-        id=str(inv.id), email=inv.email, role=inv.role, status=inv.status,
-        created_at=inv.created_at, expires_at=inv.expires_at,
+        id=str(inv.id), email=inv.email, role=inv.role, position=inv.position,
+        status=inv.status, created_at=inv.created_at, expires_at=inv.expires_at,
     )
 
 
@@ -96,13 +96,14 @@ async def create_invitation(
     if inv is None:
         inv = Invitation(
             id=uuid.uuid4(), company_id=cid, email=email, role=payload.role,
-            token_hash=_hash(raw), status="pending",
+            position=payload.position, token_hash=_hash(raw), status="pending",
             invited_by=current_user.id, expires_at=now + INVITE_TTL,
         )
         db.add(inv)
     else:
         inv.token_hash = _hash(raw)
         inv.role = payload.role
+        inv.position = payload.position
         inv.expires_at = now + INVITE_TTL
         inv.invited_by = current_user.id
     await db.flush()
@@ -208,9 +209,10 @@ async def accept_invite(
     ).scalar_one_or_none()
 
     if user is not None:
-        # Существующий — добавляем членство с ролью, без автологина.
+        # Существующий — добавляем членство с ролью/должностью, без автологина.
         if not await _is_member(user.id, cid, db):
-            db.add(UserCompany(user_id=user.id, company_id=cid, role=inv.role))
+            db.add(UserCompany(user_id=user.id, company_id=cid,
+                               role=inv.role, position=inv.position))
         inv.status = "accepted"
         inv.accepted_at = datetime.now(timezone.utc)
         await db.flush()
@@ -225,7 +227,8 @@ async def accept_invite(
     )
     db.add(user)
     await db.flush()
-    db.add(UserCompany(user_id=user.id, company_id=cid, role=inv.role))
+    db.add(UserCompany(user_id=user.id, company_id=cid,
+                       role=inv.role, position=inv.position))
     inv.status = "accepted"
     inv.accepted_at = datetime.now(timezone.utc)
     await db.flush()

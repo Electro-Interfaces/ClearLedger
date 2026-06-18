@@ -105,8 +105,8 @@ export function AcceptInvitePage() {
             ) : (
               <>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Ваше имя</label>
-                  <input value={name} onChange={(e) => setName(e.target.value)} required
+                  <label className="text-sm font-medium">ФИО</label>
+                  <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Фамилия Имя Отчество"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div className="space-y-2">

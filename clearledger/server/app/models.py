@@ -110,6 +110,8 @@ class UserCompany(Base):
     )
     # Роль пользователя В ЭТОЙ компании: user | admin (роль-на-компанию).
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    # Должность сотрудника в этой компании (per-company).
+    position: Mapped[str | None] = mapped_column(String(150), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -130,6 +132,7 @@ class Invitation(Base):
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    position: Mapped[str | None] = mapped_column(String(150), nullable=True)
     # SHA256 от сырого токена (сырой токен только в письме, в БД не хранится).
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     # pending | accepted | revoked

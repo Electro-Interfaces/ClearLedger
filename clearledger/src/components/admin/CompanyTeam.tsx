@@ -2,7 +2,7 @@
  * Команда компании: сотрудники (роль-на-компанию) + приглашения по email.
  * Используется в админ-разделе (мастер-деталь) для выбранной компании.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -51,6 +51,12 @@ function MembersCard({
     onSuccess: () => qc.invalidateQueries({ queryKey: ['team-members', companyId] }),
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
+  const update = useMutation({
+    mutationFn: ({ id, name, position }: { id: string; name?: string; position?: string }) =>
+      userService.updateUser(id, { companyId, name, position }),
+    onSuccess: () => { toast.success('Сохранено'); qc.invalidateQueries({ queryKey: ['team-members', companyId] }) },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
   const remove = useMutation({
     mutationFn: (id: string) => userService.removeUser(id, companyId),
     onSuccess: () => {
@@ -81,8 +87,9 @@ function MembersCard({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Сотрудник</TableHead>
-              <TableHead className="w-[160px]">Роль</TableHead>
+              <TableHead>ФИО / Email</TableHead>
+              <TableHead className="w-[200px]">Должность</TableHead>
+              <TableHead className="w-[150px]">Роль</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
@@ -92,13 +99,18 @@ function MembersCard({
               return (
                 <TableRow key={u.id}>
                   <TableCell>
-                    <div className="font-medium flex items-center gap-2">
-                      {u.name}
+                    <div className="flex items-center gap-2">
+                      <EditableText value={u.name} disabled={locked} placeholder="ФИО"
+                        onSave={(name) => update.mutate({ id: u.id, name })} className="font-medium" />
                       {u.is_superadmin && (
-                        <Badge variant="outline" className="gap-1 text-[10px]"><ShieldCheck className="h-3 w-3" /> супер</Badge>
+                        <Badge variant="outline" className="gap-1 text-[10px] shrink-0"><ShieldCheck className="h-3 w-3" /> супер</Badge>
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground">{u.email}</div>
+                  </TableCell>
+                  <TableCell>
+                    <EditableText value={u.position ?? ''} disabled={locked} placeholder="— должность —"
+                      onSave={(position) => update.mutate({ id: u.id, position })} />
                   </TableCell>
                   <TableCell>
                     <Select value={u.role} disabled={locked}
@@ -123,7 +135,7 @@ function MembersCard({
               )
             })}
             {!q.isLoading && members.length === 0 && (
-              <TableRow><TableCell colSpan={3} className="text-sm text-muted-foreground text-center py-4">Нет сотрудников</TableCell></TableRow>
+              <TableRow><TableCell colSpan={4} className="text-sm text-muted-foreground text-center py-4">Нет сотрудников</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
@@ -175,7 +187,10 @@ function InvitationsCard({ companyId }: { companyId: string }) {
           <TableBody>
             {invites.map((i) => (
               <TableRow key={i.id}>
-                <TableCell className="text-sm">{i.email}</TableCell>
+                <TableCell className="text-sm">
+                  {i.email}
+                  {i.position && <span className="block text-xs text-muted-foreground">{i.position}</span>}
+                </TableCell>
                 <TableCell><Badge variant="secondary" className="text-[10px]">{ROLE_LABEL[i.role] ?? i.role}</Badge></TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {new Date(i.created_at).toLocaleDateString('ru')}
@@ -205,13 +220,14 @@ function InviteDialog({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
+  const [position, setPosition] = useState('')
   const [role, setRole] = useState<'user' | 'admin'>('user')
 
   const invite = useMutation({
-    mutationFn: () => invitationService.createInvitation(companyId, email, role),
+    mutationFn: () => invitationService.createInvitation(companyId, email, role, position),
     onSuccess: () => {
       toast.success(`Приглашение отправлено на ${email}`)
-      setEmail(''); setRole('user'); setOpen(false)
+      setEmail(''); setPosition(''); setRole('user'); setOpen(false)
       qc.invalidateQueries({ queryKey: ['team-invites', companyId] })
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
@@ -230,18 +246,25 @@ function InviteDialog({ companyId }: { companyId: string }) {
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
               placeholder="employee@company.ru" />
           </div>
-          <div className="space-y-2">
-            <Label>Роль</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as 'user' | 'admin')}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="user">Сотрудник</SelectItem>
-                <SelectItem value="admin">Администратор</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Должность</Label>
+              <Input value={position} onChange={(e) => setPosition(e.target.value)}
+                placeholder="напр. Бухгалтер" />
+            </div>
+            <div className="space-y-2">
+              <Label>Роль</Label>
+              <Select value={role} onValueChange={(v) => setRole(v as 'user' | 'admin')}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">Сотрудник</SelectItem>
+                  <SelectItem value="admin">Администратор</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            На указанный email придёт ссылка-приглашение; сотрудник сам задаст пароль.
+            На указанный email придёт ссылка-приглашение; сотрудник сам задаст ФИО и пароль.
           </p>
         </div>
         <DialogFooter>
@@ -257,13 +280,13 @@ function InviteDialog({ companyId }: { companyId: string }) {
 function AddUserDialog({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'user' as 'user' | 'admin' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', position: '', role: 'user' as 'user' | 'admin' })
 
   const create = useMutation({
     mutationFn: () => userService.createUser({ companyId, ...form }),
     onSuccess: () => {
       toast.success('Сотрудник добавлен')
-      setForm({ name: '', email: '', password: '', role: 'user' }); setOpen(false)
+      setForm({ name: '', email: '', password: '', position: '', role: 'user' }); setOpen(false)
       qc.invalidateQueries({ queryKey: ['team-members', companyId] })
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
@@ -278,12 +301,12 @@ function AddUserDialog({ companyId }: { companyId: string }) {
         <DialogHeader><DialogTitle>Добавить сотрудника вручную</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2"><Label>Имя</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+            <div className="space-y-2"><Label>ФИО</Label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Фамилия Имя Отчество" /></div>
             <div className="space-y-2"><Label>Email</Label>
               <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-            <div className="space-y-2"><Label>Пароль (мин. 6)</Label>
-              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
+            <div className="space-y-2"><Label>Должность</Label>
+              <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="напр. Бухгалтер" /></div>
             <div className="space-y-2"><Label>Роль</Label>
               <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v as 'user' | 'admin' })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -292,6 +315,8 @@ function AddUserDialog({ companyId }: { companyId: string }) {
                   <SelectItem value="admin">Администратор</SelectItem>
                 </SelectContent>
               </Select></div>
+            <div className="space-y-2 col-span-2"><Label>Пароль (мин. 6)</Label>
+              <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
           </div>
         </div>
         <DialogFooter>
@@ -302,6 +327,27 @@ function AddUserDialog({ companyId }: { companyId: string }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function EditableText({
+  value, disabled, placeholder, onSave, className,
+}: { value: string; disabled?: boolean; placeholder?: string; onSave: (v: string) => void; className?: string }) {
+  const [val, setVal] = useState(value)
+  useEffect(() => setVal(value), [value])
+
+  if (disabled) {
+    return <span className={`text-sm ${className ?? ''} ${!value ? 'text-muted-foreground' : ''}`}>{value || placeholder}</span>
+  }
+  return (
+    <input
+      value={val}
+      placeholder={placeholder}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={() => { if (val !== value) onSave(val) }}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      className={`h-8 w-full bg-transparent rounded border border-transparent hover:border-border/60 focus:border-primary outline-none text-sm px-1 transition-colors ${className ?? ''}`}
+    />
   )
 }
 

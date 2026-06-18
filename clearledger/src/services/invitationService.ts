@@ -9,6 +9,7 @@ export interface Invitation {
   id: string
   email: string
   role: 'user' | 'admin'
+  position?: string | null
   status: string
   created_at: string
   expires_at: string
@@ -26,9 +27,11 @@ export async function listInvitations(companyId: string): Promise<Invitation[]> 
 }
 
 export async function createInvitation(
-  companyId: string, email: string, role: 'user' | 'admin',
+  companyId: string, email: string, role: 'user' | 'admin', position?: string,
 ): Promise<Invitation> {
-  return post<Invitation>('/api/invitations', { company_id: companyId, email, role })
+  return post<Invitation>('/api/invitations', {
+    company_id: companyId, email, role, position: position || undefined,
+  })
 }
 
 export async function revokeInvitation(id: string): Promise<void> {

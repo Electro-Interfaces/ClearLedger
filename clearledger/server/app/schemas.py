@@ -69,29 +69,33 @@ class MeResponse(BaseModel):
 class UserCreate(BaseModel):
     company_id: str
     email: EmailStr
-    name: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)   # ФИО
     password: str = Field(min_length=6)
     role: Literal["user", "admin"] = "user"
+    position: str | None = Field(None, max_length=150)  # должность
 
 
 class UserAdminUpdate(BaseModel):
     company_id: str | None = None   # контекст компании (для админа компании); суперадмин может без него
-    name: str | None = None
+    name: str | None = None         # ФИО (глобально)
     role: Literal["user", "admin"] | None = None
+    position: str | None = None     # должность (per-company); "" → очистить
 
 
 class CompanyMembership(BaseModel):
-    """Членство пользователя в компании с ролью в ней."""
+    """Членство пользователя в компании с ролью и должностью в ней."""
     slug: str
     name: str
     role: str
+    position: str | None = None
 
 
 class UserAdminResponse(BaseModel):
     id: str
     email: str
-    name: str
+    name: str                       # ФИО
     role: str                       # роль в контексте запроса (компании) или глобальная
+    position: str | None = None     # должность в контексте компании
     is_superadmin: bool
     companies: list[CompanyMembership] = []
 
@@ -107,12 +111,14 @@ class InvitationCreate(BaseModel):
     company_id: str
     email: EmailStr
     role: Literal["user", "admin"] = "user"
+    position: str | None = Field(None, max_length=150)
 
 
 class InvitationResponse(BaseModel):
     id: str
     email: str
     role: str
+    position: str | None = None
     status: str
     created_at: datetime
     expires_at: datetime

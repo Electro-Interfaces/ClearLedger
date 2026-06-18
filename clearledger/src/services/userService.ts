@@ -8,13 +8,15 @@ export interface MembershipRef {
   slug: string
   name: string
   role: 'user' | 'admin'
+  position?: string | null
 }
 
 export interface AdminUser {
   id: string
   email: string
-  name: string
+  name: string             // ФИО
   role: 'user' | 'admin'   // роль в контексте запроса (компании) или глобальная
+  position?: string | null // должность в контексте компании
   is_superadmin: boolean
   companies: MembershipRef[]
 }
@@ -44,6 +46,7 @@ export async function createUser(data: {
   name: string
   password: string
   role: 'user' | 'admin'
+  position?: string
 }): Promise<AdminUser> {
   return post<AdminUser>('/api/users', {
     company_id: data.companyId,
@@ -51,17 +54,19 @@ export async function createUser(data: {
     name: data.name,
     password: data.password,
     role: data.role,
+    position: data.position || undefined,
   })
 }
 
 export async function updateUser(
   id: string,
-  data: { companyId: string; name?: string; role?: 'user' | 'admin' },
+  data: { companyId: string; name?: string; role?: 'user' | 'admin'; position?: string },
 ): Promise<AdminUser> {
   return patch<AdminUser>(`/api/users/${id}`, {
     company_id: data.companyId,
     name: data.name,
     role: data.role,
+    position: data.position,
   })
 }
 

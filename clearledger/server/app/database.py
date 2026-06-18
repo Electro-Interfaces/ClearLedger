@@ -157,6 +157,9 @@ async def create_all() -> None:
             "  accepted_at TIMESTAMPTZ)",
             "CREATE INDEX IF NOT EXISTS idx_invitations_company ON invitations(company_id, status)",
             "CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token_hash)",
+            # v2.3: должность сотрудника (per-company) + в приглашении.
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS position VARCHAR(150)",
+            "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS position VARCHAR(150)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
