@@ -131,8 +131,14 @@ async def create_all() -> None:
             "CREATE TABLE IF NOT EXISTS user_companies ("
             "  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
             "  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,"
+            "  role VARCHAR(20) NOT NULL DEFAULT 'user',"
             "  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
             "  PRIMARY KEY (user_id, company_id))",
+            # Гарантируем дефолт role ДО backfill-INSERT (на случай, если таблицу
+            # создал ORM create_all без server_default — тогда INSERT без role упал бы).
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS role VARCHAR(20)",
+            "ALTER TABLE user_companies ALTER COLUMN role SET DEFAULT 'user'",
+            "UPDATE user_companies SET role = 'user' WHERE role IS NULL",
             "CREATE INDEX IF NOT EXISTS idx_user_companies_company ON user_companies(company_id)",
             "INSERT INTO user_companies (user_id, company_id) "
             "SELECT id, company_id FROM users WHERE company_id IS NOT NULL "

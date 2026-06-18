@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -78,7 +79,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="user")
     # Суперадмин видит и переключает ВСЕ компании без записей в user_companies.
     is_superadmin: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
+        Boolean, nullable=False, default=False, server_default=text("false")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -109,7 +110,10 @@ class UserCompany(Base):
         primary_key=True,
     )
     # Роль пользователя В ЭТОЙ компании: user | admin (роль-на-компанию).
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    # server_default обязателен: backfill-INSERT миграции v2.0 не указывает role.
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="user", server_default=text("'user'")
+    )
     # Должность сотрудника в этой компании (per-company).
     position: Mapped[str | None] = mapped_column(String(150), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -131,12 +135,16 @@ class Invitation(Base):
         nullable=False, index=True,
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="user", server_default=text("'user'")
+    )
     position: Mapped[str | None] = mapped_column(String(150), nullable=True)
     # SHA256 от сырого токена (сырой токен только в письме, в БД не хранится).
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     # pending | accepted | revoked
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
     invited_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
