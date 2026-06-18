@@ -7,7 +7,7 @@
 import type {
   Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount,
   CounterpartyBalance, ContractScopeType, LocationBrief, CounterpartyLocations,
-  LocationContracts,
+  LocationContracts, ContractDimensions,
 } from '@/types'
 import { isApiEnabled, get, post, patch, put, del } from './apiClient'
 import {
@@ -478,6 +478,21 @@ export async function getCounterpartyLocations(counterpartyId: string): Promise<
 /** Договоры точки: адресные + общекомпанейские. */
 export async function getLocationContracts(locationId: string): Promise<LocationContracts> {
   return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
+}
+
+/** Грани договора по разрезам (номенклатура/каналы/…). */
+export async function getContractDimensions(contractId: string): Promise<ContractDimensions> {
+  if (!isApiEnabled()) return { dimensions: {} }
+  return get<ContractDimensions>(`/api/references/contracts/${contractId}/dimensions`)
+}
+
+/** Заменить набор элементов разреза dim_type (пусто = снять ограничение). */
+export async function setContractDimension(
+  contractId: string, dimType: string, refs: string[],
+): Promise<ContractDimensions> {
+  return put<ContractDimensions>(
+    `/api/references/contracts/${contractId}/dimensions/${dimType}`, { refs },
+  )
 }
 
 export async function upsertContracts(companyId: string, items: Contract[]): Promise<number> {

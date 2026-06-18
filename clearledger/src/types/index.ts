@@ -433,6 +433,11 @@ export interface LocationContracts {
   counterparties: CounterpartyBrief[]
 }
 
+/** Обобщённые грани договора по разрезам (Фаза 3): dim_type → набор dim_ref. */
+export interface ContractDimensions {
+  dimensions: Record<string, string[]>
+}
+
 // ---- Учётные документы 1С (AccountingDoc) ----
 
 export type AccountingDocType =

@@ -213,6 +213,25 @@ export function useLocationContracts(locationId: string | null) {
   })
 }
 
+/** Грани договора по разрезам (номенклатура/каналы/…). */
+export function useContractDimensions(contractId: string | null) {
+  return useQuery({
+    queryKey: ['axis', 'contract', contractId, 'dimensions'],
+    queryFn: () => ref.getContractDimensions(contractId!),
+    enabled: !!contractId,
+  })
+}
+
+export function useSetContractDimension() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (v: { contractId: string; dimType: string; refs: string[] }) =>
+      ref.setContractDimension(v.contractId, v.dimType, v.refs),
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: ['axis', 'contract', v.contractId, 'dimensions'] }),
+  })
+}
+
 // ============================================================
 // Warehouses
 // ============================================================

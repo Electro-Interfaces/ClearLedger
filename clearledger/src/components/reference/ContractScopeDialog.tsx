@@ -15,7 +15,11 @@ import {
 import { Loader2, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLocations } from '@/hooks/useLocations'
-import { useContractLocations, useSetContractScope } from '@/hooks/useReferences'
+import {
+  useContractLocations, useSetContractScope, useNomenclature,
+} from '@/hooks/useReferences'
+import { useChannels } from '@/hooks/useChannels'
+import { ContractDimensionEditor } from './ContractDimensionEditor'
 import type { Contract, ContractScopeType } from '@/types'
 
 export function ContractScopeDialog({
@@ -31,6 +35,8 @@ export function ContractScopeDialog({
   const locations = useLocations()
   const { data: current = [] } = useContractLocations(open ? contract.id : null)
   const saveMut = useSetContractScope()
+  const { data: nomenclature = [] } = useNomenclature()
+  const { data: channels = [] } = useChannels()
 
   const [scopeType, setScopeType] = useState<ContractScopeType>(contract.scopeType ?? 'unassigned')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -138,6 +144,23 @@ export function ContractScopeDialog({
               Охват не задан — договор не привязан к точкам (требует распределения).
             </p>
           )}
+
+          {/* Грани по другим разрезам (Фаза 3) — независимо от охвата точек */}
+          <div className="space-y-4 border-t border-border/50 pt-3">
+            <div className="text-xs font-medium text-muted-foreground">
+              Ограничения по разрезам (необязательно)
+            </div>
+            <ContractDimensionEditor
+              contractId={contract.id} dimType="nomenclature" title="Номенклатура"
+              hint="Пусто = договор охватывает всю номенклатуру"
+              items={nomenclature.map((n) => ({ id: n.id, label: n.name, sub: n.code }))}
+            />
+            <ContractDimensionEditor
+              contractId={contract.id} dimType="channel" title="Каналы"
+              hint="Пусто = все каналы"
+              items={channels.map((c) => ({ id: c.id, label: c.name }))}
+            />
+          </div>
         </div>
 
         <DialogFooter>
