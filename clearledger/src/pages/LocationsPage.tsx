@@ -5,7 +5,7 @@
  * системой для привязки документов к местам и фильтрации каналов.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,10 +30,12 @@ import {
 import { toast } from 'sonner'
 import {
   getLocations, createLocation, updateLocation, deleteLocation,
-  getLocationByCode,
+  getLocationByCode, loadLocations,
 } from '@/services/locationService'
-import { getSources } from '@/services/sourceService'
-import { stsGetShifts } from '@/services/fuel/stsApiClient'
+import { getSources, loadSources } from '@/services/sourceService'
+import { useCompany } from '@/contexts/CompanyContext'
+import { stsGetPoints, type StsPoint } from '@/services/fuel/stsApiClient'
+import { getSettings } from '@/services/settingsService'
 import { mstoGetServicePoints } from '@/services/msto/mstoApiClient'
 import { tradecorpGetSummary } from '@/services/tradecorp/tradecorpApiClient'
 import {
@@ -303,6 +305,43 @@ function applyBindings(
   return { found: found.length, matched, unmatched, sourceName }
 }
 
+/** Авто-импорт ВСЕХ торговых точек из STS (/v1/points): создаёт недостающие
+ *  ServiceLocation и привязывает к STS-источнику (system_id + station). */
+function importPointsFromSts(
+  sourceId: string,
+  system: number,
+  points: StsPoint[],
+): ImportSummary {
+  let matched = 0
+  for (const p of points) {
+    const code = String(p.id ?? p.number ?? '').trim()
+    if (!code || code === 'undefined') continue
+    const config = { system_id: system, station: Number(code) }
+    const label = `STS sys=${system} st=${code}`
+    const name = p.name || `АЗС №${code}`
+    const existing = getLocationByCode(code)
+    if (existing) {
+      // Убираем любую старую STS-привязку этой станции (у STS-привязок есть
+      // system_id) — вкл. устаревшие sourceId и прежнюю систему (sys=65),
+      // чтобы не плодить дубли. MSTO/TradeCorp-привязки не трогаем.
+      const other = existing.sourceBindings.filter(
+        (b) => !(b.config.system_id != null && String(b.config.station) === code),
+      )
+      updateLocation(existing.id, {
+        address: existing.address || p.address,
+        sourceBindings: [...other, { sourceId, config, label }],
+      })
+    } else {
+      createLocation({
+        code, name, type: 'fuel_station', address: p.address,
+        sourceBindings: [{ sourceId, config, label }],
+      })
+    }
+    matched += 1
+  }
+  return { found: points.length, matched, unmatched: [], sourceName: 'STS' }
+}
+
 /** Извлечь первое целое число из строки (для имён типа «АКЗС 208»). */
 function parseStationCode(name: string): string | null {
   const m = name.match(/\d+/)
@@ -439,11 +478,10 @@ function StsImportButton({ onDone }: { onDone: () => void }) {
           Импорт из STS
         </Button>
       }
-      title="Импорт кодов станций из STS"
+      title="Импорт точек из STS"
       description={
-        'Проверяет в STS существование станций по кодам уже добавленных точек обслуживания. ' +
-        'Для каждой пробует обе сети (system_id=65 и 15). Найденные коды привязываются к точкам. ' +
-        'Новые точки не создаются.'
+        'Загружает все торговые точки сети из STS (GET /v1/points) для текущей системы ' +
+        'и создаёт/обновляет точки обслуживания с привязкой к STS (system_id + station).'
       }
       canRun={!!stsSource}
       sourceMissingText={
@@ -453,32 +491,11 @@ function StsImportButton({ onDone }: { onDone: () => void }) {
       }
       runImport={async (setProgress) => {
         const sourceId = stsSource!.id
-        const codes = getLocations()
-          .map((l) => Number(l.code))
-          .filter((n) => Number.isFinite(n) && n > 0)
-        const systems = [65, 15]
-        const found: ImportedCode[] = []
-        let done = 0
-        const total = codes.length * systems.length
-        for (const sys of systems) {
-          for (const code of codes) {
-            setProgress(`Сеть system_id=${sys} · код ${code} · ${done}/${total}`)
-            try {
-              const shifts = await stsGetShifts(sys, code)
-              if (Array.isArray(shifts) && shifts.length > 0) {
-                found.push({
-                  code: String(code),
-                  config: { system_id: sys, station: code },
-                  bindingLabel: `STS sys=${sys} st=${code}`,
-                })
-              }
-            } catch {
-              // станция в этой сети недоступна — пропуск
-            }
-            done += 1
-          }
-        }
-        return applyBindings(sourceId, 'STS', found)
+        const sys = getSettings().stsSystemCode
+        setProgress(`Загрузка точек из STS (система ${sys})…`)
+        const points = await stsGetPoints(sys)
+        setProgress(`Получено точек: ${points.length}. Создаю/привязываю…`)
+        return importPointsFromSts(sourceId, sys, points)
       }}
       onDone={onDone}
     />
@@ -583,6 +600,14 @@ function TradecorpImportButton({ onDone }: { onDone: () => void }) {
 export function LocationsPage() {
   const [_tick, setTick] = useState(0)
   const refresh = () => setTick((t) => t + 1)
+  const { companyId } = useCompany()
+
+  // Гидрация источников (для STS-импорта) + точек обслуживания (из бэкенда)
+  useEffect(() => {
+    void Promise.all([loadSources(companyId), loadLocations(companyId)])
+      .then(refresh).catch(() => { /* офлайн → localStorage */ })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId])
 
   const locations = getLocations()
   const sourcesCount = getSources().length

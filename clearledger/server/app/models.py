@@ -1638,3 +1638,38 @@ class OneCSyncLog(Base):
     )
 
     connection: Mapped["OneCConnection"] = relationship(back_populates="sync_logs")
+
+
+# ---------------------------------------------------------------------------
+# ServiceLocation (Точки обслуживания — АЗС/магазины/офисы)
+# ---------------------------------------------------------------------------
+# Перенесено из localStorage в бэкенд: точки должны быть общими для всех
+# браузеров/пользователей и совпадать с конфигом каналов. id — клиентский
+# nanoid (String), чтобы фронт и бэк совпадали без доп. резолва.
+# ---------------------------------------------------------------------------
+class ServiceLocation(Base):
+    __tablename__ = "service_locations"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # fuel_station | retail | office | warehouse | other
+    type: Mapped[str] = mapped_column(String(30), nullable=False, default="other")
+    # active | closed | planned
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Привязки к источникам: [{sourceId, config:{system_id,station}, label}]
+    source_bindings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # Произвольные метаданные (в API — поле metadata)
+    extra_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
