@@ -90,7 +90,10 @@ export function AppSidebar() {
   const [intakeOpen, setIntakeOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(true)
   const { user } = useAuth()
-  const canAdmin = !!user && (user.is_superadmin || user.role === 'admin')
+  // Показываем админ-раздел, если суперадмин ИЛИ админ хотя бы в одной компании.
+  const canAdmin = !!user && (
+    user.is_superadmin || (user.companies ?? []).some((c) => c.role === 'admin')
+  )
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border/40 pt-[var(--header-height)] pb-12">

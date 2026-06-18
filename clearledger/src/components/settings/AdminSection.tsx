@@ -11,15 +11,13 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Building2, Loader2 } from 'lucide-react'
-import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import * as userService from '@/services/userService'
 
 export function AdminSection() {
-  const { user } = useAuth()
-  const { company, companyId } = useCompany()
-  const canEdit = !!user && (user.is_superadmin || user.role === 'admin')
+  const { company, companyId, isCompanyAdmin } = useCompany()
+  const canEdit = isCompanyAdmin
 
   if (!isApiEnabled()) return null  // правка профиля требует бэкенд
 

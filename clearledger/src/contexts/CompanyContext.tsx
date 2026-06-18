@@ -26,6 +26,8 @@ interface CompanyContextType {
   companyId: string
   companies: Company[]
   setCompanyId: (id: string) => void
+  companyRole: 'user' | 'admin'   // роль текущего пользователя в активной компании
+  isCompanyAdmin: boolean         // admin в активной компании ИЛИ суперадмин
   profile: CompanyProfile
   categories: Category[]
   customization: CompanyCustomization
@@ -128,6 +130,13 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const activeCompany: Company = company ?? PLACEHOLDER_COMPANY
   const activeProfile: CompanyProfile = profile ?? getProfile(activeCompany.profileId)
 
+  // Роль в активной компании: суперадмин → admin; иначе роль членства из /me.
+  const activeRef = user?.companies?.find((c) => c.id === companyId)
+  const companyRole: 'user' | 'admin' = user?.is_superadmin
+    ? 'admin'
+    : (activeRef?.role === 'admin' ? 'admin' : 'user')
+  const isCompanyAdmin = !!user?.is_superadmin || companyRole === 'admin'
+
   return (
     <CompanyContext.Provider
       value={{
@@ -135,6 +144,8 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         companyId: companyId || activeCompany.id,
         companies,
         setCompanyId,
+        companyRole,
+        isCompanyAdmin,
         profile: activeProfile,
         categories,
         customization: emptyCustomization(),

@@ -12,6 +12,7 @@ export interface CompanyRef {
   short_name?: string | null
   color?: string | null
   profile_id: string
+  role?: 'user' | 'admin'   // роль пользователя в этой компании
 }
 
 /** Ответ /api/auth/me — пользователь + доступные компании (мультитенантность). */

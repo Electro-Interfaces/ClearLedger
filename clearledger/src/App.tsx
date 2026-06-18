@@ -35,6 +35,7 @@ const BatchesPage = lazy(() => import('@/pages/oneC/BatchesPage').then((m) => ({
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
+const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -87,6 +88,7 @@ const router = createBrowserRouter([
     element: <Providers />,
     children: [
       { path: '/login', element: <LazyPage><LoginPage /></LazyPage> },
+      { path: '/invite/:token', element: <LazyPage><AcceptInvitePage /></LazyPage> },
       {
         element: <ProtectedRoute><MainLayout /></ProtectedRoute>,
         children: [

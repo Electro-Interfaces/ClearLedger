@@ -23,6 +23,8 @@ interface AuthContextType {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => void
+  /** Усыновить сессию по готовому access-токену (после принятия приглашения). */
+  applySession: (accessToken: string) => Promise<void>
 }
 
 // Demo-пользователь (офлайн без бэкенда): суперадмин со всеми компаниями.
@@ -67,6 +69,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me)
   }, [])
 
+  const applySession = useCallback(async (accessToken: string) => {
+    api.setToken(accessToken)
+    const me = await authService.getMe()
+    setTokenState(accessToken)
+    setUser(me)
+  }, [])
+
   const logout = useCallback(() => {
     authService.logout()
     setUser(null)
@@ -78,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, isAuthenticated: !!user, loading, login, logout }}
+      value={{ user, token, isAuthenticated: !!user, loading, login, logout, applySession }}
     >
       {children}
     </AuthContext.Provider>

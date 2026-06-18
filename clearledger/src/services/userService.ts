@@ -4,13 +4,19 @@
  */
 import { get, post, patch, del } from './apiClient'
 
+export interface MembershipRef {
+  slug: string
+  name: string
+  role: 'user' | 'admin'
+}
+
 export interface AdminUser {
   id: string
   email: string
   name: string
-  role: 'user' | 'admin'
+  role: 'user' | 'admin'   // роль в контексте запроса (компании) или глобальная
   is_superadmin: boolean
-  companies: string[]   // slug'и компаний, в которых состоит пользователь
+  companies: MembershipRef[]
 }
 
 export async function listUsers(companyId: string): Promise<AdminUser[]> {
