@@ -201,3 +201,39 @@
 2. Типизировать субконто в проводках сейчас (Фаза 4) или раньше — оно нужно дебиторке по договору.
 3. Маппинг договоров (`ReconcileMapping.kind='contract'`) — нужен ли, или хватает резолва по external_ref.
 4. Реестр типов разрезов — расширить `reconcile_catalog` или отдельный «dimensions»-каталог.
+
+---
+
+## 10. Фаза 4 — детальный план (на основе разведки кода)
+
+**Статус Фаз 0–3: ГОТОВЫ** (НСИ pull + ось↔точки + грани по разрезам, backend+UI,
+двунаправленно; обратная навигация граней). Фаза 4 — крупный эпик (отдельный заход).
+
+**Реальность из кода (что есть сейчас):**
+- Проводки: `AccountingDoc.lines.postings` несут субконто как **ПРЕДСТАВЛЕНИЕ** (текст-имя),
+  не GUID и не типизированно (`com_worker.op_fetch_postings:509` —
+  `ПРЕДСТАВЛЕНИЕ(Р.СубконтоДт1..3/СубконтоКт1..3)`).
+- Аналитика: `analytics_service._iter_postings:66` берёт только счёт Дт/Кт + сумму;
+  субконто игнорируется. Дебиторка — по `counterparty_name` из шапки (`PayablesReceivables`).
+- Эталон 1С (§2б): счета 60/62/76 → субконто **Контрагент(1)·Договор(2)·ДокРасчётов(3)**;
+  41 → Номенклатура·Партия·Склад; 62.Р → Склад.
+
+**Шаги (по нарастанию):**
+- **4.1 Типизированное субконто** (фундамент). `com_worker.op_fetch_postings`: добавить
+  GUID субконто (`Р.СубконтоДт1` как ссылка → `_val` GUID) рядом с представлением.
+  Маппинг позиции субконто по счёту (60/62/76→Контрагент/Договор/ДокРасчётов; 41→Номенкл/Партия/Склад).
+  `AccountingDoc.lines.postings[*]` нести `subconto_counterparty_ref`/`subconto_contract_ref`/
+  `subconto_settlement_doc_ref`. Резолв по `Counterparty.external_ref`/`Contract.external_ref`.
+- **4.2 Аналитика по договору.** `PayablesReceivables` группировка `+contract`; фильтр
+  `GET /analytics/payables-receivables?contract=`; дебиторка/кредиторка в разрезе договора.
+- **4.3 Разрез сверки по договору.** `reconcile_catalog`: разрез с `key=["counterparty","contract"]`;
+  договор в линиях сверки (расширить «Ведомости» key=[station,contractor] до contract).
+- **4.4 RouteEngine (Фаза 5/future).** Заполнение Дт/Кт по (doc_type, operation_type,
+  counterparty, contract, point, period) — заменить хардкод `.cfe`. GLOSSARY §RouteEngine.
+
+**Точки входа (файлы):** `services/onec/com_worker.py:509` (fetch_postings),
+`services/analytics_service.py:66` (_iter_postings), `reconcile_catalog.py` (разрезы),
+`models.py` AccountingDoc.lines (формат), `routers/analytics_router.py` (эндпоинты).
+
+**Риск 4.1:** субконто-структура счёта различается (Субконто1..3 vs СубконтоДт/Кт) —
+`com_worker` уже отмечает это (строки 526–531). Резолв через позицию по счёту, с фолбэком.
