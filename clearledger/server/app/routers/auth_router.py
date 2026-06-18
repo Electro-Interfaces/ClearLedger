@@ -117,18 +117,22 @@ async def get_me(
     Суперадмин получает все компании; обычный — только из user_companies.
     """
     if current_user.is_superadmin:
-        rows = (
+        # Суперадмин — все компании, роль 'admin' в каждой.
+        companies = (
             await db.execute(select(Company).order_by(Company.name))
         ).scalars().all()
+        briefs = [_brief(c, "admin") for c in companies]
     else:
+        # Обычный — только свои, с ролью членства в каждой.
         rows = (
             await db.execute(
-                select(Company)
+                select(Company, UserCompany.role)
                 .join(UserCompany, UserCompany.company_id == Company.id)
                 .where(UserCompany.user_id == current_user.id)
                 .order_by(Company.name)
             )
-        ).scalars().all()
+        ).all()
+        briefs = [_brief(c, role) for c, role in rows]
 
     return MeResponse(
         id=str(current_user.id),
@@ -137,13 +141,14 @@ async def get_me(
         role=current_user.role,
         is_superadmin=current_user.is_superadmin,
         default_company_id=str(current_user.company_id) if current_user.company_id else None,
-        companies=[
-            CompanyBrief(
-                id=str(c.id), slug=c.slug, name=c.name,
-                short_name=c.short_name, color=c.color, profile_id=c.profile_id,
-            )
-            for c in rows
-        ],
+        companies=briefs,
+    )
+
+
+def _brief(c, role: str) -> CompanyBrief:
+    return CompanyBrief(
+        id=str(c.id), slug=c.slug, name=c.name,
+        short_name=c.short_name, color=c.color, profile_id=c.profile_id, role=role,
     )
 
 

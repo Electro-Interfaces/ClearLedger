@@ -138,6 +138,25 @@ async def create_all() -> None:
             "SELECT id, company_id FROM users WHERE company_id IS NOT NULL "
             "ON CONFLICT DO NOTHING",
             "UPDATE users SET is_superadmin = TRUE WHERE email = 'admin@clearledger.ru'",
+            # v2.1: роль-на-компанию — роль пользователя в КОНКРЕТНОЙ компании.
+            # Backfill: текущие глобальные админы становятся админами своих компаний.
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user'",
+            "UPDATE user_companies uc SET role = 'admin' "
+            "FROM users u WHERE uc.user_id = u.id AND u.role = 'admin'",
+            # v2.2: приглашения сотрудников по email.
+            "CREATE TABLE IF NOT EXISTS invitations ("
+            "  id UUID PRIMARY KEY,"
+            "  company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,"
+            "  email VARCHAR(255) NOT NULL,"
+            "  role VARCHAR(20) NOT NULL DEFAULT 'user',"
+            "  token_hash VARCHAR(64) NOT NULL UNIQUE,"
+            "  status VARCHAR(20) NOT NULL DEFAULT 'pending',"
+            "  invited_by UUID REFERENCES users(id) ON DELETE SET NULL,"
+            "  expires_at TIMESTAMPTZ NOT NULL,"
+            "  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),"
+            "  accepted_at TIMESTAMPTZ)",
+            "CREATE INDEX IF NOT EXISTS idx_invitations_company ON invitations(company_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token_hash)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

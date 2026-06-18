@@ -23,6 +23,7 @@ from app.routers import (
     entries_router,
     export_router,
     fuel_router,
+    invitations_router,
     export_packets_router,
     intake_router,
     mappings_router,
@@ -101,6 +102,7 @@ API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(users_router.router, prefix=API_PREFIX)
+app.include_router(invitations_router.router, prefix=API_PREFIX)
 app.include_router(companies_router.router, prefix=API_PREFIX)
 app.include_router(entries_router.router, prefix=API_PREFIX)
 app.include_router(audit_router.router, prefix=API_PREFIX)

@@ -50,6 +50,7 @@ class CompanyBrief(BaseModel):
     short_name: str | None = None
     color: str | None = None
     profile_id: str
+    role: str = "user"   # роль пользователя в этой компании (user|admin); суперадмин — admin
 
 
 class MeResponse(BaseModel):
@@ -79,17 +80,55 @@ class UserAdminUpdate(BaseModel):
     role: Literal["user", "admin"] | None = None
 
 
+class CompanyMembership(BaseModel):
+    """Членство пользователя в компании с ролью в ней."""
+    slug: str
+    name: str
+    role: str
+
+
 class UserAdminResponse(BaseModel):
     id: str
     email: str
     name: str
-    role: str
+    role: str                       # роль в контексте запроса (компании) или глобальная
     is_superadmin: bool
-    companies: list[str] = []       # slug'и компаний, в которых состоит пользователь
+    companies: list[CompanyMembership] = []
 
 
 class GrantCompanyBody(BaseModel):
     company_id: str                 # slug или UUID компании для выдачи членства
+    role: Literal["user", "admin"] = "user"
+
+
+# ===== Приглашения сотрудников =====
+
+class InvitationCreate(BaseModel):
+    company_id: str
+    email: EmailStr
+    role: Literal["user", "admin"] = "user"
+
+
+class InvitationResponse(BaseModel):
+    id: str
+    email: str
+    role: str
+    status: str
+    created_at: datetime
+    expires_at: datetime
+
+
+class AcceptPreview(BaseModel):
+    """Данные для страницы принятия приглашения (публичные)."""
+    email: str
+    company_name: str
+    role: str
+    user_exists: bool
+
+
+class AcceptInvite(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    password: str | None = Field(None, min_length=6)
 
 
 # ===== Company =====

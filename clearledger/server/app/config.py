@@ -35,6 +35,21 @@ class Settings(BaseSettings):
     ocr_max_file_size: int = 10 * 1024 * 1024  # 10 МБ
     ocr_timeout: int = 30  # секунд
 
+    # SMTP — отправка писем (приглашения сотрудников). Mailcow на services-01.
+    # На проде SMTP_HOST=10.10.70.51 (внутренний IP хоста), 587 STARTTLS,
+    # SMTP_SERVERNAME=mail.dataworker.ru для проверки TLS-сертификата.
+    # Пусто → dev-режим: ссылка приглашения печатается в лог.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "TradeLedger <ledger@dataworker.ru>"
+    smtp_servername: str = ""
+    smtp_secure: bool = False  # True для 465 SMTPS; False для 587 STARTTLS
+
+    # Публичный URL приложения для ссылок в письмах (с base-path).
+    app_public_url: str = "https://ledger.dataworker.ru/ClearLedger"
+
     # Сверки — внешние API (прокси на стороне сервера, секреты не уходят на фронт)
     tradecorp_api_url: str = ""
     tradecorp_login: str = ""

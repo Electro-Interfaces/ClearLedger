@@ -205,7 +205,7 @@ async def test_admin_global_users_and_memberships(client: AsyncClient):
     g = await client.post(f"/api/users/{uid}/companies", headers=_h(admin),
                           json={"company_id": "gig"})
     assert g.status_code == 200
-    assert set(g.json()["companies"]) == {"npk", "gig"}
+    assert {c["slug"] for c in g.json()["companies"]} == {"npk", "gig"}
 
     # multi теперь видит обе компании в /me.
     multi = await _login(client, "multi@test.ru")

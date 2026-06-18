@@ -16,6 +16,7 @@ from app.database import get_db
 from app.models import Company, User, UserCompany
 from app.utils import resolve_company_id
 from app.schemas import (
+    CompanyMembership,
     GrantCompanyBody,
     UserAdminResponse,
     UserAdminUpdate,
@@ -25,60 +26,67 @@ from app.schemas import (
 router = APIRouter(prefix="/users", tags=["Пользователи"])
 
 
+async def _membership_role(user_id: uuid.UUID, cid: uuid.UUID, db: AsyncSession) -> str | None:
+    """Роль пользователя в компании (user|admin) или None, если не член."""
+    res = await db.execute(
+        select(UserCompany.role).where(
+            UserCompany.user_id == user_id, UserCompany.company_id == cid
+        )
+    )
+    return res.scalar_one_or_none()
+
+
 async def require_company_admin(
     company_ref: str, current_user: User, db: AsyncSession
 ) -> uuid.UUID:
-    """Резолвит компанию и проверяет, что текущий пользователь — её админ
-    (суперадмин или член с ролью 'admin'). Возвращает UUID, иначе 403."""
+    """Резолвит компанию и проверяет, что текущий пользователь — её админ:
+    суперадмин ИЛИ член с ролью 'admin' В ЭТОЙ компании (роль-на-компанию)."""
     cid = await resolve_company_id(company_ref, db)
     if current_user.is_superadmin:
         return cid
-    if current_user.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Требуются права администратора")
-    member = await db.execute(
-        select(UserCompany.company_id).where(
-            UserCompany.user_id == current_user.id,
-            UserCompany.company_id == cid,
+    if await _membership_role(current_user.id, cid, db) != "admin":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Требуются права администратора компании"
         )
-    )
-    if member.scalar_one_or_none() is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к компании")
     return cid
 
 
 async def _is_member(user_id: uuid.UUID, cid: uuid.UUID, db: AsyncSession) -> bool:
-    res = await db.execute(
-        select(UserCompany.company_id).where(
-            UserCompany.user_id == user_id, UserCompany.company_id == cid
-        )
-    )
-    return res.scalar_one_or_none() is not None
+    return await _membership_role(user_id, cid, db) is not None
 
 
 async def _is_company_admin(user: User, cid: uuid.UUID, db: AsyncSession) -> bool:
     """Может ли user администрировать компанию cid (суперадмин или admin-член)."""
     if user.is_superadmin:
         return True
-    return user.role == "admin" and await _is_member(user.id, cid, db)
+    return await _membership_role(user.id, cid, db) == "admin"
 
 
-async def _company_slugs(user_id: uuid.UUID, db: AsyncSession) -> list[str]:
+async def _memberships(user_id: uuid.UUID, db: AsyncSession) -> list[CompanyMembership]:
     rows = (
         await db.execute(
-            select(Company.slug)
+            select(Company.slug, Company.name, UserCompany.role)
             .join(UserCompany, UserCompany.company_id == Company.id)
             .where(UserCompany.user_id == user_id)
             .order_by(Company.slug)
         )
-    ).scalars().all()
-    return list(rows)
+    ).all()
+    return [CompanyMembership(slug=s, name=n, role=r) for s, n, r in rows]
 
 
-async def _resp(u: User, db: AsyncSession) -> UserAdminResponse:
+async def _resp(
+    u: User, db: AsyncSession, scope_cid: uuid.UUID | None = None
+) -> UserAdminResponse:
+    memberships = await _memberships(u.id, db)
+    # role: в контексте компании — роль в ней; иначе глобальная (легаси-дефолт).
+    role = u.role
+    if scope_cid is not None:
+        m = await _membership_role(u.id, scope_cid, db)
+        role = m or u.role
     return UserAdminResponse(
         id=str(u.id), email=u.email, name=u.name,
-        role=u.role, is_superadmin=u.is_superadmin,
-        companies=await _company_slugs(u.id, db),
+        role=role, is_superadmin=u.is_superadmin,
+        companies=memberships,
     )
 
 
@@ -100,10 +108,10 @@ async def list_users(
                 .order_by(User.email)
             )
         ).scalars().all()
-    else:
-        if not current_user.is_superadmin:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Только суперадмин видит всех пользователей")
-        rows = (await db.execute(select(User).order_by(User.email))).scalars().all()
+        return [await _resp(u, db, scope_cid=cid) for u in rows]
+    if not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Только суперадмин видит всех пользователей")
+    rows = (await db.execute(select(User).order_by(User.email))).scalars().all()
     return [await _resp(u, db) for u in rows]
 
 
@@ -120,25 +128,25 @@ async def create_user(
         await db.execute(select(User).where(User.email == payload.email))
     ).scalar_one_or_none()
     if existing is not None:
-        # Пользователь уже есть — просто выдаём членство в этой компании.
+        # Пользователь уже есть — выдаём членство в этой компании с ролью.
         if not await _is_member(existing.id, cid, db):
-            db.add(UserCompany(user_id=existing.id, company_id=cid))
+            db.add(UserCompany(user_id=existing.id, company_id=cid, role=payload.role))
             await db.flush()
-        return await _resp(existing, db)
+        return await _resp(existing, db, scope_cid=cid)
 
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
         name=payload.name,
-        role=payload.role,
+        role=payload.role,            # глобальная роль — легаси-дефолт
         company_id=cid,
         is_superadmin=False,
     )
     db.add(user)
     await db.flush()
-    db.add(UserCompany(user_id=user.id, company_id=cid))
+    db.add(UserCompany(user_id=user.id, company_id=cid, role=payload.role))
     await db.flush()
-    return await _resp(user, db)
+    return await _resp(user, db, scope_cid=cid)
 
 
 @router.patch("/{user_id}", response_model=UserAdminResponse)
@@ -171,9 +179,15 @@ async def update_user(
     if payload.name is not None:
         target.name = payload.name
     if payload.role is not None:
-        target.role = payload.role
+        # Роль-на-компанию: меняем роль членства в указанной компании.
+        if not payload.company_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите company_id для смены роли")
+        membership = await db.get(UserCompany, (uid, cid))
+        if membership is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не в компании")
+        membership.role = payload.role
     await db.flush()
-    return await _resp(target, db)
+    return await _resp(target, db, scope_cid=cid if payload.company_id else None)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -230,9 +244,9 @@ async def grant_company(
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
     if not await _is_member(uid, cid, db):
-        db.add(UserCompany(user_id=uid, company_id=cid))
+        db.add(UserCompany(user_id=uid, company_id=cid, role=payload.role))
         await db.flush()
-    return await _resp(target, db)
+    return await _resp(target, db, scope_cid=cid)
 
 
 @router.delete("/{user_id}/companies/{company_id}", status_code=status.HTTP_204_NO_CONTENT)

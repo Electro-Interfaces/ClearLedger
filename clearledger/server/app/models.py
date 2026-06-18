@@ -108,8 +108,41 @@ class UserCompany(Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    # Роль пользователя В ЭТОЙ компании: user | admin (роль-на-компанию).
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# Invitation — приглашение сотрудника в компанию по email
+# ---------------------------------------------------------------------------
+class Invitation(Base):
+    __tablename__ = "invitations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    # SHA256 от сырого токена (сырой токен только в письме, в БД не хранится).
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # pending | accepted | revoked
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

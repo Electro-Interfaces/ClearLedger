@@ -29,6 +29,19 @@ async def _is_member(user: User, company_id: uuid.UUID, db: AsyncSession) -> boo
     return res.scalar_one_or_none() is not None
 
 
+async def _is_company_admin(user: User, company_id: uuid.UUID, db: AsyncSession) -> bool:
+    """Суперадмин или член с ролью 'admin' в этой компании (роль-на-компанию)."""
+    if user.is_superadmin:
+        return True
+    res = await db.execute(
+        select(UserCompany.role).where(
+            UserCompany.user_id == user.id,
+            UserCompany.company_id == company_id,
+        )
+    )
+    return res.scalar_one_or_none() == "admin"
+
+
 def _require_superadmin(user: User) -> None:
     """Управление компаниями (create/update/delete) — только суперадмин."""
     if not user.is_superadmin:
@@ -155,14 +168,13 @@ async def update_company(
     current_user: User = Depends(get_current_user),
 ):
     """Частичное обновление компании (профиль организации).
-    Разрешено суперадмину и админу-члену этой компании."""
+    Разрешено суперадмину и админу-члену этой компании (роль-на-компанию)."""
     company = await _get_company_or_404(company_id, db)
-    if not current_user.is_superadmin:
-        if current_user.role != "admin" or not await _is_member(current_user, company.id, db):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Требуются права администратора компании",
-            )
+    if not await _is_company_admin(current_user, company.id, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Требуются права администратора компании",
+        )
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
