@@ -43,6 +43,11 @@ BUILTIN_LOCATION_TYPES: list[dict] = [
             {"key": "maxPowerKw", "label": "Макс. мощность", "type": "number", "unit": "кВт"},
             {"key": "protocolOcpp", "label": "Протокол OCPP", "type": "select",
              "options": ["Нет", "OCPP 1.6", "OCPP 2.0.1"]},
+            # Связка с HubEx (asset_id) — ключ будущего HubEx-адаптера.
+            {"key": "hubexAssetId", "label": "HubEx asset_id", "type": "number"},
+            {"key": "hubexName", "label": "HubEx название", "type": "text"},
+            {"key": "linkStatus", "label": "Статус связки HubEx", "type": "select",
+             "options": ["ok", "review", "conflict", "test", "no_match"]},
         ],
     },
     {
