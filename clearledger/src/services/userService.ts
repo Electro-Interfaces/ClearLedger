@@ -10,10 +10,26 @@ export interface AdminUser {
   name: string
   role: 'user' | 'admin'
   is_superadmin: boolean
+  companies: string[]   // slug'и компаний, в которых состоит пользователь
 }
 
 export async function listUsers(companyId: string): Promise<AdminUser[]> {
   return get<AdminUser[]>('/api/users', { company_id: companyId })
+}
+
+/** Все пользователи системы (только суперадмин) — для админ-раздела. */
+export async function listAllUsers(): Promise<AdminUser[]> {
+  return get<AdminUser[]>('/api/users')
+}
+
+/** Выдать пользователю членство в компании. */
+export async function grantCompany(userId: string, companyId: string): Promise<AdminUser> {
+  return post<AdminUser>(`/api/users/${userId}/companies`, { company_id: companyId })
+}
+
+/** Отозвать членство пользователя в компании. */
+export async function revokeCompany(userId: string, companyId: string): Promise<void> {
+  await del(`/api/users/${userId}/companies/${encodeURIComponent(companyId)}`)
 }
 
 export async function createUser(data: {
@@ -64,4 +80,21 @@ export async function updateCompany(
   data: { name?: string; short_name?: string; profile_id?: string; color?: string; inn?: string },
 ): Promise<OrgProfile> {
   return patch<OrgProfile>(`/api/companies/${id}`, data)
+}
+
+/** Все компании (суперадмину — все; иначе свои). */
+export async function listCompanies(): Promise<OrgProfile[]> {
+  return get<OrgProfile[]>('/api/companies')
+}
+
+/** Создать (подключить) новую компанию — только суперадмин. */
+export async function createCompany(data: {
+  name: string
+  slug: string
+  short_name?: string
+  profile_id: string
+  color?: string
+  inn?: string
+}): Promise<OrgProfile> {
+  return post<OrgProfile>('/api/companies', data)
 }

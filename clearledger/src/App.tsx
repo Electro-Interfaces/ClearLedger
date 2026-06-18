@@ -21,6 +21,7 @@ const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ defa
 const CatalogPage = lazy(() => import('@/pages/CatalogPage').then((m) => ({ default: m.CatalogPage })))
 const LocationsPage = lazy(() => import('@/pages/LocationsPage').then((m) => ({ default: m.LocationsPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const AdminPage = lazy(() => import('@/pages/AdminPage').then((m) => ({ default: m.AdminPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
 const PeriodsPage = lazy(() => import('@/pages/oneC/PeriodsPage').then((m) => ({ default: m.PeriodsPage })))
@@ -109,6 +110,7 @@ const router = createBrowserRouter([
           { path: '/forecast', element: <LazyPage><MonthCloseForecastPage /></LazyPage> },
           { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
+          { path: '/admin', element: <LazyPage><AdminPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
         ],
       },

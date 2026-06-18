@@ -17,10 +17,11 @@ import {
   Upload, FileText, Radio, Database, ChevronDown,
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
   Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
-  Library,
+  Library, ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useAuth } from '@/contexts/AuthContext'
 
 const mainItems = [
   { to: '/', icon: LayoutDashboard, label: 'Рабочий стол', end: true },
@@ -88,6 +89,8 @@ export function AppSidebar() {
   const collapsed = state === 'collapsed'
   const [intakeOpen, setIntakeOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(true)
+  const { user } = useAuth()
+  const canAdmin = !!user && (user.is_superadmin || user.role === 'admin')
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border/40 pt-[var(--header-height)] pb-12">
@@ -184,6 +187,23 @@ export function AppSidebar() {
             ))}
           </SidebarMenu>
         </SidebarGroup>
+
+        {/* Администрирование — только для админа/суперадмина */}
+        {canAdmin && (
+          <>
+            <SidebarSeparator className="my-2" />
+            <SidebarGroup className="py-0">
+              {!collapsed && (
+                <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
+                  Администрирование
+                </p>
+              )}
+              <SidebarMenu>
+                <NavItem to="/admin" icon={ShieldCheck} label="Администрирование" collapsed={collapsed} />
+              </SidebarMenu>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
 
       <SidebarFooter />

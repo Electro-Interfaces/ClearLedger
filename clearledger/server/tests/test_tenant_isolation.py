@@ -183,3 +183,40 @@ async def test_user_management(client: AsyncClient):
     # После отзыва единственного членства пользователь удалён → логин не проходит.
     bad = await client.post("/api/auth/login", json={"email": "emp@test.ru", "password": "secret123"})
     assert bad.status_code == 401
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_admin_global_users_and_memberships(client: AsyncClient):
+    admin = await _admin_token(client)
+
+    # Суперадмин видит ВСЕХ пользователей без company_id; обычный — 403.
+    all_users = await client.get("/api/users", headers=_h(admin))
+    assert all_users.status_code == 200
+    assert any(u["email"] == "admin@clearledger.ru" for u in all_users.json())
+
+    # Создаём пользователя в npk и выдаём членство в gig (мультикомпанийный доступ).
+    r = await client.post("/api/users", headers=_h(admin), json={
+        "company_id": "npk", "email": "multi@test.ru", "name": "Multi",
+        "password": "secret123", "role": "user",
+    })
+    assert r.status_code in (200, 201), r.text
+    uid = r.json()["id"]
+
+    g = await client.post(f"/api/users/{uid}/companies", headers=_h(admin),
+                          json={"company_id": "gig"})
+    assert g.status_code == 200
+    assert set(g.json()["companies"]) == {"npk", "gig"}
+
+    # multi теперь видит обе компании в /me.
+    multi = await _login(client, "multi@test.ru")
+    me = (await client.get("/api/auth/me", headers=_h(multi))).json()
+    assert {c["slug"] for c in me["companies"]} == {"npk", "gig"}
+
+    # Отзыв членства в gig (без удаления пользователя — он ещё в npk).
+    rv = await client.delete(f"/api/users/{uid}/companies/gig", headers=_h(admin))
+    assert rv.status_code == 204
+    me2 = (await client.get("/api/auth/me", headers=_h(multi))).json()
+    assert {c["slug"] for c in me2["companies"]} == {"npk"}
+
+    # Обычный пользователь не видит глобальный список.
+    assert (await client.get("/api/users", headers=_h(multi))).status_code == 403

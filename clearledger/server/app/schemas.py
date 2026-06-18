@@ -74,7 +74,7 @@ class UserCreate(BaseModel):
 
 
 class UserAdminUpdate(BaseModel):
-    company_id: str            # контекст компании, в которой админ управляет
+    company_id: str | None = None   # контекст компании (для админа компании); суперадмин может без него
     name: str | None = None
     role: Literal["user", "admin"] | None = None
 
@@ -85,6 +85,11 @@ class UserAdminResponse(BaseModel):
     name: str
     role: str
     is_superadmin: bool
+    companies: list[str] = []       # slug'и компаний, в которых состоит пользователь
+
+
+class GrantCompanyBody(BaseModel):
+    company_id: str                 # slug или UUID компании для выдачи членства
 
 
 # ===== Company =====
