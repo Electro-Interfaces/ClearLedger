@@ -495,6 +495,17 @@ export async function setContractDimension(
   )
 }
 
+/** Обратная навигация: договоры, ограниченные данным элементом разреза. */
+export async function getDimensionContracts(
+  companyId: string, dimType: string, dimRef: string,
+): Promise<Contract[]> {
+  if (!isApiEnabled()) return []
+  return get<Contract[]>(
+    `/api/references/dimensions/${encodeURIComponent(dimType)}/contracts`,
+    { ref: dimRef, company_id: companyId },
+  )
+}
+
 export async function upsertContracts(companyId: string, items: Contract[]): Promise<number> {
   const existing = await getContracts(companyId)
   const byId = new Map(existing.map((c) => [c.id, c]))

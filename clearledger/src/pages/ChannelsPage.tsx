@@ -8,6 +8,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { DimensionContractsPopover } from '@/components/reference/DimensionContractsPopover'
 import { getChannels, loadChannels, deleteChannel } from '@/services/channelService'
 import { getSources, loadSources } from '@/services/sourceService'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -69,6 +70,9 @@ function ChannelListItem({ channel, onDelete }: { channel: Channel; onDelete: ()
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <span onClick={(e) => e.stopPropagation()}>
+              <DimensionContractsPopover dimType="channel" dimRef={channel.id} />
+            </span>
             <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
               onClick={(e) => { e.stopPropagation(); onDelete() }}>
               <Trash2 className="h-3.5 w-3.5" />

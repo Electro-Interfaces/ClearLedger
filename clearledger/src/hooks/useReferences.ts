@@ -232,6 +232,16 @@ export function useSetContractDimension() {
   })
 }
 
+/** Обратная навигация: договоры по элементу разреза (грань→договоры). */
+export function useDimensionContracts(dimType: string, dimRef: string | null) {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'dimension', dimType, dimRef, 'contracts'],
+    queryFn: () => ref.getDimensionContracts(companyId, dimType, dimRef!),
+    enabled: !!dimRef,
+  })
+}
+
 // ============================================================
 // Warehouses
 // ============================================================

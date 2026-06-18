@@ -15,6 +15,7 @@ import { CounterpartyTable } from '@/components/reference/CounterpartyTable'
 import { ImportDialog } from '@/components/reference/ImportDialog'
 import { AccountingDocsTab } from '@/components/reference/AccountingDocsTab'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
+import { DimensionContractsPopover } from '@/components/reference/DimensionContractsPopover'
 import {
   useCounterparties, useOrganizations, useNomenclature, useContracts,
   useWarehouses, useBankAccounts,
@@ -238,13 +239,14 @@ function NomenclatureTab() {
               <TableHead>Наименование</TableHead>
               <TableHead className="w-[80px]">Ед. изм.</TableHead>
               <TableHead className="w-[80px]">НДС</TableHead>
+              <TableHead className="w-[120px]">Договоры</TableHead>
               <TableHead className="w-[50px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground h-24">
+                <TableCell colSpan={6} className="text-center text-muted-foreground h-24">
                   {data.length === 0 ? 'Справочник пуст' : 'Ничего не найдено'}
                 </TableCell>
               </TableRow>
@@ -255,6 +257,9 @@ function NomenclatureTab() {
                 <TableCell className="font-medium">{n.name}</TableCell>
                 <TableCell>{n.unitLabel}</TableCell>
                 <TableCell>{n.vatRate}%</TableCell>
+                <TableCell>
+                  <DimensionContractsPopover dimType="nomenclature" dimRef={n.id} />
+                </TableCell>
                 <TableCell>
                   <Button variant="ghost" size="icon" className="size-7" onClick={() => deleteMut.mutate(n.id)}>
                     <Trash2 className="size-3.5" />
