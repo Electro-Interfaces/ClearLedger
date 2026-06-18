@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as ref from '@/services/referenceService'
-import type { Counterparty, Organization, Nomenclature, Contract } from '@/types'
+import type { Counterparty, Organization, Nomenclature, Contract, ContractScopeType } from '@/types'
 
 // ---- Keys ----
 
@@ -164,6 +164,52 @@ export function useDeleteContract() {
   return useMutation({
     mutationFn: (id: string) => ref.deleteContract(companyId, id),
     onSuccess: () => invalidateAll(qc, companyId),
+  })
+}
+
+// ============================================================
+// Ось договор↔точки (Фаза 2)
+// ============================================================
+
+/** Установить охват договора (company/locations/unassigned + точки). */
+export function useSetContractScope() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (v: { contractId: string; scopeType: ContractScopeType; locationIds?: string[] }) =>
+      ref.setContractScope(v.contractId, v.scopeType, v.locationIds ?? []),
+    onSuccess: (_d, v) => {
+      invalidateAll(qc, companyId)
+      qc.invalidateQueries({ queryKey: ['axis', 'contract', v.contractId, 'locations'] })
+      qc.invalidateQueries({ queryKey: ['axis'] })  // карточки контрагента/точки
+    },
+  })
+}
+
+/** Точки конкретного договора. */
+export function useContractLocations(contractId: string | null) {
+  return useQuery({
+    queryKey: ['axis', 'contract', contractId, 'locations'],
+    queryFn: () => ref.getContractLocations(contractId!),
+    enabled: !!contractId,
+  })
+}
+
+/** Где работает контрагент (агрегат). */
+export function useCounterpartyLocations(counterpartyId: string | null) {
+  return useQuery({
+    queryKey: ['axis', 'counterparty', counterpartyId, 'locations'],
+    queryFn: () => ref.getCounterpartyLocations(counterpartyId!),
+    enabled: !!counterpartyId,
+  })
+}
+
+/** Договоры точки. */
+export function useLocationContracts(locationId: string | null) {
+  return useQuery({
+    queryKey: ['axis', 'location', locationId, 'contracts'],
+    queryFn: () => ref.getLocationContracts(locationId!),
+    enabled: !!locationId,
   })
 }
 

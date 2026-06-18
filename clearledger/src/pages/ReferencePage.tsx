@@ -10,10 +10,11 @@ import { Input } from '@/components/ui/input'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Upload, Users, Building2, Package, FileSignature, Trash2, Search, Warehouse as WarehouseIcon, Landmark, FileText } from 'lucide-react'
+import { Upload, Users, Building2, Package, FileSignature, Trash2, Search, Warehouse as WarehouseIcon, Landmark, FileText, MapPin, AlertTriangle } from 'lucide-react'
 import { CounterpartyTable } from '@/components/reference/CounterpartyTable'
 import { ImportDialog } from '@/components/reference/ImportDialog'
 import { AccountingDocsTab } from '@/components/reference/AccountingDocsTab'
+import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
 import {
   useCounterparties, useOrganizations, useNomenclature, useContracts,
   useWarehouses, useBankAccounts,
@@ -134,6 +135,7 @@ function CounterpartiesTab() {
     <CounterpartyTable
       data={data}
       onDelete={(id) => deleteMut.mutate(id)}
+      showScope
     />
   )
 }
@@ -276,20 +278,36 @@ function ContractsTab() {
   const { data: organizations = [] } = useOrganizations()
   const deleteMut = useDeleteContract()
   const [search, setSearch] = useState('')
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false)
 
-  const cpMap = useMemo(() => new Map(counterparties.map((c) => [c.id, c.name])), [counterparties])
+  // Договоры из 1С хранят counterpartyId = GUID (externalRef); ручные — наш id.
+  const cpMap = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of counterparties) {
+      m.set(c.id, c.name)
+      if (c.externalRef) m.set(c.externalRef, c.name)
+    }
+    return m
+  }, [counterparties])
   const orgMap = useMemo(() => new Map(organizations.map((o) => [o.id, o.name])), [organizations])
 
+  const isUnassigned = (c: typeof data[number]) => !c.scopeType || c.scopeType === 'unassigned'
+  const unassignedCount = useMemo(() => data.filter(isUnassigned).length, [data])
+
   const filtered = useMemo(() => {
-    if (!search) return data
-    const q = search.toLowerCase()
-    return data.filter(
-      (c) =>
-        c.number.toLowerCase().includes(q) ||
-        c.type.toLowerCase().includes(q) ||
-        (cpMap.get(c.counterpartyId) || '').toLowerCase().includes(q),
-    )
-  }, [data, search, cpMap])
+    let rows = data
+    if (onlyUnassigned) rows = rows.filter(isUnassigned)
+    if (search) {
+      const q = search.toLowerCase()
+      rows = rows.filter(
+        (c) =>
+          c.number.toLowerCase().includes(q) ||
+          c.type.toLowerCase().includes(q) ||
+          (cpMap.get(c.counterpartyId) || '').toLowerCase().includes(q),
+      )
+    }
+    return rows
+  }, [data, search, cpMap, onlyUnassigned])
 
   if (isLoading) return <TableSkeleton />
 
@@ -299,6 +317,24 @@ function ContractsTab() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
         <Input placeholder="Поиск..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
       </div>
+
+      {unassignedCount > 0 && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-amber-400/40 bg-amber-50/60 dark:bg-amber-950/20 px-3 py-2">
+          <div className="flex items-center gap-2 text-sm">
+            <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>Договоров без охвата: <b>{unassignedCount}</b> — задайте, к каким точкам они относятся (колонка «Охват»).</span>
+          </div>
+          <Button
+            variant={onlyUnassigned ? 'secondary' : 'outline'}
+            size="sm"
+            className="shrink-0"
+            onClick={() => setOnlyUnassigned((v) => !v)}
+          >
+            {onlyUnassigned ? 'Показать все' : 'Только нераспределённые'}
+          </Button>
+        </div>
+      )}
+
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -309,13 +345,14 @@ function ContractsTab() {
               <TableHead>Организация</TableHead>
               <TableHead className="w-[100px]">Тип</TableHead>
               <TableHead className="w-[120px]">Лимит</TableHead>
+              <TableHead className="w-[160px]">Охват</TableHead>
               <TableHead className="w-[50px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground h-24">
+                <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
                   {data.length === 0 ? 'Справочник пуст' : 'Ничего не найдено'}
                 </TableCell>
               </TableRow>
@@ -331,6 +368,19 @@ function ContractsTab() {
                 </TableCell>
                 <TableCell className="font-mono text-sm">
                   {c.amountLimit != null ? c.amountLimit.toLocaleString('ru-RU') : '—'}
+                </TableCell>
+                <TableCell>
+                  <ContractScopeDialog contract={c}>
+                    <Button variant="ghost" size="sm" className="h-7 -ml-2 gap-1.5 font-normal" title="Изменить охват">
+                      <MapPin className="size-3.5 text-muted-foreground shrink-0" />
+                      <Badge
+                        variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
+                        className={c.scopeType === 'unassigned' || !c.scopeType ? 'text-muted-foreground' : ''}
+                      >
+                        {ContractScopeBadgeLabel(c.scopeType)}
+                      </Badge>
+                    </Button>
+                  </ContractScopeDialog>
                 </TableCell>
                 <TableCell>
                   <Button variant="ghost" size="icon" className="size-7" onClick={() => deleteMut.mutate(c.id)}>

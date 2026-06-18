@@ -333,8 +333,12 @@ export interface Counterparty {
   kpp?: string
   name: string
   shortName?: string
+  fullName?: string
+  okpo?: string
   type: CounterpartyType
+  kind?: string                // external | retail | internal
   aliases: string[]
+  externalRef?: string         // Ref_Key 1С — связь с counterpartyId договоров
   createdAt: string
   updatedAt: string
 }
@@ -364,6 +368,9 @@ export interface Nomenclature {
   updatedAt: string
 }
 
+/** Охват договора по торговым точкам (наш слой, не из 1С). */
+export type ContractScopeType = 'company' | 'locations' | 'unassigned'
+
 export interface Contract {
   id: string
   companyId: string
@@ -373,8 +380,57 @@ export interface Contract {
   organizationId: string
   type: string        // "Поставка", "Услуги", "Аренда" и т.д.
   amountLimit?: number
+  // Универсальный pull из 1С (Фаза 1)
+  kind?: string             // ВидДоговора: «С поставщиком»/«С покупателем»/…
+  currency?: string
+  validUntil?: string
+  isClosed?: boolean
+  externalRef?: string
+  // Ось договор↔точки (Фаза 2)
+  scopeType?: ContractScopeType
   createdAt: string
   updatedAt: string
+}
+
+/** Краткая карточка точки (ответы оси). */
+export interface LocationBrief {
+  id: string
+  code: string
+  name: string
+  type: string
+}
+
+/** Краткая карточка контрагента (ответы оси). */
+export interface CounterpartyBrief {
+  externalRef?: string
+  name: string
+  inn?: string
+}
+
+/** «Где работает контрагент» — агрегат по его договорам. */
+export interface CounterpartyLocations {
+  scope: 'company' | 'locations' | 'none'
+  locations: LocationBrief[]
+  contractsCount: number
+  unassignedCount: number
+}
+
+/** Договор в карточке точки. */
+export interface LocationContractBrief {
+  id: string
+  number: string
+  date: string
+  kind?: string
+  scopeType: ContractScopeType
+  companyWide: boolean
+  counterpartyId: string
+  counterpartyName?: string
+  counterpartyInn?: string
+}
+
+export interface LocationContracts {
+  contracts: LocationContractBrief[]
+  counterparties: CounterpartyBrief[]
 }
 
 // ---- Учётные документы 1С (AccountingDoc) ----

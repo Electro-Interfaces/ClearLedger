@@ -10,11 +10,14 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Trash2, Search } from 'lucide-react'
+import { CounterpartyLocationsPopover } from './CounterpartyLocationsPopover'
 import type { Counterparty } from '@/types'
 
 interface CounterpartyTableProps {
   data: Counterparty[]
   onDelete?: (id: string) => void
+  /** Показать колонку «Где работаем» (ось договор↔точки, требует backend). */
+  showScope?: boolean
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -23,7 +26,7 @@ const TYPE_COLORS: Record<string, string> = {
   'ФЛ': 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200',
 }
 
-export function CounterpartyTable({ data, onDelete }: CounterpartyTableProps) {
+export function CounterpartyTable({ data, onDelete, showScope }: CounterpartyTableProps) {
   const [search, setSearch] = useState('')
 
   const filtered = useMemo(() => {
@@ -59,13 +62,14 @@ export function CounterpartyTable({ data, onDelete }: CounterpartyTableProps) {
               <TableHead className="w-[100px]">КПП</TableHead>
               <TableHead className="w-[60px]">Тип</TableHead>
               <TableHead>Алиасы</TableHead>
+              {showScope && <TableHead className="w-[140px]">Где работаем</TableHead>}
               {onDelete && <TableHead className="w-[50px]" />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={onDelete ? 6 : 5} className="text-center text-muted-foreground h-24">
+                <TableCell colSpan={5 + (showScope ? 1 : 0) + (onDelete ? 1 : 0)} className="text-center text-muted-foreground h-24">
                   {data.length === 0 ? 'Справочник пуст. Импортируйте данные из 1С.' : 'Ничего не найдено'}
                 </TableCell>
               </TableRow>
@@ -99,6 +103,11 @@ export function CounterpartyTable({ data, onDelete }: CounterpartyTableProps) {
                     )}
                   </div>
                 </TableCell>
+                {showScope && (
+                  <TableCell>
+                    <CounterpartyLocationsPopover counterpartyId={cp.id} />
+                  </TableCell>
+                )}
                 {onDelete && (
                   <TableCell>
                     <Button

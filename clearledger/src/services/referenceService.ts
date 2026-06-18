@@ -4,8 +4,12 @@
  * Dual-mode: localStorage (v0.2) / API (production).
  */
 
-import type { Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount, CounterpartyBalance } from '@/types'
-import { isApiEnabled, get, post, patch, del } from './apiClient'
+import type {
+  Counterparty, Organization, Nomenclature, Contract, Warehouse, BankAccount,
+  CounterpartyBalance, ContractScopeType, LocationBrief, CounterpartyLocations,
+  LocationContracts,
+} from '@/types'
+import { isApiEnabled, get, post, patch, put, del } from './apiClient'
 import {
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
   warehousesKey, bankAccountsKey, balancesKey,
@@ -449,6 +453,31 @@ export async function deleteContract(companyId: string, id: string): Promise<boo
   if (filtered.length === list.length) return false
   await saveList(contractsKey(companyId), filtered)
   return true
+}
+
+// ---- Ось договор↔торговые точки (Фаза 2; требует backend) ----
+
+/** Установить охват договора: company | locations (+ набор точек) | unassigned. */
+export async function setContractScope(
+  contractId: string, scopeType: ContractScopeType, locationIds: string[] = [],
+): Promise<Contract> {
+  return put<Contract>(`/api/references/contracts/${contractId}/scope`, { scopeType, locationIds })
+}
+
+/** Точки конкретного договора (для scope=locations). */
+export async function getContractLocations(contractId: string): Promise<LocationBrief[]> {
+  if (!isApiEnabled()) return []
+  return get<LocationBrief[]>(`/api/references/contracts/${contractId}/locations`)
+}
+
+/** Где работает контрагент — агрегат по его договорам. */
+export async function getCounterpartyLocations(counterpartyId: string): Promise<CounterpartyLocations> {
+  return get<CounterpartyLocations>(`/api/references/counterparties/${counterpartyId}/locations`)
+}
+
+/** Договоры точки: адресные + общекомпанейские. */
+export async function getLocationContracts(locationId: string): Promise<LocationContracts> {
+  return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
 }
 
 export async function upsertContracts(companyId: string, items: Contract[]): Promise<number> {

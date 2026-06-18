@@ -39,6 +39,7 @@ import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsRenderer } from '@/components/manual/MetadataFieldsRenderer'
 import { LocationTypesManager } from '@/components/locationTypes/LocationTypesManager'
 import { LocationsTable } from '@/components/locations/LocationsTable'
+import { LocationContractsPopover } from '@/components/reference/LocationContractsPopover'
 import { stsGetPoints, type StsPoint } from '@/services/fuel/stsApiClient'
 import { getSettings } from '@/services/settingsService'
 import { mstoGetServicePoints } from '@/services/msto/mstoApiClient'
@@ -120,6 +121,9 @@ function LocationCard({
                 {location.description}
               </div>
             )}
+            <div className="mt-1.5 -ml-2">
+              <LocationContractsPopover locationId={location.id} />
+            </div>
           </div>
           <div className="flex gap-1 shrink-0">
             <LocationEditDialog location={location} onSaved={onChange}>
