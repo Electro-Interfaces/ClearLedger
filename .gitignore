@@ -5,6 +5,10 @@ node_modules/
 dist/
 dist-ssr/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Logs
 logs/
 *.log
