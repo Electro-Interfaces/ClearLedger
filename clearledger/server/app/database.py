@@ -67,8 +67,8 @@ async def create_all() -> None:
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS discrepancy_details JSONB",
             "CREATE INDEX IF NOT EXISTS idx_accdoc_period_status ON accounting_docs(company_id, period_status)",
             "CREATE INDEX IF NOT EXISTS idx_accdoc_discrepancy_status ON accounting_docs(company_id, discrepancy_status)",
-            # v0.9: уникальные маппинги source_key → target_ref в рамках (company_id, kind)
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_reconcile_mappings ON reconcile_mappings(company_id, kind, source_key)",
+            # v0.9: индекс по target (обратный поиск). Уникальность маппингов —
+            # частичные индексы в v1.9 (с учётом channel_id).
             "CREATE INDEX IF NOT EXISTS idx_reconcile_mappings_target ON reconcile_mappings(company_id, kind, target_ref)",
             # v1.0: layer + derived_from_entry_id для DataEntry — 4-слойная архитектура §0.
             "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS layer VARCHAR(10) NOT NULL DEFAULT 'raw'",
@@ -113,6 +113,14 @@ async def create_all() -> None:
             # настройка/оптимизация маппинга на уровне канала.
             "ALTER TABLE reconcile_mappings ADD COLUMN IF NOT EXISTS channel_id UUID "
             "REFERENCES channels(id) ON DELETE CASCADE",
+            # Уникальность с учётом channel_id: один дефолт компании (channel_id IS NULL)
+            # на ключ + один override на канал. Прежний индекс без channel_id запрещал
+            # override (конфликт с дефолтом) → заменяем на два частичных индекса.
+            "DROP INDEX IF EXISTS uq_reconcile_mappings",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_reconcile_mappings_company "
+            "ON reconcile_mappings(company_id, kind, source_key) WHERE channel_id IS NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_reconcile_mappings_channel "
+            "ON reconcile_mappings(company_id, kind, source_key, channel_id) WHERE channel_id IS NOT NULL",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

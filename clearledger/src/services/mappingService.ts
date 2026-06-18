@@ -11,6 +11,8 @@ export type MappingMethod = 'manual' | 'auto' | 'ai' | 'imported_from_bp'
 export interface ReconcileMapping {
   id: string
   company_id: string
+  /** Маппинг уровня канала (override). null = дефолт компании (общий для всех каналов). */
+  channel_id?: string | null
   kind: MappingKind
   source_key: string
   target_ref: string
@@ -28,15 +30,21 @@ export interface MappingStats {
   byMethod: Record<string, number>
 }
 
-export async function listMappings(companyId: string, kind?: MappingKind): Promise<ReconcileMapping[]> {
+export async function listMappings(
+  companyId: string,
+  kind?: MappingKind,
+  channelId?: string,
+): Promise<ReconcileMapping[]> {
   return get<ReconcileMapping[]>('/api/reconcile/mappings', {
     company_id: companyId,
     kind: kind ?? undefined,
+    channel_id: channelId ?? undefined,
   })
 }
 
 export async function createMapping(input: {
   companyId: string
+  channelId?: string
   kind: MappingKind
   sourceKey: string
   targetRef: string
@@ -47,6 +55,7 @@ export async function createMapping(input: {
 }): Promise<ReconcileMapping> {
   return post<ReconcileMapping>('/api/reconcile/mappings', {
     company_id: input.companyId,
+    channel_id: input.channelId,
     kind: input.kind,
     source_key: input.sourceKey,
     target_ref: input.targetRef,

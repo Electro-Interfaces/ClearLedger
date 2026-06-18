@@ -64,7 +64,6 @@ async def list_mappings(
     kind: str | None = Query(None),
     channel_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
 ):
     cid = await _resolve_company_id(company_id, db)
     stmt = select(ReconcileMapping).where(ReconcileMapping.company_id == cid)
@@ -82,7 +81,6 @@ async def list_mappings(
 async def create_mapping(
     payload: ReconcileMappingCreate,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
 ):
     cid = await _resolve_company_id(payload.company_id, db)
     m = ReconcileMapping(
@@ -114,7 +112,6 @@ async def update_mapping(
     mapping_id: str,
     payload: ReconcileMappingUpdate,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
 ):
     try:
         mid = uuid.UUID(mapping_id)
@@ -136,7 +133,6 @@ async def update_mapping(
 async def delete_mapping(
     mapping_id: str,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
 ):
     try:
         mid = uuid.UUID(mapping_id)
@@ -155,7 +151,6 @@ async def auto_detect_mappings(
     company_id: str = Query(...),
     kind: str | None = Query(None, description="Фильтр по kind: station|fuel|paytype|nomenclature|counterparty. None = все"),
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
 ):
     """Анализирует данные локальной БД и возвращает предложения маппинга.
     НЕ записывает в БД — только предложения. Применить через /auto-apply.
@@ -220,7 +215,6 @@ class AutoApplyPayload(BaseModel):
 async def auto_apply_mappings(
     payload: AutoApplyPayload,
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
 ):
     """Применяет полученный список предложений с confidence ≥ min_confidence.
     UI обычно сначала вызывает /auto-detect, даёт пользователю отфильтровать,
@@ -251,7 +245,6 @@ async def auto_apply_mappings(
 async def mapping_stats(
     company_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
-    _u: User = Depends(get_current_user),
 ):
     """Сколько маппингов каждого вида заведено для компании.
     Используется в UI для KPI «Готовность сверки к запуску»."""
