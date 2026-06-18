@@ -99,3 +99,40 @@ async def test_scope_company_clears_locations(auth_client: AsyncClient):
     })
     locs2 = (await auth_client.get(f"/api/references/contracts/{ct['id']}/locations")).json()
     assert locs2 == []
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_dimensions(auth_client: AsyncClient):
+    """Обобщённые грани договора по разрезам (Фаза 3): номенклатура, каналы."""
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000200", "name": "Поставщик-дим ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "ДИМ-1", "date": "2026-04-01",
+        "counterpartyId": cp["id"], "organizationId": "org-x", "type": "Поставка",
+    })
+    # изначально граней нет
+    d0 = (await auth_client.get(f"/api/references/contracts/{ct['id']}/dimensions")).json()
+    assert d0["dimensions"] == {}
+
+    # ограничить договор номенклатурой (напр. только ДТ и АИ-92)
+    r = await auth_client.put(
+        f"/api/references/contracts/{ct['id']}/dimensions/nomenclature",
+        json={"refs": ["nom-AI92", "nom-DT", "nom-DT"]},  # дубль схлопнётся
+    )
+    assert r.status_code == 200, r.text
+    assert set(r.json()["dimensions"]["nomenclature"]) == {"nom-AI92", "nom-DT"}
+
+    # + ограничить каналом
+    await auth_client.put(
+        f"/api/references/contracts/{ct['id']}/dimensions/channel", json={"refs": ["ch-1"]})
+    d = (await auth_client.get(f"/api/references/contracts/{ct['id']}/dimensions")).json()
+    assert set(d["dimensions"]["nomenclature"]) == {"nom-AI92", "nom-DT"}
+    assert d["dimensions"]["channel"] == ["ch-1"]
+
+    # снять ограничение по номенклатуре (пусто) — канал остаётся
+    await auth_client.put(
+        f"/api/references/contracts/{ct['id']}/dimensions/nomenclature", json={"refs": []})
+    d2 = (await auth_client.get(f"/api/references/contracts/{ct['id']}/dimensions")).json()
+    assert "nomenclature" not in d2["dimensions"]
+    assert d2["dimensions"]["channel"] == ["ch-1"]

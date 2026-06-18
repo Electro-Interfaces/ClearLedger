@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import (
     BankAccount,
     Contract,
+    ContractDimension,
     ContractLocation,
     Counterparty,
     NomenclatureItem,
@@ -28,6 +29,8 @@ from app.schemas import (
     BankAccountResponse,
     BankAccountUpdate,
     ContractCreate,
+    ContractDimensionsResponse,
+    ContractDimensionUpdate,
     ContractResponse,
     ContractScopeUpdate,
     ContractUpdate,
@@ -788,6 +791,66 @@ async def get_location_contracts(
                 inn=cp.inn if cp else None,
             )
     return LocationContractsResponse(contracts=briefs, counterparties=list(seen.values()))
+
+
+# ---------------------------------------------------------------------------
+# Обобщённые грани договора по разрезам (Фаза 3): номенклатура, каналы и др.
+# ---------------------------------------------------------------------------
+
+def _dims_grouped(rows: list[ContractDimension]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        out.setdefault(r.dim_type, []).append(r.dim_ref)
+    return out
+
+
+@router.get("/contracts/{item_id}/dimensions", response_model=ContractDimensionsResponse)
+async def get_contract_dimensions(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Все грани договора по разрезам (dim_type → набор элементов)."""
+    uid = _parse_uuid(item_id)
+    c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+    rows = (await db.execute(
+        select(ContractDimension).where(ContractDimension.contract_id == c.id)
+    )).scalars().all()
+    return ContractDimensionsResponse(dimensions=_dims_grouped(rows))
+
+
+@router.put("/contracts/{item_id}/dimensions/{dim_type}", response_model=ContractDimensionsResponse)
+async def set_contract_dimension(
+    item_id: str,
+    dim_type: str,
+    body: ContractDimensionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Заменить набор элементов разреза dim_type у договора (пусто = снять ограничение)."""
+    uid = _parse_uuid(item_id)
+    c = (await db.execute(select(Contract).where(Contract.id == uid))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+
+    await db.execute(delete(ContractDimension).where(
+        ContractDimension.contract_id == c.id,
+        ContractDimension.dim_type == dim_type,
+    ))
+    refs = list(dict.fromkeys(r.strip() for r in body.refs if r and r.strip()))
+    for ref in refs:
+        db.add(ContractDimension(
+            company_id=c.company_id, contract_id=c.id, dim_type=dim_type, dim_ref=ref,
+        ))
+    await db.flush()
+    rows = (await db.execute(
+        select(ContractDimension).where(ContractDimension.contract_id == c.id)
+    )).scalars().all()
+    return ContractDimensionsResponse(dimensions=_dims_grouped(rows))
 
 
 # ---------------------------------------------------------------------------

@@ -625,6 +625,18 @@ class LocationContractsResponse(BaseModel):
     counterparties: list[CounterpartyBrief]
 
 
+# ===== Обобщённые грани договора по разрезам (Фаза 3) =====
+
+class ContractDimensionUpdate(BaseModel):
+    """Заменить набор элементов разреза dim_type у договора. Пусто = снять ограничение."""
+    refs: list[str] = Field(default_factory=list)
+
+
+class ContractDimensionsResponse(BaseModel):
+    """Грани договора: dim_type → список dim_ref (пусто по типу = не ограничен)."""
+    dimensions: dict[str, list[str]]
+
+
 # ===== AccountingDoc (Учётные документы 1С) =====
 
 AccountingDocTypeEnum = Literal[

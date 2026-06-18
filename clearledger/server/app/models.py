@@ -512,6 +512,46 @@ class ContractLocation(Base):
 
 
 # ---------------------------------------------------------------------------
+# ContractDimension (обобщённая грань ограничения договора по разрезу — Фаза 3)
+# ---------------------------------------------------------------------------
+# Договор может ограничиваться не только торговыми точками, но и другими
+# разрезами учёта: номенклатура, канал/источник, статья ДДС и т.п. (план §5).
+# Точки — отдельная типизированная грань (ContractLocation, строгий FK); прочие
+# разрезы — здесь, полиморфно: dim_type + dim_ref (id/код/external_ref элемента).
+# Семантика: есть записи для (договор, dim_type) → ограничен этим набором; нет
+# записей → не ограничен по этому разрезу (= весь разрез). dim_ref мягкая ссылка
+# (без FK на конкретную сущность — полиморфизм). См. TRADELEDGER_COUNTERPARTY_AXIS §5.
+# ---------------------------------------------------------------------------
+class ContractDimension(Base):
+    __tablename__ = "contract_dimensions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    contract_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # nomenclature | channel | dds_article | ... (location — отдельной таблицей)
+    dim_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    # id / код / external_ref элемента разреза (Nomenclature.external_ref, Channel.id, …)
+    dim_ref: Mapped[str] = mapped_column(String(100), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_contract_dimensions", "contract_id", "dim_type", "dim_ref", unique=True),
+        Index("idx_contract_dimensions_lookup", "company_id", "dim_type", "dim_ref"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # AccountingDoc (Учётные документы 1С)
 # ---------------------------------------------------------------------------
 class AccountingDoc(Base):
