@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -87,6 +87,7 @@ export function ChannelsPage() {
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const navigate = useNavigate()
   const { companyId } = useCompany()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   function refresh() { setChannels(getChannels()) }
 
@@ -96,8 +97,18 @@ export function ChannelsPage() {
       .then(refresh).catch(() => { /* офлайн → localStorage */ })
   }, [companyId])
 
+  // Переход из каталога: ?wizard=1 → открыть мастер создания канала
+  useEffect(() => {
+    if (searchParams.get('wizard')) {
+      setWizardOpen(true)
+      searchParams.delete('wizard')
+      setSearchParams(searchParams, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   async function handleDelete(id: string) {
-    if (!confirm('Удалить обработку и все её данные?')) return
+    if (!confirm('Удалить канал и все его данные?')) return
     await deleteChannel(id)
     refresh()
   }
@@ -106,7 +117,7 @@ export function ChannelsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">Обработки данных</h1>
+          <h1 className="text-xl font-bold">Каналы данных</h1>
           <p className="text-sm text-muted-foreground">
             Комбинация источников → загрузка → сверка → результат
           </p>
@@ -118,7 +129,7 @@ export function ChannelsPage() {
           </Button>
           <Button size="sm" className="gap-1.5" onClick={() => setWizardOpen(true)}>
             <Plus className="h-4 w-4" />
-            Создать обработку
+            Создать канал
           </Button>
         </div>
       </div>
@@ -132,11 +143,11 @@ export function ChannelsPage() {
             <Radio className="h-10 w-10 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">Нет обработок</p>
             <p className="text-xs text-muted-foreground">
-              Создайте обработку из шаблона или настройте вручную
+              Создайте канал из шаблона или настройте вручную
             </p>
             <Button variant="default" size="sm" className="gap-1.5 mt-2" onClick={() => setWizardOpen(true)}>
               <Plus className="h-4 w-4" />
-              Создать обработку
+              Создать канал
             </Button>
           </CardContent>
         </Card>

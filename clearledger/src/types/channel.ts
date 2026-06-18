@@ -53,6 +53,24 @@ export const SOURCE_TYPE_META: Record<SourceType, { label: string; description: 
 }
 
 /**
+ * Реальные типы источников (taxonomy каталога /api/source-types) — точнее,
+ * чем укрупнённый SourceType. Используется на странице «Источники данных»
+ * для корректного отображения типа и выбора формы подключения.
+ */
+export const BACKEND_SOURCE_META: Record<string, { label: string; category: string; icon: string }> = {
+  sts: { label: 'STS API (АЗС)', category: 'Топливный учёт АЗС', icon: 'Fuel' },
+  onec_operational: { label: '1С операционная база', category: 'Учётные системы 1С', icon: 'Database' },
+  onec_accounting: { label: '1С:Бухгалтерия (эталон)', category: 'Эталон компании', icon: 'BookCheck' },
+  tradecorp: { label: 'TradeCorp (корп. процессинг)', category: 'Топливный учёт АЗС', icon: 'CreditCard' },
+  msto: { label: 'MSTO (онлайн-заказы)', category: 'Топливный учёт АЗС', icon: 'Smartphone' },
+  acquiring_sber: { label: 'Эквайринг Сбербанк', category: 'Платежи и эквайринг', icon: 'CreditCard' },
+  inkassation: { label: 'Инкассация', category: 'Платежи и эквайринг', icon: 'Banknote' },
+  ofd: { label: 'ОФД', category: 'Фискализация', icon: 'Receipt' },
+  chestny_znak: { label: 'Честный Знак', category: 'Маркировка', icon: 'ScanBarcode' },
+  neftoms: { label: 'NeftoMS (POS)', category: 'Касса/POS АЗС', icon: 'Server' },
+}
+
+/**
  * Дефолтные типы документов для STS REST API (pos.autooplata.ru/tms).
  *
  * Один STS-источник покрывает всю сеть АЗС ГИГ (system_id 65 и 15 —

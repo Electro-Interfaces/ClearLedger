@@ -1,6 +1,6 @@
 /**
- * Страница канала — pipeline обработки данных.
- * /channels/:id — вкладки: Обзор, Источники, Обработка, Сверка, Данные, Лог.
+ * Страница канала — pipeline данных.
+ * /channels/:id — вкладки: Обзор, Источники, Схема, Загружено, Лог.
  */
 
 import { useState, useMemo, useEffect } from 'react'
@@ -14,9 +14,10 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel } from '@/services/channelService'
 import { getSources, loadSources } from '@/services/sourceService'
+import { listMappings, createMapping, deleteMapping, type ReconcileMapping, type MappingKind } from '@/services/mappingService'
 import { isApiEnabled } from '@/services/apiClient'
 import { useCompany } from '@/contexts/CompanyContext'
-import { getLocations } from '@/services/locationService'
+import { getLocations, loadLocations } from '@/services/locationService'
 import { useFilters } from '@/contexts/FilterContext'
 import { StationsSelectorDialog } from '@/components/stations/StationsSelectorDialog'
 import { syncChannel, getAllLoadedDocs } from '@/services/channelSyncService'
@@ -34,15 +35,16 @@ import {
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 
-type TabId = 'overview' | 'sources' | 'pipeline' | 'data' | 'log'
+type TabId = 'overview' | 'sources' | 'pipeline' | 'mapping' | 'data' | 'log'
 
-// Сверка и работа с нормализованными данными — это отдельный раздел
-// продукта (Обработка → Сверка / Управленческий / ...), не часть канала.
-// Канал отвечает только за получение сырых данных из внешнего источника.
+// Сверка — отдельный раздел продукта и идёт на уровне РАЗРЕЗОВ, не каналов.
+// Канал отвечает за получение сырых данных из источника и их ПРЕДОБРАБОТКУ
+// (маппинг внешних ключей на справочники 1С, нормализация) — до сверки.
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'Обзор', icon: Radio },
   { id: 'sources', label: 'Источники', icon: Database },
   { id: 'pipeline', label: 'Схема', icon: Settings2 },
+  { id: 'mapping', label: 'Маппинг', icon: ArrowRightLeft },
   { id: 'data', label: 'Загружено', icon: FileText },
   { id: 'log', label: 'Лог', icon: History },
 ]
@@ -141,54 +143,69 @@ function monthKey(year: number, month0: number): string {
   return `${year}-${String(month0 + 1).padStart(2, '0')}`
 }
 
-function monthLabel(key: string): string {
-  const [y, m] = key.split('-').map(Number)
-  return `${MONTH_NAMES_RU[(m ?? 1) - 1]} ${y}`
+function todayStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function lastNMonths(n: number): string[] {
-  const now = new Date()
-  const out: string[] = []
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    out.push(monthKey(d.getFullYear(), d.getMonth()))
-  }
-  return out
+function firstDayOfMonth(monthStr: string): string {
+  return `${monthStr}-01`
+}
+
+function lastDayOfMonth(monthStr: string): string {
+  const [y, m] = monthStr.split('-').map(Number)
+  const day = new Date(y, m, 0).getDate() // m=1..12 → день 0 след. месяца = последний день
+  return `${monthStr}-${String(day).padStart(2, '0')}`
+}
+
+function fmtRu(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-')
+  return `${d}.${m}.${y}`
 }
 
 function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
-  const cfgMonths: string[] = channel.config?.months ?? []
-  const months = useMemo(() => lastNMonths(12), [])
-  const selected = useMemo(() => new Set(cfgMonths), [cfgMonths.join(',')])
+  const cfg = channel.config ?? {}
+  const dateFrom: string | undefined = cfg.dateFrom
+  const dateTo: string | undefined = cfg.dateTo
 
-  async function save(next: Set<string>) {
-    const arr = months.filter((m) => next.has(m))
+  async function save(df?: string, dt?: string) {
+    // PATCH config МЕРЖИТ на бэкенде — чтобы очистить, шлём явный null
+    // (undefined выпал бы из JSON и старое значение осталось бы). _period()
+    // трактует null как «не задано» → фолбэк к period_days.
     const updated = await updateChannel(channel.id, {
-      config: { ...channel.config, months: arr },
+      config: { ...channel.config, dateFrom: df ?? null, dateTo: dt ?? null, months: null },
     })
     if (updated) onUpdate(updated)
   }
 
-  function toggle(m: string) {
-    const next = new Set(selected)
-    if (next.has(m)) next.delete(m)
-    else next.add(m)
-    save(next)
+  function setFromMonth(v: string) {
+    if (!v) return save(undefined, dateTo)
+    save(firstDayOfMonth(v), dateTo ?? todayStr())
+  }
+  function setToMonth(v: string) {
+    if (!v) return save(dateFrom, undefined)
+    save(dateFrom ?? firstDayOfMonth(v), lastDayOfMonth(v))
   }
 
-  function pickPreset(kind: 'current' | 'last3' | 'last6' | 'all' | 'none') {
-    const next = new Set<string>()
-    if (kind === 'current') next.add(months[0])
-    if (kind === 'last3') months.slice(0, 3).forEach((m) => next.add(m))
-    if (kind === 'last6') months.slice(0, 6).forEach((m) => next.add(m))
-    if (kind === 'all') months.forEach((m) => next.add(m))
-    save(next)
+  function preset(kind: 'current' | 'last3' | 'last6' | 'last12' | 'year' | 'none') {
+    const now = new Date()
+    const back = (n: number) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - n, 1)
+      return monthKey(d.getFullYear(), d.getMonth())
+    }
+    if (kind === 'none') return save(undefined, undefined)
+    if (kind === 'year') return save(`${now.getFullYear()}-01-01`, todayStr())
+    const startMonth =
+      kind === 'current' ? back(0) :
+      kind === 'last3' ? back(2) :
+      kind === 'last6' ? back(5) : back(11)
+    save(firstDayOfMonth(startMonth), todayStr())
   }
 
-  const summary =
-    selected.size === 0 ? 'Не выбрано' :
-    selected.size === 1 ? monthLabel([...selected][0]) :
-    `Месяцев: ${selected.size}`
+  const hasRange = !!(dateFrom && dateTo)
+  const summary = hasRange
+    ? `${fmtRu(dateFrom!)} – ${fmtRu(dateTo!)}`
+    : `По умолчанию · ${channel.periodDays ?? 30} дн.`
 
   return (
     <Card className="py-3 gap-2">
@@ -196,38 +213,46 @@ function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
         <CardTitle className="text-sm flex items-center gap-1.5">
           <FileText className="h-3.5 w-3.5" />
           Период загрузки
-          <span className="text-xs text-muted-foreground font-normal ml-auto">{summary}</span>
+          <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">{summary}</span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0 pb-3">
-        <div className="grid grid-cols-3 gap-x-2 gap-y-0 max-h-[112px] overflow-y-auto pr-1">
-          {months.map((m) => {
-            const on = selected.has(m)
-            return (
-              <label key={m}
-                className="flex items-center gap-1.5 py-0.5 px-1 rounded text-[11px] hover:bg-accent/30 cursor-pointer">
-                <Checkbox
-                  checked={on}
-                  onCheckedChange={() => toggle(m)}
-                  className="h-3 w-3"
-                />
-                <span className="truncate">{monthLabel(m)}</span>
-              </label>
-            )
-          })}
+      <CardContent className="pt-0 pb-3 space-y-2">
+        <div className="flex items-end gap-1.5">
+          <div className="flex-1 min-w-0">
+            <Label className="text-[10px] text-muted-foreground mb-0.5 block">С месяца</Label>
+            <Input type="month" value={dateFrom ? dateFrom.slice(0, 7) : ''}
+              max={dateTo ? dateTo.slice(0, 7) : undefined}
+              onChange={(e) => setFromMonth(e.target.value)}
+              className="h-7 text-xs" />
+          </div>
+          <span className="text-muted-foreground text-xs pb-1.5">–</span>
+          <div className="flex-1 min-w-0">
+            <Label className="text-[10px] text-muted-foreground mb-0.5 block">По месяц</Label>
+            <Input type="month" value={dateTo ? dateTo.slice(0, 7) : ''}
+              min={dateFrom ? dateFrom.slice(0, 7) : undefined}
+              onChange={(e) => setToMonth(e.target.value)}
+              className="h-7 text-xs" />
+          </div>
         </div>
-        <div className="flex items-center flex-wrap gap-1 mt-2 pt-2 border-t border-border/40">
+        <div className="flex items-center flex-wrap gap-1 pt-2 border-t border-border/40">
           <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
-            onClick={() => pickPreset('current')}>Текущий</Button>
+            onClick={() => preset('current')}>Текущий</Button>
           <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
-            onClick={() => pickPreset('last3')}>3 мес</Button>
+            onClick={() => preset('last3')}>3 мес</Button>
           <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
-            onClick={() => pickPreset('last6')}>6 мес</Button>
+            onClick={() => preset('last6')}>6 мес</Button>
           <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
-            onClick={() => pickPreset('all')}>Все 12</Button>
+            onClick={() => preset('last12')}>12 мес</Button>
+          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+            onClick={() => preset('year')}>Год</Button>
           <Button size="sm" variant="ghost" className="h-5 text-[10px] px-1.5 text-muted-foreground ml-auto"
-            onClick={() => pickPreset('none')}>Очистить</Button>
+            onClick={() => preset('none')}>Сбросить</Button>
         </div>
+        {!hasRange && (
+          <p className="text-[10px] text-muted-foreground/70">
+            Без диапазона грузятся последние {channel.periodDays ?? 30} дн.
+          </p>
+        )}
       </CardContent>
     </Card>
   )
@@ -328,31 +353,26 @@ function StationsCard({
             Станции не выбраны.
           </p>
         ) : (
-          <div className="space-y-1.5">
-            {bySystem.map(([sys, items]) => {
-              const previewCount = 6
-              const preview = items.slice(0, previewCount)
-              const rest = items.length - preview.length
-              return (
-                <div key={sys} className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase shrink-0">
-                    sys {sys}
+          <div className="max-h-44 overflow-y-auto pr-1 space-y-2">
+            {bySystem.map(([sys, items]) => (
+              <div key={sys}>
+                <div className="sticky top-0 z-10 bg-card flex items-center gap-1.5 py-0.5 mb-0.5">
+                  <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase">
+                    Система {sys}
                   </span>
-                  {preview.map((s) => (
-                    <Badge key={`${s.systemId}-${s.code}`} variant="secondary"
-                      className="text-[10px] font-normal h-5">
-                      <span className="font-mono mr-1">{s.code}</span>
-                      <span className="truncate max-w-[140px]">{s.name ?? ''}</span>
-                    </Badge>
-                  ))}
-                  {rest > 0 && (
-                    <Badge variant="outline" className="text-[10px] h-5">
-                      +{rest}
-                    </Badge>
-                  )}
+                  <span className="text-[10px] text-muted-foreground/50 tabular-nums">· {items.length}</span>
                 </div>
-              )
-            })}
+                <div className="grid grid-cols-2 xl:grid-cols-3 gap-x-3 gap-y-0">
+                  {items.map((s) => (
+                    <div key={`${s.systemId}-${s.code}`}
+                      className="flex items-center gap-2 text-[11px] py-0.5 px-1 rounded hover:bg-accent/30 min-w-0">
+                      <span className="font-mono text-muted-foreground w-7 shrink-0 text-right tabular-nums">{s.code}</span>
+                      <span className="truncate">{s.name ?? ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -573,7 +593,7 @@ function SourcesTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
     if (updated) {
       onUpdate(updated)
       setAddingSourceId('')
-      toast.success('Источник добавлен в обработку')
+      toast.success('Источник добавлен в канал')
     }
   }
 
@@ -705,7 +725,7 @@ function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
       {/* Этапы pipeline */}
       <div className="space-y-3">
         <div>
-          <h3 className="text-sm font-semibold">Этапы обработки</h3>
+          <h3 className="text-sm font-semibold">Этапы конвейера</h3>
           <p className="text-xs text-muted-foreground">
             Данные проходят через pipeline слева направо
           </p>
@@ -798,7 +818,7 @@ function ProcessingParametersCard({
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-semibold">Параметры обработки</h3>
+        <h3 className="text-sm font-semibold">Параметры канала</h3>
         <p className="text-xs text-muted-foreground">
           Специфичные для этой загрузки. Применяются на этапах нормализации
           и сохранения.
@@ -917,7 +937,218 @@ function ProcessingParametersCard({
           {!primaryDocType && (
             <div className="text-[11px] text-muted-foreground italic">
               Дополнительные параметры появятся после подключения первого
-              источника к обработке.
+              источника к каналу.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ─── Вкладка: Маппинг ───────────────────────────────────────
+// Предобработка канала: внешние ключи источника → справочники 1С.
+// Уровень канала (override) перекрывает дефолт компании. Резолв:
+// канал → компания (NULL) → канон-сид. Окончательная сверка — на разрезах.
+
+const MAPPING_KIND_META: Record<MappingKind, { label: string; hint: string; ph: string }> = {
+  station: { label: 'АЗС', hint: 'код станции источника → Склад/АЗС 1С', ph: 'station_id (напр. 208)' },
+  fuel: { label: 'Нефтепродукты', hint: 'код нефтепродукта STS → Номенклатура 1С', ph: 'fuel_type (напр. ДТ)' },
+  paytype: { label: 'Каналы оплаты', hint: 'канал оплаты STS → вид оплаты 1С', ph: 'pay_type (напр. card)' },
+  nomenclature: { label: 'Номенклатура', hint: 'артикул/код товара → Номенклатура 1С', ph: 'артикул поставщика' },
+  counterparty: { label: 'Контрагенты', hint: 'ИНН/название → Контрагент 1С', ph: 'ИНН / название' },
+}
+
+// Какие виды маппинга относятся к каналу (по его шаблону)
+const KINDS_BY_TEMPLATE: Record<string, MappingKind[]> = {
+  // Топливо-продажи: маппинг по нефтепродуктам и каналам оплаты
+  // (АЗС-станции — это точки обслуживания, привязаны отдельно, не маппинг).
+  fuel_shift: ['fuel', 'paytype'],
+  fuel_delivery: ['fuel', 'counterparty'],
+  sidegoods: ['nomenclature', 'counterparty'],
+  food: ['nomenclature', 'counterparty'],
+}
+function channelMappingKinds(channel: Channel): MappingKind[] {
+  return KINDS_BY_TEMPLATE[channel.templateId ?? ''] ?? ['station', 'fuel', 'paytype', 'nomenclature', 'counterparty']
+}
+
+interface EffectiveRow {
+  sourceKey: string
+  targetRef: string
+  targetName: string
+  confidence: number
+  level: 'channel' | 'company'
+  channelMappingId?: string
+}
+
+function buildEffective(all: ReconcileMapping[], channelId: string): EffectiveRow[] {
+  const byKey = new Map<string, EffectiveRow>()
+  for (const m of all) {
+    if (m.channel_id == null) {
+      byKey.set(m.source_key, {
+        sourceKey: m.source_key, targetRef: m.target_ref,
+        targetName: m.target_name || m.target_ref, confidence: m.confidence, level: 'company',
+      })
+    }
+  }
+  for (const m of all) {
+    if (m.channel_id === channelId) {
+      byKey.set(m.source_key, {
+        sourceKey: m.source_key, targetRef: m.target_ref,
+        targetName: m.target_name || m.target_ref, confidence: m.confidence,
+        level: 'channel', channelMappingId: m.id,
+      })
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.sourceKey.localeCompare(b.sourceKey))
+}
+
+function MappingTab({ channel, companyId }: { channel: Channel; companyId: string }) {
+  const kinds = useMemo(() => channelMappingKinds(channel), [channel])
+  const [kind, setKind] = useState<MappingKind>(kinds[0])
+  const [all, setAll] = useState<ReconcileMapping[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [srcKey, setSrcKey] = useState('')
+  const [tgtRef, setTgtRef] = useState('')
+  const [tgtName, setTgtName] = useState('')
+
+  async function reload() {
+    setLoading(true); setError(null)
+    try {
+      setAll(await listMappings(companyId, kind))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { void reload() /* eslint-disable-next-line */ }, [kind, channel.id, companyId])
+
+  const rows = useMemo(() => buildEffective(all, channel.id), [all, channel.id])
+
+  async function add() {
+    if (!srcKey.trim() || !tgtRef.trim()) return
+    try {
+      await createMapping({
+        companyId, channelId: channel.id, kind,
+        sourceKey: srcKey.trim(), targetRef: tgtRef.trim(),
+        targetName: tgtName.trim() || undefined, method: 'manual',
+      })
+      setSrcKey(''); setTgtRef(''); setTgtName('')
+      toast.success('Соответствие уровня канала добавлено')
+      void reload()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  async function removeOverride(id: string) {
+    if (!confirm('Удалить соответствие уровня канала? Останется дефолт компании, если он есть.')) return
+    try {
+      await deleteMapping(id)
+      toast.success('Соответствие канала удалено')
+      void reload()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const meta = MAPPING_KIND_META[kind]
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold">Маппинг канала</h3>
+        <p className="text-xs text-muted-foreground">
+          Предобработка: внешние ключи источника → справочники 1С. Соответствие уровня канала
+          перекрывает дефолт компании.{' '}
+          <Link to="/1c/mappings" className="text-primary hover:underline">Общие маппинги компании →</Link>
+        </p>
+      </div>
+
+      {/* Виды маппинга канала */}
+      <div className="flex flex-wrap gap-1">
+        {kinds.map((k) => (
+          <button
+            key={k}
+            onClick={() => setKind(k)}
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+              kind === k ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent'
+            }`}
+          >
+            {MAPPING_KIND_META[k].label}
+          </button>
+        ))}
+      </div>
+
+      <Card>
+        <CardContent className="py-4 space-y-3">
+          <p className="text-[11px] text-muted-foreground">{meta.hint}</p>
+
+          {/* Форма добавления (уровень канала) */}
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Ключ источника</Label>
+              <Input value={srcKey} onChange={(e) => setSrcKey(e.target.value)}
+                placeholder={meta.ph} className="h-8 text-xs w-44" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Ref 1С (GUID)</Label>
+              <Input value={tgtRef} onChange={(e) => setTgtRef(e.target.value)}
+                placeholder="GUID в БП" className="h-8 text-xs w-44 font-mono" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Название (для UI)</Label>
+              <Input value={tgtName} onChange={(e) => setTgtName(e.target.value)}
+                placeholder="напр. ДТ Евро" className="h-8 text-xs w-44" />
+            </div>
+            <Button size="sm" className="h-8 text-xs gap-1" onClick={add} disabled={!srcKey.trim() || !tgtRef.trim()}>
+              <Plus className="h-3 w-3" /> Добавить
+            </Button>
+          </div>
+
+          <div className="border-t border-border/40" />
+
+          {/* Таблица соответствий */}
+          {loading ? (
+            <p className="py-4 text-xs text-muted-foreground">Загрузка…</p>
+          ) : error ? (
+            <p className="py-4 text-xs text-destructive">Не удалось загрузить маппинги: {error}</p>
+          ) : rows.length === 0 ? (
+            <p className="py-4 text-xs text-muted-foreground">
+              Соответствий по виду «{meta.label}» пока нет — добавьте выше.
+            </p>
+          ) : (
+            <div className="space-y-1">
+              <div className="grid grid-cols-[1fr_auto_2fr_auto_auto] gap-2 px-2 text-[10px] uppercase tracking-wide text-muted-foreground/60">
+                <span>Ключ источника</span><span /><span>Запись 1С</span><span>Уровень</span><span />
+              </div>
+              {rows.map((r) => (
+                <div key={r.sourceKey}
+                  className="grid grid-cols-[1fr_auto_2fr_auto_auto] items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent/30">
+                  <code className="font-mono text-[11px] truncate">{r.sourceKey}</code>
+                  <ArrowRightLeft className="h-3 w-3 text-muted-foreground/40" />
+                  <span className="truncate" title={r.targetRef}>{r.targetName}</span>
+                  {r.level === 'channel' ? (
+                    <Badge variant="default" className="h-4 px-1.5 text-[9px]">канал</Badge>
+                  ) : (
+                    <Badge variant="outline" className="h-4 px-1.5 text-[9px] border-zinc-600 text-zinc-400">компания</Badge>
+                  )}
+                  {r.level === 'channel' && r.channelMappingId ? (
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                      onClick={() => removeOverride(r.channelMappingId!)} title="Удалить override канала">
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  ) : (
+                    <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[10px]"
+                      onClick={() => { setSrcKey(r.sourceKey); setTgtRef(r.targetRef); setTgtName(r.targetName) }}
+                      title="Переопределить для этого канала">
+                      override
+                    </Button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </CardContent>
@@ -1354,7 +1585,7 @@ export function ChannelDetailPage() {
 
   // API-режим: гидрация источников+каналов из бэкенда при монтировании
   useEffect(() => {
-    void Promise.all([loadSources(companyId), loadChannels(companyId)])
+    void Promise.all([loadSources(companyId), loadChannels(companyId), loadLocations(companyId)])
       .then(() => { if (id) setChannel(getChannel(id)) })
       .catch(() => { /* офлайн → localStorage */ })
   }, [companyId, id])
@@ -1363,8 +1594,8 @@ export function ChannelDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
         <XCircle className="h-10 w-10 text-muted-foreground/30" />
-        <p className="text-lg text-muted-foreground">Обработка не найдена</p>
-        <Link to="/channels" className="text-primary hover:underline text-sm">← К списку обработок</Link>
+        <p className="text-lg text-muted-foreground">Канал не найден</p>
+        <Link to="/channels" className="text-primary hover:underline text-sm">← К списку каналов</Link>
       </div>
     )
   }
@@ -1382,7 +1613,13 @@ export function ChannelDetailPage() {
         // API-режим: прогон через бэкенд-оркестратор (fetch→normalize→save)
         const res = await runChannel(channel.id)
         refresh()
-        toast.success(res?.message || 'Канал запущен (бэкенд)')
+        if (Array.isArray(res?.by_station)) {
+          const created = res.by_station.reduce((a: number, r: { created?: number }) => a + (r.created || 0), 0)
+          const label = res.kind === 'fuel_delivery' ? 'Приём ТТН' : res.kind === 'fuel_shift' ? 'Смены' : 'Записи'
+          toast.success(`${label}: загружено ${created}, станций ${res.stations_ok}/${res.stations_total}`)
+        } else {
+          toast.success(res?.message || 'Канал запущен (бэкенд)')
+        }
         return
       }
       // localStorage-режим: клиентский pipeline
@@ -1464,6 +1701,7 @@ export function ChannelDetailPage() {
         {activeTab === 'overview' && <OverviewTab channel={channel} onSync={handleSync} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
         {activeTab === 'sources' && <SourcesTab channel={channel} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
         {activeTab === 'pipeline' && <PipelineTab channel={channel} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
+        {activeTab === 'mapping' && <MappingTab channel={channel} companyId={companyId} />}
         {activeTab === 'data' && <DataTab channel={channel} />}
         {activeTab === 'log' && <LogTab channel={channel} />}
       </div>

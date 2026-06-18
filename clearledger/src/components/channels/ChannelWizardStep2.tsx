@@ -85,7 +85,7 @@ export function ChannelWizardStep2({ template, channelName, onChannelNameChange,
 
       {/* Channel name */}
       <div>
-        <Label className="text-sm mb-1.5 block">Название обработки</Label>
+        <Label className="text-sm mb-1.5 block">Название канала</Label>
         <Input value={channelName} onChange={(e) => onChannelNameChange(e.target.value)} placeholder="Например: Смены — АКАЗС Витебский" />
       </div>
 

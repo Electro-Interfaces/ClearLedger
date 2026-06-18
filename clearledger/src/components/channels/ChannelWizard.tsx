@@ -93,12 +93,12 @@ export function ChannelWizard({ open, onOpenChange }: Props) {
         config: { stationCodes },
       })
 
-      toast.success(`Обработка "${channelName}" создана`)
+      toast.success(`Канал "${channelName}" создан`)
       onOpenChange(false)
       reset()
       navigate(`/channels/${channel.id}`)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Ошибка создания обработки')
+      toast.error(err instanceof Error ? err.message : 'Ошибка создания канала')
     }
   }
 
@@ -112,7 +112,7 @@ export function ChannelWizard({ open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v) }}>
       <DialogContent className="max-w-[650px] max-h-[85vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Новая обработка</DialogTitle>
+          <DialogTitle>Новый канал</DialogTitle>
           {/* Step indicator */}
           <div className="flex items-center gap-2 pt-2">
             {STEPS.map((s, i) => (
@@ -172,7 +172,7 @@ export function ChannelWizard({ open, onOpenChange }: Props) {
               </Button>
             ) : (
               <Button onClick={handleCreate} disabled={!canNext()}>
-                Создать обработку
+                Создать канал
               </Button>
             )}
           </div>
