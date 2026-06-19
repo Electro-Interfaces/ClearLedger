@@ -1033,6 +1033,32 @@ class OneCSyncService:
 
     # ─── upsert по каждой сущности ──────────────────────────────────
 
+    async def _full_select(self, client: Any, entity: str, base: list[str]) -> list[str]:
+        """Полная выборка реквизитов: стандартные + промо (с _Key, нужны для
+        извлечения промо-колонок) + ВСЕ реквизиты сущности через describe_entity →
+        raw становится полным снимком (33/69 полей). describe недоступен/пуст →
+        деградируем к base (текущее поведение). _val робастно сериализует любой
+        реквизит (ссылка→GUID, перечисление→синоним), поэтому fetch всех полей
+        безопасен; ссылочные реквизиты приходят под плоским именем (→ GUID в raw),
+        промо-извлечение читает свои _Key-имена из base."""
+        attrs: list[str] = []
+        try:
+            desc = await client.describe_entity(entity)
+            for v in (desc or {}).values():
+                if isinstance(v, list):
+                    attrs.extend(str(x) for x in v if x)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("describe_entity(%s) недоступен, fallback к базовому select: %s", entity, exc)
+        if not attrs:
+            return base
+        out: list[str] = []
+        seen: set[str] = set()
+        for f in [*("Ref_Key", "DeletionMark", "Description", "Code"), *base, *attrs]:
+            if f and f not in seen:
+                seen.add(f)
+                out.append(f)
+        return out
+
     async def _sync_counterparties(
         self,
         client: OneCODataClient,
@@ -1040,8 +1066,9 @@ class OneCSyncService:
         log: OneCSyncLog,
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
-        # Расширенный pull: промо-поля + raw-снимок выбранных реквизитов.
-        async for item in client.iter_entity(ENTITY_COUNTERPARTIES, select=COUNTERPARTY_FETCH, orderby="Ref_Key", page_size=500):
+        # Полная выборка: промо-поля + ВСЕ реквизиты (describe) → raw полный снимок.
+        select_list = await self._full_select(client, ENTITY_COUNTERPARTIES, COUNTERPARTY_FETCH)
+        async for item in client.iter_entity(ENTITY_COUNTERPARTIES, select=select_list, orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1
@@ -1104,7 +1131,9 @@ class OneCSyncService:
         scope_type (охват по точкам) — НАШ слой: задаётся в UI, при ресинхронизации
         НЕ перезаписывается. См. TRADELEDGER_COUNTERPARTY_AXIS §5."""
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
-        async for item in client.iter_entity(ENTITY_CONTRACTS, select=CONTRACT_FETCH, orderby="Ref_Key", page_size=500):
+        # Полная выборка: промо-поля + ВСЕ реквизиты (describe) → raw полный снимок.
+        select_list = await self._full_select(client, ENTITY_CONTRACTS, CONTRACT_FETCH)
+        async for item in client.iter_entity(ENTITY_CONTRACTS, select=select_list, orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1
