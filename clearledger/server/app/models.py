@@ -364,6 +364,18 @@ class Counterparty(Base):
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     okpo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Полная карточка контрагента (ручной ввод для компаний без 1С + промо из raw)
+    ogrn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    okved: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    legal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actual_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    director_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    director_position: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    bank_account: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    bank_bik: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    bank_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Ref_Key головного контрагента (иерархия), если задан
     head_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # Ось контрагента: external (внешний) | retail (служебный розничный) |
@@ -489,6 +501,11 @@ class Contract(Base):
     # ВидДоговора 1С: СПокупателем | СПоставщиком | СКомитентом | ... (см. SCHEMA_REFS_GIG §2)
     kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Полная карточка договора (ручной ввод + промо из raw)
+    vat_rate: Mapped[str | None] = mapped_column(String(20), nullable=True)        # ставка НДС
+    amount_incl_vat: Mapped[bool | None] = mapped_column(Boolean, nullable=True)   # сумма включает НДС
+    settlement_kind: Mapped[str | None] = mapped_column(String(150), nullable=True)  # вид взаиморасчётов
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     # СрокДействия (ISO-дата строкой) и ДоговорЗакрыт
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_closed: Mapped[bool] = mapped_column(

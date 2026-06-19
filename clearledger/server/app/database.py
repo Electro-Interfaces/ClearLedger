@@ -151,6 +151,23 @@ async def create_all() -> None:
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS postal_address TEXT",
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS fax VARCHAR(100)",
             "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(255)",
+            # v2.5: полная карточка контрагента (ОГРН/ОКВЭД/адреса/контакты/руководитель/банк).
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS ogrn VARCHAR(20)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS okved VARCHAR(20)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS legal_address TEXT",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS actual_address TEXT",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS phone VARCHAR(100)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS director_name VARCHAR(255)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS director_position VARCHAR(150)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS bank_account VARCHAR(30)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS bank_bik VARCHAR(12)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS bank_name VARCHAR(255)",
+            # v2.6: полная карточка договора (НДС, вид взаиморасчётов, комментарий).
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS vat_rate VARCHAR(20)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS amount_incl_vat BOOLEAN",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS settlement_kind VARCHAR(150)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS comment TEXT",
             # v2.0: мультитенантность — членство user↔company (M2M) + суперадмин.
             # Порядок важен: сначала колонка, потом снять NOT NULL с company_id,
             # затем таблица членства, затем backfill из текущей company_id, затем

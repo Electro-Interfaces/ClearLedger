@@ -335,6 +335,17 @@ export interface Counterparty {
   shortName?: string
   fullName?: string
   okpo?: string
+  ogrn?: string
+  okved?: string
+  legalAddress?: string        // юридический адрес
+  actualAddress?: string       // фактический адрес
+  phone?: string
+  email?: string
+  directorName?: string        // руководитель (ФИО)
+  directorPosition?: string    // должность руководителя
+  bankAccount?: string         // расчётный счёт
+  bankBik?: string             // БИК
+  bankName?: string            // банк
   type: CounterpartyType
   kind?: string                // external | retail | internal
   aliases: string[]
@@ -418,6 +429,10 @@ export interface Contract {
   kind?: string             // ВидДоговора: «С поставщиком»/«С покупателем»/…
   currency?: string
   validUntil?: string
+  vatRate?: string          // ставка НДС
+  amountInclVat?: boolean   // сумма включает НДС
+  settlementKind?: string   // вид взаиморасчётов
+  comment?: string
   isClosed?: boolean
   externalRef?: string
   raw?: Record<string, unknown>   // полный снимок реквизитов из 1С

@@ -434,7 +434,24 @@ class OcrResponse(BaseModel):
 CounterpartyTypeEnum = Literal["ЮЛ", "ФЛ", "ИП"]
 
 
-class CounterpartyCreate(BaseModel):
+class _CpExtra(BaseModel):
+    """Расширенные реквизиты контрагента — полная карточка (ручной ввод + промо из raw)."""
+    fullName: str | None = None
+    okpo: str | None = None
+    ogrn: str | None = None
+    okved: str | None = None
+    legalAddress: str | None = None
+    actualAddress: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    directorName: str | None = None
+    directorPosition: str | None = None
+    bankAccount: str | None = None
+    bankBik: str | None = None
+    bankName: str | None = None
+
+
+class CounterpartyCreate(_CpExtra):
     company_id: str
     inn: str
     kpp: str | None = None
@@ -444,7 +461,7 @@ class CounterpartyCreate(BaseModel):
     aliases: list[str] = Field(default_factory=list)
 
 
-class CounterpartyUpdate(BaseModel):
+class CounterpartyUpdate(_CpExtra):
     inn: str | None = None
     kpp: str | None = None
     name: str | None = None
@@ -453,15 +470,13 @@ class CounterpartyUpdate(BaseModel):
     aliases: list[str] | None = None
 
 
-class CounterpartyResponse(BaseModel):
+class CounterpartyResponse(_CpExtra):
     id: str
     companyId: str
     inn: str
     kpp: str | None = None
     name: str
     shortName: str | None = None
-    fullName: str | None = None
-    okpo: str | None = None
     type: str
     kind: str = "external"
     aliases: list[str]
@@ -576,6 +591,11 @@ class ContractCreate(BaseModel):
     kind: str | None = None
     currency: str | None = None
     validUntil: str | None = None
+    vatRate: str | None = None
+    amountInclVat: bool | None = None
+    settlementKind: str | None = None
+    comment: str | None = None
+    isClosed: bool = False
     scopeType: str = "unassigned"
 
 
@@ -589,6 +609,10 @@ class ContractUpdate(BaseModel):
     kind: str | None = None
     currency: str | None = None
     validUntil: str | None = None
+    vatRate: str | None = None
+    amountInclVat: bool | None = None
+    settlementKind: str | None = None
+    comment: str | None = None
     isClosed: bool | None = None
     scopeType: str | None = None
 
@@ -605,6 +629,10 @@ class ContractResponse(BaseModel):
     kind: str | None = None
     currency: str | None = None
     validUntil: str | None = None
+    vatRate: str | None = None
+    amountInclVat: bool | None = None
+    settlementKind: str | None = None
+    comment: str | None = None
     isClosed: bool = False
     scopeType: str = "unassigned"
     externalRef: str | None = None

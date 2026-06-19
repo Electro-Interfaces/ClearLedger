@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -153,13 +154,16 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             <Req label="Номер" value={c.number} />
             <Req label="Дата" value={c.date} />
             <Req label="Вид договора" value={<KindBadge kind={c.kind || c.type} />} />
+            <Req label="Тип / предмет" value={c.type} />
             <Req label="Валюта" value={c.currency} />
             <Req label="Срок действия" value={c.validUntil} />
             <Req label="Сумма" value={c.amountLimit ? c.amountLimit.toLocaleString('ru-RU') : undefined} />
-            <Req label="Сумма включает НДС" value={'СуммаВключаетНДС' in raw ? fmtRaw(raw.СуммаВключаетНДС) : undefined} />
-            <Req label="Договор закрыт" value={fmtRaw(c.isClosed)} />
+            <Req label="Ставка НДС" value={c.vatRate} />
+            <Req label="Сумма включает НДС" value={c.amountInclVat == null ? ('СуммаВключаетНДС' in raw ? fmtRaw(raw.СуммаВключаетНДС) : undefined) : (c.amountInclVat ? 'Да' : 'Нет')} />
+            <Req label="Вид взаиморасчётов" value={c.settlementKind} />
+            <Req label="Договор закрыт" value={c.isClosed ? 'Да' : 'Нет'} />
             <Req label="Охват точек" value={ContractScopeBadgeLabel(c.scopeType)} />
-            <Req label="Комментарий" value={raw.Комментарий as string} span />
+            <Req label="Комментарий" value={c.comment || (raw.Комментарий as string)} span />
           </div>
           <div className="space-y-2 border-t border-border/50 pt-3">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Все реквизиты из 1С</p>
@@ -222,9 +226,20 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
         <Req label="Полное наименование" value={cp.fullName} span />
         <Req label="ИНН" value={cp.inn} />
         <Req label="КПП" value={cp.kpp} />
+        <Req label="ОГРН" value={cp.ogrn} />
         <Req label="ОКПО" value={cp.okpo} />
+        <Req label="ОКВЭД" value={cp.okved} />
         <Req label="Вид" value={TYPE_LABEL[cp.type] || cp.type} />
         <Req label="Головной контрагент" value={head?.name} />
+        <Req label="Юридический адрес" value={cp.legalAddress} span />
+        <Req label="Фактический адрес" value={cp.actualAddress} span />
+        <Req label="Телефон" value={cp.phone} />
+        <Req label="Email" value={cp.email} />
+        <Req label="Руководитель" value={cp.directorName} />
+        <Req label="Должность руководителя" value={cp.directorPosition} />
+        <Req label="Расчётный счёт" value={cp.bankAccount} />
+        <Req label="БИК" value={cp.bankBik} />
+        <Req label="Банк" value={cp.bankName} span />
         <Req label="Комментарий" value={raw.Комментарий as string} span />
       </div>
 
@@ -323,56 +338,106 @@ const VID_OPTIONS: { value: CounterpartyType; label: string }[] = [
   { value: 'ЮЛ', label: 'Юр. лицо' }, { value: 'ИП', label: 'Инд. предприниматель' }, { value: 'ФЛ', label: 'Физ. лицо' },
 ]
 
+// Хелперы форм (секция + поле с подписью).
+function FSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2.5">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</p>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">{children}</div>
+    </div>
+  )
+}
+function LField({ label, required, span, children }: {
+  label: string; required?: boolean; span?: boolean; children: React.ReactNode
+}) {
+  return (
+    <div className={`space-y-1.5 ${span ? 'col-span-2' : ''}`}>
+      <Label className="text-xs text-muted-foreground">{label}{required && <span className="text-destructive"> *</span>}</Label>
+      {children}
+    </div>
+  )
+}
+
+const CP_FIELDS = [
+  'name', 'shortName', 'fullName', 'inn', 'kpp', 'ogrn', 'okpo', 'okved',
+  'legalAddress', 'actualAddress', 'phone', 'email', 'directorName',
+  'directorPosition', 'bankAccount', 'bankBik', 'bankName',
+] as const
+type CpField = typeof CP_FIELDS[number]
+
 function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; children: React.ReactNode }) {
   const create = useCreateCounterparty()
   const update = useUpdateCounterparty()
   const [open, setOpen] = useState(false)
-  const [f, setF] = useState({
-    name: edit?.name ?? '', shortName: edit?.shortName ?? '',
-    inn: edit?.inn ?? '', kpp: edit?.kpp ?? '', type: (edit?.type ?? 'ЮЛ') as CounterpartyType,
-  })
-  const set = (k: 'name' | 'shortName' | 'inn' | 'kpp') => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const [f, setF] = useState<Record<CpField, string>>(
+    () => Object.fromEntries(CP_FIELDS.map((k) => [k, (edit?.[k] as string) ?? ''])) as Record<CpField, string>,
+  )
+  const [type, setType] = useState<CounterpartyType>(edit?.type ?? 'ЮЛ')
+  const set = (k: CpField) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setF((s) => ({ ...s, [k]: e.target.value }))
   const canSave = f.name.trim() !== '' && f.inn.trim() !== ''
   const pending = create.isPending || update.isPending
   function save() {
-    const payload = {
-      name: f.name.trim(), shortName: f.shortName.trim() || undefined,
-      inn: f.inn.trim(), kpp: f.kpp.trim() || undefined, type: f.type,
+    const c = (v: string) => v.trim() || undefined
+    const base = {
+      name: f.name.trim(), inn: f.inn.trim(), type,
+      shortName: c(f.shortName), fullName: c(f.fullName), kpp: c(f.kpp),
+      ogrn: c(f.ogrn), okpo: c(f.okpo), okved: c(f.okved),
+      legalAddress: c(f.legalAddress), actualAddress: c(f.actualAddress),
+      phone: c(f.phone), email: c(f.email),
+      directorName: c(f.directorName), directorPosition: c(f.directorPosition),
+      bankAccount: c(f.bankAccount), bankBik: c(f.bankBik), bankName: c(f.bankName),
     }
     const opts = {
       onSuccess: () => { toast.success(edit ? 'Контрагент обновлён' : 'Контрагент добавлен'); setOpen(false) },
       onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
     }
-    if (edit) update.mutate({ id: edit.id, updates: payload }, opts)
-    else create.mutate({ ...payload, aliases: [] }, opts)
+    if (edit) update.mutate({ id: edit.id, updates: base }, opts)
+    else create.mutate({ ...base, aliases: [] }, opts)
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60!">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="size-5" /> {edit ? 'Изменить контрагента' : 'Новый контрагент'}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label>Наименование <span className="text-destructive">*</span></Label>
-            <Input value={f.name} onChange={set('name')} placeholder="ООО …" />
-          </div>
-          <div className="space-y-1.5"><Label>Краткое имя</Label><Input value={f.shortName} onChange={set('shortName')} /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5"><Label>ИНН <span className="text-destructive">*</span></Label><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></div>
-            <div className="space-y-1.5"><Label>КПП</Label><Input value={f.kpp} onChange={set('kpp')} /></div>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Вид</Label>
-            <Select value={f.type} onValueChange={(v) => setF((s) => ({ ...s, type: v as CounterpartyType }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{VID_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-4">
+          <FSection title="Идентификация">
+            <LField label="Вид">
+              <Select value={type} onValueChange={(v) => setType(v as CounterpartyType)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{VID_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+              </Select>
+            </LField>
+            <LField label="Краткое наименование" required><Input value={f.name} onChange={set('name')} placeholder="ООО …" /></LField>
+            <LField label="Полное наименование" span><Input value={f.fullName} onChange={set('fullName')} /></LField>
+            <LField label="ИНН" required><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></LField>
+            <LField label="КПП"><Input value={f.kpp} onChange={set('kpp')} /></LField>
+            <LField label="ОГРН / ОГРНИП"><Input value={f.ogrn} onChange={set('ogrn')} /></LField>
+            <LField label="ОКПО"><Input value={f.okpo} onChange={set('okpo')} /></LField>
+            <LField label="ОКВЭД"><Input value={f.okved} onChange={set('okved')} /></LField>
+          </FSection>
+          <div className="h-px bg-border/60" />
+          <FSection title="Адреса">
+            <LField label="Юридический адрес" span><Textarea value={f.legalAddress} onChange={set('legalAddress')} rows={2} /></LField>
+            <LField label="Фактический адрес" span><Textarea value={f.actualAddress} onChange={set('actualAddress')} rows={2} /></LField>
+          </FSection>
+          <div className="h-px bg-border/60" />
+          <FSection title="Контакты и руководитель">
+            <LField label="Телефон"><Input value={f.phone} onChange={set('phone')} placeholder="+7 …" /></LField>
+            <LField label="Email"><Input value={f.email} onChange={set('email')} /></LField>
+            <LField label="Руководитель (ФИО)"><Input value={f.directorName} onChange={set('directorName')} /></LField>
+            <LField label="Должность"><Input value={f.directorPosition} onChange={set('directorPosition')} placeholder="Генеральный директор" /></LField>
+          </FSection>
+          <div className="h-px bg-border/60" />
+          <FSection title="Банковские реквизиты">
+            <LField label="Расчётный счёт"><Input value={f.bankAccount} onChange={set('bankAccount')} placeholder="40702810…" /></LField>
+            <LField label="БИК"><Input value={f.bankBik} onChange={set('bankBik')} /></LField>
+            <LField label="Банк" span><Input value={f.bankName} onChange={set('bankName')} placeholder="ПАО Сбербанк" /></LField>
+          </FSection>
         </div>
         <DialogFooter>
           <Button disabled={!canSave || pending} onClick={save}>
@@ -406,6 +471,9 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
     type: edit?.type ?? '', organizationId: edit?.organizationId ?? '',
     currency: edit?.currency ?? 'RUB', validUntil: edit?.validUntil ?? '',
     amountLimit: edit?.amountLimit != null ? String(edit.amountLimit) : '',
+    vatRate: edit?.vatRate ?? '', settlementKind: edit?.settlementKind ?? '', comment: edit?.comment ?? '',
+    amountInclVat: edit?.amountInclVat == null ? '' : (edit.amountInclVat ? 'true' : 'false'),
+    isClosed: edit?.isClosed ?? false,
   })
   const orgId = f.organizationId || (orgs[0]?.externalRef || orgs[0]?.id || '')
   const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== ''
@@ -415,7 +483,13 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
       number: f.number.trim(), date: f.date.trim(), counterpartyId,
       organizationId: orgId, kind: f.kind, type: f.type.trim() || kindLabel(f.kind),
       currency: f.currency.trim() || 'RUB', validUntil: f.validUntil.trim() || undefined,
-      amountLimit: f.amountLimit ? Number(f.amountLimit) : undefined, scopeType: 'unassigned' as const,
+      amountLimit: f.amountLimit ? Number(f.amountLimit) : undefined,
+      vatRate: f.vatRate.trim() || undefined,
+      amountInclVat: f.amountInclVat === '' ? undefined : f.amountInclVat === 'true',
+      settlementKind: f.settlementKind.trim() || undefined,
+      comment: f.comment.trim() || undefined,
+      isClosed: f.isClosed,
+      scopeType: 'unassigned' as const,
     }
     const opts = {
       onSuccess: () => { toast.success(edit ? 'Договор обновлён' : 'Договор добавлен'); setOpen(false) },
@@ -427,7 +501,7 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60!">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="size-5" /> {edit ? 'Изменить договор' : 'Новый договор'}
@@ -460,6 +534,27 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
             <div className="space-y-1.5"><Label>Сумма</Label>
               <Input value={f.amountLimit} onChange={(e) => setF((s) => ({ ...s, amountLimit: e.target.value.replace(/[^\d.]/g, '') }))} /></div>
           </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5"><Label>Ставка НДС</Label>
+              <Input value={f.vatRate} onChange={(e) => setF((s) => ({ ...s, vatRate: e.target.value }))} placeholder="20% / Без НДС" /></div>
+            <div className="space-y-1.5"><Label>Сумма включает НДС</Label>
+              <Select value={f.amountInclVat || '—'} onValueChange={(v) => setF((s) => ({ ...s, amountInclVat: v === '—' ? '' : v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="—">—</SelectItem>
+                  <SelectItem value="true">Да</SelectItem>
+                  <SelectItem value="false">Нет</SelectItem>
+                </SelectContent>
+              </Select></div>
+            <div className="space-y-1.5"><Label>Вид взаиморасчётов</Label>
+              <Input value={f.settlementKind} onChange={(e) => setF((s) => ({ ...s, settlementKind: e.target.value }))} /></div>
+          </div>
+          <div className="space-y-1.5"><Label>Комментарий</Label>
+            <Textarea value={f.comment} onChange={(e) => setF((s) => ({ ...s, comment: e.target.value }))} rows={2} /></div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={f.isClosed} onChange={(e) => setF((s) => ({ ...s, isClosed: e.target.checked }))} className="size-4 accent-primary" />
+            Договор закрыт
+          </label>
           {orgs.length === 0 && <p className="text-xs text-amber-600 dark:text-amber-400">Сначала заведите организацию (раздел «Данные → Организация»).</p>}
         </div>
         <DialogFooter>

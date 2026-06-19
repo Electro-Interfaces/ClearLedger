@@ -82,6 +82,16 @@ def _parse_uuid(val: str, label: str = "ID") -> uuid.UUID:
 # Counterparty (Контрагенты)
 # ---------------------------------------------------------------------------
 
+# Расширенные реквизиты контрагента: camelCase (схема) → snake_case (модель).
+_CP_EXTRA_FIELDS = {
+    "fullName": "full_name", "okpo": "okpo", "ogrn": "ogrn", "okved": "okved",
+    "legalAddress": "legal_address", "actualAddress": "actual_address",
+    "phone": "phone", "email": "email", "directorName": "director_name",
+    "directorPosition": "director_position", "bankAccount": "bank_account",
+    "bankBik": "bank_bik", "bankName": "bank_name",
+}
+
+
 def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
     return CounterpartyResponse(
         id=str(cp.id),
@@ -90,8 +100,6 @@ def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
         kpp=cp.kpp,
         name=cp.name,
         shortName=cp.short_name,
-        fullName=cp.full_name,
-        okpo=cp.okpo,
         type=cp.type,
         kind=cp.kind,
         aliases=cp.aliases or [],
@@ -100,6 +108,7 @@ def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
         raw=cp.raw,
         createdAt=_ts(cp.created_at),
         updatedAt=_ts(cp.updated_at),
+        **{camel: getattr(cp, snake) for camel, snake in _CP_EXTRA_FIELDS.items()},
     )
 
 
@@ -169,6 +178,7 @@ async def create_counterparty(
         short_name=body.shortName,
         type=body.type,
         aliases=body.aliases,
+        **{snake: getattr(body, camel) for camel, snake in _CP_EXTRA_FIELDS.items()},
     )
     db.add(cp)
     await db.flush()
@@ -200,6 +210,10 @@ async def update_counterparty(
         cp.type = body.type
     if body.aliases is not None:
         cp.aliases = body.aliases
+    for camel, snake in _CP_EXTRA_FIELDS.items():
+        val = getattr(body, camel)
+        if val is not None:
+            setattr(cp, snake, val)
 
     await db.flush()
     return _counterparty_resp(cp)
@@ -514,6 +528,10 @@ def _contract_resp(c: Contract) -> ContractResponse:
         kind=c.kind,
         currency=c.currency,
         validUntil=c.valid_until,
+        vatRate=c.vat_rate,
+        amountInclVat=c.amount_incl_vat,
+        settlementKind=c.settlement_kind,
+        comment=c.comment,
         isClosed=c.is_closed,
         scopeType=c.scope_type,
         externalRef=c.external_ref,
@@ -560,6 +578,11 @@ async def create_contract(
         kind=body.kind,
         currency=body.currency,
         valid_until=body.validUntil,
+        vat_rate=body.vatRate,
+        amount_incl_vat=body.amountInclVat,
+        settlement_kind=body.settlementKind,
+        comment=body.comment,
+        is_closed=body.isClosed,
         scope_type=body.scopeType,
     )
     db.add(c)
@@ -598,6 +621,14 @@ async def update_contract(
         c.currency = body.currency
     if body.validUntil is not None:
         c.valid_until = body.validUntil
+    if body.vatRate is not None:
+        c.vat_rate = body.vatRate
+    if body.amountInclVat is not None:
+        c.amount_incl_vat = body.amountInclVat
+    if body.settlementKind is not None:
+        c.settlement_kind = body.settlementKind
+    if body.comment is not None:
+        c.comment = body.comment
     if body.isClosed is not None:
         c.is_closed = body.isClosed
     if body.scopeType is not None:
