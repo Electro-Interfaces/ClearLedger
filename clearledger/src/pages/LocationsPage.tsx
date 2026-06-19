@@ -26,7 +26,7 @@ import {
 import {
   Plus, Trash2, Fuel, Store, Building2, Warehouse, MapPin, Pencil,
   Zap, Utensils, Flame, SlidersHorizontal,
-  LayoutGrid, Table2,
+  LayoutGrid, Table2, Search,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -66,10 +66,13 @@ function LocationCard({
   location,
   typeDef,
   onChange,
+  onOpen,
 }: {
   location: ServiceLocation
   typeDef?: LocationTypeDef
   onChange: () => void
+  /** Клик по карточке → открыть окно станции (cockpit). */
+  onOpen?: () => void
 }) {
   const fallbackMeta = LOCATION_TYPE_META[location.type]
   const Icon = resolveIcon(typeDef?.icon ?? fallbackMeta?.icon)
@@ -84,7 +87,11 @@ function LocationCard({
   }
 
   return (
-    <Card>
+    <Card
+      className={onOpen ? 'cursor-pointer transition-colors hover:bg-secondary/30' : undefined}
+      onClick={onOpen}
+      role={onOpen ? 'button' : undefined}
+    >
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted shrink-0">
@@ -118,11 +125,11 @@ function LocationCard({
                 {location.description}
               </div>
             )}
-            <div className="mt-1.5 -ml-2">
+            <div className="mt-1.5 -ml-2" onClick={(e) => e.stopPropagation()}>
               <LocationContractsPopover locationId={location.id} />
             </div>
           </div>
-          <div className="flex gap-1 shrink-0">
+          <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
             <LocationEditDialog location={location} onSaved={onChange}>
               <Button variant="ghost" size="icon" className="h-7 w-7">
                 <Pencil className="h-3.5 w-3.5" />
@@ -323,20 +330,32 @@ export function LocationsPage() {
   const sourcesCount = getSources().length
   const typeByCode = new Map(types.map((t) => [t.code, t]))
 
-  // Группировка по типам каталога (в порядке sort_order) + «прочие» коды,
-  // которых нет в каталоге (на всякий случай, чтобы точки не пропадали).
-  const groups = types
-    .map((t) => ({ type: t, items: locations.filter((l) => l.type === t.code) }))
-    .filter((g) => g.items.length > 0)
-  const knownCodes = new Set(types.map((t) => t.code))
-  const unknownItems = locations.filter((l) => !knownCodes.has(l.type))
-
   // Режим отображения: при большом числе точек по умолчанию таблица.
   const [viewOverride, setViewOverride] = useState<'cards' | 'table' | null>(null)
   const view: 'cards' | 'table' = viewOverride ?? (locations.length > 50 ? 'table' : 'cards')
 
   // Окно станции (cockpit) — открывается кликом по строке/карточке.
   const [cockpit, setCockpit] = useState<ServiceLocation | null>(null)
+
+  // Поиск в карточном режиме (в таблице — собственные фильтры).
+  const [cardQuery, setCardQuery] = useState('')
+  const cardQ = cardQuery.trim().toLowerCase()
+  const matchesCardQuery = (l: ServiceLocation) => {
+    if (!cardQ) return true
+    const meta = (l.metadata ?? {}) as Record<string, unknown>
+    const mv = (k: string) => { const v = meta[k]; return v == null ? '' : String(v) }
+    return [l.code, l.name, l.address ?? '', mv('number'), mv('cityName'), mv('ownerTitle')]
+      .join(' ').toLowerCase().includes(cardQ)
+  }
+  const cardSource = locations.filter(matchesCardQuery)
+
+  // Группировка по типам каталога (в порядке sort_order) + «прочие» коды,
+  // которых нет в каталоге (на всякий случай, чтобы точки не пропадали).
+  const groups = types
+    .map((t) => ({ type: t, items: cardSource.filter((l) => l.type === t.code) }))
+    .filter((g) => g.items.length > 0)
+  const knownCodes = new Set(types.map((t) => t.code))
+  const unknownItems = cardSource.filter((l) => !knownCodes.has(l.type))
 
   return (
     <div className="flex-1 min-w-0">
@@ -404,6 +423,16 @@ export function LocationsPage() {
           />
         ) : (
           <>
+            <div className="relative max-w-md">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input value={cardQuery} onChange={(e) => setCardQuery(e.target.value)}
+                placeholder="Поиск: код, название, адрес, город…" className="pl-8 h-9" />
+            </div>
+            {cardQ && (
+              <div className="text-xs text-muted-foreground -mt-2">
+                Найдено: {cardSource.length}{cardSource.length !== locations.length && ` из ${locations.length}`}
+              </div>
+            )}
             {groups.map((g) => (
               <div key={g.type.code} className="space-y-2">
                 <div className="text-xs font-semibold text-muted-foreground/70 uppercase tracking-wide">
@@ -412,7 +441,8 @@ export function LocationsPage() {
                 </div>
                 <div className="space-y-2">
                   {g.items.map((l) => (
-                    <LocationCard key={l.id} location={l} typeDef={typeByCode.get(l.type)} onChange={refresh} />
+                    <LocationCard key={l.id} location={l} typeDef={typeByCode.get(l.type)}
+                      onChange={refresh} onOpen={() => setCockpit(l)} />
                   ))}
                 </div>
               </div>
@@ -424,10 +454,17 @@ export function LocationsPage() {
                 </div>
                 <div className="space-y-2">
                   {unknownItems.map((l) => (
-                    <LocationCard key={l.id} location={l} onChange={refresh} />
+                    <LocationCard key={l.id} location={l} onChange={refresh} onOpen={() => setCockpit(l)} />
                   ))}
                 </div>
               </div>
+            )}
+            {cardQ && groups.length === 0 && unknownItems.length === 0 && (
+              <Card>
+                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                  Ничего не найдено по запросу «{cardQuery}».
+                </CardContent>
+              </Card>
             )}
           </>
         )}
