@@ -352,6 +352,15 @@ export interface Organization {
   name: string
   bankAccount?: string
   bankBik?: string
+  fullName?: string           // полное наименование
+  okpo?: string
+  legalAddress?: string       // юридический адрес
+  actualAddress?: string      // фактический адрес
+  phone?: string
+  email?: string
+  directorName?: string       // руководитель (ФИО)
+  directorPosition?: string   // должность руководителя
+  accountantName?: string     // главный бухгалтер
   createdAt: string
   updatedAt: string
 }

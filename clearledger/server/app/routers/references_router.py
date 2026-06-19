@@ -231,6 +231,15 @@ def _org_resp(org: Organization) -> OrganizationResponse:
         name=org.name,
         bankAccount=org.bank_account,
         bankBik=org.bank_bik,
+        fullName=org.full_name,
+        okpo=org.okpo,
+        legalAddress=org.legal_address,
+        actualAddress=org.actual_address,
+        phone=org.phone,
+        email=org.email,
+        directorName=org.director_name,
+        directorPosition=org.director_position,
+        accountantName=org.accountant_name,
         createdAt=_ts(org.created_at),
         updatedAt=_ts(org.updated_at),
     )
@@ -301,6 +310,15 @@ async def create_organization(
         name=body.name,
         bank_account=body.bankAccount,
         bank_bik=body.bankBik,
+        full_name=body.fullName,
+        okpo=body.okpo,
+        legal_address=body.legalAddress,
+        actual_address=body.actualAddress,
+        phone=body.phone,
+        email=body.email,
+        director_name=body.directorName,
+        director_position=body.directorPosition,
+        accountant_name=body.accountantName,
     )
     db.add(org)
     await db.flush()
@@ -332,6 +350,24 @@ async def update_organization(
         org.bank_account = body.bankAccount
     if body.bankBik is not None:
         org.bank_bik = body.bankBik
+    if body.fullName is not None:
+        org.full_name = body.fullName
+    if body.okpo is not None:
+        org.okpo = body.okpo
+    if body.legalAddress is not None:
+        org.legal_address = body.legalAddress
+    if body.actualAddress is not None:
+        org.actual_address = body.actualAddress
+    if body.phone is not None:
+        org.phone = body.phone
+    if body.email is not None:
+        org.email = body.email
+    if body.directorName is not None:
+        org.director_name = body.directorName
+    if body.directorPosition is not None:
+        org.director_position = body.directorPosition
+    if body.accountantName is not None:
+        org.accountant_name = body.accountantName
 
     await db.flush()
     return _org_resp(org)

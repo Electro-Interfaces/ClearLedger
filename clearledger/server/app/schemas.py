@@ -478,6 +478,15 @@ class OrganizationCreate(BaseModel):
     name: str = Field(min_length=1, max_length=500)
     bankAccount: str | None = None
     bankBik: str | None = None
+    fullName: str | None = None
+    okpo: str | None = None
+    legalAddress: str | None = None
+    actualAddress: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    directorName: str | None = None
+    directorPosition: str | None = None
+    accountantName: str | None = None
 
 
 class OrganizationUpdate(BaseModel):
@@ -487,6 +496,15 @@ class OrganizationUpdate(BaseModel):
     name: str | None = None
     bankAccount: str | None = None
     bankBik: str | None = None
+    fullName: str | None = None
+    okpo: str | None = None
+    legalAddress: str | None = None
+    actualAddress: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    directorName: str | None = None
+    directorPosition: str | None = None
+    accountantName: str | None = None
 
 
 class OrganizationResponse(BaseModel):
@@ -498,6 +516,15 @@ class OrganizationResponse(BaseModel):
     name: str
     bankAccount: str | None = None
     bankBik: str | None = None
+    fullName: str | None = None
+    okpo: str | None = None
+    legalAddress: str | None = None
+    actualAddress: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    directorName: str | None = None
+    directorPosition: str | None = None
+    accountantName: str | None = None
     createdAt: str
     updatedAt: str
 

@@ -121,6 +121,17 @@ async def create_all() -> None:
             "ON reconcile_mappings(company_id, kind, source_key) WHERE channel_id IS NULL",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_reconcile_mappings_channel "
             "ON reconcile_mappings(company_id, kind, source_key, channel_id) WHERE channel_id IS NOT NULL",
+            # v2.3: расширенные реквизиты организации (полное наим., ОКПО, адреса,
+            # контакты, ответственные лица) — карточка «Организация» в разделе Загрузка.
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS full_name VARCHAR(500)",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS okpo VARCHAR(20)",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS legal_address TEXT",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS actual_address TEXT",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS phone VARCHAR(100)",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS director_name VARCHAR(255)",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS director_position VARCHAR(150)",
+            "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS accountant_name VARCHAR(255)",
             # v2.0: мультитенантность — членство user↔company (M2M) + суперадмин.
             # Порядок важен: сначала колонка, потом снять NOT NULL с company_id,
             # затем таблица членства, затем backfill из текущей company_id, затем
