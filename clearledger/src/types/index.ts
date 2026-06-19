@@ -338,7 +338,9 @@ export interface Counterparty {
   type: CounterpartyType
   kind?: string                // external | retail | internal
   aliases: string[]
+  headRef?: string             // Ref_Key головного контрагента (иерархия)
   externalRef?: string         // Ref_Key 1С — связь с counterpartyId договоров
+  raw?: Record<string, unknown>  // полный снимок реквизитов из 1С
   createdAt: string
   updatedAt: string
 }
@@ -352,15 +354,38 @@ export interface Organization {
   name: string
   bankAccount?: string
   bankBik?: string
+  // Идентификация
+  vid?: string                // ЮЛ / ИП / ОП / ФЛ
   fullName?: string           // полное наименование
+  prefix?: string             // префикс
   okpo?: string
+  // Государственная регистрация
+  regDate?: string            // дата регистрации
+  okved?: string
+  oktmo?: string
+  okato?: string
+  okopf?: string
+  okfs?: string
+  registrationCert?: string   // свидетельство о гос. регистрации
+  // Налоговый орган и фонды
+  ifnsCode?: string
+  ifnsName?: string
+  pfrRegNumber?: string
+  fssRegNumber?: string
+  fssSubordination?: string
+  // Адреса и контакты
   legalAddress?: string       // юридический адрес
   actualAddress?: string      // фактический адрес
+  postalAddress?: string      // почтовый адрес
   phone?: string
+  fax?: string
   email?: string
+  // Ответственные лица
   directorName?: string       // руководитель (ФИО)
   directorPosition?: string   // должность руководителя
   accountantName?: string     // главный бухгалтер
+  cashierName?: string        // кассир
+  externalRef?: string        // Ref_Key из 1С (нет → заведена вручную)
   createdAt: string
   updatedAt: string
 }
@@ -395,6 +420,7 @@ export interface Contract {
   validUntil?: string
   isClosed?: boolean
   externalRef?: string
+  raw?: Record<string, unknown>   // полный снимок реквизитов из 1С
   // Ось договор↔точки (Фаза 2)
   scopeType?: ContractScopeType
   createdAt: string

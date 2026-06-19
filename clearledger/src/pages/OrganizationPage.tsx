@@ -1,9 +1,9 @@
 /**
- * Раздел «Загрузка» → «Организация».
- * Реквизиты юрлица компании (полное наим., ИНН/КПП/ОГРН/ОКПО, адреса,
- * контакты, руководитель/гл.бухгалтер) + банковские счета.
- * Для компаний с подключением 1С реквизиты приходят из синка организаций;
- * без 1С (например РусГидро) — заполняются вручную здесь.
+ * Раздел «Данные» → «Организация».
+ * Полная карточка юрлица как в справочнике «Организации» БП 3.0: идентификация,
+ * гос. регистрация, налоговый орган и фонды, адреса, контакты, ответственные
+ * лица + банковские счета. Для компаний с 1С реквизиты приходят из синка;
+ * без 1С (например РусГидро) — заполняются вручную.
  */
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -14,47 +14,71 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from '@/components/ui/dialog'
-import { Building, Landmark, Loader2, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Building, Landmark, Loader2, Plus, Pencil, Trash2, Database } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as refs from '@/services/referenceService'
 import type { Organization, BankAccount } from '@/types'
 
-type OrgForm = {
-  fullName: string
-  name: string
-  inn: string
-  kpp: string
-  ogrn: string
-  okpo: string
-  legalAddress: string
-  actualAddress: string
-  phone: string
-  email: string
-  directorName: string
-  directorPosition: string
-  accountantName: string
-}
+// Поля формы = расширенные реквизиты Organization (кроме служебных id/ref/дат).
+type OrgForm = Pick<Organization,
+  | 'vid' | 'fullName' | 'name' | 'prefix' | 'inn' | 'kpp' | 'ogrn' | 'okpo'
+  | 'regDate' | 'okved' | 'oktmo' | 'okato' | 'okopf' | 'okfs' | 'registrationCert'
+  | 'ifnsCode' | 'ifnsName' | 'pfrRegNumber' | 'fssRegNumber' | 'fssSubordination'
+  | 'legalAddress' | 'actualAddress' | 'postalAddress' | 'phone' | 'fax' | 'email'
+  | 'directorName' | 'directorPosition' | 'accountantName' | 'cashierName'
+>
 
-const EMPTY_FORM: OrgForm = {
-  fullName: '', name: '', inn: '', kpp: '', ogrn: '', okpo: '',
-  legalAddress: '', actualAddress: '', phone: '', email: '',
-  directorName: '', directorPosition: '', accountantName: '',
-}
+const FORM_KEYS: (keyof OrgForm)[] = [
+  'vid', 'fullName', 'name', 'prefix', 'inn', 'kpp', 'ogrn', 'okpo',
+  'regDate', 'okved', 'oktmo', 'okato', 'okopf', 'okfs', 'registrationCert',
+  'ifnsCode', 'ifnsName', 'pfrRegNumber', 'fssRegNumber', 'fssSubordination',
+  'legalAddress', 'actualAddress', 'postalAddress', 'phone', 'fax', 'email',
+  'directorName', 'directorPosition', 'accountantName', 'cashierName',
+]
+
+const EMPTY_FORM: OrgForm = Object.fromEntries(FORM_KEYS.map((k) => [k, ''])) as OrgForm
 
 function orgToForm(o: Organization): OrgForm {
-  return {
-    fullName: o.fullName ?? '', name: o.name ?? '', inn: o.inn ?? '',
-    kpp: o.kpp ?? '', ogrn: o.ogrn ?? '', okpo: o.okpo ?? '',
-    legalAddress: o.legalAddress ?? '', actualAddress: o.actualAddress ?? '',
-    phone: o.phone ?? '', email: o.email ?? '',
-    directorName: o.directorName ?? '', directorPosition: o.directorPosition ?? '',
-    accountantName: o.accountantName ?? '',
-  }
+  return Object.fromEntries(FORM_KEYS.map((k) => [k, o[k] ?? ''])) as OrgForm
+}
+
+const VID_OPTIONS = [
+  { value: 'ЮЛ', label: 'Юридическое лицо' },
+  { value: 'ИП', label: 'Индивидуальный предприниматель' },
+  { value: 'ОП', label: 'Обособленное подразделение' },
+  { value: 'ФЛ', label: 'Физическое лицо' },
+]
+
+// Подпись группы полей — в стиле заголовков боковой навигации.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">{children}</div>
+    </div>
+  )
+}
+
+function Field({ label, required, span, children }: {
+  label: string; required?: boolean; span?: boolean; children: React.ReactNode
+}) {
+  return (
+    <div className={`space-y-1.5 ${span ? 'col-span-2' : ''}`}>
+      <Label className="text-xs text-muted-foreground">
+        {label}{required && <span className="text-destructive"> *</span>}
+      </Label>
+      {children}
+    </div>
+  )
 }
 
 export function OrganizationPage() {
@@ -77,14 +101,13 @@ export function OrganizationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
+  const setField = (k: keyof OrgForm, v: string) => setForm((f) => ({ ...f, [k]: v }))
   const set = (k: keyof OrgForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setForm((f) => ({ ...f, [k]: e.target.value }))
+    setField(k, e.target.value)
 
   const save = useMutation({
     mutationFn: async () => {
-      if (org) {
-        return refs.updateOrganization(companyId, org.id, { ...form })
-      }
+      if (org) return refs.updateOrganization(companyId, org.id, { ...form })
       return refs.createOrganization(companyId, { ...form })
     },
     onSuccess: () => {
@@ -94,14 +117,14 @@ export function OrganizationPage() {
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
 
-  const canSave = form.inn.trim() !== '' && form.name.trim() !== ''
+  const canSave = (form.inn ?? '').trim() !== '' && (form.name ?? '').trim() !== ''
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="max-w-4xl space-y-6 p-4 lg:p-6">
       <div className="flex items-center gap-2">
-        <Building className="h-6 w-6 text-primary" />
+        <Building className="h-6 w-6 text-primary shrink-0" />
         <div>
-          <h1 className="text-2xl font-bold">Организация</h1>
+          <h1 className="text-xl font-semibold">Организация</h1>
           <p className="text-sm text-muted-foreground">
             Реквизиты юрлица {company?.shortName ? `· ${company.shortName}` : ''}
           </p>
@@ -116,72 +139,108 @@ export function OrganizationPage() {
         <>
           {/* Реквизиты организации */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Building className="h-5 w-5" /> Реквизиты организации</CardTitle>
-              <CardDescription>
-                {org ? 'Карточка юрлица' : 'Организация ещё не заведена — заполните реквизиты и сохраните'}
-              </CardDescription>
+            <CardHeader className="flex-row items-start justify-between space-y-0 gap-3">
+              <div className="space-y-1.5">
+                <CardTitle className="flex items-center gap-2"><Building className="h-5 w-5" /> Реквизиты организации</CardTitle>
+                <CardDescription>
+                  {org ? 'Карточка юрлица' : 'Организация ещё не заведена — заполните реквизиты и сохраните'}
+                </CardDescription>
+              </div>
+              {org && (
+                org.externalRef
+                  ? <Badge variant="secondary" className="gap-1 shrink-0"><Database className="h-3 w-3" /> Из 1С</Badge>
+                  : <Badge variant="outline" className="gap-1 shrink-0 text-muted-foreground"><Pencil className="h-3 w-3" /> Вручную</Badge>
+              )}
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2 space-y-2">
-                  <Label>Полное наименование</Label>
+            <CardContent className="space-y-5 [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60! [&_input]:border-border! [&_textarea]:border-border! [&_[data-slot=select-trigger]]:border-border!">
+              <Section title="Идентификация">
+                <Field label="Вид">
+                  <Select value={form.vid || undefined} onValueChange={(v) => setField('vid', v)}>
+                    <SelectTrigger><SelectValue placeholder="Не указан" /></SelectTrigger>
+                    <SelectContent>
+                      {VID_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Префикс"><Input value={form.prefix} onChange={set('prefix')} placeholder="ГИГ" /></Field>
+                <Field label="Полное наименование" span>
                   <Input value={form.fullName} onChange={set('fullName')}
                     placeholder="Общество с ограниченной ответственностью …" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Краткое наименование <span className="text-destructive">*</span></Label>
+                </Field>
+                <Field label="Сокращённое наименование" required>
                   <Input value={form.name} onChange={set('name')} placeholder="ООО …" />
-                </div>
-                <div className="space-y-2">
-                  <Label>ИНН <span className="text-destructive">*</span></Label>
+                </Field>
+                <Field label="ИНН" required>
                   <Input value={form.inn} onChange={set('inn')} placeholder="7839…" />
-                </div>
-                <div className="space-y-2">
-                  <Label>КПП</Label>
-                  <Input value={form.kpp} onChange={set('kpp')} />
-                </div>
-                <div className="space-y-2">
-                  <Label>ОГРН</Label>
-                  <Input value={form.ogrn} onChange={set('ogrn')} />
-                </div>
-                <div className="space-y-2">
-                  <Label>ОКПО</Label>
-                  <Input value={form.okpo} onChange={set('okpo')} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Телефон</Label>
-                  <Input value={form.phone} onChange={set('phone')} placeholder="+7 …" />
-                </div>
-                <div className="col-span-2 space-y-2">
-                  <Label>Юридический адрес</Label>
+                </Field>
+                <Field label="КПП"><Input value={form.kpp} onChange={set('kpp')} /></Field>
+                <Field label="ОКПО"><Input value={form.okpo} onChange={set('okpo')} /></Field>
+              </Section>
+
+              <div className="h-px bg-border/60" />
+
+              <Section title="Государственная регистрация">
+                <Field label="ОГРН / ОГРНИП"><Input value={form.ogrn} onChange={set('ogrn')} /></Field>
+                <Field label="Дата регистрации"><Input value={form.regDate} onChange={set('regDate')} placeholder="дд.мм.гггг" /></Field>
+                <Field label="ОКВЭД"><Input value={form.okved} onChange={set('okved')} /></Field>
+                <Field label="ОКТМО"><Input value={form.oktmo} onChange={set('oktmo')} /></Field>
+                <Field label="ОКАТО"><Input value={form.okato} onChange={set('okato')} /></Field>
+                <Field label="ОКОПФ"><Input value={form.okopf} onChange={set('okopf')} /></Field>
+                <Field label="ОКФС"><Input value={form.okfs} onChange={set('okfs')} /></Field>
+                <Field label="Свидетельство о гос. регистрации" span>
+                  <Input value={form.registrationCert} onChange={set('registrationCert')}
+                    placeholder="серия, №, дата, кем выдано" />
+                </Field>
+              </Section>
+
+              <div className="h-px bg-border/60" />
+
+              <Section title="Налоговый орган и фонды">
+                <Field label="Код ИФНС"><Input value={form.ifnsCode} onChange={set('ifnsCode')} /></Field>
+                <Field label="Наименование ИФНС" span><Input value={form.ifnsName} onChange={set('ifnsName')} /></Field>
+                <Field label="Рег. номер ПФР"><Input value={form.pfrRegNumber} onChange={set('pfrRegNumber')} /></Field>
+                <Field label="Рег. номер ФСС"><Input value={form.fssRegNumber} onChange={set('fssRegNumber')} /></Field>
+                <Field label="Код подчинённости ФСС"><Input value={form.fssSubordination} onChange={set('fssSubordination')} /></Field>
+              </Section>
+
+              <div className="h-px bg-border/60" />
+
+              <Section title="Адреса">
+                <Field label="Юридический адрес" span>
                   <Textarea value={form.legalAddress} onChange={set('legalAddress')} rows={2} />
-                </div>
-                <div className="col-span-2 space-y-2">
-                  <Label>Фактический адрес</Label>
+                </Field>
+                <Field label="Фактический адрес" span>
                   <Textarea value={form.actualAddress} onChange={set('actualAddress')} rows={2} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input value={form.email} onChange={set('email')} placeholder="info@…" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Руководитель (ФИО)</Label>
-                  <Input value={form.directorName} onChange={set('directorName')} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Должность руководителя</Label>
-                  <Input value={form.directorPosition} onChange={set('directorPosition')}
-                    placeholder="Генеральный директор" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Главный бухгалтер (ФИО)</Label>
-                  <Input value={form.accountantName} onChange={set('accountantName')} />
-                </div>
+                </Field>
+                <Field label="Почтовый адрес" span>
+                  <Textarea value={form.postalAddress} onChange={set('postalAddress')} rows={2} />
+                </Field>
+              </Section>
+
+              <div className="h-px bg-border/60" />
+
+              <Section title="Контакты">
+                <Field label="Телефон"><Input value={form.phone} onChange={set('phone')} placeholder="+7 …" /></Field>
+                <Field label="Факс"><Input value={form.fax} onChange={set('fax')} /></Field>
+                <Field label="Email" span><Input value={form.email} onChange={set('email')} placeholder="info@…" /></Field>
+              </Section>
+
+              <div className="h-px bg-border/60" />
+
+              <Section title="Ответственные лица">
+                <Field label="Руководитель (ФИО)"><Input value={form.directorName} onChange={set('directorName')} /></Field>
+                <Field label="Должность руководителя">
+                  <Input value={form.directorPosition} onChange={set('directorPosition')} placeholder="Генеральный директор" />
+                </Field>
+                <Field label="Главный бухгалтер (ФИО)"><Input value={form.accountantName} onChange={set('accountantName')} /></Field>
+                <Field label="Кассир (ФИО)"><Input value={form.cashierName} onChange={set('cashierName')} /></Field>
+              </Section>
+
+              <div className="flex justify-end pt-1">
+                <Button onClick={() => save.mutate()} disabled={!canSave || save.isPending}>
+                  {save.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Сохранить
+                </Button>
               </div>
-              <Button onClick={() => save.mutate()} disabled={!canSave || save.isPending}>
-                {save.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Сохранить
-              </Button>
             </CardContent>
           </Card>
 

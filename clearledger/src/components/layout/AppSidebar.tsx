@@ -17,7 +17,7 @@ import {
   Upload, FileText, Radio, Database, ChevronDown,
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
   Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
-  Library, ShieldCheck, Building2, Building,
+  Library, ShieldCheck, Building2, Building, Boxes,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -32,9 +32,12 @@ const mainItems = [
 const intakeItems = [
   { to: '/intake', icon: FileText, label: 'Файлы и документы' },
   { to: '/channels', icon: Radio, label: 'Каналы' },
-  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
+]
+
+const dataItems = [
   { to: '/organization', icon: Building, label: 'Организация' },
   { to: '/contractors', icon: Building2, label: 'Контрагенты' },
+  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
 ]
 
 const oneCItems = [
@@ -90,6 +93,7 @@ export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar()
   const collapsed = state === 'collapsed'
   const [intakeOpen, setIntakeOpen] = useState(true)
+  const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(true)
   const { user } = useAuth()
   // Показываем админ-раздел, если суперадмин ИЛИ админ хотя бы в одной компании.
@@ -139,6 +143,36 @@ export function AppSidebar() {
               <CollapsibleContent>
                 <SidebarMenu>
                   {intakeItems.map((item) => (
+                    <NavItem key={item.to} {...item} collapsed={collapsed} />
+                  ))}
+                </SidebarMenu>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </SidebarGroup>
+
+        <SidebarSeparator className="my-2" />
+
+        {/* ДАННЫЕ section */}
+        <SidebarGroup className="py-0">
+          {collapsed ? (
+            <SidebarMenu>
+              <NavItem to="/organization" icon={Boxes} label="Данные" collapsed />
+            </SidebarMenu>
+          ) : (
+            <Collapsible open={dataOpen} onOpenChange={setDataOpen}>
+              <CollapsibleTrigger asChild>
+                <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
+                  <span className="flex items-center gap-1.5">
+                    <Boxes className="h-3 w-3" />
+                    Данные
+                  </span>
+                  <ChevronDown className={`h-3 w-3 transition-transform ${dataOpen ? '' : '-rotate-90'}`} />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <SidebarMenu>
+                  {dataItems.map((item) => (
                     <NavItem key={item.to} {...item} collapsed={collapsed} />
                   ))}
                 </SidebarMenu>

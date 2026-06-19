@@ -465,66 +465,73 @@ class CounterpartyResponse(BaseModel):
     type: str
     kind: str = "external"
     aliases: list[str]
+    headRef: str | None = None        # Ref_Key головного контрагента (иерархия)
     externalRef: str | None = None
+    raw: dict | None = None           # полный снимок реквизитов 1С
     createdAt: str
     updatedAt: str
 
 
-class OrganizationCreate(BaseModel):
+class _OrgExtra(BaseModel):
+    """Расширенные реквизиты организации — полная карточка БП 3.0."""
+    bankAccount: str | None = None
+    bankBik: str | None = None
+    # Идентификация
+    vid: str | None = None               # ЮЛ / ИП / ОП / ФЛ
+    fullName: str | None = None
+    prefix: str | None = None
+    okpo: str | None = None
+    # Государственная регистрация
+    regDate: str | None = None
+    okved: str | None = None
+    oktmo: str | None = None
+    okato: str | None = None
+    okopf: str | None = None
+    okfs: str | None = None
+    registrationCert: str | None = None
+    # Налоговый орган и фонды
+    ifnsCode: str | None = None
+    ifnsName: str | None = None
+    pfrRegNumber: str | None = None
+    fssRegNumber: str | None = None
+    fssSubordination: str | None = None
+    # Адреса и контакты
+    legalAddress: str | None = None
+    actualAddress: str | None = None
+    postalAddress: str | None = None
+    phone: str | None = None
+    fax: str | None = None
+    email: str | None = None
+    # Ответственные лица
+    directorName: str | None = None
+    directorPosition: str | None = None
+    accountantName: str | None = None
+    cashierName: str | None = None
+
+
+class OrganizationCreate(_OrgExtra):
     company_id: str
     inn: str
     kpp: str | None = None
     ogrn: str | None = None
     name: str = Field(min_length=1, max_length=500)
-    bankAccount: str | None = None
-    bankBik: str | None = None
-    fullName: str | None = None
-    okpo: str | None = None
-    legalAddress: str | None = None
-    actualAddress: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    directorName: str | None = None
-    directorPosition: str | None = None
-    accountantName: str | None = None
 
 
-class OrganizationUpdate(BaseModel):
+class OrganizationUpdate(_OrgExtra):
     inn: str | None = None
     kpp: str | None = None
     ogrn: str | None = None
     name: str | None = None
-    bankAccount: str | None = None
-    bankBik: str | None = None
-    fullName: str | None = None
-    okpo: str | None = None
-    legalAddress: str | None = None
-    actualAddress: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    directorName: str | None = None
-    directorPosition: str | None = None
-    accountantName: str | None = None
 
 
-class OrganizationResponse(BaseModel):
+class OrganizationResponse(_OrgExtra):
     id: str
     companyId: str
     inn: str
     kpp: str | None = None
     ogrn: str | None = None
     name: str
-    bankAccount: str | None = None
-    bankBik: str | None = None
-    fullName: str | None = None
-    okpo: str | None = None
-    legalAddress: str | None = None
-    actualAddress: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    directorName: str | None = None
-    directorPosition: str | None = None
-    accountantName: str | None = None
+    externalRef: str | None = None   # Ref_Key из 1С (None → заведена вручную)
     createdAt: str
     updatedAt: str
 
@@ -601,6 +608,7 @@ class ContractResponse(BaseModel):
     isClosed: bool = False
     scopeType: str = "unassigned"
     externalRef: str | None = None
+    raw: dict | None = None           # полный снимок реквизитов 1С
     createdAt: str
     updatedAt: str
 

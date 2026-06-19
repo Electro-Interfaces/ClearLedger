@@ -342,13 +342,16 @@ export function LocationsPage() {
     <div className="flex-1 min-w-0">
       <div className="px-6 py-6 space-y-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">Точки обслуживания</h1>
-            <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-              Места работы клиента: АЗС, торговые точки, офисы, склады.
-              Привязываются к источникам данных и используются системой
-              для фильтрации документов и каналов.
-            </p>
+          <div className="flex items-center gap-2">
+            <MapPin className="h-6 w-6 text-primary shrink-0" />
+            <div>
+              <h1 className="text-xl font-semibold">Точки обслуживания</h1>
+              <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+                Места работы клиента: АЗС, торговые точки, офисы, склады.
+                Привязываются к источникам данных и используются системой
+                для фильтрации документов и каналов.
+              </p>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2 shrink-0">
             {locations.length > 0 && (

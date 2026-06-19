@@ -397,16 +397,39 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     bank_account: Mapped[str | None] = mapped_column(String(30), nullable=True)
     bank_bik: Mapped[str | None] = mapped_column(String(12), nullable=True)
-    # Расширенные реквизиты (заполняются вручную или из 1С)
-    full_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Расширенные реквизиты — полная карточка организации БП 3.0
+    # (заполняются вручную или из 1С). Группы: идентификация, гос.регистрация,
+    # налоговая/фонды, адреса, контакты, ответственные лица.
+    vid: Mapped[str | None] = mapped_column(String(40), nullable=True)            # ЮЛ / ИП / ОП / ФЛ
+    full_name: Mapped[str | None] = mapped_column(String(500), nullable=True)     # полное наименование
+    prefix: Mapped[str | None] = mapped_column(String(10), nullable=True)         # префикс
     okpo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Государственная регистрация
+    reg_date: Mapped[str | None] = mapped_column(String(20), nullable=True)       # дата регистрации
+    okved: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    oktmo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    okato: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    okopf: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    okfs: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    registration_cert: Mapped[str | None] = mapped_column(String(300), nullable=True)  # свидетельство о гос.рег.
+    # Налоговый орган и фонды
+    ifns_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    ifns_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    pfr_reg_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    fss_reg_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    fss_subordination: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Адреса и контакты
     legal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     actual_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    postal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    fax: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Ответственные лица
     director_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     director_position: Mapped[str | None] = mapped_column(String(150), nullable=True)
     accountant_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cashier_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

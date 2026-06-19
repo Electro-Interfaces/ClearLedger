@@ -95,7 +95,9 @@ def _counterparty_resp(cp: Counterparty) -> CounterpartyResponse:
         type=cp.type,
         kind=cp.kind,
         aliases=cp.aliases or [],
+        headRef=cp.head_ref,
         externalRef=cp.external_ref,
+        raw=cp.raw,
         createdAt=_ts(cp.created_at),
         updatedAt=_ts(cp.updated_at),
     )
@@ -221,6 +223,21 @@ async def delete_counterparty(
 # Organization (Организации)
 # ---------------------------------------------------------------------------
 
+# Расширенные реквизиты организации: camelCase (схема) → snake_case (модель).
+_ORG_EXTRA_FIELDS = {
+    "bankAccount": "bank_account", "bankBik": "bank_bik",
+    "vid": "vid", "fullName": "full_name", "prefix": "prefix", "okpo": "okpo",
+    "regDate": "reg_date", "okved": "okved", "oktmo": "oktmo", "okato": "okato",
+    "okopf": "okopf", "okfs": "okfs", "registrationCert": "registration_cert",
+    "ifnsCode": "ifns_code", "ifnsName": "ifns_name", "pfrRegNumber": "pfr_reg_number",
+    "fssRegNumber": "fss_reg_number", "fssSubordination": "fss_subordination",
+    "legalAddress": "legal_address", "actualAddress": "actual_address",
+    "postalAddress": "postal_address", "phone": "phone", "fax": "fax", "email": "email",
+    "directorName": "director_name", "directorPosition": "director_position",
+    "accountantName": "accountant_name", "cashierName": "cashier_name",
+}
+
+
 def _org_resp(org: Organization) -> OrganizationResponse:
     return OrganizationResponse(
         id=str(org.id),
@@ -229,19 +246,10 @@ def _org_resp(org: Organization) -> OrganizationResponse:
         kpp=org.kpp,
         ogrn=org.ogrn,
         name=org.name,
-        bankAccount=org.bank_account,
-        bankBik=org.bank_bik,
-        fullName=org.full_name,
-        okpo=org.okpo,
-        legalAddress=org.legal_address,
-        actualAddress=org.actual_address,
-        phone=org.phone,
-        email=org.email,
-        directorName=org.director_name,
-        directorPosition=org.director_position,
-        accountantName=org.accountant_name,
+        externalRef=org.external_ref,
         createdAt=_ts(org.created_at),
         updatedAt=_ts(org.updated_at),
+        **{camel: getattr(org, snake) for camel, snake in _ORG_EXTRA_FIELDS.items()},
     )
 
 
@@ -308,17 +316,7 @@ async def create_organization(
         kpp=body.kpp,
         ogrn=body.ogrn,
         name=body.name,
-        bank_account=body.bankAccount,
-        bank_bik=body.bankBik,
-        full_name=body.fullName,
-        okpo=body.okpo,
-        legal_address=body.legalAddress,
-        actual_address=body.actualAddress,
-        phone=body.phone,
-        email=body.email,
-        director_name=body.directorName,
-        director_position=body.directorPosition,
-        accountant_name=body.accountantName,
+        **{snake: getattr(body, camel) for camel, snake in _ORG_EXTRA_FIELDS.items()},
     )
     db.add(org)
     await db.flush()
@@ -346,28 +344,10 @@ async def update_organization(
         org.ogrn = body.ogrn
     if body.name is not None:
         org.name = body.name
-    if body.bankAccount is not None:
-        org.bank_account = body.bankAccount
-    if body.bankBik is not None:
-        org.bank_bik = body.bankBik
-    if body.fullName is not None:
-        org.full_name = body.fullName
-    if body.okpo is not None:
-        org.okpo = body.okpo
-    if body.legalAddress is not None:
-        org.legal_address = body.legalAddress
-    if body.actualAddress is not None:
-        org.actual_address = body.actualAddress
-    if body.phone is not None:
-        org.phone = body.phone
-    if body.email is not None:
-        org.email = body.email
-    if body.directorName is not None:
-        org.director_name = body.directorName
-    if body.directorPosition is not None:
-        org.director_position = body.directorPosition
-    if body.accountantName is not None:
-        org.accountant_name = body.accountantName
+    for camel, snake in _ORG_EXTRA_FIELDS.items():
+        val = getattr(body, camel)
+        if val is not None:
+            setattr(org, snake, val)
 
     await db.flush()
     return _org_resp(org)
@@ -537,6 +517,7 @@ def _contract_resp(c: Contract) -> ContractResponse:
         isClosed=c.is_closed,
         scopeType=c.scope_type,
         externalRef=c.external_ref,
+        raw=c.raw,
         createdAt=_ts(c.created_at),
         updatedAt=_ts(c.updated_at),
     )
