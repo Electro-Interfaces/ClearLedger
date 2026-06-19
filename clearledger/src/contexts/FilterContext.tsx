@@ -16,6 +16,8 @@ import { useCompany } from './CompanyContext'
 interface FilterState {
   /** Выбранные точки обслуживания (ID из gig-locations). Пусто = «все». */
   locationIds: string[]
+  /** Выбранные регионы (= ServiceLocation.metadata.federalSubject). Пусто = «все». */
+  regionIds: string[]
   /** Выбранные типы документов (shift_report, receipt, price, ...). Пусто = «все». */
   docTypeIds: string[]
 }
@@ -23,6 +25,8 @@ interface FilterState {
 interface FilterContextType extends FilterState {
   setLocationIds: (ids: string[]) => void
   toggleLocation: (id: string) => void
+  setRegionIds: (ids: string[]) => void
+  toggleRegion: (id: string) => void
   setDocTypeIds: (ids: string[]) => void
   toggleDocType: (id: string) => void
   clearAll: () => void
@@ -38,16 +42,18 @@ function storageKey(companyId: string): string {
 }
 
 function loadFilters(companyId: string): FilterState {
+  const empty: FilterState = { locationIds: [], regionIds: [], docTypeIds: [] }
   try {
     const raw = localStorage.getItem(storageKey(companyId))
-    if (!raw) return { locationIds: [], docTypeIds: [] }
+    if (!raw) return empty
     const parsed = JSON.parse(raw)
     return {
       locationIds: Array.isArray(parsed.locationIds) ? parsed.locationIds : [],
+      regionIds: Array.isArray(parsed.regionIds) ? parsed.regionIds : [],
       docTypeIds: Array.isArray(parsed.docTypeIds) ? parsed.docTypeIds : [],
     }
   } catch {
-    return { locationIds: [], docTypeIds: [] }
+    return empty
   }
 }
 
@@ -86,6 +92,19 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  const setRegionIds = useCallback((ids: string[]) => {
+    setState((prev) => ({ ...prev, regionIds: ids }))
+  }, [])
+
+  const toggleRegion = useCallback((id: string) => {
+    setState((prev) => {
+      const set = new Set(prev.regionIds)
+      if (set.has(id)) set.delete(id)
+      else set.add(id)
+      return { ...prev, regionIds: [...set] }
+    })
+  }, [])
+
   const setDocTypeIds = useCallback((ids: string[]) => {
     setState((prev) => ({ ...prev, docTypeIds: ids }))
   }, [])
@@ -100,7 +119,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const clearAll = useCallback(() => {
-    setState({ locationIds: [], docTypeIds: [] })
+    setState({ locationIds: [], regionIds: [], docTypeIds: [] })
   }, [])
 
   const filterByLocation = useCallback(
@@ -116,11 +135,13 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     ...state,
     setLocationIds,
     toggleLocation,
+    setRegionIds,
+    toggleRegion,
     setDocTypeIds,
     toggleDocType,
     clearAll,
     filterByLocation,
-  }), [state, setLocationIds, toggleLocation, setDocTypeIds, toggleDocType, clearAll, filterByLocation])
+  }), [state, setLocationIds, toggleLocation, setRegionIds, toggleRegion, setDocTypeIds, toggleDocType, clearAll, filterByLocation])
 
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>
 }

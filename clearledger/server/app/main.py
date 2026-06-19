@@ -40,6 +40,7 @@ from app.routers import (
     reconcile_rules_router,
     locations_router,
     location_types_router,
+    netservice_router,
     references_router,
     reports_router,
     settings_router,
@@ -135,6 +136,7 @@ app.include_router(mappings_router.router, prefix=API_PREFIX)
 app.include_router(export_packets_router.router, prefix=API_PREFIX)
 app.include_router(policy_router.router, prefix=API_PREFIX)
 app.include_router(analytics_router.router, prefix=API_PREFIX)
+app.include_router(netservice_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

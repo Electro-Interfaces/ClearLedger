@@ -23,7 +23,8 @@ export function MainLayout() {
   // Рабочие области с фиксированной высотой (без скролла страницы, h-full внутри):
   // рабочий стол и отдельная область разрезов «Сверка данных».
   const isWorkspace =
-    location.pathname === '/' || location.pathname === '/reconciliation'
+    location.pathname === '/' || location.pathname === '/reconciliation' ||
+    location.pathname.startsWith('/netservice')
 
   return (
     <SidebarProvider
@@ -50,7 +51,7 @@ export function MainLayout() {
           </Sheet>
         )}
 
-        <SidebarInset className="overflow-hidden">
+        <SidebarInset id="workspace-area" className="overflow-hidden">
           {isWorkspace ? (
             <div className="flex-1 min-h-0 overflow-hidden">
               <Outlet />

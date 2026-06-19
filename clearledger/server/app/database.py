@@ -265,6 +265,34 @@ async def create_all() -> None:
             "operational_status VARCHAR(20) NOT NULL DEFAULT 'unknown'"
         ))
 
+        # v2.7: Сервисный центр (netservice). Таблицы regions/hubex_tasks/
+        # hubex_assets/hubex_refs/support_sync_cursors создаются через
+        # metadata.create_all (индексы — из __table_args__ моделей). Здесь —
+        # колонка region_id у существующей service_locations + идемпотентный
+        # бэкфилл регионов из extra_metadata.federalSubject (сырьё остаётся в
+        # metadata; region_id — производный быстрый разрез для аналитики).
+        for stmt in (
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS region_id UUID "
+            "REFERENCES regions(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS idx_service_locations_region "
+            "ON service_locations(company_id, region_id)",
+            # Уникальные federalSubject → regions
+            "INSERT INTO regions (id, company_id, name, federal_subject) "
+            "SELECT gen_random_uuid(), company_id, extra_metadata->>'federalSubject', "
+            "       extra_metadata->>'federalSubject' "
+            "FROM service_locations "
+            "WHERE extra_metadata->>'federalSubject' IS NOT NULL "
+            "  AND extra_metadata->>'federalSubject' <> '' "
+            "GROUP BY company_id, extra_metadata->>'federalSubject' "
+            "ON CONFLICT (company_id, name) DO NOTHING",
+            # Проставить region_id точкам по совпадению названия региона
+            "UPDATE service_locations sl SET region_id = r.id "
+            "FROM regions r "
+            "WHERE sl.region_id IS NULL AND r.company_id = sl.company_id "
+            "  AND r.name = sl.extra_metadata->>'federalSubject'",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

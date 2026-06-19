@@ -1904,6 +1904,12 @@ class ServiceLocation(Base):
     source_bindings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     # Произвольные метаданные (в API — поле metadata)
     extra_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Нормализованный регион (производный от extra_metadata.federalSubject). NULL
+    # пока не размечен; источник-сырьё остаётся в metadata. См. Region.
+    region_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("regions.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -1970,4 +1976,198 @@ class LocationTypeDef(Base):
             "uq_location_types_company_code", "company_id", "code",
             unique=True, postgresql_where=text("company_id IS NOT NULL"),
         ),
+    )
+
+
+# ===========================================================================
+# Сервисный центр (netservice) — управление сервисом сети.
+# MVP: 3-я линия (HubEx FSM). L1 заявок/объектов/справочников raw+промо +
+# нормализация региона. Унифицированный SupportCase и др. источники — Фаза 2+.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Region — нормализованный справочник регионов (производный от
+# ServiceLocation.extra_metadata.federalSubject). Сырьё остаётся в metadata,
+# region_id — быстрый разрез для аналитики.
+# ---------------------------------------------------------------------------
+class Region(Base):
+    __tablename__ = "regions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Сырое значение federalSubject для матчинга при бэкфилле/синке.
+    federal_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_regions_company_name", "company_id", "name", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
+# HubexTask — L1 заявок HubEx FSM (raw + промо-колонки). Натуральный ключ
+# идемпотентности (company_id, hubex_id). Вся SLA-математика — по 6 timestamp
+# полям timesheet. asset_id → ServiceLocation.extra_metadata.hubexAssetId.
+# ---------------------------------------------------------------------------
+class HubexTask(Base):
+    __tablename__ = "hubex_tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # id заявки в HubEx (ключ словаря ответа /WORK/Tasks)
+    hubex_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Промо
+    task_type: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    work_type: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # workType.erpID — мост к 1С/ERP (финансовый мост, Фаза 3)
+    work_type_erp_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    status_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    criticality: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    criticality_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    asset_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    contractor_company: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    contractor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    assignee_is_tech: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Наш слой: резолв объекта в нашу точку и регион
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True
+    )
+    region_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("regions.id", ondelete="SET NULL"), nullable=True
+    )
+    # timesheet — вся SLA-математика
+    ts_created: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ts_requested: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ts_assigned: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ts_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ts_completed: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ts_closed: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_overdue: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    is_rated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    child_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_hubex_tasks", "company_id", "hubex_id", unique=True),
+        Index("idx_hubex_tasks_asset", "company_id", "asset_id"),
+        Index("idx_hubex_tasks_lastmod", "company_id", "last_modified"),
+        Index("idx_hubex_tasks_stage", "company_id", "stage"),
+        Index("idx_hubex_tasks_region", "company_id", "region_id"),
+        Index(
+            "idx_hubex_tasks_open", "company_id",
+            postgresql_where=text("ts_closed IS NULL"),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# HubexAsset — справочник объектов HubEx (/ES/Assets). Ключ (company_id, hubex_id).
+# ---------------------------------------------------------------------------
+class HubexAsset(Base):
+    __tablename__ = "hubex_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    hubex_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True
+    )
+    serial_number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_hubex_assets", "company_id", "hubex_id", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
+# HubexRef — полиморфный справочник HubEx (статусы/типы/виды работ/критичность/
+# подрядчики). Ключ (company_id, ref_kind, hubex_id).
+# ---------------------------------------------------------------------------
+class HubexRef(Base):
+    __tablename__ = "hubex_refs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # status | task_type | work_type | criticality | company
+    ref_kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    hubex_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    erp_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_hubex_refs", "company_id", "ref_kind", "hubex_id", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
+# SupportSyncCursor — курсор инкрементального синка источников Сервисного центра.
+# Ключ (company_id, source_type, doc_kind).
+# ---------------------------------------------------------------------------
+class SupportSyncCursor(Base):
+    __tablename__ = "support_sync_cursors"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False)  # hubex_fsm | ...
+    doc_kind: Mapped[str] = mapped_column(String(40), nullable=False)     # tasks | refs | ...
+    last_modified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("uq_support_sync_cursors", "company_id", "source_type", "doc_kind", unique=True),
     )

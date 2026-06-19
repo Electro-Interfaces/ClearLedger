@@ -16,7 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from '@/components/ui/popover'
-import { MapPin, FileText, Filter, X, ChevronDown } from 'lucide-react'
+import { MapPin, FileText, Filter, X, ChevronDown, Map as MapIcon } from 'lucide-react'
 import { useFilters } from '@/contexts/FilterContext'
 import { useLocations } from '@/hooks/useLocations'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -123,6 +123,60 @@ function LocationsFilterButton() {
 }
 
 
+function RegionFilterButton() {
+  const { regionIds, toggleRegion, setRegionIds } = useFilters()
+  const locations = useLocations()
+
+  const regions = useMemo(
+    () => Array.from(new Set(
+      locations.map((l) => String((l.metadata as Record<string, unknown> | undefined)?.federalSubject ?? '').trim())
+        .filter(Boolean),
+    )).sort((a, b) => a.localeCompare(b, 'ru')),
+    [locations],
+  )
+  const selectedSet = useMemo(() => new Set(regionIds), [regionIds])
+
+  if (regions.length === 0) return null
+
+  const summary = regionIds.length === 0
+    ? 'Все регионы'
+    : regionIds.length === 1 ? regionIds[0] : `Регионов: ${regionIds.length}`
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" className={pillCls}>
+          <MapIcon className="h-4 w-4 opacity-70" />
+          <span className="hidden md:inline truncate max-w-[160px]">{summary}</span>
+          {regionIds.length > 0 && (
+            <Badge variant="secondary" className="h-4 text-[9px] px-1">{regionIds.length}</Badge>
+          )}
+          <ChevronDown className="h-4 w-4 opacity-60" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-0">
+        <div className="flex items-center justify-between p-2 border-b border-border/40">
+          <span className="text-xs font-semibold">Регионы</span>
+          <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2"
+            onClick={() => setRegionIds([])} disabled={regionIds.length === 0}>
+            Очистить
+          </Button>
+        </div>
+        <div className="p-2 max-h-[320px] overflow-y-auto space-y-0.5">
+          {regions.map((r) => (
+            <label key={r}
+              className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/40 cursor-pointer">
+              <Checkbox checked={selectedSet.has(r)} onCheckedChange={() => toggleRegion(r)} className="h-3.5 w-3.5" />
+              <span className="truncate">{r}</span>
+            </label>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+
 function DocTypesFilterButton() {
   const { docTypeIds, toggleDocType, setDocTypeIds } = useFilters()
   const selectedSet = useMemo(() => new Set(docTypeIds), [docTypeIds])
@@ -181,13 +235,14 @@ function DocTypesFilterButton() {
 
 
 export function GlobalFilters() {
-  const { locationIds, docTypeIds, clearAll } = useFilters()
-  const total = locationIds.length + docTypeIds.length
+  const { locationIds, regionIds, docTypeIds, clearAll } = useFilters()
+  const total = locationIds.length + regionIds.length + docTypeIds.length
 
   return (
     <div className="flex items-center gap-2">
       <CompanySelector />
       <div className="w-px h-6 bg-border/50 mx-0.5" />
+      <RegionFilterButton />
       <LocationsFilterButton />
       <DocTypesFilterButton />
       {total > 0 && (
