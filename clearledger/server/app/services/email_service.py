@@ -9,6 +9,7 @@ aiosmtplib (async). На проде Mailcow на том же хосте — SMTP
 import logging
 import ssl
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 
 from app.config import get_settings
 
@@ -63,6 +64,11 @@ async def send_invite(
     msg["From"] = settings.smtp_from
     msg["To"] = to_email
     msg["Subject"] = subject
+    # Date и Message-ID обязательны: без них mail.ru/Gmail кладут письмо в спам
+    # (rspamd: MISSING_DATE/MISSING_MID). Ни Python, ни Mailcow на submission их не дописывают.
+    from_domain = parseaddr(settings.smtp_from)[1].split("@")[-1] or "localhost"
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=from_domain)
     msg.set_content(text)
     msg.add_alternative(html, subtype="html")
 
