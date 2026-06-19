@@ -5,20 +5,36 @@
  * и его договоры (с детальной карточкой каждого).
  */
 import { useState, useMemo } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
-import { Search, Building2, MapPin, Loader2, Database, FileText } from 'lucide-react'
-import { useCounterparties, useContracts, useCounterpartyLocations } from '@/hooks/useReferences'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { Search, Building2, MapPin, Loader2, Database, FileText, Plus, Pencil, Trash2 } from 'lucide-react'
+import { useCompany } from '@/contexts/CompanyContext'
+import {
+  useCounterparties, useContracts, useCounterpartyLocations,
+  useCreateCounterparty, useUpdateCounterparty, useDeleteCounterparty,
+  useCreateContract, useDeleteContract,
+} from '@/hooks/useReferences'
+import * as refs from '@/services/referenceService'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
-import type { Counterparty, Contract } from '@/types'
+import type { Counterparty, Contract, CounterpartyType } from '@/types'
 
 const TYPE_COLOR: Record<string, string> = {
   'ЮЛ': 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
@@ -177,16 +193,28 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
   return (
     <div className="space-y-5">
       {/* Заголовок */}
-      <div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Building2 className="size-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">{cp.name}</h2>
-          <Badge variant="outline" className={TYPE_COLOR[cp.type] || ''}>{cp.type}</Badge>
-          {cp.externalRef && (
-            <Badge variant="secondary" className="gap-1"><Database className="size-3" /> Из 1С</Badge>
-          )}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Building2 className="size-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">{cp.name}</h2>
+            <Badge variant="outline" className={TYPE_COLOR[cp.type] || ''}>{cp.type}</Badge>
+            {cp.externalRef && (
+              <Badge variant="secondary" className="gap-1"><Database className="size-3" /> Из 1С</Badge>
+            )}
+          </div>
+          <div className="mt-2"><WhereWorks counterpartyId={cp.id} /></div>
         </div>
-        <div className="mt-2"><WhereWorks counterpartyId={cp.id} /></div>
+        {cp.externalRef ? (
+          <span className="text-[11px] text-muted-foreground shrink-0 mt-1 whitespace-nowrap">правка в 1С</span>
+        ) : (
+          <div className="flex gap-1 shrink-0">
+            <CounterpartyFormDialog edit={cp}>
+              <Button variant="outline" size="sm"><Pencil className="size-3.5 mr-1.5" /> Изменить</Button>
+            </CounterpartyFormDialog>
+            <DeleteCounterpartyButton cp={cp} />
+          </div>
+        )}
       </div>
 
       {/* Реквизиты контрагента */}
@@ -202,15 +230,20 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
 
       {/* Договоры */}
       <div>
-        <div className="flex items-center gap-2 flex-wrap mb-2">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-            Договоры ({contracts.length})
-          </p>
-          {kindCounts.map(([k, n]) => (
-            <Badge key={k} variant="outline" className={`text-[11px] ${KIND_META[k]?.cls || ''}`}>
-              {kindLabel(k)}: {n}
-            </Badge>
-          ))}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+              Договоры ({contracts.length})
+            </p>
+            {kindCounts.map(([k, n]) => (
+              <Badge key={k} variant="outline" className={`text-[11px] ${KIND_META[k]?.cls || ''}`}>
+                {kindLabel(k)}: {n}
+              </Badge>
+            ))}
+          </div>
+          <ContractFormDialog counterpartyId={cp.externalRef || cp.id}>
+            <Button size="sm" variant="outline" className="shrink-0"><Plus className="size-4 mr-1.5" /> Добавить</Button>
+          </ContractFormDialog>
         </div>
         <div className="rounded-md border">
           <Table>
@@ -220,12 +253,13 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                 <TableHead className="w-[100px]">Дата</TableHead>
                 <TableHead>Вид</TableHead>
                 <TableHead className="w-[160px]">Охват</TableHead>
+                <TableHead className="w-16" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {contracts.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground h-20">
+                  <TableCell colSpan={5} className="text-center text-muted-foreground h-20">
                     У контрагента нет договоров
                   </TableCell>
                 </TableRow>
@@ -252,6 +286,16 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                       </Button>
                     </ContractScopeDialog>
                   </TableCell>
+                  <TableCell>
+                    {!c.externalRef && (
+                      <div className="flex gap-1 justify-end">
+                        <ContractFormDialog counterpartyId={cp.externalRef || cp.id} edit={c}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8"><Pencil className="size-4" /></Button>
+                        </ContractFormDialog>
+                        <DeleteContractButton id={c.id} />
+                      </div>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -271,6 +315,208 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
         </details>
       )}
     </div>
+  )
+}
+
+// ─── Форма контрагента (создание/правка) ─────────────────────────────────────
+const VID_OPTIONS: { value: CounterpartyType; label: string }[] = [
+  { value: 'ЮЛ', label: 'Юр. лицо' }, { value: 'ИП', label: 'Инд. предприниматель' }, { value: 'ФЛ', label: 'Физ. лицо' },
+]
+
+function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; children: React.ReactNode }) {
+  const create = useCreateCounterparty()
+  const update = useUpdateCounterparty()
+  const [open, setOpen] = useState(false)
+  const [f, setF] = useState({
+    name: edit?.name ?? '', shortName: edit?.shortName ?? '',
+    inn: edit?.inn ?? '', kpp: edit?.kpp ?? '', type: (edit?.type ?? 'ЮЛ') as CounterpartyType,
+  })
+  const set = (k: 'name' | 'shortName' | 'inn' | 'kpp') => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setF((s) => ({ ...s, [k]: e.target.value }))
+  const canSave = f.name.trim() !== '' && f.inn.trim() !== ''
+  const pending = create.isPending || update.isPending
+  function save() {
+    const payload = {
+      name: f.name.trim(), shortName: f.shortName.trim() || undefined,
+      inn: f.inn.trim(), kpp: f.kpp.trim() || undefined, type: f.type,
+    }
+    const opts = {
+      onSuccess: () => { toast.success(edit ? 'Контрагент обновлён' : 'Контрагент добавлен'); setOpen(false) },
+      onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+    }
+    if (edit) update.mutate({ id: edit.id, updates: payload }, opts)
+    else create.mutate({ ...payload, aliases: [] }, opts)
+  }
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Building2 className="size-5" /> {edit ? 'Изменить контрагента' : 'Новый контрагент'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Наименование <span className="text-destructive">*</span></Label>
+            <Input value={f.name} onChange={set('name')} placeholder="ООО …" />
+          </div>
+          <div className="space-y-1.5"><Label>Краткое имя</Label><Input value={f.shortName} onChange={set('shortName')} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>ИНН <span className="text-destructive">*</span></Label><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></div>
+            <div className="space-y-1.5"><Label>КПП</Label><Input value={f.kpp} onChange={set('kpp')} /></div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Вид</Label>
+            <Select value={f.type} onValueChange={(v) => setF((s) => ({ ...s, type: v as CounterpartyType }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{VID_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button disabled={!canSave || pending} onClick={save}>
+            {pending && <Loader2 className="size-4 animate-spin mr-2" />} Сохранить
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Форма договора (создание/правка) ────────────────────────────────────────
+function ContractFormDialog({ counterpartyId, edit, children }: {
+  counterpartyId: string; edit?: Contract; children: React.ReactNode
+}) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const create = useCreateContract()
+  const update = useMutation({
+    mutationFn: (updates: Partial<Contract>) => refs.updateContract(companyId, edit!.id, updates),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['references', companyId] }),
+  })
+  const orgsQuery = useQuery({
+    queryKey: ['references', companyId, 'organizations'],
+    queryFn: () => refs.getOrganizations(companyId), enabled: !!companyId,
+  })
+  const orgs = orgsQuery.data ?? []
+  const [open, setOpen] = useState(false)
+  const [f, setF] = useState({
+    number: edit?.number ?? '', date: edit?.date ?? '', kind: edit?.kind ?? 'СПокупателем',
+    type: edit?.type ?? '', organizationId: edit?.organizationId ?? '',
+    currency: edit?.currency ?? 'RUB', validUntil: edit?.validUntil ?? '',
+    amountLimit: edit?.amountLimit != null ? String(edit.amountLimit) : '',
+  })
+  const orgId = f.organizationId || (orgs[0]?.externalRef || orgs[0]?.id || '')
+  const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== ''
+  const pending = create.isPending || update.isPending
+  function save() {
+    const payload = {
+      number: f.number.trim(), date: f.date.trim(), counterpartyId,
+      organizationId: orgId, kind: f.kind, type: f.type.trim() || kindLabel(f.kind),
+      currency: f.currency.trim() || 'RUB', validUntil: f.validUntil.trim() || undefined,
+      amountLimit: f.amountLimit ? Number(f.amountLimit) : undefined, scopeType: 'unassigned' as const,
+    }
+    const opts = {
+      onSuccess: () => { toast.success(edit ? 'Договор обновлён' : 'Договор добавлен'); setOpen(false) },
+      onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+    }
+    if (edit) update.mutate(payload, opts)
+    else create.mutate(payload, opts)
+  }
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{children}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="size-5" /> {edit ? 'Изменить договор' : 'Новый договор'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>Номер <span className="text-destructive">*</span></Label>
+              <Input value={f.number} onChange={(e) => setF((s) => ({ ...s, number: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label>Дата <span className="text-destructive">*</span></Label>
+              <Input type="date" value={f.date} onChange={(e) => setF((s) => ({ ...s, date: e.target.value }))} /></div>
+          </div>
+          <div className="space-y-1.5"><Label>Вид договора</Label>
+            <Select value={f.kind} onValueChange={(v) => setF((s) => ({ ...s, kind: v }))}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{Object.entries(KIND_META).map(([k, m]) => <SelectItem key={k} value={k}>{m.label}</SelectItem>)}</SelectContent>
+            </Select></div>
+          <div className="space-y-1.5"><Label>Тип / предмет</Label>
+            <Input value={f.type} onChange={(e) => setF((s) => ({ ...s, type: e.target.value }))} placeholder="Поставка ГСМ, аренда, услуги…" /></div>
+          <div className="space-y-1.5"><Label>Организация</Label>
+            <Select value={orgId} onValueChange={(v) => setF((s) => ({ ...s, organizationId: v }))}>
+              <SelectTrigger><SelectValue placeholder={orgs.length ? 'Выберите' : 'Нет организаций'} /></SelectTrigger>
+              <SelectContent>{orgs.map((o) => <SelectItem key={o.id} value={o.externalRef || o.id}>{o.name}</SelectItem>)}</SelectContent>
+            </Select></div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5"><Label>Валюта</Label>
+              <Input value={f.currency} onChange={(e) => setF((s) => ({ ...s, currency: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label>Срок действия</Label>
+              <Input type="date" value={f.validUntil} onChange={(e) => setF((s) => ({ ...s, validUntil: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label>Сумма</Label>
+              <Input value={f.amountLimit} onChange={(e) => setF((s) => ({ ...s, amountLimit: e.target.value.replace(/[^\d.]/g, '') }))} /></div>
+          </div>
+          {orgs.length === 0 && <p className="text-xs text-amber-600 dark:text-amber-400">Сначала заведите организацию (раздел «Данные → Организация»).</p>}
+        </div>
+        <DialogFooter>
+          <Button disabled={!canSave || pending} onClick={save}>
+            {pending && <Loader2 className="size-4 animate-spin mr-2" />} Сохранить
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DeleteCounterpartyButton({ cp }: { cp: Counterparty }) {
+  const del = useDeleteCounterparty()
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="outline" size="sm" className="text-destructive"><Trash2 className="size-3.5" /></Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Удалить контрагента «{cp.name}»?</AlertDialogTitle>
+          <AlertDialogDescription>Действие необратимо. Договоры контрагента не удаляются автоматически.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Отмена</AlertDialogCancel>
+          <AlertDialogAction onClick={() => del.mutate(cp.id, {
+            onSuccess: () => toast.success('Контрагент удалён'),
+            onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+          })}>Удалить</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+function DeleteContractButton({ id }: { id: string }) {
+  const del = useDeleteContract()
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8"><Trash2 className="size-4 text-destructive" /></Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Удалить договор?</AlertDialogTitle>
+          <AlertDialogDescription>Действие необратимо.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Отмена</AlertDialogCancel>
+          <AlertDialogAction onClick={() => del.mutate(id, {
+            onSuccess: () => toast.success('Договор удалён'),
+            onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+          })}>Удалить</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -310,6 +556,9 @@ export function ContractorsPage() {
               <Input placeholder="Поиск по имени или ИНН..." value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
             </div>
+            <CounterpartyFormDialog>
+              <Button size="sm" variant="outline" className="w-full"><Plus className="size-4 mr-2" /> Добавить контрагента</Button>
+            </CounterpartyFormDialog>
             <div className="overflow-y-auto space-y-0.5 min-h-0">
               {isLoading && <div className="text-sm text-muted-foreground p-2">Загрузка…</div>}
               {!isLoading && filtered.length === 0 && (
