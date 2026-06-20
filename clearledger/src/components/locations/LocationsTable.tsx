@@ -1,36 +1,29 @@
 /**
  * Табличный режим точек обслуживания — для типов с большим числом точек
- * (например 515 ЭЗС РусГидро). Поиск + фильтры (тип/регион/владелец) +
- * сортировка по столбцам + пагинация. Колонки тянут ключевые поля из metadata.
+ * (например 515 ЭЗС РусГидро). Принимает УЖЕ отфильтрованный список (отбор/поиск
+ * живут на LocationsPage); здесь — сортировка по столбцам + пагинация. Колонки
+ * тянут ключевые поля из metadata.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
   AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Search, Trash2, ChevronLeft, ChevronRight, ArrowUpDown, Pencil } from 'lucide-react'
+import { Trash2, ChevronLeft, ChevronRight, ArrowUpDown, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { deleteLocation } from '@/services/locationService'
 import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
 import { LOCATION_STATUS_META, type ServiceLocation } from '@/types/location'
 import type { LocationTypeDef } from '@/types/locationType'
+import { m } from './fleet/locationFleetService'
 
 const PAGE_SIZE = 50
-
-function m(l: ServiceLocation, k: string): string {
-  const v = (l.metadata as Record<string, unknown> | undefined)?.[k]
-  return v == null ? '' : String(v)
-}
 
 // Статус связки HubEx → подпись + цвет бейджа.
 const LINK_META: Record<string, { label: string; cls: string }> = {
@@ -41,7 +34,16 @@ const LINK_META: Record<string, { label: string; cls: string }> = {
   test: { label: 'test', cls: 'bg-muted text-muted-foreground' },
 }
 
-type SortKey = 'number' | 'code' | 'name' | 'region' | 'city' | 'owner' | 'power'
+// Операционный статус станции → подпись + цвет (отдельно от жизненного статуса).
+const OP_STATUS_META: Record<string, { label: string; cls: string }> = {
+  working: { label: 'Работает', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+  not_working: { label: 'Не работает', cls: 'bg-red-500/15 text-red-600 dark:text-red-400' },
+  on_repair: { label: 'На ремонте', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
+  maintenance: { label: 'Обслуживание', cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400' },
+  unknown: { label: '—', cls: 'bg-muted text-muted-foreground' },
+}
+
+type SortKey = 'number' | 'name' | 'region' | 'city' | 'brand' | 'power'
 
 export function LocationsTable({
   locations,
@@ -50,6 +52,7 @@ export function LocationsTable({
   renderEdit,
   onSelectLocation,
 }: {
+  /** Уже отфильтрованный список точек (отбор — на LocationsPage). */
   locations: ServiceLocation[]
   typeByCode: Map<string, LocationTypeDef>
   onChanged: () => void
@@ -58,73 +61,35 @@ export function LocationsTable({
   /** Клик по строке → открыть окно станции (cockpit). */
   onSelectLocation?: (location: ServiceLocation) => void
 }) {
-  const [q, setQ] = useState('')
-  const [typeF, setTypeF] = useState('all')
-  const [region, setRegion] = useState('all')
-  const [owner, setOwner] = useState('all')
-  const [link, setLink] = useState('all')
   const [sort, setSort] = useState<SortKey>('name')
   const [asc, setAsc] = useState(true)
   const [page, setPage] = useState(0)
 
-  const regions = useMemo(
-    () => Array.from(new Set(locations.map((l) => m(l, 'federalSubject')).filter(Boolean))).sort(),
-    [locations],
-  )
-  const owners = useMemo(
-    () => Array.from(new Set(locations.map((l) => m(l, 'ownerTitle')).filter(Boolean))).sort(),
-    [locations],
-  )
-  const typeCodes = useMemo(
-    () => Array.from(new Set(locations.map((l) => l.type))),
-    [locations],
-  )
-  const linkStatuses = useMemo(
-    () => Array.from(new Set(locations.map((l) => m(l, 'linkStatus')).filter(Boolean))),
-    [locations],
-  )
-
-  const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase()
-    const out = locations.filter((l) => {
-      if (typeF !== 'all' && l.type !== typeF) return false
-      if (region !== 'all' && m(l, 'federalSubject') !== region) return false
-      if (owner !== 'all' && m(l, 'ownerTitle') !== owner) return false
-      if (link !== 'all' && m(l, 'linkStatus') !== link) return false
-      if (qq) {
-        const hay = [
-          m(l, 'number'), l.code, l.name, l.address ?? '', m(l, 'cityName'),
-          m(l, 'serialNumber'), m(l, 'ownerTitle'),
-        ].join(' ').toLowerCase()
-        if (!hay.includes(qq)) return false
-      }
-      return true
-    })
+  const sorted = useMemo(() => {
     const val = (l: ServiceLocation): string | number => {
       switch (sort) {
         case 'number': return m(l, 'number')
-        case 'code': return l.code
         case 'region': return m(l, 'federalSubject')
         case 'city': return m(l, 'cityName')
-        case 'owner': return m(l, 'ownerTitle')
+        case 'brand': return m(l, 'manufacturer')
         case 'power': return Number(m(l, 'maxPowerKw')) || 0
         default: return l.name
       }
     }
-    out.sort((a, b) => {
+    return [...locations].sort((a, b) => {
       const va = val(a), vb = val(b)
       const c = typeof va === 'number' && typeof vb === 'number'
         ? va - vb : String(va).localeCompare(String(vb), 'ru')
       return asc ? c : -c
     })
-    return out
-  }, [locations, q, typeF, region, owner, link, sort, asc])
+  }, [locations, sort, asc])
 
-  useEffect(() => { setPage(0) }, [q, typeF, region, owner, link])
+  // Новая выборка (фильтры изменились) → вернуться на первую страницу.
+  useEffect(() => { setPage(0) }, [locations])
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
   const cur = Math.min(page, pageCount - 1)
-  const slice = filtered.slice(cur * PAGE_SIZE, cur * PAGE_SIZE + PAGE_SIZE)
+  const slice = sorted.slice(cur * PAGE_SIZE, cur * PAGE_SIZE + PAGE_SIZE)
 
   function toggleSort(k: SortKey) {
     if (sort === k) setAsc((v) => !v)
@@ -149,72 +114,20 @@ export function LocationsTable({
 
   return (
     <div className="space-y-3">
-      {/* Фильтры */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="Поиск: номер, серийник, название, город, владелец…" className="pl-8 h-9" />
-        </div>
-        {typeCodes.length > 1 && (
-          <Select value={typeF} onValueChange={setTypeF}>
-            <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Тип" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все типы</SelectItem>
-              {typeCodes.map((c) => (
-                <SelectItem key={c} value={c}>{typeByCode.get(c)?.name ?? c}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        {regions.length > 0 && (
-          <Select value={region} onValueChange={setRegion}>
-            <SelectTrigger className="h-9 w-[170px]"><SelectValue placeholder="Регион" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все регионы</SelectItem>
-              {regions.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-        {owners.length > 1 && (
-          <Select value={owner} onValueChange={setOwner}>
-            <SelectTrigger className="h-9 w-[170px]"><SelectValue placeholder="Владелец" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все владельцы</SelectItem>
-              {owners.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-        {linkStatuses.length > 0 && (
-          <Select value={link} onValueChange={setLink}>
-            <SelectTrigger className="h-9 w-[160px]"><SelectValue placeholder="Связка HubEx" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Связка: все</SelectItem>
-              {linkStatuses.map((s) => (
-                <SelectItem key={s} value={s}>{LINK_META[s]?.label ?? s}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-
-      <div className="text-xs text-muted-foreground">
-        Найдено: {filtered.length}{filtered.length !== locations.length && ` из ${locations.length}`}
-      </div>
-
-      {/* Таблица */}
       <div className="rounded-md border border-border/50">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-[40px]"></TableHead>
               <SortHead k="number" className="w-[90px]">Номер</SortHead>
-              <SortHead k="code" className="w-[150px]">Серийник</SortHead>
               <SortHead k="name">Название</SortHead>
               <SortHead k="region" className="hidden md:table-cell">Регион</SortHead>
               <SortHead k="city" className="hidden lg:table-cell">Город</SortHead>
-              <SortHead k="owner" className="hidden lg:table-cell">Владелец</SortHead>
+              <SortHead k="brand" className="hidden lg:table-cell">Бренд</SortHead>
+              <TableHead className="hidden xl:table-cell">Коннекторы</TableHead>
               <SortHead k="power" className="hidden md:table-cell text-right">кВт</SortHead>
+              <TableHead>Статус станции</TableHead>
+              <TableHead className="hidden lg:table-cell text-right">Реализация, пред. мес.</TableHead>
               <TableHead className="hidden xl:table-cell">Связка HubEx</TableHead>
               <TableHead className="hidden sm:table-cell">Статус</TableHead>
               <TableHead className="w-[70px]"></TableHead>
@@ -230,12 +143,21 @@ export function LocationsTable({
                   onClick={onSelectLocation ? () => onSelectLocation(l) : undefined}>
                   <TableCell><Icon className="h-4 w-4 text-muted-foreground" /></TableCell>
                   <TableCell className="font-mono text-xs font-medium">{m(l, 'number')}</TableCell>
-                  <TableCell className="font-mono text-[11px] text-muted-foreground">{l.code}</TableCell>
                   <TableCell className="font-medium">{l.name}</TableCell>
                   <TableCell className="hidden md:table-cell text-muted-foreground">{m(l, 'federalSubject')}</TableCell>
                   <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'cityName')}</TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'ownerTitle')}</TableCell>
+                  <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'manufacturer') || '—'}</TableCell>
+                  <TableCell className="hidden xl:table-cell text-xs text-muted-foreground tabular-nums">{m(l, 'connectorTypes') || '—'}</TableCell>
                   <TableCell className="hidden md:table-cell text-right tabular-nums">{m(l, 'maxPowerKw')}</TableCell>
+                  <TableCell>
+                    {(() => {
+                      const om = OP_STATUS_META[l.operationalStatus || 'unknown'] ?? OP_STATUS_META.unknown
+                      return <Badge variant="secondary" className={`text-[10px] ${om.cls}`}>{om.label}</Badge>
+                    })()}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell text-right tabular-nums text-muted-foreground">
+                    {m(l, 'salesPrevMonth') || '—'}
+                  </TableCell>
                   <TableCell className="hidden xl:table-cell">
                     {(() => {
                       const ls = m(l, 'linkStatus'); const aid = m(l, 'hubexAssetId')
@@ -283,7 +205,7 @@ export function LocationsTable({
             })}
             {slice.length === 0 && (
               <TableRow>
-                <TableCell colSpan={11} className="text-center text-sm text-muted-foreground py-8">
+                <TableCell colSpan={13} className="text-center text-sm text-muted-foreground py-8">
                   Ничего не найдено по фильтрам.
                 </TableCell>
               </TableRow>
