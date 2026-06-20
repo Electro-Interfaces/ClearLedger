@@ -23,8 +23,7 @@ export function MainLayout() {
   // Рабочие области с фиксированной высотой (без скролла страницы, h-full внутри):
   // рабочий стол и отдельная область разрезов «Сверка данных».
   const isWorkspace =
-    location.pathname === '/' || location.pathname === '/reconciliation' ||
-    location.pathname.startsWith('/netservice')
+    location.pathname === '/' || location.pathname === '/reconciliation'
 
   return (
     <SidebarProvider

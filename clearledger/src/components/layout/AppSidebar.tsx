@@ -18,12 +18,10 @@ import {
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
   Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
   Library, ShieldCheck, Building2, Building, Boxes,
-  Headset, ClipboardList, Gauge,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAuth } from '@/contexts/AuthContext'
-import { useNetServiceEnabled } from '@/hooks/useNetServiceCapabilities'
 
 const mainItems = [
   { to: '/', icon: LayoutDashboard, label: 'Рабочий стол', end: true },
@@ -40,12 +38,6 @@ const dataItems = [
   { to: '/organization', icon: Building, label: 'Организация' },
   { to: '/contractors', icon: Building2, label: 'Контрагенты' },
   { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
-]
-
-const netServiceItems = [
-  { to: '/netservice', icon: LayoutDashboard, label: 'Обзор сети', end: true },
-  { to: '/netservice/requests', icon: ClipboardList, label: 'Заявки' },
-  { to: '/netservice/sla', icon: Gauge, label: 'SLA' },
 ]
 
 const oneCItems = [
@@ -103,8 +95,6 @@ export function AppSidebar() {
   const [intakeOpen, setIntakeOpen] = useState(true)
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(true)
-  const [netOpen, setNetOpen] = useState(true)
-  const netEnabled = useNetServiceEnabled()
   const { user } = useAuth()
   // Показываем админ-раздел, если суперадмин ИЛИ админ хотя бы в одной компании.
   const canAdmin = !!user && (
@@ -190,39 +180,6 @@ export function AppSidebar() {
             </Collapsible>
           )}
         </SidebarGroup>
-
-        {/* СЕРВИСНЫЙ ЦЕНТР section — показываем, если доступна хоть одна линия */}
-        {netEnabled && (
-          <>
-            <SidebarSeparator className="my-2" />
-            <SidebarGroup className="py-0">
-              {collapsed ? (
-                <SidebarMenu>
-                  <NavItem to="/netservice" icon={Headset} label="Сервисный центр" collapsed />
-                </SidebarMenu>
-              ) : (
-                <Collapsible open={netOpen} onOpenChange={setNetOpen}>
-                  <CollapsibleTrigger asChild>
-                    <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
-                      <span className="flex items-center gap-1.5">
-                        <Headset className="h-3 w-3" />
-                        Сервисный центр
-                      </span>
-                      <ChevronDown className={`h-3 w-3 transition-transform ${netOpen ? '' : '-rotate-90'}`} />
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenu>
-                      {netServiceItems.map((item) => (
-                        <NavItem key={item.to} {...item} collapsed={collapsed} />
-                      ))}
-                    </SidebarMenu>
-                  </CollapsibleContent>
-                </Collapsible>
-              )}
-            </SidebarGroup>
-          </>
-        )}
 
         <SidebarSeparator className="my-2" />
 

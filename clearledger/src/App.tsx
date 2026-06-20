@@ -36,7 +36,6 @@ const PricesPage = lazy(() => import('@/pages/oneC/PricesPage').then((m) => ({ d
 const BatchesPage = lazy(() => import('@/pages/oneC/BatchesPage').then((m) => ({ default: m.BatchesPage })))
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
-const NetServiceCenterPage = lazy(() => import('@/pages/netservice/NetServiceCenterPage').then((m) => ({ default: m.NetServiceCenterPage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
@@ -116,8 +115,6 @@ const router = createBrowserRouter([
           { path: '/1c/batches', element: <LazyPage><BatchesPage /></LazyPage> },
           { path: '/forecast', element: <LazyPage><MonthCloseForecastPage /></LazyPage> },
           { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
-          { path: '/netservice', element: <LazyPage><NetServiceCenterPage /></LazyPage> },
-          { path: '/netservice/:mode', element: <LazyPage><NetServiceCenterPage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '/admin', element: <LazyPage><AdminPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
