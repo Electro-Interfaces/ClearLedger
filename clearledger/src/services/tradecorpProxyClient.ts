@@ -1,9 +1,9 @@
 /**
- * Клиент для работы с TradeCorp API через Backend Proxy ClearLedger
+ * Клиент для работы с TradeCorp API через Backend Proxy TradeLedger
  *
- * Все запросы идут через backend ClearLedger на /api/tradecorp/*
+ * Все запросы идут через backend TradeLedger на /api/tradecorp/*
  * Backend автоматически выполняет авторизацию и проксирует к TradeCorp API.
- * HTTP-слой — общий apiClient ClearLedger (BASE_URL + Bearer JWT).
+ * HTTP-слой — общий apiClient TradeLedger (BASE_URL + Bearer JWT).
  *
  * TradeCorp API - корпоративный процессинг топливных карт.
  */

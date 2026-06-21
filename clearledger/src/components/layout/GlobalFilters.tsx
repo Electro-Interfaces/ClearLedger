@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/popover'
 import { MapPin, FileText, Filter, X, ChevronDown, Map as MapIcon } from 'lucide-react'
 import { useFilters } from '@/contexts/FilterContext'
+import { useCompany } from '@/contexts/CompanyContext'
 import { useLocations } from '@/hooks/useLocations'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { StationsSelectorDialog, type StationOption } from '@/components/stations/StationsSelectorDialog'
@@ -28,7 +29,8 @@ const pillCls =
   'border border-border/60 dark:border-di-outline-variant/25 text-foreground ' +
   'hover:bg-accent dark:hover:bg-di-surface-highest hover:border-primary/40 transition-all'
 
-const ALL_DOC_TYPES: { id: string; label: string }[] = [
+// Фуел-профиль (ГИГ, сеть АЗС): топливо/STS/MSTO/TradeCorp
+const FUEL_DOC_TYPES: { id: string; label: string }[] = [
   { id: 'shift_report', label: 'Сменные отчёты' },
   { id: 'receipt', label: 'Поступления (ТТН)' },
   { id: 'price', label: 'Цены' },
@@ -37,6 +39,15 @@ const ALL_DOC_TYPES: { id: string; label: string }[] = [
   { id: 'sts_tanks', label: 'Остатки резервуаров' },
   { id: 'msto_transactions', label: 'MSTO транзакции' },
   { id: 'corp_transactions', label: 'TradeCorp транзакции' },
+]
+
+// Energy-профиль (РусГидро, сеть ЭЗС): зарядные сессии, ОФД, поставка э/э, ТО, аренда
+const ENERGY_DOC_TYPES: { id: string; label: string }[] = [
+  { id: 'charge_sessions', label: 'Зарядные сессии' },
+  { id: 'ofd_z_reports', label: 'Z-отчёты ОФД' },
+  { id: 'energy_supply_invoices', label: 'Счета поставщика э/э' },
+  { id: 'maintenance_acts', label: 'Акты ТО' },
+  { id: 'rent_contracts', label: 'Договоры аренды' },
 ]
 
 function LocationsFilterButton() {
@@ -179,12 +190,16 @@ function RegionFilterButton() {
 
 function DocTypesFilterButton() {
   const { docTypeIds, toggleDocType, setDocTypeIds } = useFilters()
+  const { company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
+  // Набор типов документов зависит от профиля: фуел-id скрыты для energy
+  const docTypes = isEnergy ? ENERGY_DOC_TYPES : FUEL_DOC_TYPES
   const selectedSet = useMemo(() => new Set(docTypeIds), [docTypeIds])
 
   const summary = docTypeIds.length === 0
     ? 'Все типы'
     : docTypeIds.length === 1
-      ? ALL_DOC_TYPES.find((t) => t.id === docTypeIds[0])?.label ?? '1'
+      ? docTypes.find((t) => t.id === docTypeIds[0])?.label ?? '1'
       : `Типов: ${docTypeIds.length}`
 
   return (
@@ -215,7 +230,7 @@ function DocTypesFilterButton() {
           </Button>
         </div>
         <div className="p-2 max-h-[320px] overflow-y-auto space-y-0.5">
-          {ALL_DOC_TYPES.map((t) => (
+          {docTypes.map((t) => (
             <label key={t.id}
               className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/40 cursor-pointer">
               <Checkbox

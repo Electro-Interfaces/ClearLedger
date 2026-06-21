@@ -64,7 +64,7 @@ export function MatchView({ doc, entry, onUnmatch }: Props) {
         <div className="grid grid-cols-[120px_1fr_1fr] gap-2 pb-2 border-b mb-2">
           <span />
           <span className="text-xs font-semibold text-muted-foreground">Документ 1С</span>
-          <span className="text-xs font-semibold text-muted-foreground">ClearLedger</span>
+          <span className="text-xs font-semibold text-muted-foreground">TradeLedger</span>
         </div>
 
         <FieldRow

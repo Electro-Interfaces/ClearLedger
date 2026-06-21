@@ -1,6 +1,6 @@
 /**
  * Глобальные модалки «Взаимодействие»: Чат / Заявки / Инфо.
- * Аналог TradeFrame InteractionHost, адаптированный под ClearLedger.
+ * Аналог TradeFrame InteractionHost, адаптированный под TradeLedger.
  *
  * Чат / Заявки — modal={false}, поверх экрана: кнопки шапки остаются кликабельны,
  * можно переключать секции; приглушающую подложку рисуем сами (pointer-events-none).
@@ -73,7 +73,7 @@ function ChatPanel() {
       <div className="space-y-1.5">
         <h3 className="text-lg font-semibold text-foreground">Чат с поддержкой</h3>
         <p className="max-w-md text-sm text-muted-foreground">
-          Онлайн-чат с командой ClearLedger скоро появится здесь. Пока что — звонок куратору
+          Онлайн-чат с командой TradeLedger скоро появится здесь. Пока что — звонок куратору
           или письмо ответственному за внедрение.
         </p>
       </div>
@@ -103,8 +103,7 @@ function TicketsPanel() {
 
 function ContactList() {
   const contacts = [
-    { name: 'Сидоренко Виктор Викторович', role: 'Куратор проекта', tel: '+7-921-953-06-21' },
-    { name: 'Галина Олеговна', role: 'Главный бухгалтер ГИГ', tel: '8-911-773-75-88' },
+    { name: 'Сидоренко Виктор Викторович', role: 'Куратор проекта внедрения', tel: '+7-921-953-06-21' },
   ]
   return (
     <div className="mt-2 w-full max-w-md space-y-2">

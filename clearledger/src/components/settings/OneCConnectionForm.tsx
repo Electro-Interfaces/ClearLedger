@@ -188,7 +188,7 @@ export function OneCConnectionForm() {
             <Input
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
-              placeholder="ClearLedger"
+              placeholder="TradeLedger"
             />
           </div>
           <div className="space-y-2">

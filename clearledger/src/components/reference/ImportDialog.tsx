@@ -1,6 +1,6 @@
 /**
  * Диалог импорта справочников и документов из 1С.
- * Поддерживает множественные JSON-файлы (выгрузка ClearLedger Export .epf).
+ * Поддерживает множественные JSON-файлы (выгрузка TradeLedger Export .epf).
  */
 
 import { useState, useCallback } from 'react'
@@ -137,7 +137,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
         <DialogHeader>
           <DialogTitle>Импорт из 1С</DialogTitle>
           <DialogDescription>
-            Загрузите файлы выгрузки из 1С:Бухгалтерия — один файл (XML/JSON) или папку выгрузки ClearLedger Export
+            Загрузите файлы выгрузки из 1С:Бухгалтерия — один файл (XML/JSON) или папку выгрузки TradeLedger Export
             (counterparties.json, documents.json и т.д.).
           </DialogDescription>
         </DialogHeader>
@@ -178,7 +178,7 @@ export function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
                     Перетащите файлы или нажмите для выбора
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    .xml (EnterpriseData) или .json (выгрузка ClearLedger Export)
+                    .xml (EnterpriseData) или .json (выгрузка TradeLedger Export)
                   </p>
                 </div>
               )}

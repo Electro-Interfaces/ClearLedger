@@ -1,13 +1,12 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
-  Upload,
-  Inbox,
-  Database,
+  FileText,
+  GitCompare,
+  MapPin,
   MoreHorizontal,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useInboxCount } from '@/hooks/useEntries'
 
 interface BottomNavItem {
   label: string
@@ -17,13 +16,11 @@ interface BottomNavItem {
 }
 
 export function MobileBottomNav() {
-  const { data: inboxCount = 0 } = useInboxCount()
-
   const items: BottomNavItem[] = [
-    { label: 'Дашборд', path: '/', icon: LayoutDashboard },
-    { label: 'Приём', path: '/input', icon: Upload },
-    { label: 'Входящие', path: '/inbox', icon: Inbox, badge: inboxCount },
-    { label: 'Данные', path: '/data', icon: Database },
+    { label: 'Рабочий стол', path: '/', icon: LayoutDashboard },
+    { label: 'Файлы', path: '/intake', icon: FileText },
+    { label: 'Разрезы', path: '/reconciliation', icon: GitCompare },
+    { label: 'Точки', path: '/locations', icon: MapPin },
     { label: 'Ещё', path: '/settings', icon: MoreHorizontal },
   ]
 

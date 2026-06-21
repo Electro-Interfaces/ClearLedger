@@ -35,7 +35,7 @@ export async function importFromJson(file: File, companyId: string): Promise<Imp
     const text = await file.text()
     const parsed = JSON.parse(text)
     if (!validatePayload(parsed)) {
-      result.errors.push('Неверный формат файла. Ожидается экспорт ClearLedger.')
+      result.errors.push('Неверный формат файла. Ожидается экспорт TradeLedger.')
       return result
     }
     payload = parsed

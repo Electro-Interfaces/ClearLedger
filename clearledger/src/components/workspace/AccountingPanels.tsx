@@ -10,9 +10,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, AlertCircle, TrendingUp, Wallet, Receipt, Layers, AlertTriangle } from 'lucide-react'
+import { Loader2, AlertCircle, TrendingUp, Wallet, Receipt, AlertTriangle } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
 import {
@@ -23,6 +22,17 @@ import {
   getVat, getProfit,
   fmtMoney, fmtMoneyShort, fmtLiters, fmtPct,
 } from '@/services/analyticsService'
+import { balanceModuleForProfile } from '@/config/balanceModules'
+import { BalanceVitrine } from '@/components/balance/BalanceVitrine'
+import { LocationsPage } from '@/pages/LocationsPage'
+import {
+  NetworkOverviewVitrine, RevenueVitrine, TariffsVitrine, ReceivablesVitrine, ProcurementVitrine,
+} from '@/components/balance/EnergyManagementVitrines'
+import { FinancialVitrine } from '@/components/balance/EnergyFinancialVitrine'
+import { AccountingVitrine } from '@/components/balance/EnergyAccountingVitrine'
+import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
+import { getWorkspaceModule } from '@/config/workspaceModules'
+import { useModuleConnections, isModuleConnected } from '@/services/moduleConnectionService'
 
 /* ── общие виджеты ── */
 
@@ -48,6 +58,24 @@ function ErrorState({ message }: { message: string }) {
   )
 }
 
+// Подключён ли раздел компании (модуль раздела) + пустое состояние, если нет.
+function useSectionGate(moduleId: string) {
+  const { conn, profileId } = useModuleConnections()
+  const { company } = useCompany()
+  const mod = getWorkspaceModule(moduleId)
+  return { connected: !!mod && isModuleConnected(conn, mod, profileId), org: company.shortName || company.name }
+}
+function SectionEmpty({ section, org }: { section: string; org: string }) {
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <p className="max-w-md text-center text-sm text-muted-foreground">
+        Компании «{org}» не подключены модули раздела «{section}». Подключите в{' '}
+        <span className="text-foreground">Каталоги → Модули</span>.
+      </p>
+    </div>
+  )
+}
+
 /* ────────────────────────────────────────────────────────────── */
 /*                     Управленческий учёт                          */
 /* ────────────────────────────────────────────────────────────── */
@@ -60,23 +88,81 @@ const MGMT_MENU: CentralMenuItem[] = [
   { key: 'marketing', label: 'Маркетинг' },
 ]
 
+// Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).
+const ENERGY_MGMT: CentralMenuItem[] = [
+  { key: 'net_overview', label: 'Сводка сети' },
+  { key: 'revenue', label: 'Выручка и продажи' },
+  { key: 'tariffs', label: 'Тарифы и ценообразование' },
+  { key: 'receivables', label: 'Дебиторка и взаиморасчёты' },
+  { key: 'procurement', label: 'Энергозакупка' },
+]
+const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
+function EnergyMgmtVitrine({ tab }: { tab: string }) {
+  switch (tab) {
+    case 'net_overview': return <NetworkOverviewVitrine />
+    case 'revenue': return <RevenueVitrine />
+    case 'tariffs': return <TariffsVitrine />
+    case 'receivables': return <ReceivablesVitrine />
+    case 'procurement': return <ProcurementVitrine />
+    default: return null
+  }
+}
+
 export function ManagementPanel() {
   const [tab, setTab] = useState('overview')
   const [period, setPeriod] = useAnalyticsPeriod()
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+  // Управленческий уровень работает на НОРМАЛИЗОВАННОЙ базе (выход конвейера Источник→Канал→Разрез)
+  // и собирается из МОДУЛЕЙ, подключённых компании по профилю (в перспективе — через настройки).
+  // Топливные модули (АЗС/литры/смены) — только fuel-профилю; energy получает свой набор.
+  // Меню = модули, ПОДКЛЮЧЁННЫЕ компании (управляется каталогом «Модули»).
+  // По умолчанию подключены модули, подходящие профилю — текущее поведение сохраняется.
+  const { conn } = useModuleConnections()
+  const on = (id: string) => { const m = getWorkspaceModule(id); return m ? isModuleConnected(conn, m, company.profileId) : false }
+  const balMod = balanceModuleForProfile(company.profileId)
+  const menu = [
+    ...(on('mgmt_pnl') ? MGMT_MENU : []),                                         // топливный P&L (Обзор/Станции/…)
+    ...ENERGY_MGMT.filter((m) => on(m.key)),                                      // энергомодули (Сводка/Выручка/Тарифы/Дебиторка/Закупка)
+    ...(on('objects') ? [{ key: 'objects', label: 'Объекты' }] : []),            // точки (нормализованные данные)
+    ...(balMod && on(balMod.id) ? [{ key: 'balance', label: balMod.navLabel }] : []),
+  ]
+  const menuKeys = menu.map((m) => m.key)
+  const activeTab = menuKeys.includes(tab) ? tab : (menuKeys[0] ?? 'balance')
+
+  if (menu.length === 0) {
+    return (
+      <div className="p-6 text-sm text-muted-foreground">
+        Компании «{company.shortName || company.name}» не подключены управленческие модули. Подключите модуль в настройках.
+      </div>
+    )
+  }
 
   return (
-    <CentralPanelLayout items={MGMT_MENU} activeKey={tab} onSelect={setTab}>
-      <div className="h-full flex flex-col">
-        <AnalyticsPeriodPicker period={period} onChange={setPeriod} />
-        <ScrollArea className="flex-1">
-          {tab === 'overview' && <MgmtOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-          {tab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
-          {tab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
-          {tab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
-          {tab === 'marketing' && <MgmtPaymentMix companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-        </ScrollArea>
-      </div>
+    <CentralPanelLayout items={menu} activeKey={activeTab} onSelect={setTab}>
+      {activeTab === 'balance' ? (
+        <div className="h-full overflow-y-auto">
+          <BalanceVitrine />
+        </div>
+      ) : activeTab === 'objects' ? (
+        <div className="h-full overflow-y-auto">
+          <LocationsPage cockpitVariant="full" />
+        </div>
+      ) : ENERGY_MGMT_KEYS.includes(activeTab) ? (
+        <div className="h-full overflow-y-auto">
+          <EnergyMgmtVitrine tab={activeTab} />
+        </div>
+      ) : (
+        <div className="h-full flex flex-col">
+          <AnalyticsPeriodPicker period={period} onChange={setPeriod} />
+          <ScrollArea className="flex-1">
+            {activeTab === 'overview' && <MgmtOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+            {activeTab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
+            {activeTab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
+            {activeTab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
+            {activeTab === 'marketing' && <MgmtPaymentMix companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+          </ScrollArea>
+        </div>
+      )}
     </CentralPanelLayout>
   )
 }
@@ -271,7 +357,11 @@ const FIN_MENU: CentralMenuItem[] = [
 export function FinancialPanel() {
   const [tab, setTab] = useState('overview')
   const [period, setPeriod] = useAnalyticsPeriod()
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
+  const gate = useSectionGate(isEnergy ? 'fin_energy' : 'financial')
+  if (!gate.connected) return <SectionEmpty section="Финансовый" org={gate.org} />
+  if (isEnergy) return <div className="h-full overflow-y-auto"><FinancialVitrine /></div>
 
   return (
     <CentralPanelLayout items={FIN_MENU} activeKey={tab} onSelect={setTab}>
@@ -418,6 +508,11 @@ const ACC_MENU: CentralMenuItem[] = [
 
 export function AccountingPanel() {
   const [tab, setTab] = useState('overview')
+  const { company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
+  const gate = useSectionGate(isEnergy ? 'acc_energy' : 'accounting')
+  if (!gate.connected) return <SectionEmpty section="Бухгалтерский" org={gate.org} />
+  if (isEnergy) return <div className="h-full overflow-y-auto"><AccountingVitrine /></div>
   return (
     <CentralPanelLayout items={ACC_MENU} activeKey={tab} onSelect={setTab}>
       <ScrollArea className="h-full">
@@ -483,7 +578,11 @@ const TAX_MENU: CentralMenuItem[] = [
 export function TaxPanel() {
   const [tab, setTab] = useState('vat')
   const [period, setPeriod] = useAnalyticsPeriod()
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
+  const gate = useSectionGate(isEnergy ? 'tax_energy' : 'tax')
+  if (!gate.connected) return <SectionEmpty section="Налоговый" org={gate.org} />
+  if (isEnergy) return <div className="h-full overflow-y-auto"><TaxVitrine /></div>
   return (
     <CentralPanelLayout items={TAX_MENU} activeKey={tab} onSelect={setTab}>
       <div className="h-full flex flex-col">

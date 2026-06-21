@@ -1,5 +1,5 @@
 /**
- * Сервис AI-аудитора ClearLedger.
+ * Сервис AI-аудитора TradeLedger.
  * Dual-mode: localStorage (demo) / API.
  */
 
@@ -11,7 +11,7 @@ import { isApiEnabled, get } from './apiClient'
 const DEMO_INSTANCES: AuditorInstance[] = [
   {
     id: 'inst-1',
-    name: 'ClearLedger — Основная',
+    name: 'TradeLedger — Основная',
     companyId: 'npk',
     status: 'active',
     documentsCount: 1247,
@@ -19,7 +19,7 @@ const DEMO_INSTANCES: AuditorInstance[] = [
   },
   {
     id: 'inst-2',
-    name: 'ClearLedger — Тест',
+    name: 'TradeLedger — Тест',
     companyId: 'rti',
     status: 'inactive',
     documentsCount: 85,
@@ -124,7 +124,7 @@ export function streamAudit(
 function simulateStream(prompt: string, onChunk: StreamCallback, signal: AbortSignal) {
   const responses: Record<string, string> = {
     'audit-full': '## Результаты полного аудита\n\n### Критические находки (2)\n- **Дубликат:** Счёт №142 от 15.01.2026 — дублирует Счёт №142 от 14.01.2026\n- **Просрочен:** Договор №12/2024 — истёк 31.12.2025\n\n### Предупреждения (5)\n- Пропуск нумерации УПД №87-89\n- Расхождение суммы в Акте №56\n- 3 документа без подписи контрагента\n\n### Информация (8)\n- 4 контрагента без проверки по ЕГРЮЛ\n- 2 документа с низкой уверенностью OCR\n- 2 записи без привязки к договору\n\n✅ Проверено: 1 247 документов за 3.2 сек.',
-    'default': `Анализирую запрос...\n\nОбрабатываю данные по вашему запросу. Промежуточные результаты:\n\n- Документов проверено: 1 247\n- Контрагентов: 48\n- Период: 01.2025 — 02.2026\n\nДля детального анализа подключите инстанс ClearLedger к API.`,
+    'default': `Анализирую запрос...\n\nОбрабатываю данные по вашему запросу. Промежуточные результаты:\n\n- Документов проверено: 1 247\n- Контрагентов: 48\n- Период: 01.2025 — 02.2026\n\nДля детального анализа подключите инстанс TradeLedger к API.`,
   }
 
   const cmdId = Object.keys(responses).find((k) => prompt.includes(k))

@@ -1,9 +1,9 @@
 /**
- * Клиент для работы с MSTO IntegratorService API через Backend Proxy ClearLedger
+ * Клиент для работы с MSTO IntegratorService API через Backend Proxy TradeLedger
  *
- * Все запросы идут через backend ClearLedger на /api/msto/*
+ * Все запросы идут через backend TradeLedger на /api/msto/*
  * Backend автоматически управляет JWT авторизацией.
- * HTTP-слой — общий apiClient ClearLedger (BASE_URL + Bearer JWT).
+ * HTTP-слой — общий apiClient TradeLedger (BASE_URL + Bearer JWT).
  */
 
 import type {

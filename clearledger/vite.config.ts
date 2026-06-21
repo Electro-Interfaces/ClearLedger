@@ -5,7 +5,26 @@ import path from 'path'
 
 export default defineConfig({
   base: '/ClearLedger/',
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // Dev: редирект /ClearLedger (без завершающего слэша) → /ClearLedger/ (base-path),
+    // чтобы URL без слэша не упирался в подсказку Vite, а сразу открывал приложение.
+    {
+      name: 'redirect-base-no-slash',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === '/ClearLedger') {
+            res.statusCode = 301
+            res.setHeader('Location', '/ClearLedger/')
+            res.end()
+            return
+          }
+          next()
+        })
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

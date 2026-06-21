@@ -1,9 +1,9 @@
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider, Outlet, Link } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet, Link, Navigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
-import { CompanyProvider } from '@/contexts/CompanyContext'
+import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
 import { FilterProvider } from '@/contexts/FilterContext'
 import { SupportProvider } from '@/contexts/SupportContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -36,6 +36,8 @@ const PricesPage = lazy(() => import('@/pages/oneC/PricesPage').then((m) => ({ d
 const BatchesPage = lazy(() => import('@/pages/oneC/BatchesPage').then((m) => ({ default: m.BatchesPage })))
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
+const NormalizationWorkspacePage = lazy(() => import('@/pages/NormalizationWorkspacePage').then((m) => ({ default: m.NormalizationWorkspacePage })))
+const BalancePage = lazy(() => import('@/pages/BalancePage').then((m) => ({ default: m.BalancePage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
@@ -50,6 +52,17 @@ function LazyPage({ children }: { children: React.ReactNode }) {
       {children}
     </Suspense>
   )
+}
+
+/**
+ * Гард fuel-only роутов (1С, нормализация, закрытие месяца).
+ * Для energy-профиля (РусГидро, сеть ЭЗС) этих разделов нет — прямой переход
+ * по URL редиректит на рабочий стол. Fuel-профиль (ГИГ) проходит без изменений.
+ */
+function RequireFuel({ children }: { children: React.ReactNode }) {
+  const { company } = useCompany()
+  if (company.profileId === 'energy') return <Navigate to="/" replace />
+  return <>{children}</>
 }
 
 function NotFoundPage() {
@@ -100,21 +113,23 @@ const router = createBrowserRouter([
           { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
           { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
           { path: '/catalog', element: <LazyPage><CatalogPage /></LazyPage> },
-          { path: '/locations', element: <LazyPage><LocationsPage /></LazyPage> },
+          { path: '/locations', element: <LazyPage><LocationsPage cockpitVariant="intake" /></LazyPage> },
           { path: '/contractors', element: <LazyPage><ContractorsPage /></LazyPage> },
           { path: '/organization', element: <LazyPage><OrganizationPage /></LazyPage> },
-          { path: '/1c/connection', element: <LazyPage><ConnectionPage /></LazyPage> },
-          { path: '/1c/references', element: <LazyPage><ReferencesPage /></LazyPage> },
-          { path: '/1c/documents', element: <LazyPage><DocumentsPage /></LazyPage> },
-          { path: '/1c/periods', element: <LazyPage><PeriodsPage /></LazyPage> },
-          { path: '/1c/mappings', element: <LazyPage><MappingsPage /></LazyPage> },
-          { path: '/1c/export', element: <LazyPage><ExportPacketsPage /></LazyPage> },
-          { path: '/1c/policy', element: <LazyPage><PolicyPage /></LazyPage> },
-          { path: '/1c/posting-templates', element: <LazyPage><PostingTemplatesPage /></LazyPage> },
-          { path: '/1c/prices', element: <LazyPage><PricesPage /></LazyPage> },
-          { path: '/1c/batches', element: <LazyPage><BatchesPage /></LazyPage> },
+          { path: '/1c/connection', element: <RequireFuel><LazyPage><ConnectionPage /></LazyPage></RequireFuel> },
+          { path: '/1c/references', element: <RequireFuel><LazyPage><ReferencesPage /></LazyPage></RequireFuel> },
+          { path: '/1c/documents', element: <RequireFuel><LazyPage><DocumentsPage /></LazyPage></RequireFuel> },
+          { path: '/1c/periods', element: <RequireFuel><LazyPage><PeriodsPage /></LazyPage></RequireFuel> },
+          { path: '/1c/mappings', element: <RequireFuel><LazyPage><MappingsPage /></LazyPage></RequireFuel> },
+          { path: '/1c/export', element: <RequireFuel><LazyPage><ExportPacketsPage /></LazyPage></RequireFuel> },
+          { path: '/1c/policy', element: <RequireFuel><LazyPage><PolicyPage /></LazyPage></RequireFuel> },
+          { path: '/1c/posting-templates', element: <RequireFuel><LazyPage><PostingTemplatesPage /></LazyPage></RequireFuel> },
+          { path: '/1c/prices', element: <RequireFuel><LazyPage><PricesPage /></LazyPage></RequireFuel> },
+          { path: '/1c/batches', element: <RequireFuel><LazyPage><BatchesPage /></LazyPage></RequireFuel> },
           { path: '/forecast', element: <LazyPage><MonthCloseForecastPage /></LazyPage> },
+          { path: '/normalization', element: <LazyPage><NormalizationWorkspacePage /></LazyPage> },
           { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
+          { path: '/balance', element: <LazyPage><BalancePage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '/admin', element: <LazyPage><AdminPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },

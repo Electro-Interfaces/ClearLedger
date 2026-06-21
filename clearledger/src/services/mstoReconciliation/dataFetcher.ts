@@ -3,10 +3,10 @@
  *
  * Три источника данных:
  * 1. Сменный отчет (STS /v1/report/shift_report) - итоговые суммы по смене
- * 2. MSTO IntegratorService (через backend-прокси ClearLedger) - детальные транзакции агрегаторов
+ * 2. MSTO IntegratorService (через backend-прокси TradeLedger) - детальные транзакции агрегаторов
  * 3. TF транзакции (STS /v2/transactions) - факт отпуска на ТРК
  *
- * Адаптация под ClearLedger:
+ * Адаптация под TradeLedger:
  * - MSTO берётся из backend-прокси (mstoProxyClient → /api/msto/*)
  * - TF и смены берутся напрямую из STS через stsApiClient
  */

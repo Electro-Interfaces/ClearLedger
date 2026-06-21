@@ -2,11 +2,11 @@
  * Модуль получения данных для сверки корпоративного процессинга
  *
  * Три источника данных:
- * 1. Corp (TradeCorp API через backend-прокси ClearLedger) - транзакции корп. процессинга
+ * 1. Corp (TradeCorp API через backend-прокси TradeLedger) - транзакции корп. процессинга
  * 2. TF (STS /v2/transactions) - детальные операции отпуска на ТРК
  * 3. Смена (STS /v1/report/shift_report) - агрегированные данные сменного отчёта
  *
- * Адаптация под ClearLedger:
+ * Адаптация под TradeLedger:
  * - Corp берётся из backend-прокси (tradecorpProxyClient → /api/tradecorp/*)
  * - TF и смены берутся напрямую из STS через stsApiClient (а не из внутреннего backend TF)
  */
@@ -242,7 +242,7 @@ export async function getShiftsWithReports(
 /**
  * Получить список доступных станций.
  *
- * У STS API нет endpoint списка станций, поэтому в ClearLedger используем
+ * У STS API нет endpoint списка станций, поэтому в TradeLedger используем
  * коды станций из настроек приложения (settingsService) как fallback.
  * Обычно сюда не попадаем — модалка параметров передаёт станции из справочника
  * Location явным списком.

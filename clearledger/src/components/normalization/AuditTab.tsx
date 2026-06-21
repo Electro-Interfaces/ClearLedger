@@ -476,7 +476,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
 
       {/* 4. Не найдены в CL */}
       <CollapsibleSection
-        title="Не найдены в ClearLedger"
+        title="Не найдены в TradeLedger"
         icon={FilePlus}
         iconBg="hsl(0 84% 60% / 0.15)"
         iconColor="text-red-500"

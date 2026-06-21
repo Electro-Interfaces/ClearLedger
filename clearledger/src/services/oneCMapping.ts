@@ -1,7 +1,7 @@
 /**
  * Маппинг docTypeId → тип документа 1С:Бухгалтерия.
  *
- * Определяет какой объект EnterpriseData создавать для каждого типа документа ClearLedger.
+ * Определяет какой объект EnterpriseData создавать для каждого типа документа TradeLedger.
  */
 
 /** Тип объекта EnterpriseData для 1С:БП 3.0 */
@@ -40,7 +40,7 @@ const DOC_TYPE_MAP: Record<string, OneCMappingResult> = {
 }
 
 /**
- * Получить тип документа 1С:БП по docTypeId ClearLedger.
+ * Получить тип документа 1С:БП по docTypeId TradeLedger.
  * Возвращает undefined для типов, не имеющих прямого маппинга.
  */
 export function mapToOneCDocType(docTypeId?: string): OneCMappingResult | undefined {

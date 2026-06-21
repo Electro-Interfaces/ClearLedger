@@ -9,8 +9,11 @@ import { getSettings, saveSettings, type AppSettings } from '@/services/settings
 import { stsTestConnection, clearToken } from '@/services/fuel/stsApiClient'
 import { Loader2, CheckCircle2, XCircle, Wifi } from 'lucide-react'
 import { AdminSection } from '@/components/settings/AdminSection'
+import { useCompany } from '@/contexts/CompanyContext'
 
 export function SettingsPage() {
+  const { company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
   const [settings, setSettings] = useState<AppSettings>(getSettings)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string; shiftsCount?: number } | null>(null)
@@ -65,6 +68,9 @@ export function SettingsPage() {
       {/* Профиль организации + пользователи (по роли, API-режим) */}
       <AdminSection />
 
+      {/* STS API + станции АЗС — только для топливного профиля (energy не использует STS/АЗС). */}
+      {!isEnergy && (
+      <>
       {/* STS API */}
       <Card>
         <CardHeader>
@@ -175,6 +181,8 @@ export function SettingsPage() {
           </Button>
         </CardContent>
       </Card>
+      </>
+      )}
     </div>
   )
 }

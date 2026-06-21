@@ -61,7 +61,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null)
   const [selectedShiftNumber, setSelectedShiftNumber] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'raw' | 'core' | 'export'>('raw')
-  const [coreMode, setCoreMode] = useState<CoreMode>('normalize')
+  const [coreMode, setCoreMode] = useState<CoreMode>('management')
   const [lastReconcileResult, setLastReconcileResult] = useState<unknown | null>(null)
   const [exportDocs, setExportDocs] = useState<ExportDocument[]>([])
 

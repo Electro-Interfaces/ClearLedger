@@ -23,7 +23,8 @@ export function MainLayout() {
   // Рабочие области с фиксированной высотой (без скролла страницы, h-full внутри):
   // рабочий стол и отдельная область разрезов «Сверка данных».
   const isWorkspace =
-    location.pathname === '/' || location.pathname === '/reconciliation'
+    location.pathname === '/' || location.pathname === '/reconciliation' ||
+    location.pathname === '/normalization'
 
   return (
     <SidebarProvider
@@ -44,7 +45,7 @@ export function MainLayout() {
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <SheetContent side="left" className="p-0 w-72 mobile-safe-left">
               <SheetTitle className="sr-only">Меню навигации</SheetTitle>
-              <SheetDescription className="sr-only">Навигация GIG Fuel Ledger</SheetDescription>
+              <SheetDescription className="sr-only">Навигация TradeLedger</SheetDescription>
               <AppSidebar />
             </SheetContent>
           </Sheet>

@@ -24,6 +24,7 @@ import { nanoid } from 'nanoid'
 import { format } from 'date-fns'
 import { useLocations } from '@/hooks/useLocations'
 import { useFilters } from '@/contexts/FilterContext'
+import { useCompany } from '@/contexts/CompanyContext'
 
 type DocKind = 'shift_report' | 'receipt' | 'invoice' | 'bank_statement' | 'cash_doc' | 'contract' | 'other'
 
@@ -35,19 +36,36 @@ interface IntakeFile {
   status: 'loaded' | 'processing' | 'classified' | 'error'
   loadedAt: string
   docKind: DocKind
+  docKindId: string   // id выбранного варианта (для подписи; несколько вариантов могут делить kind)
   locationId?: string
   docDate?: string
   comment?: string
 }
 
-const DOC_KINDS: { value: DocKind; label: string; hint: string }[] = [
-  { value: 'shift_report', label: 'Сменный отчёт', hint: 'ОРП, фискальный документ за смену' },
-  { value: 'receipt', label: 'ТТН / Поступление', hint: 'Накладная на приём топлива или товара' },
-  { value: 'invoice', label: 'Счёт-фактура', hint: 'СФ от поставщика для НДС' },
-  { value: 'bank_statement', label: 'Банковская выписка', hint: 'Платёжный документ из банка' },
-  { value: 'cash_doc', label: 'Кассовый документ', hint: 'ПКО / РКО / акт инкассации' },
-  { value: 'contract', label: 'Договор / соглашение', hint: 'Контракт с контрагентом' },
-  { value: 'other', label: 'Прочее', hint: 'Не подходит под другие типы' },
+// Запись типа документа в выпадающем списке. id — уникальный ключ варианта
+// (стабилен для key/Select), kind — на каком виде сохраняется (атрибут записи).
+interface DocKindOption { id: string; kind: DocKind; label: string; hint: string }
+
+// Набор типов документов для топливного/розничного (1С) профиля.
+const DOC_KINDS_FUEL: DocKindOption[] = [
+  { id: 'shift_report', kind: 'shift_report', label: 'Сменный отчёт', hint: 'ОРП, фискальный документ за смену' },
+  { id: 'receipt', kind: 'receipt', label: 'ТТН / Поступление', hint: 'Накладная на приём топлива или товара' },
+  { id: 'invoice', kind: 'invoice', label: 'Счёт-фактура', hint: 'СФ от поставщика для НДС' },
+  { id: 'bank_statement', kind: 'bank_statement', label: 'Банковская выписка', hint: 'Платёжный документ из банка' },
+  { id: 'cash_doc', kind: 'cash_doc', label: 'Кассовый документ', hint: 'ПКО / РКО / акт инкассации' },
+  { id: 'contract', kind: 'contract', label: 'Договор / соглашение', hint: 'Контракт с контрагентом' },
+  { id: 'other', kind: 'other', label: 'Прочее', hint: 'Не подходит под другие типы' },
+]
+
+// Набор типов документов для энергетического профиля (ЭЗС, инфраструктура).
+const DOC_KINDS_ENERGY: DocKindOption[] = [
+  { id: 'maintenance_act', kind: 'receipt', label: 'Акт ТО оборудования', hint: 'Плановое / аварийное обслуживание' },
+  { id: 'defect_sheet', kind: 'other', label: 'Дефектная ведомость', hint: 'Перечень выявленных дефектов' },
+  { id: 'inspection_journal', kind: 'shift_report', label: 'Журнал обходов', hint: 'Записи о плановых обходах объекта' },
+  { id: 'work_permit', kind: 'contract', label: 'Наряд-допуск', hint: 'Разрешение на проведение работ' },
+  { id: 'supplier_invoice', kind: 'invoice', label: 'Счёт поставщика', hint: 'Счёт / счёт-фактура от контрагента' },
+  { id: 'payment_order', kind: 'bank_statement', label: 'Платёжное поручение', hint: 'Платёжный документ' },
+  { id: 'other', kind: 'other', label: 'Прочее', hint: 'Не подходит под другие типы' },
 ]
 
 const FILE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -80,13 +98,23 @@ export function IntakePage() {
   const locations = useLocations()   // точки активной компании, рефетч при переключении
   const { locationIds: globalLocIds } = useFilters()
 
+  // Набор типов документов зависит от профиля компании: для энергетики
+  // (ЭЗС РусГидро) — энерго-документы, иначе — топливные/1С.
+  const { company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
+  const docKinds = isEnergy ? DOC_KINDS_ENERGY : DOC_KINDS_FUEL
+
   // Если в шапке выбрана ровно одна точка — предзаполняем её
   const defaultLocationId =
     globalLocIds.length === 1 ? globalLocIds[0] : ''
 
-  const [pendingKind, setPendingKind] = useState<DocKind>('other')
+  // pendingKindId — id выбранного варианта (последний = «Прочее») из активного набора.
+  const [pendingKindId, setPendingKindId] = useState<string>(() => docKinds[docKinds.length - 1].id)
   const [pendingLocationId, setPendingLocationId] = useState<string>(defaultLocationId)
   const [pendingDate, setPendingDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'))
+
+  // Если набор сменился (профиль) и выбранного id в нём нет — откатываемся к «Прочее».
+  const pendingOption = docKinds.find((k) => k.id === pendingKindId) ?? docKinds[docKinds.length - 1]
 
   const handleFiles = useCallback((fileList: FileList) => {
     const newFiles: IntakeFile[] = Array.from(fileList).map((f) => ({
@@ -96,13 +124,14 @@ export function IntakePage() {
       mime: f.type,
       status: 'loaded' as const,
       loadedAt: new Date().toISOString(),
-      docKind: pendingKind,
+      docKind: pendingOption.kind,
+      docKindId: pendingOption.id,
       locationId: pendingLocationId || undefined,
       docDate: pendingDate,
     }))
     setFiles((prev) => [...newFiles, ...prev])
     toast.success(`Загружено ${newFiles.length} файл(ов)`)
-  }, [pendingKind, pendingLocationId, pendingDate])
+  }, [pendingOption, pendingLocationId, pendingDate])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -121,9 +150,13 @@ export function IntakePage() {
     return (id?: string) => id ? (map.get(id)?.name ?? '—') : '—'
   }, [locations])
 
+  // Подпись по id варианта — ищем в обоих наборах (файл мог быть загружен
+  // под любым профилем); фолбэк — по виду документа.
   const kindLabel = useMemo(() => {
-    const map = new Map(DOC_KINDS.map((k) => [k.value, k.label]))
-    return (k: DocKind) => map.get(k) ?? k
+    const map = new Map(
+      [...DOC_KINDS_FUEL, ...DOC_KINDS_ENERGY].map((k) => [k.id, k.label]),
+    )
+    return (id: string, kind: DocKind) => map.get(id) ?? kind
   }, [])
 
   return (
@@ -151,11 +184,11 @@ export function IntakePage() {
           <div className="grid sm:grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Тип документа</Label>
-              <Select value={pendingKind} onValueChange={(v) => setPendingKind(v as DocKind)}>
+              <Select value={pendingOption.id} onValueChange={setPendingKindId}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {DOC_KINDS.map((k) => (
-                    <SelectItem key={k.value} value={k.value} className="text-xs">
+                  {docKinds.map((k) => (
+                    <SelectItem key={k.id} value={k.id} className="text-xs">
                       <div className="flex flex-col">
                         <span>{k.label}</span>
                         <span className="text-[10px] text-muted-foreground">{k.hint}</span>
@@ -265,7 +298,7 @@ export function IntakePage() {
                       <span className="font-medium truncate">{f.name}</span>
                     </div>
                     <Badge variant="outline" className="text-[10px] h-5 px-1.5 justify-self-start">
-                      {kindLabel(f.docKind)}
+                      {kindLabel(f.docKindId, f.docKind)}
                     </Badge>
                     <div className="min-w-0 flex items-center gap-1">
                       {f.locationId ? (

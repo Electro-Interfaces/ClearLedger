@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'react'
+import { useCompany } from '@/contexts/CompanyContext'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
@@ -12,11 +13,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  FileOutput, FileCheck, Eye, Upload, Search,
+  FileOutput, Upload, Search,
   CheckCircle2, AlertTriangle, XCircle, Clock,
-  ArrowRight, FileText, Loader2, Shield,
-  GitBranch, RotateCcw, BarChart3, ListChecks,
+  FileText, Loader2, Shield,
+  GitBranch, RotateCcw, ListChecks,
 } from 'lucide-react'
+import { EnergyExportView } from './EnergyExportView'
 
 type ExportTab = 'documents' | 'preview' | 'validation' | 'upload' | 'analysis'
 
@@ -452,7 +454,12 @@ function AnalysisView() {
 /* ── Главный компонент ── */
 
 export function ExportLayerPanel() {
+  const { company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
   const [tab, setTab] = useState<ExportTab>('documents')
+
+  // Energy-профиль (ЭЗС, без 1С/нефтепродуктов): энерго-выгрузка (Документы/Данные → учётная система компании).
+  if (isEnergy) return <EnergyExportView />
 
   return (
     <CentralPanelLayout items={EXPORT_MENU} activeKey={tab} onSelect={(k) => setTab(k as ExportTab)}>

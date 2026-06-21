@@ -1065,7 +1065,7 @@ function DocumentDetailSheet({ docId, companyId, connectionId, onClose, onLinesL
                     <TableHeader>
                       <TableRow>
                         <TableHead className="h-6 text-[10px]">Поле</TableHead>
-                        <TableHead className="h-6 text-[10px] text-right">ClearLedger</TableHead>
+                        <TableHead className="h-6 text-[10px] text-right">TradeLedger</TableHead>
                         <TableHead className="h-6 text-[10px] text-right">БП ГИГ</TableHead>
                         <TableHead className="h-6 text-[10px] text-right">Δ</TableHead>
                         <TableHead className="h-6 text-[10px]">Severity</TableHead>

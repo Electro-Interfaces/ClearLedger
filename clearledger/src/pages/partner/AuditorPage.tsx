@@ -1,5 +1,5 @@
 /**
- * AuditorPage — AI-аудитор ClearLedger.
+ * AuditorPage — AI-аудитор TradeLedger.
  * 2-панельный layout (WorkPanel | Tabs) по образцу LocationWorkspacePage из TSupport.
  */
 

@@ -1,5 +1,5 @@
 /**
- * HTTP-клиент для ClearLedger API.
+ * HTTP-клиент для TradeLedger API.
  * Автоматическая подстановка JWT, обработка ошибок, refresh.
  *
  * Если VITE_API_URL не задан — API недоступен, используется localStorage.

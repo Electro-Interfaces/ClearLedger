@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, AlertCircle, AlertTriangle, Info, FileWarning, CalendarCheck2 } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
+import { EnergyForecastView } from '@/components/workspace/EnergyForecastView'
 import {
   getMonthForecast, fmtMoney, fmtMoneyShort, fmtPct, currentMonthBounds,
 } from '@/services/analyticsService'
@@ -31,12 +32,16 @@ export function MonthCloseForecastPage() {
   const init = currentMonthBounds()
   const [year, setYear] = useState(init.year)
   const [month, setMonth] = useState(init.month)
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['month-forecast', companyId, year, month],
     queryFn: () => getMonthForecast({ companyId, year, month }),
+    enabled: company.profileId !== 'energy',
   })
+
+  // Energy-профиль: закрытие по энергометрикам (эталон = биллинг компании), без ОРП/1С.
+  if (company.profileId === 'energy') return <EnergyForecastView />
 
   return (
     <div className="p-6 space-y-4">

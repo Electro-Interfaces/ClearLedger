@@ -42,13 +42,13 @@ function getProfileId(companyId: string) {
 const cl = {
   async reset() {
     await resetSeed()
-    console.log('[ClearLedger] Seed сброшен и пересоздан. Перезагрузка...')
+    console.log('[TradeLedger] Seed сброшен и пересоздан. Перезагрузка...')
     location.reload()
   },
 
   clear() {
     clearAllData()
-    console.log('[ClearLedger] Все данные очищены. Перезагрузка...')
+    console.log('[TradeLedger] Все данные очищены. Перезагрузка...')
     location.reload()
   },
 
@@ -56,7 +56,7 @@ const cl = {
     const companyId = getCurrentCompanyId()
     const profileId = getProfileId(companyId)
     const entries = await generateEntries(companyId, profileId, count)
-    console.log(`[ClearLedger] Создано ${entries.length} записей для ${companyId}`)
+    console.log(`[TradeLedger] Создано ${entries.length} записей для ${companyId}`)
     return entries
   },
 
@@ -86,21 +86,21 @@ const cl = {
   async setStatus(status: EntryStatus) {
     const companyId = getCurrentCompanyId()
     const count = await setAllStatuses(companyId, status)
-    console.log(`[ClearLedger] Изменено ${count} записей → ${status}`)
+    console.log(`[TradeLedger] Изменено ${count} записей → ${status}`)
     return count
   },
 
   async deleteEntries(companyId?: string) {
     const cid = companyId ?? getCurrentCompanyId()
     const count = await deleteAllEntries(cid)
-    console.log(`[ClearLedger] Удалено ${count} записей для ${cid}`)
+    console.log(`[TradeLedger] Удалено ${count} записей для ${cid}`)
     return count
   },
 
   async export(companyId?: string) {
     const cid = companyId ?? getCurrentCompanyId()
     await exportAllData(cid)
-    console.log(`[ClearLedger] Экспорт ${cid} завершён`)
+    console.log(`[TradeLedger] Экспорт ${cid} завершён`)
   },
 }
 
@@ -114,7 +114,7 @@ declare global {
 window.__cl = cl
 
 console.log(
-  '%c[ClearLedger Dev Tools]%c Доступны через window.__cl — попробуйте __cl.stats()',
+  '%c[TradeLedger Dev Tools]%c Доступны через window.__cl — попробуйте __cl.stats()',
   'color: #3b82f6; font-weight: bold',
   'color: inherit',
 )

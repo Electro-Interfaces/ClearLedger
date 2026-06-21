@@ -1,8 +1,8 @@
 /**
- * Сопоставление справочника Location (ClearLedger) → параметры сверки.
+ * Сопоставление справочника Location (TradeLedger) → параметры сверки.
  *
  * В TradeFrame станции брались из TradingPoint (external_id = код станции STS,
- * externalCodes c system='msto' = MSTO servicePointId). В ClearLedger сетей нет,
+ * externalCodes c system='msto' = MSTO servicePointId). В TradeLedger сетей нет,
  * вместо TradingPoint — справочник `ServiceLocation` (типа 'fuel_station').
  *
  * ДОПУЩЕНИЕ (Location → номер станции STS):

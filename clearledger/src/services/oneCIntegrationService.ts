@@ -1,5 +1,5 @@
 /**
- * API-сервис интеграции ClearLedger ↔ 1С:Бухгалтерия 3.0
+ * API-сервис интеграции TradeLedger ↔ 1С:Бухгалтерия 3.0
  */
 
 import { get, post, patch, del } from '@/services/apiClient'

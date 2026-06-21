@@ -26,7 +26,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Search, Building2, MapPin, Loader2, Database, FileText, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Search, Building2, MapPin, Loader2, Database, FileText, Plus, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   useCounterparties, useContracts, useCounterpartyLocations,
@@ -221,27 +221,33 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
         )}
       </div>
 
-      {/* Реквизиты контрагента */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-        <Req label="Полное наименование" value={cp.fullName} span />
-        <Req label="ИНН" value={cp.inn} />
-        <Req label="КПП" value={cp.kpp} />
-        <Req label="ОГРН" value={cp.ogrn} />
-        <Req label="ОКПО" value={cp.okpo} />
-        <Req label="ОКВЭД" value={cp.okved} />
-        <Req label="Вид" value={TYPE_LABEL[cp.type] || cp.type} />
-        <Req label="Головной контрагент" value={head?.name} />
-        <Req label="Юридический адрес" value={cp.legalAddress} span />
-        <Req label="Фактический адрес" value={cp.actualAddress} span />
-        <Req label="Телефон" value={cp.phone} />
-        <Req label="Email" value={cp.email} />
-        <Req label="Руководитель" value={cp.directorName} />
-        <Req label="Должность руководителя" value={cp.directorPosition} />
-        <Req label="Расчётный счёт" value={cp.bankAccount} />
-        <Req label="БИК" value={cp.bankBik} />
-        <Req label="Банк" value={cp.bankName} span />
-        <Req label="Комментарий" value={raw.Комментарий as string} span />
-      </div>
+      {/* Реквизиты контрагента — свёрнуты по умолчанию, раскрываются по клику */}
+      <details className="group rounded-md border border-border/50 p-3">
+        <summary className="flex cursor-pointer list-none items-center justify-between text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70 hover:text-muted-foreground">
+          <span>Реквизиты</span>
+          <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 pt-3">
+          <Req label="Полное наименование" value={cp.fullName} span />
+          <Req label="ИНН" value={cp.inn} />
+          <Req label="КПП" value={cp.kpp} />
+          <Req label="ОГРН" value={cp.ogrn} />
+          <Req label="ОКПО" value={cp.okpo} />
+          <Req label="ОКВЭД" value={cp.okved} />
+          <Req label="Вид" value={TYPE_LABEL[cp.type] || cp.type} />
+          <Req label="Головной контрагент" value={head?.name} />
+          <Req label="Юридический адрес" value={cp.legalAddress} span />
+          <Req label="Фактический адрес" value={cp.actualAddress} span />
+          <Req label="Телефон" value={cp.phone} />
+          <Req label="Email" value={cp.email} />
+          <Req label="Руководитель" value={cp.directorName} />
+          <Req label="Должность руководителя" value={cp.directorPosition} />
+          <Req label="Расчётный счёт" value={cp.bankAccount} />
+          <Req label="БИК" value={cp.bankBik} />
+          <Req label="Банк" value={cp.bankName} span />
+          <Req label="Комментарий" value={raw.Комментарий as string} span />
+        </div>
+      </details>
 
       {/* Договоры */}
       <div>
@@ -637,7 +643,7 @@ export function ContractorsPage() {
         <div>
           <h1 className="text-xl font-semibold">Контрагенты и договоры</h1>
           <p className="text-sm text-muted-foreground">
-            Разрез по контрагентам: их реквизиты из 1С, договоры, охват точек и ограничения по разрезам.
+            Разрез по контрагентам: их реквизиты, договоры, охват точек и ограничения по разрезам.
           </p>
         </div>
       </div>

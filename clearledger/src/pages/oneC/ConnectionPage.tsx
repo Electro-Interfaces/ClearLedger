@@ -1,5 +1,5 @@
 /**
- * Страница «1С → Подключение». Работает с бэкендом ClearLedger
+ * Страница «1С → Подключение». Работает с бэкендом TradeLedger
  * (POST /api/onec/connections, тесты и синхронизации) через хуки
  * useOneCSync. Два режима: OData (HTTP) и COM (V83.COMConnector
  * на локальной файловой БД).
@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/tabs'
 import {
   Plug, Server, CheckCircle2, AlertCircle, Loader2, Save, Database, HardDrive,
-  RefreshCw, Trash2, FileText, History,
+  RefreshCw, Trash2, FileText, History, Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -52,7 +52,7 @@ const MODE_META: Record<OneCConnectionMode, {
     label: 'COM (локально)',
     icon: HardDrive,
     urlLabel: 'Путь к файловой БД или строка соединения',
-    urlPlaceholder: 'D:\\Users\\magsp\\GIG Base2',
+    urlPlaceholder: 'C:\\1C\\Bases\\Бухгалтерия',
     hint: 'V83.COMConnector. Только Windows + 32-bit Python. Для стендов разработки.',
   },
 }
@@ -73,37 +73,53 @@ export function ConnectionPage() {
   const syncCatalogsMutation = useSyncCatalogs()
   const syncDocumentsMutation = useSyncDocuments()
 
-  const connection = connections?.[0]
+  // Выбранное подключение: id существующего, 'new' — режим создания, null — initial.
+  const [selectedId, setSelectedId] = useState<string | 'new' | null>(null)
+  const connection = selectedId && selectedId !== 'new'
+    ? connections?.find((c) => c.id === selectedId) ?? null
+    : null
+  const isNew = selectedId === 'new'
   const { data: history } = useSyncHistory(connection?.id ?? '')
 
-  const [form, setForm] = useState({
-    name: '1С:Бухгалтерия',
-    mode: 'com' as OneCConnectionMode,
-    odataUrl: '',
-    username: '',
-    password: '',
-  })
+  const emptyForm = {
+    name: '', mode: 'com' as OneCConnectionMode, odataUrl: '', username: '', password: '',
+  }
+  const [form, setForm] = useState({ ...emptyForm })
   const [testResult, setTestResult] = useState<OneCTestResult | null>(null)
 
-  // Подтягиваем поля из существующего коннекта в форму при первой загрузке.
+  // Автовыбор первого подключения при загрузке (если ещё ничего не выбрано).
   useEffect(() => {
+    if (selectedId === null && connections && connections.length > 0) {
+      setSelectedId(connections[0].id)
+    }
+  }, [connections, selectedId])
+
+  // Подстановка полей выбранного подключения в форму (или сброс для нового).
+  useEffect(() => {
+    setTestResult(null)
     if (connection) {
-      setForm((prev) => ({
-        ...prev,
+      setForm({
         name: connection.name,
         mode: connection.mode,
         odataUrl: connection.odataUrl,
         username: connection.username,
-        // password не возвращается с бэка — поле остаётся пустым в форме.
-      }))
+        password: '', // не возвращается с бэка
+      })
+    } else if (isNew) {
+      setForm({ ...emptyForm, name: '1С:Бухгалтерия' })
     }
-  }, [connection?.id])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection?.id, isNew])
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   async function handleSave() {
+    if (!form.name.trim()) {
+      toast.error('Укажите название подключения (напр. «БП», «УТ», «Розница»)')
+      return
+    }
     if (!form.odataUrl.trim() || !form.username.trim()) {
       toast.error('Заполните URL/путь и имя пользователя')
       return
@@ -126,7 +142,7 @@ export function ConnectionPage() {
           toast.error('Укажите пароль')
           return
         }
-        await createMutation.mutateAsync({
+        const created = await createMutation.mutateAsync({
           companyId,
           name: form.name,
           mode: form.mode,
@@ -135,6 +151,7 @@ export function ConnectionPage() {
           password: form.password,
         })
         toast.success('Подключение создано')
+        if (created?.id) setSelectedId(created.id)
       }
       setTestResult(null)
     } catch (err) {
@@ -187,10 +204,10 @@ export function ConnectionPage() {
 
   async function handleDelete() {
     if (!connection) return
-    if (!confirm('Удалить подключение к 1С?')) return
+    if (!confirm(`Удалить подключение «${connection.name}»?`)) return
     try {
       await deleteMutation.mutateAsync(connection.id)
-      setForm({ name: '1С:Бухгалтерия', mode: 'com', odataUrl: '', username: '', password: '' })
+      setSelectedId(null) // автовыбор первого из оставшихся
       setTestResult(null)
       toast.success('Подключение удалено')
     } catch (err) {
@@ -209,14 +226,66 @@ export function ConnectionPage() {
     <div className="space-y-4 max-w-3xl">
       {/* Заголовок */}
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Подключение к 1С</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Подключения к 1С</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Связь с информационной базой 1С:Бухгалтерия 3.0 для pull-чтения справочников
-          и документов. Запись в 1С выполняется её собственным расширением.
+          Информационные базы 1С компании. Можно подключить несколько баз и конфигураций
+          (Бухгалтерия, УТ, Розница, КА…) — каждое подключение принадлежит только этой
+          компании. Pull-чтение справочников и документов; запись в 1С выполняет её расширение.
         </p>
       </div>
 
-      {/* Статус */}
+      {/* Список подключений компании */}
+      <Card className="py-4 gap-3">
+        <CardHeader className="pb-0">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" />
+              Подключения компании
+              {connections && connections.length > 0 && (
+                <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{connections.length}</Badge>
+              )}
+            </CardTitle>
+            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => setSelectedId('new')}>
+              <Plus className="h-3.5 w-3.5" /> Добавить
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {isLoading && <p className="text-xs text-muted-foreground">Загрузка…</p>}
+          {!isLoading && (!connections || connections.length === 0) && (
+            <p className="text-xs text-muted-foreground">
+              Подключений нет. Нажмите «Добавить», чтобы настроить первую базу 1С.
+            </p>
+          )}
+          {connections && connections.length > 0 && (
+            <div className="space-y-1.5">
+              {connections.map((c) => {
+                const ModeIcon = MODE_META[c.mode]?.icon ?? Database
+                const st = STATUS_META[c.status] ?? STATUS_META.inactive
+                const StIcon = st.icon
+                const active = c.id === selectedId
+                return (
+                  <button key={c.id} onClick={() => setSelectedId(c.id)}
+                    className={`flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors ${active ? 'border-primary bg-primary/5' : 'border-border/50 hover:bg-muted/50'}`}>
+                    <ModeIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium">{c.name}</div>
+                      <div className="truncate font-mono text-[10px] text-muted-foreground">{c.odataUrl || MODE_META[c.mode]?.label}</div>
+                    </div>
+                    <span className={`flex shrink-0 items-center gap-1 text-[11px] ${st.color}`}>
+                      <StIcon className="h-3 w-3" />
+                      {st.label}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Статус выбранного подключения */}
+      {connection && (
       <Card className="py-4 gap-3">
         <CardHeader className="pb-0">
           <div className="flex items-center justify-between">
@@ -251,17 +320,24 @@ export function ConnectionPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {/* Параметры подключения */}
+      {/* Параметры подключения (редактирование выбранного / новое) */}
+      {(connection || isNew) && (
       <Card className="py-4 gap-3">
         <CardHeader className="pb-0">
-          <CardTitle className="text-sm">Параметры подключения</CardTitle>
+          <CardTitle className="text-sm">{isNew ? 'Новое подключение' : `Параметры — ${connection?.name ?? ''}`}</CardTitle>
           <CardDescription className="text-xs">
             Выберите режим и заполните поля. Сохранение не запускает проверку
             автоматически — нажмите «Проверить».
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0 space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="conn-name" className="text-xs">Название / конфигурация</Label>
+            <Input id="conn-name" value={form.name} onChange={(e) => update('name', e.target.value)}
+              placeholder="напр. БП ГИГ, УТ Склад, Розница" className="h-8 text-xs" />
+          </div>
           <Tabs value={form.mode} onValueChange={(v) => update('mode', v as OneCConnectionMode)}>
             <TabsList className="grid w-full grid-cols-2 h-9">
               {(['odata', 'com'] as const).map((m) => {
@@ -346,6 +422,7 @@ export function ConnectionPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* История синхронизаций */}
       {connection && history && history.length > 0 && (
@@ -397,8 +474,8 @@ export function ConnectionPage() {
             {[
               ['Справочники', 'Контрагенты, Номенклатура, Договоры, Склады, Организации'],
               ['Документы', 'ПТУ, ОРП, ОПЗС, КорректировкаПоступления'],
-              ['Сверка', 'Локальные документы ClearLedger ↔ эталон БП ГИГ'],
-              ['Pull-only', 'ClearLedger только читает. Запись в 1С — её расширение тянет данные из ClearLedger API'],
+              ['Сверка', 'Локальные документы ↔ эталон 1С:Бухгалтерии компании'],
+              ['Pull-only', 'TradeLedger только читает. Запись в 1С — её расширение тянет данные из TradeLedger API'],
             ].map(([title, descr]) => (
               <li key={title} className="flex items-start gap-2">
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 mt-0.5 shrink-0" />

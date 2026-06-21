@@ -162,7 +162,7 @@ export function OrganizationPage() {
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="Префикс"><Input value={form.prefix} onChange={set('prefix')} placeholder="ГИГ" /></Field>
+                <Field label="Префикс"><Input value={form.prefix} onChange={set('prefix')} placeholder="напр. РГ" /></Field>
                 <Field label="Полное наименование" span>
                   <Input value={form.fullName} onChange={set('fullName')}
                     placeholder="Общество с ограниченной ответственностью …" />

@@ -65,6 +65,10 @@ export function LocationsTable({
   const [asc, setAsc] = useState(true)
   const [page, setPage] = useState(0)
 
+  // Колонка «Реализация, пред. мес.» показывается, только если хотя бы у одной
+  // точки выборки есть это значение (для ЭЗС/энергетики данных нет → скрыта).
+  const showSales = useMemo(() => locations.some((l) => m(l, 'salesPrevMonth')), [locations])
+
   const sorted = useMemo(() => {
     const val = (l: ServiceLocation): string | number => {
       switch (sort) {
@@ -127,7 +131,7 @@ export function LocationsTable({
               <TableHead className="hidden xl:table-cell">Коннекторы</TableHead>
               <SortHead k="power" className="hidden md:table-cell text-right">кВт</SortHead>
               <TableHead>Статус станции</TableHead>
-              <TableHead className="hidden lg:table-cell text-right">Реализация, пред. мес.</TableHead>
+              {showSales && <TableHead className="hidden lg:table-cell text-right">Реализация, пред. мес.</TableHead>}
               <TableHead className="hidden xl:table-cell">Связка HubEx</TableHead>
               <TableHead className="hidden sm:table-cell">Статус</TableHead>
               <TableHead className="w-[70px]"></TableHead>
@@ -155,9 +159,11 @@ export function LocationsTable({
                       return <Badge variant="secondary" className={`text-[10px] ${om.cls}`}>{om.label}</Badge>
                     })()}
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell text-right tabular-nums text-muted-foreground">
-                    {m(l, 'salesPrevMonth') || '—'}
-                  </TableCell>
+                  {showSales && (
+                    <TableCell className="hidden lg:table-cell text-right tabular-nums text-muted-foreground">
+                      {m(l, 'salesPrevMonth') || '—'}
+                    </TableCell>
+                  )}
                   <TableCell className="hidden xl:table-cell">
                     {(() => {
                       const ls = m(l, 'linkStatus'); const aid = m(l, 'hubexAssetId')
@@ -205,7 +211,7 @@ export function LocationsTable({
             })}
             {slice.length === 0 && (
               <TableRow>
-                <TableCell colSpan={13} className="text-center text-sm text-muted-foreground py-8">
+                <TableCell colSpan={showSales ? 13 : 12} className="text-center text-sm text-muted-foreground py-8">
                   Ничего не найдено по фильтрам.
                 </TableCell>
               </TableRow>

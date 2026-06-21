@@ -5,6 +5,8 @@
  */
 
 import { useState } from 'react'
+import { useCompany } from '@/contexts/CompanyContext'
+import { EnergyNormalizationView } from './EnergyNormalizationView'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
@@ -13,8 +15,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   ArrowRight, CheckCircle2, AlertTriangle, XCircle, Clock,
-  Play, Bot, FileText, Settings2, ListChecks, History,
-  Sparkles, ArrowRightLeft, RefreshCw,
+  Play, Bot, Settings2, ListChecks, History,
+  ArrowRightLeft, RefreshCw,
 } from 'lucide-react'
 
 type NormTab = 'pipeline' | 'rules' | 'mapping' | 'agents' | 'log'
@@ -457,7 +459,11 @@ function LogView() {
 /* ── Главный компонент ── */
 
 export function NormalizationPanel() {
+  const { company } = useCompany()
   const [tab, setTab] = useState<NormTab>('pipeline')
+
+  // Energy-профиль (ЭЗС): нормализация источников ПК/эквайер/ОФД (L1→L2), без топлива/смен/1С.
+  if (company.profileId === 'energy') return <EnergyNormalizationView />
 
   return (
     <CentralPanelLayout items={NORM_MENU} activeKey={tab} onSelect={(k) => setTab(k as NormTab)}>

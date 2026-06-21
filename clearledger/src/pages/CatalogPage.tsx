@@ -10,12 +10,28 @@
 import { useState, type ReactNode } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Database, Radio, GitCompare, ChevronDown, Plug, Plus } from 'lucide-react'
+import { Database, Radio, GitCompare, ChevronDown, Plug, Plus, Boxes, Settings2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { useCompany } from '@/contexts/CompanyContext'
+import { WORKSPACE_MODULES, PROFILE_LABEL, type WorkspaceModuleDef } from '@/config/workspaceModules'
+import {
+  ENERGY_SOURCES, ENERGY_CHANNELS, ENERGY_CUTS,
+  channelsForCut, sourcesForCut, cutsForChannel, cutsForSource, energySource,
+  type EnergySource, type EnergyChannel, type EnergyCut,
+} from '@/config/energyPipeline'
+import {
+  useModuleConnections, isModuleConnected, setModuleConnected, setModuleParams,
+  type ModuleConnMap,
+} from '@/services/moduleConnectionService'
 import {
   getChannelTemplates,
   getReconcileRules,
@@ -31,6 +47,8 @@ const STATUS: Record<string, { label: string; dot: string; text: string }> = {
   imperative: { label: 'обязательный', dot: 'bg-emerald-400', text: 'text-emerald-300/80' },
   partial: { label: 'частично', dot: 'bg-amber-400', text: 'text-amber-300/80' },
   planned: { label: 'план', dot: 'bg-zinc-500', text: 'text-zinc-400' },
+  active: { label: 'рабочий', dot: 'bg-emerald-400', text: 'text-emerald-300/80' },
+  demo: { label: 'демо', dot: 'bg-sky-400', text: 'text-sky-300/80' },
 }
 function statusMeta(s: string) {
   return STATUS[s] ?? { label: s, dot: 'bg-zinc-500', text: 'text-zinc-400' }
@@ -194,10 +212,19 @@ function Section<T>({
 
 export function CatalogPage() {
   const navigate = useNavigate()
+  const { company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
+  const moduleConn = useModuleConnections()
+  const [configMod, setConfigMod] = useState<WorkspaceModuleDef | null>(null)
 
   const sources = useQuery({ queryKey: ['catalog', 'source-types'], queryFn: getSourceTypes })
   const channels = useQuery({ queryKey: ['catalog', 'channel-templates'], queryFn: getChannelTemplates })
   const rules = useQuery({ queryKey: ['catalog', 'reconcile-rules'], queryFn: getReconcileRules })
+  const modules = useQuery({ queryKey: ['catalog', 'workspace-modules'], queryFn: async () => WORKSPACE_MODULES })
+  // Энергоцепочка (для energy-профиля) — из единой модели energyPipeline.
+  const eSources = useQuery({ queryKey: ['catalog', 'energy-sources'], queryFn: async () => ENERGY_SOURCES })
+  const eChannels = useQuery({ queryKey: ['catalog', 'energy-channels'], queryFn: async () => ENERGY_CHANNELS })
+  const eCuts = useQuery({ queryKey: ['catalog', 'energy-cuts'], queryFn: async () => ENERGY_CUTS })
 
   const sourceRows = (items: SourceTypeItem[]): CatalogRow[] =>
     items.map((s) => ({
@@ -240,34 +267,182 @@ export function CatalogPage() {
       chips: r.streams.map((st) => `${st.role}: ${st.source_type}`),
     }))
 
+  const moduleRows = (items: WorkspaceModuleDef[]): CatalogRow[] =>
+    items.map((m) => {
+      const connected = isModuleConnected(moduleConn.conn, m, moduleConn.profileId)
+      return {
+        code: m.id,
+        label: m.label,
+        status: m.status,
+        description: m.description,
+        group: m.section,
+        meta: `${m.profiles.map((p) => PROFILE_LABEL[p]).join(' · ')} · ${connected ? '✓ подключён' : 'не подключён'}`,
+        chips: m.params.map((p) => p.label),
+        action: { label: connected ? 'Настроить' : 'Подключить', kind: 'connect', onClick: () => setConfigMod(m) },
+      }
+    })
+
+  const energySourceRows = (items: EnergySource[]): CatalogRow[] =>
+    items.map((s) => ({
+      code: s.id, label: s.label, status: s.status, description: s.streams.join(' · '),
+      group: s.level === 'station' ? 'Привязка: станция' : 'Привязка: компания',
+      meta: `питает: ${cutsForSource(s.id).map((c) => c.label).join(', ')}`,
+      chips: cutsForSource(s.id).map((c) => c.label),
+      action: { label: 'Открыть', kind: 'connect', onClick: () => navigate('/sources') },
+    }))
+
+  const energyChannelRows = (items: EnergyChannel[]): CatalogRow[] =>
+    items.map((ch) => ({
+      code: ch.id, label: ch.label, status: ch.status, description: ch.produces,
+      group: 'Нормализация L1 → L2',
+      meta: `источник: ${energySource(ch.sourceId)?.label ?? ch.sourceId}`,
+      chips: cutsForChannel(ch.id).map((c) => c.label),
+      action: { label: 'Открыть', kind: 'create', onClick: () => navigate('/channels') },
+    }))
+
+  const energyCutRows = (items: EnergyCut[]): CatalogRow[] =>
+    items.map((c) => ({
+      code: c.id, label: c.label, status: c.status, description: c.desc,
+      group: 'Разрезы учёта',
+      meta: `источники: ${sourcesForCut(c.id).map((s) => s.label).join(', ')}`,
+      chips: channelsForCut(c.id).map((ch) => ch.label),
+      action: { label: 'Открыть', kind: 'connect', onClick: () => navigate('/reconciliation') },
+    }))
+
   return (
     <div className="space-y-8 p-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Каталоги входного контура</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Каталоги</h1>
         <p className="text-sm text-muted-foreground">
-          Библиотека источников, каналов и разрезов сверки — что вообще можно подключить.
-          Реальные подключения компании — в разделах «Источники данных» и «Каналы».
+          Библиотека того, что можно подключить: модули рабочего стола, источники, каналы и разрезы сверки —
+          и настроить под организацию. Реальные подключения — в «Источниках данных»/«Каналах»; параметры модуля — кнопкой «Настроить».
         </p>
       </div>
 
       <Section
-        title="Источники"
-        icon={<Database className="h-5 w-5" />}
-        query={sources}
-        toRows={sourceRows}
+        title="Модули"
+        icon={<Boxes className="h-5 w-5" />}
+        query={modules}
+        toRows={moduleRows}
       />
-      <Section
-        title="Каналы"
-        icon={<Radio className="h-5 w-5" />}
-        query={channels}
-        toRows={channelRows}
-      />
-      <Section
-        title="Разрезы сверки"
-        icon={<GitCompare className="h-5 w-5" />}
-        query={rules}
-        toRows={ruleRows}
+      {isEnergy ? (
+        <>
+          <Section title="Источники" icon={<Database className="h-5 w-5" />} query={eSources} toRows={energySourceRows} />
+          <Section title="Каналы" icon={<Radio className="h-5 w-5" />} query={eChannels} toRows={energyChannelRows} />
+          <Section title="Разрезы учёта" icon={<GitCompare className="h-5 w-5" />} query={eCuts} toRows={energyCutRows} />
+        </>
+      ) : (
+        <>
+          <Section title="Источники" icon={<Database className="h-5 w-5" />} query={sources} toRows={sourceRows} />
+          <Section title="Каналы" icon={<Radio className="h-5 w-5" />} query={channels} toRows={channelRows} />
+          <Section title="Разрезы учёта" icon={<GitCompare className="h-5 w-5" />} query={rules} toRows={ruleRows} />
+        </>
+      )}
+
+      <ModuleConfigDialog
+        module={configMod}
+        companyId={moduleConn.companyId}
+        profileId={moduleConn.profileId}
+        conn={moduleConn.conn}
+        org={company.shortName || company.name}
+        onSaved={moduleConn.refresh}
+        onClose={() => setConfigMod(null)}
       />
     </div>
+  )
+}
+
+// ── Настройка/подключение модуля под организацию ─────────────────────
+function ModuleConfigDialog({
+  module, companyId, profileId, conn, org, onSaved, onClose,
+}: {
+  module: WorkspaceModuleDef | null
+  companyId: string
+  profileId: string
+  conn: ModuleConnMap
+  org: string
+  onSaved: () => void
+  onClose: () => void
+}) {
+  return (
+    <Dialog open={!!module} onOpenChange={(o) => { if (!o) onClose() }}>
+      {module && (
+        <ModuleConfigContent
+          key={module.id}
+          module={module}
+          companyId={companyId}
+          profileId={profileId}
+          conn={conn}
+          org={org}
+          onSaved={onSaved}
+          onClose={onClose}
+        />
+      )}
+    </Dialog>
+  )
+}
+
+function ModuleConfigContent({
+  module, companyId, profileId, conn, org, onSaved, onClose,
+}: {
+  module: WorkspaceModuleDef
+  companyId: string
+  profileId: string
+  conn: ModuleConnMap
+  org: string
+  onSaved: () => void
+  onClose: () => void
+}) {
+  const [connected, setConnected] = useState(() => isModuleConnected(conn, module, profileId))
+  const [params, setParams] = useState<Record<string, string>>(() => conn[module.id]?.params ?? {})
+
+  const handleSave = () => {
+    setModuleConnected(companyId, module.id, connected)
+    setModuleParams(companyId, module.id, params)
+    onSaved()
+    toast.success(`Модуль «${module.label}» ${connected ? 'подключён' : 'отключён'}`, {
+      description: `Параметры сохранены под «${org}»`,
+    })
+    onClose()
+  }
+
+  return (
+    <DialogContent className="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Settings2 className="h-4 w-4" /> Настройка модуля «{module.label}»
+        </DialogTitle>
+        <DialogDescription>
+          Раздел рабочего стола: {module.section} · параметры под организацию «{org}» (применяются только к этой компании).
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="flex items-center justify-between rounded-md border border-border/60 p-3">
+        <div>
+          <Label className="text-sm">Подключён к компании</Label>
+          <p className="text-[11px] text-muted-foreground">модуль появляется в разделе «{module.section}»</p>
+        </div>
+        <Switch checked={connected} onCheckedChange={setConnected} />
+      </div>
+
+      <div className={`space-y-3 py-1 ${connected ? '' : 'opacity-50'}`}>
+        {module.params.map((p) => (
+          <div key={p.key} className="space-y-1">
+            <Label className="text-xs">{p.label}</Label>
+            <Input
+              className="h-8 text-xs"
+              value={params[p.key] ?? ''}
+              onChange={(e) => setParams((s) => ({ ...s, [p.key]: e.target.value }))}
+              placeholder={p.hint || `значение для «${org}»`}
+            />
+          </div>
+        ))}
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" size="sm" onClick={onClose}>Отмена</Button>
+        <Button size="sm" onClick={handleSave}>Сохранить</Button>
+      </DialogFooter>
+    </DialogContent>
   )
 }

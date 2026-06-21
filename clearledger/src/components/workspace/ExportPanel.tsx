@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { useCompany } from '@/contexts/CompanyContext'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -27,7 +28,31 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function ExportPanel({ hideHeader = false }: { hideHeader?: boolean }) {
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const { company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
   const { exportDocs, removeExportDoc, markExported } = useWorkspace()
+
+  // Energy-профиль (ЭЗС, без 1С): фуел-«Для 1С» не показываем.
+  if (isEnergy) {
+    return (
+      <div className="flex flex-col h-full">
+        {!hideHeader && (
+          <div className="flex items-center px-3 py-2.5 border-b border-border/50">
+            <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Выгрузка
+            </h2>
+          </div>
+        )}
+        <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center px-4 text-muted-foreground">
+          <FileOutput className="h-10 w-10 opacity-30" />
+          <p className="text-sm font-medium">Энерго-выгрузка — в проработке</p>
+          <p className="text-xs max-w-xs">
+            Выгрузка данных по сети ЭЗС будет доступна в следующих версиях.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   const filteredDocs = statusFilter === 'all'
     ? exportDocs

@@ -23,8 +23,8 @@ export function ReconciliationPage() {
       <div className="flex h-full flex-col">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
           <GitCompare className="h-4 w-4 text-primary" />
-          <h1 className="text-sm font-semibold">Сверка данных</h1>
-          <span className="text-xs text-muted-foreground">— разрезы до рабочей области</span>
+          <h1 className="text-sm font-semibold">Разрезы учёта</h1>
+          <span className="text-xs text-muted-foreground">— сверка потоков каналов по разрезам, до рабочей области</span>
         </div>
         <div className="min-h-0 flex-1">
           <ReconciliationPanel />

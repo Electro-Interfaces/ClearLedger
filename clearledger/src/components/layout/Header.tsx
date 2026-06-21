@@ -1,4 +1,4 @@
-import { User, Menu, Sun, Moon, Fuel, ChevronsLeft, ChevronsRight, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle } from 'lucide-react'
+import { User, Menu, Sun, Moon, Fuel, Zap, ChevronsLeft, ChevronsRight, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle } from 'lucide-react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,9 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const { user, logout } = useAuth()
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
   const userName = user?.name ?? 'Пользователь'
+  // Профиль-зависимый логотип: energy → молния (ЭЗС), иначе топл.колонка (АЗС)
+  const isEnergy = company.profileId === 'energy'
+  const BrandIcon = isEnergy ? Zap : Fuel
 
   function handleLogout() {
     logout()
@@ -65,7 +68,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
 
           <Link to="/" className="flex items-center gap-3 shrink-0">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
-              <Fuel className="h-5 w-5 text-white" />
+              <BrandIcon className="h-5 w-5 text-white" />
             </div>
             <div className="hidden sm:flex flex-col leading-none">
               <h1 className="font-semibold tracking-tight text-foreground text-lg">TradeLedger</h1>

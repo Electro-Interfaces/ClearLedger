@@ -1,6 +1,6 @@
 /**
  * Страница «1С → Выгрузка» — L3 слой (см. docs/sverka-spec.md §0).
- * Пакеты данных, подготовленные ClearLedger для загрузки в БП ГИГ
+ * Пакеты данных, подготовленные TradeLedger для загрузки в БП ГИГ
  * через её расширение TradeLedger.cfe (тянет /queue, квитирует /ack).
  */
 
@@ -131,7 +131,7 @@ export function ExportPacketsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Выгрузка в 1С (L3)</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Пакеты данных подготовленные ClearLedger для загрузки в БП ГИГ.
+            Пакеты данных подготовленные TradeLedger для загрузки в БП ГИГ.
             Расширение TradeLedger.cfe тянет их через GET /queue и квитирует через POST /ack.
           </p>
         </div>
