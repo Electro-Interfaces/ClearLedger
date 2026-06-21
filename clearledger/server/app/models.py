@@ -1,5 +1,5 @@
 """
-SQLAlchemy 2.0 ORM модели ClearLedger.
+SQLAlchemy 2.0 ORM модели TradeLedger.
 Все первичные ключи — UUID (хранятся как PostgreSQL UUID).
 """
 
@@ -644,7 +644,7 @@ class AccountingDoc(Base):
     period_status: Mapped[str] = mapped_column(
         String(10), nullable=False, default="open"
     )
-    # Состояние сверки этого документа с парной ClearLedger.DataEntry.
+    # Состояние сверки этого документа с парной TradeLedger.DataEntry.
     # pending | none | rounding | minor | material | critical | unmatched
     discrepancy_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
@@ -667,7 +667,7 @@ class AccountingDoc(Base):
 # ---------------------------------------------------------------------------
 # ReconcileMapping (маппинг внешний ключ → запись в БП ГИГ)
 # ---------------------------------------------------------------------------
-# Соответствия между ключами источников ClearLedger (station_id из STS,
+# Соответствия между ключами источников TradeLedger (station_id из STS,
 # артикул топлива, код вида оплаты, артикул номенклатуры из ТТН-файла)
 # и записями в Catalog.Склады / Catalog.Номенклатура / Catalog.ВидыОплат БП.
 # Используется reconciliation_service для построчного матчинга
@@ -677,7 +677,7 @@ class AccountingDoc(Base):
 # ExportPacket (L3 — что мы выгружаем в 1С)
 # ---------------------------------------------------------------------------
 # Пакет данных, подготовленный для загрузки в БП ГИГ через её расширение
-# (TradeLedger.cfe тянет через HTTP API ClearLedger). Один пакет = один или
+# (TradeLedger.cfe тянет через HTTP API TradeLedger). Один пакет = один или
 # несколько target-документов в 1С (агрегация смен в один ОРП, разделение
 # ТТН на ПТУ+ПКО и т.п.). См. docs/sverka-spec.md §0.
 
@@ -710,7 +710,7 @@ class ExportPacket(Base):
     source_entry_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
     # Жизненный цикл пакета:
-    # 'draft'    — подготовлен в ClearLedger, не отправлен
+    # 'draft'    — подготовлен в TradeLedger, не отправлен
     # 'queued'   — поставлен в очередь HTTP-обмена (TradeLedger ещё не забрал)
     # 'sent'     — отдан расширению 1С (получен запросом extension'а)
     # 'acked'    — 1С квитировала: пакет загружен, ссылка на документ известна
@@ -1269,8 +1269,8 @@ class FuelValidationResult(Base):
 # (FuelShift, FuelReceipt, DataEntry, AccountingDoc) привязан к Period
 # и наследует флаг is_locked, если период закрыт.
 #
-# Закрытие происходит ВНЕ ClearLedger (в БП ГИГ через УстановкуДатЗапрета
-# или аналогичный механизм). ClearLedger детектирует закрытие при
+# Закрытие происходит ВНЕ TradeLedger (в БП ГИГ через УстановкуДатЗапрета
+# или аналогичный механизм). TradeLedger детектирует закрытие при
 # репликации и проставляет Period.status='closed' + is_locked=true
 # на привязанные сущности.
 # ---------------------------------------------------------------------------
@@ -1299,7 +1299,7 @@ class Period(Base):
     )
     closed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # Источник установки статуса: manual (вручную в UI ClearLedger)
+    # Источник установки статуса: manual (вручную в UI TradeLedger)
     # или from_bp (репликация из БП через OData / явный признак закрытия)
     closure_source: Mapped[str] = mapped_column(
         String(30), nullable=False, default="from_bp"
@@ -1398,7 +1398,7 @@ class SourceSync(Base):
 # ---------------------------------------------------------------------------
 # Хранит «что уже забрало расширение БП» для идемпотентности.
 # При повторном опросе расширение присылает свой extension_id и last_seen,
-# ClearLedger отдаёт только дельту с этого момента.
+# TradeLedger отдаёт только дельту с этого момента.
 # ---------------------------------------------------------------------------
 class PullCheckpoint(Base):
     __tablename__ = "pull_checkpoints"

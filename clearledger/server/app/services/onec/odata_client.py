@@ -19,7 +19,7 @@ logger = logging.getLogger("clearledger.onec.odata")
 
 
 # OData-сущности БП 3.0 с кириллическими именами метаданных.
-# Подмножество, необходимое ClearLedger для pull НСИ и документов.
+# Подмножество, необходимое TradeLedger для pull НСИ и документов.
 # Префиксы — стандарт OData 1С: Catalog_/Document_/InformationRegister_/
 # AccumulationRegister_/AccountingRegister_/Constant_.
 ENTITY_COUNTERPARTIES = "Catalog_Контрагенты"
@@ -86,8 +86,8 @@ def encode_filter(expr: str) -> str:
 class OneCODataClient:
     """Асинхронный pull-клиент OData 1С:БП 3.0.
 
-    Идеология ClearLedger: только чтение из БП. Все мутации БП происходят
-    через её собственное расширение, которое тянет данные из ClearLedger
+    Идеология TradeLedger: только чтение из БП. Все мутации БП происходят
+    через её собственное расширение, которое тянет данные из TradeLedger
     HTTP API. Этот клиент НЕ имеет методов post/patch/delete по дизайну.
     """
 

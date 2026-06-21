@@ -1,5 +1,5 @@
 """
-Алгоритм сверки: AccountingDoc (1С) ↔ DataEntry (ClearLedger).
+Алгоритм сверки: AccountingDoc (1С) ↔ DataEntry (TradeLedger).
 
 4 критерия, порог 55 баллов:
   ИНН контрагента  +40 (точное совпадение)
@@ -512,7 +512,7 @@ async def run_reconciliation(db: AsyncSession, company_id: uuid.UUID) -> dict:
             doc.matched_entry_id = None
             doc.match_details = None
             doc.discrepancy_status = "unmatched"
-            doc.discrepancy_summary = "пары в ClearLedger не найдено"
+            doc.discrepancy_summary = "пары в TradeLedger не найдено"
             doc.discrepancy_details = None
             stats["unmatched"] += 1
             stats.setdefault("by_severity", {}).setdefault("unmatched", 0)

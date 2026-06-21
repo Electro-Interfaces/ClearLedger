@@ -366,7 +366,7 @@ async def ack_packet(
 
     Body может содержать:
       target_doc_external_id: GUID документа в БП (Ref_Key из 1С)
-      target_doc_id:          UUID AccountingDoc в ClearLedger (если расширение
+      target_doc_id:          UUID AccountingDoc в TradeLedger (если расширение
                               предварительно его узнало через sync_documents)
       reject_reason:          если status='rejected'
 

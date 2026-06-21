@@ -137,7 +137,7 @@ async def export_excel(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "ClearLedger"
+    ws.title = "TradeLedger"
 
     # Заголовки
     for col_idx, col_key in enumerate(EXPORT_COLUMNS, 1):

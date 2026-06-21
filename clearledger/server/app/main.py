@@ -1,5 +1,5 @@
 """
-Точка входа ClearLedger Server.
+Точка входа TradeLedger Server.
 FastAPI приложение с CORS, роутерами, startup seed.
 """
 
@@ -64,7 +64,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown: создание таблиц + seed данных."""
-    logger.info("Запуск ClearLedger Server...")
+    logger.info("Запуск TradeLedger Server...")
 
     # Создание таблиц
     await create_all()
@@ -74,9 +74,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with async_session_factory() as session:
         await seed_data(session)
 
-    logger.info("ClearLedger Server запущен")
+    logger.info("TradeLedger Server запущен")
     yield
-    logger.info("ClearLedger Server остановлен")
+    logger.info("TradeLedger Server остановлен")
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="ClearLedger API",
+    title="TradeLedger API",
     description="Бэкенд системы приёма, классификации и верификации документов",
     version="0.5.0",
     lifespan=lifespan,
@@ -145,5 +145,5 @@ async def health_check():
     return {
         "status": "ok",
         "version": "0.7.0",
-        "service": "ClearLedger API",
+        "service": "TradeLedger API",
     }

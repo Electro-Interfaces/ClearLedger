@@ -1,8 +1,8 @@
 """
 13 эндпоинтов /api/onec/* — интеграция с 1С:Бухгалтерия 3.0 (БП ГИГ).
-Pull-only по идеологии ClearLedger v3 — клиент только ЧИТАЕТ из 1С,
+Pull-only по идеологии TradeLedger v3 — клиент только ЧИТАЕТ из 1С,
 запись в 1С выполняется её собственным расширением, которое тянет данные
-из ClearLedger HTTP API.
+из TradeLedger HTTP API.
 
 Эндпоинт #12 (export) оставлен заглушкой со статусом 'not_implemented' —
 EnterpriseData XML push реализуется отдельно после стабилизации pull.
@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AccountingDoc, OneCConnection, OneCSyncLog, User
+from app.deps import get_owned
+from app.models import AccountingDoc, OneCConnection, OneCSyncLog, User, UserCompany
 from app.schemas import (
     OneCConnectionCreate,
     OneCConnectionResponse,
@@ -71,16 +72,13 @@ def _synclog_response(log: OneCSyncLog) -> OneCSyncLogResponse:
     )
 
 
-async def _get_connection_or_404(connection_id: str, db: AsyncSession) -> OneCConnection:
+async def _get_connection_or_404(connection_id: str, current_user: User, db: AsyncSession) -> OneCConnection:
     try:
         cid = uuid.UUID(connection_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid connection id") from exc
-    result = await db.execute(select(OneCConnection).where(OneCConnection.id == cid))
-    conn = result.scalar_one_or_none()
-    if conn is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Connection not found")
-    return conn
+    # Проверка членства в компании подключения: чужое/несуществующее → 404.
+    return await get_owned(OneCConnection, cid, current_user, db)
 
 
 def _sync_result_from_log(log: OneCSyncLog) -> OneCSyncResult:
@@ -109,6 +107,11 @@ async def list_connections(
     if company_id:
         cid = await assert_company_member(company_id, current_user, db)
         stmt = stmt.where(OneCConnection.company_id == cid)
+    elif not current_user.is_superadmin:
+        # Без company_id не-суперадмин видит только подключения СВОИХ компаний
+        # (иначе утечка 1С-конфигов всех компаний с логинами/паролями).
+        member = select(UserCompany.company_id).where(UserCompany.user_id == current_user.id)
+        stmt = stmt.where(OneCConnection.company_id.in_(member))
     result = await db.execute(stmt.order_by(OneCConnection.created_at.desc()))
     return [_connection_response(c) for c in result.scalars().all()]
 
@@ -119,9 +122,9 @@ async def list_connections(
 async def get_connection(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCConnectionResponse:
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     return _connection_response(conn)
 
 
@@ -160,9 +163,9 @@ async def update_connection(
     connection_id: str,
     payload: OneCConnectionUpdate,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCConnectionResponse:
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     if payload.name is not None:
         conn.name = payload.name
     if payload.mode is not None:
@@ -191,9 +194,9 @@ async def update_connection(
 async def delete_connection(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     await db.delete(conn)
 
 
@@ -203,9 +206,9 @@ async def delete_connection(
 async def test_connection(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCTestResult:
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     service = OneCSyncService(db)
     result = await service.test_connection(conn)
     new_status = "active" if result["available"] else "error"
@@ -220,9 +223,9 @@ async def test_connection(
 async def sync_catalogs(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCSyncResult:
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     service = OneCSyncService(db)
     log = await service.sync_catalogs(conn)
     conn.last_sync_at = log.finished_at
@@ -234,9 +237,9 @@ async def sync_catalogs(
 async def sync_documents(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCSyncResult:
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     service = OneCSyncService(db)
     log = await service.sync_documents(conn)
     conn.last_sync_at = log.finished_at
@@ -248,10 +251,10 @@ async def sync_documents(
 async def sync_batches(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCSyncResult:
     """Pull остатков партий товаров (FIFO) из РегистрНакопления.ПартииТоваровНаСкладах."""
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     service = OneCSyncService(db)
     log = await service.sync_batches(conn)
     conn.last_sync_at = log.finished_at
@@ -263,10 +266,10 @@ async def sync_batches(
 async def sync_prices(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCSyncResult:
     """Pull РегС.ЦеныНоменклатуры — последняя цена на пару (Номенклатура, ВидЦен)."""
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     service = OneCSyncService(db)
     log = await service.sync_prices(conn)
     conn.last_sync_at = log.finished_at
@@ -278,12 +281,12 @@ async def sync_prices(
 async def sync_policy(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCSyncResult:
     """Pull РегС.УчетнаяПолитика для всех организаций компании из БП.
     Хранит последнюю запись на организацию в OneCPolicy (settings JSONB +
     плоские колонки mpz_method/tax_system/vat_rate/pbu_18_02)."""
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     service = OneCSyncService(db)
     log = await service.sync_policy(conn)
     conn.last_sync_at = log.finished_at
@@ -295,11 +298,11 @@ async def sync_policy(
 async def sync_full(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCSyncResult:
     """Catalogs → Policy → Documents в одном вызове. Возвращает агрегат
     последнего этапа (documents) для совместимости со старой схемой."""
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     service = OneCSyncService(db)
     await service.sync_catalogs(conn)
     try:
@@ -324,9 +327,9 @@ async def sync_full(
 async def get_sync_status(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> OneCSyncStatusResponse:
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     # Текущий лог — самый свежий со статусом running.
     running = (await db.execute(
         select(OneCSyncLog)
@@ -349,9 +352,9 @@ async def get_sync_history(
     connection_id: str,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[OneCSyncLogResponse]:
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     limit = max(1, min(limit, 200))
     result = await db.execute(
         select(OneCSyncLog)
@@ -363,22 +366,22 @@ async def get_sync_history(
 
 
 # ─── 12-13. Экспорт (заглушки) ──────────────────────────────────────
-# Идеология v3 предписывает pull со стороны 1С, а не push из ClearLedger.
+# Идеология v3 предписывает pull со стороны 1С, а не push из TradeLedger.
 # Эндпоинты оставлены для совместимости фронта, возвращают not_implemented.
 
 @router.post("/connections/{connection_id}/export")
 async def export_to_1c(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
-    await _get_connection_or_404(connection_id, db)
+    await _get_connection_or_404(connection_id, current_user, db)
     return {
         "status": "not_implemented",
         "file_path": None,
         "entries_count": 0,
         "error": "Экспорт в 1С через EnterpriseData XML не реализован. "
-                 "По идеологии ClearLedger v3 расширение 1С тянет данные из ClearLedger HTTP API.",
+                 "По идеологии TradeLedger v3 расширение 1С тянет данные из TradeLedger HTTP API.",
     }
 
 
@@ -386,9 +389,9 @@ async def export_to_1c(
 async def get_export_status(
     connection_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
-    await _get_connection_or_404(connection_id, db)
+    await _get_connection_or_404(connection_id, current_user, db)
     return {"status": "not_implemented", "files": [], "error": None}
 
 
@@ -436,11 +439,11 @@ async def fetch_document_lines(
     connection_id: str,
     doc_id: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """Тянет ТЧ конкретного AccountingDoc из 1С и кэширует в doc.lines.
     Идемпотентно — при повторном вызове перезатирает кэш."""
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
 
     try:
         doc_uuid = uuid.UUID(doc_id)
@@ -503,11 +506,11 @@ async def enrich_nomenclature(
     connection_id: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """Batch-резолв Catalog.Номенклатура по GUID → имя/ед.изм/плотность/артикул.
     Нужен для конвертации тонн→литры на ТТН (см. docs/sverka-spec.md §5.3)."""
-    conn = await _get_connection_or_404(connection_id, db)
+    conn = await _get_connection_or_404(connection_id, current_user, db)
     refs = body.get("refs") or []
     if not refs:
         return {}

@@ -1,10 +1,10 @@
 """
-HTTP-клиент для ClearLedger COM-Agent.
+HTTP-клиент для TradeLedger COM-Agent.
 
 Тот же публичный интерфейс что и OneCComClient, но вместо subprocess через
 stdin/stdout ходит к удалённому FastAPI-агенту по HTTPS.
 
-Используется когда backend ClearLedger развёрнут на Linux (Miran), а сам
+Используется когда backend TradeLedger развёрнут на Linux (Miran), а сам
 COM-агент крутится на Windows-машине рядом с 1С (1c-dev-01).
 
 Сигнатуры методов 1:1 с OneCComClient — sync_service подменяется через factory.

@@ -51,7 +51,7 @@ logger = logging.getLogger("clearledger.onec.sync")
 
 
 # Поля справочников 1С, которые тянем в локальную нормализованную БД.
-# Только то, что есть в существующих моделях ClearLedger — без расширения схемы.
+# Только то, что есть в существующих моделях TradeLedger — без расширения схемы.
 COUNTERPARTY_SELECT = ["Ref_Key", "DeletionMark", "Description", "ИНН", "КПП"]
 NOMENCLATURE_SELECT = ["Ref_Key", "DeletionMark", "Description", "Артикул", "Код"]
 ORGANIZATION_SELECT = ["Ref_Key", "DeletionMark", "Description", "ИНН", "КПП"]

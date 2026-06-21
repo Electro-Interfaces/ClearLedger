@@ -26,7 +26,7 @@ from app.services import sts_client
 class STSAdapter(SourceAdapter):
     """STS API — pos.autooplata.ru/tms.
 
-    Тянет сменные отчёты и ТТН по нефтепродуктам. У ClearLedger клиент
+    Тянет сменные отчёты и ТТН по нефтепродуктам. У TradeLedger клиент
     ГИГ имеет две тех. сети `system_id=65` и `system_id=15`. Оба
     обслуживаются одним адаптером — `system` передаётся в filters
     при fetch_delta.

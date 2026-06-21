@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Настройки ClearLedger Server."""
+    """Настройки TradeLedger Server."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     smtp_secure: bool = False  # True для 465 SMTPS; False для 587 STARTTLS
 
     # Публичный URL приложения для ссылок в письмах (с base-path).
+    # ⚠ Путь = /ClearLedger (vite base + nginx), хотя имя продукта TradeLedger.
+    # Переименование пути /ClearLedger→/TradeLedger — отдельная риск-миграция.
     app_public_url: str = "https://ledger.dataworker.ru/ClearLedger"
 
     # Сверки — внешние API (прокси на стороне сервера, секреты не уходят на фронт)

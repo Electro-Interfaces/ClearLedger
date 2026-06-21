@@ -1,1 +1,1 @@
-# ClearLedger Server — FastAPI backend
+# TradeLedger Server — FastAPI backend
