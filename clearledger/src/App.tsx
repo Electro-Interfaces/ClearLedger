@@ -40,6 +40,7 @@ const NormalizationWorkspacePage = lazy(() => import('@/pages/NormalizationWorks
 const BalancePage = lazy(() => import('@/pages/BalancePage').then((m) => ({ default: m.BalancePage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
+const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
 // ShiftReportsPage не используется как отдельная страница — просмотр через RawPanel
 
 function LazyPage({ children }: { children: React.ReactNode }) {
@@ -104,6 +105,7 @@ const router = createBrowserRouter([
     children: [
       { path: '/login', element: <LazyPage><LoginPage /></LazyPage> },
       { path: '/invite/:token', element: <LazyPage><AcceptInvitePage /></LazyPage> },
+      { path: '/reset-password/:token', element: <LazyPage><ResetPasswordPage /></LazyPage> },
       {
         element: <ProtectedRoute><MainLayout /></ProtectedRoute>,
         children: [

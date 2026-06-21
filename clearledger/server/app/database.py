@@ -174,6 +174,9 @@ async def create_all() -> None:
             # демо-админ → суперадмин (иначе он привязан только к npk и теряет
             # доступ к остальным компаниям).
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT FALSE",
+            # Восстановление пароля по email (одноразовый токен + срок).
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash VARCHAR(64)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ",
             "ALTER TABLE users ALTER COLUMN company_id DROP NOT NULL",
             "CREATE TABLE IF NOT EXISTS user_companies ("
             "  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,"

@@ -2,7 +2,11 @@
 Роутер аутентификации: регистрация, логин, текущий пользователь.
 """
 
+import hashlib
+import logging
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -16,12 +20,15 @@ from app.auth import (
 )
 from app.database import get_db
 from app.models import Company, User, UserCompany
+from app.services import email_service
 from app.utils import resolve_company_id
 from app.schemas import (
     CompanyBrief,
+    ForgotPasswordRequest,
     LoginRequest,
     MeResponse,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserResponse,
 )
@@ -46,6 +53,74 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         access_token=token,
         user=_user_response(user),
     )
+
+
+# ===== Восстановление пароля по email =====
+
+RESET_TTL = timedelta(hours=1)
+_reset_log = logging.getLogger("clearledger.email")
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)
+):
+    """Запрос восстановления пароля: письмо со ссылкой-токеном.
+    Всегда возвращает 200 — не раскрываем, существует ли email."""
+    user = (
+        await db.execute(select(User).where(User.email == body.email.lower()))
+    ).scalar_one_or_none()
+    if user is not None:
+        raw = secrets.token_urlsafe(32)
+        user.reset_token_hash = _hash_token(raw)
+        user.reset_token_expires = datetime.now(timezone.utc) + RESET_TTL
+        await db.flush()
+        try:
+            await email_service.send_password_reset(user.email, raw)
+        except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять запрос
+            _reset_log.error("send_password_reset failed: %s", exc)
+    return {"ok": True}
+
+
+async def _valid_reset_user(token: str, db: AsyncSession) -> User:
+    user = (
+        await db.execute(
+            select(User).where(User.reset_token_hash == _hash_token(token))
+        )
+    ).scalar_one_or_none()
+    if (
+        user is None
+        or user.reset_token_expires is None
+        or user.reset_token_expires < datetime.now(timezone.utc)
+    ):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "Ссылка недействительна или истекла"
+        )
+    return user
+
+
+@router.get("/reset-password/{token}")
+async def reset_password_preview(token: str, db: AsyncSession = Depends(get_db)):
+    """Проверка токена восстановления (фронт показывает форму при валидном)."""
+    user = await _valid_reset_user(token, db)
+    return {"email": user.email}
+
+
+@router.post("/reset-password")
+async def reset_password(
+    body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)
+):
+    """Установка нового пароля по токену из письма (токен одноразовый)."""
+    user = await _valid_reset_user(body.token, db)
+    user.password_hash = hash_password(body.password)
+    user.reset_token_hash = None
+    user.reset_token_expires = None
+    await db.flush()
+    return {"ok": True}
 
 
 @router.post(

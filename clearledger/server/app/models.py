@@ -82,6 +82,11 @@ class User(Base):
     is_superadmin: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Восстановление пароля по email: одноразовый токен (SHA256-хеш) + срок действия.
+    reset_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reset_token_expires: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

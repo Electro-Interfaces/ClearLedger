@@ -79,3 +79,22 @@ export async function refreshToken(): Promise<TokenResponse> {
 export function logout(): void {
   api.clearToken()
 }
+
+/** Запросить восстановление пароля — письмо со ссылкой на email. */
+export async function forgotPassword(email: string): Promise<void> {
+  await api.post('/api/auth/forgot-password', { email })
+}
+
+export interface ResetPreview {
+  email: string
+}
+
+/** Проверить токен восстановления (валиден/истёк) перед формой. */
+export async function getResetPreview(token: string): Promise<ResetPreview> {
+  return api.get<ResetPreview>(`/api/auth/reset-password/${encodeURIComponent(token)}`)
+}
+
+/** Установить новый пароль по токену из письма. */
+export async function resetPassword(token: string, password: string): Promise<void> {
+  await api.post('/api/auth/reset-password', { token, password })
+}
