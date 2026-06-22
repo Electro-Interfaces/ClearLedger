@@ -26,7 +26,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { Search, Building2, MapPin, Loader2, Database, FileText, Plus, Pencil, Trash2, ChevronDown } from 'lucide-react'
+import { Search, Building2, MapPin, Loader2, Database, FileText, Plus, Pencil, Trash2, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   useCounterparties, useContracts, useCounterpartyLocations,
@@ -645,6 +645,12 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [limit, setLimit] = useState(100)
+  const [sortKey, setSortKey] = useState<'date' | 'amount'>('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const toggleSort = (col: 'date' | 'amount') => {
+    if (sortKey === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(col); setSortDir('desc') }
+  }
 
   // counterpartyId договора = externalRef из 1С или наш id → имя контрагента.
   const cpName = useMemo(() => {
@@ -664,15 +670,34 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return allContracts
-      .filter((c) => {
-        if (typeFilter !== 'all' && (c.type || '—') !== typeFilter) return false
-        if (!q) return true
-        const name = cpName.get(c.counterpartyId) ?? ''
-        return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q)
-      })
-      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-  }, [allContracts, search, typeFilter, cpName])
+    const list = allContracts.filter((c) => {
+      if (typeFilter !== 'all' && (c.type || '—') !== typeFilter) return false
+      if (!q) return true
+      const name = cpName.get(c.counterpartyId) ?? ''
+      return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q)
+    })
+    const sign = sortDir === 'asc' ? 1 : -1
+    return [...list].sort((a, b) => {
+      if (sortKey === 'amount') {
+        // пустые суммы всегда внизу, независимо от направления
+        const an = a.amountLimit == null, bn = b.amountLimit == null
+        if (an && bn) return 0
+        if (an) return 1
+        if (bn) return -1
+        return sign * (a.amountLimit! - b.amountLimit!)
+      }
+      // дата: пустые всегда внизу
+      const ad = a.date || '', bd = b.date || ''
+      if (!ad && !bd) return 0
+      if (!ad) return 1
+      if (!bd) return -1
+      return sign * ad.localeCompare(bd)
+    })
+  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir])
+
+  const SortIcon = ({ col }: { col: 'date' | 'amount' }) =>
+    sortKey !== col ? <ArrowUpDown className="size-3 opacity-40" />
+      : sortDir === 'desc' ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />
 
   useEffect(() => { setLimit(100) }, [search, typeFilter])
   const shown = filtered.slice(0, limit)
@@ -708,11 +733,19 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
             <TableHeader className="sticky top-0 bg-card z-10">
               <TableRow>
                 <TableHead className="w-[150px]">Номер</TableHead>
-                <TableHead className="w-[100px]">Дата</TableHead>
+                <TableHead className="w-[100px]">
+                  <button onClick={() => toggleSort('date')} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
+                    Дата <SortIcon col="date" />
+                  </button>
+                </TableHead>
                 <TableHead className="w-[180px]">Тип</TableHead>
                 <TableHead>Контрагент</TableHead>
                 <TableHead className="w-[150px]">Охват</TableHead>
-                <TableHead className="w-[120px] text-right">Сумма</TableHead>
+                <TableHead className="w-[120px] text-right">
+                  <button onClick={() => toggleSort('amount')} className="inline-flex items-center gap-1 hover:text-foreground transition-colors ml-auto">
+                    Сумма <SortIcon col="amount" />
+                  </button>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
