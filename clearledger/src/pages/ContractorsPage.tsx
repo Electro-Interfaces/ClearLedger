@@ -66,6 +66,17 @@ function KindBadge({ kind }: { kind?: string }) {
   return <Badge variant="outline" className={m?.cls || ''}>{m?.label || kind}</Badge>
 }
 
+// Роли контрагента в энергосети (из aliases — заполняется при загрузке реестра ЭЗС).
+// Один контрагент может выступать в нескольких ролях (напр. энергосбыт + аренда).
+const ROLE_META: Record<string, { label: string; cls: string }> = {
+  'поставка':   { label: 'Поставщик ЭЗС', cls: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' },
+  'сервис':     { label: 'Сервис',        cls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' },
+  'монтаж':     { label: 'Монтаж',        cls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' },
+  'энергосбыт': { label: 'Энергосбыт',    cls: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20' },
+  'аренда':     { label: 'Аренда',        cls: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20' },
+}
+const ROLE_ORDER = ['поставка', 'сервис', 'монтаж', 'энергосбыт', 'аренда']
+
 // Человекочитаемые ярлыки реквизитов 1С (raw). Неизвестные ключи — как есть.
 const RAW_LABELS: Record<string, string> = {
   Description: 'Наименование', НаименованиеПолное: 'Полное наименование', Код: 'Код',
@@ -623,18 +634,51 @@ function DeleteContractButton({ id }: { id: string }) {
 
 export function ContractorsPage() {
   const { data: counterparties = [], isLoading } = useCounterparties()
+  const { data: allContracts = [] } = useContracts()
   const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<string>('all')
+  const [sortBy, setSortBy] = useState<'name' | 'contracts'>('name')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Число договоров на контрагента (ключ = externalRef из 1С или наш id).
+  const contractCount = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of allContracts) {
+      if (!c.counterpartyId) continue
+      m.set(c.counterpartyId, (m.get(c.counterpartyId) ?? 0) + 1)
+    }
+    return m
+  }, [allContracts])
+  const cpContracts = (c: Counterparty) =>
+    (c.externalRef ? contractCount.get(c.externalRef) ?? 0 : 0) + (contractCount.get(c.id) ?? 0)
+
+  // Счётчики по ролям (для чипсов-фильтров).
+  const roleCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of counterparties)
+      for (const a of c.aliases ?? []) m.set(a, (m.get(a) ?? 0) + 1)
+    return m
+  }, [counterparties])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return counterparties
-    return counterparties.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.inn.includes(q),
-    )
-  }, [counterparties, search])
+    const list = counterparties.filter((c) => {
+      if (roleFilter !== 'all' && !(c.aliases ?? []).includes(roleFilter)) return false
+      if (!q) return true
+      return c.name.toLowerCase().includes(q) || (c.inn ?? '').includes(q)
+    })
+    if (sortBy === 'contracts')
+      return [...list].sort((a, b) => cpContracts(b) - cpContracts(a))
+    return list
+  }, [counterparties, search, roleFilter, sortBy, contractCount])
 
   const selected = counterparties.find((c) => c.id === selectedId) ?? null
+
+  const chip = (active: boolean) =>
+    `px-2 py-0.5 rounded-full text-[11px] border transition-colors ${
+      active ? 'bg-primary text-primary-foreground border-primary'
+             : 'bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted'
+    }`
 
   return (
     <div className="flex-1 min-w-0 p-4 lg:p-6">
@@ -648,40 +692,84 @@ export function ContractorsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
         {/* Список контрагентов */}
         <Card className="lg:h-[calc(100vh-12rem)] flex flex-col">
-          <CardContent className="p-3 flex flex-col gap-3 min-h-0">
+          <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input placeholder="Поиск по имени или ИНН..." value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
             </div>
+
+            {/* Фильтр по ролям */}
+            <div className="flex flex-wrap gap-1">
+              <button onClick={() => setRoleFilter('all')} className={chip(roleFilter === 'all')}>
+                Все · {counterparties.length}
+              </button>
+              {ROLE_ORDER.filter((r) => roleCounts.get(r)).map((r) => (
+                <button key={r} onClick={() => setRoleFilter(r)} className={chip(roleFilter === r)}>
+                  {ROLE_META[r].label} · {roleCounts.get(r)}
+                </button>
+              ))}
+            </div>
+
             <CounterpartyFormDialog>
               <Button size="sm" variant="outline" className="w-full"><Plus className="size-4 mr-2" /> Добавить контрагента</Button>
             </CounterpartyFormDialog>
-            <div className="overflow-y-auto space-y-0.5 min-h-0">
+
+            {/* Счётчик + сортировка */}
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground px-0.5">
+              <span>Найдено: {filtered.length}{filtered.length !== counterparties.length && ` из ${counterparties.length}`}</span>
+              <button
+                onClick={() => setSortBy((s) => (s === 'name' ? 'contracts' : 'name'))}
+                className="hover:text-foreground transition-colors"
+                title="Переключить сортировку"
+              >
+                сортировка: {sortBy === 'name' ? 'по имени' : 'по договорам'}
+              </button>
+            </div>
+
+            <div className="overflow-y-auto space-y-0.5 min-h-0 -mr-1 pr-1">
               {isLoading && <div className="text-sm text-muted-foreground p-2">Загрузка…</div>}
               {!isLoading && filtered.length === 0 && (
                 <div className="text-sm text-muted-foreground p-2">Контрагенты не найдены.</div>
               )}
-              {filtered.slice(0, 300).map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedId(c.id)}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm transition-colors ${
-                    c.id === selectedId ? 'bg-accent' : 'hover:bg-muted'
-                  }`}
-                >
-                  <div className="font-medium truncate">{c.name}</div>
-                  <div className="text-xs text-muted-foreground">ИНН {c.inn}</div>
-                </button>
-              ))}
-              {filtered.length > 300 && (
-                <div className="text-[11px] text-muted-foreground p-2">
-                  …показаны первые 300, уточните поиском ({filtered.length} всего)
-                </div>
-              )}
+              {filtered.map((c) => {
+                const roles = (c.aliases ?? []).filter((a) => ROLE_META[a])
+                const n = cpContracts(c)
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedId(c.id)}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm transition-colors ${
+                      c.id === selectedId ? 'bg-accent' : 'hover:bg-muted'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium truncate">{c.name}</div>
+                      {n > 0 && (
+                        <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                          {n} дог.
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                      {roles.length > 0
+                        ? roles.map((r) => (
+                            <span key={r} className={`text-[9px] leading-none px-1 py-0.5 rounded border ${ROLE_META[r].cls}`}>
+                              {ROLE_META[r].label}
+                            </span>
+                          ))
+                        : (
+                          <span className="text-xs text-muted-foreground">
+                            {c.inn ? `ИНН ${c.inn}` : 'ИНН не задан'}
+                          </span>
+                        )}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </CardContent>
         </Card>
