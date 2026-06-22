@@ -10,7 +10,7 @@ import type { ServiceLocation } from '@/types/location'
 import { SectionCard, InfoRow, WipBadge, ScrollTab } from './shared'
 
 const CONTACTS = [
-  { name: 'Сидоренко Виктор Викторович', role: 'Куратор проекта внедрения', tel: '+7-921-953-06-21' },
+  { name: 'Михеев Андрей Геннадьевич', role: 'Куратор проекта внедрения', tel: '+7-921-953-06-21' },
 ]
 
 function ContactRow({ name, role, tel }: { name: string; role: string; tel: string }) {

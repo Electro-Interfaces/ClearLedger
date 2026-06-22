@@ -103,7 +103,7 @@ function TicketsPanel() {
 
 function ContactList() {
   const contacts = [
-    { name: 'Сидоренко Виктор Викторович', role: 'Куратор проекта внедрения', tel: '+7-921-953-06-21' },
+    { name: 'Михеев Андрей Геннадьевич', role: 'Куратор проекта внедрения', tel: '+7-921-953-06-21' },
   ]
   return (
     <div className="mt-2 w-full max-w-md space-y-2">
