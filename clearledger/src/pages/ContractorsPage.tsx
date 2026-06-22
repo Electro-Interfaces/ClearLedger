@@ -4,7 +4,7 @@
  * справа — выбранный контрагент с полными реквизитами из 1С, где он работает,
  * и его договоры (с детальной карточкой каждого).
  */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -632,9 +632,138 @@ function DeleteContractButton({ id }: { id: string }) {
   )
 }
 
+// Стиль чипса-фильтра (общий для контрагентов и договоров).
+const chipCls = (active: boolean) =>
+  `px-2 py-0.5 rounded-full text-[11px] border transition-colors ${
+    active ? 'bg-primary text-primary-foreground border-primary'
+           : 'bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted'
+  }`
+
+// ─── Глобальный список всех договоров (с фильтром по типу) ───────────────────
+function AllContractsView({ counterparties }: { counterparties: Counterparty[] }) {
+  const { data: allContracts = [], isLoading } = useContracts()
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [limit, setLimit] = useState(100)
+
+  // counterpartyId договора = externalRef из 1С или наш id → имя контрагента.
+  const cpName = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of counterparties) {
+      if (c.externalRef) m.set(c.externalRef, c.name)
+      m.set(c.id, c.name)
+    }
+    return m
+  }, [counterparties])
+
+  const typeCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const c of allContracts) { const t = c.type || '—'; m.set(t, (m.get(t) ?? 0) + 1) }
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [allContracts])
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return allContracts
+      .filter((c) => {
+        if (typeFilter !== 'all' && (c.type || '—') !== typeFilter) return false
+        if (!q) return true
+        const name = cpName.get(c.counterpartyId) ?? ''
+        return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q)
+      })
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  }, [allContracts, search, typeFilter, cpName])
+
+  useEffect(() => { setLimit(100) }, [search, typeFilter])
+  const shown = filtered.slice(0, limit)
+
+  return (
+    <Card className="lg:h-[calc(100vh-13rem)] flex flex-col">
+      <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input placeholder="Поиск по номеру или контрагенту..." value={search}
+              onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
+          </div>
+          <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+            Найдено: {filtered.length}{filtered.length !== allContracts.length && ` из ${allContracts.length}`}
+          </span>
+        </div>
+
+        {/* Фильтр по типу договора */}
+        <div className="flex flex-wrap gap-1">
+          <button onClick={() => setTypeFilter('all')} className={chipCls(typeFilter === 'all')}>
+            Все · {allContracts.length}
+          </button>
+          {typeCounts.map(([t, n]) => (
+            <button key={t} onClick={() => setTypeFilter(t)} className={chipCls(typeFilter === t)}>
+              {t} · {n}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-y-auto min-h-0 rounded-md border">
+          <Table>
+            <TableHeader className="sticky top-0 bg-card z-10">
+              <TableRow>
+                <TableHead className="w-[150px]">Номер</TableHead>
+                <TableHead className="w-[100px]">Дата</TableHead>
+                <TableHead className="w-[180px]">Тип</TableHead>
+                <TableHead>Контрагент</TableHead>
+                <TableHead className="w-[150px]">Охват</TableHead>
+                <TableHead className="w-[120px] text-right">Сумма</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading && (
+                <TableRow><TableCell colSpan={6} className="h-20 text-center text-muted-foreground">Загрузка…</TableCell></TableRow>
+              )}
+              {!isLoading && filtered.length === 0 && (
+                <TableRow><TableCell colSpan={6} className="h-20 text-center text-muted-foreground">Договоры не найдены</TableCell></TableRow>
+              )}
+              {shown.map((c) => (
+                <TableRow key={c.id}>
+                  <TableCell>
+                    <ContractDetailDialog contract={c}>
+                      <button className="font-mono text-sm text-primary hover:underline text-left">{c.number}</button>
+                    </ContractDetailDialog>
+                  </TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">{c.date || '—'}</TableCell>
+                  <TableCell className="text-sm">{c.type || '—'}</TableCell>
+                  <TableCell className="text-sm truncate max-w-[280px]">
+                    {cpName.get(c.counterpartyId) ?? <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
+                      className={c.scopeType === 'unassigned' || !c.scopeType ? 'text-muted-foreground' : ''}>
+                      {ContractScopeBadgeLabel(c.scopeType)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right text-sm tabular-nums">
+                    {c.amountLimit ? c.amountLimit.toLocaleString('ru-RU') : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {filtered.length > limit && (
+            <div className="p-2 text-center border-t">
+              <Button variant="ghost" size="sm" onClick={() => setLimit((l) => l + 200)}>
+                Показать ещё ({filtered.length - limit})
+              </Button>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function ContractorsPage() {
   const { data: counterparties = [], isLoading } = useCounterparties()
   const { data: allContracts = [] } = useContracts()
+  const [view, setView] = useState<'counterparties' | 'contracts'>('counterparties')
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<'name' | 'contracts'>('name')
@@ -673,18 +802,13 @@ export function ContractorsPage() {
   }, [counterparties, search, roleFilter, sortBy, contractCount])
 
   const selected = counterparties.find((c) => c.id === selectedId) ?? null
-
-  const chip = (active: boolean) =>
-    `px-2 py-0.5 rounded-full text-[11px] border transition-colors ${
-      active ? 'bg-primary text-primary-foreground border-primary'
-             : 'bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted'
-    }`
+  const chip = chipCls
 
   return (
     <div className="flex-1 min-w-0 p-4 lg:p-6">
       <div className="mb-4 flex items-center gap-2">
         <Building2 className="h-6 w-6 text-primary shrink-0" />
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold">Контрагенты и договоры</h1>
           <p className="text-sm text-muted-foreground">
             Разрез по контрагентам: их реквизиты, договоры, охват точек и ограничения по разрезам.
@@ -692,6 +816,21 @@ export function ContractorsPage() {
         </div>
       </div>
 
+      {/* Переключатель режимов: список контрагентов / все договоры */}
+      <div className="mb-4 inline-flex rounded-lg border border-border/60 bg-muted/30 p-0.5">
+        <button onClick={() => setView('counterparties')}
+          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'counterparties' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
+          Контрагенты ({counterparties.length})
+        </button>
+        <button onClick={() => setView('contracts')}
+          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'contracts' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
+          Все договоры ({allContracts.length})
+        </button>
+      </div>
+
+      {view === 'contracts' ? (
+        <AllContractsView counterparties={counterparties} />
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
         {/* Список контрагентов */}
         <Card className="lg:h-[calc(100vh-12rem)] flex flex-col">
@@ -787,6 +926,7 @@ export function ContractorsPage() {
           </CardContent>
         </Card>
       </div>
+      )}
     </div>
   )
 }
