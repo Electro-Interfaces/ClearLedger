@@ -40,6 +40,9 @@ export interface PaymentDisciplineSummary {
   stationsNoRent: number
   counterpartiesUnpaidEnergy: number
   counterpartiesUnpaidRent: number
+  l1Raw: number
+  l2Clean: number
+  settlements: number
 }
 
 // ── UI-помощники ──────────────────────────────────────────────────────────

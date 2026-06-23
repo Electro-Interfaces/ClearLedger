@@ -26,7 +26,7 @@ import { balanceModuleForProfile } from '@/config/balanceModules'
 import { BalanceVitrine } from '@/components/balance/BalanceVitrine'
 import { LocationsPage } from '@/pages/LocationsPage'
 import {
-  NetworkOverviewVitrine, RevenueVitrine, TariffsVitrine, ReceivablesVitrine, ProcurementVitrine,
+  NetworkOverviewVitrine, RevenueVitrine, TariffsVitrine, ReceivablesVitrine, ProcurementVitrine, RentVitrine,
 } from '@/components/balance/EnergyManagementVitrines'
 import { FinancialVitrine } from '@/components/balance/EnergyFinancialVitrine'
 import { AccountingVitrine } from '@/components/balance/EnergyAccountingVitrine'
@@ -95,6 +95,7 @@ const ENERGY_MGMT: CentralMenuItem[] = [
   { key: 'tariffs', label: 'Тарифы и ценообразование' },
   { key: 'receivables', label: 'Дебиторка и взаиморасчёты' },
   { key: 'procurement', label: 'Энергозакупка' },
+  { key: 'rent', label: 'Аренда' },
 ]
 const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 function EnergyMgmtVitrine({ tab }: { tab: string }) {
@@ -104,6 +105,7 @@ function EnergyMgmtVitrine({ tab }: { tab: string }) {
     case 'tariffs': return <TariffsVitrine />
     case 'receivables': return <ReceivablesVitrine />
     case 'procurement': return <ProcurementVitrine />
+    case 'rent': return <RentVitrine />
     default: return null
   }
 }

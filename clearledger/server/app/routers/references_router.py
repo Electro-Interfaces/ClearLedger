@@ -18,6 +18,7 @@ from app.models import (
     ContractDimension,
     ContractLocation,
     Counterparty,
+    DataEntry,
     NomenclatureItem,
     Organization,
     ServiceLocation,
@@ -990,6 +991,15 @@ async def payment_discipline_summary(
         select(func.count(ServiceLocation.id)).where(ServiceLocation.company_id == cid)
     )).scalar() or 0
 
+    # Счётчики слоёв нормализации реестра (DataEntry L1 RAW / L2 CLEAN).
+    from app.services.reestr_normalize import SOURCE_TAG as _TAG
+    l1_raw = (await db.execute(select(func.count(DataEntry.id)).where(
+        DataEntry.company_id == cid, DataEntry.layer == "raw",
+        DataEntry.source_label.like(f"{_TAG}-%")))).scalar() or 0
+    l2_clean = (await db.execute(select(func.count(DataEntry.id)).where(
+        DataEntry.company_id == cid, DataEntry.layer == "clean",
+        DataEntry.source_label.like(f"{_TAG}-%")))).scalar() or 0
+
     return PaymentDisciplineSummary(
         stationsCovered=len(covered),
         byRole=list(roles.values()),
@@ -997,6 +1007,7 @@ async def payment_discipline_summary(
         stationsNoRent=max(0, all_stations - len(stations_with_role["rent"])),
         counterpartiesUnpaidEnergy=len(cp_unpaid["energy"]),
         counterpartiesUnpaidRent=len(cp_unpaid["rent"]),
+        l1Raw=l1_raw, l2Clean=l2_clean, settlements=len(rows),
     )
 
 

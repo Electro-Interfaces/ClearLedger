@@ -16,42 +16,64 @@ import { ROLE_LABEL, type SettlementRole } from '@/types/settlement'
 
 const all = DEMO_EZS
 
-/* ── Платёжная дисциплина (РЕАЛЬНЫЕ данные реестра «Договоры и оплаты ЭЗС») ── */
-function PaymentDisciplineBlock() {
+/* ── Платёжная дисциплина (РЕАЛЬНЫЕ данные реестра «Энергоснабжение и аренда ЭЗС»).
+   role задаёт контур: 'energy' (закупка) | 'rent' (аренда) | undefined (оба, для Дебиторки). ── */
+function PaymentDisciplineBlock({ role }: { role?: SettlementRole }) {
   const q = usePaymentDisciplineSummary()
   const s = q.data
   if (!s || s.stationsCovered === 0) return null
+  const rolesShown = (role ? [role] : (['energy', 'rent'] as SettlementRole[]))
+    .map((r) => s.byRole.find((x) => x.role === r)).filter(Boolean) as typeof s.byRole
+  const r0 = role ? s.byRole.find((x) => x.role === role) : undefined
+  const cpUnpaid = role === 'rent' ? s.counterpartiesUnpaidRent : s.counterpartiesUnpaidEnergy
+  const noContract = role === 'rent' ? s.stationsNoRent : s.stationsNoEnergy
+  const title = role === 'energy' ? 'Договоры и оплаты энергоснабжения'
+    : role === 'rent' ? 'Договоры/разрешения и оплаты аренды'
+    : 'Платёжная дисциплина (реестр ЭЗС)'
   return (
     <Card><CardContent className="space-y-3 pt-5">
       <div className="flex items-center gap-2">
-        <div className="text-sm font-medium">Платёжная дисциплина (реестр ЭЗС)</div>
+        <div className="text-sm font-medium">{title}</div>
         <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi label="ЭЗС с данными" value={fmtN(s.stationsCovered)} />
-        <Kpi label="Контрагенты без оплат (энерго)" value={String(s.counterpartiesUnpaidEnergy)} accent={s.counterpartiesUnpaidEnergy ? 'warn' : undefined} />
-        <Kpi label="Контрагенты без оплат (аренда)" value={String(s.counterpartiesUnpaidRent)} accent={s.counterpartiesUnpaidRent ? 'warn' : undefined} />
-        <Kpi label="ЭЗС без договора э/э" value={String(s.stationsNoEnergy)} accent={s.stationsNoEnergy ? 'warn' : undefined} />
+        {role && r0 ? (
+          <>
+            <Kpi label="Записей по ЭЗС" value={fmtN(r0.total)} />
+            <Kpi label="Оплачено" value={fmtN(r0.paid)} />
+            <Kpi label="Не оплачено" value={String(r0.unpaid)} accent={r0.unpaid ? 'warn' : undefined} />
+            <Kpi label="Контрагентов без оплат" value={String(cpUnpaid)} accent={cpUnpaid ? 'warn' : undefined} />
+          </>
+        ) : (
+          <>
+            <Kpi label="ЭЗС с данными" value={fmtN(s.stationsCovered)} />
+            <Kpi label="Контрагенты без оплат (энерго)" value={String(s.counterpartiesUnpaidEnergy)} accent={s.counterpartiesUnpaidEnergy ? 'warn' : undefined} />
+            <Kpi label="Контрагенты без оплат (аренда)" value={String(s.counterpartiesUnpaidRent)} accent={s.counterpartiesUnpaidRent ? 'warn' : undefined} />
+            <Kpi label="ЭЗС без договора э/э" value={String(s.stationsNoEnergy)} accent={s.stationsNoEnergy ? 'warn' : undefined} />
+          </>
+        )}
       </div>
+      {role && r0 && (
+        <p className="text-xs text-muted-foreground/70">
+          {role === 'rent' ? 'ЭЗС без договора/разрешения аренды' : 'ЭЗС без договора энергоснабжения'}: {noContract}.
+          {' '}Особый порядок: {r0.special}{role === 'rent' ? ' (% от выручки / фикс / сервитут)' : ''}.
+        </p>
+      )}
       <Table><TableHeader><TableRow>
         <TableHead>Контур</TableHead><TableHead className="text-right">Всего</TableHead>
         <TableHead className="text-right">Оплачено</TableHead><TableHead className="text-right">Не оплачено</TableHead>
         <TableHead className="text-right">Особый порядок</TableHead><TableHead className="text-right">С проблемой</TableHead>
       </TableRow></TableHeader><TableBody>
-        {(['energy', 'rent'] as SettlementRole[]).map((role) => {
-          const r = s.byRole.find((x) => x.role === role)
-          if (!r) return null
-          return (
-            <TableRow key={role}>
-              <TableCell className="font-medium">{ROLE_LABEL[role]}</TableCell>
-              <TableCell className="text-right tabular-nums">{r.total}</TableCell>
-              <TableCell className="text-right tabular-nums text-emerald-600 dark:text-emerald-400">{r.paid}</TableCell>
-              <TableCell className="text-right tabular-nums text-red-600 dark:text-red-400">{r.unpaid}</TableCell>
-              <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">{r.special}</TableCell>
-              <TableCell className="text-right tabular-nums text-muted-foreground">{r.withProblem}</TableCell>
-            </TableRow>
-          )
-        })}
+        {rolesShown.map((r) => (
+          <TableRow key={r.role}>
+            <TableCell className="font-medium">{ROLE_LABEL[r.role as SettlementRole] ?? r.role}</TableCell>
+            <TableCell className="text-right tabular-nums">{r.total}</TableCell>
+            <TableCell className="text-right tabular-nums text-emerald-600 dark:text-emerald-400">{r.paid}</TableCell>
+            <TableCell className="text-right tabular-nums text-red-600 dark:text-red-400">{r.unpaid}</TableCell>
+            <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">{r.special}</TableCell>
+            <TableCell className="text-right tabular-nums text-muted-foreground">{r.withProblem}</TableCell>
+          </TableRow>
+        ))}
       </TableBody></Table>
     </CardContent></Card>
   )
@@ -268,7 +290,7 @@ export function ProcurementVitrine() {
         <Kpi label="Средняя цена, ₽/кВт·ч" value={rate(buyRub, buyKwh)} />
         <Kpi label="Поставщиков" value={String(bySupplier.size)} />
       </div>
-      <PaymentDisciplineBlock />
+      <PaymentDisciplineBlock role="energy" />
       <Card><CardContent className="overflow-x-auto pt-5">
         <Table><TableHeader><TableRow>
           <TableHead>Поставщик э/э</TableHead><TableHead className="text-right">Объём, кВт·ч</TableHead>
@@ -286,6 +308,19 @@ export function ProcurementVitrine() {
           ))}
         </TableBody></Table>
       </CardContent></Card>
+    </div>
+  )
+}
+
+/* ── Аренда (земля/площадки ЭЗС) — отдельный управленческий модуль ── */
+export function RentVitrine() {
+  return (
+    <div className="space-y-5 px-6 py-6">
+      <Head
+        title="Аренда (земля и площадки ЭЗС)"
+        subtitle="Договоры и разрешения на размещение ЭЗС, арендодатели (в т.ч. муниципалитеты), статус оплаты «оплачено по», особый порядок (% от выручки / фикс / сервитут) и проблемные позиции."
+      />
+      <PaymentDisciplineBlock role="rent" />
     </div>
   )
 }

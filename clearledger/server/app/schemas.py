@@ -707,6 +707,9 @@ class PaymentDisciplineSummary(BaseModel):
     stationsNoRent: int = 0               # станций без записи аренды
     counterpartiesUnpaidEnergy: int = 0
     counterpartiesUnpaidRent: int = 0
+    l1Raw: int = 0                         # сырьё реестра (DataEntry layer=raw)
+    l2Clean: int = 0                       # нормализовано (DataEntry layer=clean)
+    settlements: int = 0                   # всего записей платёжной дисциплины
 
 
 # ===== Ось договор ↔ торговые точки (Фаза 2) =====
