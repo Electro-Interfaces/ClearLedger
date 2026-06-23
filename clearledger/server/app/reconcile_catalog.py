@@ -299,6 +299,48 @@ RECONCILE_RULES: list[ReconRuleDecl] = [
         compare=[CompareField("amount", 1.0, "₽")],
         severity=SeveritySpec(thresholds={"none": 1.0, "minor": 100.0, "material": 1000.0}),
     ),
+
+    # ── ENERGY (РусГидро): договорная полнота + платёжная дисциплина по ЭЗС ──
+    # Потребляют L2 реестра «Договоры и оплаты ЭЗС» (StationContractSettlement),
+    # роль energy/rent. Декларация разреза; движок — поверх settlements (фронт-агрегат).
+    ReconRuleDecl(
+        id="energy_suppliers",
+        label="Поставщики э/э: договор + оплата по ЭЗС",
+        module="energy",
+        description=(
+            "Контур энергоснабжения (закупка): по каждой ЭЗС — поставщик, договор "
+            "энергоснабжения и статус оплаты («оплачено по»). Договорная полнота и "
+            "платёжная дисциплина. Дополняет физическую сверку ПУ ЭЗС ↔ ПУ поставщика."
+        ),
+        status="planned",
+        impl="StationContractSettlement(role=energy) + /payment-discipline/summary",
+        streams=[
+            StreamRef("anchor", "manual_table", "contracts_payments", "Реестр: энергоснабжение"),
+        ],
+        key=["station"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("paid_through", 0.0, "период")],
+        severity=SeveritySpec(thresholds={"none": 0.0, "minor": 1.0, "material": 2.0}),
+    ),
+    ReconRuleDecl(
+        id="energy_rent",
+        label="Аренда: договор/разрешение + оплата по ЭЗС",
+        module="energy",
+        description=(
+            "Контур аренды земли/площадки: по каждой ЭЗС — арендодатель, договор или "
+            "разрешение и статус оплаты. Включает муниципальные основания (разрешение/"
+            "постановление/приказ) и особый порядок (% от выручки, сервитут)."
+        ),
+        status="planned",
+        impl="StationContractSettlement(role=rent) + /payment-discipline/summary",
+        streams=[
+            StreamRef("anchor", "manual_table", "contracts_payments", "Реестр: аренда"),
+        ],
+        key=["station"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("paid_through", 0.0, "период")],
+        severity=SeveritySpec(thresholds={"none": 0.0, "minor": 1.0, "material": 2.0}),
+    ),
 ]
 
 

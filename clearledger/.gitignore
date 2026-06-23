@@ -28,3 +28,4 @@ deploy/.env
 deploy/data/
 deploy/backups/
 server/probe_*.py
+server/uploads/

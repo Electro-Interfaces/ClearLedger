@@ -604,6 +604,7 @@ class ContractCreate(BaseModel):
     amountInclVat: bool | None = None
     settlementKind: str | None = None
     comment: str | None = None
+    basis: str | None = None
     isClosed: bool = False
     scopeType: str = "unassigned"
 
@@ -622,6 +623,7 @@ class ContractUpdate(BaseModel):
     amountInclVat: bool | None = None
     settlementKind: str | None = None
     comment: str | None = None
+    basis: str | None = None
     isClosed: bool | None = None
     scopeType: str | None = None
 
@@ -642,12 +644,69 @@ class ContractResponse(BaseModel):
     amountInclVat: bool | None = None
     settlementKind: str | None = None
     comment: str | None = None
+    basis: str | None = None
     isClosed: bool = False
     scopeType: str = "unassigned"
     externalRef: str | None = None
     raw: dict | None = None           # полный снимок реквизитов 1С
     createdAt: str
     updatedAt: str
+
+
+# ===== Платёжная дисциплина по станции × роль (v2.8) =====
+# Реестр «Договоры и оплаты ЭЗС» (energy/РусГидро). См.
+# SOURCE_CONTRACTS_PAYMENTS_RUSHYDRO.md.
+
+class SettlementUpsert(BaseModel):
+    company_id: str
+    locationId: str
+    role: str                              # energy | rent
+    contractId: str | None = None
+    counterpartyId: str | None = None
+    paidThrough: str | None = None         # ISO 'YYYY-MM-01' (оплачено по)
+    paymentStatus: str = "unknown"         # paid | unpaid | unknown | special
+    basis: str | None = None               # договор | разрешение | постановление | ...
+    comment: str | None = None
+    period: str | None = None
+    source: str | None = None
+
+
+class SettlementResponse(BaseModel):
+    id: str
+    companyId: str
+    locationId: str
+    role: str
+    contractId: str | None = None
+    counterpartyId: str | None = None
+    paidThrough: str | None = None
+    paymentStatus: str
+    basis: str | None = None
+    comment: str | None = None
+    period: str | None = None
+    createdAt: str
+    updatedAt: str
+
+
+class RoleDiscipline(BaseModel):
+    """Сводка по одной роли (energy|rent): счётчики статусов оплаты."""
+    role: str
+    total: int = 0
+    paid: int = 0
+    unpaid: int = 0
+    unknown: int = 0
+    special: int = 0
+    withProblem: int = 0                    # непустой проблемный комментарий
+
+
+class PaymentDisciplineSummary(BaseModel):
+    """Агрегат для витрин «Дебиторка/взаиморасчёты» и «Энергозакупка» + KPI листа
+    «Показатели» (контрагенты без оплат, ЭЗС без договоров)."""
+    stationsCovered: int = 0               # станций, по которым есть хоть одна запись
+    byRole: list[RoleDiscipline] = Field(default_factory=list)
+    stationsNoEnergy: int = 0              # станций без записи энергоснабжения
+    stationsNoRent: int = 0               # станций без записи аренды
+    counterpartiesUnpaidEnergy: int = 0
+    counterpartiesUnpaidRent: int = 0
 
 
 # ===== Ось договор ↔ торговые точки (Фаза 2) =====

@@ -12,7 +12,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useQueryClient } from '@tanstack/react-query'
 import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel } from '@/services/channelService'
+import { uploadTableFile } from '@/services/referenceService'
 import { getSources, loadSources } from '@/services/sourceService'
 import { listMappings, createMapping, deleteMapping, type ReconcileMapping, type MappingKind } from '@/services/mappingService'
 import { isApiEnabled } from '@/services/apiClient'
@@ -30,7 +32,7 @@ import {
   ArrowLeft, Play, Loader2, Radio, Database, Download, Shuffle,
   GitCompare, ShieldCheck, ArrowRightLeft, Trash2, Plus, History,
   Settings2, FileText, AlertTriangle, CheckCircle2, XCircle, GripVertical, MapPin,
-  Search, Filter,
+  Search, Filter, Upload,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -408,9 +410,77 @@ function StationsCard({
 }
 
 
+// ─── Карточка ручной таблицы (источник manual_table): загрузка + обработка ──
+
+function ManualTableCard({ channel }: { channel: Channel }) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const [file, setFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
+  const fileId = (channel.config ?? {}).uploadFileId as string | undefined
+
+  async function uploadAndRun() {
+    if (!file && !fileId) { toast.error('Выберите файл таблицы (xlsx)'); return }
+    setBusy(true)
+    try {
+      if (file) {
+        const r = await uploadTableFile(companyId, file)
+        await updateChannel(channel.id, { config: { ...channel.config, uploadFileId: r.source_id } })
+        toast.success('Таблица загружена (L1)')
+      }
+      const res: any = await runChannel(channel.id)
+      if (res?.status === 'success') {
+        toast.success(
+          `Обработано: строк ${res.shifts ?? res.rows ?? 0} · контрагентов +${res.counterparties ?? 0} · ` +
+          `договоров +${res.contracts ?? 0} · платёжных записей ${res.settlements ?? 0}` +
+          (res.unmatched ? ` · не сопоставлено ${res.unmatched}` : ''),
+        )
+      } else {
+        toast.warning(res?.message || 'Обработка без изменений')
+      }
+      qc.invalidateQueries({ queryKey: ['axis'] })
+      setFile(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="md:col-span-3 py-3 gap-2 border-l-2 border-l-primary">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <Upload className="h-3.5 w-3.5 text-primary" />
+          Загрузка таблицы и обработка
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0 pb-3 space-y-2">
+        <p className="text-xs text-muted-foreground">
+          Файл реестра (xlsx) → загрузка как сырьё (L1) → нормализация → нормализованная БД (L2)
+          и разрезы «Поставщики э/э» / «Аренда».
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="file" accept=".xlsx,.xls"
+            className="h-8 max-w-xs text-xs"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <Button size="sm" className="h-8 gap-1.5" disabled={busy || (!file && !fileId)} onClick={uploadAndRun}>
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            {file ? 'Загрузить и обработать' : 'Запустить обработку'}
+          </Button>
+          {fileId && !file && (
+            <span className="text-[10px] text-muted-foreground">файл загружен ранее · {String(fileId).slice(0, 8)}…</span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 // ─── Вкладка: Обзор ────────────────────────────────────────
 
 function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: () => void; onUpdate: (ch: Channel) => void }) {
+  const isManualTable = channel.templateId === 'reestr_contracts_payments'
   const sources = getSources()
   const channelSourceIds = getChannelSourceIds(channel)
   const channelSources = sources.filter((s) => channelSourceIds.includes(s.id))
@@ -442,6 +512,9 @@ function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: 
 
   return (
     <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      {/* Ручная таблица: загрузка файла + запуск обработки (manual_table) */}
+      {isManualTable && <ManualTableCard channel={channel} />}
+
       {/* Row 1: meta — Статус, Источники, Расписание */}
       <Card className={`${compactCard} border-l-2 ${statusBorder}`}>
         <CardHeader className="pb-0">

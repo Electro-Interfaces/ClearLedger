@@ -9,7 +9,8 @@ import type {
   CounterpartyBalance, ContractScopeType, LocationBrief, CounterpartyLocations,
   LocationContracts, ContractDimensions,
 } from '@/types'
-import { isApiEnabled, get, post, patch, put, del } from './apiClient'
+import type { StationSettlement, PaymentDisciplineSummary } from '@/types/settlement'
+import { isApiEnabled, get, post, patch, put, del, upload } from './apiClient'
 import {
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
   warehousesKey, bankAccountsKey, balancesKey,
@@ -478,6 +479,40 @@ export async function getCounterpartyLocations(counterpartyId: string): Promise<
 /** Договоры точки: адресные + общекомпанейские. */
 export async function getLocationContracts(locationId: string): Promise<LocationContracts> {
   return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
+}
+
+// ---- Платёжная дисциплина (реестр «Договоры и оплаты ЭЗС», energy) ----
+
+/** Записи платёжной дисциплины станции (для окна станции). */
+export async function getLocationSettlements(
+  companyId: string, locationId: string,
+): Promise<StationSettlement[]> {
+  if (!isApiEnabled()) return []
+  return get<StationSettlement[]>('/api/references/settlements',
+    { company_id: companyId, location_id: locationId })
+}
+
+/** Все записи платёжной дисциплины компании (для индикаторов в списке/карте). */
+export async function getAllSettlements(companyId: string): Promise<StationSettlement[]> {
+  if (!isApiEnabled()) return []
+  return get<StationSettlement[]>('/api/references/settlements', { company_id: companyId })
+}
+
+/** Агрегат платёжной дисциплины (для витрин «Дебиторка»/«Энергозакупка»). */
+export async function getPaymentDisciplineSummary(
+  companyId: string,
+): Promise<PaymentDisciplineSummary> {
+  return get<PaymentDisciplineSummary>('/api/references/payment-discipline/summary',
+    { company_id: companyId })
+}
+
+/** Загрузить файл-таблицу (xlsx) как L1-сырьё источника. Возвращает source_id (SourceFile). */
+export async function uploadTableFile(
+  companyId: string, file: File,
+): Promise<{ source_id: string }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return upload<{ source_id: string }>(`/api/intake?company_id=${companyId}`, fd)
 }
 
 /** Грани договора по разрезам (номенклатура/каналы/…). */

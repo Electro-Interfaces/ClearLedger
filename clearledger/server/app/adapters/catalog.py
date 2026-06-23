@@ -291,6 +291,37 @@ class ChestnyZnakAdapter(PlannedAdapter):
 # ---------------------------------------------------------------------------
 # Касса/POS станции
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Ручная таблица (загруженный Excel/CSV как источник) — парсинг/нормализация
+# server-side в канале (orchestrator), не через fetch_delta планировщика.
+# ---------------------------------------------------------------------------
+@register_adapter("manual_table")
+class ManualTableAdapter(SourceAdapter):
+    status = "available"
+    label = "Таблица (ручная загрузка Excel)"
+    category = "Ручные источники"
+    description = (
+        "Загруженная таблица (xlsx) как источник: реестры, выгрузки без API. "
+        "Файл грузится в канал, парсинг и нормализация — server-side при запуске "
+        "обработки канала. Для РусГидро: реестр «Договоры и оплаты ЭЗС»."
+    )
+    icon = "Table"
+    setup_schema = [
+        SetupField(key="sheet", label="Лист", field_type="text", required=False,
+                   default_value="Общий свод", help_text="Имя листа Excel с данными."),
+    ]
+    available_doc_types = [
+        SourceDocType(id="contracts_payments", name="Договоры и оплаты ЭЗС", category="reference"),
+    ]
+
+    async def test_connection(self, connection: dict[str, Any]) -> TestResult:
+        return TestResult(ok=True, message="Ручной источник: загрузите таблицу в канал и запустите обработку.")
+
+    async def fetch_delta(self, connection, doc_type, since=None, until=None, filters=None) -> RawBatch:
+        # Парсинг идёт в оркестраторе (читает загруженный SourceFile); здесь — пусто.
+        return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
+
+
 @register_adapter("neftoms")
 class NeftoMsAdapter(PlannedAdapter):
     label = "NeftoMS (POS станции)"

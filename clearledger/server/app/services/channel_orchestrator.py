@@ -17,10 +17,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import uuid as _uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Channel, ChannelStream, Source, SourceCredentials
+from app.models import Channel, ChannelStream, Source, SourceCredentials, SourceFile
 from app.services.cb_intake import ingest_packages
 from app.services.onec.com_client import OneCComClient
 from app.services.onec.crypto import decrypt_password
@@ -164,6 +166,29 @@ async def _run_fuel_delivery(db: AsyncSession, channel: Channel, src: Source) ->
 
 
 # ---------------------------------------------------------------------------
+# Ветка ручной таблицы (реестр «Договоры и оплаты ЭЗС») — server-side L1→L2
+# ---------------------------------------------------------------------------
+async def _run_reestr(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+    """Загруженный xlsx (SourceFile из config.uploadFileId) → L1 RAW → нормализация → L2."""
+    cfg = channel.config or {}
+    file_id = cfg.get("uploadFileId") or cfg.get("upload_file_id")
+    if not file_id:
+        return {"status": "skipped",
+                "message": "не загружена таблица: сначала «Загрузить таблицу» (config.uploadFileId пуст)"}
+    try:
+        sf = await db.get(SourceFile, _uuid.UUID(str(file_id)))
+    except (ValueError, TypeError):
+        sf = None
+    if sf is None:
+        return {"status": "error", "message": f"файл {file_id} не найден"}
+    with open(sf.storage_path, "rb") as fh:
+        content = fh.read()
+    from app.services.reestr_normalize import ingest_reestr, parse_reestr_xlsx
+    rows = parse_reestr_xlsx(content)
+    return await ingest_reestr(db, channel.company_id, rows, channel_id=channel.id)
+
+
+# ---------------------------------------------------------------------------
 # Диспетчер
 # ---------------------------------------------------------------------------
 async def run_channel(db: AsyncSession, channel: Channel) -> dict[str, Any]:
@@ -173,6 +198,8 @@ async def run_channel(db: AsyncSession, channel: Channel) -> dict[str, Any]:
         return {"status": "skipped", "message": "в потоках канала нет источника"}
     if src.source_type == "onec_operational":
         return await _run_cb(db, channel, src)
+    if src.source_type == "manual_table":
+        return await _run_reestr(db, channel, src)
     if src.source_type == "sts":
         if (channel.template_id or "") == "fuel_delivery":
             return await _run_fuel_delivery(db, channel, src)

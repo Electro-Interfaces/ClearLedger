@@ -511,6 +511,11 @@ class Contract(Base):
     amount_incl_vat: Mapped[bool | None] = mapped_column(Boolean, nullable=True)   # сумма включает НДС
     settlement_kind: Mapped[str | None] = mapped_column(String(150), nullable=True)  # вид взаиморасчётов
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Основание обязательства (НАШ слой, v2.8): договор | разрешение | постановление |
+    # приказ | сервитут. Для энергоснабжения/аренды РусГидро часть объектов стоит на
+    # муниципальной земле по разрешению, а не по договору аренды. См.
+    # SOURCE_CONTRACTS_PAYMENTS_RUSHYDRO.md §6.
+    basis: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # СрокДействия (ISO-дата строкой) и ДоговорЗакрыт
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_closed: Mapped[bool] = mapped_column(
@@ -563,6 +568,66 @@ class ContractLocation(Base):
 
     __table_args__ = (
         Index("uq_contract_locations", "contract_id", "location_id", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
+# StationContractSettlement (платёжная дисциплина по станции × роль — v2.8)
+# ---------------------------------------------------------------------------
+# Платёжно-договорный слой реестра «Договоры и оплаты ЭЗС» (energy/РусГидро).
+# Оплата фиксируется по СТРОКЕ реестра (станция × роль), т.к. один договор может
+# покрывать несколько ЭЗС с разным статусом оплаты — поэтому статус живёт на
+# связке станция↔роль, а не на договоре глобально. contract_id — мягкая ссылка
+# (best-effort резолв; NULL если договор не сопоставлен). См.
+# SOURCE_CONTRACTS_PAYMENTS_RUSHYDRO.md §5.
+# ---------------------------------------------------------------------------
+class StationContractSettlement(Base):
+    __tablename__ = "station_contract_settlements"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Роль контура обязательства: energy (энергоснабжение/закупка) | rent (аренда земли/площадки).
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Мягкая ссылка на договор (резолв по контрагент+номер+тип); NULL если не сопоставлен.
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    # Контрагент строки (GUID 1С или наш UUID) — для отображения даже без договора.
+    counterparty_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # «Оплачено по» — ISO-дата (метка 1-го числа месяца включительно), либо NULL.
+    paid_through: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Статус оплаты: paid | unpaid | unknown | special (% от выручки/фикс/сервитут).
+    payment_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unknown", server_default=text("'unknown'")
+    )
+    # Основание (дублирует Contract.basis для отображения без джойна): договор|разрешение|...
+    basis: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Проблемный комментарий реестра (не поступают документы, банкротство, демонтаж...).
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Снимок периода реестра (напр. '2026-06-01') — для будущей истории.
+    period: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # Один текущий статус на станцию×роль (идемпотентный upsert реестра).
+        Index("uq_station_settlement", "company_id", "location_id", "role", unique=True),
+        Index("idx_station_settlement_status", "company_id", "role", "payment_status"),
     )
 
 

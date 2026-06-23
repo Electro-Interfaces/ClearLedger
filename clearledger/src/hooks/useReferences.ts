@@ -213,6 +213,38 @@ export function useLocationContracts(locationId: string | null) {
   })
 }
 
+/** Платёжная дисциплина станции (энергоснабжение/аренда, статусы оплат). */
+export function useLocationSettlements(locationId: string | null) {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'location', locationId, 'settlements', companyId],
+    queryFn: () => ref.getLocationSettlements(companyId, locationId!),
+    enabled: !!locationId && !!companyId,
+  })
+}
+
+/** Все записи платёжной дисциплины компании (индикаторы в списке/карте ЭЗС). */
+export function useAllSettlements() {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'settlements', companyId],
+    queryFn: () => ref.getAllSettlements(companyId),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  })
+}
+
+/** Агрегат платёжной дисциплины (витрины «Дебиторка»/«Энергозакупка»). */
+export function usePaymentDisciplineSummary() {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'payment-summary', companyId],
+    queryFn: () => ref.getPaymentDisciplineSummary(companyId),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  })
+}
+
 /** Грани договора по разрезам (номенклатура/каналы/…). */
 export function useContractDimensions(contractId: string | null) {
   return useQuery({

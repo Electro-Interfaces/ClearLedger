@@ -21,6 +21,7 @@ from app.models import (
     NomenclatureItem,
     Organization,
     ServiceLocation,
+    StationContractSettlement,
     User,
     Warehouse,
 )
@@ -43,6 +44,10 @@ from app.schemas import (
     CounterpartyCreate,
     CounterpartyResponse,
     CounterpartyUpdate,
+    PaymentDisciplineSummary,
+    RoleDiscipline,
+    SettlementResponse,
+    SettlementUpsert,
     NomenclatureCreate,
     NomenclaturePage,
     NomenclatureResponse,
@@ -532,6 +537,7 @@ def _contract_resp(c: Contract) -> ContractResponse:
         amountInclVat=c.amount_incl_vat,
         settlementKind=c.settlement_kind,
         comment=c.comment,
+        basis=c.basis,
         isClosed=c.is_closed,
         scopeType=c.scope_type,
         externalRef=c.external_ref,
@@ -582,6 +588,7 @@ async def create_contract(
         amount_incl_vat=body.amountInclVat,
         settlement_kind=body.settlementKind,
         comment=body.comment,
+        basis=body.basis,
         is_closed=body.isClosed,
         scope_type=body.scopeType,
     )
@@ -629,6 +636,8 @@ async def update_contract(
         c.settlement_kind = body.settlementKind
     if body.comment is not None:
         c.comment = body.comment
+    if body.basis is not None:
+        c.basis = body.basis
     if body.isClosed is not None:
         c.is_closed = body.isClosed
     if body.scopeType is not None:
@@ -839,6 +848,156 @@ async def get_location_contracts(
                 inn=cp.inn if cp else None,
             )
     return LocationContractsResponse(contracts=briefs, counterparties=list(seen.values()))
+
+
+# ---------------------------------------------------------------------------
+# Платёжная дисциплина по станции × роль (v2.8) — реестр «Договоры и оплаты ЭЗС»
+# ---------------------------------------------------------------------------
+
+def _settlement_resp(s: StationContractSettlement) -> SettlementResponse:
+    return SettlementResponse(
+        id=str(s.id),
+        companyId=str(s.company_id),
+        locationId=s.location_id,
+        role=s.role,
+        contractId=str(s.contract_id) if s.contract_id else None,
+        counterpartyId=s.counterparty_id,
+        paidThrough=s.paid_through,
+        paymentStatus=s.payment_status,
+        basis=s.basis,
+        comment=s.comment,
+        period=s.period,
+        createdAt=_ts(s.created_at),
+        updatedAt=_ts(s.updated_at),
+    )
+
+
+@router.get("/settlements", response_model=list[SettlementResponse])
+async def list_settlements(
+    company_id: str = Query(...),
+    location_id: str | None = Query(None, description="Фильтр по станции (для окна станции)"),
+    role: str | None = Query(None, description="energy | rent"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Платёжная дисциплина: все записи компании (для индикаторов в списке/карте)
+    либо по конкретной станции (для вкладки «Договоры» в окне станции)."""
+    cid = await assert_company_member(company_id, current_user, db)
+    stmt = select(StationContractSettlement).where(StationContractSettlement.company_id == cid)
+    if location_id:
+        stmt = stmt.where(StationContractSettlement.location_id == location_id)
+    if role:
+        stmt = stmt.where(StationContractSettlement.role == role)
+    result = await db.execute(stmt)
+    return [_settlement_resp(s) for s in result.scalars().all()]
+
+
+@router.post("/settlements", response_model=SettlementResponse, status_code=status.HTTP_201_CREATED)
+async def upsert_settlement(
+    body: SettlementUpsert,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Идемпотентный upsert статуса оплаты станции×роль (ключ company+location+role).
+    Используется ETL реестра «Договоры и оплаты ЭЗС»."""
+    cid = await assert_company_member(body.company_id, current_user, db)
+    # Станция должна принадлежать компании.
+    loc = (await db.execute(
+        select(ServiceLocation).where(
+            ServiceLocation.id == body.locationId,
+            ServiceLocation.company_id == cid,
+        )
+    )).scalar_one_or_none()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Точка не найдена в компании")
+
+    contract_uuid = None
+    if body.contractId:
+        try:
+            contract_uuid = uuid.UUID(body.contractId)
+        except (ValueError, TypeError):
+            contract_uuid = None
+
+    existing = (await db.execute(
+        select(StationContractSettlement).where(
+            StationContractSettlement.company_id == cid,
+            StationContractSettlement.location_id == body.locationId,
+            StationContractSettlement.role == body.role,
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        existing.contract_id = contract_uuid
+        existing.counterparty_id = body.counterpartyId
+        existing.paid_through = body.paidThrough
+        existing.payment_status = body.paymentStatus
+        existing.basis = body.basis
+        existing.comment = body.comment
+        existing.period = body.period
+        existing.source = body.source
+        s = existing
+    else:
+        s = StationContractSettlement(
+            company_id=cid,
+            location_id=body.locationId,
+            role=body.role,
+            contract_id=contract_uuid,
+            counterparty_id=body.counterpartyId,
+            paid_through=body.paidThrough,
+            payment_status=body.paymentStatus,
+            basis=body.basis,
+            comment=body.comment,
+            period=body.period,
+            source=body.source,
+        )
+        db.add(s)
+    await db.flush()
+    return _settlement_resp(s)
+
+
+@router.get("/payment-discipline/summary", response_model=PaymentDisciplineSummary)
+async def payment_discipline_summary(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Агрегат платёжной дисциплины для витрин «Дебиторка/взаиморасчёты» и
+    «Энергозакупка» + KPI листа «Показатели»."""
+    cid = await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(
+        select(StationContractSettlement).where(StationContractSettlement.company_id == cid)
+    )).scalars().all()
+
+    roles: dict[str, RoleDiscipline] = {}
+    stations_with_role: dict[str, set[str]] = {"energy": set(), "rent": set()}
+    cp_unpaid: dict[str, set[str]] = {"energy": set(), "rent": set()}
+    covered: set[str] = set()
+
+    for s in rows:
+        covered.add(s.location_id)
+        rd = roles.setdefault(s.role, RoleDiscipline(role=s.role))
+        rd.total += 1
+        st = s.payment_status if s.payment_status in ("paid", "unpaid", "unknown", "special") else "unknown"
+        setattr(rd, st, getattr(rd, st) + 1)
+        if s.comment:
+            rd.withProblem += 1
+        if s.role in stations_with_role:
+            stations_with_role[s.role].add(s.location_id)
+        if s.payment_status == "unpaid" and s.role in cp_unpaid and s.counterparty_id:
+            cp_unpaid[s.role].add(s.counterparty_id)
+
+    all_stations = (await db.execute(
+        select(func.count(ServiceLocation.id)).where(ServiceLocation.company_id == cid)
+    )).scalar() or 0
+
+    return PaymentDisciplineSummary(
+        stationsCovered=len(covered),
+        byRole=list(roles.values()),
+        stationsNoEnergy=max(0, all_stations - len(stations_with_role["energy"])),
+        stationsNoRent=max(0, all_stations - len(stations_with_role["rent"])),
+        counterpartiesUnpaidEnergy=len(cp_unpaid["energy"]),
+        counterpartiesUnpaidRent=len(cp_unpaid["rent"]),
+    )
 
 
 # ---------------------------------------------------------------------------

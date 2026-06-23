@@ -181,6 +181,28 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
         schedule=_SCHED_DAILY,
     ),
 
+    # ── Энергоснабжение / Аренда (РусГидро) ───────────────────────────────
+    ChannelTemplateDecl(
+        id="reestr_contracts_payments",
+        label="Реестр договоров и оплат ЭЗС",
+        category="Энергоснабжение",
+        description=(
+            "Ручная таблица (xlsx) «Договоры и оплаты ЭЗС»: по каждой станции — "
+            "энергоснабжение и аренда с контрагентом, договором/разрешением и статусом "
+            "оплаты. Загрузка файла → L1 RAW → нормализация → L2 (контрагенты/договоры/"
+            "платёжная дисциплина) → разрезы «Поставщики э/э» и «Аренда»."
+        ),
+        icon="Table",
+        direction="energy",
+        status="available",
+        streams=[
+            StreamDecl("manual_table", "contracts_payments", "anchor", "Реестр договоров и оплат"),
+        ],
+        stages=_STAGES_INGEST,
+        reconcile_rules=["energy_suppliers", "energy_rent"],
+        schedule={"mode": "manual"},
+    ),
+
     # ── Эталон ───────────────────────────────────────────────────────────
     ChannelTemplateDecl(
         id="reference_1c",

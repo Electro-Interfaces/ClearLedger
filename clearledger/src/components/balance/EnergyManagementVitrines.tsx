@@ -11,8 +11,51 @@ import {
   DEMO_EZS, sumBuy, sumRelease, lossKwh, lossPct, overNorm, fmtN,
   supplierContract, tariffCheck, openClaimsCount, CONTRACT_STATUS_META,
 } from './balanceCalc'
+import { usePaymentDisciplineSummary } from '@/hooks/useReferences'
+import { ROLE_LABEL, type SettlementRole } from '@/types/settlement'
 
 const all = DEMO_EZS
+
+/* ── Платёжная дисциплина (РЕАЛЬНЫЕ данные реестра «Договоры и оплаты ЭЗС») ── */
+function PaymentDisciplineBlock() {
+  const q = usePaymentDisciplineSummary()
+  const s = q.data
+  if (!s || s.stationsCovered === 0) return null
+  return (
+    <Card><CardContent className="space-y-3 pt-5">
+      <div className="flex items-center gap-2">
+        <div className="text-sm font-medium">Платёжная дисциплина (реестр ЭЗС)</div>
+        <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Kpi label="ЭЗС с данными" value={fmtN(s.stationsCovered)} />
+        <Kpi label="Контрагенты без оплат (энерго)" value={String(s.counterpartiesUnpaidEnergy)} accent={s.counterpartiesUnpaidEnergy ? 'warn' : undefined} />
+        <Kpi label="Контрагенты без оплат (аренда)" value={String(s.counterpartiesUnpaidRent)} accent={s.counterpartiesUnpaidRent ? 'warn' : undefined} />
+        <Kpi label="ЭЗС без договора э/э" value={String(s.stationsNoEnergy)} accent={s.stationsNoEnergy ? 'warn' : undefined} />
+      </div>
+      <Table><TableHeader><TableRow>
+        <TableHead>Контур</TableHead><TableHead className="text-right">Всего</TableHead>
+        <TableHead className="text-right">Оплачено</TableHead><TableHead className="text-right">Не оплачено</TableHead>
+        <TableHead className="text-right">Особый порядок</TableHead><TableHead className="text-right">С проблемой</TableHead>
+      </TableRow></TableHeader><TableBody>
+        {(['energy', 'rent'] as SettlementRole[]).map((role) => {
+          const r = s.byRole.find((x) => x.role === role)
+          if (!r) return null
+          return (
+            <TableRow key={role}>
+              <TableCell className="font-medium">{ROLE_LABEL[role]}</TableCell>
+              <TableCell className="text-right tabular-nums">{r.total}</TableCell>
+              <TableCell className="text-right tabular-nums text-emerald-600 dark:text-emerald-400">{r.paid}</TableCell>
+              <TableCell className="text-right tabular-nums text-red-600 dark:text-red-400">{r.unpaid}</TableCell>
+              <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">{r.special}</TableCell>
+              <TableCell className="text-right tabular-nums text-muted-foreground">{r.withProblem}</TableCell>
+            </TableRow>
+          )
+        })}
+      </TableBody></Table>
+    </CardContent></Card>
+  )
+}
 
 function Head({ title, subtitle }: { title: string; subtitle: string }) {
   return (
@@ -183,6 +226,7 @@ export function ReceivablesVitrine() {
         <Kpi label="Задолженность поставщикам, ₽" value={fmtN(payable)} accent={payable ? 'warn' : undefined} />
         <Kpi label="Договоров в пересмотре/расторжении" value={String(renegotiating)} accent={renegotiating ? 'warn' : undefined} />
       </div>
+      <PaymentDisciplineBlock />
       <Card><CardContent className="overflow-x-auto pt-5">
         <Table><TableHeader><TableRow>
           <TableHead>ЭЗС</TableHead><TableHead className="text-right">Холд&lt;факт, ₽</TableHead>
@@ -224,6 +268,7 @@ export function ProcurementVitrine() {
         <Kpi label="Средняя цена, ₽/кВт·ч" value={rate(buyRub, buyKwh)} />
         <Kpi label="Поставщиков" value={String(bySupplier.size)} />
       </div>
+      <PaymentDisciplineBlock />
       <Card><CardContent className="overflow-x-auto pt-5">
         <Table><TableHeader><TableRow>
           <TableHead>Поставщик э/э</TableHead><TableHead className="text-right">Объём, кВт·ч</TableHead>

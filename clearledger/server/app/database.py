@@ -296,6 +296,15 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.8: платёжная дисциплина по станциям (реестр «Договоры и оплаты ЭЗС»,
+        # energy/РусГидро). Таблица station_contract_settlements создаётся через
+        # metadata.create_all (индексы — из __table_args__). Здесь — колонка basis
+        # у contracts (основание обязательства: договор|разрешение|постановление|…).
+        # См. SOURCE_CONTRACTS_PAYMENTS_RUSHYDRO.md.
+        await conn.execute(__import__("sqlalchemy").text(
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS basis VARCHAR(100)"
+        ))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""
