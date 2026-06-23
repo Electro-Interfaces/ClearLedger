@@ -22,6 +22,11 @@ import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
 import { LOCATION_STATUS_META, type ServiceLocation } from '@/types/location'
 import type { LocationTypeDef } from '@/types/locationType'
 import { m } from './fleet/locationFleetService'
+import { useAllSettlements } from '@/hooks/useReferences'
+import {
+  stationFlag, paidThroughLabel, ROLE_LABEL,
+  type StationFlag, type StationSettlement,
+} from '@/types/settlement'
 
 const PAGE_SIZE = 50
 
@@ -41,6 +46,14 @@ const OP_STATUS_META: Record<string, { label: string; cls: string }> = {
   on_repair: { label: 'На ремонте', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
   maintenance: { label: 'Обслуживание', cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400' },
   unknown: { label: '—', cls: 'bg-muted text-muted-foreground' },
+}
+
+// Сводный индикатор платёжной дисциплины станции (реестр «Договоры и оплаты ЭЗС», energy).
+const FLAG_META: Record<StationFlag, { label: string; cls: string; dot: string }> = {
+  ok:        { label: 'оплачено',   cls: 'text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-500' },
+  attention: { label: 'внимание',    cls: 'text-amber-600 dark:text-amber-400',     dot: 'bg-amber-500' },
+  unpaid:    { label: 'не оплачено', cls: 'text-red-600 dark:text-red-400',         dot: 'bg-red-500' },
+  none:      { label: '—',           cls: 'text-muted-foreground',                  dot: 'bg-muted-foreground/30' },
 }
 
 type SortKey = 'number' | 'name' | 'region' | 'city' | 'brand' | 'power'
@@ -68,6 +81,20 @@ export function LocationsTable({
   // Колонка «Реализация, пред. мес.» показывается, только если хотя бы у одной
   // точки выборки есть это значение (для ЭЗС/энергетики данных нет → скрыта).
   const showSales = useMemo(() => locations.some((l) => m(l, 'salesPrevMonth')), [locations])
+
+  // Индикатор платёжной дисциплины (реестр «Договоры и оплаты ЭЗС», energy/РусГидро):
+  // тянем все settlement компании, группируем по точке, флаг — через stationFlag().
+  // Колонка появляется только если в компании есть данные реестра (для fuel/ГИГ — скрыта).
+  const { data: settlements } = useAllSettlements()
+  const settleByLoc = useMemo(() => {
+    const map = new Map<string, StationSettlement[]>()
+    for (const s of settlements ?? []) {
+      const arr = map.get(s.locationId)
+      if (arr) arr.push(s); else map.set(s.locationId, [s])
+    }
+    return map
+  }, [settlements])
+  const showPayment = (settlements?.length ?? 0) > 0
 
   const sorted = useMemo(() => {
     const val = (l: ServiceLocation): string | number => {
@@ -131,6 +158,7 @@ export function LocationsTable({
               <TableHead className="hidden xl:table-cell">Коннекторы</TableHead>
               <SortHead k="power" className="hidden md:table-cell text-right">кВт</SortHead>
               <TableHead>Статус станции</TableHead>
+              {showPayment && <TableHead className="hidden md:table-cell">Оплата</TableHead>}
               {showSales && <TableHead className="hidden lg:table-cell text-right">Реализация, пред. мес.</TableHead>}
               <TableHead className="hidden xl:table-cell">Связка HubEx</TableHead>
               <TableHead className="hidden sm:table-cell">Статус</TableHead>
@@ -159,6 +187,23 @@ export function LocationsTable({
                       return <Badge variant="secondary" className={`text-[10px] ${om.cls}`}>{om.label}</Badge>
                     })()}
                   </TableCell>
+                  {showPayment && (
+                    <TableCell className="hidden md:table-cell">
+                      {(() => {
+                        const ss = settleByLoc.get(l.id) ?? []
+                        const fm = FLAG_META[stationFlag(ss)]
+                        const title = ss.length
+                          ? ss.map((s) => `${ROLE_LABEL[s.role]}: ${paidThroughLabel(s)}${s.comment ? ` — ${s.comment}` : ''}`).join('\n')
+                          : 'нет данных реестра'
+                        return (
+                          <span className="inline-flex items-center gap-1.5" title={title}>
+                            <span className={`h-2 w-2 rounded-full ${fm.dot}`} />
+                            <span className={`text-[10px] ${fm.cls}`}>{fm.label}</span>
+                          </span>
+                        )
+                      })()}
+                    </TableCell>
+                  )}
                   {showSales && (
                     <TableCell className="hidden lg:table-cell text-right tabular-nums text-muted-foreground">
                       {m(l, 'salesPrevMonth') || '—'}
@@ -211,7 +256,7 @@ export function LocationsTable({
             })}
             {slice.length === 0 && (
               <TableRow>
-                <TableCell colSpan={showSales ? 13 : 12} className="text-center text-sm text-muted-foreground py-8">
+                <TableCell colSpan={12 + (showPayment ? 1 : 0) + (showSales ? 1 : 0)} className="text-center text-sm text-muted-foreground py-8">
                   Ничего не найдено по фильтрам.
                 </TableCell>
               </TableRow>
