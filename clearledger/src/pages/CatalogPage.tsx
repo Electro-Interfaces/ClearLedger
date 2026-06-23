@@ -220,7 +220,13 @@ export function CatalogPage() {
   const sources = useQuery({ queryKey: ['catalog', 'source-types'], queryFn: getSourceTypes })
   const channels = useQuery({ queryKey: ['catalog', 'channel-templates'], queryFn: getChannelTemplates })
   const rules = useQuery({ queryKey: ['catalog', 'reconcile-rules'], queryFn: getReconcileRules })
-  const modules = useQuery({ queryKey: ['catalog', 'workspace-modules'], queryFn: async () => WORKSPACE_MODULES })
+  // Модули фильтруются по профилю компании: energy не видит fuel-модули (Баланс АЗС и т.п.) и наоборот;
+  // 'any' — общие для всех профилей.
+  const modules = useQuery({
+    queryKey: ['catalog', 'workspace-modules', company.profileId],
+    queryFn: async () =>
+      WORKSPACE_MODULES.filter((mod) => mod.profiles.some((p) => p === 'any' || p === company.profileId)),
+  })
   // Энергоцепочка (для energy-профиля) — из единой модели energyPipeline.
   const eSources = useQuery({ queryKey: ['catalog', 'energy-sources'], queryFn: async () => ENERGY_SOURCES })
   const eChannels = useQuery({ queryKey: ['catalog', 'energy-channels'], queryFn: async () => ENERGY_CHANNELS })

@@ -5,6 +5,7 @@
  */
 
 import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { useCompany } from '@/contexts/CompanyContext'
 import { getStsStationsFromLocations } from '@/services/locationService'
 import { useLocations } from '@/hooks/useLocations'
 import { useShifts } from '@/hooks/useFuel'
@@ -18,6 +19,10 @@ export function WorkspaceToolbar() {
   useLocations()   // гидратация точек активной компании
   const stations = getStsStationsFromLocations()
   const queryClient = useQueryClient()
+  const { company } = useCompany()
+  // energy (РусГидро): станции/смены — fuel-концепт (STS), для energy список пуст и витрины
+  // рабочего стола по станции не фильтруются → скрываем мёртвый кластер «станция + обновить».
+  const isEnergy = company.profileId === 'energy'
   const { globalStation, setGlobalStation, coreMode, setCoreMode } = useWorkspace()
   const { isFetching } = useShifts(
     globalStation === 'all' ? undefined : Number(globalStation),
@@ -31,34 +36,38 @@ export function WorkspaceToolbar() {
 
   return (
     <div className="flex items-center px-3 py-1.5 border-b border-border/50 bg-background flex-shrink-0">
-      {/* Станция */}
-      <Select value={globalStation} onValueChange={setGlobalStation}>
-        <SelectTrigger className="h-7 w-[160px] text-xs">
-          <SelectValue placeholder="Все станции" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Все станции</SelectItem>
-          {stations.map((s) => (
-            <SelectItem key={s.code} value={String(s.code)}>
-              {s.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {!isEnergy && (
+        <>
+          {/* Станция */}
+          <Select value={globalStation} onValueChange={setGlobalStation}>
+            <SelectTrigger className="h-7 w-[160px] text-xs">
+              <SelectValue placeholder="Все станции" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все станции</SelectItem>
+              {stations.map((s) => (
+                <SelectItem key={s.code} value={String(s.code)}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-      {/* Обновить */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 ml-1"
-        onClick={handleRefresh}
-        disabled={isFetching}
-        title="Обновить данные"
-      >
-        <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
-      </Button>
+          {/* Обновить */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 ml-1"
+            onClick={handleRefresh}
+            disabled={isFetching}
+            title="Обновить данные"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+          </Button>
 
-      <div className="h-4 w-px bg-border/50 mx-2" />
+          <div className="h-4 w-px bg-border/50 mx-2" />
+        </>
+      )}
 
       {/* Конвейер — переключатель режимов */}
       <div className="flex items-center gap-0.5 bg-muted/40 rounded-md p-0.5">
