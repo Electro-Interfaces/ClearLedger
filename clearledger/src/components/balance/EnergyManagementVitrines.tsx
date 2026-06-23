@@ -150,6 +150,61 @@ function RegionParkStructure() {
   )
 }
 
+/* ── Структура парка по производителям и мощности (РЕАЛЬНЫЕ данные точек). Мощность ЭЗС
+   определяет ценовой сегмент (медленные/быстрые/ультрабыстрые), поэтому блок — в «Тарифах». ── */
+function ManufacturerParkStructure() {
+  const locations = useLocations()
+  if (!locations.length) return null
+  const byMfr = new Map<string, { count: number; power: number }>()
+  let slow = 0, fast = 0, ultra = 0, unknownP = 0
+  for (const l of locations) {
+    const mfr = (m(l, 'manufacturer') as string) || '— не указан'
+    const p = Number(m(l, 'maxPowerKw')) || 0
+    const e = byMfr.get(mfr) ?? { count: 0, power: 0 }
+    e.count += 1; e.power += p
+    byMfr.set(mfr, e)
+    if (!p) unknownP += 1
+    else if (p < 50) slow += 1
+    else if (p < 150) fast += 1
+    else ultra += 1
+  }
+  const ranked = [...byMfr.entries()].sort((a, b) => b[1].count - a[1].count)
+  const rows = ranked.slice(0, 12)
+  const restMfr = ranked.length - rows.length
+  const restCount = ranked.slice(12).reduce((a, [, e]) => a + e.count, 0)
+  return (
+    <Card><CardContent className="space-y-3 overflow-x-auto pt-5">
+      <div className="flex items-center gap-2">
+        <div className="text-sm font-medium">Структура парка: производители и мощность</div>
+        <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+        <span className="text-xs text-muted-foreground/70">{locations.length} ЭЗС · {ranked.length} производителей</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Kpi label="Медленные, <50 кВт" value={fmtN(slow)} />
+        <Kpi label="Быстрые, 50–149 кВт" value={fmtN(fast)} />
+        <Kpi label="Ультрабыстрые, ≥150 кВт" value={fmtN(ultra)} />
+        <Kpi label="Мощность не указана" value={fmtN(unknownP)} accent={unknownP ? 'warn' : undefined} />
+      </div>
+      <Table><TableHeader><TableRow>
+        <TableHead>Производитель</TableHead><TableHead className="text-right">ЭЗС, шт</TableHead>
+        <TableHead className="text-right">Σ мощность, кВт</TableHead><TableHead className="text-right">средняя, кВт</TableHead>
+      </TableRow></TableHeader><TableBody>
+        {rows.map(([mfr, e]) => (
+          <TableRow key={mfr}>
+            <TableCell className="font-medium">{mfr}</TableCell>
+            <TableCell className="text-right tabular-nums">{e.count}</TableCell>
+            <TableCell className="text-right tabular-nums text-muted-foreground">{fmtN(e.power)}</TableCell>
+            <TableCell className="text-right tabular-nums text-muted-foreground">{e.count ? Math.round(e.power / e.count) : 0}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody></Table>
+      {restMfr > 0 && (
+        <p className="text-xs text-muted-foreground/70">…и ещё {restMfr} производителей ({restCount} ЭЗС).</p>
+      )}
+    </CardContent></Card>
+  )
+}
+
 /* ── Сводка сети ── */
 export function NetworkOverviewVitrine() {
   const revenue = all.reduce((a, s) => a + sumRelease(s).rub, 0)
@@ -282,6 +337,7 @@ export function TariffsVitrine() {
           })}
         </TableBody></Table>
       </CardContent></Card>
+      <ManufacturerParkStructure />
     </div>
   )
 }
