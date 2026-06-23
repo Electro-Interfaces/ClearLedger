@@ -43,6 +43,8 @@ export const ENERGY_SOURCES: EnergySource[] = [
   { id: 'ofd',      label: 'ОФД',                 level: 'company', streams: ['Z-отчёт', 'Чеки (54-ФЗ)'], status: 'demo' },
   { id: 'tariffs',  label: 'Тарифы / НПА',        level: 'company', streams: ['Эталон тарифов'], status: 'demo' },
   { id: 'rent',     label: 'Договоры аренды',     level: 'company', streams: ['Реестр аренды', 'Платежи аренды'], status: 'planned' },
+  { id: 'reestr_dp', label: 'Реестр договоров и оплат ЭЗС', level: 'station',
+    streams: ['Договоры/оплаты энергоснабжения', 'Договоры/оплаты аренды'], status: 'active' },
 ]
 
 export const ENERGY_CHANNELS: EnergyChannel[] = [
@@ -53,6 +55,8 @@ export const ENERGY_CHANNELS: EnergyChannel[] = [
   { id: 'ch_ofd',      label: 'Канал ОФД',            sourceId: 'ofd',      produces: 'Z-отчёт/чеки → L2', status: 'demo' },
   { id: 'ch_tariffs',  label: 'Канал тарифов/НПА',    sourceId: 'tariffs',  produces: 'Тарифы → L2', status: 'demo' },
   { id: 'ch_rent',     label: 'Канал аренды',         sourceId: 'rent',     produces: 'Договоры/платежи аренды → L2', status: 'planned' },
+  { id: 'ch_reestr',   label: 'Канал реестра договоров и оплат', sourceId: 'reestr_dp',
+    produces: 'Договоры+оплаты энерго/аренда → L2 (контрагенты/договоры/платёжная дисциплина)', status: 'active' },
 ]
 
 export const ENERGY_CUTS: EnergyCut[] = [
@@ -66,10 +70,10 @@ export const ENERGY_CUTS: EnergyCut[] = [
     desc: 'Банк-эквайер ↔ платежи ПК: зачисления, холды (холд<факт), комиссия, T+1.' },
   { id: 'ofd',       label: 'ОФД/чеки',        channelIds: ['ch_ofd', 'ch_pk', 'ch_acq'], status: 'demo',
     desc: 'ОФД (Z-отчёт) ↔ ПК ↔ эквайер — полнота пробития чеков (54-ФЗ), three-way выручки.' },
-  { id: 'suppliers', label: 'Поставщики э/э',  channelIds: ['ch_pu', 'ch_supplier'], status: 'planned',
-    desc: 'ПУ ЭЗС ↔ ПУ поставщика — верификация физобъёма закупки э/э (§4.1.1 ТЗ).' },
-  { id: 'rent',      label: 'Аренда',          channelIds: ['ch_rent', 'ch_acq'], status: 'planned',
-    desc: 'Договоры аренды (земля/площадки/оборудование ЭЗС) ↔ платежи — сверка взаиморасчётов.' },
+  { id: 'suppliers', label: 'Поставщики э/э',  channelIds: ['ch_reestr', 'ch_pu', 'ch_supplier'], status: 'demo',
+    desc: 'Договорная полнота и платёжная дисциплина закупки э/э по ЭЗС (реестр: поставщик, договор, «оплачено по»). Плюс физическая сверка ПУ ЭЗС ↔ ПУ поставщика (§4.1.1 ТЗ, в проработке).' },
+  { id: 'rent',      label: 'Аренда',          channelIds: ['ch_reestr', 'ch_rent', 'ch_acq'], status: 'demo',
+    desc: 'Договоры/разрешения аренды земли/площадки ЭЗС ↔ платежи: контрагент, основание (договор/разрешение), «оплачено по», взаиморасчёты.' },
 ]
 
 export const ALL_ENERGY_CUT_IDS = ENERGY_CUTS.map((c) => c.id)

@@ -3,13 +3,32 @@
  * от подключённых разрезов учёта (разрез → каналы → источники). Единый источник
  * правды — config/energyPipeline.ts. Профиль energy наполняет пустые страницы.
  */
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Upload } from 'lucide-react'
+import { useCompany } from '@/contexts/CompanyContext'
+import { loadChannels } from '@/services/channelService'
 import {
   ALL_ENERGY_CUT_IDS, ENERGY_CHANNELS, PIPE_STATUS_META,
   neededSources, neededChannels, cutsForSource, cutsForChannel, energySource,
 } from '@/config/energyPipeline'
 import type { PipeStatus } from '@/config/energyPipeline'
+
+/** Резолв id операционного backend-канала по template_id (для перехода на загрузку+обработку). */
+function useBackendChannelId(templateId: string): string | null {
+  const { companyId } = useCompany()
+  const [id, setId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!companyId) return
+    loadChannels(companyId)
+      .then((chs) => setId(chs.find((c) => c.templateId === templateId)?.id ?? null))
+      .catch(() => { /* офлайн */ })
+  }, [companyId, templateId])
+  return id
+}
 
 /** Бейдж статуса элемента энергоцепочки (источник/канал): demo — нейтрально-позитивно, planned — приглушённо. */
 function StatusBadge({ status, className }: { status: PipeStatus; className?: string }) {
@@ -52,6 +71,8 @@ export function EnergySourcesSection() {
 
 export function EnergyChannelsSection() {
   const channels = neededChannels(ALL_ENERGY_CUT_IDS)
+  const navigate = useNavigate()
+  const reestrChannelId = useBackendChannelId('reestr_contracts_payments')
   return (
     <Card>
       <CardContent className="space-y-3 pt-5">
@@ -75,6 +96,15 @@ export function EnergyChannelsSection() {
                 <span>питает разрезы:</span>
                 {cuts.map((c) => <Badge key={c.id} variant="outline" className="text-[10px]">{c.label}</Badge>)}
               </div>
+              {ch.id === 'ch_reestr' && reestrChannelId && (
+                <div className="mt-2 border-t border-border/40 pt-2">
+                  <Button size="sm" className="h-7 gap-1.5 text-xs"
+                    onClick={() => navigate(`/channels/${reestrChannelId}`)}>
+                    <Upload className="h-3.5 w-3.5" />
+                    Загрузить таблицу и запустить обработку
+                  </Button>
+                </div>
+              )}
             </div>
           )
         })}
