@@ -9,7 +9,7 @@ import type {
   CounterpartyBalance, ContractScopeType, LocationBrief, CounterpartyLocations,
   LocationContracts, ContractDimensions,
 } from '@/types'
-import type { StationSettlement, PaymentDisciplineSummary } from '@/types/settlement'
+import type { StationSettlement, PaymentDisciplineSummary, SettlementDetail, SettlementRole } from '@/types/settlement'
 import { isApiEnabled, get, post, patch, put, del, upload } from './apiClient'
 import {
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
@@ -504,6 +504,16 @@ export async function getPaymentDisciplineSummary(
 ): Promise<PaymentDisciplineSummary> {
   return get<PaymentDisciplineSummary>('/api/references/payment-discipline/summary',
     { company_id: companyId })
+}
+
+/** Детализация платёжной дисциплины (строки: станция×контрагент×договор×оплата). */
+export async function getSettlementsDetail(
+  companyId: string, role?: SettlementRole,
+): Promise<SettlementDetail[]> {
+  if (!isApiEnabled()) return []
+  const params: Record<string, string> = { company_id: companyId }
+  if (role) params.role = role
+  return get<SettlementDetail[]>('/api/references/settlements/detail', params)
 }
 
 /** Загрузить файл-таблицу (xlsx) как L1-сырьё источника. Возвращает source_id (SourceFile). */

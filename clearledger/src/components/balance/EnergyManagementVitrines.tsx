@@ -11,8 +11,8 @@ import {
   DEMO_EZS, sumBuy, sumRelease, lossKwh, lossPct, overNorm, fmtN,
   supplierContract, tariffCheck, openClaimsCount, CONTRACT_STATUS_META,
 } from './balanceCalc'
-import { usePaymentDisciplineSummary } from '@/hooks/useReferences'
-import { ROLE_LABEL, type SettlementRole } from '@/types/settlement'
+import { usePaymentDisciplineSummary, useSettlementsDetail } from '@/hooks/useReferences'
+import { ROLE_LABEL, PAYMENT_META, paidThroughLabel, type SettlementRole } from '@/types/settlement'
 
 const all = DEMO_EZS
 
@@ -233,6 +233,50 @@ export function TariffsVitrine() {
   )
 }
 
+/* ── Детализация по ЭЗС (РЕАЛЬНЫЕ строки реестра): станция × контрагент × договор × оплата ── */
+function SettlementDetailTable({ role }: { role: SettlementRole }) {
+  const q = useSettlementsDetail(role)
+  const rows = q.data ?? []
+  if (q.isLoading) return <Card><CardContent className="pt-5 text-sm text-muted-foreground">Загрузка детализации…</CardContent></Card>
+  if (!rows.length) return null
+  return (
+    <Card><CardContent className="pt-5">
+      <div className="mb-3 flex items-center gap-2">
+        <div className="text-sm font-medium">
+          {role === 'rent' ? 'Аренда по ЭЗС — детализация' : 'Энергоснабжение по ЭЗС — детализация'}
+        </div>
+        <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные · {rows.length}</Badge>
+      </div>
+      <div className="max-h-[480px] overflow-auto rounded-md border border-border/40">
+        <Table><TableHeader className="sticky top-0 bg-card"><TableRow>
+          <TableHead>ЭЗС</TableHead>
+          <TableHead>{role === 'rent' ? 'Арендодатель' : 'Поставщик э/э'}</TableHead>
+          <TableHead>{role === 'rent' ? 'Договор / разрешение' : 'Договор'}</TableHead>
+          <TableHead>Оплата</TableHead>
+          <TableHead>Комментарий</TableHead>
+        </TableRow></TableHeader><TableBody>
+          {rows.map((r) => {
+            const meta = PAYMENT_META[r.paymentStatus]
+            const contractCell = r.contractNumber || (r.basis && r.basis !== 'договор' ? r.basis : '—')
+            return (
+              <TableRow key={`${r.locationId}-${r.role}`}>
+                <TableCell className="font-medium whitespace-nowrap">
+                  {r.buNumber ? `№${r.buNumber}` : (r.stationCode || '—')}
+                  {r.stationName && <span className="ml-1 text-xs text-muted-foreground">{r.stationName.length > 38 ? r.stationName.slice(0, 38) + '…' : r.stationName}</span>}
+                </TableCell>
+                <TableCell className="text-muted-foreground">{r.counterpartyName || '—'}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{contractCell}</TableCell>
+                <TableCell><span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.cls}`}>{paidThroughLabel(r)}</span></TableCell>
+                <TableCell className="max-w-[280px] text-xs text-muted-foreground">{r.comment || ''}</TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody></Table>
+      </div>
+    </CardContent></Card>
+  )
+}
+
 /* ── Дебиторка и взаиморасчёты ── */
 export function ReceivablesVitrine() {
   const hold = all.reduce((a, s) => a + s.unpaid.rub, 0)
@@ -291,6 +335,7 @@ export function ProcurementVitrine() {
         <Kpi label="Поставщиков" value={String(bySupplier.size)} />
       </div>
       <PaymentDisciplineBlock role="energy" />
+      <SettlementDetailTable role="energy" />
       <Card><CardContent className="overflow-x-auto pt-5">
         <Table><TableHeader><TableRow>
           <TableHead>Поставщик э/э</TableHead><TableHead className="text-right">Объём, кВт·ч</TableHead>
@@ -321,6 +366,7 @@ export function RentVitrine() {
         subtitle="Договоры и разрешения на размещение ЭЗС, арендодатели (в т.ч. муниципалитеты), статус оплаты «оплачено по», особый порядок (% от выручки / фикс / сервитут) и проблемные позиции."
       />
       <PaymentDisciplineBlock role="rent" />
+      <SettlementDetailTable role="rent" />
     </div>
   )
 }

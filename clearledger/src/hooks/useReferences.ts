@@ -245,6 +245,17 @@ export function usePaymentDisciplineSummary() {
   })
 }
 
+/** Детализация платёжной дисциплины (строки таблицы) по роли energy|rent. */
+export function useSettlementsDetail(role?: 'energy' | 'rent') {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'settlements-detail', companyId, role ?? 'all'],
+    queryFn: () => ref.getSettlementsDetail(companyId, role),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  })
+}
+
 /** Грани договора по разрезам (номенклатура/каналы/…). */
 export function useContractDimensions(contractId: string | null) {
   return useQuery({

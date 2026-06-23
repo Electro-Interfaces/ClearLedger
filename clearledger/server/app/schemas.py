@@ -687,6 +687,21 @@ class SettlementResponse(BaseModel):
     updatedAt: str
 
 
+class SettlementDetail(BaseModel):
+    """Строка детализации платёжной дисциплины: станция × контрагент × договор × оплата."""
+    locationId: str
+    stationCode: str | None = None
+    stationName: str | None = None
+    buNumber: str | None = None
+    role: str
+    counterpartyName: str | None = None
+    contractNumber: str | None = None
+    basis: str | None = None
+    paidThrough: str | None = None
+    paymentStatus: str
+    comment: str | None = None
+
+
 class RoleDiscipline(BaseModel):
     """Сводка по одной роли (energy|rent): счётчики статусов оплаты."""
     role: str

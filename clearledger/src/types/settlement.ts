@@ -23,6 +23,20 @@ export interface StationSettlement {
   updatedAt: string
 }
 
+export interface SettlementDetail {
+  locationId: string
+  stationCode: string | null
+  stationName: string | null
+  buNumber: string | null
+  role: SettlementRole
+  counterpartyName: string | null
+  contractNumber: string | null
+  basis: string | null
+  paidThrough: string | null
+  paymentStatus: PaymentStatus
+  comment: string | null
+}
+
 export interface RoleDiscipline {
   role: string
   total: number

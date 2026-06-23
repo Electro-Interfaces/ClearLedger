@@ -47,6 +47,7 @@ from app.schemas import (
     CounterpartyUpdate,
     PaymentDisciplineSummary,
     RoleDiscipline,
+    SettlementDetail,
     SettlementResponse,
     SettlementUpsert,
     NomenclatureCreate,
@@ -954,6 +955,79 @@ async def upsert_settlement(
         db.add(s)
     await db.flush()
     return _settlement_resp(s)
+
+
+@router.get("/settlements/detail", response_model=list[SettlementDetail])
+async def settlements_detail(
+    company_id: str = Query(...),
+    role: str | None = Query(None, description="energy | rent"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Детализация платёжной дисциплины (строки таблицы): станция × контрагент ×
+    договор × оплата. Для таблиц витрин «Энергозакупка»/«Аренда»."""
+    cid = await assert_company_member(company_id, current_user, db)
+    stmt = select(StationContractSettlement).where(StationContractSettlement.company_id == cid)
+    if role:
+        stmt = stmt.where(StationContractSettlement.role == role)
+    rows = (await db.execute(stmt)).scalars().all()
+    if not rows:
+        return []
+
+    loc_ids = {r.location_id for r in rows if r.location_id}
+    locs = (await db.execute(
+        select(ServiceLocation).where(ServiceLocation.id.in_(loc_ids))
+    )).scalars().all() if loc_ids else []
+    loc_map = {l.id: l for l in locs}
+
+    cp_ids = {r.counterparty_id for r in rows if r.counterparty_id}
+    cp_map: dict[str, str] = {}
+    if cp_ids:
+        uuid_keys = []
+        for k in cp_ids:
+            try:
+                uuid_keys.append(uuid.UUID(k))
+            except (ValueError, TypeError):
+                pass
+        cond = Counterparty.external_ref.in_(cp_ids)
+        if uuid_keys:
+            cond = or_(cond, Counterparty.id.in_(uuid_keys))
+        for cp in (await db.execute(
+            select(Counterparty).where(Counterparty.company_id == cid, cond)
+        )).scalars().all():
+            if cp.external_ref:
+                cp_map[cp.external_ref] = cp.name
+            cp_map[str(cp.id)] = cp.name
+
+    contr_ids = {r.contract_id for r in rows if r.contract_id}
+    contr_map: dict = {}
+    if contr_ids:
+        for c in (await db.execute(
+            select(Contract).where(Contract.id.in_(contr_ids))
+        )).scalars().all():
+            contr_map[c.id] = c.number
+
+    out: list[SettlementDetail] = []
+    for r in rows:
+        loc = loc_map.get(r.location_id)
+        md = (loc.extra_metadata or {}) if loc else {}
+        out.append(SettlementDetail(
+            locationId=r.location_id,
+            stationCode=loc.code if loc else None,
+            stationName=loc.name if loc else None,
+            buNumber=md.get("buNumber"),
+            role=r.role,
+            counterpartyName=cp_map.get(r.counterparty_id) if r.counterparty_id else None,
+            contractNumber=contr_map.get(r.contract_id) if r.contract_id else None,
+            basis=r.basis,
+            paidThrough=r.paid_through,
+            paymentStatus=r.payment_status,
+            comment=r.comment,
+        ))
+    # сорт: проблемные/неоплаченные сверху, затем по № БУ
+    order = {"unpaid": 0, "special": 1, "unknown": 2, "paid": 3}
+    out.sort(key=lambda x: (order.get(x.paymentStatus, 9), x.buNumber or x.stationCode or ""))
+    return out
 
 
 @router.get("/payment-discipline/summary", response_model=PaymentDisciplineSummary)
