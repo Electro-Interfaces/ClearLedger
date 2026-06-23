@@ -36,7 +36,7 @@ COMPANY = sys.argv[1] if len(sys.argv) > 1 else "rushydro"
 
 # (source_type, name, description, status, connection_config)
 SOURCES = [
-    ("manual_table", "Реестр договоров и оплат ЭЗС",
+    ("manual_table", "Реестр энергоснабжения и аренды ЭЗС",
      "Ручная таблица (xlsx): по каждой ЭЗС энергоснабжение и аренда с контрагентом, "
      "договором/разрешением и статусом оплаты. Загрузка в канал → нормализация L1→L2.",
      "connected", {"sheet": "Общий свод"}),
@@ -44,10 +44,10 @@ SOURCES = [
 
 # (template_id, name, description, status, anchor_source_type, anchor_doc_type, stream_name)
 CHANNELS = [
-    ("reestr_contracts_payments", "Реестр договоров и оплат ЭЗС",
+    ("reestr_contracts_payments", "Энергоснабжение и аренда ЭЗС",
      "Загрузка таблицы → L1 RAW → нормализация → L2 (контрагенты/договоры/платёжная "
      "дисциплина) → разрезы «Поставщики э/э» и «Аренда».",
-     "active", "manual_table", "contracts_payments", "Реестр договоров и оплат"),
+     "active", "manual_table", "contracts_payments", "Энергоснабжение и аренда ЭЗС"),
 ]
 
 

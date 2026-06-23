@@ -184,7 +184,7 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
     # ── Энергоснабжение / Аренда (РусГидро) ───────────────────────────────
     ChannelTemplateDecl(
         id="reestr_contracts_payments",
-        label="Реестр договоров и оплат ЭЗС",
+        label="Энергоснабжение и аренда ЭЗС",
         category="Энергоснабжение",
         description=(
             "Ручная таблица (xlsx) «Договоры и оплаты ЭЗС»: по каждой станции — "

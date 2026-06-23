@@ -43,7 +43,7 @@ export const ENERGY_SOURCES: EnergySource[] = [
   { id: 'ofd',      label: 'ОФД',                 level: 'company', streams: ['Z-отчёт', 'Чеки (54-ФЗ)'], status: 'demo' },
   { id: 'tariffs',  label: 'Тарифы / НПА',        level: 'company', streams: ['Эталон тарифов'], status: 'demo' },
   { id: 'rent',     label: 'Договоры аренды',     level: 'company', streams: ['Реестр аренды', 'Платежи аренды'], status: 'planned' },
-  { id: 'reestr_dp', label: 'Реестр договоров и оплат ЭЗС', level: 'station',
+  { id: 'reestr_dp', label: 'Реестр энергоснабжения и аренды ЭЗС', level: 'station',
     streams: ['Договоры/оплаты энергоснабжения', 'Договоры/оплаты аренды'], status: 'active' },
 ]
 
@@ -55,7 +55,7 @@ export const ENERGY_CHANNELS: EnergyChannel[] = [
   { id: 'ch_ofd',      label: 'Канал ОФД',            sourceId: 'ofd',      produces: 'Z-отчёт/чеки → L2', status: 'demo' },
   { id: 'ch_tariffs',  label: 'Канал тарифов/НПА',    sourceId: 'tariffs',  produces: 'Тарифы → L2', status: 'demo' },
   { id: 'ch_rent',     label: 'Канал аренды',         sourceId: 'rent',     produces: 'Договоры/платежи аренды → L2', status: 'planned' },
-  { id: 'ch_reestr',   label: 'Канал реестра договоров и оплат', sourceId: 'reestr_dp',
+  { id: 'ch_reestr',   label: 'Энергоснабжение и аренда ЭЗС', sourceId: 'reestr_dp',
     produces: 'Договоры+оплаты энерго/аренда → L2 (контрагенты/договоры/платёжная дисциплина)', status: 'active' },
 ]
 
