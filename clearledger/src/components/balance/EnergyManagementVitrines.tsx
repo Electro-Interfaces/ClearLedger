@@ -13,6 +13,7 @@ import {
 } from './balanceCalc'
 import { usePaymentDisciplineSummary, useSettlementsDetail } from '@/hooks/useReferences'
 import { useLocations } from '@/hooks/useLocations'
+import { m } from '@/components/locations/fleet/locationFleetService'
 import { ROLE_LABEL, PAYMENT_META, paidThroughLabel, type SettlementRole } from '@/types/settlement'
 
 const all = DEMO_EZS
@@ -105,6 +106,50 @@ function Kpi({ label, value, accent, real }: { label: string; value: string; acc
 }
 const rate = (rub: number, kwh: number) => (kwh > 0 ? (rub / kwh).toFixed(2) : '—')
 
+/* ── Структура парка по регионам (РЕАЛЬНЫЕ данные: точки обслуживания компании). ── */
+function RegionParkStructure() {
+  const locations = useLocations()
+  if (!locations.length) return null
+  const byRegion = new Map<string, { count: number; power: number }>()
+  for (const l of locations) {
+    const region = (m(l, 'federalSubject') as string) || '— не указан'
+    const e = byRegion.get(region) ?? { count: 0, power: 0 }
+    e.count += 1
+    e.power += Number(m(l, 'maxPowerKw')) || 0
+    byRegion.set(region, e)
+  }
+  const all = [...byRegion.entries()].sort((a, b) => b[1].count - a[1].count)
+  const rows = all.slice(0, 15)
+  const restCount = all.slice(15).reduce((a, [, e]) => a + e.count, 0)
+  const restRegions = all.length - rows.length
+  const totalPower = all.reduce((a, [, e]) => a + e.power, 0)
+  return (
+    <Card><CardContent className="space-y-3 overflow-x-auto pt-5">
+      <div className="flex items-center gap-2">
+        <div className="text-sm font-medium">Структура парка по регионам</div>
+        <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+        <span className="text-xs text-muted-foreground/70">{locations.length} ЭЗС · {all.length} регионов · Σ {fmtN(totalPower)} кВт</span>
+      </div>
+      <Table><TableHeader><TableRow>
+        <TableHead>Регион</TableHead><TableHead className="text-right">ЭЗС, шт</TableHead>
+        <TableHead className="text-right">Σ мощность, кВт</TableHead><TableHead className="text-right">средняя, кВт</TableHead>
+      </TableRow></TableHeader><TableBody>
+        {rows.map(([region, e]) => (
+          <TableRow key={region}>
+            <TableCell className="font-medium">{region}</TableCell>
+            <TableCell className="text-right tabular-nums">{e.count}</TableCell>
+            <TableCell className="text-right tabular-nums text-muted-foreground">{fmtN(e.power)}</TableCell>
+            <TableCell className="text-right tabular-nums text-muted-foreground">{e.count ? Math.round(e.power / e.count) : 0}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody></Table>
+      {restRegions > 0 && (
+        <p className="text-xs text-muted-foreground/70">…и ещё {restRegions} регионов ({restCount} ЭЗС).</p>
+      )}
+    </CardContent></Card>
+  )
+}
+
 /* ── Сводка сети ── */
 export function NetworkOverviewVitrine() {
   const revenue = all.reduce((a, s) => a + sumRelease(s).rub, 0)
@@ -194,6 +239,7 @@ export function RevenueVitrine() {
           ))}
         </TableBody></Table>
       </CardContent></Card>
+      <RegionParkStructure />
     </div>
   )
 }
