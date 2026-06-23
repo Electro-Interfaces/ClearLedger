@@ -12,6 +12,7 @@ import {
   supplierContract, tariffCheck, openClaimsCount, CONTRACT_STATUS_META,
 } from './balanceCalc'
 import { usePaymentDisciplineSummary, useSettlementsDetail } from '@/hooks/useReferences'
+import { useLocations } from '@/hooks/useLocations'
 import { ROLE_LABEL, PAYMENT_META, paidThroughLabel, type SettlementRole } from '@/types/settlement'
 
 const all = DEMO_EZS
@@ -90,11 +91,14 @@ function Head({ title, subtitle }: { title: string; subtitle: string }) {
     </div>
   )
 }
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: 'warn' | 'danger' }) {
+function Kpi({ label, value, accent, real }: { label: string; value: string; accent?: 'warn' | 'danger'; real?: boolean }) {
   const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400' : accent === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'
   return (
     <Card><CardContent className="pt-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <span>{label}</span>
+        {real && <span className="rounded bg-emerald-500/15 px-1 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">факт</span>}
+      </div>
       <div className={`mt-1 text-lg font-semibold tabular-nums ${tone}`}>{value}</div>
     </CardContent></Card>
   )
@@ -113,10 +117,12 @@ export function NetworkOverviewVitrine() {
   const receivable = all.reduce((a, s) => a + s.unpaid.rub, 0)
   const uptime = 98.2, util = 41 // заглушки до телеметрии
   const top = [...all].sort((a, b) => sumRelease(b).rub - sumRelease(a).rub).slice(0, 5)
+  const networkSize = useLocations().length // реальный размер парка ЭЗС (точки обслуживания компании)
   return (
     <div className="space-y-5 px-6 py-6">
-      <Head title="Сводка сети ЭЗС" subtitle="Единый кокпит сети: выручка, потери, доступность, утилизация, обращения, дебиторка." />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+      <Head title="Сводка сети ЭЗС" subtitle="Единый кокпит сети: размер парка и платёжная дисциплина — реальные данные (помечены «факт»); выручка, потери, доступность, утилизация — демо до подключения телеметрии." />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+        <Kpi label="ЭЗС в сети" value={fmtN(networkSize)} real />
         <Kpi label="Выручка, ₽" value={fmtN(revenue)} />
         <Kpi label="Отпуск, кВт·ч" value={fmtN(kwh)} />
         <Kpi label="% потерь" value={`${lossPctNet.toFixed(1)}%`} accent={lossPctNet > 2 ? 'warn' : undefined} />
@@ -143,6 +149,7 @@ export function NetworkOverviewVitrine() {
           ))}
         </TableBody></Table>
       </CardContent></Card>
+      <PaymentDisciplineBlock />
       <p className="text-xs text-muted-foreground/70">Дебиторка к доплате (холд&lt;факт): {fmtN(receivable)} ₽. Uptime/утилизация — заглушка до телеметрии ПК/ПУ.</p>
     </div>
   )
