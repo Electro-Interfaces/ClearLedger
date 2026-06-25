@@ -372,6 +372,7 @@ async def update_organization(
             setattr(org, snake, val)
 
     await db.flush()
+    await db.refresh(org)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _org_resp(org)
 
 
@@ -502,6 +503,7 @@ async def update_nomenclature(
         n.vat_rate = body.vatRate
 
     await db.flush()
+    await db.refresh(n)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _nom_resp(n)
 
 
@@ -956,6 +958,7 @@ async def upsert_settlement(
         )
         db.add(s)
     await db.flush()
+    await db.refresh(s)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _settlement_resp(s)
 
 
@@ -1281,6 +1284,7 @@ async def update_warehouse(
         w.type = body.type
 
     await db.flush()
+    await db.refresh(w)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _warehouse_resp(w)
 
 
@@ -1384,6 +1388,7 @@ async def update_bank_account(
         ba.organization_id = body.organizationId
 
     await db.flush()
+    await db.refresh(ba)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _bank_account_resp(ba)
 
 
