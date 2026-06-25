@@ -110,3 +110,57 @@ async def test_refresh_token(auth_client: AsyncClient):
     data = resp.json()
     assert "access_token" in data
     assert data["user"]["email"] == "admin@clearledger.ru"
+
+
+# ---------------------------------------------------------------------------
+# Нормализация email (регистр + пробелы) — единый канон во всех точках
+# ---------------------------------------------------------------------------
+
+
+async def test_register_normalizes_email(auth_client: AsyncClient):
+    # Заглавные буквы и пробелы по краям → сохраняется нормализованным.
+    resp = await auth_client.post(
+        "/api/auth/register",
+        json={
+            "email": "  MixedCase@Test.COM ",
+            "password": "secret123",
+            "name": "Mixed Case",
+            "company_id": "npk",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["user"]["email"] == "mixedcase@test.com"
+
+
+async def test_login_email_case_insensitive(client: AsyncClient):
+    # Тот же аккаунт (создан выше) логинится при любом регистре.
+    resp = await client.post(
+        "/api/auth/login",
+        json={"email": "MIXEDCASE@TEST.com", "password": "secret123"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["user"]["email"] == "mixedcase@test.com"
+
+
+async def test_register_duplicate_email_case_insensitive(auth_client: AsyncClient):
+    # Повторная регистрация в другом регистре — тот же email → 409, не дубль.
+    resp = await auth_client.post(
+        "/api/auth/register",
+        json={
+            "email": "MixedCase@test.com",
+            "password": "secret123",
+            "name": "Dup",
+            "company_id": "npk",
+        },
+    )
+    assert resp.status_code == 409
+
+
+async def test_forgot_password_case_insensitive(client: AsyncClient):
+    # Разный регистр не должен ломать поиск пользователя; ответ всегда 200.
+    resp = await client.post(
+        "/api/auth/forgot-password",
+        json={"email": "ADMIN@clearledger.RU"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}

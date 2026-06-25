@@ -71,8 +71,9 @@ async def forgot_password(
 ):
     """Запрос восстановления пароля: письмо со ссылкой-токеном.
     Всегда возвращает 200 — не раскрываем, существует ли email."""
+    # email уже нормализован схемой (NormEmail: strip + lower)
     user = (
-        await db.execute(select(User).where(User.email == body.email.lower()))
+        await db.execute(select(User).where(User.email == body.email))
     ).scalar_one_or_none()
     if user is not None:
         raw = secrets.token_urlsafe(32)

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import hash_password
+from app.config import get_settings
 from app.location_type_defaults import BUILTIN_LOCATION_TYPES
 from app.models import Company, LocationTypeDef, PostingTemplate, User, UserCompany
 
@@ -25,16 +26,8 @@ COMPANIES = [
     {"slug": "rushydro", "name": "РусГидро", "short_name": "РусГидро", "profile_id": "energy", "color": "#ef4444"},
 ]
 
-DEMO_USER = {
-    "email": "admin@clearledger.ru",
-    "password": "admin123",
-    "name": "Администратор",
-    "role": "admin",
-}
-
-
 async def seed_data(db: AsyncSession) -> None:
-    """Создаёт начальные компании и демо-пользователя (если отсутствуют)."""
+    """Создаёт начальные компании и (опционально) суперадмина."""
 
     # --- Компании ---
     existing = await db.execute(select(Company))
@@ -51,40 +44,8 @@ async def seed_data(db: AsyncSession) -> None:
     if created_companies:
         await db.flush()  # получить ID
 
-    # --- Демо-пользователь (суперадмин: видит все компании) ---
-    # is_superadmin проставляем и при создании, и для уже существующего —
-    # на чистой тестовой БД (ORM create_all) DDL-миграция v2.0 не выполняется,
-    # поэтому флаг должен ставить сам seed.
-    result = await db.execute(
-        select(User).where(User.email == DEMO_USER["email"])
-    )
-    demo = result.scalar_one_or_none()
-    if demo is None:
-        # Компания по умолчанию — НПК (членство суперадмину не обязательно).
-        first_company = await db.execute(
-            select(Company).where(Company.slug == "npk")
-        )
-        company = first_company.scalar_one_or_none()
-        if company:
-            user = User(
-                email=DEMO_USER["email"],
-                password_hash=hash_password(DEMO_USER["password"]),
-                name=DEMO_USER["name"],
-                role=DEMO_USER["role"],
-                company_id=company.id,
-                is_superadmin=True,
-            )
-            db.add(user)
-            await db.flush()
-            db.add(UserCompany(user_id=user.id, company_id=company.id))
-            logger.info(
-                "Создан демо-пользователь (суперадмин): %s / %s",
-                DEMO_USER["email"],
-                DEMO_USER["password"],
-            )
-    elif not demo.is_superadmin:
-        demo.is_superadmin = True
-        logger.info("Демо-пользователь повышен до суперадмина")
+    # --- Суперадмин ---
+    await _seed_superadmin(db)
 
     # --- Шаблоны проводок (глобальные, company_id=NULL) ---
     await _seed_posting_templates(db)
@@ -94,6 +55,50 @@ async def seed_data(db: AsyncSession) -> None:
 
     await db.commit()
     logger.info("Seed завершён")
+
+
+async def _seed_superadmin(db: AsyncSession) -> None:
+    """Создаёт суперадмина ТОЛЬКО при заданных SEED_SUPERADMIN_EMAIL +
+    SEED_SUPERADMIN_PASSWORD. Без них на старте суперадмин не создаётся —
+    раньше тут хардкодился admin@clearledger.ru/admin123 (постоянный бэкдор)
+    и любой пользователь с этим email втихую повышался до суперадмина.
+
+    Идемпотентно: существующему пользователю пароль НЕ перезаписываем; только
+    проставляем флаг is_superadmin (для чистой тестовой БД без DDL-миграции).
+    Авто-повышения чужого аккаунта больше нет — повышаем лишь свой сид-email."""
+    settings = get_settings()
+    email = settings.seed_superadmin_email.strip().lower()
+    password = settings.seed_superadmin_password
+    if not email or not password:
+        logger.info("Сид суперадмина отключён (SEED_SUPERADMIN_* не заданы)")
+        return
+
+    existing = (
+        await db.execute(select(User).where(User.email == email))
+    ).scalar_one_or_none()
+    if existing is not None:
+        if not existing.is_superadmin:
+            existing.is_superadmin = True
+            logger.info("Сид-суперадмин %s: проставлен флаг is_superadmin", email)
+        return
+
+    # Компания по умолчанию — НПК (членство суперадмину не обязательно).
+    company = (
+        await db.execute(select(Company).where(Company.slug == "npk"))
+    ).scalar_one_or_none()
+    user = User(
+        email=email,
+        password_hash=hash_password(password),
+        name="Администратор",
+        role="admin",
+        company_id=company.id if company else None,
+        is_superadmin=True,
+    )
+    db.add(user)
+    await db.flush()
+    if company:
+        db.add(UserCompany(user_id=user.id, company_id=company.id))
+    logger.info("Создан сид-суперадмин: %s", email)
 
 
 async def _seed_builtin_location_types(db: AsyncSession) -> None:

@@ -4,20 +4,33 @@ snake_case на стороне Python; apiClient на фронте конвер�
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, EmailStr, Field
+
+
+def _normalize_email(value: str) -> str:
+    """Единая нормализация email: обрезка пробелов + нижний регистр.
+    Гарантирует, что логин, регистрация, сброс пароля и приглашения работают
+    с одним и тем же значением (иначе письмо сброса не находит пользователя,
+    а `User@x` и `user@x` создаются как разные аккаунты)."""
+    return value.strip().lower()
+
+
+# Email с нормализацией на входе. EmailStr валидирует формат, AfterValidator —
+# приводит к канону. Использовать во ВСЕХ схемах, где email приходит от клиента.
+NormEmail = Annotated[EmailStr, AfterValidator(_normalize_email)]
 
 
 # ===== Auth =====
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: NormEmail
     password: str = Field(min_length=4)
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    email: NormEmail
 
 
 class ResetPasswordRequest(BaseModel):
@@ -26,7 +39,7 @@ class ResetPasswordRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: NormEmail
     password: str = Field(min_length=6)
     name: str = Field(min_length=1, max_length=255)
     company_id: str
@@ -77,7 +90,7 @@ class MeResponse(BaseModel):
 
 class UserCreate(BaseModel):
     company_id: str
-    email: EmailStr
+    email: NormEmail
     name: str = Field(min_length=1, max_length=255)   # ФИО
     password: str = Field(min_length=6)
     role: Literal["user", "admin"] = "user"
@@ -118,7 +131,7 @@ class GrantCompanyBody(BaseModel):
 
 class InvitationCreate(BaseModel):
     company_id: str
-    email: EmailStr
+    email: NormEmail
     role: Literal["user", "admin"] = "user"
     position: str | None = Field(None, max_length=150)
 

@@ -8,10 +8,18 @@ Seed-данные: 5 компаний + демо-пользователь (admin
 import os
 
 # --- Тестовое окружение ---
-os.environ["DATABASE_URL"] = (
-    "postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger_test"
+# Тестовая БД задаётся ТОЛЬКО через TEST_DATABASE_URL (обычный DATABASE_URL из
+# окружения намеренно игнорируется — иначе прогон мог бы снести прод/dev-БД,
+# conftest делает drop_all). По умолчанию — локальный clearledger_test:5432.
+os.environ["DATABASE_URL"] = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger_test",
 )
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
+# Суперадмин для тестов: сид создаёт его только при заданных SEED_SUPERADMIN_*
+# (в проде их нет → бэкдор admin@clearledger.ru/admin123 не появляется).
+os.environ.setdefault("SEED_SUPERADMIN_EMAIL", "admin@clearledger.ru")
+os.environ.setdefault("SEED_SUPERADMIN_PASSWORD", "admin123")
 
 from collections.abc import AsyncGenerator
 

@@ -66,6 +66,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown: создание таблиц + seed данных."""
     logger.info("Запуск TradeLedger Server...")
 
+    # Безопасность: секрет JWT не должен оставаться дефолтным на проде —
+    # иначе токены подделываются публично известным ключом.
+    if settings.secret_is_insecure:
+        logger.critical(
+            "SECRET_KEY не задан — используется небезопасный дефолт! "
+            "JWT можно подделать. Задайте SECRET_KEY (или JWT_SECRET) в окружении."
+        )
+
     # Создание таблиц
     await create_all()
     logger.info("Таблицы БД созданы/проверены")

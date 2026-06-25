@@ -71,7 +71,7 @@ async def create_invitation(
     current_user: User = Depends(get_current_user),
 ):
     cid = await require_company_admin(payload.company_id, current_user, db)
-    email = payload.email.lower()
+    email = payload.email  # уже нормализован схемой (NormEmail: strip + lower)
 
     # Уже член компании?
     existing_user = (

@@ -6,8 +6,10 @@
 #   POSTGRES_PASSWORD — пароль для postgres
 #   COM_AGENT_URL    — http://10.10.70.45:8080 (1c-dev-01)
 #   COM_AGENT_TOKEN  — Bearer secret COM-агента
-#   JWT_SECRET       — секрет для JWT-токенов backend
+#   JWT_SECRET       — секрет для JWT-токенов backend (маппится в SECRET_KEY)
 #   CORS_ORIGINS     — https://ledger.dataworker.ru
+#   SEED_SUPERADMIN_EMAIL / SEED_SUPERADMIN_PASSWORD — опц., разовый запуск для
+#                      создания суперадмина; после создания убрать из .env
 
 services:
   postgres:
@@ -40,8 +42,15 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://clearledger:${POSTGRES_PASSWORD}@postgres:5432/clearledger
-      JWT_SECRET: ${JWT_SECRET}
+      # Приложение читает секрет JWT из SECRET_KEY. Хостовая переменная исторически
+      # называется JWT_SECRET (deploy/.env) — маппим её в правильное имя, иначе
+      # backend брал небезопасный дефолт и токены подделывались.
+      SECRET_KEY: ${JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://ledger.dataworker.ru}
+      # Суперадмин на старте создаётся ТОЛЬКО при заданных обеих переменных.
+      # Пусто → дефолтного бэкдора admin@clearledger.ru/admin123 не будет.
+      SEED_SUPERADMIN_EMAIL: ${SEED_SUPERADMIN_EMAIL:-}
+      SEED_SUPERADMIN_PASSWORD: ${SEED_SUPERADMIN_PASSWORD:-}
       COM_AGENT_URL: ${COM_AGENT_URL:-http://10.10.70.45:8080}
       COM_AGENT_TOKEN: ${COM_AGENT_TOKEN}
       LOG_LEVEL: INFO

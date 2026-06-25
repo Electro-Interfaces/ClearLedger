@@ -5,7 +5,13 @@
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Значение секрета по умолчанию — заведомо небезопасное. Если оно доедет до
+# прода, JWT можно подделать публично известным ключом. main.lifespan проверяет
+# и кричит в лог; деплой обязан задать SECRET_KEY (или JWT_SECRET).
+DEFAULT_INSECURE_SECRET = "change-me-in-production-use-openssl-rand-hex-32"
 
 
 class Settings(BaseSettings):
@@ -22,10 +28,26 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger"
     )
 
-    # Безопасность
-    secret_key: str = "change-me-in-production-use-openssl-rand-hex-32"
+    # Безопасность. Секрет читается из SECRET_KEY ИЛИ JWT_SECRET — историческое
+    # расхождение имён (прод-compose отдавал JWT_SECRET, а приложение ждало
+    # SECRET_KEY → втихую брался дефолт). AliasChoices принимает оба.
+    secret_key: str = Field(
+        default=DEFAULT_INSECURE_SECRET,
+        validation_alias=AliasChoices("SECRET_KEY", "JWT_SECRET"),
+    )
     access_token_expire_minutes: int = 1440  # 24 часа
     algorithm: str = "HS256"
+
+    # Сид суперадмина. Создаётся при старте ТОЛЬКО если заданы обе переменные
+    # (SEED_SUPERADMIN_EMAIL + SEED_SUPERADMIN_PASSWORD). Пусто → суперадмин на
+    # старте НЕ создаётся (нет дефолтного бэкдора admin@clearledger.ru/admin123).
+    seed_superadmin_email: str = ""
+    seed_superadmin_password: str = ""
+
+    @property
+    def secret_is_insecure(self) -> bool:
+        """Секрет не задан в окружении (используется небезопасный дефолт)?"""
+        return self.secret_key == DEFAULT_INSECURE_SECRET
 
     # CORS — список origin через запятую
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
