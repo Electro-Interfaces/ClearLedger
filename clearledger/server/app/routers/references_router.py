@@ -223,6 +223,7 @@ async def update_counterparty(
             setattr(cp, snake, val)
 
     await db.flush()
+    await db.refresh(cp)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _counterparty_resp(cp)
 
 
@@ -646,6 +647,7 @@ async def update_contract(
         c.scope_type = body.scopeType
 
     await db.flush()
+    await db.refresh(c)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _contract_resp(c)
 
 
