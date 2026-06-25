@@ -29,10 +29,12 @@ export function PassportTab({
   const lon = meta.longitude != null ? String(meta.longitude) : ''
   const owner = meta.ownerTitle != null ? String(meta.ownerTitle) : ''
 
+  // Поля, вынесенные в блок «Расположение» (не дублируем в «Характеристиках»).
+  const LOCATION_KEYS = ['latitude', 'longitude', 'ownerTitle', 'ownerId',
+    'federalDistrict', 'federalSubject', 'cityName', 'placement']
   // Характеристики типа БЕЗ оборудования и без гео/владельца (они в карточках выше).
   const passportFields = (typeDef?.fields ?? []).filter(
-    (f) => !EQUIPMENT_KEYS.includes(f.key) &&
-      !['latitude', 'longitude', 'ownerTitle', 'ownerId'].includes(f.key),
+    (f) => !EQUIPMENT_KEYS.includes(f.key) && !LOCATION_KEYS.includes(f.key),
   )
 
   return (
@@ -51,13 +53,15 @@ export function PassportTab({
         </CardContent>
       </Card>
 
-      {(lat || lon) && (
+      {(lat || lon || meta.federalDistrict != null || meta.federalSubject != null) && (
         <SectionCard title="Расположение" icon={MapPin}>
           <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-            <Field label="Широта" value={lat || '—'} mono />
-            <Field label="Долгота" value={lon || '—'} mono />
-            {meta.cityName != null && <Field label="Город" value={String(meta.cityName)} />}
+            {meta.federalDistrict != null && <Field label="Федеральный округ" value={String(meta.federalDistrict)} />}
             {meta.federalSubject != null && <Field label="Регион" value={String(meta.federalSubject)} />}
+            {meta.cityName != null && <Field label="Город" value={String(meta.cityName)} />}
+            {meta.placement != null && <Field label="Расположение" value={String(meta.placement)} />}
+            {(lat || lon) && <Field label="Широта" value={lat || '—'} mono />}
+            {(lat || lon) && <Field label="Долгота" value={lon || '—'} mono />}
           </div>
           {lat && lon && (
             <a

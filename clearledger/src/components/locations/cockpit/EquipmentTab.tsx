@@ -5,7 +5,7 @@
  * Прочие типы: профильный каркас или мягкая заглушка.
  */
 import { Card, CardContent } from '@/components/ui/card'
-import { Cpu, Fuel, Gauge, Database, Zap, Box } from 'lucide-react'
+import { Cpu, Fuel, Gauge, Database, Zap, Box, Plug } from 'lucide-react'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsReader } from '@/components/manual/MetadataFieldsReader'
 import { locationStationNumber } from '@/components/reconciliation/locationMapping'
@@ -25,6 +25,10 @@ export function EquipmentTab({ location }: { location: ServiceLocation }) {
     const equipFields = (typeDef?.fields ?? []).filter((f) => EQUIPMENT_KEYS.includes(f.key))
     // Считаем заполненным значение, отличное от пустого/нуля-заглушки.
     const has = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== ''
+    // Силовые блоки (коннекторы) с мощностью каждого — детализация «от производителя».
+    const connectors = Array.isArray(meta.connectors)
+      ? (meta.connectors as Array<{ type?: string; powerKw?: number | null }>)
+      : []
     // Сводка «от производителя» — только заполненные поля (без вереницы «—»).
     const summary: { label: string; value: string; mono?: boolean }[] = [
       { label: 'Бренд', value: String(meta.manufacturer ?? '') },
@@ -51,6 +55,21 @@ export function EquipmentTab({ location }: { location: ServiceLocation }) {
             )}
           </CardContent>
         </Card>
+        {connectors.length > 0 && (
+          <SectionCard title="Силовые блоки (коннекторы)" icon={Plug}>
+            <div className="space-y-1.5">
+              {connectors.map((c, i) => (
+                <div key={i} className="flex items-center gap-3 border-b border-border/30 py-1.5 text-sm last:border-0">
+                  <span className="w-9 shrink-0 font-mono text-xs text-muted-foreground">№{i + 1}</span>
+                  <span className="font-medium">{c.type ?? '—'}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {c.powerKw != null ? `${c.powerKw} кВт` : 'мощность н/д'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+        )}
         <SectionCard title="Все характеристики оборудования" icon={Zap}>
           <MetadataFieldsReader fields={equipFields} values={meta} />
         </SectionCard>
