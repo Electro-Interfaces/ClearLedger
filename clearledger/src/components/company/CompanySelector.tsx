@@ -25,13 +25,7 @@ export function CompanySelector() {
       <SelectTrigger
         className="h-10 w-[200px] text-sm font-medium bg-secondary border-border"
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <div
-            className="size-2.5 shrink-0 rounded-full"
-            style={{ background: company.color }}
-          />
-          <SelectValue placeholder="Выберите компанию" />
-        </div>
+        <SelectValue placeholder="Выберите компанию" />
       </SelectTrigger>
       <SelectContent
         style={{ boxShadow: 'var(--shadow-large)' }}

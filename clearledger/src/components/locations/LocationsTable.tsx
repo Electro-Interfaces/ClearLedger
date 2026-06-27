@@ -56,6 +56,34 @@ const FLAG_META: Record<StationFlag, { label: string; cls: string; dot: string }
   none:      { label: '—',           cls: 'text-muted-foreground',                  dot: 'bg-muted-foreground/30' },
 }
 
+/** ИД сети (system_id) и ИД торговой точки (station) из STS-привязки — специфика АЗС. */
+function stsRef(l: ServiceLocation): { network: string; station: string } {
+  for (const b of l.sourceBindings ?? []) {
+    const cfg = (b.config ?? {}) as Record<string, string | number>
+    const network = cfg.system_id ?? cfg.systemId ?? cfg.systemCode
+    const station = cfg.station ?? cfg.station_id
+    if (network != null || station != null) {
+      return {
+        network: network != null ? String(network) : '',
+        station: station != null ? String(station) : '',
+      }
+    }
+  }
+  return { network: '', station: '' }
+}
+
+/** Виды топлива станции (снимок из STS, лежит в metadata.fuelTypes). */
+function fuelTypesOf(l: ServiceLocation): string[] {
+  const v = (l.metadata as Record<string, unknown> | undefined)?.fuelTypes
+  return Array.isArray(v) ? v.map(String) : []
+}
+
+/** MSTO servicePointId станции (ID у агента онлайн-заказов, лежит в metadata.mstoId). */
+function mstoIdOf(l: ServiceLocation): string {
+  const v = (l.metadata as Record<string, unknown> | undefined)?.mstoId
+  return v != null && v !== '' ? String(v) : ''
+}
+
 type SortKey = 'number' | 'name' | 'region' | 'city' | 'brand' | 'power'
 
 export function LocationsTable({
@@ -95,6 +123,31 @@ export function LocationsTable({
     return map
   }, [settlements])
   const showPayment = (settlements?.length ?? 0) > 0
+
+  // Опциональные столбцы парка ЭЗС (federalSubject/cityName/manufacturer/
+  // connectorTypes/maxPowerKw/linkStatus/operationalStatus заполняются при импорте
+  // ЭЗС РусГидро из HubEx). Для fuel/ГИГ этих данных нет → скрываем пустые столбцы,
+  // чтобы таблица не пестрила «—». Так единый табличный вид адаптируется под специфику.
+  const hasMeta = (key: string) => locations.some((l) => m(l, key))
+  const showNumber = hasMeta('number')
+  const showRegion = hasMeta('federalSubject')
+  const showCity = hasMeta('cityName')
+  const showBrand = hasMeta('manufacturer')
+  const showConnectors = hasMeta('connectorTypes')
+  const showPower = hasMeta('maxPowerKw')
+  const showHubex = hasMeta('linkStatus')
+  const showOpStatus = locations.some((l) => l.operationalStatus && l.operationalStatus !== 'unknown')
+  // STS-идентификаторы АЗС (ИД сети / ИД торговой точки) — есть у fuel-точек ГИГ,
+  // нет у ЭЗС РусГидро. Появляются только когда в выборке есть STS-привязки.
+  const showNetwork = locations.some((l) => stsRef(l).network)
+  const showStation = locations.some((l) => stsRef(l).station)
+  const showFuel = locations.some((l) => fuelTypesOf(l).length > 0)
+  const showMsto = locations.some((l) => mstoIdOf(l))
+  // Видимых столбцов = базовые (иконка, Название, Статус, действия = 4) + опциональные.
+  const visibleCols = 4 + [
+    showNumber, showNetwork, showStation, showMsto, showFuel, showRegion, showCity, showBrand,
+    showConnectors, showPower, showOpStatus, showPayment, showSales, showHubex,
+  ].filter(Boolean).length
 
   const sorted = useMemo(() => {
     const val = (l: ServiceLocation): string | number => {
@@ -150,17 +203,21 @@ export function LocationsTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-[40px]"></TableHead>
-              <SortHead k="number" className="w-[90px]">Номер</SortHead>
+              {showNumber && <SortHead k="number" className="w-[90px]">Номер</SortHead>}
               <SortHead k="name">Название</SortHead>
-              <SortHead k="region" className="hidden md:table-cell">Регион</SortHead>
-              <SortHead k="city" className="hidden lg:table-cell">Город</SortHead>
-              <SortHead k="brand" className="hidden lg:table-cell">Бренд</SortHead>
-              <TableHead className="hidden xl:table-cell">Коннекторы</TableHead>
-              <SortHead k="power" className="hidden md:table-cell text-right">кВт</SortHead>
-              <TableHead>Статус станции</TableHead>
+              {showNetwork && <TableHead className="w-[80px]">ИД сети</TableHead>}
+              {showStation && <TableHead className="w-[100px]">ИД точки</TableHead>}
+              {showMsto && <TableHead className="w-[80px]">MSTO</TableHead>}
+              {showFuel && <TableHead>Виды топлива</TableHead>}
+              {showRegion && <SortHead k="region" className="hidden md:table-cell">Регион</SortHead>}
+              {showCity && <SortHead k="city" className="hidden lg:table-cell">Город</SortHead>}
+              {showBrand && <SortHead k="brand" className="hidden lg:table-cell">Бренд</SortHead>}
+              {showConnectors && <TableHead className="hidden xl:table-cell">Коннекторы</TableHead>}
+              {showPower && <SortHead k="power" className="hidden md:table-cell text-right">кВт</SortHead>}
+              {showOpStatus && <TableHead>Статус станции</TableHead>}
               {showPayment && <TableHead className="hidden md:table-cell">Оплата</TableHead>}
               {showSales && <TableHead className="hidden lg:table-cell text-right">Реализация, пред. мес.</TableHead>}
-              <TableHead className="hidden xl:table-cell">Связка HubEx</TableHead>
+              {showHubex && <TableHead className="hidden xl:table-cell">Связка HubEx</TableHead>}
               <TableHead className="hidden sm:table-cell">Статус</TableHead>
               <TableHead className="w-[70px]"></TableHead>
             </TableRow>
@@ -174,19 +231,33 @@ export function LocationsTable({
                   className={onSelectLocation ? 'cursor-pointer hover:bg-secondary/50' : undefined}
                   onClick={onSelectLocation ? () => onSelectLocation(l) : undefined}>
                   <TableCell><Icon className="h-4 w-4 text-muted-foreground" /></TableCell>
-                  <TableCell className="font-mono text-xs font-medium">{m(l, 'number')}</TableCell>
+                  {showNumber && <TableCell className="font-mono text-xs font-medium">{m(l, 'number')}</TableCell>}
                   <TableCell className="font-medium">{l.name}</TableCell>
-                  <TableCell className="hidden md:table-cell text-muted-foreground">{m(l, 'federalSubject')}</TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'cityName')}</TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'manufacturer') || '—'}</TableCell>
-                  <TableCell className="hidden xl:table-cell text-xs text-muted-foreground tabular-nums">{m(l, 'connectorTypes') || '—'}</TableCell>
-                  <TableCell className="hidden md:table-cell text-right tabular-nums">{m(l, 'maxPowerKw')}</TableCell>
-                  <TableCell>
-                    {(() => {
-                      const om = OP_STATUS_META[l.operationalStatus || 'unknown'] ?? OP_STATUS_META.unknown
-                      return <Badge variant="secondary" className={`text-[10px] ${om.cls}`}>{om.label}</Badge>
-                    })()}
-                  </TableCell>
+                  {showNetwork && <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">{stsRef(l).network || '—'}</TableCell>}
+                  {showStation && <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">{stsRef(l).station || '—'}</TableCell>}
+                  {showMsto && <TableCell className="font-mono text-xs text-muted-foreground tabular-nums">{mstoIdOf(l) || '—'}</TableCell>}
+                  {showFuel && (
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {fuelTypesOf(l).map((ft) => (
+                          <Badge key={ft} variant="outline" className="text-[10px]">{ft}</Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                  )}
+                  {showRegion && <TableCell className="hidden md:table-cell text-muted-foreground">{m(l, 'federalSubject')}</TableCell>}
+                  {showCity && <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'cityName')}</TableCell>}
+                  {showBrand && <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'manufacturer') || '—'}</TableCell>}
+                  {showConnectors && <TableCell className="hidden xl:table-cell text-xs text-muted-foreground tabular-nums">{m(l, 'connectorTypes') || '—'}</TableCell>}
+                  {showPower && <TableCell className="hidden md:table-cell text-right tabular-nums">{m(l, 'maxPowerKw')}</TableCell>}
+                  {showOpStatus && (
+                    <TableCell>
+                      {(() => {
+                        const om = OP_STATUS_META[l.operationalStatus || 'unknown'] ?? OP_STATUS_META.unknown
+                        return <Badge variant="secondary" className={`text-[10px] ${om.cls}`}>{om.label}</Badge>
+                      })()}
+                    </TableCell>
+                  )}
                   {showPayment && (
                     <TableCell className="hidden md:table-cell">
                       {(() => {
@@ -209,19 +280,21 @@ export function LocationsTable({
                       {m(l, 'salesPrevMonth') || '—'}
                     </TableCell>
                   )}
-                  <TableCell className="hidden xl:table-cell">
-                    {(() => {
-                      const ls = m(l, 'linkStatus'); const aid = m(l, 'hubexAssetId')
-                      if (!ls) return null
-                      const lm = LINK_META[ls]
-                      return (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Badge variant="secondary" className={`text-[10px] ${lm?.cls ?? ''}`}>{lm?.label ?? ls}</Badge>
-                          {aid && <span className="text-xs text-muted-foreground tabular-nums">{aid}</span>}
-                        </span>
-                      )
-                    })()}
-                  </TableCell>
+                  {showHubex && (
+                    <TableCell className="hidden xl:table-cell">
+                      {(() => {
+                        const ls = m(l, 'linkStatus'); const aid = m(l, 'hubexAssetId')
+                        if (!ls) return null
+                        const lm = LINK_META[ls]
+                        return (
+                          <span className="inline-flex items-center gap-1.5">
+                            <Badge variant="secondary" className={`text-[10px] ${lm?.cls ?? ''}`}>{lm?.label ?? ls}</Badge>
+                            {aid && <span className="text-xs text-muted-foreground tabular-nums">{aid}</span>}
+                          </span>
+                        )
+                      })()}
+                    </TableCell>
+                  )}
                   <TableCell className="hidden sm:table-cell">
                     {st && <Badge variant="secondary" className="text-[10px]">{st.label}</Badge>}
                   </TableCell>
@@ -256,7 +329,7 @@ export function LocationsTable({
             })}
             {slice.length === 0 && (
               <TableRow>
-                <TableCell colSpan={12 + (showPayment ? 1 : 0) + (showSales ? 1 : 0)} className="text-center text-sm text-muted-foreground py-8">
+                <TableCell colSpan={visibleCols} className="text-center text-sm text-muted-foreground py-8">
                   Ничего не найдено по фильтрам.
                 </TableCell>
               </TableRow>

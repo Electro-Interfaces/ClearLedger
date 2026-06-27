@@ -12,7 +12,6 @@ import { DimensionContractsPopover } from '@/components/reference/DimensionContr
 import { getChannels, loadChannels, deleteChannel } from '@/services/channelService'
 import { getSources, loadSources } from '@/services/sourceService'
 import { useCompany } from '@/contexts/CompanyContext'
-import { EnergyChannelsSection } from '@/components/pipeline/EnergyPipelineSections'
 import { getChannelSourceIds } from '@/types/channel'
 import type { Channel } from '@/types/channel'
 import { Plus, Trash2, Radio, Database, ChevronRight, Clock } from 'lucide-react'
@@ -89,8 +88,7 @@ export function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>(getChannels)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [scheduleOpen, setScheduleOpen] = useState(false)
-  const { companyId, company } = useCompany()
-  const isEnergy = company.profileId === 'energy'
+  const { companyId } = useCompany()
   const [searchParams, setSearchParams] = useSearchParams()
 
   function refresh() { setChannels(getChannels()) }
@@ -123,12 +121,9 @@ export function ChannelsPage() {
         <div>
           <h1 className="text-xl font-bold">Каналы данных</h1>
           <p className="text-sm text-muted-foreground">
-            {isEnergy
-              ? 'Каналы выводятся от подключённых разрезов учёта (разрез → каналы).'
-              : 'Комбинация источников → загрузка → сверка → результат'}
+            Комбинация источников → загрузка → сверка → результат
           </p>
         </div>
-        {!isEnergy && (
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setScheduleOpen(true)}>
             <Clock className="h-4 w-4" />
@@ -139,15 +134,12 @@ export function ChannelsPage() {
             Создать канал
           </Button>
         </div>
-        )}
       </div>
 
       <ChannelWizard open={wizardOpen} onOpenChange={(v) => { setWizardOpen(v); if (!v) refresh() }} />
       <ScheduleOverview open={scheduleOpen} onOpenChange={setScheduleOpen} />
 
-      {isEnergy ? (
-        <EnergyChannelsSection />
-      ) : channels.length === 0 ? (
+      {channels.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
             <Radio className="h-10 w-10 text-muted-foreground/30" />

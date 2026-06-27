@@ -380,9 +380,10 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
   const stats = useMemo(() => computeFleetStats(filtered, typeByCode), [filtered, typeByCode])
   const options = useMemo(() => collectFilterOptions(locations, typeByCode), [locations, typeByCode])
 
-  // Режим отображения списка: при большом числе точек по умолчанию таблица.
+  // Режим отображения списка: единый вид по умолчанию — таблица (как у РусГидро/
+  // энергетики). Карточки доступны вручную через переключатель вида.
   const [viewOverride, setViewOverride] = useState<'cards' | 'table' | null>(null)
-  const view: 'cards' | 'table' = viewOverride ?? (locations.length > 50 ? 'table' : 'cards')
+  const view: 'cards' | 'table' = viewOverride ?? 'table'
 
   // Окно станции (cockpit) — открывается кликом по строке/карточке.
   const [cockpit, setCockpit] = useState<ServiceLocation | null>(null)

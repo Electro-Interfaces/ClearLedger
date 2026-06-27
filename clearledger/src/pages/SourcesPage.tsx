@@ -17,7 +17,6 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { getSources, loadSources, createSource, updateSource, deleteSource, frontendSourceType } from '@/services/sourceService'
 import { useCompany } from '@/contexts/CompanyContext'
-import { EnergySourcesSection } from '@/components/pipeline/EnergyPipelineSections'
 import { SOURCE_TYPE_META, BACKEND_SOURCE_META, type Source } from '@/types/channel'
 import { stsTestConnection } from '@/services/fuel/stsApiClient'
 import { mstoTestConnection } from '@/services/msto/mstoApiClient'
@@ -428,8 +427,7 @@ export function SourcesPage() {
   const [newName, setNewName] = useState('')
   const [newType, setNewType] = useState<string>('sts')
   const [focusId, setFocusId] = useState<string | null>(null)
-  const { companyId, company } = useCompany()
-  const isEnergy = company.profileId === 'energy'
+  const { companyId } = useCompany()
   const [searchParams, setSearchParams] = useSearchParams()
 
   function refresh() { setSources(getSources()) }
@@ -480,12 +478,9 @@ export function SourcesPage() {
         <div>
           <h1 className="text-xl font-bold">Источники данных</h1>
           <p className="text-sm text-muted-foreground">
-            {isEnergy
-              ? 'Источники выводятся от подключённых разрезов учёта (разрез → каналы → источники).'
-              : 'Подключения к внешним системам. Настройте источник, затем создайте канал.'}
+            Подключения к внешним системам. Настройте источник, затем создайте канал.
           </p>
         </div>
-        {!isEnergy && (
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm" className="gap-1.5">
@@ -521,12 +516,9 @@ export function SourcesPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        )}
       </div>
 
-      {isEnergy ? (
-        <EnergySourcesSection />
-      ) : sources.length === 0 ? (
+      {sources.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
             <Server className="h-10 w-10 text-muted-foreground/30" />
