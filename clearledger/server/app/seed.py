@@ -16,13 +16,11 @@ from app.models import Company, LocationTypeDef, PostingTemplate, User, UserComp
 logger = logging.getLogger("clearledger.seed")
 
 # Компании — данные совпадают с config/companies.ts (defaultCompanies).
-# Для GIG Ledger основная — gig (ООО ГИГ / ГазИнвестГрупп). Остальные — legacy.
+# Активные направления GIG Ledger: gig (ООО ГИГ / ГазИнвестГрупп) и rushydro.
+# Legacy-компании (НПК, РТИ, ТС-94, ОФ ПТК) удалены 2026-06-27 — больше не
+# сидятся, чтобы не воскресать при рестарте после ручной чистки в БД.
 COMPANIES = [
     {"slug": "gig", "name": "ООО ГИГ (ГазИнвестГрупп)", "short_name": "ГИГ", "profile_id": "fuel", "color": "#3b82f6", "inn": "7839124578"},
-    {"slug": "npk", "name": "НПК", "short_name": "НПК", "profile_id": "fuel", "color": "#3b82f6"},
-    {"slug": "rti", "name": "РТИ", "short_name": "РТИ", "profile_id": "fuel", "color": "#8b5cf6"},
-    {"slug": "ts94", "name": "ТС-94", "short_name": "ТС-94", "profile_id": "trade", "color": "#10b981"},
-    {"slug": "ofptk", "name": "ОФ ПТК", "short_name": "ОФПТК", "profile_id": "retail", "color": "#f59e0b"},
     {"slug": "rushydro", "name": "РусГидро", "short_name": "РусГидро", "profile_id": "energy", "color": "#ef4444"},
 ]
 
@@ -82,9 +80,9 @@ async def _seed_superadmin(db: AsyncSession) -> None:
             logger.info("Сид-суперадмин %s: проставлен флаг is_superadmin", email)
         return
 
-    # Компания по умолчанию — НПК (членство суперадмину не обязательно).
+    # Компания по умолчанию — ГИГ (членство суперадмину не обязательно).
     company = (
-        await db.execute(select(Company).where(Company.slug == "npk"))
+        await db.execute(select(Company).where(Company.slug == "gig"))
     ).scalar_one_or_none()
     user = User(
         email=email,
