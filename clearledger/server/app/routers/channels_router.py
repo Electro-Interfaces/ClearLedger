@@ -7,18 +7,20 @@
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.channel_catalog import get_channel_template
-from app.database import get_db
+from app.database import async_session_factory, get_db
 from app.deps import CompanyDep, get_owned
 from app.models import Channel, ChannelStage, ChannelStream, ChannelSyncLog, Source, User
 from app.services.cb_intake import ingest_packages
@@ -106,9 +108,13 @@ async def _stages(db: AsyncSession, channel_id: uuid.UUID) -> list[ChannelStage]
     return list(res.scalars().all())
 
 
-async def _resp(db: AsyncSession, ch: Channel, skipped: list[str] | None = None) -> ChannelResponse:
-    streams = await _streams(db, ch.id)
-    stages = await _stages(db, ch.id)
+async def _resp(db: AsyncSession, ch: Channel, skipped: list[str] | None = None,
+                streams: list[ChannelStream] | None = None,
+                stages: list[ChannelStage] | None = None) -> ChannelResponse:
+    if streams is None:
+        streams = await _streams(db, ch.id)
+    if stages is None:
+        stages = await _stages(db, ch.id)
     return ChannelResponse(
         id=str(ch.id), company_id=str(ch.company_id), name=ch.name,
         description=ch.description, status=ch.status, template_id=ch.template_id,
@@ -116,8 +122,9 @@ async def _resp(db: AsyncSession, ch: Channel, skipped: list[str] | None = None)
         config=ch.config or {}, period_days=int(ch.period_days or 30),
         last_sync_at=ch.last_sync_at.isoformat() if ch.last_sync_at else None,
         streams=[{
-            "id": str(s.id), "source_id": str(s.source_id),
+            "id": str(s.id), "source_id": str(s.source_id) if s.source_id else None,
             "doc_type_id": s.doc_type_id, "name": s.name, "enabled": s.enabled,
+            "role": s.role,
         } for s in streams],
         stages=[{
             "id": str(st.id), "stage_type": st.stage_type, "name": st.name,
@@ -160,10 +167,12 @@ async def create_channel(
             src_id = await _resolve_source(db, cid, s.source_type, payload.source_bindings)
             if src_id is None:
                 skipped.append(f"{s.source_type}:{s.doc_type}")
-                continue
+            # Разрез предустановлен шаблоном — создаём ВСЕГДА (даже без источника);
+            # enabled = источник подключён. Так канал несёт весь свой набор разрезов.
             db.add(ChannelStream(
                 channel_id=ch.id, source_id=src_id,
-                doc_type_id=s.doc_type, name=s.label,
+                doc_type_id=s.doc_type, name=s.label, role=s.role,
+                enabled=src_id is not None,
             ))
         for i, st in enumerate(tpl.stages):
             db.add(ChannelStage(
@@ -176,10 +185,23 @@ async def create_channel(
 
 @router.get("", response_model=list[ChannelResponse])
 async def list_channels(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(
+    chs = list((await db.execute(
         select(Channel).where(Channel.company_id == cid).order_by(Channel.created_at)
-    )
-    return [await _resp(db, ch) for ch in res.scalars().all()]
+    )).scalars())
+    ch_ids = [c.id for c in chs]
+    # Batch-загрузка потоков и стадий ВСЕХ каналов (вместо N+1: 2 запроса на канал).
+    from collections import defaultdict
+    streams_by: dict = defaultdict(list)
+    stages_by: dict = defaultdict(list)
+    if ch_ids:
+        for s in (await db.execute(
+            select(ChannelStream).where(ChannelStream.channel_id.in_(ch_ids)))).scalars():
+            streams_by[s.channel_id].append(s)
+        for st in (await db.execute(
+            select(ChannelStage).where(ChannelStage.channel_id.in_(ch_ids))
+            .order_by(ChannelStage.order_index))).scalars():
+            stages_by[st.channel_id].append(st)
+    return [await _resp(db, ch, streams=streams_by[ch.id], stages=stages_by[ch.id]) for ch in chs]
 
 
 @router.get("/{channel_id}", response_model=ChannelResponse)
@@ -266,40 +288,214 @@ async def remove_stream(
     return await _resp(db, ch)
 
 
+class RunRequest(BaseModel):
+    """Явный период загрузки (YYYY-MM-DD). Указывается перед запуском.
+    station_codes — подмножество станций канала (UI «Обновить с выбором точек»);
+    None/пусто → все станции канала."""
+    date_from: str | None = None
+    date_to: str | None = None
+    station_codes: list[int] | None = None
+    all_period: bool = False   # вся история (игнорировать даты)
+
+
+def _loaded_total(result: dict) -> int:
+    by = result.get("by_station")
+    if isinstance(by, list):
+        return sum(int(r.get("created", 0) or 0) for r in by)
+    return int(result.get("created", 0) or 0)
+
+
+def _run_summary(result: dict) -> str:
+    n = _loaded_total(result)
+    if result.get("stations_total") is not None:
+        return f"загружено {n}, станций {result.get('stations_ok', '?')}/{result.get('stations_total', '?')}"
+    return result.get("message") or f"загружено {n}"
+
+
+async def _run_channel_background(
+    channel_id: uuid.UUID, date_from: str | None, date_to: str | None, log_id: uuid.UUID,
+    station_codes: list[int] | None = None, all_period: bool = False,
+) -> None:
+    """Фоновый прогон: своя сессия, поэтапный commit внутри оркестратора.
+    Запуск НЕ держит HTTP-запрос — UI поллит статус через /run-status."""
+    async with async_session_factory() as db:
+        ch = await db.get(Channel, channel_id)
+        if ch is None:
+            return
+        result: dict = {}
+        status = "success"
+        try:
+            result = await orchestrate_channel(
+                db, ch, date_from=date_from, date_to=date_to, log_id=log_id,
+                station_codes=station_codes, all_period=all_period)
+            status = result.get("status", "success")
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("clearledger.channel").exception("Фоновый прогон канала упал")
+            status = "error"
+            result = {"message": f"{type(exc).__name__}: {exc}"}
+            try:
+                await db.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+        # обновить лог-запись (созданную синхронно при запуске)
+        log = await db.get(ChannelSyncLog, log_id)
+        if log is not None:
+            log.status = "success" if status == "success" else (
+                "partial" if status == "skipped" else "error")
+            log.loaded = _loaded_total(result)
+            # Счётчики и per-station детали для строки прогона в кокпите.
+            by = result.get("by_station") if isinstance(result.get("by_station"), list) else []
+            log.skipped = sum(int(r.get("skipped", 0) or 0) for r in by)
+            log.duplicates = sum(int(r.get("duplicates", 0) or 0) for r in by)
+            log.errors = sum(1 for r in by if "error" in r)
+            st_total = result.get("stations_total")
+            log.events = [{
+                "level": "info" if status in ("success", "skipped") else "error",
+                "event": "run",
+                "message": _run_summary(result),
+                "stations_done": len(by),
+                "stations_total": st_total if isinstance(st_total, int) else len(by),
+                "loaded": log.loaded,
+                "by_station": by,
+            }]
+            log.finished_at = datetime.now(timezone.utc)
+        ch2 = await db.get(Channel, channel_id)
+        if ch2 is not None:
+            ch2.last_sync_at = datetime.now(timezone.utc)
+            ch2.docs_loaded = (ch2.docs_loaded or 0) + _loaded_total(result)
+        await db.commit()
+
+
 @router.post("/{channel_id}/run")
 async def run_channel(
+    channel_id: uuid.UUID,
+    payload: RunRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Запустить прогон канала В ФОНЕ и сразу вернуть управление.
+
+    Прогон (12 станций × период смен) длится минуты — синхронно он блокировал бы
+    UI и рвался по таймауту. Поэтому создаём лог status='running', запускаем фоновую
+    задачу и возвращаем sync_log_id. UI поллит GET /{id}/run-status.
+    Период берётся из payload.date_from/date_to (UI требует указать перед запуском).
+    """
+    ch = await get_owned(Channel, channel_id, current_user, db)
+    df = payload.date_from if payload else None
+    dt = payload.date_to if payload else None
+    sc = payload.station_codes if payload else None
+    ap = bool(payload.all_period) if payload else False
+    _scn = f", станций {len(sc)}" if sc else ""
+    _per = "вся история" if ap else f"{df or '—'}…{dt or '—'}"
+    log = ChannelSyncLog(
+        channel_id=ch.id, status="running", finished_at=None,
+        date_from=None if ap else df, date_to=None if ap else dt,
+        events=[{"level": "info", "event": "run",
+                 "message": f"загрузка запущена ({_per}{_scn})"}],
+    )
+    db.add(log)
+    await db.flush()
+    log_id = log.id
+    await db.commit()  # зафиксировать лог до старта фоновой задачи
+    asyncio.create_task(_run_channel_background(ch.id, df, dt, log_id, sc, ap))
+    return {"sync_log_id": str(log_id), "status": "running",
+            "message": "Загрузка запущена в фоне"}
+
+
+@router.get("/{channel_id}/run-status")
+async def run_status(
     channel_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Прогон канала: fetch (pull смен из ЦБ) → normalize → save (L2 DataEntry).
-
-    Для каналов с источником onec_operational оркестратор тянет смены через
-    COM (com_worker) и записывает в L2. ⚠ В проде fetch идёт через COM-Agent;
-    при недоступности COM прогон вернёт ошибку в логе (не падает на клиента).
-    """
+    """Статус последнего прогона канала (для поллинга прогресса в UI)."""
     ch = await get_owned(Channel, channel_id, current_user, db)
-    try:
-        result = await orchestrate_channel(db, ch)
-        status = result.get("status", "success")
-        msg = (f"смен={result.get('shifts', 0)} создано={result.get('created', 0)} "
-               f"обновлено={result.get('updated', 0)}") if status == "success" \
-            else result.get("message", "")
-        level = "info" if status in ("success", "skipped") else "error"
-    except Exception as exc:  # COM недоступен / ошибка извлечения — не роняем запрос
-        status, msg, level, result = "error", f"{type(exc).__name__}: {exc}", "error", {}
-    log = ChannelSyncLog(
-        channel_id=ch.id,
-        status="success" if status == "success" else ("partial" if status == "skipped" else "error"),
-        loaded=result.get("created", 0),
-        duplicates=result.get("updated", 0),
-        events=[{"level": level, "event": "run", "message": msg}],
-        finished_at=datetime.now(timezone.utc),
-    )
-    db.add(log)
-    ch.last_sync_at = datetime.now(timezone.utc)
-    await db.flush()
-    return {"sync_log_id": str(log.id), "status": status, "message": msg, **result}
+    log = (await db.execute(
+        select(ChannelSyncLog).where(ChannelSyncLog.channel_id == ch.id)
+        .order_by(ChannelSyncLog.started_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if log is None:
+        return {"status": "idle", "running": False, "loaded": 0, "stations_done": 0,
+                "stations_total": 0, "docs_loaded": ch.docs_loaded or 0, "message": ""}
+    ev = (log.events[-1] if log.events else {}) or {}
+    return {
+        "status": log.status,
+        "running": log.status == "running",
+        "loaded": log.loaded,
+        "stations_done": ev.get("stations_done", 0),
+        "stations_total": ev.get("stations_total", 0),
+        "message": ev.get("message", ""),
+        "finished_at": log.finished_at.isoformat() if log.finished_at else None,
+        "docs_loaded": ch.docs_loaded or 0,
+        "last_sync_at": ch.last_sync_at.isoformat() if ch.last_sync_at else None,
+    }
+
+
+@router.get("/{channel_id}/logs")
+async def channel_logs(
+    channel_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """История прогонов канала (ChannelSyncLog) — для вкладки «Лог».
+    Одна запись = один прогон (последний событийный итог)."""
+    ch = await get_owned(Channel, channel_id, current_user, db)
+    # сортировка по ОТОБРАЖАЕМОЙ метке (finished_at, для running — started_at),
+    # чтобы видимый timestamp строго убывал даже при пересекающихся прогонах.
+    logs = (await db.execute(
+        select(ChannelSyncLog).where(ChannelSyncLog.channel_id == ch.id)
+        .order_by(func.coalesce(ChannelSyncLog.finished_at, ChannelSyncLog.started_at).desc())
+        .limit(100)
+    )).scalars().all()
+    level_map = {"success": "success", "error": "error", "partial": "warn", "running": "info"}
+    event_map = {"success": "DONE", "error": "ERROR", "partial": "SYNC", "running": "SYNC"}
+    out = []
+    for lg in logs:
+        ev = (lg.events[-1] if lg.events else {}) or {}
+        ts = lg.finished_at or lg.started_at
+        out.append({
+            "timestamp": ts.isoformat() if ts else None,
+            "level": level_map.get(lg.status, "info"),
+            "event": event_map.get(lg.status, "SYNC"),
+            "message": ev.get("message") or f"загружено {lg.loaded or 0}",
+        })
+    return out
+
+
+@router.get("/{channel_id}/runs")
+async def channel_runs(
+    channel_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Лента прогонов канала (кокпит): структурные строки — период, объём,
+    станции, ошибки + per-station детали для раскрытия. Новые сверху."""
+    ch = await get_owned(Channel, channel_id, current_user, db)
+    logs = (await db.execute(
+        select(ChannelSyncLog).where(ChannelSyncLog.channel_id == ch.id)
+        .order_by(func.coalesce(ChannelSyncLog.finished_at, ChannelSyncLog.started_at).desc())
+        .limit(100)
+    )).scalars().all()
+    out = []
+    for lg in logs:
+        ev = (lg.events[-1] if lg.events else {}) or {}
+        out.append({
+            "id": str(lg.id),
+            "status": lg.status,
+            "started_at": lg.started_at.isoformat() if lg.started_at else None,
+            "finished_at": lg.finished_at.isoformat() if lg.finished_at else None,
+            "date_from": lg.date_from,
+            "date_to": lg.date_to,
+            "loaded": lg.loaded or 0,
+            "skipped": lg.skipped or 0,
+            "duplicates": lg.duplicates or 0,
+            "errors": lg.errors or 0,
+            "stations_done": ev.get("stations_done", 0),
+            "stations_total": ev.get("stations_total", 0),
+            "message": ev.get("message") or f"загружено {lg.loaded or 0}",
+            "by_station": ev.get("by_station") or [],
+        })
+    return out
 
 
 class IngestRequest(BaseModel):

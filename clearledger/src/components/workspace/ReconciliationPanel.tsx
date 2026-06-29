@@ -3,7 +3,7 @@
  * STS (смены) vs MSTO (онлайн-заказы) vs TradeCorp (корп. карты).
  */
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,7 +22,13 @@ import { useLocations } from '@/hooks/useLocations'
 import { executeMstoReconciliation } from '@/services/mstoReconciliation'
 import { MSTOReconciliationResults } from '@/components/reconciliation/MSTOReconciliationResults'
 import type { MSTOReconciliationResult, StationInfo } from '@/types/mstoReconciliation'
-import { GitCompare, Play, Loader2 } from 'lucide-react'
+import { GitCompare, Play, Loader2, Settings2, CheckCircle2, AlertTriangle, Plug } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { getSources, loadSources } from '@/services/sourceService'
+import { getChannels, loadChannels } from '@/services/channelService'
+import { isApiEnabled } from '@/services/apiClient'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 
@@ -37,9 +43,6 @@ const RECONCILE_MENU: CentralMenuItem[] = [
   { key: 'corporate', label: 'Корп. карты' },
   { key: 'acquiring', label: 'Эквайринг' },
   { key: 'receipts', label: 'Чеки' },
-  { key: 'depots', label: 'Нефтебазы' },
-  { key: 'drains', label: 'Сливы' },
-  { key: 'transport', label: 'Перевозки' },
 ]
 
 const ENERGY_RECONCILE_MENU: CentralMenuItem[] = [
@@ -228,13 +231,111 @@ function useReconcileParams(): [ReconcileParams, React.Dispatch<React.SetStateAc
   })
 }
 
-function ReconcileParamsForm({ params, setParams, onRun, description, loading }: {
+// ── Источники сверки по разрезу ──────────────────────────────────────────
+// Конфиг: какие источники участвуют в сверке разреза (опорный + сверяемые).
+// Фактический статус подключения берётся из НСИ/Источники.
+interface CutSourceDecl { sourceType: string; role: 'anchor' | 'control'; label: string; note?: string }
+
+const RECON_CUT_SOURCES: Record<string, CutSourceDecl[]> = {
+  online: [
+    { sourceType: 'sts', role: 'anchor', label: 'Сменный отчёт (STS)', note: 'Итоги онлайн-продаж смены (sbpRevenue)' },
+    { sourceType: 'msto', role: 'control', label: 'MSTO — онлайн-заказы', note: 'Заказы агрегаторов: Я.Заправки / Benzuber / FuelUp' },
+    { sourceType: 'sts_transactions', role: 'control', label: 'STS — транзакции отпуска', note: 'Факт на ТРК по виду оплаты «онлайн»' },
+  ],
+  corporate: [
+    { sourceType: 'sts', role: 'anchor', label: 'Сменный отчёт (STS)', note: 'Итоги по корп-картам' },
+    { sourceType: 'tradecorp', role: 'control', label: 'TradeCorp — корп-карты' },
+    { sourceType: 'sts_transactions', role: 'control', label: 'STS — транзакции отпуска' },
+  ],
+  acquiring: [
+    { sourceType: 'sts', role: 'anchor', label: 'Сменный отчёт (STS)' },
+    { sourceType: 'acquiring_sber', role: 'control', label: 'Эквайринг Сбербанк' },
+    { sourceType: 'sts_transactions', role: 'control', label: 'STS — транзакции отпуска' },
+  ],
+  receipts: [
+    { sourceType: 'sts', role: 'anchor', label: 'Сменный отчёт (STS)' },
+    { sourceType: 'ofd', role: 'control', label: 'ОФД — фискальные чеки' },
+  ],
+}
+
+const CUT_TITLES: Record<string, string> = {
+  online: 'Онлайн-заказы', corporate: 'Корп. карты', acquiring: 'Эквайринг', receipts: 'Чеки',
+}
+
+function CutSourcesModal({ cutKey, open, onClose }: { cutKey: string; open: boolean; onClose: () => void }) {
+  const navigate = useNavigate()
+  const { company } = useCompany()
+  useQuery({
+    queryKey: ['sources-for-cut', company.id],
+    queryFn: () => loadSources(company.id),
+    enabled: open && isApiEnabled(),
+  })
+  const sources = getSources()
+  const decls = RECON_CUT_SOURCES[cutKey] ?? []
+  const byType = (t: string) => sources.find((s) => s.backendType === t || s.type === t)
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <GitCompare className="h-4 w-4 text-muted-foreground" />
+            Источники сверки · {CUT_TITLES[cutKey] ?? cutKey}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-[13px] text-muted-foreground">
+          Сверка сопоставляет данные этих источников — транзакционно и суммарно по каждой смене.
+        </p>
+        <div className="space-y-2 mt-1">
+          {decls.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">Для этого разреза источники сверки не заданы.</p>
+          ) : decls.map((d) => {
+            const src = byType(d.sourceType)
+            const connected = !!src && ['connected', 'active'].includes(src.status as string)
+            return (
+              <div key={d.sourceType} className="rounded-xl border border-border/60 bg-di-surface-low p-3">
+                <div className="flex items-center gap-2.5">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${d.role === 'anchor' ? 'bg-primary' : 'bg-emerald-500'}`} />
+                  <span className="text-sm font-medium text-foreground/90">{d.label}</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                    {d.role === 'anchor' ? 'опорный' : 'сверяемый'}
+                  </span>
+                  <span className="ml-auto text-[11px] font-semibold uppercase tracking-wide shrink-0">
+                    {!src ? (
+                      <span className="text-muted-foreground/60">нет источника</span>
+                    ) : connected ? (
+                      <span className="flex items-center gap-1 text-emerald-500"><CheckCircle2 className="h-3.5 w-3.5" />подключён</span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-amber-500"><AlertTriangle className="h-3.5 w-3.5" />настраивается</span>
+                    )}
+                  </span>
+                </div>
+                {d.note && <p className="text-[11px] text-muted-foreground mt-1 pl-[18px]">{d.note}</p>}
+                <div className="mt-2 pl-[18px]">
+                  <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+                    onClick={() => { onClose(); navigate(src ? `/sources?focus=${src.id}` : '/sources') }}>
+                    <Plug className="h-3.5 w-3.5" />
+                    {src ? 'Настроить источник' : 'Завести источник'}
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ReconcileParamsForm({ params, setParams, onRun, description, loading, cutKey }: {
   params: ReconcileParams
   setParams: React.Dispatch<React.SetStateAction<ReconcileParams>>
   onRun: () => void
   description: string
   loading?: boolean
+  cutKey?: string
 }) {
+  const [cfgOpen, setCfgOpen] = useState(false)
   // Гидратируем точки активной компании (наполняет зеркало + ререндер),
   // затем собираем станции из точек обслуживания.
   useLocations()
@@ -331,10 +432,18 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading }:
           {loading ? 'Загрузка...' : 'Запустить'}
         </Button>
 
+        {cutKey && (
+          <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setCfgOpen(true)}>
+            <Settings2 className="h-3 w-3" />
+            Настройка сверки
+          </Button>
+        )}
+
       </div>
 
       {/* Разделитель */}
       <div className="border-b border-border/50 mt-3" />
+      {cutKey && <CutSourcesModal cutKey={cutKey} open={cfgOpen} onClose={() => setCfgOpen(false)} />}
     </div>
   )
 }
@@ -390,6 +499,7 @@ function OnlineOrdersView() {
         setParams={setParams}
         onRun={handleRun}
         description="Включая без онлайн-заказов"
+        cutKey="online"
         loading={loading}
       />
       {result && (
@@ -410,6 +520,7 @@ function AcquiringView() {
         setParams={setParams}
         onRun={() => {}}
         description="Включая смены без эквайринговых операций"
+        cutKey="acquiring"
       />
     </div>
   )
@@ -424,48 +535,7 @@ function ReceiptsView() {
         setParams={setParams}
         onRun={() => {}}
         description="Включая смены без чеков"
-      />
-    </div>
-  )
-}
-
-function DepotsView() {
-  const [params, setParams] = useReconcileParams()
-  return (
-    <div className="p-4 space-y-0">
-      <ReconcileParamsForm
-        params={params}
-        setParams={setParams}
-        onRun={() => {}}
-        description="Включая станции без поступлений"
-      />
-    </div>
-  )
-}
-
-function DrainsView() {
-  const [params, setParams] = useReconcileParams()
-  return (
-    <div className="p-4 space-y-0">
-      <ReconcileParamsForm
-        params={params}
-        setParams={setParams}
-        onRun={() => {}}
-        description="Включая смены без сливов"
-      />
-    </div>
-  )
-}
-
-function TransportView() {
-  const [params, setParams] = useReconcileParams()
-  return (
-    <div className="p-4 space-y-0">
-      <ReconcileParamsForm
-        params={params}
-        setParams={setParams}
-        onRun={() => toast.info('Сверка по транспортным компаниям пока не подключена — данные перевозок появятся после интеграции с TradeFrame')}
-        description="Включая станции без перевозок"
+        cutKey="receipts"
       />
     </div>
   )
@@ -480,37 +550,110 @@ function CorporateCardsView() {
         setParams={setParams}
         onRun={() => toast.info('Сверка корпоративных карт пока не подключена — нужна интеграция с TradeCorp/процессингом')}
         description="Включая без корп. карт"
+        cutKey="corporate"
       />
+    </div>
+  )
+}
+
+// doc_type сверяемого разреза → ярлык + реализованный вид сверки (пока только у
+// канала «Сменный отчёт» fuel_shift). Остальные разрезы — заглушка «не настроен».
+const CUT_DOC_META: Record<string, { label: string; fuelView?: ReconcileTab }> = {
+  online_orders: { label: 'Онлайн-заказы', fuelView: 'online' },
+  card_transactions: { label: 'Корп-карты', fuelView: 'corporate' },
+  card_payments: { label: 'Эквайринг', fuelView: 'acquiring' },
+  fiscal_receipts: { label: 'Чеки', fuelView: 'receipts' },
+  marking_movement: { label: 'Маркировка' },
+}
+
+function CutPlaceholderView({ label, channel }: { label: string; channel?: string }) {
+  return (
+    <div className="flex h-full items-center justify-center p-8">
+      <div className="text-center text-muted-foreground max-w-sm">
+        <GitCompare className="h-8 w-8 mx-auto mb-3 opacity-30" />
+        <p className="text-sm font-medium text-foreground/80">{label}{channel ? ` · ${channel}` : ''}</p>
+        <p className="text-xs mt-1.5 leading-relaxed">
+          Сверка этого разреза ещё не настроена — нужен подключённый источник и вид сверки.
+          Состав источников — в «Настройке сверки» разреза (где доступна).
+        </p>
+      </div>
     </div>
   )
 }
 
 export function ReconciliationPanel() {
   const { company } = useCompany()
-  // Набор разрезов настраивается под компанию: топливные у fuel, энергетические у energy.
+  // Набор разрезов: топливные у fuel (динамически из каналов), энергетические у energy.
   const isFuel = company.profileId === 'fuel'
-  const menu = isFuel ? RECONCILE_MENU : ENERGY_RECONCILE_MENU
-  const [tab, setTab] = useState<ReconcileTab>(isFuel ? 'online' : 'orders')
+
+  // Каналы — источник разрезов (группировка по каналу).
+  const { data: loadedChannels } = useQuery({
+    queryKey: ['recon-channels', company.id],
+    queryFn: () => loadChannels(company.id),
+    enabled: isFuel && isApiEnabled(),
+  })
+  const channels = loadedChannels ?? getChannels()
+
+  const menu: CentralMenuItem[] = useMemo(() => {
+    if (!isFuel) return ENERGY_RECONCILE_MENU
+    const items: CentralMenuItem[] = [{ key: 'dashboard', label: 'Обзор' }]
+    for (const ch of channels) {
+      for (const s of ch.streams) {
+        if (s.role !== 'control') continue
+        const meta = CUT_DOC_META[s.docTypeId]
+        if (!meta) continue
+        const hasView = ch.templateId === 'fuel_shift' && !!meta.fuelView
+        items.push({
+          key: `${ch.id}:${s.docTypeId}`,
+          label: meta.label,
+          group: ch.name,
+          disabled: !hasView || !s.sourceId,
+        })
+      }
+    }
+    // каналы ещё не загрузились → старое плоское меню как fallback
+    return items.length > 1 ? items : RECONCILE_MENU
+  }, [isFuel, channels])
+
+  const [tab, setTab] = useState<string>('dashboard')
   const menuKeys = menu.map((m) => m.key)
-  const activeTab = (menuKeys.includes(tab) ? tab : menuKeys[0]) as ReconcileTab
+  const activeKey = menuKeys.includes(tab) ? tab : menuKeys[0]
+
+  function renderFuelCut(key: string): React.ReactNode {
+    if (key === 'dashboard') return <DashboardView />
+    // Динамический ключ `${channelId}:${docType}` → вид по каналу/типу.
+    if (key.includes(':')) {
+      const [chId, docType] = key.split(':')
+      const ch = channels.find((c) => c.id === chId)
+      const meta = CUT_DOC_META[docType]
+      const view = ch?.templateId === 'fuel_shift' ? meta?.fuelView : undefined
+      switch (view) {
+        case 'online': return <OnlineOrdersView />
+        case 'corporate': return <CorporateCardsView />
+        case 'acquiring': return <AcquiringView />
+        case 'receipts': return <ReceiptsView />
+        default: return <CutPlaceholderView label={meta?.label ?? 'Разрез'} channel={ch?.name} />
+      }
+    }
+    // Плоский fallback-ключ (RECONCILE_MENU).
+    switch (key) {
+      case 'online': return <OnlineOrdersView />
+      case 'corporate': return <CorporateCardsView />
+      case 'acquiring': return <AcquiringView />
+      case 'receipts': return <ReceiptsView />
+      default: return <CutPlaceholderView label="Разрез" />
+    }
+  }
 
   return (
-    <CentralPanelLayout items={menu} activeKey={activeTab} onSelect={(k) => setTab(k as ReconcileTab)}>
+    <CentralPanelLayout items={menu} activeKey={activeKey} onSelect={setTab}>
       <ScrollArea className="h-full">
-        {activeTab === 'dashboard' ? (
-          isFuel ? <DashboardView /> : <EnergyDashboardView onSelectCut={(k) => setTab(k as ReconcileTab)} />
-        ) : isFuel ? (
-          <>
-            {activeTab === 'online' && <OnlineOrdersView />}
-            {activeTab === 'corporate' && <CorporateCardsView />}
-            {activeTab === 'acquiring' && <AcquiringView />}
-            {activeTab === 'receipts' && <ReceiptsView />}
-            {activeTab === 'depots' && <DepotsView />}
-            {activeTab === 'drains' && <DrainsView />}
-            {activeTab === 'transport' && <TransportView />}
-          </>
+        {isFuel ? (
+          renderFuelCut(activeKey)
+        ) : activeKey === 'dashboard' ? (
+          <EnergyDashboardView onSelectCut={setTab} />
         ) : (
-          <EnergyCutView tab={activeTab} />
+          <EnergyCutView tab={activeKey} />
         )}
       </ScrollArea>
     </CentralPanelLayout>

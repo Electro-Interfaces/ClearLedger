@@ -17,7 +17,7 @@ import {
   Upload, FileText, Radio, Database, ChevronDown,
   Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
   Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
-  Library, ShieldCheck, Building2, Building, Boxes, Sparkles,
+  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -50,6 +50,7 @@ const oneCItems = [
   { to: '/1c/posting-templates',  icon: ScrollText,    label: 'Схема проводок' },
   { to: '/1c/prices',             icon: Tag,           label: 'Цены' },
   { to: '/1c/batches',            icon: Layers,        label: 'Партии (FIFO)' },
+  { to: '/1c/fuel-mappings',      icon: Fuel,          label: 'Топливо: оплаты' },
   { to: '/1c/mappings',           icon: Link2,         label: 'Маппинги' },
   { to: '/1c/export',             icon: Package,       label: 'Выгрузка' },
 ]

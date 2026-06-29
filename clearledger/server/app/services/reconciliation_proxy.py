@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
@@ -224,85 +225,141 @@ async def tradecorp_health() -> dict[str, Any]:
 
 
 # ─────────────────────────── MSTO IntegratorService (JWT) ───────────────────────────
-_msto_client: httpx.AsyncClient | None = None
-_msto_token: str | None = None
-_msto_token_expiry: float = 0.0
+@dataclass(frozen=True)
+class MstoConn:
+    base_url: str
+    username: str
+    password: str
+
+
+# Кеш клиентов/токенов ПО ПОДКЛЮЧЕНИЮ (base_url|username): у каждого источника своё
+# подключение MSTO; .env остаётся fallback'ом (если у источника креды не заданы).
+_msto_clients: dict[str, dict[str, Any]] = {}
 _msto_lock = asyncio.Lock()
 
-_sp_map: dict[str, Any] | None = None
-_sp_map_expiry: float = 0.0
+_sp_map: dict[str, dict[str, Any]] = {}        # conn_key → {name(lower): id}
+_sp_map_expiry: dict[str, float] = {}
 
 
-async def _msto_refresh_token() -> None:
-    global _msto_token, _msto_token_expiry
-    assert _msto_client is not None
+def _msto_settings_conn() -> MstoConn | None:
+    """Подключение MSTO из .env (settings) — fallback."""
     s = get_settings()
-    if not (s.msto_username and s.msto_password):
+    if s.msto_api_url and s.msto_username and s.msto_password:
+        return MstoConn(s.msto_api_url, s.msto_username, s.msto_password)
+    return None
+
+
+def _conn_key(conn: MstoConn) -> str:
+    return f"{conn.base_url}|{conn.username}"
+
+
+def _resolve_conn(conn: MstoConn | None) -> MstoConn:
+    conn = conn or _msto_settings_conn()
+    if conn is None:
         raise RuntimeError("Missing required MSTO credentials")
-    _msto_client.headers.pop("Authorization", None)
-    _msto_token = None
-    resp = await _msto_client.post("/session", json={"username": s.msto_username, "password": s.msto_password})
+    return conn
+
+
+async def _msto_refresh_token_for(conn: MstoConn) -> None:
+    entry = _msto_clients[_conn_key(conn)]
+    client: httpx.AsyncClient = entry["client"]
+    client.headers.pop("Authorization", None)
+    entry["token"] = None
+    resp = await client.post("/session", json={"username": conn.username, "password": conn.password})
     resp.raise_for_status()
     token = (resp.json() or {}).get("item", {}).get("token")
     if not token:
         raise RuntimeError("MSTO API did not return a token")
-    _msto_token = token
-    _msto_token_expiry = time.time() + 23 * 60 * 60
-    _msto_client.headers["Authorization"] = token
+    entry["token"] = token
+    entry["expiry"] = time.time() + 23 * 60 * 60
+    client.headers["Authorization"] = token
 
 
-async def _msto_get_client() -> httpx.AsyncClient:
-    global _msto_client
-    s = get_settings()
-    if not s.msto_api_url:
-        raise RuntimeError("Missing required MSTO API environment variable: MSTO_API_URL")
-    if _msto_client is None:
-        _msto_client = httpx.AsyncClient(
-            base_url=s.msto_api_url, timeout=90.0, headers={"Content-Type": "application/json"}
-        )
+async def _msto_get_client(conn: MstoConn | None = None) -> httpx.AsyncClient:
+    conn = _resolve_conn(conn)
+    key = _conn_key(conn)
+    entry = _msto_clients.get(key)
+    if entry is None:
+        entry = {
+            "client": httpx.AsyncClient(
+                base_url=conn.base_url, timeout=90.0,
+                headers={"Content-Type": "application/json"},
+            ),
+            "token": None,
+            "expiry": 0.0,
+        }
+        _msto_clients[key] = entry
     async with _msto_lock:
-        if not _msto_token or time.time() >= _msto_token_expiry:
-            await _msto_refresh_token()
-    return _msto_client
+        if not entry["token"] or time.time() >= entry["expiry"]:
+            await _msto_refresh_token_for(conn)
+    return entry["client"]
 
 
-async def _msto_invalidate_and_refresh() -> None:
-    global _msto_token, _msto_token_expiry
-    _msto_token = None
-    _msto_token_expiry = 0.0
-    await _msto_refresh_token()
+async def _msto_invalidate_and_refresh(conn: MstoConn) -> None:
+    entry = _msto_clients.get(_conn_key(conn))
+    if entry:
+        entry["token"] = None
+        entry["expiry"] = 0.0
+    await _msto_refresh_token_for(conn)
 
 
-async def _msto_get_checked(url_path: str, params: dict[str, Any] | None = None) -> httpx.Response:
+async def _msto_get_checked(url_path: str, params: dict[str, Any] | None = None,
+                            conn: MstoConn | None = None) -> httpx.Response:
     """GET с автоповтором при 401 (рефреш токена)."""
-    client = await _msto_get_client()
+    conn = _resolve_conn(conn)
+    client = await _msto_get_client(conn)
     resp = await client.get(url_path, params=params)
     if resp.status_code == 401:
-        await _msto_invalidate_and_refresh()
-        client = await _msto_get_client()
+        await _msto_invalidate_and_refresh(conn)
+        client = await _msto_get_client(conn)
         resp = await client.get(url_path, params=params)
     return resp
 
 
-async def get_service_points_map() -> dict[str, Any]:
-    """name(lower) → id; кэш 2 ч (для обогащения транзакций servicePointId)."""
-    global _sp_map, _sp_map_expiry
-    if _sp_map is not None and time.time() < _sp_map_expiry:
-        return _sp_map
+async def msto_conn_for_company(db: Any, company_id: Any) -> MstoConn | None:
+    """Подключение MSTO из источника компании (source_type=msto): base_url+логин из
+    connection_config, пароль из SourceCredentials (Fernet). None → используется .env."""
+    from sqlalchemy import select
+    from app.models import Source, SourceCredentials
+    from app.services.onec.crypto import decrypt_password
+    src = (await db.execute(select(Source).where(
+        Source.company_id == company_id, Source.source_type == "msto"
+    ))).scalars().first()
+    if src is None:
+        return None
+    cfg = src.connection_config or {}
+    base_url = cfg.get("base_url") or cfg.get("url")
+    username = cfg.get("login") or cfg.get("username")
+    cr = (await db.execute(select(SourceCredentials).where(
+        SourceCredentials.source_id == src.id
+    ))).scalars().first()
+    enc = (cr.encrypted_values or {}) if cr else {}
+    pwd = decrypt_password(enc["password"]) if enc.get("password") else None
+    if base_url and username and pwd:
+        return MstoConn(str(base_url), str(username), str(pwd))
+    return None
+
+
+async def get_service_points_map(conn: MstoConn | None = None) -> dict[str, Any]:
+    """name(lower) → id; кэш 2 ч на подключение (обогащение transactions servicePointId)."""
+    conn = _resolve_conn(conn)
+    key = _conn_key(conn)
+    if key in _sp_map and time.time() < _sp_map_expiry.get(key, 0.0):
+        return _sp_map[key]
     try:
-        resp = await _msto_get_checked("/private/servicePoints")
+        resp = await _msto_get_checked("/private/servicePoints", conn=conn)
         models = (resp.json() or {}).get("models", []) if resp.status_code == 200 else []
-        _sp_map = {sp["name"].lower(): sp["id"] for sp in models if sp.get("name") and sp.get("id")}
-        _sp_map_expiry = time.time() + 2 * 60 * 60
-        return _sp_map
+        _sp_map[key] = {sp["name"].lower(): sp["id"] for sp in models if sp.get("name") and sp.get("id")}
+        _sp_map_expiry[key] = time.time() + 2 * 60 * 60
+        return _sp_map[key]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[MSTO Proxy] Failed to load servicePoints map: %s", exc)
         return {}
 
 
-async def msto_service_points() -> Any:
+async def msto_service_points(conn: MstoConn | None = None) -> Any:
     """Сырой ответ servicePoints; [] при 403/404/Access Denied (как в TF)."""
-    resp = await _msto_get_checked("/private/servicePoints")
+    resp = await _msto_get_checked("/private/servicePoints", conn=conn)
     if resp.status_code in (403, 404):
         return []
     if "Access Denied" in (resp.text or ""):
@@ -311,13 +368,14 @@ async def msto_service_points() -> Any:
     return resp.json()
 
 
-async def msto_tariffs(params: dict[str, Any] | None = None) -> Any:
+async def msto_tariffs(params: dict[str, Any] | None = None,
+                       conn: MstoConn | None = None) -> Any:
     url_path = "/private/tariffs"
     key = _cache_key(url_path, params)
     cached = _cache.get(key)
     if cached is not None:
         return cached
-    resp = await _msto_get_checked(url_path, params)
+    resp = await _msto_get_checked(url_path, params, conn=conn)
     resp.raise_for_status()
     data = resp.json()
     _cache.set(key, data, _msto_ttl(url_path))
@@ -362,7 +420,7 @@ def convert_transaction_params(query: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in q.items() if v is not None}
 
 
-async def msto_transactions(query: dict[str, Any]) -> Any:
+async def msto_transactions(query: dict[str, Any], conn: MstoConn | None = None) -> Any:
     """GET /private/transactions с конвертацией параметров, кэшем и обогащением servicePointId."""
     url_path = "/private/transactions"
     params = convert_transaction_params(query)
@@ -371,8 +429,8 @@ async def msto_transactions(query: dict[str, Any]) -> Any:
     if cached is not None:
         return cached
 
-    sp_map = await get_service_points_map()
-    resp = await _msto_get_checked(url_path, params)
+    sp_map = await get_service_points_map(conn)
+    resp = await _msto_get_checked(url_path, params, conn=conn)
     resp.raise_for_status()
     data = resp.json()
 

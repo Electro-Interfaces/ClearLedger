@@ -409,6 +409,7 @@ export interface Nomenclature {
   unit: string       // код ОКЕИ
   unitLabel: string   // наименование единицы
   vatRate: number     // % НДС (0, 10, 20)
+  externalRef?: string   // GUID номенклатуры в 1С (для маппингов)
   createdAt: string
   updatedAt: string
 }
@@ -569,6 +570,7 @@ export interface Warehouse {
   name: string
   address?: string
   type: WarehouseType
+  externalRef?: string   // GUID склада в 1С (для маппингов)
   createdAt: string
   updatedAt: string
 }

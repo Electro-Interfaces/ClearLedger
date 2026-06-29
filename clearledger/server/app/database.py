@@ -108,6 +108,73 @@ async def create_all() -> None:
             # уже = натуральному ключу; старые shift_orp:* останутся как есть).
             "UPDATE export_packets SET idem_key = payload->>'marker' "
             "WHERE idem_key IS NULL AND payload ? 'marker'",
+            # v2.5: уникальность смены STS (станция + номер) — защита от дублей при
+            # параллельных прогонах канала fuel_shift с поэтапным commit.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fuel_shifts_station_number "
+            "ON fuel_shifts(station_id, shift_number)",
+            # v2.6: детали смены как в TradeFrame — счётчики ТРК, параметры
+            # резервуаров, движение наличных (fuel_cash_movements создаётся create_all).
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS fuel_code INTEGER",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS volume_received NUMERIC(12,2) NOT NULL DEFAULT 0",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS density_beg NUMERIC(6,4)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS temp_end NUMERIC(6,2)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS level_end NUMERIC(10,2)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS water_level NUMERIC(10,2)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS water_volume NUMERIC(12,2)",
+            "ALTER TABLE fuel_pumps ADD COLUMN IF NOT EXISTS fuel_code INTEGER",
+            "ALTER TABLE fuel_pumps ADD COLUMN IF NOT EXISTS tank_number INTEGER",
+            "ALTER TABLE fuel_pumps ADD COLUMN IF NOT EXISTS psm_beg NUMERIC(14,2)",
+            "ALTER TABLE fuel_pumps ADD COLUMN IF NOT EXISTS psm_end NUMERIC(14,2)",
+            "ALTER TABLE fuel_pumps ADD COLUMN IF NOT EXISTS price NUMERIC(8,2)",
+            "ALTER TABLE fuel_pumps ADD COLUMN IF NOT EXISTS density NUMERIC(6,4)",
+            # v2.9: сырой сменный отчёт STS на смене — вход эталонного просмотрщика
+            # TradeFrame (форма «Детали смены» строится адаптером из этого JSON).
+            "ALTER TABLE fuel_shifts ADD COLUMN IF NOT EXISTS raw_report JSONB",
+            # v3.1: период прогона в логе — для ленты прогонов кокпита канала
+            # (строка прогона показывает, за какой период он грузил).
+            "ALTER TABLE channel_sync_logs ADD COLUMN IF NOT EXISTS date_from VARCHAR(10)",
+            "ALTER TABLE channel_sync_logs ADD COLUMN IF NOT EXISTS date_to VARCHAR(10)",
+            # v3.2: онлайн-заказы MSTO — натуральный ключ идемпотентности ingest
+            # (повторный прогон периода не плодит дубли заказов).
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_online_orders_ext "
+            "ON online_orders(company_id, external_id)",
+            # v3.3: канон топлива (резолв имени MSTO → эталон компании).
+            "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS fuel_code INTEGER",
+            # v3.4: роль разреза учёта на потоке канала (anchor/control/reference);
+            # бэкафилл из шаблонов — в seed (_backfill_channel_cuts).
+            "ALTER TABLE channel_streams ADD COLUMN IF NOT EXISTS role VARCHAR(20) "
+            "NOT NULL DEFAULT 'control'",
+            # v3.5: разрез может быть предустановлен без подключённого источника.
+            "ALTER TABLE channel_streams ALTER COLUMN source_id DROP NOT NULL",
+            # v3.0: натуральный ключ ТТН — дедуп существующих дублей + уникальный
+            # индекс (DB-страховка от задвоения; как уже дедуплицирует delivery-ветка
+            # по (company, station, ttn, code)). COALESCE(fuel_code,-1) — чтобы NULL
+            # не плодил дубли; частичный WHERE ttn<>'' — пустые ТТН не индексируем.
+            "DELETE FROM fuel_receipts a USING fuel_receipts b "
+            "WHERE a.id > b.id AND a.company_id = b.company_id "
+            "AND a.station_id = b.station_id AND a.ttn = b.ttn "
+            "AND a.fuel_code IS NOT DISTINCT FROM b.fuel_code AND a.ttn <> ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fuel_receipts_natural "
+            "ON fuel_receipts (company_id, station_id, ttn, COALESCE(fuel_code, -1)) "
+            "WHERE ttn <> ''",
+            # v3.1: реквизиты журнала/деталей поступления (как TradePoint).
+            "ALTER TABLE fuel_receipts ADD COLUMN IF NOT EXISTS shift_number INTEGER",
+            "ALTER TABLE fuel_receipts ADD COLUMN IF NOT EXISTS tank INTEGER",
+            "ALTER TABLE fuel_receipts ADD COLUMN IF NOT EXISTS doc_temp NUMERIC(6,2)",
+            "ALTER TABLE fuel_receipts ADD COLUMN IF NOT EXISTS fact_temp NUMERIC(6,2)",
+            "ALTER TABLE fuel_receipts ADD COLUMN IF NOT EXISTS fact_density NUMERIC(6,4)",
+            # v3.2: единый справочник видов топлива — привязка номенклатуры 1С
+            # по GUID (т/л). fuel_mappings = единый источник правды; reconcile-fuel
+            # выводится из него. Backfill GUID/имени литров из существующего
+            # reconcile-маппинга 'fuel' (там уже выбрана номенклатура 1С).
+            "ALTER TABLE fuel_mappings ADD COLUMN IF NOT EXISTS nomenclature_t_ref VARCHAR(36)",
+            "ALTER TABLE fuel_mappings ADD COLUMN IF NOT EXISTS nomenclature_l_ref VARCHAR(36)",
+            "UPDATE fuel_mappings fm "
+            "SET nomenclature_l_ref = rm.target_ref, "
+            "    nomenclature_liters = COALESCE(NULLIF(rm.target_name,''), fm.nomenclature_liters) "
+            "FROM reconcile_mappings rm "
+            "WHERE rm.company_id = fm.company_id AND rm.kind = 'fuel' AND rm.channel_id IS NULL "
+            "  AND rm.source_key = fm.service_code::text AND fm.nomenclature_l_ref IS NULL",
             # v1.9: маппинг уровня КАНАЛА — channel_id (NULL=дефолт компании).
             # Значения топлива/оплат/станций различаются между системами →
             # настройка/оптимизация маппинга на уровне канала.

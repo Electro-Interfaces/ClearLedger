@@ -23,6 +23,8 @@ from app.routers import (
     entries_router,
     export_router,
     fuel_router,
+    fuel_mappings_router,
+    online_orders_router,
     invitations_router,
     export_packets_router,
     intake_router,
@@ -82,6 +84,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with async_session_factory() as session:
         await seed_data(session)
 
+    # Сброс зависших прогонов: при рестарте фоновые задачи прерываются, их
+    # ChannelSyncLog остаётся в 'running' навсегда — помечаем как прерванные.
+    async with async_session_factory() as session:
+        from sqlalchemy import text
+        await session.execute(text(
+            "UPDATE channel_sync_logs SET status='error', finished_at=now(), "
+            "events='[{\"level\":\"error\",\"event\":\"run\",\"message\":\"прогон прерван перезапуском сервера\"}]'::jsonb "
+            "WHERE status='running'"
+        ))
+        await session.commit()
+
     logger.info("TradeLedger Server запущен")
     yield
     logger.info("TradeLedger Server остановлен")
@@ -130,6 +143,8 @@ app.include_router(reconciliation_proxy_router.router, prefix=API_PREFIX)  # п�
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
+app.include_router(fuel_mappings_router.router, prefix=API_PREFIX)
+app.include_router(online_orders_router.router, prefix=API_PREFIX)
 app.include_router(source_types_router.router, prefix=API_PREFIX)
 app.include_router(sources_router.router, prefix=API_PREFIX)
 app.include_router(locations_router.router, prefix=API_PREFIX)

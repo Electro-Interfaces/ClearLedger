@@ -11,6 +11,19 @@ export interface DocTypeRef {
   category?: string | null
 }
 
+export interface SetupFieldSchema {
+  key: string
+  label: string
+  type: string // text | password | number | select | tags | url
+  required?: boolean
+  default_value?: string | null
+  placeholder?: string | null
+  options?: { value: string; label: string }[] | null
+  help_text?: string | null
+  secret?: boolean
+  group?: string | null
+}
+
 export interface SourceTypeItem {
   source_type: string
   label: string
@@ -18,7 +31,9 @@ export interface SourceTypeItem {
   description: string
   icon: string
   status: string // available | planned | partial
-  setup_schema: { key: string; label: string; type: string; secret?: boolean }[]
+  version?: string
+  setup_guide?: string // подробная инструкция подключения (только в панели, не в каталоге)
+  setup_schema: SetupFieldSchema[]
   available_doc_types: DocTypeRef[]
 }
 

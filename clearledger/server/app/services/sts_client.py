@@ -85,15 +85,35 @@ async def sts_get_shifts(
     system: int, station: int | None = None,
     date_from: str | None = None, date_to: str | None = None,
 ) -> list[dict]:
-    """Список смен (опц. период date_from/date_to = YYYY-MM-DD)."""
+    """Список смен за период.
+
+    ВАЖНО: STS /v1/shifts фильтрует по dt_beg/dt_end (ISO с временем), НЕ по
+    date_from/date_to. С неверными именами параметров STS их игнорирует и
+    отдаёт лишь последние смены — поэтому загрузка за прошлые месяцы давала 0
+    (эталон — TradeFrame shiftsService: dt_beg='2026-04-01T00:00:00').
+    date_from/date_to сюда приходят как YYYY-MM-DD.
+    """
     params = f"system={system}"
     if station is not None:
         params += f"&station={station}"
     if date_from:
-        params += f"&date_from={date_from}"
+        params += f"&dt_beg={date_from}T00:00:00"
     if date_to:
-        params += f"&date_to={date_to}"
+        params += f"&dt_end={date_to}T23:59:59"
     return await _auth_get(base_url, login, password, f"/v1/shifts?{params}")
+
+
+async def sts_get_points(
+    base_url: str, login: str, password: str, system: int,
+) -> list[dict]:
+    """Все торговые точки (станции) системы — STS GET /v1/points?system=.
+
+    Авто-discovery всей сети: канал работает со ВСЕМИ станциями системы, а не
+    с зашитым подмножеством. Точка: {system, number (код станции), name,
+    address, longitude, latitude}.
+    """
+    data = await _auth_get(base_url, login, password, f"/v1/points?system={system}")
+    return data if isinstance(data, list) else []
 
 
 async def sts_get_shift_report(

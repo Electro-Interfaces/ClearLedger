@@ -5,50 +5,59 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Progress } from '@/components/ui/progress'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useQueryClient } from '@tanstack/react-query'
-import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel } from '@/services/channelService'
-import { uploadTableFile } from '@/services/referenceService'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
+import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel, getChannelRunStatus, getChannelRuns, type ChannelRun } from '@/services/channelService'
+import { uploadTableFile, getNomenclature, getWarehouses, getCounterparties } from '@/services/referenceService'
 import { getSources, loadSources } from '@/services/sourceService'
 import { listMappings, createMapping, deleteMapping, type ReconcileMapping, type MappingKind } from '@/services/mappingService'
 import { isApiEnabled } from '@/services/apiClient'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getLocations, loadLocations } from '@/services/locationService'
 import { useFilters } from '@/contexts/FilterContext'
-import { StationsSelectorDialog } from '@/components/stations/StationsSelectorDialog'
-import { syncChannel, getAllLoadedDocs } from '@/services/channelSyncService'
+import { syncChannel, getAllLoadedDocs, type LoadedDocument } from '@/services/channelSyncService'
+import { getLoadedShifts, getLoadedReceipts, getShiftDocuments, getReceiptDocuments, deleteFuelPeriod, getLoadedStations, type LoadedShift, type LoadedReceipt, type FuelDocument } from '@/services/fuel/fuelMappingService'
+import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
+import { ReceiptsJournal } from '@/components/fuel/ReceiptsJournal'
 import { extractDeliveries } from '@/services/receiptExtractService'
-import { getChannelSourceIds, getChannelStations, STAGE_TYPE_META, DUPLICATE_POLICY_META } from '@/types/channel'
-import type { Channel, ChannelStage, ChannelStation, SyncResult, DuplicatePolicy } from '@/types/channel'
+import { getChannelSourceIds, getChannelStations, STAGE_TYPE_META } from '@/types/channel'
+import type { Channel, ChannelStation, DuplicatePolicy } from '@/types/channel'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from '@/components/ui/command'
 import {
   ArrowLeft, Play, Loader2, Radio, Database, Download, Shuffle,
   GitCompare, ShieldCheck, ArrowRightLeft, Trash2, Plus, History,
   Settings2, FileText, AlertTriangle, CheckCircle2, XCircle, GripVertical, MapPin,
-  Search, Filter, Upload,
+  Search, Filter, Upload, RotateCcw, ChevronsUpDown, Check, ChevronDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 
-type TabId = 'overview' | 'sources' | 'pipeline' | 'mapping' | 'data' | 'log'
+type TabId = 'overview' | 'data' | 'mapping' | 'settings'
 
 // Сверка — отдельный раздел продукта и идёт на уровне РАЗРЕЗОВ, не каналов.
 // Канал отвечает за получение сырых данных из источника и их ПРЕДОБРАБОТКУ
 // (маппинг внешних ключей на справочники 1С, нормализация) — до сверки.
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'overview', label: 'Обзор', icon: Radio },
-  { id: 'sources', label: 'Источники', icon: Database },
-  { id: 'pipeline', label: 'Схема', icon: Settings2 },
+  { id: 'data', label: 'Данные', icon: FileText },
   { id: 'mapping', label: 'Маппинг', icon: ArrowRightLeft },
-  { id: 'data', label: 'Загружено', icon: FileText },
-  { id: 'log', label: 'Лог', icon: History },
+  { id: 'settings', label: 'Настройки', icon: Settings2 },
 ]
 
 const STAGE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -64,69 +73,27 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
 
 // ─── Расписание и Период загрузки ────────────────────────
 
-function getScheduleSummary(channel: Channel): { mode: string; interval: number | null; label: string } {
-  const sched = channel.schedule
-  if (typeof sched === 'string') {
-    return { mode: sched, interval: null, label: sched === 'manual' ? 'Вручную' : sched }
-  }
-  if (!sched) return { mode: 'manual', interval: null, label: 'Вручную' }
-  if (sched.mode === 'manual') return { mode: 'manual', interval: null, label: 'Вручную' }
-  if (sched.mode === 'interval') {
-    const m = sched.intervalMinutes ?? 60
-    const label =
-      m < 60 ? `Каждые ${m} мин` :
-      m === 60 ? 'Каждый час' :
-      m < 1440 ? `Каждые ${m / 60} ч` :
-      m === 1440 ? 'Раз в сутки' :
-      `Каждые ${m} мин`
-    return { mode: 'interval', interval: m, label }
-  }
-  return { mode: sched.mode ?? 'manual', interval: null, label: sched.mode ?? 'manual' }
-}
-
-const SCHEDULE_PRESETS: { key: string; label: string; mode: 'manual' | 'interval'; intervalMinutes?: number }[] = [
-  { key: 'manual', label: 'Вручную', mode: 'manual' },
-  { key: 'i30', label: 'Каждые 30 мин', mode: 'interval', intervalMinutes: 30 },
-  { key: 'i60', label: 'Каждый час', mode: 'interval', intervalMinutes: 60 },
-  { key: 'i360', label: 'Каждые 6 часов', mode: 'interval', intervalMinutes: 360 },
-  { key: 'i1440', label: 'Раз в сутки', mode: 'interval', intervalMinutes: 1440 },
-]
-
-function ScheduleCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
-  const current = getScheduleSummary(channel)
-  const currentKey =
-    current.mode === 'manual' ? 'manual' :
-    current.interval ? `i${current.interval}` : 'manual'
-
-  async function pick(key: string) {
-    const preset = SCHEDULE_PRESETS.find((p) => p.key === key)
-    if (!preset) return
-    const updated = await updateChannel(channel.id, {
-      schedule: preset.mode === 'manual'
-        ? { mode: 'manual', pauseOnError: true, maxRetries: 3 }
-        : { mode: 'interval', intervalMinutes: preset.intervalMinutes, pauseOnError: true, maxRetries: 3 },
-    })
-    if (updated) onUpdate(updated)
-  }
-
+// Расписание: авто-запуск по расписанию в бэкенде НЕ реализован — планировщика нет,
+// единственный триггер прогона это ручной asyncio.create_task в channels_router.
+// Поэтому карточка информационная (помечена «скоро»), без декоративного селектора,
+// который сохранял бы интервал, но ничего бы не запускал.
+function ScheduleCard() {
   return (
     <Card className="py-3 gap-2">
       <CardHeader className="pb-0">
         <CardTitle className="text-sm flex items-center gap-1.5">
           <History className="h-3.5 w-3.5" />
           Расписание
-          <span className="text-xs text-muted-foreground font-normal ml-auto">{current.label}</span>
+          <Badge variant="outline" className="ml-auto h-4 px-1.5 text-[9px] font-normal text-muted-foreground border-border">
+            скоро
+          </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0 pb-3">
-        <Select value={currentKey} onValueChange={pick}>
-          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {SCHEDULE_PRESETS.map((p) => (
-              <SelectItem key={p.key} value={p.key} className="text-xs">{p.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Запуск вручную — кнопкой «Запустить». Авто-запуск по интервалу/расписанию
+          в разработке.
+        </p>
       </CardContent>
     </Card>
   )
@@ -140,6 +107,23 @@ const MONTH_NAMES_RU = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
 ]
+
+const MONTH_SHORT_RU = [
+  'янв', 'фев', 'мар', 'апр', 'май', 'июн',
+  'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+]
+
+/** Компактная подпись периода для кнопки запуска: «Май 2026», «апр–май 2026»,
+ *  «дек 2025 – янв 2026». null, если диапазон не задан. */
+function periodShortLabel(dateFrom?: string | null, dateTo?: string | null): string | null {
+  if (!dateFrom || !dateTo) return null
+  const [y1, m1] = dateFrom.slice(0, 7).split('-').map(Number)
+  const [y2, m2] = dateTo.slice(0, 7).split('-').map(Number)
+  if (!y1 || !m1 || !y2 || !m2) return null
+  if (y1 === y2 && m1 === m2) return `${MONTH_NAMES_RU[m1 - 1]} ${y1}`
+  if (y1 === y2) return `${MONTH_SHORT_RU[m1 - 1]}–${MONTH_SHORT_RU[m2 - 1]} ${y1}`
+  return `${MONTH_SHORT_RU[m1 - 1]} ${y1} – ${MONTH_SHORT_RU[m2 - 1]} ${y2}`
+}
 
 function monthKey(year: number, month0: number): string {
   return `${year}-${String(month0 + 1).padStart(2, '0')}`
@@ -218,40 +202,40 @@ function PeriodCard({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Ch
           <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">{summary}</span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0 pb-3 space-y-2">
-        <div className="flex items-end gap-1.5">
-          <div className="flex-1 min-w-0">
-            <Label className="text-[10px] text-muted-foreground mb-0.5 block">С месяца</Label>
+      <CardContent className="pt-0 pb-3 space-y-2.5">
+        <div className="flex flex-wrap gap-3">
+          <div className="w-full sm:flex-1 sm:min-w-[180px]">
+            <Label className="text-xs text-muted-foreground">С месяца</Label>
             <Input type="month" value={dateFrom ? dateFrom.slice(0, 7) : ''}
               max={dateTo ? dateTo.slice(0, 7) : undefined}
               onChange={(e) => setFromMonth(e.target.value)}
-              className="h-7 text-xs" />
+              className="mt-1 bg-di-surface-low dark:bg-di-surface-low border-di-outline-variant/20" />
           </div>
-          <span className="text-muted-foreground text-xs pb-1.5">–</span>
-          <div className="flex-1 min-w-0">
-            <Label className="text-[10px] text-muted-foreground mb-0.5 block">По месяц</Label>
+          <div className="w-full sm:flex-1 sm:min-w-[180px]">
+            <Label className="text-xs text-muted-foreground">По месяц</Label>
             <Input type="month" value={dateTo ? dateTo.slice(0, 7) : ''}
               min={dateFrom ? dateFrom.slice(0, 7) : undefined}
               onChange={(e) => setToMonth(e.target.value)}
-              className="h-7 text-xs" />
+              className="mt-1 bg-di-surface-low dark:bg-di-surface-low border-di-outline-variant/20" />
           </div>
         </div>
-        <div className="flex items-center flex-wrap gap-1 pt-2 border-t border-border/40">
-          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+        <div className="flex items-center flex-wrap gap-1.5 pt-2.5 border-t border-border/40">
+          <span className="text-xs text-muted-foreground mr-1">Быстро:</span>
+          <Button size="sm" variant="outline" className="h-7 text-xs px-2.5"
             onClick={() => preset('current')}>Текущий</Button>
-          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+          <Button size="sm" variant="outline" className="h-7 text-xs px-2.5"
             onClick={() => preset('last3')}>3 мес</Button>
-          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+          <Button size="sm" variant="outline" className="h-7 text-xs px-2.5"
             onClick={() => preset('last6')}>6 мес</Button>
-          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+          <Button size="sm" variant="outline" className="h-7 text-xs px-2.5"
             onClick={() => preset('last12')}>12 мес</Button>
-          <Button size="sm" variant="outline" className="h-5 text-[10px] px-1.5"
+          <Button size="sm" variant="outline" className="h-7 text-xs px-2.5"
             onClick={() => preset('year')}>Год</Button>
-          <Button size="sm" variant="ghost" className="h-5 text-[10px] px-1.5 text-muted-foreground ml-auto"
+          <Button size="sm" variant="ghost" className="h-7 text-xs px-2.5 text-muted-foreground ml-auto"
             onClick={() => preset('none')}>Сбросить</Button>
         </div>
         {!hasRange && (
-          <p className="text-[10px] text-muted-foreground/70">
+          <p className="text-[11px] text-muted-foreground/70">
             Без диапазона грузятся последние {channel.periodDays ?? 30} дн.
           </p>
         )}
@@ -307,12 +291,16 @@ function collectStationUniverse(
   return entries
 }
 
-function StationsCard({
-  channel, onUpdate,
-}: {
-  channel: Channel
-  onUpdate: (ch: Channel) => void
-}) {
+/**
+ * Карточка станций — ИНФОРМАЦИОННАЯ.
+ *
+ * Прогон канала охватывает ВСЮ сеть системы: оркестратор тянет станции из STS
+ * `/v1/points` (см. channel_orchestrator._fuel_context), а config.stations
+ * используется лишь как фолбэк при недоступности /v1/points. Поэтому здесь —
+ * не селектор (он обещал бы scoping, которого нет), а сводка известных станций.
+ * Точечный отбор для конкретной загрузки — в окне «Запустить» / «Управление».
+ */
+function StationsCard({ channel }: { channel: Channel }) {
   const stsSource = getSources().find((s) => s.type === 'rest')
   const channelStations = getChannelStations(channel)
   const universe = useMemo(
@@ -320,39 +308,31 @@ function StationsCard({
     [stsSource?.id, channel.id, channelStations.length],
   )
 
-  async function saveSelected(next: Array<{ code: number; systemId: number; name: string; locationId?: string }>) {
-    next.sort((a, b) => a.systemId - b.systemId || a.code - b.code)
-    const updated = await updateChannel(channel.id, {
-      config: { ...channel.config, stations: next, stationCodes: undefined },
-    })
-    if (updated) onUpdate(updated)
-  }
-
-  // Группировка для preview-сводки
+  // Группировка известных станций по системе
   const bySystem = useMemo(() => {
-    const m = new Map<number, ChannelStation[]>()
-    for (const s of channelStations) {
+    const m = new Map<number, StationCheckEntry[]>()
+    for (const s of universe) {
       if (!m.has(s.systemId)) m.set(s.systemId, [])
       m.get(s.systemId)!.push(s)
     }
     return Array.from(m.entries()).sort((a, b) => a[0] - b[0])
-  }, [channelStations])
+  }, [universe])
 
   return (
     <Card className="md:col-span-2 py-3 gap-2">
       <CardHeader className="pb-0">
         <CardTitle className="text-sm flex items-center gap-1.5">
           <MapPin className="h-3.5 w-3.5" />
-          Станции
-          <span className="text-xs text-muted-foreground font-normal ml-auto">
-            {channelStations.length} из {universe.length}
+          Станции сети
+          <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">
+            {universe.length}
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0 pb-3">
-        {channelStations.length === 0 ? (
+        {universe.length === 0 ? (
           <p className="text-xs text-muted-foreground py-1">
-            Станции не выбраны.
+            Станции появятся после первой загрузки — они читаются из STS.
           </p>
         ) : (
           <div className="max-h-44 overflow-y-auto pr-1 space-y-2">
@@ -367,7 +347,7 @@ function StationsCard({
                 <div className="grid grid-cols-2 xl:grid-cols-3 gap-x-3 gap-y-0">
                   {items.map((s) => (
                     <div key={`${s.systemId}-${s.code}`}
-                      className="flex items-center gap-2 text-[11px] py-0.5 px-1 rounded hover:bg-accent/30 min-w-0">
+                      className="flex items-center gap-2 text-[11px] py-0.5 px-1 rounded min-w-0">
                       <span className="font-mono text-muted-foreground w-7 shrink-0 text-right tabular-nums">{s.code}</span>
                       <span className="truncate">{s.name ?? ''}</span>
                     </div>
@@ -378,32 +358,10 @@ function StationsCard({
           </div>
         )}
 
-        <div className="mt-2 pt-2 border-t border-border/40 flex items-center gap-2">
-          <StationsSelectorDialog
-            stsSourceId={stsSource?.id}
-            selected={channelStations.map((s) => ({ code: s.code, systemId: s.systemId }))}
-            onSave={(next) => saveSelected(next.map((o) => ({
-              code: o.code, systemId: o.systemId,
-              name: o.name, locationId: o.locationId,
-            })))}
-            trigger={
-              <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5 flex-1">
-                <Search className="h-3.5 w-3.5" />
-                {channelStations.length === 0 ? 'Выбрать станции' : 'Изменить выбор'}
-              </Button>
-            }
-          />
-          {channelStations.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs px-2 text-muted-foreground"
-              onClick={() => saveSelected([])}
-            >
-              Очистить
-            </Button>
-          )}
-        </div>
+        <p className="mt-2 pt-2 border-t border-border/40 text-[10px] text-muted-foreground/80 leading-relaxed">
+          Загрузка охватывает всю сеть системы (станции читаются из STS автоматически).
+          Ограничить станции для конкретной загрузки можно в окне «Запустить» или «Управление».
+        </p>
       </CardContent>
     </Card>
   )
@@ -479,174 +437,338 @@ function ManualTableCard({ channel }: { channel: Channel }) {
 
 // ─── Вкладка: Обзор ────────────────────────────────────────
 
-function OverviewTab({ channel, onSync, onUpdate }: { channel: Channel; onSync: () => void; onUpdate: (ch: Channel) => void }) {
-  const isManualTable = channel.templateId === 'reestr_contracts_payments'
-  const sources = getSources()
-  const channelSourceIds = getChannelSourceIds(channel)
-  const channelSources = sources.filter((s) => channelSourceIds.includes(s.id))
-  const status = STATUS_MAP[channel.status] ?? STATUS_MAP.draft
-  const docs = getAllLoadedDocs().filter((d) => d.channelId === channel.id)
+/** Загруженные документы канала: в API-режиме из БД (/fuel/shifts|receipts),
+ *  иначе localStorage. Решает «Загружено 0» при реально загруженных сменах. */
+function useChannelDocs(channel: Channel): LoadedDocument[] {
+  const isShift = channel.templateId === 'fuel_shift'
+  const isDelivery = channel.templateId === 'fuel_delivery'
+  const apiFuel = isApiEnabled() && (isShift || isDelivery)
+  const anchorStreamId = channel.streams.find((s) => s.enabled)?.id ?? channel.streams[0]?.id ?? ''
+  const { data } = useQuery({
+    queryKey: ['channel-loaded', channel.id, channel.templateId],
+    enabled: apiFuel,
+    queryFn: async (): Promise<LoadedDocument[]> => {
+      if (isDelivery) {
+        const rows = await getLoadedReceipts()
+        return rows.map((r: LoadedReceipt) => ({
+          id: r.id, channelId: channel.id, streamId: anchorStreamId, docType: 'receipt',
+          fingerprint: r.id, title: `ТТН ${r.ttn} · ${r.fuel_name}`,
+          stationId: r.station_code ?? 0,
+          date: '', data: { ...r, totalLiters: r.doc_volume_liters },
+          catalog: r.supplier ?? '', loadedAt: r.created_at ?? '',
+        }))
+      }
+      const rows = await getLoadedShifts()
+      return rows.map((s: LoadedShift) => ({
+        id: s.id, channelId: channel.id, streamId: anchorStreamId, docType: 'shift_report',
+        fingerprint: s.id, title: `Смена №${s.shift_number}`,
+        stationId: s.station_code ?? 0,
+        date: s.opened_at ?? '', data: { ...s, totalLiters: s.total_liters },
+        catalog: s.station_name ?? '', loadedAt: s.created_at ?? '',
+      }))
+    },
+  })
+  if (apiFuel) return data ?? []
+  return getAllLoadedDocs().filter((d) => d.channelId === channel.id)
+}
 
-  // Список станций канала используется только для disabled-state кнопки.
-  // Все CRUD-операции теперь внутри StationsCard.
-  const stations = getChannelStations(channel)
+/** Лёгкая подпись зоны на «Обзоре» — sentence-case, не трекинг-капс (не eyebrow). */
+function ZoneLabel({ children }: { children: React.ReactNode }) {
+  return <h2 className="text-xs font-semibold text-muted-foreground/80 px-0.5">{children}</h2>
+}
 
-  // shadcn Card по умолчанию имеет py-6 gap-6 — это съедает вертикаль.
-  // Переопределяем на компактный режим для всех карточек Обзора.
-  // (tailwind-merge правильно подменяет py-6→py-3, gap-6→gap-2.)
-  const compactCard = "py-3 gap-2"
+// ─── Обзор = кокпит прогона: панель загрузки + лента прогонов ───────────
 
-  // Цветовой акцент карточки Статус по состоянию. Используем border-l как
-  // тонкий «маркер слева» — идиома из Stripe/Linear/Vercel: даёт читаемую
-  // визуальную иерархию без агрессивных заливок.
-  const statusBorder =
-    channel.status === 'active' ? 'border-l-emerald-500' :
-    channel.status === 'error' ? 'border-l-destructive' :
-    channel.status === 'paused' ? 'border-l-muted-foreground' :
-    'border-l-amber-500'
-  const statusBadgeBg =
-    channel.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' :
-    channel.status === 'error' ? 'bg-destructive/10 text-destructive border-destructive/20' :
-    channel.status === 'paused' ? 'bg-muted text-muted-foreground border-border' :
-    'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+const RUN_STATUS_META: Record<string, { Icon: React.ComponentType<{ className?: string }>; cls: string; label: string }> = {
+  success: { Icon: CheckCircle2, cls: 'text-emerald-500', label: 'Успешно' },
+  partial: { Icon: AlertTriangle, cls: 'text-amber-500', label: 'Частично' },
+  error: { Icon: XCircle, cls: 'text-destructive', label: 'Ошибка' },
+  running: { Icon: Loader2, cls: 'text-primary', label: 'Идёт…' },
+}
+
+function runUnit(channel: Channel): string {
+  return channel.templateId === 'fuel_delivery' ? 'ТТН'
+    : channel.templateId === 'fuel_shift' ? 'смен' : 'док'
+}
+
+/**
+ * Панель «Загрузка» — единая точка запуска: период (PeriodCard, пишет в config)
+ * + опциональный фильтр станций для прогона + кнопка «Запустить».
+ * Период — единственный источник правды (он же в подписи кнопки шапки).
+ */
+function LoadPanel({ channel, onUpdate, syncing, isFuelApi, availableStations, onRun }: {
+  channel: Channel
+  onUpdate: (ch: Channel) => void
+  syncing: boolean
+  isFuelApi: boolean
+  availableStations: { code: number; name: string }[]
+  onRun: (p: { dateFrom?: string; dateTo?: string; stationCodes?: number[] }) => void
+}) {
+  const cfg = channel.config ?? {}
+  const [sel, setSel] = useState<number[]>([])   // фильтр станций для прогона (пусто = вся сеть)
+  const [stOpen, setStOpen] = useState(false)
+  const periodLabel = periodShortLabel(cfg.dateFrom, cfg.dateTo) ?? `последние ${channel.periodDays ?? 30} дн.`
+  const stLabel = sel.length === 0 ? `вся сеть · ${availableStations.length || '—'} ст.` : `${sel.length} ст.`
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-      {/* Ручная таблица: загрузка файла + запуск обработки (manual_table) */}
-      {isManualTable && <ManualTableCard channel={channel} />}
-
-      {/* Row 1: meta — Статус, Источники, Расписание */}
-      <Card className={`${compactCard} border-l-2 ${statusBorder}`}>
-        <CardHeader className="pb-0">
-          <CardTitle className="text-sm flex items-center gap-2">
-            Статус
-            <Badge
-              variant="outline"
-              className={`ml-auto h-5 px-1.5 text-[10px] font-medium ${statusBadgeBg}`}
-            >
-              {status.label}
-            </Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0 pb-3 space-y-2.5">
-          <Button size="sm" className="w-full gap-1.5 font-medium" onClick={onSync}
-            disabled={stations.length === 0 || channelSources.length === 0}>
-            <Play className="h-3.5 w-3.5" />
-            Запустить pipeline
-          </Button>
-          {channel.lastSync ? (
-            <p className="text-[10px] text-muted-foreground">
-              Последний прогон —{' '}
-              <span className="text-foreground/70 font-medium">
-                {format(new Date(channel.lastSync), 'dd.MM.yyyy HH:mm')}
-              </span>
-            </p>
-          ) : (
-            <p className="text-[10px] text-muted-foreground">Pipeline ещё не запускался</p>
-          )}
-          {stations.length === 0 && (
-            <p className="text-[10px] text-amber-500">Укажите хотя бы одну станцию</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Источники */}
-      <Card className={compactCard}>
-        <CardHeader className="pb-0">
-          <CardTitle className="text-sm flex items-center gap-1.5">
-            <Database className="h-3.5 w-3.5 text-muted-foreground" />
-            Источники
-            <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">
-              {channelSources.length}
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0 pb-3">
-          <div className="space-y-1">
-            {channelSources.map((src) => (
-              <div key={src.id} className="flex items-center gap-2 text-xs">
-                <span className="font-medium truncate">{src.name}</span>
-                <Badge variant="outline" className="text-[9px] h-4 ml-auto shrink-0 uppercase tracking-wide">
-                  {src.type}
-                </Badge>
-              </div>
-            ))}
-            {channelSources.length === 0 && (
-              <p className="text-xs text-muted-foreground">Нет подключённых источников</p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Расписание */}
-      <ScheduleCard channel={channel} onUpdate={onUpdate} />
-
-      {/* Row 2: конфигурация — Станции (2) + Период (1) */}
-      <StationsCard channel={channel} onUpdate={onUpdate} />
-      <PeriodCard channel={channel} onUpdate={onUpdate} />
-
-      {/* Row 3: результат — Загружено (1) + Pipeline (2) */}
-      <Card className={compactCard}>
-        <CardHeader className="pb-0">
-          <CardTitle className="text-sm flex items-center gap-1.5">
-            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-            Загружено
-            <span className="text-xs text-muted-foreground font-normal ml-auto tabular-nums">
-              {docs.length}
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0 pb-3">
-          <div className="space-y-1">
-            {channel.streams.filter((s) => s.enabled).map((s) => {
-              const count = docs.filter((d) => d.streamId === s.id).length
-              return (
-                <div key={s.id} className="flex items-center justify-between text-xs gap-2">
-                  <span className="truncate">{s.name}</span>
-                  <Badge variant="secondary" className="text-[10px] shrink-0 tabular-nums">
-                    {count}
-                  </Badge>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Pipeline — визуальный путь обработки */}
-      <Card className={`${compactCard} md:col-span-2`}>
-        <CardHeader className="pb-0">
-          <CardTitle className="text-sm flex items-center gap-1.5">
-            <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
-            Pipeline
-            <span className="text-xs text-muted-foreground font-normal ml-auto">
-              {channel.stages.filter((s) => s.enabled).length} активных
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0 pb-3">
-          <div className="flex items-center flex-wrap gap-y-2">
-            {channel.stages.sort((a, b) => a.order - b.order).map((stage, i) => {
-              const meta = STAGE_TYPE_META[stage.type]
-              const active = stage.enabled
-              return (
-                <div key={stage.id} className="flex items-center">
-                  {i > 0 && (
-                    <span className="mx-2 text-muted-foreground/40 select-none">→</span>
-                  )}
-                  <div className={`px-3 py-1 rounded-full border text-[11px] font-medium transition-colors ${
-                    active
-                      ? 'border-primary/30 bg-primary/5 text-foreground'
-                      : 'border-border/40 bg-muted/40 text-muted-foreground line-through'
-                  }`}>
-                    {meta.label}
+    <section className="space-y-2">
+      <ZoneLabel>Загрузка</ZoneLabel>
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <PeriodCard channel={channel} onUpdate={onUpdate} />
+        </div>
+        <Card className="py-3 gap-2 border-primary/20">
+          <CardHeader className="pb-0">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <Play className="h-3.5 w-3.5 text-primary" />
+              Загрузить
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 pb-3 space-y-2">
+            {isFuelApi && availableStations.length > 0 && (
+              <Popover open={stOpen} onOpenChange={setStOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 text-sm w-full justify-between gap-1.5 font-normal bg-di-surface-low dark:bg-di-surface-low border-di-outline-variant/20">
+                    <span className="flex items-center gap-1.5 truncate">
+                      <MapPin className="h-3.5 w-3.5 shrink-0" /> {stLabel}
+                    </span>
+                    <ChevronsUpDown className="h-3 w-3 opacity-50 shrink-0" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-2" align="end">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium">Станции загрузки</span>
+                    <button type="button" className="text-xs text-primary hover:underline"
+                      onClick={() => setSel([])}>Вся сеть</button>
                   </div>
+                  <div className="max-h-56 overflow-y-auto space-y-0.5">
+                    {availableStations.map((s) => {
+                      const checked = sel.includes(s.code)
+                      return (
+                        <label key={s.code} className="flex items-center gap-2 text-sm py-0.5 cursor-pointer">
+                          <Checkbox checked={checked} onCheckedChange={(v) =>
+                            setSel((prev) => v ? [...prev, s.code] : prev.filter((c) => c !== s.code))} />
+                          <span className="truncate flex-1">{s.name}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">{s.code}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">Пусто = вся сеть системы.</p>
+                </PopoverContent>
+              </Popover>
+            )}
+            <Button size="sm" className="w-full gap-1.5 h-9" disabled={syncing}
+              onClick={() => onRun({ dateFrom: cfg.dateFrom, dateTo: cfg.dateTo, stationCodes: sel })}>
+              {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              <span className="truncate">Загрузить · {periodLabel}</span>
+            </Button>
+            <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+              Грузит период из настроек слева. Прогресс — в ленте «Загрузки» ниже.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  )
+}
+
+/** Лента прогонов — история загрузок: строка = прогон, раскрывается в детали. */
+function RunsList({ channel, isFuelApi, onRepeat, onDelete }: {
+  channel: Channel
+  isFuelApi: boolean
+  onRepeat: (r: ChannelRun) => void
+  onDelete: (r: ChannelRun) => void
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['channel-runs', channel.id],
+    enabled: isApiEnabled(),
+    queryFn: () => getChannelRuns(channel.id),
+  })
+  const runs = data ?? []
+  const [openId, setOpenId] = useState<string | null>(null)
+  const unit = runUnit(channel)
+  const stationName = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const loc of getLocations()) {
+      if (loc.type !== 'fuel_station') continue
+      const c = Number(loc.code)
+      if (Number.isFinite(c) && !m.has(c)) m.set(c, loc.name)
+    }
+    return (c: number) => m.get(c) ?? `Станция ${c}`
+  }, [])
+
+  return (
+    <section className="space-y-2">
+      <ZoneLabel>Загрузки</ZoneLabel>
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
+        </div>
+      ) : runs.length === 0 ? (
+        <Card>
+          <CardContent className="py-10 text-center">
+            <History className="h-9 w-9 text-muted-foreground/30 mx-auto mb-2" />
+            <p className="text-sm font-medium text-muted-foreground">Загрузок ещё не было</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Выберите период выше и нажмите «Загрузить».</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-1">
+            {runs.map((r) => {
+              const meta = RUN_STATUS_META[r.status] ?? RUN_STATUS_META.running
+              const Icon = meta.Icon
+              const period = periodShortLabel(r.date_from, r.date_to)
+              const ts = r.finished_at || r.started_at
+              const canManage = isFuelApi && !!r.date_from && !!r.date_to
+              const expandable = r.by_station.length > 0 || canManage
+              const open = expandable && openId === r.id
+              return (
+                <div key={r.id} className="bg-di-surface-low rounded-xl overflow-hidden">
+                  <div
+                    onClick={expandable ? () => setOpenId(open ? null : r.id) : undefined}
+                    className={`flex items-center gap-4 py-3 px-3 transition-colors ${expandable ? 'cursor-pointer hover:bg-di-surface-high' : ''}`}
+                  >
+                    <Icon className={`h-4 w-4 shrink-0 ${meta.cls} ${r.status === 'running' ? 'animate-spin' : ''}`} />
+                    <span className="text-sm font-medium w-28 shrink-0 truncate">{period ?? 'весь период'}</span>
+                    {/* объём */}
+                    <span className="text-sm tabular-nums shrink-0 w-24">
+                      <b className="text-foreground">{r.loaded}</b> <span className="text-muted-foreground">{unit}</span>
+                    </span>
+                    {/* станции */}
+                    <span className="text-sm text-muted-foreground tabular-nums shrink-0 w-20 hidden sm:block">
+                      {r.stations_done}/{r.stations_total} ст
+                    </span>
+                    {/* разбивка — прямо в строке */}
+                    <span className="text-xs text-muted-foreground tabular-nums hidden lg:flex items-center gap-3 shrink-0">
+                      <span>проп <span className="text-foreground/70">{r.skipped}</span></span>
+                      <span>дубл <span className="text-foreground/70">{r.duplicates}</span></span>
+                      <span className={r.errors > 0 ? 'text-destructive' : ''}>
+                        ошиб <span className={r.errors > 0 ? 'font-semibold' : 'text-foreground/70'}>{r.errors}</span>
+                      </span>
+                    </span>
+                    <span className="ml-auto flex items-center gap-3 shrink-0">
+                      {!r.date_from && r.status !== 'running' && (
+                        <span className="text-[10px] text-muted-foreground/45 hidden xl:inline">период не сохранён</span>
+                      )}
+                      <span className="text-[11px] text-muted-foreground/80 tabular-nums w-[118px] text-right hidden sm:block">
+                        {ts ? format(new Date(ts), 'dd.MM.yyyy HH:mm') : ''}
+                      </span>
+                      {expandable
+                        ? <ChevronDown className={`h-4 w-4 text-muted-foreground/60 transition-transform ${open ? 'rotate-180' : ''}`} />
+                        : <span className="w-4 shrink-0" />}
+                    </span>
+                  </div>
+                  {open && (
+                    <div className="px-3 pb-3 pt-2 space-y-2 border-t border-border/40">
+                      {r.by_station.length > 0 && (
+                        <div className="grid grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-0.5 max-h-40 overflow-y-auto pr-1">
+                          {r.by_station.map((s, i) => (
+                            <div key={i} className="flex items-center gap-2 text-[11px]">
+                              <span className="font-mono text-muted-foreground w-7 text-right tabular-nums shrink-0">{s.station}</span>
+                              <span className="truncate flex-1">{s.name ?? stationName(s.station)}</span>
+                              {s.error
+                                ? <span className="text-destructive text-[10px] shrink-0" title={s.error}>ошибка</span>
+                                : <span className="text-muted-foreground tabular-nums shrink-0">{s.created ?? 0}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {canManage && (
+                        <div className="flex gap-2 pt-1">
+                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+                            onClick={(e) => { e.stopPropagation(); onRepeat(r) }}>
+                            <RotateCcw className="h-3 w-3" /> Повторить период
+                          </Button>
+                          <Button size="sm" variant="outline"
+                            className="h-7 text-xs gap-1.5 text-destructive hover:text-destructive"
+                            onClick={(e) => { e.stopPropagation(); onDelete(r) }}>
+                            <Trash2 className="h-3 w-3" /> Удалить период
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+const ROLE_META: Record<string, { label: string; cls: string; dot: string }> = {
+  anchor: { label: 'Опорный', cls: 'text-foreground/80', dot: 'bg-primary' },
+  control: { label: 'Сверяемый', cls: 'text-emerald-500', dot: 'bg-emerald-500' },
+  reference: { label: 'Справочный', cls: 'text-muted-foreground', dot: 'bg-muted-foreground/50' },
+  external: { label: 'Внешний', cls: 'text-amber-500', dot: 'bg-amber-500' },
+}
+
+/** Разрезы учёта канала: какие потоки он формирует и какие из них сверяемы. */
+function ChannelCutsCard({ channel }: { channel: Channel }) {
+  const cuts = channel.streams
+  const anchor = cuts.find((s) => (s.role ?? 'control') === 'anchor')
+  const reconcilable = cuts.filter((s) => s.role === 'control')
+  return (
+    <Card className="py-3 gap-2">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <GitCompare className="h-3.5 w-3.5 text-muted-foreground" />
+          Разрезы учёта
+          <span className="text-xs text-muted-foreground font-normal ml-2 tabular-nums">{cuts.length}</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0 pb-3">
+        {cuts.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-2">Разрезов учёта нет</p>
+        ) : (
+          <div className="space-y-1">
+            {cuts.map((s) => {
+              const m = ROLE_META[s.role ?? 'control'] ?? ROLE_META.control
+              return (
+                <div key={s.id} className={`flex items-center gap-2.5 px-3 py-2 bg-di-surface-low rounded-xl${s.sourceId ? '' : ' opacity-70'}`}>
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${m.dot}`} />
+                  <span className="text-sm text-foreground/90 truncate">{s.name}</span>
+                  {!s.sourceId && <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60 shrink-0">не подключён</span>}
+                  <span className={`ml-auto text-[10px] font-semibold uppercase tracking-wide shrink-0 ${m.cls}`}>{m.label}</span>
                 </div>
               )
             })}
           </div>
-        </CardContent>
-      </Card>
+        )}
+        <p className="text-[11px] text-muted-foreground mt-2.5 px-0.5">
+          {reconcilable.length > 0
+            ? `Сверяемых разрезов: ${reconcilable.length}${anchor ? ` · опорный — «${anchor.name}»` : ''}`
+            : 'Дополнительной сверки разрезов нет'}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function OverviewTab({ channel, onUpdate, isFuelApi, syncing, availableStations, onRun, onRepeat, onDelete }: {
+  channel: Channel
+  onUpdate: (ch: Channel) => void
+  isFuelApi: boolean
+  syncing: boolean
+  availableStations: { code: number; name: string }[]
+  onRun: (p: { dateFrom?: string; dateTo?: string; stationCodes?: number[] }) => void
+  onRepeat: (r: ChannelRun) => void
+  onDelete: (r: ChannelRun) => void
+}) {
+  const isManualTable = channel.templateId === 'reestr_contracts_payments'
+  return (
+    <div className="space-y-5">
+      {isManualTable && (
+        <div className="grid gap-3 md:grid-cols-3">
+          <ManualTableCard channel={channel} />
+        </div>
+      )}
+      <LoadPanel channel={channel} onUpdate={onUpdate} syncing={syncing}
+        isFuelApi={isFuelApi} availableStations={availableStations} onRun={onRun} />
+      <ChannelCutsCard channel={channel} />
+      <RunsList channel={channel} isFuelApi={isFuelApi} onRepeat={onRepeat} onDelete={onDelete} />
     </div>
   )
 }
@@ -793,9 +915,16 @@ function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
     if (updated) onUpdate(updated)
   }
 
+  // Визуализация этапов — только для клиентского (localStorage) pipeline.
+  // В API-режиме обработку ведёт серверный оркестратор (загрузка из STS по всем
+  // станциям → нормализация → сохранение); channel.stages он не использует,
+  // поэтому пустой блок «Этапы конвейера» здесь не нужен.
+  const showStages = stages.length > 0 || !isApiEnabled()
+
   return (
     <div className="space-y-6">
-      {/* Этапы pipeline */}
+      {/* Этапы pipeline (клиентский режим) */}
+      {showStages && (
       <div className="space-y-3">
         <div>
           <h3 className="text-sm font-semibold">Этапы конвейера</h3>
@@ -851,6 +980,7 @@ function PipelineTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
           </Card>
         )}
       </div>
+      )}
 
       {/* Параметры обработки — специфика конкретной обработки */}
       <ProcessingParametersCard channel={channel} onUpdate={onUpdate} />
@@ -948,34 +1078,29 @@ function ProcessingParametersCard({
           {primaryDocType === 'shift_report' && (
             <>
               <div className="border-t border-border/40" />
-              <div className="space-y-3">
-                <div className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
-                  Сменные отчёты
+              <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                Сменный отчёт обрабатывается полностью: продажи раскладываются по каналам
+                оплаты (для документов 1С), резервуары и счётчики ТРК сохраняются для
+                контроля. Приём топлива (ТТН) идёт отдельным каналом «Топливо: приём».
+              </p>
+              <div className="border-t border-border/40" />
+              <div className="grid sm:grid-cols-3 gap-3 items-start">
+                <div>
+                  <Label className="text-xs font-medium">Порог расхождения по резервуару</Label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                    Смена помечается «Расхождения», если |факт − расчёт| остатка в баке
+                    превышает это значение. По умолчанию 10 л.
+                  </p>
                 </div>
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <Checkbox
-                    checked={cfg.includeReceipts ?? true}
-                    onCheckedChange={(v) => update({ includeReceipts: !!v })}
-                    className="h-3.5 w-3.5"
+                <div className="sm:col-span-2 flex items-center gap-2">
+                  <Input
+                    type="number" min="0" step="1"
+                    value={cfg.tankThreshold ?? 10}
+                    onChange={(e) => update({ tankThreshold: Number(e.target.value) || 0 })}
+                    className="h-8 text-xs sm:max-w-[140px] bg-di-surface-low dark:bg-di-surface-low border-di-outline-variant/20"
                   />
-                  <span>Извлекать ТТН из сменных отчётов</span>
-                </label>
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <Checkbox
-                    checked={cfg.includePayments ?? true}
-                    onCheckedChange={(v) => update({ includePayments: !!v })}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span>Сохранять разбивку оплат (наличные / карты / талоны)</span>
-                </label>
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <Checkbox
-                    checked={cfg.includeTanks ?? true}
-                    onCheckedChange={(v) => update({ includeTanks: !!v })}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span>Сохранять остатки резервуаров</span>
-                </label>
+                  <span className="text-xs text-muted-foreground">литров</span>
+                </div>
               </div>
             </>
           )}
@@ -983,27 +1108,11 @@ function ProcessingParametersCard({
           {primaryDocType === 'receipt' && (
             <>
               <div className="border-t border-border/40" />
-              <div className="space-y-3">
-                <div className="text-[11px] font-semibold text-muted-foreground/80 uppercase tracking-wide">
-                  Поступления (ТТН)
-                </div>
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <Checkbox
-                    checked={cfg.recomputeDensity ?? false}
-                    onCheckedChange={(v) => update({ recomputeDensity: !!v })}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span>Пересчитывать плотность по факту (объём ↔ масса)</span>
-                </label>
-                <label className="flex items-center gap-2 text-xs cursor-pointer">
-                  <Checkbox
-                    checked={cfg.warnDiff ?? true}
-                    onCheckedChange={(v) => update({ warnDiff: !!v })}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span>Помечать расхождения «факт vs документ» в логе</span>
-                </label>
-              </div>
+              <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                По каждой ТТН сохраняются объём (литры), масса (тонны) и плотность; масса
+                пересчитывается из объёма по плотности при отсутствии в документе.
+                Расхождения «факт vs документ» фиксируются автоматически.
+              </p>
             </>
           )}
 
@@ -1074,6 +1183,97 @@ function buildEffective(all: ReconcileMapping[], channelId: string): EffectiveRo
     }
   }
   return [...byKey.values()].sort((a, b) => a.sourceKey.localeCompare(b.sourceKey))
+}
+
+// Какой справочник 1С стоит за видом маппинга (для пикера записи 1С).
+// paytype не имеет синхронизируемого справочника → остаётся ручной ввод GUID.
+const CATALOG_KIND: Partial<Record<MappingKind, 'nomenclature' | 'warehouse' | 'counterparty'>> = {
+  fuel: 'nomenclature',
+  nomenclature: 'nomenclature',
+  station: 'warehouse',
+  counterparty: 'counterparty',
+}
+
+interface RefOption { ref?: string; name: string; sub?: string }
+
+/** Опции справочника 1С по виду маппинга (номенклатура/склад/контрагент). */
+function useRefOptions(kind: MappingKind, companyId: string): { options: RefOption[]; loading: boolean } {
+  const catalog = CATALOG_KIND[kind]
+  const { data, isLoading } = useQuery({
+    queryKey: ['ref-catalog', catalog, companyId],
+    enabled: !!catalog && isApiEnabled(),
+    queryFn: async (): Promise<RefOption[]> => {
+      if (catalog === 'nomenclature') {
+        return (await getNomenclature(companyId)).map((n) => ({ ref: n.externalRef, name: n.name, sub: n.code }))
+      }
+      if (catalog === 'warehouse') {
+        return (await getWarehouses(companyId)).map((w) => ({ ref: w.externalRef, name: w.name, sub: w.code }))
+      }
+      return (await getCounterparties(companyId)).map((c) => ({ ref: c.externalRef, name: c.name, sub: c.inn }))
+    },
+  })
+  return { options: data ?? [], loading: isLoading }
+}
+
+/**
+ * Пикер записи 1С: combobox с поиском по справочнику (вместо ручного ввода GUID).
+ * Записи без external_ref (нет GUID 1С — заведены вручную) показываются, но
+ * недоступны для выбора как цель маппинга. Выбор заполняет и GUID, и название.
+ */
+function RefPicker({ kind, companyId, valueRef, valueName, onPick }: {
+  kind: MappingKind
+  companyId: string
+  valueRef: string
+  valueName: string
+  onPick: (ref: string, name: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const { options, loading } = useRefOptions(kind, companyId)
+  const label = valueName || valueRef || 'Выбрать запись 1С…'
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" role="combobox" aria-expanded={open}
+          className="h-8 text-xs w-64 justify-between font-normal">
+          <span className={`truncate ${valueRef ? '' : 'text-muted-foreground'}`}>{label}</span>
+          <ChevronsUpDown className="h-3 w-3 opacity-50 shrink-0" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <Command filter={(value, search) => value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}>
+          <CommandInput placeholder="Поиск по названию/коду…" className="text-xs" />
+          <CommandList>
+            {loading ? (
+              <div className="py-6 text-center text-xs text-muted-foreground">Загрузка справочника…</div>
+            ) : (
+              <>
+                <CommandEmpty className="py-6 text-center text-xs text-muted-foreground">
+                  Ничего не найдено. Синхронизируйте справочники 1С.
+                </CommandEmpty>
+                <CommandGroup>
+                  {options.map((o, i) => (
+                    <CommandItem
+                      key={(o.ref ?? 'noref') + i}
+                      value={`${o.name} ${o.sub ?? ''}`}
+                      disabled={!o.ref}
+                      onSelect={() => { if (o.ref) { onPick(o.ref, o.name); setOpen(false) } }}
+                      className="text-xs gap-2"
+                    >
+                      <Check className={`h-3 w-3 shrink-0 ${valueRef && valueRef === o.ref ? 'opacity-100' : 'opacity-0'}`} />
+                      <span className="truncate flex-1">{o.name}</span>
+                      {o.sub && <span className="text-[10px] text-muted-foreground font-mono shrink-0">{o.sub}</span>}
+                      {!o.ref && <span className="text-[9px] text-amber-500 shrink-0">нет GUID</span>}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 function MappingTab({ channel, companyId }: { channel: Channel; companyId: string }) {
@@ -1162,20 +1362,33 @@ function MappingTab({ channel, companyId }: { channel: Channel; companyId: strin
           {/* Форма добавления (уровень канала) */}
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Ключ источника</Label>
+              <Label className="text-[11px] text-muted-foreground">Ключ источника</Label>
               <Input value={srcKey} onChange={(e) => setSrcKey(e.target.value)}
                 placeholder={meta.ph} className="h-8 text-xs w-44" />
             </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Ref 1С (GUID)</Label>
-              <Input value={tgtRef} onChange={(e) => setTgtRef(e.target.value)}
-                placeholder="GUID в БП" className="h-8 text-xs w-44 font-mono" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Название (для UI)</Label>
-              <Input value={tgtName} onChange={(e) => setTgtName(e.target.value)}
-                placeholder="напр. ДТ Евро" className="h-8 text-xs w-44" />
-            </div>
+            {CATALOG_KIND[kind] ? (
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Запись 1С</Label>
+                <RefPicker
+                  kind={kind} companyId={companyId}
+                  valueRef={tgtRef} valueName={tgtName}
+                  onPick={(ref, name) => { setTgtRef(ref); setTgtName(name) }}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">Ref 1С (GUID)</Label>
+                  <Input value={tgtRef} onChange={(e) => setTgtRef(e.target.value)}
+                    placeholder="GUID в БП" className="h-8 text-xs w-44 font-mono" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] text-muted-foreground">Название (для UI)</Label>
+                  <Input value={tgtName} onChange={(e) => setTgtName(e.target.value)}
+                    placeholder="напр. Купон" className="h-8 text-xs w-44" />
+                </div>
+              </>
+            )}
             <Button size="sm" className="h-8 text-xs gap-1" onClick={add} disabled={!srcKey.trim() || !tgtRef.trim()}>
               <Plus className="h-3 w-3" /> Добавить
             </Button>
@@ -1256,7 +1469,9 @@ function parseShiftNo(title: string): number | null {
 
 
 function DataTab({ channel }: { channel: Channel }) {
-  const allDocs = getAllLoadedDocs().filter((d) => d.channelId === channel.id)
+  const allDocs = useChannelDocs(channel)
+  // Порог расхождения по резервуару (л) из настроек канала → в просмотрщик смены.
+  const tankThreshold = Number((channel.config as Record<string, any>)?.tankThreshold) || 10
 
   // Глобальные фильтры из шапки (Компания/Точки/Типы документов).
   // Применяются ПОВЕРХ локальных фильтров вкладки (AND-логика):
@@ -1496,7 +1711,7 @@ function DataTab({ channel }: { channel: Channel }) {
         </Card>
       ) : (
         Array.from(grouped.entries()).map(([type, items]) => (
-          <DocumentsTable key={type} type={type} items={items} />
+          <DocumentsTable key={type} type={type} items={items} tankThreshold={tankThreshold} />
         ))
       )}
     </div>
@@ -1512,7 +1727,8 @@ function DataTab({ channel }: { channel: Channel }) {
  * · Размер (литры или нет данных). Имя станции подтягивается из
  * справочника по коду — если не найдено, показываем «Станция N».
  */
-function DocumentsTable({ type, items }: { type: string; items: ReturnType<typeof getAllLoadedDocs> }) {
+function DocumentsTable({ type, items, tankThreshold = 10 }: { type: string; items: ReturnType<typeof getAllLoadedDocs>; tankThreshold?: number }) {
+  const [openDoc, setOpenDoc] = useState<ReturnType<typeof getAllLoadedDocs>[number] | null>(null)
   // Кэш имён станций по коду
   const stationName = useMemo(() => {
     const map = new Map<number, string>()
@@ -1557,7 +1773,7 @@ function DocumentsTable({ type, items }: { type: string; items: ReturnType<typeo
       </CardHeader>
       <CardContent className="pt-0 pb-3">
         {/* Заголовок таблицы */}
-        <div className="grid grid-cols-[1fr_220px_110px_140px_90px] gap-3 px-2 py-1.5 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide border-b border-border/40">
+        <div className="grid grid-cols-[1fr_220px_110px_140px_90px] gap-3 px-3 pb-2 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
           <span>Документ</span>
           <span>Станция</span>
           <span>Дата</span>
@@ -1565,13 +1781,13 @@ function DocumentsTable({ type, items }: { type: string; items: ReturnType<typeo
           <span className="text-right">Размер</span>
         </div>
 
-        {/* Строки */}
-        <div className="max-h-[440px] overflow-y-auto -mx-2 px-2">
+        {/* Строки — плитки-поверхности (стиль TradeFrame) */}
+        <div className="max-h-[460px] overflow-y-auto space-y-1 pr-1">
           {visible.map((doc) => {
             const size = docSize(doc)
             return (
-              <div key={doc.id}
-                className="grid grid-cols-[1fr_220px_110px_140px_90px] gap-3 items-center px-2 py-2 text-xs border-b border-border/30 hover:bg-accent/30 transition-colors last:border-b-0">
+              <div key={doc.id} onClick={() => setOpenDoc(doc)}
+                className="grid grid-cols-[1fr_220px_110px_140px_90px] gap-3 items-center px-3 py-2.5 text-xs bg-di-surface-low rounded-xl hover:bg-di-surface-high transition-colors cursor-pointer">
                 <div className="flex items-center gap-2 min-w-0">
                   <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   <span className="font-medium truncate">{doc.title}</span>
@@ -1601,47 +1817,117 @@ function DocumentsTable({ type, items }: { type: string; items: ReturnType<typeo
           )}
         </div>
       </CardContent>
+      {openDoc?.docType === 'shift_report' ? (
+        <ShiftDetailsDialog shiftId={openDoc.id} open onClose={() => setOpenDoc(null)} tankThreshold={tankThreshold} />
+      ) : (
+        <DocumentDetailDialog doc={openDoc} onClose={() => setOpenDoc(null)} />
+      )}
     </Card>
   )
 }
 
-// ─── Вкладка: Лог ───────────────────────────────────────────
+const DOC_KIND_LABEL: Record<string, string> = {
+  shift_orp: 'Отчёт о розничных продажах (ОРП)',
+  cash_pko: 'Приходный кассовый ордер (ПКО)',
+  fuel_transfer: 'Перемещение на склад канала',
+  fuel_writeoff: 'Списание топлива',
+  ttn_transfer: 'Перемещение тонн (41.01)',
+  ttn_assembly: 'Комплектация тонны → литры (41.02)',
+}
 
-function LogTab({ channel }: { channel: Channel }) {
-  const log = channel.syncLog ?? []
-
-  if (log.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-12 text-center">
-          <History className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">Лог пуст</p>
-        </CardContent>
-      </Card>
-    )
-  }
-
+/** Диалог с документами 1С:Бухгалтерии, которые сформирует смена/ТТН. */
+function DocumentDetailDialog({ doc, onClose }: {
+  doc: ReturnType<typeof getAllLoadedDocs>[number] | null
+  onClose: () => void
+}) {
+  const isReceipt = doc?.docType === 'receipt'
+  const { data, isLoading } = useQuery({
+    queryKey: ['doc-1c', doc?.id, doc?.docType],
+    enabled: !!doc && isApiEnabled(),
+    queryFn: () => (isReceipt ? getReceiptDocuments(doc!.id) : getShiftDocuments(doc!.id)),
+  })
+  const docs: FuelDocument[] = data?.documents ?? []
   return (
-    <Card>
-      <CardContent className="py-3">
-        <ScrollArea className="max-h-[500px]">
-          <div className="space-y-0.5 font-mono text-[11px]">
-            {log.map((entry, i) => (
-              <div key={i} className={`flex gap-3 py-0.5 ${
-                entry.level === 'error' ? 'text-destructive' :
-                entry.level === 'success' ? 'text-emerald-500' :
-                entry.level === 'warn' ? 'text-amber-500' :
-                'text-muted-foreground'
-              }`}>
-                <span className="shrink-0 w-16">{format(new Date(entry.timestamp), 'HH:mm:ss')}</span>
-                <span className="shrink-0 w-20 font-semibold">{entry.event}</span>
-                <span>{entry.message}</span>
-              </div>
-            ))}
+    <Dialog open={!!doc} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{doc?.title}</DialogTitle>
+          <DialogDescription>
+            Документы 1С:Бухгалтерии, которые сформирует {isReceipt ? 'эта ТТН' : 'эта смена'}
+          </DialogDescription>
+        </DialogHeader>
+        {!isApiEnabled() ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">Доступно при подключённом API</p>
+        ) : isLoading ? (
+          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        ) : docs.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            Документы пока не сформированы (нет продаж/приёма за этот период)
+          </p>
+        ) : (
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            {docs.map((d, i) => {
+              const p = d.payload as Record<string, any>
+              const lines: any[] = Array.isArray(p.lines) ? p.lines : []
+              return (
+                <div key={i} className="rounded-lg border border-border/50 p-3 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium">{DOC_KIND_LABEL[d.kind] ?? d.kind}</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">{p.time ?? ''}</span>
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {p.doc_type}{p.warehouse ? ` · склад ${p.warehouse}` : ''}
+                    {p.warehouse_from ? ` · ${p.warehouse_from} → ${p.warehouse_to}` : ''}
+                  </div>
+                  {lines.map((ln, j) => (
+                    <div key={j} className="flex items-center justify-between text-xs gap-2 border-t border-border/30 pt-1">
+                      <span className="truncate">{ln.nomenclature || ln.fuel_name || '—'}</span>
+                      <span className="tabular-nums text-muted-foreground shrink-0">
+                        {ln.liters != null ? `${ln.liters} л` : ''}
+                        {ln.tonnes != null ? ` ${ln.tonnes} т` : ''}
+                        {ln.amount ? ` · ${Number(ln.amount).toLocaleString('ru')} ₽` : ''}
+                      </span>
+                    </div>
+                  ))}
+                  {p.amount != null && lines.length === 0 && (
+                    <div className="text-xs text-right tabular-nums">{Number(p.amount).toLocaleString('ru')} ₽</div>
+                  )}
+                  {p.product && (
+                    <div className="flex justify-between text-xs border-t border-border/30 pt-1">
+                      <span className="truncate">{p.product.nomenclature}</span>
+                      <span className="tabular-nums text-muted-foreground shrink-0">{p.product.liters} л</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
-        </ScrollArea>
-      </CardContent>
-    </Card>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Вкладка: Настройки (Источники + Станции + Расписание + Обработка) ──────
+// Редко используемая конфигурация канала. Источники, охват/станции сети,
+// расписание и параметры обработки. Период загрузки здесь НЕ дублируется —
+// он живёт в панели «Загрузка» кокпита (вкладка «Обзор»).
+
+function SettingsTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: Channel) => void }) {
+  return (
+    <div className="space-y-8">
+      <SourcesTab channel={channel} onUpdate={onUpdate} />
+      <div className="border-t border-border/40" />
+      <div>
+        <h3 className="text-sm font-semibold mb-3">Станции и расписание</h3>
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <StationsCard channel={channel} />
+          <ScheduleCard />
+        </div>
+      </div>
+      <div className="border-t border-border/40" />
+      <PipelineTab channel={channel} onUpdate={onUpdate} />
+    </div>
   )
 }
 
@@ -1650,11 +1936,35 @@ function LogTab({ channel }: { channel: Channel }) {
 export function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const [channel, setChannel] = useState<Channel | undefined>(() => id ? getChannel(id) : undefined)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
   const [syncing, setSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState('')
+  const [syncPercent, setSyncPercent] = useState<number | null>(null)
+  // Живая статистика прогона для панели прогресса (станции + объём).
+  const [syncStats, setSyncStats] = useState<{ loaded: number; done: number; total: number } | null>(null)
+  // Период загрузки — указывается явно перед каждым запуском (дефолт: текущий месяц)
+  const _now = new Date()
+  const [runFrom, setRunFrom] = useState(
+    `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-01`,
+  )
+  const [runTo, setRunTo] = useState(_now.toISOString().slice(0, 10))
+  // Диалог «Удалить»/«Обновить» за период + выбор станций
+  const [manageOpen, setManageOpen] = useState(false)
+  const [manageMode, setManageMode] = useState<'delete' | 'refresh'>('refresh')
+  const [manageBusy, setManageBusy] = useState(false)
+  const [selStations, setSelStations] = useState<number[]>([])
+  const [allPeriod, setAllPeriod] = useState(false)
   const { companyId } = useCompany()
+
+  // Станции, по которым есть загруженные данные (вкладка «Загружено» —
+  // данные всей компании, не только станций канала). Для диалога удаления.
+  const { data: loadedStations } = useQuery({
+    queryKey: ['fuel-loaded-stations', id],
+    enabled: isApiEnabled() && !!id,
+    queryFn: getLoadedStations,
+  })
 
   // API-режим: гидрация источников+каналов из бэкенда при монтировании
   useEffect(() => {
@@ -1677,22 +1987,52 @@ export function ChannelDetailPage() {
     if (id) setChannel(getChannel(id))
   }
 
-  async function handleSync() {
+  async function handleSync(period?: { dateFrom?: string; dateTo?: string; stationCodes?: number[]; allPeriod?: boolean }) {
     if (!channel) return
     setSyncing(true)
-    setSyncProgress('Запуск...')
+    setSyncPercent(null)
+    setSyncStats(null)
+    setSyncProgress('Запуск…')
     try {
       if (isApiEnabled()) {
-        // API-режим: прогон через бэкенд-оркестратор (fetch→normalize→save)
-        const res = await runChannel(channel.id)
-        refresh()
-        if (Array.isArray(res?.by_station)) {
-          const created = res.by_station.reduce((a: number, r: { created?: number }) => a + (r.created || 0), 0)
-          const label = res.kind === 'fuel_delivery' ? 'Приём ТТН' : res.kind === 'fuel_shift' ? 'Смены' : 'Записи'
-          toast.success(`${label}: загружено ${created}, станций ${res.stations_ok}/${res.stations_total}`)
-        } else {
-          toast.success(res?.message || 'Канал запущен (бэкенд)')
+        // API-режим: прогон запускается В ФОНЕ (возвращает сразу), поллим прогресс.
+        await runChannel(channel.id, period)
+        setSyncProgress('Подключение к STS…')
+        for (let i = 0; i < 1800; i++) {           // защитный лимит
+          await new Promise((r) => setTimeout(r, i === 0 ? 1200 : 2000))
+          let st
+          try {
+            st = await getChannelRunStatus(channel.id)
+          } catch {
+            continue                                // транзиентная ошибка сети — повторим
+          }
+          if (st.running) {
+            if (st.stations_total > 0) {
+              const p = Math.round((st.stations_done / st.stations_total) * 100)
+              // 0% (станция ещё качается) → бегущий индикатор, а не статичный 0
+              setSyncPercent(p > 0 ? p : null)
+            }
+            // бэк присылает осмысленный статус: «Станция X/12: загрузка смен…»
+            setSyncProgress(st.message || 'Подключение к STS…')
+            setSyncStats({ loaded: st.loaded ?? 0, done: st.stations_done ?? 0, total: st.stations_total ?? 0 })
+            if (i % 2 === 0) {
+              refresh()
+              qc.invalidateQueries({ queryKey: ['fuel-count', channel.id] }) // живой рост числа
+              qc.invalidateQueries({ queryKey: ['channel-runs', channel.id] })
+            }
+          } else {
+            setSyncPercent(100)
+            refresh()
+            // обновить карточку/вкладку «Загружено» без F5 (список + реальный count)
+            qc.invalidateQueries({ queryKey: ['channel-loaded', channel.id] })
+            qc.invalidateQueries({ queryKey: ['fuel-count', channel.id] })
+            qc.invalidateQueries({ queryKey: ['channel-runs', channel.id] })
+            if (st.status === 'error') toast.error(st.message || 'Ошибка прогона')
+            else toast.success(st.message || `Загрузка завершена · ${st.loaded}`)
+            return
+          }
         }
+        toast.message('Загрузка продолжается в фоне', { description: 'Обновите страницу позже' })
         return
       }
       // localStorage-режим: клиентский pipeline
@@ -1712,10 +2052,116 @@ export function ChannelDetailPage() {
     } finally {
       setSyncing(false)
       setSyncProgress('')
+      setSyncPercent(null)
+      setSyncStats(null)
     }
   }
 
   const status = STATUS_MAP[channel.status] ?? STATUS_MAP.draft
+
+  // Канал топлива в API-режиме — для него доступны «Обновить»/«Удалить» загруженного.
+  const isFuelApi = isApiEnabled() &&
+    (channel.templateId === 'fuel_shift' || channel.templateId === 'fuel_delivery')
+  const fuelKind: 'shift' | 'receipt' = channel.templateId === 'fuel_delivery' ? 'receipt' : 'shift'
+  // Имена станций по коду из справочника точек (как в списке «Загружено»).
+  const stationNameByCode = (() => {
+    const m = new Map<number, string>()
+    for (const loc of getLocations()) {
+      if (loc.type !== 'fuel_station') continue
+      const c = Number(loc.code)
+      if (Number.isFinite(c) && !m.has(c)) m.set(c, loc.name)
+    }
+    return m
+  })()
+  // Станции для диалога = настройки канала ∪ станции с загруженными данными
+  // (вкладка «Загружено» показывает данные всей компании, не только канала).
+  const availableStations: { code: number; name: string }[] = (() => {
+    const m = new Map<number, string>()
+    for (const s of ((channel.config?.stations as any[]) || [])) {
+      const c = Number(s.code)
+      if (Number.isFinite(c) && c) m.set(c, stationNameByCode.get(c) || String(s.name || `Станция ${c}`))
+    }
+    for (const s of (loadedStations || [])) {
+      const c = Number(s.code)
+      if (Number.isFinite(c) && c && !m.has(c)) m.set(c, stationNameByCode.get(c) || s.name || `Станция ${c}`)
+    }
+    return [...m.entries()].map(([code, name]) => ({ code, name })).sort((a, b) => a.code - b.code)
+  })()
+
+  // Повтор/удаление за период конкретного прогона (строка ленты «Прогоны»).
+  // Перезагрузка = удалить период + загрузить заново (нужно для полного raw_report).
+  async function deleteRun(r: ChannelRun) {
+    if (!channel || !r.date_from || !r.date_to) return
+    try {
+      const res = await deleteFuelPeriod({
+        kind: fuelKind, station_codes: [], date_from: r.date_from, date_to: r.date_to,
+      })
+      qc.invalidateQueries({ queryKey: ['channel-loaded', channel.id] })
+      qc.invalidateQueries({ queryKey: ['fuel-count', channel.id] })
+      qc.invalidateQueries({ queryKey: ['channel-runs', channel.id] })
+      refresh()
+      toast.success(`Удалено документов: ${res.deleted}`)
+    } catch (e) {
+      toast.error(`Не удалось удалить: ${String(e)}`)
+    }
+  }
+
+  async function repeatRun(r: ChannelRun) {
+    if (!channel || !r.date_from || !r.date_to) return
+    try {
+      await deleteFuelPeriod({
+        kind: fuelKind, station_codes: [], date_from: r.date_from, date_to: r.date_to,
+      })
+    } catch (e) {
+      toast.error(`Не удалось перезагрузить: ${String(e)}`)
+      return
+    }
+    await handleSync({ dateFrom: r.date_from, dateTo: r.date_to })
+  }
+
+  function openManage(mode: 'delete' | 'refresh') {
+    if (!channel) return
+    const cfg = channel.config || {}
+    if (cfg.dateFrom && cfg.dateTo) {     // период из настроек канала (покрывает загруженное)
+      setRunFrom(String(cfg.dateFrom).slice(0, 10))
+      setRunTo(String(cfg.dateTo).slice(0, 10))
+    }
+    // «Удалить» по умолчанию — за ВЕСЬ период (чтобы «удалить всё» не зависело
+    // от того, попадает ли период настроек канала в реально загруженные даты).
+    // «Обновить» — за конкретный период (из настроек канала).
+    setAllPeriod(mode === 'delete')
+    setSelStations([])   // пусто = вся сеть системы (по умолчанию все станции STS)
+    setManageMode(mode)
+    setManageOpen(true)
+  }
+
+  async function handleManageConfirm() {
+    if (!channel) return
+    // Пустой выбор → вся сеть системы (бэкенд/оркестратор трактуют пусто как «все»).
+    const codes = selStations
+    setManageBusy(true)
+    try {
+      const r = await deleteFuelPeriod({
+        kind: fuelKind, station_codes: codes,
+        date_from: allPeriod ? undefined : runFrom,
+        date_to: allPeriod ? undefined : runTo,
+      })
+      qc.invalidateQueries({ queryKey: ['channel-loaded', channel.id] })
+      qc.invalidateQueries({ queryKey: ['fuel-count', channel.id] })
+      refresh()
+      setManageOpen(false)
+      if (manageMode === 'delete') {
+        toast.success(`Удалено документов: ${r.deleted}`)
+      } else {
+        toast.message(`Удалено ${r.deleted} — перезагружаю из STS…`)
+        await handleSync({ dateFrom: runFrom, dateTo: runTo, stationCodes: codes, allPeriod })
+      }
+    } catch (e) {
+      toast.error(`Не удалось: ${String(e)}`)
+    } finally {
+      setManageBusy(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -1733,18 +2179,129 @@ export function ChannelDetailPage() {
             <p className="text-sm text-muted-foreground mt-0.5">{channel.description}</p>
           )}
         </div>
-        <Button size="sm" className="gap-1.5" onClick={handleSync} disabled={syncing}>
-          {syncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-          Запустить
-        </Button>
+        {isFuelApi && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-1.5" disabled={syncing || manageBusy}>
+                <Settings2 className="h-3.5 w-3.5" /> Управление
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Загруженные данные</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => openManage('refresh')}>
+                <RotateCcw className="h-3.5 w-3.5" /> Перезагрузить период…
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => openManage('delete')}>
+                <Trash2 className="h-3.5 w-3.5" /> Удалить загруженное…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
-      {/* Прогресс */}
+      {/* Диалог «Удалить»/«Обновить» загруженного — период + выбор станций */}
+      <Dialog open={manageOpen} onOpenChange={(o) => { if (!manageBusy) setManageOpen(o) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {manageMode === 'delete' ? 'Удалить загруженные данные' : 'Обновить (перезагрузить) период'}
+            </DialogTitle>
+            <DialogDescription>
+              {manageMode === 'delete'
+                ? `Удалит загруженные ${fuelKind === 'receipt' ? 'ТТН' : 'смены'} за период по выбранным станциям. Смены закрытых периодов пропускаются.`
+                : 'Удалит загруженные смены за период и сразу загрузит их заново из STS — нужно для полной формы детали смены (сырой отчёт).'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="m-from">С даты</Label>
+                <Input id="m-from" type="date" value={runFrom} disabled={allPeriod}
+                  onChange={(e) => setRunFrom(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="m-to">По дату</Label>
+                <Input id="m-to" type="date" value={runTo} disabled={allPeriod}
+                  onChange={(e) => setRunTo(e.target.value)} />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={allPeriod} onCheckedChange={(v) => setAllPeriod(!!v)} />
+              <span>{manageMode === 'delete'
+                ? 'За весь период (игнорировать даты — удалить всё по станциям)'
+                : 'За весь период (загрузить всю историю — дольше)'}</span>
+            </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>Станции</Label>
+                <div className="flex gap-3 text-xs">
+                  <button type="button" className="text-primary hover:underline"
+                    onClick={() => setSelStations(availableStations.map((s) => s.code))}>Все</button>
+                  <button type="button" className="text-muted-foreground hover:underline"
+                    onClick={() => setSelStations([])}>Сбросить</button>
+                </div>
+              </div>
+              <div className="max-h-48 overflow-y-auto rounded-md border border-border/50 p-2 space-y-0.5">
+                {availableStations.length === 0 && (
+                  <p className="text-xs text-muted-foreground">У канала не выбраны станции</p>
+                )}
+                {availableStations.map((s) => {
+                  const checked = selStations.includes(s.code)
+                  return (
+                    <label key={s.code} className="flex items-center gap-2 text-sm py-0.5 cursor-pointer">
+                      <Checkbox checked={checked} onCheckedChange={(v) =>
+                        setSelStations((prev) => v ? [...prev, s.code] : prev.filter((c) => c !== s.code))} />
+                      <span className="truncate">{s.name}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono ml-auto">код {s.code}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Пусто = вся сеть системы (все станции STS). Выбрано: {selStations.length || 'все'}.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setManageOpen(false)} disabled={manageBusy}>Отмена</Button>
+            <Button
+              variant={manageMode === 'delete' ? 'destructive' : 'default'}
+              disabled={manageBusy || (!allPeriod && (!runFrom || !runTo || runFrom > runTo))}
+              onClick={handleManageConfirm}
+            >
+              {manageBusy
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : (manageMode === 'delete' ? <Trash2 className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />)}
+              {manageMode === 'delete' ? 'Удалить за период' : 'Обновить за период'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Прогресс: детерминированный по станциям, indeterminate пока 0 */}
       {syncing && (
-        <div className="space-y-1">
-          <Progress className="h-1.5" />
-          <p className="text-[10px] text-muted-foreground">{syncProgress}</p>
-        </div>
+        <Card className="border-primary/30 bg-primary/[0.03]">
+          <CardContent className="py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+              <span className="text-sm font-medium">Загрузка из STS</span>
+              {syncStats && syncStats.total > 0 && (
+                <span className="text-xs text-muted-foreground ml-auto tabular-nums">
+                  станций {syncStats.done}/{syncStats.total}
+                </span>
+              )}
+            </div>
+            <Progress className="h-2" value={syncPercent ?? undefined} />
+            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span className="truncate">{syncProgress || 'Подключение…'}</span>
+              <span className="shrink-0 tabular-nums">
+                {syncStats ? `загружено ${syncStats.loaded}` : ''}
+                {syncPercent != null ? ` · ${syncPercent}%` : ''}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Tabs */}
@@ -1771,12 +2328,35 @@ export function ChannelDetailPage() {
 
       {/* Content */}
       <div className="pt-2">
-        {activeTab === 'overview' && <OverviewTab channel={channel} onSync={handleSync} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
-        {activeTab === 'sources' && <SourcesTab channel={channel} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
-        {activeTab === 'pipeline' && <PipelineTab channel={channel} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
-        {activeTab === 'mapping' && <MappingTab channel={channel} companyId={companyId} />}
-        {activeTab === 'data' && <DataTab channel={channel} />}
-        {activeTab === 'log' && <LogTab channel={channel} />}
+        {activeTab === 'overview' && (
+          <OverviewTab
+            channel={channel}
+            onUpdate={(ch) => { setChannel(ch); refresh() }}
+            isFuelApi={isFuelApi}
+            syncing={syncing}
+            availableStations={availableStations}
+            onRun={(p) => handleSync(p)}
+            onRepeat={repeatRun}
+            onDelete={deleteRun}
+          />
+        )}
+        {activeTab === 'data' && (
+          isFuelApi && channel.templateId === 'fuel_delivery'
+            ? <ReceiptsJournal />
+            : <DataTab channel={channel} />
+        )}
+        {activeTab === 'mapping' && (
+          <div className="space-y-3">
+            {(channel.templateId === 'fuel_shift' || channel.templateId === 'fuel_delivery') && (
+              <p className="text-xs text-muted-foreground">
+                Канонические справочники (виды топлива, каналы оплаты) — на странице
+                «Каналы» → блок «Маппинги компании». Здесь — переопределения уровня канала.
+              </p>
+            )}
+            <MappingTab channel={channel} companyId={companyId} />
+          </div>
+        )}
+        {activeTab === 'settings' && <SettingsTab channel={channel} onUpdate={(ch) => { setChannel(ch); refresh() }} />}
       </div>
     </div>
   )

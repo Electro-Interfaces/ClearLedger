@@ -96,6 +96,8 @@ def list_adapters() -> list[dict]:
             "description": cls.description,
             "icon": cls.icon,
             "status": cls.status,
+            "version": cls.version,
+            "setup_guide": cls.setup_guide,
             "setup_schema": [
                 {
                     "key": f.key,
@@ -107,6 +109,7 @@ def list_adapters() -> list[dict]:
                     "options": f.options,
                     "help_text": f.help_text,
                     "secret": f.secret,
+                    "group": f.group,
                 }
                 for f in cls.setup_schema
             ],

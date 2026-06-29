@@ -64,13 +64,10 @@
   --color-di-outline-variant: var(--di-outline-variant);
   --color-di-error-container: var(--di-error-container);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
+  /* Радиусы — дефолты Tailwind, как в основном проекте TradePoint
+     (rounded-md 6px / lg 8px / xl 12px). НЕ переопределяем относительно
+     --radius: прежний скейл раздувал кнопки (rounded-xl) до 16px и делал UI
+     заметно круглее TradePoint. Возврат к дефолтам = единая «форма» с TP. */
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
   --spacing-header: var(--header-height);
@@ -431,6 +428,19 @@
 
   input[type="number"] {
     -moz-appearance: textfield;
+  }
+
+  /* Иконка календаря в date-инпутах — видимость на тёмной теме (как в TradeFrame) */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="month"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+  }
+
+  .dark input[type="date"]::-webkit-calendar-picker-indicator,
+  .dark input[type="month"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.8;
   }
 
   /* Touch targets for mobile */

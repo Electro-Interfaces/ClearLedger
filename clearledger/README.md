@@ -124,7 +124,7 @@ clearledger/
 
 Корень репозитория перенесён из OneDrive в локальную папку:
 
-- **Текущий путь:** `D:\Users\magsp\Ledger\`
+- **Текущий путь:** `D:\Users\magsp\ELSYPLUS\Ledger\app\` (перенесён 2026-06-27 в кластер Ledger; было `D:\Users\magsp\Ledger\`)
 - **Старый путь (до 23.05.2026):** `D:\Users\magsp\OneDrive\Ledger\` — нельзя, OneDrive sync ломает hydration cloud-only файлов при работе с git.
 
 Причина переноса — OneDrive периодически выгружает файлы в облако (атрибут `O`), что вызывает ошибки git и docker. Dev-папки не должны жить в OneDrive.

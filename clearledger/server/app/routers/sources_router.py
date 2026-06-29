@@ -224,8 +224,12 @@ async def test_source(
             connection[k] = decrypt_password(token)
 
     result = await adapter.test_connection(connection)
-    src.status = "connected" if result.ok else "error"
-    src.error_message = None if result.ok else result.message
+    planned = getattr(adapter, "status", "available") == "planned"
+    # Запланированный источник: тест не ошибка — статус не понижаем (остаётся draft).
+    if not planned:
+        src.status = "connected" if result.ok else "error"
+        src.error_message = None if result.ok else result.message
     src.last_test_at = datetime.now(timezone.utc)
     await db.flush()
-    return {"ok": result.ok, "message": result.message, "details": result.details}
+    return {"ok": result.ok, "message": result.message, "details": result.details,
+            "planned": planned}

@@ -63,7 +63,7 @@ function WelcomeStep({ onNext, onSkip }: StepProps) {
         <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center bg-primary/10 mb-4">
           <Rocket className="size-8 text-primary" />
         </div>
-        <DialogTitle className="text-center text-xl">Добро пожаловать в TradeLedger</DialogTitle>
+        <DialogTitle className="text-center text-xl">Добро пожаловать в Ledger</DialogTitle>
         <DialogDescription className="text-center">
           Система приёма, классификации и верификации документов для бизнеса.
           Давайте настроим платформу за пару минут.
@@ -108,7 +108,7 @@ function CompanyStep({ onNext, onPrev, onSkip }: StepProps) {
         </div>
         <DialogTitle className="text-center text-xl">Выберите компанию</DialogTitle>
         <DialogDescription className="text-center">
-          TradeLedger поддерживает мультикомпанейность. Выберите основную компанию для работы.
+          Ledger поддерживает мультикомпанейность. Выберите основную компанию для работы.
         </DialogDescription>
       </DialogHeader>
 
@@ -233,7 +233,7 @@ function DoneStep({ onSkip }: StepProps) {
         </div>
         <DialogTitle className="text-center text-xl">Всё готово!</DialogTitle>
         <DialogDescription className="text-center">
-          TradeLedger настроен. Вы можете начать работу с документами прямо сейчас.
+          Ledger настроен. Вы можете начать работу с документами прямо сейчас.
         </DialogDescription>
       </DialogHeader>
 

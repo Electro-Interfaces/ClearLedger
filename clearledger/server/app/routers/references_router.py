@@ -403,6 +403,7 @@ def _nom_resp(n: NomenclatureItem) -> NomenclatureResponse:
         unit=n.unit,
         unitLabel=n.unit_label,
         vatRate=n.vat_rate,
+        externalRef=n.external_ref,
         createdAt=_ts(n.created_at),
         updatedAt=_ts(n.updated_at),
     )
@@ -1186,6 +1187,7 @@ def _warehouse_resp(w: Warehouse) -> WarehouseResponse:
         name=w.name,
         address=w.address,
         type=w.type,
+        externalRef=w.external_ref,
         createdAt=_ts(w.created_at),
         updatedAt=_ts(w.updated_at),
     )

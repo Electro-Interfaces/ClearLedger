@@ -60,7 +60,7 @@ function OnboardingBanner() {
     <Card className="border-dashed border-2">
       <CardContent className="py-8">
         <div className="text-center space-y-4">
-          <h2 className="text-xl font-semibold">Добро пожаловать в TradeLedger</h2>
+          <h2 className="text-xl font-semibold">Добро пожаловать в Ledger</h2>
           <p className="text-muted-foreground max-w-md mx-auto">
             Начните работу — загрузите первые документы или настройте компанию.
           </p>

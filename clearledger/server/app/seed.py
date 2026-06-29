@@ -10,8 +10,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import hash_password
 from app.config import get_settings
+from app.fuel_mapping_defaults import (
+    GIG_FUEL_MAPPINGS,
+    GIG_PAYMENT_CHANNELS,
+    GIG_PAYMENT_MAPPINGS,
+)
 from app.location_type_defaults import BUILTIN_LOCATION_TYPES
-from app.models import Company, LocationTypeDef, PostingTemplate, User, UserCompany
+from app.models import (
+    Channel,
+    ChannelStream,
+    Company,
+    FuelMapping,
+    LocationTypeDef,
+    PaymentChannel,
+    PaymentMapping,
+    PostingTemplate,
+    Source,
+    SourceCredentials,
+    User,
+    UserCompany,
+)
 
 logger = logging.getLogger("clearledger.seed")
 
@@ -51,8 +69,210 @@ async def seed_data(db: AsyncSession) -> None:
     # --- Встроенные типы точек (company_id=NULL) ---
     await _seed_builtin_location_types(db)
 
+    # --- Маппинги топливных каналов STS → 1С (компания ГИГ) ---
+    await _seed_gig_fuel_mappings(db)
+
+    # --- Источник онлайн-заказов MSTO (только источник, без канала) ---
+    await _seed_gig_msto_source(db)
+
+    # --- Источник STS-транзакций (отдельный, для разрезов сверки) ---
+    await _seed_gig_sts_transactions_source(db)
+
+    # --- Достройка предустановленных разрезов учёта каналов (из шаблонов) ---
+    await _backfill_channel_cuts(db)
+
     await db.commit()
     logger.info("Seed завершён")
+
+
+async def _seed_gig_msto_source(db: AsyncSession) -> None:
+    """Источник «MSTO Онлайн-заказы» (source_type=msto) для ГИГ — ВНЕШНИЙ источник
+    для сверки онлайн-канала смены. Отдельного канала у онлайн-заказов НЕТ: разрез
+    online_orders «Сменного отчёта» подключается к этому источнику. Креды MSTO — в
+    settings (MSTO_API_URL/USERNAME/PASSWORD), как у TradeFrame.
+    Если ранее был заведён отдельный канал msto_online — удаляем (legacy)."""
+    gig = (
+        await db.execute(select(Company).where(Company.slug == "gig"))
+    ).scalar_one_or_none()
+    if gig is None:
+        return
+
+    # Источник MSTO — ключ (company_id, source_type=msto)
+    src = (
+        await db.execute(
+            select(Source).where(
+                Source.company_id == gig.id, Source.source_type == "msto"
+            )
+        )
+    ).scalars().first()
+    if src is None:
+        db.add(Source(
+            company_id=gig.id,
+            source_type="msto",
+            name="MSTO Онлайн-заказы",
+            description="Заказы агрегаторов (Я.Заправки/Benzuber/FuelUp) через MSTO IntegratorService",
+            status="active",
+            connection_config={"base_url": "http://46.229.214.21:3000", "login": "tf-integration"},
+        ))
+        logger.info("ГИГ: источник «MSTO Онлайн-заказы»")
+
+    # Legacy: онлайн-заказы — это ИСТОЧНИК, а не канал. Удаляем отдельный канал,
+    # если он был заведён ранее (потоки удалятся каскадом).
+    for ch in (await db.execute(
+        select(Channel).where(
+            Channel.company_id == gig.id, Channel.template_id == "msto_online"
+        )
+    )).scalars().all():
+        await db.delete(ch)
+        logger.info("ГИГ: удалён legacy-канал «Онлайн-заказы (MSTO)»")
+
+
+async def _seed_gig_sts_transactions_source(db: AsyncSession) -> None:
+    """Источник «STS Транзакции» (source_type=sts_transactions) для ГИГ — отдельный,
+    переиспользуемый разрезами сверки НЕЗАВИСИМО от канала смен (онлайн/корп-карты/
+    эквайринг сверяются с этими транзакциями). Подключение переиспользует основной
+    STS-источник, если он заведён."""
+    gig = (
+        await db.execute(select(Company).where(Company.slug == "gig"))
+    ).scalar_one_or_none()
+    if gig is None:
+        return
+    sts = (await db.execute(select(Source).where(
+        Source.company_id == gig.id, Source.source_type == "sts"
+    ))).scalars().first()
+    cfg = dict(sts.connection_config) if sts and sts.connection_config else {
+        "base_url": "https://pos.autooplata.ru/tms", "default_system_ids": "65,15",
+    }
+    # Переиспользуем РАБОЧЕЕ подключение основного STS (вкл. зашифрованный пароль —
+    # тот же Fernet-ключ): транзакции тянутся из той же STS-системы.
+    sts_cr = None
+    if sts is not None:
+        sts_cr = (await db.execute(select(SourceCredentials).where(
+            SourceCredentials.source_id == sts.id
+        ))).scalars().first()
+    has_sts_creds = bool(sts_cr and sts_cr.encrypted_values)
+    connected = sts is not None and sts.status == "connected" and has_sts_creds
+
+    src = (await db.execute(select(Source).where(
+        Source.company_id == gig.id, Source.source_type == "sts_transactions"
+    ))).scalars().first()
+    if src is None:
+        src = Source(
+            company_id=gig.id, source_type="sts_transactions",
+            name="STS Транзакции (отпуск)",
+            description="Пооперационные транзакции отпуска (STS /v2/transactions) — зерно сверки разрезов. Независимый источник.",
+            status="connected" if connected else "draft",
+            connection_config=cfg,
+        )
+        db.add(src)
+        await db.flush()
+        logger.info("ГИГ: источник «STS Транзакции» создан (%s)", src.status)
+
+    # Докопировать креды/подключение с основного STS, если у источника их ещё нет.
+    own_cr = (await db.execute(select(SourceCredentials).where(
+        SourceCredentials.source_id == src.id
+    ))).scalars().first()
+    if has_sts_creds and not (own_cr and own_cr.encrypted_values):
+        db.add(SourceCredentials(
+            source_id=src.id,
+            encrypted_values=dict(sts_cr.encrypted_values),
+            cipher_version=sts_cr.cipher_version,
+        ))
+        if not src.connection_config:
+            src.connection_config = cfg
+        if connected and src.status != "connected":
+            src.status = "connected"
+        logger.info("ГИГ: «STS Транзакции» — креды скопированы с STS (%s)", src.status)
+
+
+async def _backfill_channel_cuts(db: AsyncSession) -> None:
+    """Достраивает каналам предустановленные разрезы учёта из шаблона: проставляет
+    роль существующим потокам и ДОБАВЛЯЕТ недостающие (источник может быть не
+    подключён — source_id=NULL, enabled=False). Канал несёт весь свой набор разрезов."""
+    from app.channel_catalog import get_channel_template
+
+    channels = (
+        await db.execute(select(Channel).where(Channel.template_id.isnot(None)))
+    ).scalars().all()
+    for ch in channels:
+        tpl = get_channel_template(ch.template_id or "")
+        if tpl is None:
+            continue
+        streams = (
+            await db.execute(select(ChannelStream).where(ChannelStream.channel_id == ch.id))
+        ).scalars().all()
+        by_doc = {s.doc_type_id: s for s in streams}
+        for decl in tpl.streams:
+            existing = by_doc.get(decl.doc_type)
+            if existing is not None:
+                if existing.role != decl.role:
+                    existing.role = decl.role
+                continue
+            ids = (await db.execute(select(Source.id).where(
+                Source.company_id == ch.company_id,
+                Source.source_type == decl.source_type,
+            ))).scalars().all()
+            src_id = ids[0] if len(ids) == 1 else None
+            db.add(ChannelStream(
+                channel_id=ch.id, source_id=src_id,
+                doc_type_id=decl.doc_type, name=decl.label, role=decl.role,
+                enabled=src_id is not None,
+            ))
+            logger.info("Канал %s: + разрез %s (%s, %s)", ch.name, decl.doc_type,
+                        decl.role, "подключён" if src_id else "не подключён")
+
+
+async def _seed_gig_fuel_mappings(db: AsyncSession) -> None:
+    """Идемпотентно заполняет каналы оплаты, маппинг оплат и маппинг топлива
+    для компании ГИГ из эталона расширения TradeLedger.cfe.
+
+    Не перетирает существующие записи (ручные правки сохраняются) — добавляет
+    только отсутствующие по натуральному ключу."""
+    gig = (
+        await db.execute(select(Company).where(Company.slug == "gig"))
+    ).scalar_one_or_none()
+    if gig is None:
+        return
+
+    # PaymentChannel — ключ (company_id, code)
+    existing_codes = {
+        c.code for c in (
+            await db.execute(
+                select(PaymentChannel).where(PaymentChannel.company_id == gig.id)
+            )
+        ).scalars().all()
+    }
+    for i, ch in enumerate(GIG_PAYMENT_CHANNELS):
+        if ch["code"] in existing_codes:
+            continue
+        db.add(PaymentChannel(company_id=gig.id, sort_order=i, **ch))
+        logger.info("ГИГ: канал оплаты %s", ch["code"])
+
+    # PaymentMapping — ключ (company_id, pattern)
+    existing_patterns = {
+        m.pattern for m in (
+            await db.execute(
+                select(PaymentMapping).where(PaymentMapping.company_id == gig.id)
+            )
+        ).scalars().all()
+    }
+    for i, mp in enumerate(GIG_PAYMENT_MAPPINGS):
+        if mp["pattern"] in existing_patterns:
+            continue
+        db.add(PaymentMapping(company_id=gig.id, sort_order=i, **mp))
+
+    # FuelMapping — ключ (company_id, service_code)
+    existing_codes_f = {
+        f.service_code for f in (
+            await db.execute(
+                select(FuelMapping).where(FuelMapping.company_id == gig.id)
+            )
+        ).scalars().all()
+    }
+    for fm in GIG_FUEL_MAPPINGS:
+        if fm["service_code"] in existing_codes_f:
+            continue
+        db.add(FuelMapping(company_id=gig.id, sort_order=fm["service_code"], **fm))
 
 
 async def _seed_superadmin(db: AsyncSession) -> None:

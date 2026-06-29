@@ -266,3 +266,31 @@ def _parse_system_ids(value: Any) -> list[int]:
                 pass
         return result
     return []
+
+
+@register_adapter("sts_transactions")
+class STSTransactionsAdapter(STSAdapter):
+    """STS как ОТДЕЛЬНЫЙ источник транзакций отпуска (STS /v2/transactions).
+
+    Самостоятельный источник, переиспользуемый разрезами сверки НЕЗАВИСИМО от
+    канала смен (онлайн-заказы, корп-карты, эквайринг сверяются с этими
+    транзакциями). Подключение, test_connection и fetch — как у STS; набор данных —
+    только пооперационные транзакции отпуска.
+    """
+
+    source_type = "sts_transactions"
+    label = "STS Транзакции (отпуск по ТРК)"
+    category = "Топливный учёт АЗС"
+    icon = "Activity"
+
+    available_doc_types = [
+        SourceDocType(
+            id="transactions",
+            name="Операции отпуска (TF)",
+            description=(
+                "Пооперационные транзакции отпуска топлива (STS /v2/transactions) — "
+                "зерно сверки разрезов: онлайн-заказы, корп-карты, эквайринг."
+            ),
+            category="fuel",
+        ),
+    ]

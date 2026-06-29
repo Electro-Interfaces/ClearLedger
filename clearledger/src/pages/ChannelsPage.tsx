@@ -3,27 +3,28 @@
  * Клик → /channels/:id (детальная страница с вкладками).
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Card, CardContent } from '@/components/ui/card'
 import { DimensionContractsPopover } from '@/components/reference/DimensionContractsPopover'
 import { getChannels, loadChannels, deleteChannel } from '@/services/channelService'
 import { getSources, loadSources } from '@/services/sourceService'
+import { isApiEnabled } from '@/services/apiClient'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getChannelSourceIds } from '@/types/channel'
 import type { Channel } from '@/types/channel'
-import { Plus, Trash2, Radio, Database, ChevronRight, Clock } from 'lucide-react'
+import { Plus, Trash2, Radio, Database, Clock, Loader2, ArrowRightLeft, CheckCircle2, XCircle, Circle, PauseCircle } from 'lucide-react'
+import { FuelMappingsPanel } from '@/components/fuel/FuelMappingsPanel'
 import { format } from 'date-fns'
 import { ChannelWizard } from '@/components/channels/ChannelWizard'
 import { ScheduleOverview } from '@/components/channels/ScheduleOverview'
 
-const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-  active: { label: 'Активен', variant: 'default' },
-  paused: { label: 'Пауза', variant: 'secondary' },
-  error: { label: 'Ошибка', variant: 'destructive' },
-  draft: { label: 'Черновик', variant: 'outline' },
+const STATUS_MAP: Record<string, { label: string; cls: string; Icon: ComponentType<{ className?: string }> }> = {
+  active: { label: 'Активен', cls: 'text-emerald-500', Icon: CheckCircle2 },
+  paused: { label: 'Пауза', cls: 'text-amber-500', Icon: PauseCircle },
+  error: { label: 'Ошибка', cls: 'text-destructive', Icon: XCircle },
+  draft: { label: 'Черновик', cls: 'text-muted-foreground', Icon: Circle },
 }
 
 /** Карточка канала в списке */
@@ -32,60 +33,55 @@ function ChannelListItem({ channel, onDelete }: { channel: Channel; onDelete: ()
   const sources = getSources()
   const channelSourceIds = getChannelSourceIds(channel)
   const channelSources = sources.filter((s) => channelSourceIds.includes(s.id))
-  const statusMeta = STATUS_MAP[channel.status] ?? STATUS_MAP.draft
+  const st = STATUS_MAP[channel.status] ?? STATUS_MAP.draft
+  const label = channelSources[0]?.name ?? 'Канал данных'
+  const cuts = channel.streams.length
+  const reconcilable = channel.streams.filter((s) => s.role === 'control').length
 
   return (
-    <Card className="cursor-pointer hover:bg-accent/30 transition-colors group"
-      onClick={() => navigate(`/channels/${channel.id}`)}>
-      <CardContent className="py-4">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary/10 shrink-0">
-            <Radio className="h-5 w-5 text-primary" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm">{channel.name}</CardTitle>
-              <Badge variant={statusMeta.variant} className="text-[10px]">{statusMeta.label}</Badge>
-            </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <Database className="h-3 w-3" />
-                {channelSources.length} источник{channelSources.length !== 1 ? 'ов' : ''}
-              </span>
-              <span>{channel.streams.filter((s) => s.enabled).length} потоков</span>
-              {channel.lastSync && (
-                <span>Синхр: {format(new Date(channel.lastSync), 'dd.MM.yyyy HH:mm')}</span>
-              )}
-              <span>Документов: {channel.docsLoaded}</span>
-            </div>
-            {channelSources.length > 0 && (
-              <div className="flex items-center gap-1.5 mt-1.5">
-                {channelSources.map((s) => (
-                  <Badge key={s.id} variant="outline" className="text-[9px] h-4 px-1.5">
-                    {s.name}
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span onClick={(e) => e.stopPropagation()}>
-              <DimensionContractsPopover dimType="channel" dimRef={channel.id} />
-            </span>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
-              onClick={(e) => { e.stopPropagation(); onDelete() }}>
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-            <ChevronRight className="h-4 w-4 text-muted-foreground/50 group-hover:text-foreground transition-colors" />
-          </div>
+    <div onClick={() => navigate(`/channels/${channel.id}`)}
+      className="group/head rounded-2xl border border-border/60 hover:border-border bg-card cursor-pointer p-4 transition-colors">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-di-surface-low shrink-0">
+          <Radio className="h-4 w-4 text-muted-foreground" />
         </div>
-      </CardContent>
-    </Card>
+        <div className="flex items-center gap-1">
+          <span className={`flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide ${st.cls}`}>
+            <st.Icon className="h-3.5 w-3.5" />
+            {st.label}
+          </span>
+          <span onClick={(e) => e.stopPropagation()} className="opacity-0 group-hover/head:opacity-100 transition-opacity">
+            <DimensionContractsPopover dimType="channel" dimRef={channel.id} />
+          </span>
+          <Button variant="ghost" size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-destructive opacity-0 group-hover/head:opacity-100 transition-opacity"
+            onClick={(e) => { e.stopPropagation(); onDelete() }}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+      <div className="mt-3">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70 truncate">{label}</div>
+        <div className="mt-0.5 text-base font-bold tracking-tight truncate">{channel.name}</div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Database className="h-3 w-3" />{channelSources.length} источник{channelSources.length !== 1 ? 'ов' : ''}
+          </span>
+          <span>{cuts} разрез{cuts === 1 ? '' : 'ов'} учёта</span>
+          {reconcilable > 0 && <span className="text-emerald-500">{reconcilable} сверяемых</span>}
+          <span>Документов: {channel.docsLoaded}</span>
+          {channel.lastSync && (
+            <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{format(new Date(channel.lastSync), 'dd.MM HH:mm')}</span>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
 export function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>(getChannels)
+  const [loading, setLoading] = useState(getChannels().length === 0)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const { companyId } = useCompany()
@@ -93,10 +89,18 @@ export function ChannelsPage() {
 
   function refresh() { setChannels(getChannels()) }
 
-  // API-режим: гидрация источников+каналов из бэкенда при монтировании
+  // API-режим: гидрация из бэкенда. Каналы грузим первыми и показываем СРАЗУ,
+  // не дожидаясь источников (раньше Promise.all держал список до загрузки обоих).
   useEffect(() => {
-    void Promise.all([loadSources(companyId), loadChannels(companyId)])
-      .then(refresh).catch(() => { /* офлайн → localStorage */ })
+    let cancelled = false
+    setLoading(getChannels().length === 0)
+    loadChannels(companyId)
+      .then(() => { if (!cancelled) refresh() })
+      .catch(() => { /* офлайн → localStorage */ })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    // источники — параллельно, не блокируют показ каналов
+    loadSources(companyId).then(() => { if (!cancelled) refresh() }).catch(() => {})
+    return () => { cancelled = true }
   }, [companyId])
 
   // Переход из каталога: ?wizard=1 → открыть мастер создания канала
@@ -116,7 +120,7 @@ export function ChannelsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold">Каналы данных</h1>
@@ -139,7 +143,30 @@ export function ChannelsPage() {
       <ChannelWizard open={wizardOpen} onOpenChange={(v) => { setWizardOpen(v); if (!v) refresh() }} />
       <ScheduleOverview open={scheduleOpen} onOpenChange={setScheduleOpen} />
 
-      {channels.length === 0 ? (
+      {/* Канонические маппинги компании — единый источник для всех каналов */}
+      {isApiEnabled() && (
+        <details className="rounded-lg border border-border/50 bg-card/40">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold flex items-center gap-2 select-none">
+            <ArrowRightLeft className="h-4 w-4 text-muted-foreground shrink-0" />
+            Маппинги компании (НСИ)
+            <span className="text-xs font-normal text-muted-foreground ml-1">
+              виды топлива · каналы оплаты — единый справочник, общий для всех каналов
+            </span>
+          </summary>
+          <div className="px-4 pb-4 pt-1">
+            <FuelMappingsPanel />
+          </div>
+        </details>
+      )}
+
+      {channels.length === 0 && loading ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
+            <Loader2 className="h-8 w-8 text-muted-foreground/40 animate-spin" />
+            <p className="text-sm text-muted-foreground">Загрузка каналов…</p>
+          </CardContent>
+        </Card>
+      ) : channels.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
             <Radio className="h-10 w-10 text-muted-foreground/30" />
@@ -154,7 +181,7 @@ export function ChannelsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
           {channels.map((ch) => (
             <ChannelListItem key={ch.id} channel={ch} onDelete={() => handleDelete(ch.id)} />
           ))}

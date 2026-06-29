@@ -34,6 +34,7 @@ const PolicyPage = lazy(() => import('@/pages/oneC/PolicyPage').then((m) => ({ d
 const PostingTemplatesPage = lazy(() => import('@/pages/oneC/PostingTemplatesPage').then((m) => ({ default: m.PostingTemplatesPage })))
 const PricesPage = lazy(() => import('@/pages/oneC/PricesPage').then((m) => ({ default: m.PricesPage })))
 const BatchesPage = lazy(() => import('@/pages/oneC/BatchesPage').then((m) => ({ default: m.BatchesPage })))
+const FuelMappingsPage = lazy(() => import('@/pages/FuelMappingsPage').then((m) => ({ default: m.FuelMappingsPage })))
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 const NormalizationWorkspacePage = lazy(() => import('@/pages/NormalizationWorkspacePage').then((m) => ({ default: m.NormalizationWorkspacePage })))
@@ -128,6 +129,7 @@ const router = createBrowserRouter([
           { path: '/1c/posting-templates', element: <RequireFuel><LazyPage><PostingTemplatesPage /></LazyPage></RequireFuel> },
           { path: '/1c/prices', element: <RequireFuel><LazyPage><PricesPage /></LazyPage></RequireFuel> },
           { path: '/1c/batches', element: <RequireFuel><LazyPage><BatchesPage /></LazyPage></RequireFuel> },
+          { path: '/1c/fuel-mappings', element: <RequireFuel><LazyPage><FuelMappingsPage /></LazyPage></RequireFuel> },
           { path: '/forecast', element: <LazyPage><MonthCloseForecastPage /></LazyPage> },
           { path: '/normalization', element: <LazyPage><NormalizationWorkspacePage /></LazyPage> },
           { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },

@@ -13,7 +13,10 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.auth import get_current_user
+from app.database import get_db
 from app.models import User
 from app.services import reconciliation_proxy as proxy
 
@@ -65,27 +68,30 @@ async def tradecorp_health(user: User = Depends(get_current_user)):
 
 # ─────────────────────────── MSTO ───────────────────────────
 @router.get("/msto/servicePoints")
-async def msto_service_points(user: User = Depends(get_current_user)):
+async def msto_service_points(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     try:
-        return await proxy.msto_service_points()
+        conn = await proxy.msto_conn_for_company(db, user.company_id)
+        return await proxy.msto_service_points(conn=conn)
     except Exception as exc:  # noqa: BLE001
         logger.error("[MSTO servicePoints] %s", exc)
         raise _upstream_error(exc)
 
 
 @router.get("/msto/transactions")
-async def msto_transactions(request: Request, user: User = Depends(get_current_user)):
+async def msto_transactions(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     try:
-        return await proxy.msto_transactions(dict(request.query_params))
+        conn = await proxy.msto_conn_for_company(db, user.company_id)
+        return await proxy.msto_transactions(dict(request.query_params), conn=conn)
     except Exception as exc:  # noqa: BLE001
         logger.error("[MSTO transactions] %s", exc)
         raise _upstream_error(exc)
 
 
 @router.get("/msto/tariffs")
-async def msto_tariffs(request: Request, user: User = Depends(get_current_user)):
+async def msto_tariffs(request: Request, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     try:
-        return await proxy.msto_tariffs(dict(request.query_params))
+        conn = await proxy.msto_conn_for_company(db, user.company_id)
+        return await proxy.msto_tariffs(dict(request.query_params), conn=conn)
     except Exception as exc:  # noqa: BLE001
         logger.error("[MSTO tariffs] %s", exc)
         raise _upstream_error(exc)

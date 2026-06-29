@@ -212,6 +212,21 @@ export async function updateSource(id: string, updates: Partial<Source>): Promis
   return sources[idx]
 }
 
+export interface SourceTestResult {
+  ok: boolean
+  message?: string | null
+  planned?: boolean
+  details?: Record<string, unknown> | null
+}
+
+/** Проверить подключение источника через адаптер (бэкенд). */
+export async function testSource(id: string): Promise<SourceTestResult> {
+  if (isApiEnabled()) {
+    return post<SourceTestResult>(`/api/sources/${id}/test`, {})
+  }
+  return { ok: false, message: 'Тест доступен только при подключённом API.' }
+}
+
 export async function deleteSource(id: string): Promise<boolean> {
   if (isApiEnabled()) {
     await del(`/api/sources/${id}`)

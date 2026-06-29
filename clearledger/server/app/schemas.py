@@ -598,6 +598,7 @@ class NomenclatureResponse(BaseModel):
     unit: str
     unitLabel: str
     vatRate: int
+    externalRef: str | None = None    # GUID номенклатуры в 1С (для маппингов)
     createdAt: str
     updatedAt: str
 
@@ -948,6 +949,7 @@ class WarehouseResponse(BaseModel):
     name: str
     address: str | None = None
     type: str
+    externalRef: str | None = None    # GUID склада в 1С (для маппингов)
     createdAt: str
     updatedAt: str
 

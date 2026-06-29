@@ -59,6 +59,7 @@ export const SOURCE_TYPE_META: Record<SourceType, { label: string; description: 
  */
 export const BACKEND_SOURCE_META: Record<string, { label: string; category: string; icon: string }> = {
   sts: { label: 'STS API (АЗС)', category: 'Топливный учёт АЗС', icon: 'Fuel' },
+  sts_transactions: { label: 'STS Транзакции (отпуск)', category: 'Топливный учёт АЗС', icon: 'Activity' },
   onec_operational: { label: '1С операционная база', category: 'Учётные системы 1С', icon: 'Database' },
   onec_accounting: { label: '1С:Бухгалтерия (эталон)', category: 'Эталон компании', icon: 'BookCheck' },
   tradecorp: { label: 'TradeCorp (корп. процессинг)', category: 'Топливный учёт АЗС', icon: 'CreditCard' },
@@ -131,6 +132,9 @@ export type ChannelStatus = 'active' | 'paused' | 'error' | 'draft'
 export type DuplicatePolicy = 'skip' | 'warn' | 'overwrite'
 
 /** Поток данных внутри канала — что забираем и куда кладём */
+/** Роль разреза учёта в канале */
+export type ChannelStreamRole = 'anchor' | 'control' | 'reference' | 'external'
+
 export interface ChannelStream {
   id: string
   /** ID типа документа из источника */
@@ -145,6 +149,8 @@ export interface ChannelStream {
   filters: Record<string, string>
   /** Активен ли поток */
   enabled: boolean
+  /** Роль разреза учёта: anchor (опорный) | control (сверяемый) | reference (справочный) */
+  role?: ChannelStreamRole
 }
 
 /** Этап pipeline обработки данных */

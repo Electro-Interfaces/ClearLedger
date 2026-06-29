@@ -22,10 +22,11 @@ import uuid as _uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Channel, ChannelStream, Source, SourceCredentials, SourceFile
+from app.models import Channel, ChannelStream, ChannelSyncLog, Source, SourceCredentials, SourceFile
 from app.services.cb_intake import ingest_packages
 from app.services.onec.com_client import OneCComClient
 from app.services.onec.crypto import decrypt_password
+from app.services.sts_client import sts_get_points
 
 
 async def _channel_source(db: AsyncSession, channel_id, source_type: str | None = None) -> Source | None:
@@ -34,6 +35,8 @@ async def _channel_source(db: AsyncSession, channel_id, source_type: str | None 
         await db.execute(select(ChannelStream).where(ChannelStream.channel_id == channel_id))
     ).scalars().all()
     for s in streams:
+        if s.source_id is None:
+            continue
         src = await db.get(Source, s.source_id)
         if src is not None and (source_type is None or src.source_type == source_type):
             return src
@@ -63,9 +66,15 @@ def _conn_string(src: Source, password: str) -> str:
     return base + extra
 
 
-def _period(channel: Channel) -> tuple[str, str]:
-    """Период прогона: явный диапазон config.dateFrom/dateTo (UI «Период загрузки»)
-    в приоритете; иначе фолбэк к period_days как глубине от сегодня."""
+def _period(
+    channel: Channel,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[str, str]:
+    """Период прогона. Приоритет: явный параметр запуска (UI «Период загрузки»)
+    → config.dateFrom/dateTo канала → фолбэк period_days от сегодня."""
+    if date_from and date_to:
+        return str(date_from)[:10], str(date_to)[:10]
     cfg = channel.config or {}
     df = cfg.get("dateFrom") or cfg.get("date_from")
     dt = cfg.get("dateTo") or cfg.get("date_to")
@@ -80,11 +89,12 @@ def _period(channel: Channel) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # Ветка ЦБ (сопутка/общепит)
 # ---------------------------------------------------------------------------
-async def _run_cb(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+async def _run_cb(db: AsyncSession, channel: Channel, src: Source,
+                  date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
     conn = _conn_string(src, await _decrypt_pwd(db, src.id))
     cfg = src.connection_config or {}
     station = str((channel.config or {}).get("station") or cfg.get("default_station") or "208")
-    pf, pt = _period(channel)
+    pf, pt = _period(channel, date_from, date_to)
     async with OneCComClient(conn) as client:
         packages = await client.fetch_cb_shifts(pf, pt, station=station, limit=200)
     result = await ingest_packages(db, channel.company_id, packages, channel_id=channel.id)
@@ -97,33 +107,96 @@ async def _run_cb(db: AsyncSession, channel: Channel, src: Source) -> dict[str, 
 #   • fuel_shift    → shift_report → FuelShift (продажи), без ТТН.
 #   • fuel_delivery → receipts     → FuelReceipt + L1 ТТН (приём).
 # ---------------------------------------------------------------------------
-async def _fuel_context(db: AsyncSession, channel: Channel, src: Source):
-    """Общий контекст STS-прогона: креды, период, станции канала."""
+async def _fuel_context(db: AsyncSession, channel: Channel, src: Source,
+                        date_from: str | None = None, date_to: str | None = None,
+                        all_period: bool = False):
+    """Общий контекст STS-прогона: креды, период, станции.
+
+    Станции — ВСЯ сеть системы(систем) из STS `/v1/points` (канал работает со
+    всеми станциями, а не с зашитым подмножеством). config.stations больше НЕ
+    ограничивает прогон — точечный отбор делается параметром station_codes
+    (диалог «Обновить»). Фолбэк на config.stations — только если /v1/points
+    недоступен. all_period=True → без ограничения по датам (вся история)."""
     cfg = src.connection_config or {}
     pwd = await _decrypt_pwd(db, src.id)
     login = str(cfg.get("login") or "")
     base_url = str(cfg.get("base_url") or "https://pos.autooplata.ru/tms")
     sysids = str(cfg.get("default_system_ids") or "65")
-    default_system = int((sysids.split(",")[0].strip() or "65"))
-    pf, pt = _period(channel)  # период канала — НЕ грузить всю историю
+    systems = [int(s.strip()) for s in sysids.split(",") if s.strip()] or [65]
+    default_system = systems[0]
+    pf, pt = (None, None) if all_period else _period(channel, date_from, date_to)
 
-    # Станции канала: список config.stations [{code, systemId}] ИЛИ единственная config.station
-    ch_cfg = channel.config or {}
-    stations = list(ch_cfg.get("stations") or [])
+    # ВСЕ станции систем источника из STS /v1/points (авто-discovery сети).
+    stations: list[dict] = []
+    seen: set[tuple[int, int]] = set()
+    for sysid in systems:
+        try:
+            points = await sts_get_points(base_url, login, pwd, sysid)
+        except Exception:  # noqa: BLE001 — STS недоступен → фолбэк ниже
+            points = []
+        for p in points:
+            try:
+                code = int(p.get("number") or p.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if code and (sysid, code) not in seen:
+                seen.add((sysid, code))
+                stations.append({"code": code, "systemId": sysid, "name": p.get("name")})
+
+    # Фолбэк: /v1/points не дал станций → берём из конфигурации канала.
     if not stations:
-        single = ch_cfg.get("station") or cfg.get("default_station")
-        if single:
-            stations = [{"code": single, "systemId": default_system}]
+        ch_cfg = channel.config or {}
+        stations = list(ch_cfg.get("stations") or [])
+        if not stations:
+            single = ch_cfg.get("station") or cfg.get("default_station")
+            if single:
+                stations = [{"code": single, "systemId": default_system}]
     return login, pwd, base_url, default_system, pf, pt, stations
 
 
-async def _run_sts_stations(db, channel, src, ingest_fn, kind: str) -> dict[str, Any]:
-    """Перебор станций канала с per-станционным savepoint; ingest_fn — ветка."""
+async def _bump_progress(db, log_id, by_station, total: int = 0,
+                         working: int | None = None) -> None:
+    """Обновить прогресс ChannelSyncLog. working — индекс станции (1-based),
+    которая СЕЙЧАС обрабатывается (показываем «Станция X/N: загрузка смен…»,
+    пока станция качается из STS — иначе долго висит «Подключение»). Без
+    working — станция завершена («станция X/N · загружено N»)."""
+    if log_id is None:
+        return
+    log = await db.get(ChannelSyncLog, log_id)
+    if log is None:
+        return
+    loaded = sum(int(r.get("created", 0) or 0) for r in by_station)
+    done = len(by_station)
+    log.loaded = loaded
+    if working is not None:
+        msg = f"Станция {working}/{total}: загрузка смен из STS…"
+        sd = working - 1
+    else:
+        msg = f"станция {done}/{total} · загружено {loaded}"
+        sd = done
+    log.events = [{
+        "level": "info", "event": "run", "message": msg,
+        "stations_done": sd, "stations_total": total, "loaded": loaded,
+    }]
+
+
+async def _run_sts_stations(db, channel, src, ingest_fn, kind: str,
+                            date_from: str | None = None, date_to: str | None = None,
+                            log_id=None, station_codes: list[int] | None = None,
+                            all_period: bool = False) -> dict[str, Any]:
+    """Перебор ВСЕХ станций системы (STS /v1/points) с per-станционным savepoint.
+    station_codes — точечный отбор станций (UI «Обновить»); None → вся сеть.
+    all_period=True → без ограничения по датам (вся история)."""
     from app.routers.fuel_router import NormalizeRequest
 
-    login, pwd, base_url, default_system, pf, pt, stations = await _fuel_context(db, channel, src)
+    login, pwd, base_url, default_system, pf, pt, stations = await _fuel_context(
+        db, channel, src, date_from, date_to, all_period)
+    if station_codes:
+        wanted = {int(c) for c in station_codes}
+        stations = [s for s in stations
+                    if int(s.get("code") or s.get("station") or 0) in wanted]
     by_station: list[dict[str, Any]] = []
-    for st in stations:
+    for idx, st in enumerate(stations):
         code = int(st.get("code") or st.get("station") or 0)
         if not code:
             continue
@@ -133,13 +206,23 @@ async def _run_sts_stations(db, channel, src, ingest_fn, kind: str) -> dict[str,
             password=pwd, system_code=system_code,
             date_from=pf, date_to=pt,
         )
+        # промежуточный статус: станция началась (пока качается из STS — это
+        # самая долгая фаза станции, без этого UI висит «Подключение»)
+        await _bump_progress(db, log_id, by_station, len(stations), working=idx + 1)
+        await db.commit()
         try:
             # savepoint: сбой одной станции откатывается локально и НЕ отравляет
             # общую сессию (иначе PendingRollbackError валит все следующие станции)
             async with db.begin_nested():
                 r = await ingest_fn(body, channel.company_id, db)
             by_station.append({"station": code, **r})
+            # Прогресс в лог + поэтапный commit: данные станции сохраняются СРАЗУ,
+            # а UI-поллинг видит растущее «загружено N» (иначе минуты висит 0 и
+            # выглядит как «ничего не грузится»).
+            await _bump_progress(db, log_id, by_station, len(stations))
+            await db.commit()
         except Exception as e:  # одна станция не валит весь прогон
+            await db.rollback()
             by_station.append({"station": code, "error": str(e)[:200]})
 
     ok = sum(1 for r in by_station if "error" not in r)
@@ -148,21 +231,56 @@ async def _run_sts_stations(db, channel, src, ingest_fn, kind: str) -> dict[str,
             "by_station": by_station}
 
 
-async def _run_fuel(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+async def _run_fuel(db: AsyncSession, channel: Channel, src: Source,
+                    date_from: str | None = None, date_to: str | None = None,
+                    log_id=None, station_codes: list[int] | None = None,
+                    all_period: bool = False) -> dict[str, Any]:
     """Канал продаж (fuel_shift): shift_report → FuelShift, БЕЗ ТТН."""
     from app.routers.fuel_router import ingest_fuel_shifts
 
     async def _ingest(body, cid, db):
         return await ingest_fuel_shifts(body, cid, db, with_receipts=False)
 
-    return await _run_sts_stations(db, channel, src, _ingest, "fuel_shift")
+    return await _run_sts_stations(db, channel, src, _ingest, "fuel_shift",
+                                   date_from, date_to, log_id, station_codes, all_period)
 
 
-async def _run_fuel_delivery(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+async def _run_fuel_delivery(db: AsyncSession, channel: Channel, src: Source,
+                             date_from: str | None = None, date_to: str | None = None,
+                             log_id=None, station_codes: list[int] | None = None,
+                             all_period: bool = False) -> dict[str, Any]:
     """Канал приёма (fuel_delivery): receipts → FuelReceipt + L1 ТТН."""
     from app.routers.fuel_router import ingest_fuel_deliveries
 
-    return await _run_sts_stations(db, channel, src, ingest_fuel_deliveries, "fuel_delivery")
+    return await _run_sts_stations(db, channel, src, ingest_fuel_deliveries, "fuel_delivery",
+                                   date_from, date_to, log_id, station_codes, all_period)
+
+
+# ---------------------------------------------------------------------------
+# Ветка MSTO — онлайн-заказы агрегаторов (внешний источник сверки онлайн-канала)
+# ---------------------------------------------------------------------------
+async def _run_msto(db: AsyncSession, channel: Channel, src: Source,
+                    date_from: str | None = None, date_to: str | None = None,
+                    all_period: bool = False) -> dict[str, Any]:
+    """Канал онлайн-заказов MSTO: транзакции агрегаторов → OnlineOrder.
+    Креды MSTO — в settings (через reconciliation_proxy). servicePointId станций
+    берём из config.stations[].mstoServicePointId; пусто → вся сеть MSTO."""
+    from app.routers.online_orders_router import ingest_online_orders
+
+    pf, pt = (None, None) if all_period else _period(channel, date_from, date_to)
+    spids: list[int] = []
+    for st in ((channel.config or {}).get("stations") or []):
+        v = st.get("mstoServicePointId") or st.get("msto_service_point_id") or st.get("servicePointId")
+        try:
+            if v:
+                spids.append(int(v))
+        except (ValueError, TypeError):
+            pass
+    r = await ingest_online_orders(db, channel.company_id, pf, pt, spids or None)
+    return {"status": "success", "kind": "msto", "period": [pf, pt],
+            "created": r.get("created", 0), "skipped": r.get("skipped", 0),
+            "fetched": r.get("fetched", 0),
+            "message": f"загружено {r.get('created', 0)} (из {r.get('fetched', 0)})"}
 
 
 # ---------------------------------------------------------------------------
@@ -191,18 +309,34 @@ async def _run_reestr(db: AsyncSession, channel: Channel, src: Source) -> dict[s
 # ---------------------------------------------------------------------------
 # Диспетчер
 # ---------------------------------------------------------------------------
-async def run_channel(db: AsyncSession, channel: Channel) -> dict[str, Any]:
-    """Прогон канала: fetch→normalize→save, ветка по типу источника и шаблону."""
+async def run_channel(
+    db: AsyncSession,
+    channel: Channel,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    log_id=None,
+    station_codes: list[int] | None = None,
+    all_period: bool = False,
+) -> dict[str, Any]:
+    """Прогон канала: fetch→normalize→save, ветка по типу источника и шаблону.
+
+    date_from/date_to (YYYY-MM-DD) — явный период загрузки из запроса (UI).
+    Приоритетнее config канала и period_days. log_id — ChannelSyncLog для
+    обновления прогресса по ходу (живое «загружено N» в UI-поллинге).
+    station_codes — точечный отбор станций (UI «Обновить»); None → вся сеть STS.
+    all_period — вся история (без ограничения по датам)."""
     src = await _channel_source(db, channel.id)
     if src is None:
         return {"status": "skipped", "message": "в потоках канала нет источника"}
     if src.source_type == "onec_operational":
-        return await _run_cb(db, channel, src)
+        return await _run_cb(db, channel, src, date_from, date_to)
     if src.source_type == "manual_table":
         return await _run_reestr(db, channel, src)
     if src.source_type == "sts":
         if (channel.template_id or "") == "fuel_delivery":
-            return await _run_fuel_delivery(db, channel, src)
-        return await _run_fuel(db, channel, src)
+            return await _run_fuel_delivery(db, channel, src, date_from, date_to, log_id, station_codes, all_period)
+        return await _run_fuel(db, channel, src, date_from, date_to, log_id, station_codes, all_period)
+    if src.source_type == "msto":
+        return await _run_msto(db, channel, src, date_from, date_to, all_period)
     return {"status": "skipped",
             "message": f"тип источника '{src.source_type}' оркестратором пока не исполняется"}

@@ -24,7 +24,7 @@ export interface ChannelStats {
 }
 
 // ─── API-режим: типы ответа + кэш ─────────────────────────────────────────
-interface ApiStream { id: string; source_id: string; doc_type_id: string | null; name: string; enabled: boolean }
+interface ApiStream { id: string; source_id: string | null; doc_type_id: string | null; name: string; enabled: boolean; role?: 'anchor' | 'control' | 'reference' | 'external' }
 interface ApiStage { id: string; stage_type: string; name: string; order_index: number; enabled: boolean }
 interface ApiChannel {
   id: string
@@ -48,7 +48,7 @@ function scheduleFromApi(s: Record<string, any>): ScheduleConfig | string {
 }
 
 function chFromApi(r: ApiChannel): Channel {
-  const sourceIds = [...new Set(r.streams.map((s) => s.source_id))]
+  const sourceIds = [...new Set(r.streams.map((s) => s.source_id).filter((x): x is string => Boolean(x)))]
   return {
     id: r.id,
     name: r.name,
@@ -62,8 +62,8 @@ function chFromApi(r: ApiChannel): Channel {
     templateId: r.template_id ?? undefined,
     periodDays: r.period_days ?? 7,
     streams: r.streams.map((s) => ({
-      id: s.id, sourceId: s.source_id, docTypeId: s.doc_type_id ?? '',
-      name: s.name, catalogTemplate: '', filters: {}, enabled: s.enabled,
+      id: s.id, sourceId: s.source_id ?? '', docTypeId: s.doc_type_id ?? '',
+      name: s.name, catalogTemplate: '', filters: {}, enabled: s.enabled, role: s.role,
     })),
     stages: r.stages.map((s) => ({
       id: s.id, type: s.stage_type as ChannelStage['type'], name: s.name,
@@ -300,11 +300,77 @@ export async function addSyncLog(channelId: string, entries: SyncLogEntry[]): Pr
 }
 
 /** Запустить канал (API-режим: бэкенд-оркестратор; localStorage: см. channelSyncService). */
-export async function runChannel(id: string): Promise<any> {
+export async function runChannel(
+  id: string,
+  period?: { dateFrom?: string; dateTo?: string; stationCodes?: number[]; allPeriod?: boolean },
+): Promise<any> {
   if (!isApiEnabled()) throw new Error('runChannel: доступно только в API-режиме')
-  const res = await post<any>(`/api/channels/${id}/run`)
-  await _refetchOne(id)
-  return res
+  const body = period
+    ? {
+        date_from: period.allPeriod ? undefined : period.dateFrom,
+        date_to: period.allPeriod ? undefined : period.dateTo,
+        station_codes: period.stationCodes && period.stationCodes.length ? period.stationCodes : undefined,
+        all_period: period.allPeriod || undefined,
+      }
+    : undefined
+  // Бэкенд запускает прогон в ФОНЕ и сразу возвращает {status:'running'}.
+  return post<any>(`/api/channels/${id}/run`, body)
+}
+
+export interface ChannelRunStatus {
+  status: string
+  running: boolean
+  loaded: number
+  stations_done: number
+  stations_total: number
+  message: string
+  docs_loaded: number
+  finished_at?: string | null
+  last_sync_at?: string | null
+}
+
+/** Статус последнего прогона канала (поллинг прогресса фоновой загрузки). */
+export async function getChannelRunStatus(id: string): Promise<ChannelRunStatus> {
+  return get<ChannelRunStatus>(`/api/channels/${id}/run-status`)
+}
+
+/** История прогонов канала (ChannelSyncLog) — для вкладки «Лог». */
+export async function getChannelLogs(id: string): Promise<SyncLogEntry[]> {
+  if (!isApiEnabled()) return []
+  return get<SyncLogEntry[]>(`/api/channels/${id}/logs`)
+}
+
+/** Строка прогона для ленты кокпита (структурная, с периодом и станциями). */
+export interface ChannelRunStationRow {
+  station: number
+  name?: string
+  created?: number
+  skipped?: number
+  duplicates?: number
+  error?: string
+}
+
+export interface ChannelRun {
+  id: string
+  status: string            // success | partial | error | running
+  started_at: string | null
+  finished_at: string | null
+  date_from: string | null
+  date_to: string | null
+  loaded: number
+  skipped: number
+  duplicates: number
+  errors: number
+  stations_done: number
+  stations_total: number
+  message: string
+  by_station: ChannelRunStationRow[]
+}
+
+/** Лента прогонов канала (кокпит) — структурные строки из ChannelSyncLog. */
+export async function getChannelRuns(id: string): Promise<ChannelRun[]> {
+  if (!isApiEnabled()) return []
+  return get<ChannelRun[]>(`/api/channels/${id}/runs`)
 }
 
 /** Добавить источник к каналу */

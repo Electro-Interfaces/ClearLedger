@@ -1,7 +1,7 @@
 # CLAUDE.md — ClearLedger (продукт = TradeLedger)
 
 > Инструкции для Claude Code при работе внутри `clearledger/`.
-> 📛 **Имя продукта = TradeLedger** (канон: `D:\Users\magsp\Ledger\GLOSSARY.md`). `ClearLedger`/`clearledger/` — текущее имя кодовой базы; переименование в `tradeledger/` — отдельная Tier-3 миграция (затрагивает прод-деплой `ledger.dataworker.ru/ClearLedger/`). Термины входного слоя (Источник/Канал/Поток/Разрез сверки) и **4 слоя данных** (L1 RAW→L2 CLEAN→L3 EXPORT→L4 1C_REF) — по GLOSSARY.
+> 📛 **Имя продукта = TradeLedger** (канон: `D:\Users\magsp\ELSYPLUS\Ledger\app\GLOSSARY.md`). `ClearLedger`/`clearledger/` — текущее имя кодовой базы; переименование в `tradeledger/` — отдельная Tier-3 миграция (затрагивает прод-деплой `ledger.dataworker.ru/ClearLedger/`). Термины входного слоя (Источник/Канал/Поток/Разрез сверки) и **4 слоя данных** (L1 RAW→L2 CLEAN→L3 EXPORT→L4 1C_REF) — по GLOSSARY.
 
 ---
 

@@ -22,13 +22,13 @@ export function ReconciliationKPICards({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       {/* Corp Card */}
-      <Card className="bg-card border-border">
+      <Card className="bg-di-surface-mid border border-transparent">
         <CardContent className="p-4">
           <div className="flex items-center gap-3 mb-2">
             <CreditCard className="h-5 w-5 text-purple-600 dark:text-purple-400" />
             <span className="text-muted-foreground text-sm">Corp</span>
           </div>
-          <div className="text-2xl font-bold text-foreground">
+          <div className="font-headline text-2xl font-extrabold tracking-tight text-foreground">
             {(summary.totalCorpLiters || 0).toFixed(1)} л
           </div>
           <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
@@ -46,13 +46,13 @@ export function ReconciliationKPICards({
       </Card>
 
       {/* TF Card */}
-      <Card className="bg-card border-border">
+      <Card className="bg-di-surface-mid border border-transparent">
         <CardContent className="p-4">
           <div className="flex items-center gap-3 mb-2">
             <Fuel className="h-5 w-5 text-primary dark:text-primary/70" />
             <span className="text-muted-foreground text-sm">TF</span>
           </div>
-          <div className="text-2xl font-bold text-foreground">
+          <div className="font-headline text-2xl font-extrabold tracking-tight text-foreground">
             {(summary.totalTfLiters || 0).toFixed(1)} л
           </div>
           <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
@@ -70,13 +70,13 @@ export function ReconciliationKPICards({
       </Card>
 
       {/* Shift Card */}
-      <Card className="bg-card border-border">
+      <Card className="bg-di-surface-mid border border-transparent">
         <CardContent className="p-4">
           <div className="flex items-center gap-3 mb-2">
             <Clock className="h-5 w-5 text-green-600 dark:text-green-400" />
             <span className="text-muted-foreground text-sm">Смена</span>
           </div>
-          <div className="text-2xl font-bold text-foreground">
+          <div className="font-headline text-2xl font-extrabold tracking-tight text-foreground">
             {(summary.totalShiftLiters || 0).toFixed(1)} л
           </div>
           <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
@@ -94,7 +94,7 @@ export function ReconciliationKPICards({
       </Card>
 
       {/* Status Card */}
-      <Card className={`border-border ${summary.hasErrors ? 'bg-red-100 dark:bg-red-900/30' : 'bg-emerald-100 dark:bg-emerald-900/30'}`}>
+      <Card className={`bg-di-surface-mid border ${summary.hasErrors ? 'border-red-500/30' : 'border-emerald-500/30'}`}>
         <CardContent className="p-4">
           <div className="flex items-center gap-3 mb-2">
             {summary.hasErrors ? (
@@ -115,7 +115,7 @@ export function ReconciliationKPICards({
               variant="outline"
               size="sm"
               onClick={onShowRecommendations}
-              className="mt-3 w-full bg-card/50 border-border hover:bg-secondary text-foreground/80"
+              className="mt-3 w-full bg-di-surface-low border-di-outline-variant/20 hover:bg-di-surface-high text-foreground"
             >
               <Lightbulb className="h-4 w-4 mr-2 text-yellow-600 dark:text-yellow-400" />
               Рекомендации

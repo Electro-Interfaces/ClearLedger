@@ -1,4 +1,4 @@
-import { User, Menu, Sun, Moon, Fuel, Zap, ChevronsLeft, ChevronsRight, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle } from 'lucide-react'
+import { User, Menu, Sun, Moon, BookText, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle } from 'lucide-react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useSidebar } from '@/components/ui/sidebar'
 import { APP_VERSION } from '@/config/version'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -27,9 +26,8 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const { user, logout } = useAuth()
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
   const userName = user?.name ?? 'Пользователь'
-  // Профиль-зависимый логотип: energy → молния (ЭЗС), иначе топл.колонка (АЗС)
-  const isEnergy = company.profileId === 'energy'
-  const BrandIcon = isEnergy ? Zap : Fuel
+  // Универсальный логотип «учёт»: приложение не привязано к топливу/энергии.
+  const BrandIcon = BookText
 
   function handleLogout() {
     logout()
@@ -43,17 +41,6 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
         ? 'bg-primary text-white border-primary'
         : 'bg-primary/10 dark:bg-primary/20 hover:bg-primary text-primary dark:text-primary/80 hover:text-white border-primary/30 dark:border-primary/50 hover:border-primary'
     }`
-
-  // Header может рендериться вне SidebarProvider (тесты/изолированные layout'ы)
-  let sidebarState: 'expanded' | 'collapsed' = 'expanded'
-  let toggleSidebar: (() => void) | null = null
-  try {
-    const sidebar = useSidebar()
-    sidebarState = sidebar.state
-    toggleSidebar = sidebar.toggleSidebar
-  } catch {
-    /* нет провайдера — кнопка свёртки просто не рисуется */
-  }
 
   return (
     <header className="h-[var(--header-height)] shrink-0 border-b border-border/50 bg-card/95 backdrop-blur-xl">
@@ -71,20 +58,11 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
               <BrandIcon className="h-5 w-5 text-white" />
             </div>
             <div className="hidden sm:flex flex-col leading-none">
-              <h1 className="font-semibold tracking-tight text-foreground text-lg">TradeLedger</h1>
+              <h1 className="font-semibold tracking-tight text-foreground text-lg">Ledger</h1>
               <p className="text-xs text-muted-foreground">v{APP_VERSION}</p>
             </div>
           </Link>
 
-          {!isMobile && toggleSidebar && (
-            <button
-              onClick={toggleSidebar}
-              className="ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-all hover:bg-secondary hover:text-foreground active:scale-90 dark:hover:bg-di-surface-high"
-              title={sidebarState === 'collapsed' ? 'Развернуть меню (Ctrl+B)' : 'Свернуть меню (Ctrl+B)'}
-            >
-              {sidebarState === 'collapsed' ? <ChevronsRight className="h-5 w-5" /> : <ChevronsLeft className="h-5 w-5" />}
-            </button>
-          )}
         </div>
 
         {/* Центр: глобальные фильтры-пилюли + кнопки взаимодействия */}
