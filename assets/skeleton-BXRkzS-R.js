@@ -1,0 +1,1 @@
+import{j as o}from"./vendor-query-Bt6e9tSW.js";import{c1 as s}from"./index-Dale_fCR.js";function r({className:t,...e}){return o.jsx("div",{"data-slot":"skeleton",className:s("bg-accent animate-pulse rounded-md",t),...e})}export{r as S};

@@ -1,0 +1,1 @@
+import{j as r}from"./vendor-query-Bt6e9tSW.js";import{e2 as e}from"./index-Dale_fCR.js";import"./vendor-react-B57VyEsA.js";import"./vendor-radix-BrRBqlSH.js";import"./vendor-xlsx-DK-yVfHF.js";function n(){return r.jsx("div",{className:"flex-1 min-w-0",children:r.jsx(e,{})})}export{n as BalancePage,n as default};
