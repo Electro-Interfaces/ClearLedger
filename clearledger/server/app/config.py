@@ -52,9 +52,10 @@ class Settings(BaseSettings):
     # CORS — список origin через запятую
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
-    # OCR
+    # OCR / загрузка файлов (лимит /api/intake — общий на все загрузки, вкл. xlsx
+    # выгрузок сессий/реестров, которые бывают крупными).
     ocr_enabled: bool = True
-    ocr_max_file_size: int = 10 * 1024 * 1024  # 10 МБ
+    ocr_max_file_size: int = 100 * 1024 * 1024  # 100 МБ
     ocr_timeout: int = 30  # секунд
 
     # SMTP — отправка писем (приглашения сотрудников). Mailcow на services-01.
