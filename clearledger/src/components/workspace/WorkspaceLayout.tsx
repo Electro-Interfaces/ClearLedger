@@ -12,7 +12,6 @@ import { getSettings } from '@/services/settingsService'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Button } from '@/components/ui/button'
-import { RawPanel } from './raw-panel'
 import { CorePanel } from './CorePanel'
 import { NormalizationPanel } from './NormalizationPanel'
 import { ReconciliationPanel } from './ReconciliationPanel'
@@ -21,9 +20,10 @@ import { ExportLayerPanel } from './ExportLayerPanel'
 import { ExportPanel } from './ExportPanel'
 import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
-import { EnergyRawPanel, EnergyExportDocsPanel } from './EnergySidePanels'
+import { WorkspaceModeSidebar } from './WorkspaceModeSidebar'
+import { EnergyExportDocsPanel } from './EnergySidePanels'
 import {
-  ClipboardList, Database, FileOutput,
+  Database, FileOutput,
   PanelLeftClose, PanelLeftOpen,
   PanelRightClose, PanelRightOpen,
 } from 'lucide-react'
@@ -41,18 +41,16 @@ function WorkspaceContent() {
 }
 
 function DesktopWorkspace() {
-  const rawRef = usePanelRef()
   const coreRef = usePanelRef()
   const exportRef = usePanelRef()
 
-  const [rawSize, setRawSize] = useState(20)
-  const [coreSize, setCoreSize] = useState(55)
-  const [exportSize, setExportSize] = useState(25)
+  // Панель «Для 1С» по умолчанию свёрнута; core занимает почти всю ширину.
+  const [coreSize, setCoreSize] = useState(97)
+  const [exportSize, setExportSize] = useState(3)
 
   const ICON = 5
-  const RAW_SIZE = '20%' as const
-  const CORE_SIZE = '55%' as const
-  const EXPORT_SIZE = '25%' as const
+  const CORE_SIZE = '70%' as const
+  const EXPORT_SIZE = '30%' as const
   const COLLAPSED_SIZE = '3%' as const
 
   const { company } = useCompany()
@@ -66,60 +64,15 @@ function DesktopWorkspace() {
     <div className="h-full min-h-0 overflow-hidden flex flex-col">
       <WorkspaceToolbar />
 
-      <ResizablePanelGroup orientation="horizontal" className="flex-1">
-        {/* === Raw Panel === — слой ВХОДНЫХ ДОКУМЕНТОВ (фуел: смены/ТТН; energy: первичка ЭЗС) */}
-        <>
-          <ResizablePanel
-            panelRef={rawRef}
-            defaultSize="20%"
-            minSize="3%"
-            onResize={(s) => setRawSize(s.asPercentage)}
-            className="bg-muted/60"
-          >
-            {rawSize <= ICON ? (
-              <div className="h-full flex flex-col items-center py-3 gap-3">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => rawRef.current?.resize(RAW_SIZE)} title="Развернуть">
-                  <PanelLeftOpen className="h-3.5 w-3.5" />
-                </Button>
-                <ClipboardList className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
-                  {isEnergy ? 'Входные' : 'Загруженные'}
-                </span>
-              </div>
-            ) : (
-              <div className="h-full flex flex-col overflow-hidden">
-                <div className="flex-1 overflow-hidden">
-                  {isEnergy ? (
-                    <EnergyRawPanel
-                      hideHeader
-                      collapseButton={
-                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => rawRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
-                          <PanelLeftClose className="h-3.5 w-3.5" />
-                        </Button>
-                      }
-                    />
-                  ) : (
-                    <RawPanel
-                      hideHeader
-                      collapseButton={
-                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => rawRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
-                          <PanelLeftClose className="h-3.5 w-3.5" />
-                        </Button>
-                      }
-                    />
-                  )}
-                </div>
-              </div>
-            )}
-          </ResizablePanel>
+      <div className="flex-1 min-h-0 flex">
+        {/* Вертикальное меню разделов рабочей области (виды учёта + Выгрузка) */}
+        <WorkspaceModeSidebar />
 
-          <ResizableHandle withHandle />
-        </>
-
-        {/* === Core Panel === */}
+        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-w-0">
+        {/* === Core Panel === — первый слой («Документы») вынесен в отдельный раздел /files */}
         <ResizablePanel
           panelRef={coreRef}
-          defaultSize="55%"
+          defaultSize="97%"
           minSize="3%"
           onResize={(s) => setCoreSize(s.asPercentage)}
           className="bg-background"
@@ -190,7 +143,7 @@ function DesktopWorkspace() {
 
           <ResizablePanel
             panelRef={exportRef}
-            defaultSize="25%"
+            defaultSize="3%"
             minSize="3%"
             onResize={(s) => setExportSize(s.asPercentage)}
             className="bg-muted/60"
@@ -229,22 +182,22 @@ function DesktopWorkspace() {
             )}
           </ResizablePanel>
         </>
-      </ResizablePanelGroup>
+        </ResizablePanelGroup>
+      </div>
     </div>
   )
 }
 
 function MobileWorkspace() {
   const { activeTab, setActiveTab, exportDocs } = useWorkspace()
+  // Первый слой («Документы») вынесен в отдельный раздел /files —
+  // вкладки «Смены» здесь больше нет; дефолтный 'raw' маппим на 'core'.
+  const tab = activeTab === 'raw' ? 'core' : activeTab
 
   return (
     <div className="h-full pb-14">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'raw' | 'core' | 'export')}>
+      <Tabs value={tab} onValueChange={(v) => setActiveTab(v as 'raw' | 'core' | 'export')}>
         <TabsList className="w-full rounded-none border-b h-10 bg-card">
-          <TabsTrigger value="raw" className="flex-1 gap-1.5 text-xs">
-            <ClipboardList className="h-3.5 w-3.5" />
-            Смены
-          </TabsTrigger>
           <TabsTrigger value="core" className="flex-1 gap-1.5 text-xs">
             <Database className="h-3.5 w-3.5" />
             Детали
@@ -260,9 +213,6 @@ function MobileWorkspace() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="raw" className="mt-0 h-[calc(100vh-8rem)]">
-          <RawPanel />
-        </TabsContent>
         <TabsContent value="core" className="mt-0 h-[calc(100vh-8rem)]">
           <CorePanel />
         </TabsContent>

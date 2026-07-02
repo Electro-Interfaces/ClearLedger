@@ -1,8 +1,8 @@
 /**
- * Раздел «Компании и команда» (мастер-деталь).
+ * Раздел «Компании, команда и доступ» (мастер-деталь).
  * Слева — список компаний (суперадмину все + подключить новую; админу — свои).
- * Справа — выбранная компания: реквизиты (правка) + команда (сотрудники +
- * приглашения по email). Требует API-режим.
+ * Справа — выбранная компания: реквизиты (правка) + команда (сотрудники,
+ * приглашения по email, роли и RBAC-доступ к модулям учёта). Требует API-режим.
  */
 import { useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -17,13 +17,14 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
-import { Building2, Plus, Loader2, ShieldCheck, Users } from 'lucide-react'
+import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History } from 'lucide-react'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import * as userService from '@/services/userService'
 import type { OrgProfile } from '@/services/userService'
-import { CompanyTeam } from '@/components/admin/CompanyTeam'
+import { MembersCard, InvitationsCard, RolesAccessTab, AuditTab } from '@/components/admin/CompanyTeam'
 
 const PROFILES = [
   { id: 'fuel', label: 'Топливо (АЗС)' },
@@ -65,58 +66,75 @@ export function AdminPage() {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <ShieldCheck className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold">Компании и команда</h1>
+        <div>
+          <h1 className="text-2xl font-bold leading-tight">Компании, команда и доступ</h1>
+          <p className="text-sm text-muted-foreground">Реквизиты, сотрудники, роли и доступ к модулям учёта</p>
+        </div>
       </div>
 
-      <div className="flex gap-6 items-start">
-        {/* Левый рейл — компании */}
-        <div className="w-64 shrink-0 space-y-2">
-          {isSuper && <AddCompanyDialog onCreated={(c) => setSelectedId(c.id)} />}
-          <div className="rounded-lg border border-border/50 divide-y divide-border/40 overflow-hidden">
-            {companiesQuery.isLoading && (
-              <div className="p-3 text-sm text-muted-foreground flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Загрузка…
-              </div>
-            )}
-            {companies.map((c) => {
-              const active = selected?.id === c.id
-              return (
-                <button key={c.id} onClick={() => setSelectedId(c.id)}
-                  className={`w-full text-left px-3 py-2.5 flex items-center gap-2 transition-colors ${
-                    active ? 'bg-primary/10 text-primary' : 'hover:bg-accent'
-                  }`}>
-                  <span className="size-2.5 rounded-full shrink-0" style={{ background: c.color ?? '#888' }} />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium truncate">{c.short_name || c.name}</span>
-                    <span className="block text-[11px] text-muted-foreground font-mono">{c.slug}</span>
+      {/* Панель выбора компании */}
+      <div className="flex items-center gap-3 flex-wrap border-b border-border/50 pb-3">
+        <span className="text-sm font-medium text-muted-foreground">Компания:</span>
+        {companiesQuery.isLoading ? (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        ) : (
+          <Select value={selected?.id ?? ''} onValueChange={setSelectedId}>
+            <SelectTrigger className="w-72"><SelectValue placeholder="Выберите компанию" /></SelectTrigger>
+            <SelectContent>
+              {companies.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  <span className="flex items-center gap-2">
+                    <span className="size-2 rounded-full shrink-0" style={{ background: c.color ?? '#888' }} />
+                    {c.short_name || c.name}
+                    <span className="text-muted-foreground font-mono text-[11px]">{c.slug}</span>
                   </span>
-                </button>
-              )
-            })}
-            {!companiesQuery.isLoading && companies.length === 0 && (
-              <div className="p-3 text-sm text-muted-foreground">Нет компаний</div>
-            )}
-          </div>
-        </div>
-
-        {/* Деталь — выбранная компания */}
-        <div className="flex-1 min-w-0 space-y-6">
-          {selected ? (
-            <>
-              <CompanyProfileCard company={selected} canEdit={canManageSelected(selected.id)} />
-              <CompanyTeam
-                companyId={selected.id}
-                canManage={canManageSelected(selected.id)}
-                selfId={user!.id}
-              />
-            </>
-          ) : (
-            <Card><CardContent className="py-10 text-center text-muted-foreground">
-              Выберите компанию слева
-            </CardContent></Card>
-          )}
-        </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {isSuper && <AddCompanyDialog onCreated={(c) => setSelectedId(c.id)} />}
+        <span className="text-xs text-muted-foreground ml-auto">Компаний: {companies.length}</span>
       </div>
+
+      {selected ? (
+        <Tabs defaultValue="members" className="w-full">
+          <TabsList>
+            <TabsTrigger value="members" className="gap-1.5"><Users className="h-4 w-4" /> Сотрудники</TabsTrigger>
+            <TabsTrigger value="roles" className="gap-1.5"><KeyRound className="h-4 w-4" /> Роли и доступ</TabsTrigger>
+            <TabsTrigger value="profile" className="gap-1.5"><Building2 className="h-4 w-4" /> Реквизиты</TabsTrigger>
+            {canManageSelected(selected.id) && (
+              <TabsTrigger value="invites" className="gap-1.5"><Mail className="h-4 w-4" /> Приглашения</TabsTrigger>
+            )}
+            {canManageSelected(selected.id) && (
+              <TabsTrigger value="audit" className="gap-1.5"><History className="h-4 w-4" /> Журнал</TabsTrigger>
+            )}
+          </TabsList>
+          <TabsContent value="members" className="mt-4">
+            <MembersCard companyId={selected.id} canManage={canManageSelected(selected.id)} selfId={user!.id} />
+          </TabsContent>
+          <TabsContent value="roles" className="mt-4">
+            <RolesAccessTab companyId={selected.id} canManage={canManageSelected(selected.id)} />
+          </TabsContent>
+          <TabsContent value="profile" className="mt-4">
+            <CompanyProfileCard company={selected} canEdit={canManageSelected(selected.id)} />
+          </TabsContent>
+          {canManageSelected(selected.id) && (
+            <TabsContent value="invites" className="mt-4">
+              <InvitationsCard companyId={selected.id} />
+            </TabsContent>
+          )}
+          {canManageSelected(selected.id) && (
+            <TabsContent value="audit" className="mt-4">
+              <AuditTab companyId={selected.id} />
+            </TabsContent>
+          )}
+        </Tabs>
+      ) : (
+        <Card><CardContent className="py-10 text-center text-muted-foreground">
+          {companies.length === 0 ? 'Нет доступных компаний' : 'Выберите компанию'}
+        </CardContent></Card>
+      )}
     </div>
   )
 }
@@ -201,7 +219,7 @@ function AddCompanyDialog({ onCreated }: { onCreated: (c: OrgProfile) => void })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="w-full" size="sm"><Plus className="h-4 w-4 mr-2" /> Подключить компанию</Button>
+        <Button size="sm" variant="outline"><Plus className="h-4 w-4 mr-2" /> Подключить компанию</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Новая компания</DialogTitle></DialogHeader>

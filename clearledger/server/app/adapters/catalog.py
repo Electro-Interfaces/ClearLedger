@@ -545,6 +545,36 @@ class ManualTableAdapter(SourceAdapter):
         return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
 
 
+# ---------------------------------------------------------------------------
+# ЭЗС: зарядные сессии (загруженный Excel) — парсинг/нормализация server-side
+# ---------------------------------------------------------------------------
+@register_adapter("charge_sessions_excel")
+class ChargeSessionsExcelAdapter(SourceAdapter):
+    status = "available"
+    label = "ЭЗС: Зарядные сессии (Excel)"
+    category = "Электромобильность (ЭЗС)"
+    description = (
+        "Выгрузка зарядных сессий ЭЗС (ChargeTransactions, xlsx) как источник: "
+        "станция, коннектор, энергия (кВтч), сумма, тариф, тип пользователя. "
+        "Файл грузится в канал, парсинг и нормализация (коннектор/ФЛ-ЮЛ) — "
+        "server-side при запуске обработки канала. Для РусГидро."
+    )
+    icon = "Zap"
+    setup_schema = [
+        SetupField(key="sheet", label="Лист", field_type="text", required=False,
+                   default_value="ChargeTransactions", help_text="Имя листа Excel с сессиями."),
+    ]
+    available_doc_types = [
+        SourceDocType(id="charge_sessions", name="Зарядные сессии реализации", category="anchor"),
+    ]
+
+    async def test_connection(self, connection: dict[str, Any]) -> TestResult:
+        return TestResult(ok=True, message="Источник сессий: загрузите таблицу в канал и запустите обработку.")
+
+    async def fetch_delta(self, connection, doc_type, since=None, until=None, filters=None) -> RawBatch:
+        return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
+
+
 @register_adapter("neftoms")
 class NeftoMsAdapter(PlannedAdapter):
     label = "NeftoMS (POS станции)"

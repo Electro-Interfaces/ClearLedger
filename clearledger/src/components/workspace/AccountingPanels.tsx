@@ -6,33 +6,44 @@
  * над проводками AccountingDoc и сменами FuelShift.
  */
 
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
+import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
+import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS } from './workspaceSections'
+import { ChargeSessionsPanel } from './ChargeSessionsPanel'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, AlertCircle, TrendingUp, Wallet, Receipt, AlertTriangle } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Loader2, AlertCircle, TrendingUp, Wallet, Receipt, AlertTriangle, Pencil, Banknote, CreditCard, Ticket, Fuel, Layers } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
-import {
-  AnalyticsPeriodPicker, KpiCard, useAnalyticsPeriod,
-} from './analytics/AnalyticsPeriodPicker'
+import { KpiCard } from './analytics/AnalyticsPeriodPicker'
+import { useFilters } from '@/contexts/FilterContext'
+import { useAllReceipts } from '@/hooks/useFuel'
 import {
   getPnL, getPaymentMix, getCashFlow, getPayablesReceivables,
-  getVat, getProfit,
+  getVat, getProfit, getFuelBalance, getSalesChannels,
   fmtMoney, fmtMoneyShort, fmtLiters, fmtPct,
 } from '@/services/analyticsService'
-import { balanceModuleForProfile } from '@/config/balanceModules'
 import { BalanceVitrine } from '@/components/balance/BalanceVitrine'
-import { LocationsPage } from '@/pages/LocationsPage'
 import {
   NetworkOverviewVitrine, RevenueVitrine, TariffsVitrine, ReceivablesVitrine, ProcurementVitrine, RentVitrine,
 } from '@/components/balance/EnergyManagementVitrines'
 import { FinancialVitrine } from '@/components/balance/EnergyFinancialVitrine'
 import { AccountingVitrine } from '@/components/balance/EnergyAccountingVitrine'
 import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
-import { getWorkspaceModule } from '@/config/workspaceModules'
-import { useModuleConnections, isModuleConnected } from '@/services/moduleConnectionService'
+// Бухгалтерский модуль ГИГ — смены/ТТН (корректировка перед 1С) + аналитика.
+// Нормализация и сверка НЕ дублируются здесь — они живут в разделах
+// «Нормализация» (/normalization) и «Разрезы учёта» (/reconciliation).
+import { useMemo, useState } from 'react'
+import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
+import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
+import { SyncWith1CPanel } from '@/components/fuel/SyncWith1CPanel'
+import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
+import {
+  getLoadedShifts, getCostingMargin, type LoadedShift,
+} from '@/services/fuel/fuelMappingService'
 
 /* ── общие виджеты ── */
 
@@ -58,13 +69,6 @@ function ErrorState({ message }: { message: string }) {
   )
 }
 
-// Подключён ли раздел компании (модуль раздела) + пустое состояние, если нет.
-function useSectionGate(moduleId: string) {
-  const { conn, profileId } = useModuleConnections()
-  const { company } = useCompany()
-  const mod = getWorkspaceModule(moduleId)
-  return { connected: !!mod && isModuleConnected(conn, mod, profileId), org: company.shortName || company.name }
-}
 function SectionEmpty({ section, org }: { section: string; org: string }) {
   return (
     <div className="flex h-full items-center justify-center p-6">
@@ -80,24 +84,7 @@ function SectionEmpty({ section, org }: { section: string; org: string }) {
 /*                     Управленческий учёт                          */
 /* ────────────────────────────────────────────────────────────── */
 
-const MGMT_MENU: CentralMenuItem[] = [
-  { key: 'overview',  label: 'Обзор' },
-  { key: 'by-station', label: 'По станциям' },
-  { key: 'by-fuel',   label: 'По топливу' },
-  { key: 'by-month',  label: 'По месяцам' },
-  { key: 'marketing', label: 'Маркетинг' },
-]
-
 // Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).
-const ENERGY_MGMT: CentralMenuItem[] = [
-  { key: 'net_overview', label: 'Сводка сети' },
-  { key: 'revenue', label: 'Выручка и продажи' },
-  { key: 'tariffs', label: 'Тарифы и ценообразование' },
-  { key: 'receivables', label: 'Дебиторка и взаиморасчёты' },
-  { key: 'procurement', label: 'Энергозакупка' },
-  { key: 'rent', label: 'Аренда' },
-]
-const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 function EnergyMgmtVitrine({ tab }: { tab: string }) {
   switch (tab) {
     case 'net_overview': return <NetworkOverviewVitrine />
@@ -111,24 +98,14 @@ function EnergyMgmtVitrine({ tab }: { tab: string }) {
 }
 
 export function ManagementPanel() {
-  const [tab, setTab] = useState('overview')
-  const [period, setPeriod] = useAnalyticsPeriod()
-  const { companyId, company } = useCompany()
-  // Управленческий уровень работает на НОРМАЛИЗОВАННОЙ базе (выход конвейера Источник→Канал→Разрез)
-  // и собирается из МОДУЛЕЙ, подключённых компании по профилю (в перспективе — через настройки).
-  // Топливные модули (АЗС/литры/смены) — только fuel-профилю; energy получает свой набор.
-  // Меню = модули, ПОДКЛЮЧЁННЫЕ компании (управляется каталогом «Модули»).
-  // По умолчанию подключены модули, подходящие профилю — текущее поведение сохраняется.
-  const { conn } = useModuleConnections()
-  const on = (id: string) => { const m = getWorkspaceModule(id); return m ? isModuleConnected(conn, m, company.profileId) : false }
-  const balMod = balanceModuleForProfile(company.profileId)
-  const menu = [
-    ...(on('mgmt_pnl') ? MGMT_MENU : []),                                         // топливный P&L (Обзор/Станции/…)
-    ...ENERGY_MGMT.filter((m) => on(m.key)),                                      // энергомодули (Сводка/Выручка/Тарифы/Дебиторка/Закупка)
-    ...(on('objects') ? [{ key: 'objects', label: 'Объекты' }] : []),            // точки (нормализованные данные)
-    ...(balMod && on(balMod.id) ? [{ key: 'balance', label: balMod.navLabel }] : []),
-  ]
+  // Меню (под-разделы) собирается из подключённых модулей в общем хуке — им же
+  // рисуется гармошка в левом вертикальном меню. Здесь — только контент.
+  const sections = useWorkspaceSections()
+  const menu = sections.find((s) => s.mode === 'management')?.items ?? []
   const menuKeys = menu.map((m) => m.key)
+  const [tab] = useWorkspaceSubView(menuKeys[0] ?? 'overview')
+  const { period } = useFilters()
+  const { companyId, company } = useCompany()
   const activeTab = menuKeys.includes(tab) ? tab : (menuKeys[0] ?? 'balance')
 
   if (menu.length === 0) {
@@ -139,33 +116,28 @@ export function ManagementPanel() {
     )
   }
 
+  if (activeTab === 'balance') {
+    return <div className="h-full overflow-y-auto"><BalanceVitrine /></div>
+  }
+  if (CHARGE_SESSIONS_KEYS.includes(activeTab)) {
+    return <div className="h-full overflow-y-auto"><ChargeSessionsPanel tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} /></div>
+  }
+  if (ENERGY_MGMT_KEYS.includes(activeTab)) {
+    return <div className="h-full overflow-y-auto"><EnergyMgmtVitrine tab={activeTab} /></div>
+  }
   return (
-    <CentralPanelLayout items={menu} activeKey={activeTab} onSelect={setTab}>
-      {activeTab === 'balance' ? (
-        <div className="h-full overflow-y-auto">
-          <BalanceVitrine />
-        </div>
-      ) : activeTab === 'objects' ? (
-        <div className="h-full overflow-y-auto">
-          <LocationsPage cockpitVariant="full" />
-        </div>
-      ) : ENERGY_MGMT_KEYS.includes(activeTab) ? (
-        <div className="h-full overflow-y-auto">
-          <EnergyMgmtVitrine tab={activeTab} />
-        </div>
-      ) : (
-        <div className="h-full flex flex-col">
-          <AnalyticsPeriodPicker period={period} onChange={setPeriod} />
-          <ScrollArea className="flex-1">
-            {activeTab === 'overview' && <MgmtOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-            {activeTab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
-            {activeTab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
-            {activeTab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
-            {activeTab === 'marketing' && <MgmtPaymentMix companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-          </ScrollArea>
-        </div>
-      )}
-    </CentralPanelLayout>
+    <div className="h-full flex flex-col">
+      <ScrollArea className="flex-1">
+        {activeTab === 'overview' && <MgmtOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {activeTab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
+        {activeTab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
+        {activeTab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
+        {activeTab === 'channels' && <MgmtChannels companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {activeTab === 'margin' && <MgmtMargin companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {activeTab === 'purchases' && <MgmtPurchases dateFrom={period.from} dateTo={period.to} />}
+        {activeTab === 'tanks' && <MgmtBalance companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      </ScrollArea>
+    </div>
   )
 }
 
@@ -318,27 +290,327 @@ function MgmtPnLTable({ companyId, dateFrom, dateTo, groupBy }: { companyId: str
   )
 }
 
-function MgmtPaymentMix({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+/* ── Каналы оплаты и продаж (комиссии, розница/корп/онлайн) ── */
+
+// Справочник: категория + ставка комиссии % (эквайринг банк-карт, процессинг
+// топливных карт, комиссии агрегаторов). Дефолты — в перспективе редактируемы.
+const CHANNEL_META: Record<string, { category: string; commission: number }> = {
+  'Наличные':         { category: 'Розница', commission: 0 },
+  'Банковская карта': { category: 'Розница', commission: 1.8 },
+  'Топливная карта':  { category: 'Корпоратив', commission: 1.5 },
+  'Онлайн':           { category: 'Онлайн-агрегаторы', commission: 7 },
+  'Талоны':           { category: 'Талоны/ведомости', commission: 0 },
+  'Ведомости':        { category: 'Талоны/ведомости', commission: 0 },
+}
+const channelMeta = (label: string) => CHANNEL_META[label] ?? { category: 'Прочее', commission: 0 }
+const CATEGORY_ACCENT: Record<string, string> = {
+  'Розница': 'text-emerald-400', 'Корпоратив': 'text-blue-400',
+  'Онлайн-агрегаторы': 'text-amber-400', 'Талоны/ведомости': 'text-purple-400',
+  'Прочее': 'text-muted-foreground',
+}
+
+function MgmtChannels({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['analytics-paymentmix', companyId, dateFrom, dateTo],
-    queryFn: () => getPaymentMix({ companyId, dateFrom, dateTo }),
+    queryKey: ['analytics-saleschannels', companyId, dateFrom, dateTo],
+    queryFn: () => getSalesChannels({ companyId, dateFrom, dateTo }),
   })
   if (isLoading) return <LoadingState />
   if (error) return <ErrorState message={String(error)} />
-  if (!data) return null
+  if (!data || data.lines.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет продаж по каналам за период</div>
+
+  const rows = data.lines.map((l) => {
+    const meta = channelMeta(l.label)
+    const commission = l.amount * meta.commission / 100
+    return { ...l, category: meta.category, commissionPct: meta.commission, commission, net: l.amount - commission }
+  })
+  const totalCommission = rows.reduce((a, r) => a + r.commission, 0)
+  const totalNet = data.total_amount - totalCommission
+
+  const catMap = new Map<string, { amount: number; commission: number }>()
+  for (const r of rows) {
+    const cur = catMap.get(r.category) ?? { amount: 0, commission: 0 }
+    cur.amount += r.amount; cur.commission += r.commission
+    catMap.set(r.category, cur)
+  }
+  const categories = [...catMap.entries()]
+    .map(([label, v]) => ({ label, ...v, share: data.total_amount ? v.amount / data.total_amount * 100 : 0 }))
+    .sort((a, b) => b.amount - a.amount)
+
   return (
     <div className="p-4 space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Закрытых смен" value={String(data.shifts_count)} />
-        <KpiCard label="Оборот всего" value={fmtMoneyShort(data.total_amount) + ' ₽'} />
-        <KpiCard label="Средний чек/смена" value={fmtMoney(data.avg_per_shift) + ' ₽'} />
-        <KpiCard label="Доля карт" value={data.shares_pct.card.toFixed(1) + '%'} accent="info" />
+        <KpiCard label="Оборот всего" value={fmtMoneyShort(data.total_amount) + ' ₽'} hint={`${fmtLiters(data.total_liters)} · ${data.shifts_count} смен`} />
+        <KpiCard label="Комиссии каналов" value={fmtMoneyShort(totalCommission) + ' ₽'} accent="warning" hint="эквайринг + агрегаторы" />
+        <KpiCard label="Чистая выручка" value={fmtMoneyShort(totalNet) + ' ₽'} accent="success" />
+        <KpiCard label="Каналов" value={String(rows.length)} />
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {categories.map((c) => (
+          <Card key={c.label}>
+            <CardContent className="pt-3 pb-3">
+              <div className={`text-xs font-medium ${CATEGORY_ACCENT[c.label] ?? ''}`}>{c.label}</div>
+              <div className="text-lg font-semibold mt-0.5">{c.share.toFixed(1)}%</div>
+              <div className="text-[11px] text-muted-foreground">
+                {fmtMoneyShort(c.amount)} ₽{c.commission > 0 ? ` · комиссия ${fmtMoneyShort(c.commission)}` : ''}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/40 text-muted-foreground">
+                <th className="text-left p-2 font-medium">Канал</th>
+                <th className="text-left p-2 font-medium">Категория</th>
+                <th className="text-right p-2 font-medium">Объём, л</th>
+                <th className="text-right p-2 font-medium">Оборот</th>
+                <th className="text-right p-2 font-medium">Доля</th>
+                <th className="text-right p-2 font-medium">₽/л</th>
+                <th className="text-right p-2 font-medium">Комиссия</th>
+                <th className="text-right p-2 font-medium">Чистая</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.channel} className="border-b border-border/30 hover:bg-muted/30">
+                  <td className="p-2 font-medium">{r.label}</td>
+                  <td className={`p-2 ${CATEGORY_ACCENT[r.category] ?? ''}`}>{r.category}</td>
+                  <td className="p-2 text-right font-mono">{fmtLiters(r.liters)}</td>
+                  <td className="p-2 text-right font-mono">{fmtMoney(r.amount)}</td>
+                  <td className="p-2 text-right font-mono">{r.share_pct.toFixed(1)}%</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(r.avg_price)}</td>
+                  <td className="p-2 text-right font-mono text-amber-400">{r.commissionPct > 0 ? `${fmtMoney(r.commission)} · ${r.commissionPct}%` : '—'}</td>
+                  <td className="p-2 text-right font-mono text-emerald-400">{fmtMoney(r.net)}</td>
+                </tr>
+              ))}
+              <tr className="bg-muted/60 font-medium">
+                <td className="p-2" colSpan={2}>Итого</td>
+                <td className="p-2 text-right font-mono">{fmtLiters(data.total_liters)}</td>
+                <td className="p-2 text-right font-mono">{fmtMoney(data.total_amount)}</td>
+                <td className="p-2 text-right font-mono">100%</td>
+                <td className="p-2"></td>
+                <td className="p-2 text-right font-mono text-amber-400">{fmtMoney(totalCommission)}</td>
+                <td className="p-2 text-right font-mono text-emerald-400">{fmtMoney(totalNet)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4 text-xs text-muted-foreground">
+          Ставки комиссий (эквайринг банк-карт, процессинг топливных карт, агрегаторы Яндекс/Benzuber) заданы по умолчанию —
+          в перспективе редактируются в справочнике. «Чистая выручка» = оборот − комиссия канала.
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/* ── Маржа и цены (валовая маржа по видам топлива, ₽/литр) ── */
+
+function MgmtMargin({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['analytics-pnl', companyId, dateFrom, dateTo, 'fuel'],
+    queryFn: () => getPnL({ companyId, dateFrom, dateTo, groupBy: 'fuel' }),
+  })
+  if (isLoading) return <LoadingState />
+  if (error) return <ErrorState message={String(error)} />
+  if (!data || data.lines.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет данных за период</div>
+  const t = data.totals
+  const perL = (m: number, l: number) => (l > 0 ? m / l : 0)
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Валовая маржа" value={fmtMoneyShort(t.gross_margin) + ' ₽'} accent={t.gross_margin >= 0 ? 'success' : 'danger'} />
+        <KpiCard label="Маржа %" value={fmtPct(t.gross_margin_pct)} />
+        <KpiCard label="Маржа ₽/литр" value={fmtMoney(perL(t.gross_margin, t.liters)) + ' ₽'} hint="средняя по всем видам" />
+        <KpiCard label="Литров продано" value={fmtLiters(t.liters)} />
       </div>
       <Card>
-        <CardContent className="pt-4 space-y-2 text-xs">
-          {(['cash', 'card', 'voucher', 'other'] as const).map((k) => (
-            <PayBar key={k} label={LABELS[k]} amount={data.breakdown[k]} pct={data.shares_pct[k]} />
-          ))}
+        <CardContent className="p-0">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/40 text-muted-foreground">
+                <th className="text-left p-2 font-medium">Вид топлива</th>
+                <th className="text-right p-2 font-medium">Выручка без НДС</th>
+                <th className="text-right p-2 font-medium">Себестоим.</th>
+                <th className="text-right p-2 font-medium">Маржа</th>
+                <th className="text-right p-2 font-medium">Маржа %</th>
+                <th className="text-right p-2 font-medium">₽/литр</th>
+                <th className="text-right p-2 font-medium">Литров</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.lines.map((l) => (
+                <tr key={l.label} className="border-b border-border/30 hover:bg-muted/30">
+                  <td className="p-2 font-medium">{l.label}</td>
+                  <td className="p-2 text-right font-mono">{fmtMoney(l.revenue_net)}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(l.cogs)}</td>
+                  <td className={`p-2 text-right font-mono ${l.gross_margin >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtMoney(l.gross_margin)}</td>
+                  <td className="p-2 text-right font-mono">{fmtPct(l.gross_margin_pct)}</td>
+                  <td className="p-2 text-right font-mono">{fmtMoney(perL(l.gross_margin, l.liters))}</td>
+                  <td className="p-2 text-right font-mono">{l.liters > 0 ? fmtLiters(l.liters) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4 text-xs text-muted-foreground">
+          Маржа = выручка без НДС − себестоимость (COGS из проводок 90.02). «₽/литр» — валовая маржа на литр
+          проданного топлива. Динамика закупочных цен — на вкладке «Поступления» и в разделе «1С → Цены».
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/* ── Поступления/закупки (ТТН: поставщики, объёмы, закупочные цены) ── */
+
+function MgmtPurchases({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+  const { data: receipts, isLoading } = useAllReceipts()
+  if (isLoading) return <LoadingState />
+  const inPeriod = (receipts ?? []).filter((r) => {
+    const d = (r.dt || '').slice(0, 10)
+    return d && d >= dateFrom && d <= dateTo
+  })
+  if (inPeriod.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет поступлений (ТТН) за выбранный период</div>
+
+  const sum = (f: (r: typeof inPeriod[number]) => number) => inPeriod.reduce((a, r) => a + (f(r) || 0), 0)
+  const totalDoc = sum((r) => r.docVolume)
+  const totalFact = sum((r) => r.factVolume)
+  const diff = totalDoc - totalFact
+
+  const byFuel = (() => {
+    const m = new Map<string, { doc: number; fact: number; count: number }>()
+    for (const r of inPeriod) {
+      const k = r.fuel || '—'
+      const cur = m.get(k) ?? { doc: 0, fact: 0, count: 0 }
+      cur.doc += r.docVolume || 0
+      cur.fact += r.factVolume || 0
+      cur.count += 1
+      m.set(k, cur)
+    }
+    return [...m.entries()].map(([label, v]) => ({ label, ...v, diff: v.doc - v.fact })).sort((a, b) => b.doc - a.doc)
+  })()
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Принято (документ)" value={fmtLiters(totalDoc)} hint={`${inPeriod.length} ТТН`} />
+        <KpiCard label="Принято (факт)" value={fmtLiters(totalFact)} accent="info" />
+        <KpiCard label="Расхождение" value={fmtLiters(diff)}
+          accent={Math.abs(diff) < 1 ? 'success' : 'warning'} hint="документ − факт (приёмка)" />
+        <KpiCard label="ТТН за период" value={String(inPeriod.length)} />
+      </div>
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">По видам топлива</div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/20 text-muted-foreground">
+                <th className="text-left p-2 font-medium">Топливо</th>
+                <th className="text-right p-2 font-medium">Документ, л</th>
+                <th className="text-right p-2 font-medium">Факт, л</th>
+                <th className="text-right p-2 font-medium">Расхождение</th>
+                <th className="text-right p-2 font-medium">ТТН</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byFuel.map((r) => (
+                <tr key={r.label} className="border-b border-border/30 hover:bg-muted/30">
+                  <td className="p-2 font-medium">{r.label}</td>
+                  <td className="p-2 text-right font-mono">{fmtLiters(r.doc)}</td>
+                  <td className="p-2 text-right font-mono">{fmtLiters(r.fact)}</td>
+                  <td className={`p-2 text-right font-mono ${Math.abs(r.diff) < 1 ? 'text-muted-foreground' : 'text-amber-400'}`}>{fmtLiters(r.diff)}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{r.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4 text-xs text-muted-foreground">
+          Поставщики и закупочные цены — из детализации ТТН и раздела «1С → Цены/Партии» (в STS-ленте ТТН их нет).
+          Здесь — объёмы приёмки (документ vs факт) и расхождения по видам топлива.
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/* ── Топливный баланс (приход/реализация/остатки → недостача) ── */
+
+function MgmtBalance({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['analytics-fuelbalance', companyId, dateFrom, dateTo, 'station_fuel'],
+    queryFn: () => getFuelBalance({ companyId, dateFrom, dateTo, groupBy: 'station_fuel' }),
+  })
+  if (isLoading) return <LoadingState />
+  if (error) return <ErrorState message={String(error)} />
+  if (!data || data.lines.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет данных по резервуарам за период</div>
+  const t = data.totals
+  const lossCls = (l: number) => (Math.abs(l) < 1 ? 'text-muted-foreground' : l > 0 ? 'text-red-400' : 'text-amber-400')
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Приход (слив ТТН)" value={fmtLiters(t.receipts_liters)} accent="info" />
+        <KpiCard label="Реализация (ТРК)" value={fmtLiters(t.sales_liters)} />
+        <KpiCard label="Недостача / излишек" value={fmtLiters(t.loss_liters)}
+          accent={Math.abs(t.loss_liters) < 1 ? 'success' : t.loss_liters > 0 ? 'danger' : 'warning'}
+          hint={`${fmtPct(t.loss_pct)} от оборота`} />
+        <KpiCard label="Резервуаров / смен" value={`${t.tanks_count} / ${data.shifts_count}`} />
+      </div>
+      <Card>
+        <CardContent className="p-0">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/40 text-muted-foreground">
+                <th className="text-left p-2 font-medium">Станция · топливо</th>
+                <th className="text-right p-2 font-medium">Остаток нач.</th>
+                <th className="text-right p-2 font-medium">Приход</th>
+                <th className="text-right p-2 font-medium">Реализация</th>
+                <th className="text-right p-2 font-medium">Остаток кон.</th>
+                <th className="text-right p-2 font-medium">Недостача</th>
+                <th className="text-right p-2 font-medium">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.lines.map((l) => (
+                <tr key={l.label} className="border-b border-border/30 hover:bg-muted/30">
+                  <td className="p-2 font-medium truncate max-w-[240px]">{l.label}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{fmtLiters(l.balance_start_liters)}</td>
+                  <td className="p-2 text-right font-mono text-blue-400">{fmtLiters(l.receipts_liters)}</td>
+                  <td className="p-2 text-right font-mono">{fmtLiters(l.sales_liters)}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{fmtLiters(l.balance_end_liters)}</td>
+                  <td className={`p-2 text-right font-mono ${lossCls(l.loss_liters)}`}>{fmtLiters(l.loss_liters)}</td>
+                  <td className={`p-2 text-right font-mono ${lossCls(l.loss_liters)}`}>{fmtPct(l.loss_pct)}</td>
+                </tr>
+              ))}
+              <tr className="bg-muted/60 font-medium">
+                <td className="p-2">Итого</td>
+                <td className="p-2 text-right font-mono">{fmtLiters(t.balance_start_liters)}</td>
+                <td className="p-2 text-right font-mono">{fmtLiters(t.receipts_liters)}</td>
+                <td className="p-2 text-right font-mono">{fmtLiters(t.sales_liters)}</td>
+                <td className="p-2 text-right font-mono">{fmtLiters(t.balance_end_liters)}</td>
+                <td className={`p-2 text-right font-mono ${lossCls(t.loss_liters)}`}>{fmtLiters(t.loss_liters)}</td>
+                <td className={`p-2 text-right font-mono ${lossCls(t.loss_liters)}`}>{fmtPct(t.loss_pct)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="pt-4 text-xs text-muted-foreground">
+          Баланс по резервуарам за период: <span className="text-foreground">Остаток нач + Приход(ТТН слив) − Реализация(ТРК) − Остаток факт = Недостача</span>.
+          Положительное значение — потеря (усушка/недолив/недостача), отрицательное — излишек. Норма естественной убыли пока
+          не вычитается (нужен справочник НСИ) — расхождение показано «как есть».
         </CardContent>
       </Card>
     </div>
@@ -349,34 +621,27 @@ function MgmtPaymentMix({ companyId, dateFrom, dateTo }: { companyId: string; da
 /*                       Финансовый учёт                          */
 /* ────────────────────────────────────────────────────────────── */
 
-const FIN_MENU: CentralMenuItem[] = [
-  { key: 'overview',   label: 'Обзор' },
-  { key: 'cashflow',   label: 'Денежный поток' },
-  { key: 'receivables', label: 'Дебиторка' },
-  { key: 'payables',   label: 'Кредиторка' },
-]
-
 export function FinancialPanel() {
-  const [tab, setTab] = useState('overview')
-  const [period, setPeriod] = useAnalyticsPeriod()
+  const sections = useWorkspaceSections()
+  const section = sections.find((s) => s.mode === 'financial')
+  const items = section?.items ?? []
+  const [tab] = useWorkspaceSubView(items[0]?.key ?? 'overview', items.map((i) => i.key))
+  const { period } = useFilters()
   const { companyId, company } = useCompany()
   const isEnergy = company.profileId === 'energy'
-  const gate = useSectionGate(isEnergy ? 'fin_energy' : 'financial')
-  if (!gate.connected) return <SectionEmpty section="Финансовый" org={gate.org} />
+
+  if (!section?.connected) return <SectionEmpty section="Финансовый" org={company.shortName || company.name} />
   if (isEnergy) return <div className="h-full overflow-y-auto"><FinancialVitrine /></div>
 
   return (
-    <CentralPanelLayout items={FIN_MENU} activeKey={tab} onSelect={setTab}>
-      <div className="h-full flex flex-col">
-        <AnalyticsPeriodPicker period={period} onChange={setPeriod} />
-        <ScrollArea className="flex-1">
-          {tab === 'overview' && <FinOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-          {tab === 'cashflow' && <FinCashFlow companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-          {tab === 'receivables' && <FinContragents companyId={companyId} dateFrom={period.from} dateTo={period.to} mode="receivables" />}
-          {tab === 'payables' && <FinContragents companyId={companyId} dateFrom={period.from} dateTo={period.to} mode="payables" />}
-        </ScrollArea>
-      </div>
-    </CentralPanelLayout>
+    <div className="h-full flex flex-col">
+      <ScrollArea className="flex-1">
+        {tab === 'overview' && <FinOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {tab === 'cashflow' && <FinCashFlow companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {tab === 'receivables' && <FinContragents companyId={companyId} dateFrom={period.from} dateTo={period.to} mode="receivables" />}
+        {tab === 'payables' && <FinContragents companyId={companyId} dateFrom={period.from} dateTo={period.to} mode="payables" />}
+      </ScrollArea>
+    </div>
   )
 }
 
@@ -498,72 +763,282 @@ function FinContragents({ companyId, dateFrom, dateTo, mode }: { companyId: stri
 /* ────────────────────────────────────────────────────────────── */
 /*                      Бухгалтерский учёт                        */
 /* ────────────────────────────────────────────────────────────── */
-// Сохранён как был — accounting уже подключён к DocumentsPage и ExportLayerPanel.
-// Здесь только верхнеуровневое меню + ссылки.
-
-const ACC_MENU: CentralMenuItem[] = [
-  { key: 'overview',  label: 'Обзор' },
-  { key: 'documents', label: 'Документы 1С' },
-  { key: 'export',    label: 'Очередь выгрузки' },
-  { key: 'periods',   label: 'Периоды' },
-]
+// Модуль собирается из компонентов (config/moduleComponents.ts) по идеологии
+// L1 RAW → L2 CLEAN → L3 EXPORT → L4 1C_REF. Меню (section.items) — включённые
+// компоненты компании; здесь только маршрутизация под-разделов на контент.
 
 export function AccountingPanel() {
-  const [tab, setTab] = useState('overview')
-  const { company } = useCompany()
+  const sections = useWorkspaceSections()
+  const section = sections.find((s) => s.mode === 'accounting')
+  const items = section?.items ?? []
+  const [tab] = useWorkspaceSubView(items[0]?.key ?? 'overview', items.map((i) => i.key))
+  const { company, companyId } = useCompany()
+  const { period } = useFilters()
   const isEnergy = company.profileId === 'energy'
-  const gate = useSectionGate(isEnergy ? 'acc_energy' : 'accounting')
-  if (!gate.connected) return <SectionEmpty section="Бухгалтерский" org={gate.org} />
+  if (!section?.connected) return <SectionEmpty section="Бухгалтерский" org={company.shortName || company.name} />
   if (isEnergy) return <div className="h-full overflow-y-auto"><AccountingVitrine /></div>
+
   return (
-    <CentralPanelLayout items={ACC_MENU} activeKey={tab} onSelect={setTab}>
-      <ScrollArea className="h-full">
-        {tab === 'overview' && (
-          <div className="p-4 space-y-3">
-            <Card>
-              <CardContent className="pt-4 text-xs space-y-2">
-                <p className="font-medium text-sm">Подготовка документов для 1С — три страницы:</p>
-                <ul className="list-disc list-inside text-muted-foreground space-y-1">
-                  <li>
-                    <a className="text-primary hover:underline" href="/1c/documents">/1c/documents</a> — журнал документов БП ГИГ (фильтры, сверка, проводки, шаблоны)
-                  </li>
-                  <li>
-                    <a className="text-primary hover:underline" href="/1c/export">/1c/export</a> — очередь L3 ExportPacket
-                  </li>
-                  <li>
-                    <a className="text-primary hover:underline" href="/1c/periods">/1c/periods</a> — статусы периодов (открыт/закрыт)
-                  </li>
-                  <li>
-                    <a className="text-primary hover:underline" href="/1c/posting-templates">/1c/posting-templates</a> — эталонные проводки
-                  </li>
-                  <li>
-                    <a className="text-primary hover:underline" href="/1c/policy">/1c/policy</a> — учётная политика
-                  </li>
-                  <li>
-                    <a className="text-primary hover:underline" href="/1c/batches">/1c/batches</a> — партии FIFO
-                  </li>
-                </ul>
-              </CardContent>
-            </Card>
+    <ScrollArea className="h-full">
+        {/* Специализированные ГИГ — смены/ТТН с корректировкой перед выгрузкой */}
+        {tab === 'shifts' && <ShiftsPanel />}
+        {tab === 'ttn' && <ReceiptsSection />}
+        {tab === 'margin' && (
+          <div className="p-4 space-y-4">
+            <FifoMarginView dateFrom={period.from} dateTo={period.to} />
+            <div>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Бухгалтерская маржа (COGS из проводок 1С 90.02, постфактум):
+              </p>
+              <MgmtMargin companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+            </div>
           </div>
         )}
-        {tab === 'documents' && (
-          <div className="p-6 text-center text-sm text-muted-foreground">
-            Откройте <a className="text-primary hover:underline" href="/1c/documents">/1c/documents</a> для полнофункционального журнала.
+        {tab === 'reports' && <ShiftDashboardPanel />}
+        {tab === 'recon1c' && <SyncWith1CPanel />}
+    </ScrollArea>
+  )
+}
+
+/* Управленческая маржа по FIFO-себестоимости партий (по разрезам). */
+function FifoMarginView({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+  const [groupBy, setGroupBy] = useState('fuel')
+  const { data, isLoading } = useQuery({
+    queryKey: ['costing-margin', dateFrom, dateTo, groupBy],
+    queryFn: () => getCostingMargin(dateFrom, dateTo, groupBy),
+  })
+  const fmt = (v: number, d = 0) => (v ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d })
+  const GROUPS = [
+    { key: 'fuel', label: 'Топливо' }, { key: 'payment', label: 'Вид оплаты' },
+    { key: 'fuel_payment', label: 'Топливо × оплата' }, { key: 'station', label: 'Станция' },
+    { key: 'month', label: 'Месяц' },
+  ]
+  const uncosted = data?.totals.liters_uncosted ?? 0
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">Управленческая маржа (FIFO по партиям)</span>
+          <div className="ml-auto flex flex-wrap gap-1">
+            {GROUPS.map((g) => (
+              <button key={g.key} onClick={() => setGroupBy(g.key)}
+                className={`rounded px-2 py-1 text-xs transition-colors ${groupBy === g.key ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent/40'}`}>
+                {g.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {uncosted > 0 && (
+          <div className="mb-2 flex items-start gap-2 rounded border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-amber-300/90">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{fmt(uncosted)} л продано из партий без заданной себестоимости — не учтены в марже.
+              Задайте себестоимость на карточке ТТН (раздел «ТТН»).</span>
           </div>
         )}
-        {tab === 'export' && (
-          <div className="p-6 text-center text-sm text-muted-foreground">
-            Откройте <a className="text-primary hover:underline" href="/1c/export">/1c/export</a> для очереди пакетов.
+        {isLoading ? <LoadingState /> : !data || data.lines.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Нет продаж с заданной себестоимостью партий за период. Задайте себестоимость на ТТН.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border/60 text-xs text-muted-foreground">
+                  <th className="py-2 pr-3 text-left font-medium">Разрез</th>
+                  <th className="px-3 text-right font-medium">Литры</th>
+                  <th className="px-3 text-right font-medium">Выручка (без НДС)</th>
+                  <th className="px-3 text-right font-medium">Себест. FIFO</th>
+                  <th className="px-3 text-right font-medium">Маржа</th>
+                  <th className="pl-3 text-right font-medium">Маржа ₽/л</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.lines.map((l, i) => (
+                  <tr key={i} className="border-b border-border/30">
+                    <td className="py-2 pr-3">{l.label}</td>
+                    <td className="px-3 text-right tabular-nums">{fmt(l.liters)}</td>
+                    <td className="px-3 text-right tabular-nums">{fmt(l.revenue_net)}</td>
+                    <td className="px-3 text-right tabular-nums">{fmt(l.cogs)}</td>
+                    <td className={`px-3 text-right tabular-nums ${l.margin >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{fmt(l.margin)}</td>
+                    <td className="pl-3 text-right tabular-nums">{l.margin_per_liter.toFixed(2)}</td>
+                  </tr>
+                ))}
+                <tr className="bg-secondary/40 font-semibold">
+                  <td className="py-2 pr-3">Итого</td>
+                  <td className="px-3 text-right tabular-nums">{fmt(data.totals.liters)}</td>
+                  <td className="px-3 text-right tabular-nums">{fmt(data.totals.revenue_net)}</td>
+                  <td className="px-3 text-right tabular-nums">{fmt(data.totals.cogs)}</td>
+                  <td className={`px-3 text-right tabular-nums ${data.totals.margin >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{fmt(data.totals.margin)}</td>
+                  <td className="pl-3" />
+                </tr>
+              </tbody>
+            </table>
           </div>
         )}
-        {tab === 'periods' && (
-          <div className="p-6 text-center text-sm text-muted-foreground">
-            Откройте <a className="text-primary hover:underline" href="/1c/periods">/1c/periods</a>.
+      </CardContent>
+    </Card>
+  )
+}
+
+/* Смены — журнал загруженных смен; клик открывает детали с вкладкой «Корректировка»
+   (правка значений реализации перед выгрузкой в 1С, персист в L2). */
+function ShiftsPanel() {
+  const { data } = useQuery({ queryKey: ['fuel-shifts-acc'], queryFn: getLoadedShifts })
+  const shifts: LoadedShift[] = data ?? []
+  const [openShift, setOpenShift] = useState<string | null>(null)
+  const [onlyCorrected, setOnlyCorrected] = useState(false)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [station, setStation] = useState('all')
+  const [shiftNum, setShiftNum] = useState('')
+
+  const fmtDT = (s: string | null) =>
+    s ? new Date(s).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : '—'
+  const fmtN = (v: number, d = 0) =>
+    (v ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d })
+
+  const stations = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const s of shifts) if (!m.has(s.station_code)) m.set(s.station_code, s.station_name ?? `АЗС №${s.station_code}`)
+    return [...m.entries()].sort((a, b) => a[0] - b[0])
+  }, [shifts])
+
+  const filtered = useMemo(() => {
+    let list = shifts
+    if (station !== 'all') list = list.filter((s) => String(s.station_code) === station)
+    if (shiftNum.trim()) list = list.filter((s) => String(s.shift_number).includes(shiftNum.trim()))
+    if (dateFrom || dateTo) {
+      const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : null
+      const to = dateTo ? new Date(dateTo + 'T23:59:59') : null
+      list = list.filter((s) => {
+        if (!s.opened_at) return false
+        const d = new Date(s.opened_at)
+        if (from && d < from) return false
+        if (to && d > to) return false
+        return true
+      })
+    }
+    return list
+  }, [shifts, station, shiftNum, dateFrom, dateTo])
+
+  const kpi = useMemo(() => {
+    let cash = 0, card = 0, voucher = 0, total = 0, liters = 0
+    for (const s of filtered) {
+      cash += s.cash || 0; card += s.card || 0; voucher += s.voucher || 0
+      total += s.total_amount || 0; liters += s.total_liters || 0
+    }
+    return { cash, card, voucher, total, liters, count: filtered.length }
+  }, [filtered])
+
+  const corrCount = useMemo(() => filtered.filter((s) => s.has_corrections).length, [filtered])
+  const shown = onlyCorrected ? filtered.filter((s) => s.has_corrections) : filtered
+  const clear = () => { setDateFrom(''); setDateTo(''); setStation('all'); setShiftNum(''); setOnlyCorrected(false) }
+
+  const KCARD = 'rounded-xl border border-border bg-card p-3'
+  const gridCols = 'grid grid-cols-[110px_1fr_130px_130px_110px_120px] gap-3 items-center'
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* KPI по способам оплаты */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className={`${KCARD} bg-gradient-to-br from-blue-50 to-card dark:from-blue-900/40`}>
+          <div className="flex items-center gap-1.5 text-sm"><Fuel className="h-4 w-4 text-blue-500" /><span className="font-medium">ИТОГО</span><span className="ml-auto text-xs text-muted-foreground">{kpi.count} смен</span></div>
+          <div className="mt-2 text-base font-bold tabular-nums">{fmtN(kpi.total, 2)} ₽</div>
+          <div className="text-sm tabular-nums text-primary">{fmtN(kpi.liters)} л</div>
+        </div>
+        <div className={KCARD}>
+          <div className="flex items-center gap-1.5 text-sm"><Banknote className="h-4 w-4 text-emerald-500" /><span className="font-medium">Наличные</span></div>
+          <div className="mt-2 text-base font-bold tabular-nums">{fmtN(kpi.cash, 2)} ₽</div>
+        </div>
+        <div className={KCARD}>
+          <div className="flex items-center gap-1.5 text-sm"><CreditCard className="h-4 w-4 text-blue-500" /><span className="font-medium">Карты</span></div>
+          <div className="mt-2 text-base font-bold tabular-nums">{fmtN(kpi.card, 2)} ₽</div>
+        </div>
+        <div className={KCARD}>
+          <div className="flex items-center gap-1.5 text-sm"><Ticket className="h-4 w-4 text-amber-500" /><span className="font-medium">Талоны</span></div>
+          <div className="mt-2 text-base font-bold tabular-nums">{fmtN(kpi.voucher, 2)} ₽</div>
+        </div>
+      </div>
+
+      {/* Фильтры */}
+      <Card className="py-3">
+        <CardContent className="pt-0 pb-0">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Дата от</Label>
+              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Дата до</Label>
+              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Станция</Label>
+              <Select value={station} onValueChange={setStation}>
+                <SelectTrigger className="h-8"><SelectValue placeholder="Все" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  {stations.map(([code, name]) => <SelectItem key={code} value={String(code)}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Номер смены</Label>
+              <Input type="text" placeholder="Введите номер" value={shiftNum} onChange={(e) => setShiftNum(e.target.value)} className="h-8" />
+            </div>
           </div>
-        )}
-      </ScrollArea>
-    </CentralPanelLayout>
+        </CardContent>
+      </Card>
+
+      {/* Журнал */}
+      <Card className="py-3 gap-2">
+        <CardHeader className="pb-0">
+          <CardTitle className="text-sm flex flex-wrap items-center gap-1.5">
+            <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+            Сменные отчёты
+            <span className="ml-2 text-xs font-normal tabular-nums text-muted-foreground">{shown.length}</span>
+            <button onClick={() => setOnlyCorrected((v) => !v)} disabled={corrCount === 0}
+              className={`ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors disabled:opacity-50 ${onlyCorrected ? 'border-amber-400 bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300' : 'border-border text-muted-foreground hover:bg-accent/40'}`}>
+              <Pencil className="h-3 w-3" />Только изменённые{corrCount > 0 ? ` (${corrCount})` : ''}
+            </button>
+            <button onClick={clear} className="text-xs text-muted-foreground hover:text-foreground">Сбросить фильтры</button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 pb-3">
+          <div className={`${gridCols} px-3 pb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70`}>
+            <span>Смена</span><span>Станция</span><span>Открыта</span><span>Закрыта</span>
+            <span className="text-right">Литры</span><span className="text-right">Сумма, ₽</span>
+          </div>
+          <div className="max-h-[460px] space-y-1 overflow-y-auto pr-1">
+            {shown.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {shifts.length === 0 ? 'Нет загруженных смен. Загрузите период в канале STS.' : 'Нет смен по фильтру.'}
+              </p>
+            ) : shown.map((s) => (
+              <div key={s.id} onClick={() => setOpenShift(s.id)}
+                className={`${gridCols} cursor-pointer rounded-xl bg-di-surface-low px-3 py-2.5 text-xs transition-colors hover:bg-di-surface-high ${s.has_corrections ? 'border-l-2 border-l-amber-400 bg-amber-50/60 dark:bg-amber-400/[0.06]' : ''}`}>
+                <span className="font-medium inline-flex items-center gap-1.5">
+                  #{s.shift_number}
+                  {s.has_corrections && (
+                    <span title="Внесена корректировка перед выгрузкой в 1С"
+                      className="inline-flex items-center gap-0.5 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
+                      <Pencil className="h-2.5 w-2.5" />испр.
+                    </span>
+                  )}
+                </span>
+                <span className="text-foreground/80 truncate">{s.station_name ?? `АЗС №${s.station_code}`}</span>
+                <span className="text-muted-foreground tabular-nums">{fmtDT(s.opened_at)}</span>
+                <span className="text-muted-foreground tabular-nums">{fmtDT(s.closed_at)}</span>
+                <span className="text-right tabular-nums text-foreground/80">{fmtN(s.total_liters)}</span>
+                <span className="text-right tabular-nums text-foreground/80">{fmtN(s.total_amount, 2)}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+      <ShiftDetailsDialog shiftId={openShift} open={!!openShift} onClose={() => setOpenShift(null)} />
+    </div>
   )
 }
 
@@ -571,31 +1046,24 @@ export function AccountingPanel() {
 /*                          Налоговый учёт                          */
 /* ────────────────────────────────────────────────────────────── */
 
-const TAX_MENU: CentralMenuItem[] = [
-  { key: 'vat',     label: 'НДС' },
-  { key: 'profit',  label: 'Налог на прибыль' },
-  { key: 'compliance', label: 'Соответствие' },
-]
-
 export function TaxPanel() {
-  const [tab, setTab] = useState('vat')
-  const [period, setPeriod] = useAnalyticsPeriod()
+  const sections = useWorkspaceSections()
+  const section = sections.find((s) => s.mode === 'tax')
+  const items = section?.items ?? []
+  const [tab] = useWorkspaceSubView(items[0]?.key ?? 'vat', items.map((i) => i.key))
+  const { period } = useFilters()
   const { companyId, company } = useCompany()
   const isEnergy = company.profileId === 'energy'
-  const gate = useSectionGate(isEnergy ? 'tax_energy' : 'tax')
-  if (!gate.connected) return <SectionEmpty section="Налоговый" org={gate.org} />
+  if (!section?.connected) return <SectionEmpty section="Налоговый" org={company.shortName || company.name} />
   if (isEnergy) return <div className="h-full overflow-y-auto"><TaxVitrine /></div>
   return (
-    <CentralPanelLayout items={TAX_MENU} activeKey={tab} onSelect={setTab}>
-      <div className="h-full flex flex-col">
-        <AnalyticsPeriodPicker period={period} onChange={setPeriod} />
-        <ScrollArea className="flex-1">
-          {tab === 'vat' && <TaxVat companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-          {tab === 'profit' && <TaxProfit companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-          {tab === 'compliance' && <TaxCompliance companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-        </ScrollArea>
-      </div>
-    </CentralPanelLayout>
+    <div className="h-full flex flex-col">
+      <ScrollArea className="flex-1">
+        {tab === 'vat' && <TaxVat companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {tab === 'profit' && <TaxProfit companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {tab === 'compliance' && <TaxCompliance companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      </ScrollArea>
+    </div>
   )
 }
 

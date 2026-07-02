@@ -199,16 +199,17 @@ async def get_me(
         ).scalars().all()
         briefs = [_brief(c, "admin") for c in companies]
     else:
-        # Обычный — только свои, с ролью членства в каждой.
+        # Обычный — только свои, с ролью и модулями членства в каждой.
         rows = (
             await db.execute(
-                select(Company, UserCompany.role)
+                select(Company, UserCompany.role, UserCompany.modules)
                 .join(UserCompany, UserCompany.company_id == Company.id)
                 .where(UserCompany.user_id == current_user.id)
                 .order_by(Company.name)
             )
         ).all()
-        briefs = [_brief(c, role) for c, role in rows]
+        # admin-член видит всё (modules игнорируется на всякий случай).
+        briefs = [_brief(c, role, None if role == "admin" else mods) for c, role, mods in rows]
 
     return MeResponse(
         id=str(current_user.id),
@@ -221,10 +222,11 @@ async def get_me(
     )
 
 
-def _brief(c, role: str) -> CompanyBrief:
+def _brief(c, role: str, modules: list[str] | None = None) -> CompanyBrief:
     return CompanyBrief(
         id=str(c.id), slug=c.slug, name=c.name,
         short_name=c.short_name, color=c.color, profile_id=c.profile_id, role=role,
+        modules=modules,
     )
 
 

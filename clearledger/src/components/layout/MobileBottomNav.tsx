@@ -18,7 +18,7 @@ interface BottomNavItem {
 export function MobileBottomNav() {
   const items: BottomNavItem[] = [
     { label: 'Рабочий стол', path: '/', icon: LayoutDashboard },
-    { label: 'Файлы', path: '/intake', icon: FileText },
+    { label: 'Файлы', path: '/files', icon: FileText },
     { label: 'Разрезы', path: '/reconciliation', icon: GitCompare },
     { label: 'Точки', path: '/locations', icon: MapPin },
     { label: 'Ещё', path: '/settings', icon: MoreHorizontal },

@@ -4,8 +4,34 @@
  */
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'financial' | 'accounting' | 'tax' | 'export'
+
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'financial', 'accounting', 'tax', 'export']
+function readMode(sp: URLSearchParams): CoreMode {
+  const m = sp.get('mode')
+  return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'
+}
+
+/**
+ * Под-вид панели рабочего стола (URL-параметр `sub`) — чтобы закладка запоминала
+ * точный под-раздел («Финансовый · Дебиторка»). Валидируется по набору ключей
+ * панели; невалидное значение (после смены режима) откатывается к дефолту.
+ */
+export function useWorkspaceSubView(defaultKey: string, validKeys?: string[]): [string, (v: string) => void] {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const raw = searchParams.get('sub')
+  const value = raw && (!validKeys || validKeys.includes(raw)) ? raw : defaultKey
+  const set = useCallback((v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('sub', v)
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
+  return [value, set]
+}
 
 interface ExportDocument {
   id: string
@@ -18,10 +44,6 @@ interface ExportDocument {
 }
 
 interface WorkspaceContextType {
-  /** Глобальный фильтр станции (общий тулбар) */
-  globalStation: string
-  setGlobalStation: (value: string) => void
-
   /** Выбранная станция */
   selectedStationId: number | null
   /** Выбранная смена */
@@ -57,11 +79,20 @@ interface WorkspaceContextType {
 const WorkspaceContext = createContext<WorkspaceContextType | null>(null)
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [globalStation, setGlobalStation] = useState<string>('all')
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null)
   const [selectedShiftNumber, setSelectedShiftNumber] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'raw' | 'core' | 'export'>('raw')
-  const [coreMode, setCoreMode] = useState<CoreMode>('management')
+  // Режим центральной панели живёт в URL (?mode=) — чтобы под-вид можно было закрепить закладкой.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const coreMode = readMode(searchParams)
+  const setCoreMode = useCallback((mode: CoreMode) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('mode', mode)
+      next.delete('sub')   // новый режим — со своего под-раздела по умолчанию
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
   const [lastReconcileResult, setLastReconcileResult] = useState<unknown | null>(null)
   const [exportDocs, setExportDocs] = useState<ExportDocument[]>([])
 
@@ -96,8 +127,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   return (
     <WorkspaceContext.Provider
       value={{
-        globalStation,
-        setGlobalStation,
         selectedStationId,
         selectedShiftNumber,
         activeTab,

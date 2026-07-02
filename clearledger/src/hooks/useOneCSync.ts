@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
+import { isApiEnabled, getToken } from '@/services/apiClient'
 import * as svc from '@/services/oneCIntegrationService'
 import type { CreateConnectionInput, UpdateConnectionInput } from '@/services/oneCIntegrationService'
 
@@ -21,6 +22,10 @@ export function useOneCConnections() {
   return useQuery({
     queryKey: keys.connections(companyId),
     queryFn: () => svc.getConnections(companyId),
+    // Не бить в API без авторизации и реально выбранной компании ('_' — плейсхолдер
+    // при загрузке). Иначе 401/400 на входе → ложная «Сессия истекла». OneCAutoSync
+    // смонтирован глобально и рендерится в т.ч. на /login.
+    enabled: isApiEnabled() && !!companyId && companyId !== '_' && !!getToken(),
   })
 }
 

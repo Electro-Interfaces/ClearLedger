@@ -120,11 +120,38 @@ class UserCompany(Base):
     role: Mapped[str] = mapped_column(
         String(20), nullable=False, default="user", server_default=text("'user'")
     )
+    # RBAC: разрешённые модули доступа (ключи из access_catalog.ACCESS_KEYS).
+    # NULL = полный доступ (admin, суперадмин, старые члены до миграции).
+    # Список = доступны только перечисленные модули. Legacy-fallback, если role_id пуст.
+    modules: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Назначенная именованная роль доступа (company_roles). Приоритетнее modules.
+    # NULL = ad-hoc (см. modules) или admin (полный доступ).
+    role_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company_roles.id", ondelete="SET NULL"), nullable=True
+    )
     # Должность сотрудника в этой компании (per-company).
     position: Mapped[str | None] = mapped_column(String(150), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+# ---------------------------------------------------------------------------
+# CompanyRole — именованная роль доступа per-компания (hybrid RBAC)
+# ---------------------------------------------------------------------------
+class CompanyRole(Base):
+    __tablename__ = "company_roles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Набор модулей доступа. NULL = все модули (полный доступ).
+    modules: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Системная роль (сид из пресетов): нельзя удалять/переименовывать.
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -2488,4 +2515,283 @@ class FuelShiftSale(Base):
 
     __table_args__ = (
         Index("uq_fuel_shift_sales", "shift_id", "payment_channel", "fuel_code", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelShiftSaleOverride — РУЧНАЯ КОРРЕКТИРОВКА строки продаж смены (слой L2 CLEAN).
+# Правка человеком поверх FuelShiftSale (raw-проекция STS). Ключуется НАТУРАЛЬНЫМ
+# ключом смены (station_id + shift_number), а НЕ shift_id — чтобы пережить
+# «Обновить период» (delete+reingest с CASCADE пересоздаёт смену с новым UUID).
+# Накладывается при построении документов 1С (_build_shift_docs) и в get_shift.
+# ---------------------------------------------------------------------------
+class FuelShiftSaleOverride(Base):
+    __tablename__ = "fuel_shift_sale_overrides"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Натуральный ключ смены (станция стабильна между reingest; shift_id — нет).
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    shift_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    payment_channel: Mapped[str] = mapped_column(String(40), nullable=False)
+    fuel_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Скорректированные значения (NULL → показатель не правился, берётся из FuelShiftSale).
+    liters: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    discount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    warehouse_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Снимок исходных STS-значений на момент первой правки (для diff/аудита/отката).
+    src_liters: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    src_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    src_discount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_fuel_sale_override", "company_id", "station_id", "shift_number",
+            "payment_channel", "fuel_code", unique=True,
+        ),
+    )
+
+
+class FuelShiftCorrectionNote(Base):
+    """Комментарий менеджера по корректировке смены — один на документ (смену).
+
+    Ключуется натуральным ключом смены (company_id + station_id + shift_number),
+    как FuelShiftSaleOverride — переживает delete+reingest STS.
+    """
+    __tablename__ = "fuel_shift_correction_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    shift_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    note: Mapped[str] = mapped_column(String(2000), nullable=False, default="")
+    author: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_fuel_shift_corr_note", "company_id", "station_id", "shift_number",
+            unique=True,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelReceiptOverride — РУЧНАЯ КОРРЕКТИРОВКА ТТН перед выгрузкой в 1С (L2 CLEAN).
+# Правка объёма/массы/плотности документа поверх FuelReceipt (raw из STS).
+# Ключуется натуральным ключом ТТН (station_id + ttn + fuel_code, -1 для NULL),
+# а НЕ id — чтобы пережить delete+reingest. Накладывается в _build_receipt_docs
+# (→ документы 1С: Перемещение тонн + Комплектация) и в списке ТТН.
+# ---------------------------------------------------------------------------
+class FuelReceiptOverride(Base):
+    __tablename__ = "fuel_receipt_overrides"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    ttn: Mapped[str] = mapped_column(String(100), nullable=False)
+    fuel_code: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
+    # Скорректированные значения документа (NULL → не правился, берётся из FuelReceipt).
+    doc_volume_liters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    doc_mass_kg: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    # Снимок исходных STS-значений на момент первой правки (для diff/отката).
+    src_volume: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    src_mass: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    src_density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_fuel_receipt_override", "company_id", "station_id", "ttn",
+            "fuel_code", unique=True,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelReceiptCost — СЕБЕСТОИМОСТЬ ПАРТИИ (ТТН-слива), задаётся менеджером (L2).
+# Партия = ТТН × вид топлива; менеджер вводит ₽/л ИЛИ ₽/кг, вторая единица
+# считается через плотность. Для FIFO-списания на продажи (в литрах) храним
+# нормализованный `cost_per_liter`. Натуральный ключ (station_id + ttn + fuel_code,
+# -1 для NULL) — переживает delete+reingest ТТН. Основа расчёта маржи по разрезам.
+# ---------------------------------------------------------------------------
+class FuelReceiptCost(Base):
+    __tablename__ = "fuel_receipt_costs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    ttn: Mapped[str] = mapped_column(String(100), nullable=False)
+    fuel_code: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
+    # Что ввёл менеджер: единица и цена за единицу.
+    unit: Mapped[str] = mapped_column(String(10), nullable=False, default="liter")  # 'liter' | 'kg'
+    unit_cost: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
+    # Плотность, использованная для пересчёта л↔кг (из ТТН или введённая).
+    density_used: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    # Нормализовано в ₽/л для FIFO (продажи считаются в литрах).
+    cost_per_liter: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
+    # Происхождение: ручной ввод / из закупочной партии (Шаг 2).
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    purchase_batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_fuel_receipt_cost", "company_id", "station_id", "ttn",
+            "fuel_code", unique=True,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelPurchaseBatch — КРУПНАЯ ЗАКУПОЧНАЯ ПАРТИЯ топлива (Шаг 2). Менеджер вводит
+# закупку у поставщика (объём + себестоимость), выбирает целевые АЗС; аллокатор
+# распределяет объём на ТТН этих АЗС по ФИФО (по дате поступления), создавая
+# FuelReceiptCost(source='purchase_batch') на покрытые ТТН.
+# ---------------------------------------------------------------------------
+class FuelPurchaseBatch(Base):
+    __tablename__ = "fuel_purchase_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    supplier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    fuel_code: Mapped[int] = mapped_column(Integer, nullable=False, default=-1)
+    fuel_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Объём закупки и себестоимость (unit — как ввёл менеджер; cost_per_liter норм.).
+    total_liters: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    total_mass_kg: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    unit: Mapped[str] = mapped_column(String(10), nullable=False, default="liter")
+    unit_cost: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
+    cost_per_liter: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
+    density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    purchase_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Целевые АЗС (список UUID станций строками) для распределения по ФИФО.
+    target_station_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")  # draft | allocated
+    allocated_liters: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ChargeSession(Base):
+    """Зарядная сессия ЭЗС (energy-профиль, РусГидро). Источник — Excel-выгрузка
+    ChargeTransactions. Дедуп по (company_id, session_ext_id)."""
+    __tablename__ = "charge_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    # Канал-обработчик (цепочка Источник→Канал→Разрез); NULL — прямой импорт (legacy).
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    session_ext_id: Mapped[str] = mapped_column(String(64), nullable=False)  # «ID сессии»
+
+    # Станция/объект
+    station_code: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)   # «Номер станции» (65.245)
+    station_name: Mapped[str | None] = mapped_column(String(160), nullable=True)              # «Наименование станции» (СНК)
+    region: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)        # «Регион станции»
+    address: Mapped[str | None] = mapped_column(String(300), nullable=True)                   # «Адрес станции»
+
+    # Коннектор
+    connector_no: Mapped[str | None] = mapped_column(String(20), nullable=True)               # «Номер коннектора»
+    connector_type: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True) # TYPE2/CHADEMO/GBT_DC
+
+    # Время
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True, index=True)  # «Начало сессии по МСК»
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)             # «Завершение сессии по МСК»
+    duration_min: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)     # завершение − начало, мин
+
+    # Классификация
+    result: Mapped[str | None] = mapped_column(String(40), nullable=True)                     # «Результат зарядки» (Complete/…)
+    charge_type: Mapped[str | None] = mapped_column(String(40), nullable=True)                # «Тип зарядки» (USER)
+    user_type: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)      # «Тип пользователя» (ФЛ/ЮЛ)
+    user_id: Mapped[str | None] = mapped_column(String(160), nullable=True)                   # «Пользователь» (телефон)
+    rfid: Mapped[str | None] = mapped_column(String(120), nullable=True)                      # «RFID-карта»
+
+    # Показатели
+    energy_kwh: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False, default=0)       # «Энергия», кВтч
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)           # «Итоговая сумма списания», ₽
+    tariff: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)           # «Цена тарифа», ₽/кВтч
+
+    # Оплата
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)  # «Дата и время оплаты»
+    payment_id: Mapped[str | None] = mapped_column(String(64), nullable=True)                 # «ID платежа»
+
+    # Разрез учёта (placeholder — привяжем к разрезам сверки позже)
+    cut_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_charge_sessions", "company_id", "session_ext_id", unique=True),
     )

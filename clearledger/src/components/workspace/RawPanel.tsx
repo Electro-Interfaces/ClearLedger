@@ -135,7 +135,7 @@ function TreeView({ fsTree, path, depth, selectedShiftNumber, selectedStationId,
 export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseButton?: React.ReactNode }) {
   const settings = getSettings()
   const queryClient = useQueryClient()
-  const { globalStation, selectedStationId, selectedShiftNumber, selectShift } = useWorkspace()
+  const { selectedStationId, selectedShiftNumber, selectShift } = useWorkspace()
 
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [searchQuery, setSearchQuery] = useState('')
@@ -154,7 +154,7 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   // и к построению дерева. Для просмотра конкретного документа
   // (viewer modal) фильтр игнорируется — мы открываем то что выбрали.
   const { docs: filteredDocs, hasActiveFilters: hasGlobalFilters } = useFilteredLoadedDocs()
-  const { locationIds: globalLocIds } = useFilters()
+  const { locationIds: globalLocIds, stationCode } = useFilters()
 
   // Преобразуем выбранные точки → коды станций. useShifts работает на одну
   // станцию за раз, поэтому: 1 точка в фильтре → переопределяем workspace;
@@ -171,11 +171,11 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
   }, [globalLocIds])
 
   // Эффективная одна станция для useShifts: если глобально выбрана ровно
-  // одна → её код. Иначе → берём workspace.globalStation.
+  // одна → её код. Иначе → берём станцию из основного фильтра (stationCode).
   const effectiveStation =
     globalStationCodes.length === 1
       ? globalStationCodes[0]
-      : (globalStation === 'all' ? undefined : Number(globalStation))
+      : (stationCode === 'all' ? undefined : Number(stationCode))
 
   const filterStation = effectiveStation
   const { data: shifts, isLoading, isFetching } = useShifts(filterStation)

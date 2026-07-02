@@ -18,10 +18,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Users, Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X,
+  Users, Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
+  KeyRound, Plus, Pencil, Copy, History,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
+import type { AdminUser } from '@/services/userService'
 import * as invitationService from '@/services/invitationService'
+import * as roleService from '@/services/roleService'
+import type { CompanyRole } from '@/services/roleService'
+import { ACCESS_MODULES, ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', user: 'Сотрудник' }
 
@@ -36,14 +41,21 @@ export function CompanyTeam({
   )
 }
 
-function MembersCard({
+export function MembersCard({
   companyId, canManage, selfId,
 }: { companyId: string; canManage: boolean; selfId: string }) {
   const qc = useQueryClient()
+  const [search, setSearch] = useState('')
   const q = useQuery({
     queryKey: ['team-members', companyId],
     queryFn: () => userService.listUsers(companyId),
   })
+  const rolesQ = useQuery({
+    queryKey: ['company-roles', companyId],
+    queryFn: () => roleService.listRoles(companyId),
+    enabled: canManage,
+  })
+  const roles = rolesQ.data ?? []
 
   const setRole = useMutation({
     mutationFn: ({ id, role }: { id: string; role: 'user' | 'admin' }) =>
@@ -67,13 +79,16 @@ function MembersCard({
   })
 
   const members = q.data ?? []
+  const filtered = search.trim()
+    ? members.filter((m) => `${m.name} ${m.email} ${m.position ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()))
+    : members
 
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <div>
-          <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Сотрудники</CardTitle>
-          <CardDescription>Участники компании и их роли</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Сотрудники <span className="text-sm font-normal text-muted-foreground">({members.length})</span></CardTitle>
+          <CardDescription>Роли (Администратор — полный доступ) и доступ к модулям для сотрудников</CardDescription>
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
@@ -83,18 +98,29 @@ function MembersCard({
         )}
       </CardHeader>
       <CardContent>
+        <div className="relative mb-3 max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: ФИО, email, должность…"
+            className="h-8 pl-8 text-sm" />
+        </div>
         {q.isLoading && <Loading />}
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>ФИО / Email</TableHead>
-              <TableHead className="w-[200px]">Должность</TableHead>
-              <TableHead className="w-[150px]">Роль</TableHead>
+              <TableHead className="w-[160px]">Должность</TableHead>
+              <TableHead className="w-[130px]">Роль</TableHead>
+              <TableHead className="w-[300px]">Доступ к модулям</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {members.map((u) => {
+            {!q.isLoading && filtered.length === 0 && (
+              <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
+                {members.length === 0 ? 'Нет сотрудников' : 'Ничего не найдено'}
+              </TableCell></TableRow>
+            )}
+            {filtered.map((u) => {
               const locked = u.is_superadmin || u.id === selfId || !canManage
               return (
                 <TableRow key={u.id}>
@@ -123,6 +149,29 @@ function MembersCard({
                     </Select>
                   </TableCell>
                   <TableCell>
+                    {u.role === 'admin' || u.is_superadmin ? (
+                      <Badge variant="outline" className="text-[10px] gap-1"><ShieldCheck className="h-3 w-3" /> Все модули</Badge>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {u.role_name ? (
+                          <Badge className="text-[10px] gap-1"><KeyRound className="h-3 w-3" />{u.role_name}</Badge>
+                        ) : u.modules == null ? (
+                          <span className="text-xs text-muted-foreground">Все модули</span>
+                        ) : u.modules.length === 0 ? (
+                          <span className="text-xs text-destructive/80">Нет доступа</span>
+                        ) : (
+                          moduleLabels(u.modules).map((l) => (
+                            <Badge key={l} variant="secondary" className="text-[10px] font-normal">{l}</Badge>
+                          ))
+                        )}
+                        {canManage && u.id !== selfId && (
+                          <AccessDialog member={u} companyId={companyId} roles={roles}
+                            onSaved={() => qc.invalidateQueries({ queryKey: ['team-members', companyId] })} />
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     {!locked && (
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
                         title="Убрать из компании" disabled={remove.isPending}
@@ -144,7 +193,7 @@ function MembersCard({
   )
 }
 
-function InvitationsCard({ companyId }: { companyId: string }) {
+export function InvitationsCard({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
   const q = useQuery({
     queryKey: ['team-invites', companyId],
@@ -356,5 +405,314 @@ function Loading() {
     <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
       <Loader2 className="h-4 w-4 animate-spin" /> Загрузка…
     </div>
+  )
+}
+
+/** Общая сетка чекбоксов модулей (роль и ad-hoc доступ). */
+function ModuleCheckboxGrid({ sel, onToggle, disabled }: {
+  sel: Set<string>; onToggle: (k: string) => void; disabled?: boolean
+}) {
+  const groups = [...new Set(ACCESS_MODULES.map((m) => m.group))]
+  return (
+    <div className={disabled ? 'opacity-40 pointer-events-none' : ''}>
+      {groups.map((g) => (
+        <div key={g} className="mb-3">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{g}</div>
+          <div className="flex flex-col gap-1">
+            {ACCESS_MODULES.filter((m) => m.group === g).map((m) => (
+              <button key={m.key} type="button" onClick={() => onToggle(m.key)}
+                className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-sm text-left border transition-colors ${
+                  sel.has(m.key) ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent/40'
+                }`}>
+                <span>{m.label}{m.hint && <span className="text-[11px] text-muted-foreground/70 ml-1">· {m.hint}</span>}</span>
+                {sel.has(m.key) && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Вкладка «Роли и доступ»: менеджер ролей (CRUD) + каталог модулей. */
+export function RolesAccessTab({ companyId, canManage }: { companyId: string; canManage: boolean }) {
+  const qc = useQueryClient()
+  const rolesQ = useQuery({ queryKey: ['company-roles', companyId], queryFn: () => roleService.listRoles(companyId) })
+  const roles = rolesQ.data ?? []
+  const refetch = () => qc.invalidateQueries({ queryKey: ['company-roles', companyId] })
+  const del = useMutation({
+    mutationFn: (id: string) => roleService.deleteRole(id, companyId),
+    onSuccess: () => { toast.success('Роль удалена'); refetch(); qc.invalidateQueries({ queryKey: ['team-members', companyId] }) },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  const groups = [...new Set(ACCESS_MODULES.map((m) => m.group))]
+  return (
+    <div className="grid lg:grid-cols-2 gap-4 items-start">
+      <Card>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" /> Роли доступа</CardTitle>
+            <CardDescription>Именованные наборы модулей. Системные — только чтение; кастомные можно менять.</CardDescription>
+          </div>
+          {canManage && <RoleEditDialog companyId={companyId} roles={roles} onSaved={refetch} />}
+        </CardHeader>
+        <CardContent className="space-y-2.5">
+          {rolesQ.isLoading && <Loading />}
+          {roles.map((r) => (
+            <div key={r.id} className="rounded-md border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium text-sm truncate">{r.name}</span>
+                  {r.is_system && <Badge variant="outline" className="text-[10px] shrink-0">системная</Badge>}
+                  <span className="text-[11px] text-muted-foreground shrink-0">· {r.members_count} чел.</span>
+                </div>
+                {canManage && !r.is_system && (
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <RoleEditDialog companyId={companyId} roles={roles} editRole={r} onSaved={refetch} />
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                      title="Удалить роль" disabled={del.isPending} onClick={() => del.mutate(r.id)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {r.modules == null
+                  ? <Badge variant="outline" className="text-[10px] gap-1"><ShieldCheck className="h-3 w-3" /> Все модули</Badge>
+                  : moduleLabels(r.modules).map((l) => <Badge key={l} variant="secondary" className="text-[10px] font-normal">{l}</Badge>)}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {/* Каталог модулей */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5" /> Модули доступа</CardTitle>
+          <CardDescription>Что открывает каждый модуль. Роль «Администратор» — всегда полный доступ.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {groups.map((g) => (
+            <div key={g}>
+              <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">{g}</div>
+              <div className="space-y-1">
+                {ACCESS_MODULES.filter((m) => m.group === g).map((m) => (
+                  <div key={m.key} className="flex items-start justify-between gap-3 rounded-md border px-2.5 py-1.5">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">{m.label}</div>
+                      {m.hint && <div className="text-[11px] text-muted-foreground">{m.hint}</div>}
+                    </div>
+                    <code className="text-[10px] text-muted-foreground/50 font-mono mt-0.5 shrink-0">{m.key}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/** Создание (clone-to-create + diff) / правка кастомной роли. */
+function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
+  companyId: string; roles: CompanyRole[]; editRole?: CompanyRole; onSaved: () => void
+}) {
+  const isEdit = !!editRole
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(editRole?.name ?? '')
+  const [full, setFull] = useState(editRole ? editRole.modules == null : false)
+  const [sel, setSel] = useState<Set<string>>(new Set(editRole?.modules ?? []))
+  const [cloneId, setCloneId] = useState<string>('')
+  useEffect(() => {
+    if (open) {
+      setName(editRole?.name ?? ''); setFull(editRole ? editRole.modules == null : false)
+      setSel(new Set(editRole?.modules ?? [])); setCloneId('')
+    }
+  }, [open, editRole])
+  const applyClone = (id: string) => {
+    setCloneId(id)
+    const src = roles.find((r) => r.id === id)
+    if (src) { setFull(src.modules == null); setSel(new Set(src.modules ?? [])) }
+  }
+  const save = useMutation({
+    mutationFn: () => isEdit
+      ? roleService.updateRole(editRole!.id, companyId, name.trim(), full ? null : Array.from(sel))
+      : roleService.createRole(companyId, name.trim(), full ? null : Array.from(sel)),
+    onSuccess: () => { toast.success(isEdit ? 'Роль сохранена' : 'Роль создана'); onSaved(); setOpen(false) },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const tmpl = roles.find((r) => r.id === cloneId)
+  const tmplSet = tmpl && tmpl.modules ? new Set(tmpl.modules) : null
+  const cur = full ? null : sel
+  const added = tmplSet && cur ? [...cur].filter((k) => !tmplSet.has(k)) : []
+  const removed = tmplSet && cur ? [...tmplSet].filter((k) => !cur.has(k)) : []
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        {isEdit
+          ? <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" title="Изменить роль"><Pencil className="h-3.5 w-3.5" /></Button>
+          : <Button size="sm" className="gap-1"><Plus className="h-4 w-4" /> Создать роль</Button>}
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>{isEdit ? 'Изменить роль' : 'Новая роль'}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Название</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="напр. Главбух" />
+          </div>
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1"><Copy className="h-3.5 w-3.5" /> Клонировать из</Label>
+              <Select value={cloneId} onValueChange={applyClone}>
+                <SelectTrigger><SelectValue placeholder="— с нуля —" /></SelectTrigger>
+                <SelectContent>{roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          )}
+          <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+            <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="h-4 w-4" />
+            Полный доступ (все модули)
+          </label>
+          <ModuleCheckboxGrid sel={sel} onToggle={toggle} disabled={full} />
+          {tmpl && (added.length > 0 || removed.length > 0) && (
+            <div className="text-[11px] rounded-md border bg-muted/30 p-2">
+              <span className="text-muted-foreground">Отличия от «{tmpl.name}»: </span>
+              {added.map((k) => <span key={k} className="text-emerald-500">+{moduleLabels([k])[0]} </span>)}
+              {removed.map((k) => <span key={k} className="text-red-500">−{moduleLabels([k])[0]} </span>)}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Отмена</Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || !name.trim()}>
+            {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}{isEdit ? 'Сохранить' : 'Создать'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Вкладка «Журнал»: последние изменения доступа/ролей/команды. */
+export function AuditTab({ companyId }: { companyId: string }) {
+  const q = useQuery({ queryKey: ['audit', companyId], queryFn: () => roleService.listAudit(companyId, 150) })
+  const RBAC = /^(role\.|member\.|user\.)/
+  const rows = (q.data ?? []).filter((e) => RBAC.test(e.action))
+  const ACTION_LABEL: Record<string, string> = {
+    'role.create': 'Роль создана', 'role.update': 'Роль изменена', 'role.delete': 'Роль удалена',
+    'member.access': 'Доступ изменён', 'member.role': 'Роль сотрудника',
+    'user.create': 'Сотрудник добавлен', 'user.remove': 'Сотрудник убран',
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><History className="h-5 w-5" /> Журнал изменений</CardTitle>
+        <CardDescription>Кто, когда и что менял в доступе, ролях и команде</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {q.isLoading && <Loading />}
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead className="w-[150px]">Когда</TableHead>
+            <TableHead className="w-[170px]">Действие</TableHead>
+            <TableHead className="w-[170px]">Кто</TableHead>
+            <TableHead>Детали</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {!q.isLoading && rows.length === 0 && (
+              <TableRow><TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-6">Нет записей</TableCell></TableRow>
+            )}
+            {rows.map((e) => (
+              <TableRow key={e.id}>
+                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{new Date(e.timestamp).toLocaleString('ru-RU')}</TableCell>
+                <TableCell><Badge variant="secondary" className="text-[10px] font-normal">{ACTION_LABEL[e.action] ?? e.action}</Badge></TableCell>
+                <TableCell className="text-xs">{e.user_name ?? '—'}</TableCell>
+                <TableCell className="text-xs text-muted-foreground truncate max-w-0">{e.details ?? ''}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** Диалог назначения доступа члену: именованная роль ИЛИ ad-hoc набор модулей. */
+function AccessDialog({ member, companyId, roles, onSaved }: {
+  member: AdminUser; companyId: string; roles: CompanyRole[]; onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<'role' | 'custom'>(member.role_id ? 'role' : 'custom')
+  const [roleId, setRoleId] = useState<string>(member.role_id ?? '')
+  const [full, setFull] = useState(member.modules == null && !member.role_id)
+  const [sel, setSel] = useState<Set<string>>(new Set(member.modules ?? ALL_ACCESS_KEYS))
+  useEffect(() => {
+    if (open) {
+      setMode(member.role_id ? 'role' : 'custom')
+      setRoleId(member.role_id ?? roles[0]?.id ?? '')
+      setFull(member.modules == null && !member.role_id)
+      setSel(new Set(member.modules ?? ALL_ACCESS_KEYS))
+    }
+  }, [open, member.role_id, member.modules, roles])
+  const save = useMutation({
+    mutationFn: () => mode === 'role'
+      ? userService.setMemberAccess(member.id, companyId, { mode: 'role', roleId })
+      : userService.setMemberAccess(member.id, companyId, { mode: 'custom', modules: full ? null : Array.from(sel) }),
+    onSuccess: () => { toast.success('Доступ сохранён'); onSaved(); setOpen(false) },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const selRole = roles.find((r) => r.id === roleId)
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground shrink-0" title="Настроить доступ">
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Доступ: {member.name}</DialogTitle></DialogHeader>
+        <div className="flex gap-1">
+          <Button variant={mode === 'role' ? 'default' : 'outline'} size="sm" className="h-7 text-xs px-3" onClick={() => setMode('role')}>По роли</Button>
+          <Button variant={mode === 'custom' ? 'default' : 'outline'} size="sm" className="h-7 text-xs px-3" onClick={() => setMode('custom')}>Вручную</Button>
+        </div>
+        {mode === 'role' ? (
+          <div className="space-y-3">
+            <Select value={roleId} onValueChange={setRoleId}>
+              <SelectTrigger><SelectValue placeholder="Выберите роль" /></SelectTrigger>
+              <SelectContent>{roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}</SelectContent>
+            </Select>
+            {selRole && (
+              <div className="rounded-md border p-2.5">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">Модули роли</div>
+                <div className="flex flex-wrap gap-1">
+                  {selRole.modules == null
+                    ? <Badge variant="outline" className="text-[10px] gap-1"><ShieldCheck className="h-3 w-3" /> Все модули</Badge>
+                    : moduleLabels(selRole.modules).map((l) => <Badge key={l} variant="secondary" className="text-[10px] font-normal">{l}</Badge>)}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+              <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="h-4 w-4" />
+              Полный доступ (все модули)
+            </label>
+            <ModuleCheckboxGrid sel={sel} onToggle={toggle} disabled={full} />
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Отмена</Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || (mode === 'role' && !roleId)}>
+            {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}Сохранить
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -160,6 +160,57 @@ def CompanyScope(query_param: str = "company_id"):
     return _dep
 
 
+async def resolve_member_modules(m: UserCompany, db: AsyncSession) -> list[str] | None:
+    """Эффективный набор модулей члена: назначенная роль (role_id) приоритетнее
+    ad-hoc modules. Возвращает None = полный доступ (admin / роль «Полный доступ»)."""
+    if m.role == "admin":
+        return None
+    if m.role_id is not None:
+        from app.models import CompanyRole
+        role = await db.get(CompanyRole, m.role_id)
+        if role is not None:
+            return role.modules
+    return m.modules
+
+
+async def assert_company_module(
+    company_ref: str, user: User, db: AsyncSession, module_key: str
+) -> uuid.UUID:
+    """assert_company_member + RBAC-проверка модуля.
+
+    Полный доступ (без проверки): суперадмин, admin-член, эффективные modules=NULL.
+    Иначе 403, если module_key не в разрешённых модулях (с учётом роли).
+    """
+    cid = await assert_company_member(company_ref, user, db)  # membership + 403
+    if user.is_superadmin:
+        return cid
+    m = await db.get(UserCompany, (user.id, cid))
+    if m is None or m.role == "admin":
+        return cid
+    mods = await resolve_member_modules(m, db)
+    if mods is None:
+        return cid
+    if module_key not in mods:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Нет доступа к модулю",
+        )
+    return cid
+
+
+def CompanyModuleScope(module_key: str, query_param: str = "company_id"):
+    """Как CompanyScope, но дополнительно требует доступ к модулю module_key (RBAC)."""
+
+    async def _dep(
+        company_id: str = Query(..., alias=query_param),
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> uuid.UUID:
+        return await assert_company_module(company_id, current_user, db, module_key)
+
+    return _dep
+
+
 async def get_company_by_api_key(
     x_cloud_api_key: str = Header(..., alias="X-Cloud-API-Key"),
     db: AsyncSession = Depends(get_db),

@@ -1,7 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getItem, setItem } from '@/services/storage'
-import { getAllLoadedDocs } from '@/services/channelSyncService'
 import type { ShiftRecord } from '@/services/fuel/types'
 import type { DeliveryRecord } from '@/services/receiptExtractService'
 import type { FsNode, ViewMode, SortConfig, RawPanelFilters, TreeState, AdvancedFilters, GroupMode } from './raw-panel-types'
@@ -125,44 +124,22 @@ export function useRawPanelState() {
     setActiveTabId(node.path)
     setSelectedNode(node)
 
-    // Select shift in workspace
-    if (node.shift && node.stationId != null) {
-      workspace.selectShift(node.stationId, node.shift.shift)
-    }
-
-    // Open viewer modal
-    const loadedDocs = getAllLoadedDocs()
-
-    if (node.shift && node.stationId != null) {
-      const shiftDoc = loadedDocs.find(
-        (d) => d.docType === 'shift_report' && d.stationId === node.stationId &&
-          (d.data as ShiftRecord)?.shiftNumber === node.shift?.shift,
-      )
-      if (shiftDoc) {
-        setViewingShift(shiftDoc.data as ShiftRecord)
-        return
+    // Открыть просмотрщик по типу документа из узла.
+    const d = node.doc
+    if (!d) return
+    if (d.docType === 'shift_report') {
+      const rec = d.data as ShiftRecord
+      if (node.stationId != null && rec?.shiftNumber != null) {
+        workspace.selectShift(node.stationId, rec.shiftNumber)
       }
+      setViewingShift(rec)
+      return
     }
-
-    if (node.name.includes('ТТН')) {
-      const ttnMatch = node.name.match(/ТТН\s+(\S+)/)
-      const ttnNumber = ttnMatch?.[1]
-      if (ttnNumber) {
-        const deliveryDoc = loadedDocs.find(
-          (d) => d.docType === 'delivery' && (d.data as DeliveryRecord)?.ttn === ttnNumber,
-        )
-        if (deliveryDoc) {
-          setViewingDelivery(deliveryDoc.data as DeliveryRecord)
-          return
-        }
-      }
-      const anyDelivery = loadedDocs.find(
-        (d) => d.docType === 'delivery' && d.stationId === node.stationId,
-      )
-      if (anyDelivery) {
-        setViewingDelivery(anyDelivery.data as DeliveryRecord)
-      }
+    if (d.docType === 'delivery' || d.docType === 'receipt') {
+      setViewingDelivery(d.data as DeliveryRecord)
+      return
     }
+    // Прочие типы — пока только выделение и панель деталей (спец-модалки нет).
   }, [workspace])
 
   // --- Tab operations ---
@@ -174,8 +151,10 @@ export function useRawPanelState() {
   const switchTab = useCallback((node: FsNode) => {
     setActiveTabId(node.path)
     setSelectedNode(node)
-    if (node.shift && node.stationId != null) {
-      workspace.selectShift(node.stationId, node.shift.shift)
+    const d = node.doc
+    if (d?.docType === 'shift_report' && node.stationId != null) {
+      const rec = d.data as ShiftRecord
+      if (rec?.shiftNumber != null) workspace.selectShift(node.stationId, rec.shiftNumber)
     }
   }, [workspace])
 

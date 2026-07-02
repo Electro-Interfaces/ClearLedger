@@ -307,6 +307,30 @@ async def _run_reestr(db: AsyncSession, channel: Channel, src: Source) -> dict[s
 
 
 # ---------------------------------------------------------------------------
+# Ветка зарядных сессий ЭЗС (Excel) — server-side L1→L2 (ChargeSession)
+# ---------------------------------------------------------------------------
+async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+    """Загруженный xlsx сессий ЭЗС (SourceFile из config.uploadFileId) → L1 RAW →
+    нормализация (connector/user_type) → L2 (ChargeSession с channel_id)."""
+    cfg = channel.config or {}
+    file_id = cfg.get("uploadFileId") or cfg.get("upload_file_id")
+    if not file_id:
+        return {"status": "skipped",
+                "message": "не загружена таблица сессий: сначала «Загрузить таблицу» (config.uploadFileId пуст)"}
+    try:
+        sf = await db.get(SourceFile, _uuid.UUID(str(file_id)))
+    except (ValueError, TypeError):
+        sf = None
+    if sf is None:
+        return {"status": "error", "message": f"файл {file_id} не найден"}
+    with open(sf.storage_path, "rb") as fh:
+        content = fh.read()
+    from app.services.charge_sessions_normalize import ingest_charge_sessions, parse_sessions_xlsx
+    rows = parse_sessions_xlsx(content)
+    return await ingest_charge_sessions(db, channel.company_id, rows, channel_id=channel.id)
+
+
+# ---------------------------------------------------------------------------
 # Диспетчер
 # ---------------------------------------------------------------------------
 async def run_channel(
@@ -332,6 +356,8 @@ async def run_channel(
         return await _run_cb(db, channel, src, date_from, date_to)
     if src.source_type == "manual_table":
         return await _run_reestr(db, channel, src)
+    if src.source_type == "charge_sessions_excel":
+        return await _run_charge_sessions(db, channel, src)
     if src.source_type == "sts":
         if (channel.template_id or "") == "fuel_delivery":
             return await _run_fuel_delivery(db, channel, src, date_from, date_to, log_id, station_codes, all_period)

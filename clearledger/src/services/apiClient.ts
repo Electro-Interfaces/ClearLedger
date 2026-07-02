@@ -67,16 +67,21 @@ async function handleResponse<T>(res: Response): Promise<T> {
     } catch { /* ignore */ }
 
     if (res.status === 401 && !isRedirecting) {
-      isRedirecting = true
-      clearToken()
-      // Импортируем toast динамически чтобы избежать циклических зависимостей
-      import('sonner').then(({ toast }) => {
-        toast.error('Сессия истекла', { description: 'Войдите в систему снова' })
-      })
-      setTimeout(() => {
-        const base = import.meta.env.BASE_URL ?? '/'
-        window.location.href = `${base}login`
-      }, 1500)
+      const base = import.meta.env.BASE_URL ?? '/'
+      const onLogin = window.location.pathname.replace(/\/$/, '').endsWith('/login')
+      // На странице входа 401 от фоновых запросов — не «истёкшая сессия»: не шумим
+      // и не редиректим (иначе фоновый 401 сбивает свежий вход).
+      if (!onLogin) {
+        isRedirecting = true
+        clearToken()
+        // Импортируем toast динамически чтобы избежать циклических зависимостей
+        import('sonner').then(({ toast }) => {
+          toast.error('Сессия истекла', { description: 'Войдите в систему снова' })
+        })
+        setTimeout(() => {
+          window.location.href = `${base}login`
+        }, 1500)
+      }
     }
 
     if (res.status === 422 && body?.detail) {

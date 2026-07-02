@@ -28,6 +28,7 @@ interface CompanyContextType {
   setCompanyId: (id: string) => void
   companyRole: 'user' | 'admin'   // роль текущего пользователя в активной компании
   isCompanyAdmin: boolean         // admin в активной компании ИЛИ суперадмин
+  companyModules: string[] | null // RBAC: разрешённые модули в активной компании; null = полный доступ
   profile: CompanyProfile
   categories: Category[]
   customization: CompanyCustomization
@@ -136,6 +137,8 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     ? 'admin'
     : (activeRef?.role === 'admin' ? 'admin' : 'user')
   const isCompanyAdmin = !!user?.is_superadmin || companyRole === 'admin'
+  // Модули активной компании: admin/суперадмин → null (полный доступ).
+  const companyModules: string[] | null = isCompanyAdmin ? null : (activeRef?.modules ?? null)
 
   return (
     <CompanyContext.Provider
@@ -146,6 +149,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         setCompanyId,
         companyRole,
         isCompanyAdmin,
+        companyModules,
         profile: activeProfile,
         categories,
         customization: emptyCustomization(),

@@ -13,52 +13,14 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, Settings, PanelLeftClose, PanelLeftOpen,
-  Upload, FileText, Radio, Database, ChevronDown,
-  Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
-  Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
-  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel,
+  PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
-
-const dashboardItem = { to: '/', icon: LayoutDashboard, label: 'Рабочий стол', end: true }
-const normalizationItem = { to: '/normalization', icon: Sparkles, label: 'Нормализация' }
-const forecastItem = { to: '/forecast', icon: CalendarCheck2, label: 'Закрытие месяца' }
-
-const intakeItems = [
-  { to: '/intake', icon: FileText, label: 'Файлы и документы' },
-  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
-  { to: '/contractors', icon: Building2, label: 'Контрагенты' },
-  { to: '/sources', icon: Database, label: 'Источники' },
-  { to: '/channels', icon: Radio, label: 'Каналы' },
-  { to: '/reconciliation', icon: GitCompare, label: 'Разрезы учёта' },
-]
-
-const dataItems = [
-  { to: '/organization', icon: Building, label: 'Организация' },
-]
-
-const oneCItems = [
-  { to: '/1c/connection',         icon: Plug,          label: 'Подключение' },
-  { to: '/1c/references',         icon: BookOpen,      label: 'Справочники' },
-  { to: '/1c/documents',          icon: FileText,      label: 'Документы' },
-  { to: '/1c/periods',            icon: CalendarClock, label: 'Периоды' },
-  { to: '/1c/policy',             icon: Landmark,      label: 'Учётная политика' },
-  { to: '/1c/posting-templates',  icon: ScrollText,    label: 'Схема проводок' },
-  { to: '/1c/prices',             icon: Tag,           label: 'Цены' },
-  { to: '/1c/batches',            icon: Layers,        label: 'Партии (FIFO)' },
-  { to: '/1c/fuel-mappings',      icon: Fuel,          label: 'Топливо: оплаты' },
-  { to: '/1c/mappings',           icon: Link2,         label: 'Маппинги' },
-  { to: '/1c/export',             icon: Package,       label: 'Выгрузка' },
-]
-
-const settingsItems = [
-  { to: '/settings', icon: Settings, label: 'Параметры' },
-  { to: '/catalog', icon: Library, label: 'Каталоги' },
-]
+import { mainNavItems, dataItems, oneCItems, settingsItems, adminItem } from '@/config/navigation'
+import { routeAllowed } from '@/config/accessModules'
 
 function NavItem({ to, icon: Icon, label, end, collapsed }: {
   to: string; icon: React.ComponentType<{ className?: string }>; label: string; end?: boolean; collapsed?: boolean
@@ -93,21 +55,21 @@ function NavItem({ to, icon: Icon, label, end, collapsed }: {
 export function AppSidebar() {
   const { state, toggleSidebar } = useSidebar()
   const collapsed = state === 'collapsed'
-  const [intakeOpen, setIntakeOpen] = useState(true)
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
   const { user } = useAuth()
-  const { company } = useCompany()
+  const { company, companyModules } = useCompany()
+  // RBAC: скрываем пункты меню, недоступные по модулям (admin/суперадмин → companyModules=null).
+  const allow = (to: string) => routeAllowed(to, companyModules)
+  const mainNav = mainNavItems.filter((i) => allow(i.to))
+  const dataNav = dataItems.filter((i) => allow(i.to))
+  const oneCNav = oneCItems.filter((i) => allow(i.to))
+  const settingsNav = settingsItems.filter((i) => allow(i.to))
   // Energy-профиль (РусГидро, сеть ЭЗС): нет 1С/топлива/FIFO/нормализации/закрытия —
   // эти разделы скрываем. Fuel-профиль (ГИГ) видит всё как прежде.
   const isEnergy = company.profileId === 'energy'
   // «Баланс ЭЗС» теперь модуль внутри режима «Управленческий» (ManagementPanel),
   // подключается к компании по профилю — отдельным пунктом левого меню больше не выводится.
-  const mainItems = [
-    dashboardItem,
-    normalizationItem,
-    forecastItem,
-  ]
   // Показываем админ-раздел, если суперадмин ИЛИ админ хотя бы в одной компании.
   const canAdmin = !!user && (
     user.is_superadmin || (user.companies ?? []).some((c) => c.role === 'admin')
@@ -125,36 +87,39 @@ export function AppSidebar() {
         </div>
 
         {/* Main nav */}
-        <SidebarGroup className="py-0">
-          <SidebarMenu>
-            {mainItems.map((item) => (
-              <NavItem key={item.to} {...item} collapsed={collapsed} />
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        {mainNav.length > 0 && (
+          <SidebarGroup className="py-0">
+            <SidebarMenu>
+              {mainNav.map((item) => (
+                <NavItem key={item.to} {...item} collapsed={collapsed} />
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
 
-        <SidebarSeparator className="my-2" />
+        {dataNav.length > 0 && <SidebarSeparator className="my-2" />}
 
-        {/* ЗАГРУЗКА section */}
+        {/* ДАННЫЕ section (бывш. «Загрузка») */}
+        {dataNav.length > 0 && (
         <SidebarGroup className="py-0">
           {collapsed ? (
             <SidebarMenu>
-              <NavItem to="/intake" icon={Upload} label="Загрузка" collapsed />
+              <NavItem to={dataNav[0].to} icon={Layers} label="Данные" collapsed />
             </SidebarMenu>
           ) : (
-            <Collapsible open={intakeOpen} onOpenChange={setIntakeOpen}>
+            <Collapsible open={dataOpen} onOpenChange={setDataOpen}>
               <CollapsibleTrigger asChild>
                 <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
                   <span className="flex items-center gap-1.5">
-                    <Upload className="h-3 w-3" />
-                    Загрузка
+                    <Layers className="h-3 w-3" />
+                    Данные
                   </span>
-                  <ChevronDown className={`h-3 w-3 transition-transform ${intakeOpen ? '' : '-rotate-90'}`} />
+                  <ChevronDown className={`h-3 w-3 transition-transform ${dataOpen ? '' : '-rotate-90'}`} />
                 </button>
               </CollapsibleTrigger>
               <CollapsibleContent>
                 <SidebarMenu>
-                  {intakeItems.map((item) => (
+                  {dataNav.map((item) => (
                     <NavItem key={item.to} {...item} collapsed={collapsed} />
                   ))}
                 </SidebarMenu>
@@ -162,9 +127,10 @@ export function AppSidebar() {
             </Collapsible>
           )}
         </SidebarGroup>
+        )}
 
-        {/* 1С section — только для fuel-профиля (ГИГ); energy (ЭЗС) без 1С */}
-        {!isEnergy && (
+        {/* 1С section — fuel-профиль (ГИГ) + доступ к модулю onec; energy (ЭЗС) без 1С */}
+        {!isEnergy && oneCNav.length > 0 && (
           <>
             <SidebarSeparator className="my-2" />
             <SidebarGroup className="py-0">
@@ -185,7 +151,7 @@ export function AppSidebar() {
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <SidebarMenu>
-                      {oneCItems.map((item) => (
+                      {oneCNav.map((item) => (
                         <NavItem key={item.to} {...item} collapsed={collapsed} />
                       ))}
                     </SidebarMenu>
@@ -198,37 +164,8 @@ export function AppSidebar() {
 
         <SidebarSeparator className="my-2" />
 
-        {/* Конфигурация section (бывш. Данные) — под разделом 1С */}
-        <SidebarGroup className="py-0">
-          {collapsed ? (
-            <SidebarMenu>
-              <NavItem to="/organization" icon={Boxes} label="Конфигурация" collapsed />
-            </SidebarMenu>
-          ) : (
-            <Collapsible open={dataOpen} onOpenChange={setDataOpen}>
-              <CollapsibleTrigger asChild>
-                <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
-                  <span className="flex items-center gap-1.5">
-                    <Boxes className="h-3 w-3" />
-                    Конфигурация
-                  </span>
-                  <ChevronDown className={`h-3 w-3 transition-transform ${dataOpen ? '' : '-rotate-90'}`} />
-                </button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <SidebarMenu>
-                  {dataItems.map((item) => (
-                    <NavItem key={item.to} {...item} collapsed={collapsed} />
-                  ))}
-                </SidebarMenu>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
-        </SidebarGroup>
-
-        <SidebarSeparator className="my-2" />
-
         {/* Settings */}
+        {settingsNav.length > 0 && (
         <SidebarGroup className="py-0">
           {!collapsed && (
             <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
@@ -236,11 +173,12 @@ export function AppSidebar() {
             </p>
           )}
           <SidebarMenu>
-            {settingsItems.map((item) => (
+            {settingsNav.map((item) => (
               <NavItem key={item.to} {...item} collapsed={collapsed} />
             ))}
           </SidebarMenu>
         </SidebarGroup>
+        )}
 
         {/* Администрирование — только для админа/суперадмина */}
         {canAdmin && (
@@ -253,7 +191,7 @@ export function AppSidebar() {
                 </p>
               )}
               <SidebarMenu>
-                <NavItem to="/admin" icon={ShieldCheck} label="Администрирование" collapsed={collapsed} />
+                <NavItem {...adminItem} collapsed={collapsed} />
               </SidebarMenu>
             </SidebarGroup>
           </>

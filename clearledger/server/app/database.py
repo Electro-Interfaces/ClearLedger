@@ -146,6 +146,9 @@ async def create_all() -> None:
             "NOT NULL DEFAULT 'control'",
             # v3.5: разрез может быть предустановлен без подключённого источника.
             "ALTER TABLE channel_streams ALTER COLUMN source_id DROP NOT NULL",
+            # v3.6: зарядные сессии ЭЗС — привязка к каналу-обработчику (цепочка).
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS channel_id UUID "
+            "REFERENCES channels(id) ON DELETE SET NULL",
             # v3.0: натуральный ключ ТТН — дедуп существующих дублей + уникальный
             # индекс (DB-страховка от задвоения; как уже дедуплицирует delivery-ветка
             # по (company, station, ttn, code)). COALESCE(fuel_code,-1) — чтобы NULL
@@ -266,6 +269,11 @@ async def create_all() -> None:
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'user'",
             "UPDATE user_companies uc SET role = 'admin' "
             "FROM users u WHERE uc.user_id = u.id AND u.role = 'admin'",
+            # v2.3: RBAC — модули доступа члена компании. NULL = полный доступ.
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS modules JSONB",
+            # v2.4: hybrid RBAC — назначенная именованная роль (company_roles).
+            # Таблицу company_roles создаёт create_all; здесь только колонка role_id.
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS role_id UUID",
             # v2.2: приглашения сотрудников по email.
             "CREATE TABLE IF NOT EXISTS invitations ("
             "  id UUID PRIMARY KEY,"

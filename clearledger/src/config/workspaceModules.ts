@@ -47,16 +47,6 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
     ],
   },
   {
-    id: 'objects', label: 'Объекты', section: 'Управленческий',
-    description: 'Рабочий список точек обслуживания на нормализованных данных, полный кокпит (паспорт/оборудование/интеграции/диагностика/договоры/реализация/снабжение).',
-    profiles: ['any'], status: 'active',
-    params: [
-      { key: 'types', label: 'Типы точек' },
-      { key: 'tabs', label: 'Набор табов кокпита' },
-      { key: 'passportFields', label: 'Поля паспорта по типу' },
-    ],
-  },
-  {
     id: 'mgmt_pnl', label: 'Управленческий P&L', section: 'Управленческий',
     description: 'Выручка / себестоимость / валовая маржа по станциям, топливу, месяцам + структура оплат.',
     profiles: ['fuel'], status: 'active',
@@ -64,41 +54,6 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
       { key: 'groupings', label: 'Группировки (станция/топливо/месяц)' },
       { key: 'defaultPeriod', label: 'Период по умолчанию' },
       { key: 'vat', label: 'Ставка НДС, %' },
-    ],
-  },
-  {
-    id: 'net_overview', label: 'Сводка сети', section: 'Управленческий',
-    description: 'Единый KPI-кокпит сети ЭЗС: выручка, кВт·ч, % потерь, uptime, утилизация, открытые обращения, дебиторка.',
-    profiles: ['energy'], status: 'demo',
-    params: [
-      { key: 'defaultPeriod', label: 'Период по умолчанию' },
-      { key: 'uptimeTarget', label: 'Целевой uptime, %' },
-    ],
-  },
-  {
-    id: 'revenue', label: 'Выручка и продажи', section: 'Управленческий',
-    description: 'Выручка и кВт·ч в разрезе ЭЗС/регион/категория (ЮЛ/ФЛ), динамика, средний чек сессии.',
-    profiles: ['energy'], status: 'demo',
-    params: [
-      { key: 'vat', label: 'Ставка НДС, %' },
-      { key: 'groupings', label: 'Группировки (ЭЗС/регион/категория)' },
-    ],
-  },
-  {
-    id: 'tariffs', label: 'Тарифы и ценообразование', section: 'Управленческий',
-    description: 'Управление тарифами по станциям/категориям, контроль соответствия НПА (§4.3.2 ТЗ), эффект изменения тарифа.',
-    profiles: ['energy'], status: 'demo',
-    params: [
-      { key: 'npaRef', label: 'Эталон НПА (тариф)' },
-      { key: 'categories', label: 'Категории отпуска' },
-    ],
-  },
-  {
-    id: 'receivables', label: 'Дебиторка и взаиморасчёты', section: 'Управленческий',
-    description: 'Задолженность корп-клиентов (ЮЛ), холд<факт, сальдо с поставщиками э/э и арендодателями.',
-    profiles: ['energy'], status: 'demo',
-    params: [
-      { key: 'overdueDays', label: 'Порог просрочки, дней' },
     ],
   },
   {

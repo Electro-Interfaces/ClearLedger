@@ -10,13 +10,18 @@ export default defineConfig({
     tailwindcss(),
     // Dev: редирект /ClearLedger (без завершающего слэша) → /ClearLedger/ (base-path),
     // чтобы URL без слэша не упирался в подсказку Vite, а сразу открывал приложение.
+    // Важно сохранять query/hash: React Router с basename отдаёт для корня
+    // «/ClearLedger?mode=…» (без слэша перед «?»), и при жёсткой перезагрузке
+    // без этого редиректа Vite показывал бы 404-подсказку.
     {
       name: 'redirect-base-no-slash',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          if (req.url === '/ClearLedger') {
-            res.statusCode = 301
-            res.setHeader('Location', '/ClearLedger/')
+          const url = req.url || ''
+          if (url === '/ClearLedger' || url.startsWith('/ClearLedger?') || url.startsWith('/ClearLedger#')) {
+            const rest = url.slice('/ClearLedger'.length) // '' | '?…' | '#…'
+            res.statusCode = 302 // временный — чтобы dev-браузер не кешировал редирект
+            res.setHeader('Location', '/ClearLedger/' + rest)
             res.end()
             return
           }
@@ -32,6 +37,9 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      // OCR (tesseract.js) — опциональный динамический импорт в try/catch; пакет не
+      // установлен (OCR деградирует мягко). Externalize, чтобы сборка не падала.
+      external: ['tesseract.js'],
       output: {
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],

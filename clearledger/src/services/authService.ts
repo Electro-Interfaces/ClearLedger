@@ -13,6 +13,7 @@ export interface CompanyRef {
   color?: string | null
   profile_id: string
   role?: 'user' | 'admin'   // роль пользователя в этой компании
+  modules?: string[] | null // RBAC: разрешённые модули; null/undefined = полный доступ
 }
 
 /** Ответ /api/auth/me — пользователь + доступные компании (мультитенантность). */

@@ -4,17 +4,21 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
+import { TabsProvider } from '@/contexts/TabsContext'
 import { FilterProvider } from '@/contexts/FilterContext'
 import { SupportProvider } from '@/contexts/SupportContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { MainLayout } from '@/components/layout/MainLayout'
+import { TabFilterSync } from '@/components/layout/TabFilterSync'
+import { OneCAutoSync } from '@/components/onec/OneCAutoSync'
 import { WorkspaceLayout } from '@/components/workspace/WorkspaceLayout'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Loader2 } from 'lucide-react'
 
 const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ default: m.IntakePage })))
+const FilesPage = lazy(() => import('@/pages/FilesPage').then((m) => ({ default: m.FilesPage })))
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
 const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
@@ -25,6 +29,7 @@ const OrganizationPage = lazy(() => import('@/pages/OrganizationPage').then((m) 
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AdminPage = lazy(() => import('@/pages/AdminPage').then((m) => ({ default: m.AdminPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
+const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
 const PeriodsPage = lazy(() => import('@/pages/oneC/PeriodsPage').then((m) => ({ default: m.PeriodsPage })))
 const DocumentsPage = lazy(() => import('@/pages/oneC/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
@@ -83,14 +88,18 @@ function Providers() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <CompanyProvider>
-            <FilterProvider>
-              <SupportProvider>
-                <TooltipProvider>
-                  <Outlet />
-                  <Toaster position="bottom-right" richColors closeButton />
-                </TooltipProvider>
-              </SupportProvider>
-            </FilterProvider>
+            <TabsProvider>
+              <FilterProvider>
+                <SupportProvider>
+                  <TooltipProvider>
+                    <TabFilterSync />
+                    <OneCAutoSync />
+                    <Outlet />
+                    <Toaster position="bottom-right" richColors closeButton />
+                  </TooltipProvider>
+                </SupportProvider>
+              </FilterProvider>
+            </TabsProvider>
           </CompanyProvider>
         </AuthProvider>
       </QueryClientProvider>
@@ -111,6 +120,8 @@ const router = createBrowserRouter([
         element: <ProtectedRoute><MainLayout /></ProtectedRoute>,
         children: [
           { path: '/', element: <WorkspaceLayout /> },
+          { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
+          { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
           { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
           { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
@@ -120,6 +131,7 @@ const router = createBrowserRouter([
           { path: '/contractors', element: <LazyPage><ContractorsPage /></LazyPage> },
           { path: '/organization', element: <LazyPage><OrganizationPage /></LazyPage> },
           { path: '/1c/connection', element: <RequireFuel><LazyPage><ConnectionPage /></LazyPage></RequireFuel> },
+          { path: '/1c/sync', element: <RequireFuel><LazyPage><SyncPage /></LazyPage></RequireFuel> },
           { path: '/1c/references', element: <RequireFuel><LazyPage><ReferencesPage /></LazyPage></RequireFuel> },
           { path: '/1c/documents', element: <RequireFuel><LazyPage><DocumentsPage /></LazyPage></RequireFuel> },
           { path: '/1c/periods', element: <RequireFuel><LazyPage><PeriodsPage /></LazyPage></RequireFuel> },

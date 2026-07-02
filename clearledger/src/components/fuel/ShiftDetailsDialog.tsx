@@ -7,17 +7,24 @@
  * карточки канала (вкладка «Загружено»). Данные строятся адаптером из сырого
  * отчёта STS (buildShiftDetails).
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { AlertTriangle, Loader2 } from 'lucide-react'
-import React from 'react'
+import { AlertTriangle, Loader2, Save, RotateCcw, Pencil } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { DualScrollX } from '@/components/common/DualScrollX'
 import { useIsMobile } from '@/hooks/use-mobile'
-import { getShiftDetail, type ShiftDetail } from '@/services/fuel/fuelMappingService'
+import {
+  getShiftDetail, patchShiftSales, resetShiftSaleOverrides, setShiftCorrectionNote,
+  type ShiftDetail, type ShiftSale, type ShiftSaleEdit,
+} from '@/services/fuel/fuelMappingService'
 import { buildShiftDetails } from '@/services/fuel/shiftDetailsBuilder'
 import { useFuelName } from '@/hooks/useFuelName'
 import { isCashOrCard } from '@/utils/paymentUtils'
@@ -39,8 +46,8 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
   const built = data ? buildShiftDetails(data, tankThreshold, fuelName) : null
   const details = built?.details ?? null
 
-  const thClass = isMobile ? 'px-1 py-1' : 'px-2 py-2'
-  const tdClass = isMobile ? 'px-1 py-1' : 'px-3 py-2'
+  const thClass = isMobile ? 'px-1 py-0.5' : 'px-2 py-1'
+  const tdClass = isMobile ? 'px-1 py-0.5' : 'px-2 py-1'
 
   const formatCurrency = (value: number) =>
     value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₽'
@@ -118,6 +125,7 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                 <TabsTrigger value="receipts" className={`font-medium data-[state=active]:bg-secondary data-[state=active]:text-foreground data-[state=active]:font-semibold data-[state=active]:shadow-sm ${isMobile ? 'text-xs px-2 py-1.5' : 'px-4 py-2'}`}>Поступления</TabsTrigger>
                 <TabsTrigger value="sales" className={`font-medium data-[state=active]:bg-secondary data-[state=active]:text-foreground data-[state=active]:font-semibold data-[state=active]:shadow-sm ${isMobile ? 'text-xs px-2 py-1.5' : 'px-4 py-2'}`}>{isMobile ? 'Реализация' : 'Расшифровка реализации'}</TabsTrigger>
                 <TabsTrigger value="cash" className={`font-medium data-[state=active]:bg-secondary data-[state=active]:text-foreground data-[state=active]:font-semibold data-[state=active]:shadow-sm ${isMobile ? 'text-xs px-2 py-1.5' : 'px-4 py-2'}`}>{isMobile ? 'Наличные' : 'Движение наличных'}</TabsTrigger>
+                <TabsTrigger value="edit" className={`font-medium data-[state=active]:bg-secondary data-[state=active]:text-foreground data-[state=active]:font-semibold data-[state=active]:shadow-sm ${isMobile ? 'text-xs px-2 py-1.5' : 'px-4 py-2'}`}>Корректировка</TabsTrigger>
               </TabsList>
 
               {/* ── Состав смены — Показания счётных механизмов ── */}
@@ -125,8 +133,8 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                 <div className={`${isMobile ? 'mb-2' : 'mb-4'} text-foreground/80`}>
                   <p className={isMobile ? 'text-xs' : ''}>Смена с {details.openedAt ? formatDateTime(details.openedAt) : '—'} до {details.closedAt ? formatDateTime(details.closedAt) : '—'}</p>
                 </div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className={`w-full border-collapse ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                <DualScrollX>
+                  <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
                       <tr className="border-b-2 border-border">
                         <th className={`${thClass} text-left text-foreground border-r-2 border-border`} rowSpan={4}>{isMobile ? 'Топливо' : 'Наименование нефтепродуктов'}</th>
@@ -214,15 +222,15 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                       </tr>
                     </tbody>
                   </table>
-                </div>
+                </DualScrollX>
                 <div className="mt-4 text-xs text-muted-foreground"><p>* Погрешность ТРК недоступна в текущей версии API</p></div>
               </TabsContent>
 
               {/* ── Расшифровка реализации ── */}
               <TabsContent value="sales" className={isMobile ? 'mt-2' : 'mt-4'}>
                 <div className="mb-4"><h3 className="text-lg font-semibold text-foreground text-center">Расшифровка реализации</h3></div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className={`w-full border-collapse ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                <DualScrollX>
+                  <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
                       <tr className="border-b-2 border-border">
                         <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2} rowSpan={2}>Нефтепродукты, товары</th>
@@ -284,7 +292,7 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                       </tr>
                     </tbody>
                   </table>
-                </div>
+                </DualScrollX>
 
                 {/* Безналичная реализация — динамические колонки по сырым pay_type */}
                 <div className="mt-8">
@@ -369,8 +377,8 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
               {/* ── Состояние резервуаров ── */}
               <TabsContent value="tanks" className={isMobile ? 'mt-2' : 'mt-4'}>
                 <div className="mb-4"><h3 className="text-lg font-semibold text-foreground text-center">Состояние резервуаров</h3></div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className={`w-full border-collapse ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                <DualScrollX>
+                  <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
                       <tr className="border-b-2 border-border">
                         <th className={`${thClass} text-left text-foreground border-r-2 border-border`} rowSpan={3}>Наименование<br/>нефте-<br/>продуктов</th>
@@ -440,14 +448,14 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                       )}
                     </tbody>
                   </table>
-                </div>
+                </DualScrollX>
               </TabsContent>
 
               {/* ── Поступления ── */}
               <TabsContent value="receipts" className={isMobile ? 'mt-2' : 'mt-4'}>
                 <div className="mb-4"><h3 className="text-lg font-semibold text-foreground text-center">Расшифровка поступлений</h3></div>
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className={`w-full border-collapse ${isMobile ? 'text-xs' : 'text-sm'}`}>
+                <DualScrollX>
+                  <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
                     <thead className="bg-secondary/80">
                       <tr className="border-b-2 border-border">
                         <th className={`${thClass} text-center text-foreground border-r-2 border-border`} colSpan={2}>Нефтепродукты</th>
@@ -497,7 +505,7 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                       )}
                     </tbody>
                   </table>
-                </div>
+                </DualScrollX>
               </TabsContent>
 
               {/* ── Движение наличных ── */}
@@ -526,6 +534,25 @@ export function ShiftDetailsDialog({ shiftId, open, onClose, tankThreshold = 10 
                   )
                 })()}
               </TabsContent>
+
+              {/* ── Корректировка значений реализации для 1С (слой L2 CLEAN) ── */}
+              <TabsContent value="edit" className={isMobile ? 'mt-2' : 'mt-4'}>
+                {data && shiftId ? (
+                  <SalesEditor
+                    key={shiftId}
+                    shiftId={shiftId}
+                    sales={data.sales}
+                    fuelName={fuelName}
+                    isMobile={isMobile}
+                    thClass={thClass}
+                    tdClass={tdClass}
+                    note={data.correction_note ?? ''}
+                    noteAuthor={data.correction_note_author ?? null}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-8">Нет данных для корректировки.</p>
+                )}
+              </TabsContent>
             </Tabs>
           </div>
         )}
@@ -548,6 +575,180 @@ function CashRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between items-center py-2">
       <span className="text-foreground pl-8">{label}</span>
       <span className="text-foreground font-medium">{value}</span>
+    </div>
+  )
+}
+
+// Читаемые подписи каналов оплаты (коды PaymentChannel).
+const CHANNEL_LABELS: Record<string, string> = {
+  retail_cash: 'Розница (наличные)',
+  retail_card: 'Розница (карта)',
+  cards: 'Топливные карты',
+  online: 'Онлайн-заказы',
+  voucher: 'Талоны / ведомость',
+  ledger: 'Ведомость',
+  writeoff_fuel: 'Списание',
+}
+
+/**
+ * Редактор значений реализации смены (слой L2 CLEAN). Правит строки FuelShiftSale
+ * (канал оплаты × топливо) → PATCH override, переживающий reingest. Значения
+ * попадают в документы 1С при пересборке пакетов выгрузки.
+ */
+function SalesEditor({ shiftId, sales, fuelName, isMobile, thClass, tdClass, note, noteAuthor }: {
+  shiftId: string
+  sales: ShiftSale[]
+  fuelName: (code?: number | null, fallback?: string | null) => string
+  isMobile: boolean
+  thClass: string
+  tdClass: string
+  note: string
+  noteAuthor: string | null
+}) {
+  const qc = useQueryClient()
+  const [saving, setSaving] = useState(false)
+  const keyOf = (s: ShiftSale) => `${s.payment_channel}|${s.fuel_code}`
+  const [edits, setEdits] = useState<Record<string, { liters: string; amount: string; discount: string }>>({})
+  const [noteText, setNoteText] = useState(note)
+
+  // Инициализация/переинициализация полей из текущих (уже с наложенным override) значений.
+  useEffect(() => {
+    setEdits(Object.fromEntries(sales.map((s) => [keyOf(s), {
+      liters: String(s.liters ?? 0), amount: String(s.amount ?? 0), discount: String(s.discount ?? 0),
+    }])))
+  }, [sales])
+
+  const anyManual = sales.some((s) => s.is_manual)
+  const setField = (key: string, field: 'liters' | 'amount' | 'discount', val: string) =>
+    setEdits((prev) => ({ ...prev, [key]: { ...prev[key], [field]: val } }))
+  const num = (v: string): number | null => (v.trim() === '' ? null : Number(v))
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const payload: ShiftSaleEdit[] = sales.map((s) => {
+        const e = edits[keyOf(s)] ?? { liters: '', amount: '', discount: '' }
+        return {
+          payment_channel: s.payment_channel, fuel_code: s.fuel_code,
+          liters: num(e.liters), amount: num(e.amount), discount: num(e.discount),
+        }
+      })
+      await patchShiftSales(shiftId, payload)
+      if (noteText.trim() !== (note ?? '').trim()) await setShiftCorrectionNote(shiftId, noteText.trim())
+      await qc.invalidateQueries({ queryKey: ['shift-detail', shiftId] })
+      toast.success('Корректировки сохранены (L2)', {
+        description: 'Пересоберите пакеты выгрузки, чтобы обновить документы 1С.',
+      })
+    } catch {
+      toast.error('Не удалось сохранить корректировки', {
+        description: 'Смена может быть в закрытом периоде.',
+      })
+    } finally { setSaving(false) }
+  }
+
+  const reset = async () => {
+    setSaving(true)
+    try {
+      await resetShiftSaleOverrides(shiftId)
+      setNoteText('')
+      await qc.invalidateQueries({ queryKey: ['shift-detail', shiftId] })
+      toast.success('Корректировки сброшены к данным STS')
+    } catch {
+      toast.error('Не удалось сбросить корректировки')
+    } finally { setSaving(false) }
+  }
+
+  if (sales.length === 0) {
+    return <p className="text-sm text-muted-foreground text-center py-8">У смены нет разбивки продаж по каналам оплаты.</p>
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2 rounded-lg border border-sky-400/30 bg-sky-400/5 px-3 py-2 text-xs text-sky-200/90">
+        <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+        <span>Правьте значения продаж по каналу оплаты × топливо. Корректировки сохраняются в слое L2
+          (переживают повторную загрузку из STS) и попадают в документы 1С при пересборке пакетов выгрузки.</span>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className={`w-max min-w-full border-collapse leading-tight ${isMobile ? 'text-xs' : 'text-[13px]'}`}>
+          <thead className="bg-secondary/80">
+            <tr className="border-b-2 border-border">
+              <th className={`${thClass} text-left text-foreground border-r border-border`}>Канал оплаты</th>
+              <th className={`${thClass} text-left text-foreground border-r border-border`}>Топливо</th>
+              <th className={`${thClass} text-center text-foreground border-r border-border`}>Литры</th>
+              <th className={`${thClass} text-center text-foreground border-r border-border`}>Сумма, ₽</th>
+              <th className={`${thClass} text-center text-foreground`}>Скидка, ₽</th>
+            </tr>
+          </thead>
+          <tbody className="bg-card">
+            {sales.map((s) => {
+              const k = keyOf(s)
+              const e = edits[k] ?? { liters: '', amount: '', discount: '' }
+              // Правка на уровне поля — только при реальном отличии от STS (устойчиво к ложным override).
+              const litChanged = s.src_liters != null && Math.abs(s.src_liters - s.liters) > 0.005
+              const amtChanged = s.src_amount != null && Math.abs(s.src_amount - s.amount) > 0.005
+              const disChanged = s.src_discount != null && Math.abs(s.src_discount - s.discount) > 0.005
+              const rowChanged = litChanged || amtChanged || disChanged
+              const inp = (changed: boolean) =>
+                `h-7 text-right text-xs ${changed ? 'border-amber-400 ring-1 ring-amber-400/40 bg-amber-50 font-semibold text-amber-700 dark:bg-amber-400/10 dark:text-amber-200' : ''}`
+              const was = (v: number) =>
+                <div className="mt-0.5 text-right text-[10px] font-medium text-amber-600 dark:text-amber-400">было: {v}</div>
+              return (
+                <tr key={k} className={`border-b border-border ${rowChanged ? 'bg-amber-50/60 dark:bg-amber-400/[0.06]' : ''}`}>
+                  <td className={`${tdClass} text-foreground border-r border-border ${rowChanged ? 'border-l-2 border-l-amber-400' : ''}`}>
+                    {CHANNEL_LABELS[s.payment_channel] ?? s.payment_channel}
+                    {rowChanged && (
+                      <Badge className="ml-1.5 gap-0.5 border-transparent bg-amber-100 text-[10px] font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-400/15 dark:text-amber-300">
+                        <Pencil className="h-2.5 w-2.5" />правка
+                      </Badge>
+                    )}
+                  </td>
+                  <td className={`${tdClass} text-foreground border-r border-border`}>{fuelName(s.fuel_code, `код ${s.fuel_code}`)}</td>
+                  <td className={`${tdClass} border-r border-border`}>
+                    <Input className={inp(litChanged)} inputMode="decimal" value={e.liters}
+                      onChange={(ev) => setField(k, 'liters', ev.target.value)} />
+                    {litChanged && was(s.src_liters!)}
+                  </td>
+                  <td className={`${tdClass} border-r border-border`}>
+                    <Input className={inp(amtChanged)} inputMode="decimal" value={e.amount}
+                      onChange={(ev) => setField(k, 'amount', ev.target.value)} />
+                    {amtChanged && was(s.src_amount!)}
+                  </td>
+                  <td className={tdClass}>
+                    <Input className={inp(disChanged)} inputMode="decimal" value={e.discount}
+                      onChange={(ev) => setField(k, 'discount', ev.target.value)} />
+                    {disChanged && was(s.src_discount!)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {/* Комментарий менеджера — в целом по документу (смене) */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Pencil className="h-3 w-3 text-amber-500" /> Комментарий менеджера по корректировке
+          </label>
+          {noteAuthor && note.trim() && <span className="text-[10px] text-muted-foreground">· {noteAuthor}</span>}
+        </div>
+        <textarea
+          value={noteText}
+          onChange={(ev) => setNoteText(ev.target.value)}
+          rows={2}
+          maxLength={2000}
+          placeholder="Причина и суть правок в целом по смене (сохраняется в L2 вместе с корректировками)…"
+          className="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={save} disabled={saving} className="gap-1">
+          <Save className="h-3.5 w-3.5" /> Сохранить корректировки
+        </Button>
+        <Button size="sm" variant="outline" onClick={reset} disabled={saving || (!anyManual && !noteText.trim())} className="gap-1">
+          <RotateCcw className="h-3.5 w-3.5" /> Сбросить к STS
+        </Button>
+      </div>
     </div>
   )
 }

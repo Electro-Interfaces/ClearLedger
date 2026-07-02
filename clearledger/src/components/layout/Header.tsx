@@ -12,7 +12,7 @@ import { APP_VERSION } from '@/config/version'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSupportContext } from '@/contexts/SupportContext'
-import { GlobalFilters } from './GlobalFilters'
+import { CompanySelector } from '@/components/company/CompanySelector'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -65,9 +65,11 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
 
         </div>
 
-        {/* Центр: глобальные фильтры-пилюли + кнопки взаимодействия */}
+        {/* Центр: переключатель компании + кнопки взаимодействия.
+            Фильтры (период/точки/регионы/типы) переехали в свёрнутый фильтр
+            рабочей области — единый фильтр над разделами. */}
         <div className="flex flex-1 items-center justify-center min-w-0 gap-2 px-2">
-          <GlobalFilters />
+          <CompanySelector />
 
           <div className="hidden md:flex items-center gap-2 pl-1">
             <div className="w-px h-6 bg-border/50" />

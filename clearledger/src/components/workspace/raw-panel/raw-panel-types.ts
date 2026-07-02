@@ -1,11 +1,14 @@
 import type { StsShift } from '@/services/fuel/types'
 import type { ShiftRecord } from '@/services/fuel/types'
 import type { DeliveryRecord } from '@/services/receiptExtractService'
+import type { LoadedDocument } from '@/services/channelSyncService'
 
 export interface FsNode {
   name: string
   type: 'folder' | 'file'
   path: string
+  /** Загруженный документ каталога компании (для файлов). */
+  doc?: LoadedDocument
   /** STS shift data (for shift files) */
   shift?: StsShift
   stationId?: number

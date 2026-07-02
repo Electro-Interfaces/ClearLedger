@@ -73,6 +73,7 @@ class CompanyBrief(BaseModel):
     color: str | None = None
     profile_id: str
     role: str = "user"   # роль пользователя в этой компании (user|admin); суперадмин — admin
+    modules: list[str] | None = None   # RBAC: разрешённые модули; null = полный доступ
 
 
 class MeResponse(BaseModel):
@@ -110,6 +111,43 @@ class CompanyMembership(BaseModel):
     name: str
     role: str
     position: str | None = None
+    modules: list[str] | None = None   # RBAC: разрешённые модули; null = полный доступ
+
+
+class MemberModulesUpdate(BaseModel):
+    """Смена набора модулей доступа члена компании. modules=null → полный доступ."""
+    company_id: str
+    modules: list[str] | None = None
+
+
+class MemberAccessUpdate(BaseModel):
+    """Назначение доступа члену: именованная роль ИЛИ ad-hoc набор модулей."""
+    company_id: str
+    mode: Literal["role", "custom"] = "custom"
+    role_id: str | None = None          # для mode="role"
+    modules: list[str] | None = None    # для mode="custom"; null = полный доступ
+
+
+# ===== Роли доступа (hybrid RBAC) =====
+
+class CompanyRoleResponse(BaseModel):
+    id: str
+    name: str
+    modules: list[str] | None = None    # null = все модули
+    is_system: bool = False
+    members_count: int = 0
+
+
+class CompanyRoleCreate(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=100)
+    modules: list[str] | None = None
+
+
+class CompanyRoleUpdate(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=100)
+    modules: list[str] | None = None    # полная замена набора
 
 
 class UserAdminResponse(BaseModel):
@@ -118,6 +156,9 @@ class UserAdminResponse(BaseModel):
     name: str                       # ФИО
     role: str                       # роль в контексте запроса (компании) или глобальная
     position: str | None = None     # должность в контексте компании
+    modules: list[str] | None = None  # эффективные RBAC-модули; null = полный доступ
+    role_id: str | None = None      # назначенная именованная роль доступа (company_roles)
+    role_name: str | None = None    # имя назначенной роли (для UI)
     is_superadmin: bool
     companies: list[CompanyMembership] = []
 

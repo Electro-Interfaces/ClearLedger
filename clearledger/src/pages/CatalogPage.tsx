@@ -10,7 +10,7 @@
 import { useState, type ReactNode } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Database, Radio, GitCompare, ChevronDown, Plug, Plus, Boxes, Settings2 } from 'lucide-react'
+import { Database, Radio, GitCompare, ChevronDown, Plug, Plus, Boxes, Blocks, Settings2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
-import { WORKSPACE_MODULES, PROFILE_LABEL, type WorkspaceModuleDef } from '@/config/workspaceModules'
+import { WORKSPACE_MODULES, PROFILE_LABEL, getWorkspaceModule, type WorkspaceModuleDef } from '@/config/workspaceModules'
+import {
+  MODULE_COMPONENTS, getModuleComponentDefs, type ModuleComponent,
+} from '@/config/moduleComponents'
 import {
   ENERGY_SOURCES, ENERGY_CHANNELS, ENERGY_CUTS,
   channelsForCut, sourcesForCut, cutsForChannel, cutsForSource, energySource,
@@ -30,6 +33,7 @@ import {
 } from '@/config/energyPipeline'
 import {
   useModuleConnections, isModuleConnected, setModuleConnected, setModuleParams,
+  isComponentEnabled, setComponentEnabled,
   type ModuleConnMap,
 } from '@/services/moduleConnectionService'
 import {
@@ -227,6 +231,12 @@ export function CatalogPage() {
     queryFn: async () =>
       WORKSPACE_MODULES.filter((mod) => mod.profiles.some((p) => p === 'any' || p === company.profileId)),
   })
+  // Компоненты для сборки модулей (стандартные + специализированные), библиотека по профилю.
+  const components = useQuery({
+    queryKey: ['catalog', 'module-components', company.profileId],
+    queryFn: async () =>
+      MODULE_COMPONENTS.filter((c) => c.profiles.some((p) => p === 'any' || p === company.profileId)),
+  })
   // Энергоцепочка (для energy-профиля) — из единой модели energyPipeline.
   const eSources = useQuery({ queryKey: ['catalog', 'energy-sources'], queryFn: async () => ENERGY_SOURCES })
   const eChannels = useQuery({ queryKey: ['catalog', 'energy-channels'], queryFn: async () => ENERGY_CHANNELS })
@@ -276,15 +286,35 @@ export function CatalogPage() {
   const moduleRows = (items: WorkspaceModuleDef[]): CatalogRow[] =>
     items.map((m) => {
       const connected = isModuleConnected(moduleConn.conn, m, moduleConn.profileId)
+      const enabledSpec = getModuleComponentDefs(m.id, moduleConn.profileId)
+        .filter((c) => c.kind === 'specialized' && isComponentEnabled(moduleConn.conn, c, moduleConn.profileId))
+        .map((c) => c.label)
       return {
         code: m.id,
         label: m.label,
         status: m.status,
         description: m.description,
         group: m.section,
-        meta: `${m.profiles.map((p) => PROFILE_LABEL[p]).join(' · ')} · ${connected ? '✓ подключён' : 'не подключён'}`,
+        meta: `${m.profiles.map((p) => PROFILE_LABEL[p]).join(' · ')} · ${connected ? '✓ подключён' : 'не подключён'}`
+          + (enabledSpec.length ? ` · компоненты: ${enabledSpec.join(', ')}` : ''),
         chips: m.params.map((p) => p.label),
         action: { label: connected ? 'Настроить' : 'Подключить', kind: 'connect', onClick: () => setConfigMod(m) },
+      }
+    })
+
+  const componentRows = (items: ModuleComponent[]): CatalogRow[] =>
+    items.map((c) => {
+      const owner = getWorkspaceModule(c.moduleId)
+      const enabled = isComponentEnabled(moduleConn.conn, c, moduleConn.profileId)
+      return {
+        code: c.id,
+        label: c.label,
+        status: c.status,
+        description: c.description,
+        group: owner?.label ?? c.moduleId,
+        meta: `${c.kind === 'standard' ? 'стандартный' : 'специализированный'} · ${enabled ? '✓ в сборке' : 'не включён'}`,
+        chips: c.menuItems?.map((mi) => mi.label) ?? [],
+        action: owner ? { label: 'Настроить', kind: 'connect', onClick: () => setConfigMod(owner) } : undefined,
       }
     })
 
@@ -330,6 +360,12 @@ export function CatalogPage() {
         icon={<Boxes className="h-5 w-5" />}
         query={modules}
         toRows={moduleRows}
+      />
+      <Section
+        title="Компоненты модулей"
+        icon={<Blocks className="h-5 w-5" />}
+        query={components}
+        toRows={componentRows}
       />
       {isEnergy ? (
         <>
@@ -401,13 +437,20 @@ function ModuleConfigContent({
 }) {
   const [connected, setConnected] = useState(() => isModuleConnected(conn, module, profileId))
   const [params, setParams] = useState<Record<string, string>>(() => conn[module.id]?.params ?? {})
+  const compDefs = getModuleComponentDefs(module.id, profileId)
+  const [comps, setComps] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(compDefs.map((c) => [c.id, isComponentEnabled(conn, c, profileId)])),
+  )
 
   const handleSave = () => {
     setModuleConnected(companyId, module.id, connected)
     setModuleParams(companyId, module.id, params)
+    for (const c of compDefs) {
+      if (c.kind === 'specialized') setComponentEnabled(companyId, module.id, c.id, comps[c.id] ?? false)
+    }
     onSaved()
     toast.success(`Модуль «${module.label}» ${connected ? 'подключён' : 'отключён'}`, {
-      description: `Параметры сохранены под «${org}»`,
+      description: `Сборка и параметры сохранены под «${org}»`,
     })
     onClose()
   }
@@ -444,6 +487,37 @@ function ModuleConfigContent({
           </div>
         ))}
       </div>
+
+      {compDefs.length > 0 && (
+        <div className="space-y-2 border-t border-border/60 pt-3">
+          <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+            Компоненты модуля
+          </Label>
+          {compDefs.map((c) => {
+            const isStd = c.kind === 'standard'
+            const isPlanned = c.status === 'planned'
+            return (
+              <div key={c.id} className="flex items-start justify-between gap-3 rounded-md border border-border/60 p-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 text-sm">
+                    <span>{c.label}</span>
+                    <Badge variant="outline" className="font-normal text-[10px]">
+                      {isStd ? 'стандартный' : 'спец.'}
+                    </Badge>
+                    {isPlanned && <Badge variant="outline" className="font-normal text-[10px]">план</Badge>}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">{c.description}</p>
+                </div>
+                <Switch
+                  checked={isStd ? true : (comps[c.id] ?? false)}
+                  disabled={isStd || isPlanned || !connected}
+                  onCheckedChange={(v) => setComps((s) => ({ ...s, [c.id]: v }))}
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <DialogFooter>
         <Button variant="outline" size="sm" onClick={onClose}>Отмена</Button>

@@ -4,7 +4,7 @@ Fuel CRUD: станции, смены, ТТН, документы на эксп�
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 def _parse_dt(val: str | None) -> datetime | None:
@@ -50,7 +50,7 @@ def _density(val) -> float | None:
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -58,9 +58,13 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     FuelStation, FuelShift, FuelTank, FuelPump, FuelCashMovement,
-    FuelReceipt, FuelExportDoc, FuelShiftSale, ExportPacket, User, DataEntry,
+    FuelReceipt, FuelReceiptOverride, FuelReceiptCost, FuelPurchaseBatch,
+    FuelExportDoc, FuelShiftSale, FuelShiftSaleOverride, FuelShiftCorrectionNote,
+    ExportPacket, User, DataEntry,
 )
 from app.services.fuel_documents import build_shift_documents, build_ttn_documents
+from app.services.fuel_costing import FuelCostingService
+from app.services.fuel_dashboard import FuelDashboardService
 from app.services.fuel_mappings import MappingContext, load_mapping_context
 from app.services.sts_client import (
     sts_get_shifts, sts_get_shift_report, sts_get_receipts,
@@ -100,6 +104,7 @@ class ShiftOut(BaseModel):
     cash: float
     card: float
     voucher: float
+    has_corrections: bool = False   # внесена хоть одна корректировка (FuelShiftSaleOverride)
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -151,6 +156,13 @@ class ShiftSaleOut(BaseModel):
     amount: float
     discount: float = 0
     warehouse_name: str | None = None
+    # Корректировка (L2 CLEAN): is_manual=строка скорректирована вручную;
+    # src_* — исходные STS-значения для показа «было → стало».
+    is_manual: bool = False
+    src_liters: float | None = None
+    src_amount: float | None = None
+    src_discount: float | None = None
+    note: str | None = None
     model_config = {"from_attributes": True}
 
 
@@ -163,6 +175,9 @@ class ShiftDetailOut(ShiftOut):
     # Сырой сменный отчёт STS ({psm, release, sales, receipt, money}) — вход
     # эталонного просмотрщика. None у смен, загруженных до v2.9 (нужна переигровка).
     raw_report: dict | None = None
+    # Комментарий менеджера по корректировке (в целом по документу)
+    correction_note: str | None = None
+    correction_note_author: str | None = None
 
 
 class ReceiptOut(BaseModel):
@@ -189,6 +204,18 @@ class ReceiptOut(BaseModel):
     status: str
     received_at: datetime | None = None
     created_at: datetime
+    # Корректировка (L2 CLEAN): is_manual + исходные STS-значения документа.
+    is_manual: bool = False
+    has_corrections: bool = False   # реальная правка значений ИЛИ комментарий менеджера
+    src_volume: float | None = None
+    src_mass: float | None = None
+    src_density: float | None = None
+    note: str | None = None
+    # Себестоимость партии (L2, задаётся менеджером; cost_per_liter — норм. ₽/л для маржи).
+    has_cost: bool = False
+    cost_unit: str | None = None
+    cost_unit_price: float | None = None
+    cost_per_liter: float | None = None
     model_config = {"from_attributes": True}
 
 
@@ -278,7 +305,25 @@ async def list_shifts(
     st_ids = {s.station_id for s in shifts}
     stations = {st.id: st for st in (await db.execute(
         select(FuelStation).where(FuelStation.id.in_(st_ids)))).scalars()} if st_ids else {}
-    return [_shift_out(s, stations.get(s.station_id)) for s in shifts]
+    # Смены с реальной корректировкой (override с полем, отличным от STS-снимка).
+    ov_rows = (await db.execute(
+        select(FuelShiftSaleOverride.station_id, FuelShiftSaleOverride.shift_number)
+        .where(
+            FuelShiftSaleOverride.company_id == company_id,
+            or_(
+                and_(FuelShiftSaleOverride.liters.isnot(None),
+                     FuelShiftSaleOverride.liters != FuelShiftSaleOverride.src_liters),
+                and_(FuelShiftSaleOverride.amount.isnot(None),
+                     FuelShiftSaleOverride.amount != FuelShiftSaleOverride.src_amount),
+                and_(FuelShiftSaleOverride.discount.isnot(None),
+                     FuelShiftSaleOverride.discount != FuelShiftSaleOverride.src_discount),
+            ),
+        ).distinct())).all()
+    ov_keys = {(r[0], r[1]) for r in ov_rows}
+    return [
+        _shift_out(s, stations.get(s.station_id), (s.station_id, s.shift_number) in ov_keys)
+        for s in shifts
+    ]
 
 
 @router.get("/shifts/{shift_id}", response_model=ShiftDetailOut)
@@ -303,22 +348,31 @@ async def get_shift(
         raise HTTPException(404, "Смена не найдена")
     station = await db.get(FuelStation, shift.station_id)
     out = _shift_out(shift, station)
-    # Разбивка продаж по каналам оплаты (для вкладки «Реализация»)
+    # Разбивка продаж по каналам оплаты (для вкладки «Реализация») + корректировки L2
     sales = (await db.execute(
         select(FuelShiftSale).where(FuelShiftSale.shift_id == shift.id))).scalars().all()
+    ov_map = await _load_sale_overrides(db, cid, shift.station_id, shift.shift_number)
     # ТТН периода станции (для вкладки «Поступления»)
     rcpts = (await db.execute(
         select(FuelReceipt).where(
             FuelReceipt.company_id == cid, FuelReceipt.station_id == shift.station_id)
         .order_by(FuelReceipt.received_at.desc()).limit(50))).scalars().all()
+    # Комментарий менеджера по корректировке (в целом по документу)
+    note = (await db.execute(select(FuelShiftCorrectionNote).where(
+        FuelShiftCorrectionNote.company_id == cid,
+        FuelShiftCorrectionNote.station_id == shift.station_id,
+        FuelShiftCorrectionNote.shift_number == shift.shift_number,
+    ))).scalar_one_or_none()
     return ShiftDetailOut(
         **out.model_dump(),
         tanks=[TankOut.model_validate(t) for t in shift.tanks],
         pumps=[PumpOut.model_validate(p) for p in shift.pumps],
         cash_movements=[CashMovementOut.model_validate(m) for m in shift.cash_movements],
-        sales=[ShiftSaleOut.model_validate(s) for s in sales],
+        sales=[_sale_out_with_override(s, ov_map.get((s.payment_channel, s.fuel_code))) for s in sales],
         receipts=[_receipt_out(r, station) for r in rcpts],
         raw_report=shift.raw_report,
+        correction_note=note.note if note else None,
+        correction_note_author=note.author if note else None,
     )
 
 
@@ -472,7 +526,16 @@ async def list_receipts(
     st_ids = {r.station_id for r in rcpts}
     stations = {st.id: st for st in (await db.execute(
         select(FuelStation).where(FuelStation.id.in_(st_ids)))).scalars()} if st_ids else {}
-    return [_receipt_out(r, stations.get(r.station_id)) for r in rcpts]
+    ov_map = await _load_receipt_overrides(db, company_id)
+    cost_map = await _load_receipt_costs(db, company_id)
+    return [
+        _receipt_out(
+            r, stations.get(r.station_id),
+            ov_map.get((str(r.station_id), r.ttn, _receipt_fuel_key(r.fuel_code))),
+            cost_map.get((str(r.station_id), r.ttn, _receipt_fuel_key(r.fuel_code))),
+        )
+        for r in rcpts
+    ]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1108,7 +1171,8 @@ async def ingest_fuel_deliveries(
 # Helpers
 # ═══════════════════════════════════════════════════════════════
 
-def _shift_out(s: FuelShift, station: FuelStation | None = None) -> ShiftOut:
+def _shift_out(s: FuelShift, station: FuelStation | None = None,
+               has_corrections: bool = False) -> ShiftOut:
     return ShiftOut(
         id=str(s.id),
         station_id=str(s.station_id),
@@ -1124,11 +1188,24 @@ def _shift_out(s: FuelShift, station: FuelStation | None = None) -> ShiftOut:
         cash=float(s.cash or 0),
         card=float(s.card or 0),
         voucher=float(s.voucher or 0),
+        has_corrections=has_corrections,
         created_at=s.created_at,
     )
 
 
-def _receipt_out(r: FuelReceipt, station: FuelStation | None = None) -> ReceiptOut:
+def _receipt_fuel_key(fuel_code: int | None) -> int:
+    """Нормализация fuel_code для натурального ключа override (NULL → -1)."""
+    return fuel_code if fuel_code is not None else -1
+
+
+def _receipt_out(
+    r: FuelReceipt, station: FuelStation | None = None,
+    ov: "FuelReceiptOverride | None" = None,
+    cost: "FuelReceiptCost | None" = None,
+) -> ReceiptOut:
+    doc_vol = float(r.doc_volume_liters or 0)
+    doc_mass = float(r.doc_mass_kg or 0)
+    dens = float(r.density) if r.density else None
     return ReceiptOut(
         id=str(r.id),
         station_id=str(r.station_id),
@@ -1140,28 +1217,113 @@ def _receipt_out(r: FuelReceipt, station: FuelStation | None = None) -> ReceiptO
         supplier=r.supplier,
         shift_number=r.shift_number,
         tank=r.tank,
-        doc_volume_liters=float(r.doc_volume_liters or 0),
+        doc_volume_liters=float(ov.doc_volume_liters) if ov and ov.doc_volume_liters is not None else doc_vol,
         fact_volume_liters=float(r.fact_volume_liters or 0),
         diff_volume=float(r.diff_volume or 0),
-        doc_mass_kg=float(r.doc_mass_kg or 0),
+        doc_mass_kg=float(ov.doc_mass_kg) if ov and ov.doc_mass_kg is not None else doc_mass,
         fact_mass_kg=float(r.fact_mass_kg or 0),
         diff_mass=float(r.diff_mass or 0),
-        density=float(r.density) if r.density else None,
+        density=(float(ov.density) if ov and ov.density is not None else dens),
         fact_density=float(r.fact_density) if r.fact_density else None,
         doc_temp=float(r.doc_temp) if r.doc_temp is not None else None,
         fact_temp=float(r.fact_temp) if r.fact_temp is not None else None,
         status=r.status,
         received_at=r.received_at,
         created_at=r.created_at,
+        is_manual=ov is not None,
+        has_corrections=ov is not None and (
+            (ov.doc_volume_liters is not None and abs(float(ov.doc_volume_liters) - doc_vol) > 0.005)
+            or (ov.doc_mass_kg is not None and abs(float(ov.doc_mass_kg) - doc_mass) > 0.005)
+            or (ov.density is not None and dens is not None and abs(float(ov.density) - dens) > 0.005)
+            or bool(ov.note and ov.note.strip())
+        ),
+        src_volume=doc_vol if ov is not None else None,
+        src_mass=doc_mass if ov is not None else None,
+        src_density=dens if ov is not None else None,
+        note=ov.note if ov is not None else None,
+        has_cost=cost is not None,
+        cost_unit=cost.unit if cost is not None else None,
+        cost_unit_price=float(cost.unit_cost) if cost is not None else None,
+        cost_per_liter=float(cost.cost_per_liter) if cost is not None else None,
     )
+
+
+async def _load_receipt_overrides(
+    db: AsyncSession, company_id: uuid.UUID
+) -> dict[tuple[str, str, int], FuelReceiptOverride]:
+    """Корректировки ТТН компании, ключ (station_id, ttn, fuel_code)."""
+    rows = (await db.execute(select(FuelReceiptOverride).where(
+        FuelReceiptOverride.company_id == company_id))).scalars().all()
+    return {(str(o.station_id), o.ttn, o.fuel_code): o for o in rows}
+
+
+async def _load_receipt_costs(
+    db: AsyncSession, company_id: uuid.UUID
+) -> dict[tuple[str, str, int], FuelReceiptCost]:
+    """Себестоимость партий (ТТН) компании, ключ (station_id, ttn, fuel_code)."""
+    rows = (await db.execute(select(FuelReceiptCost).where(
+        FuelReceiptCost.company_id == company_id))).scalars().all()
+    return {(str(c.station_id), c.ttn, c.fuel_code): c for c in rows}
 
 
 # ═══════════════════════════════════════════════════════════════
 # Документы 1С из смены/ТТН (конвейер L2 → пакеты для БП)
 # ═══════════════════════════════════════════════════════════════
 
+async def _load_sale_overrides(
+    db: AsyncSession, company_id: uuid.UUID, station_id: uuid.UUID, shift_number: int
+) -> dict[tuple[str, int], FuelShiftSaleOverride]:
+    """Ручные корректировки строк продаж смены (L2 CLEAN) по натуральному ключу."""
+    rows = (await db.execute(
+        select(FuelShiftSaleOverride).where(
+            FuelShiftSaleOverride.company_id == company_id,
+            FuelShiftSaleOverride.station_id == station_id,
+            FuelShiftSaleOverride.shift_number == shift_number,
+        )
+    )).scalars().all()
+    return {(o.payment_channel, o.fuel_code): o for o in rows}
+
+
+def _apply_sale_override(sale: dict, ov: "FuelShiftSaleOverride | None") -> dict:
+    """Наложить корректировку на строку продаж (NULL-показатели в override не трогают)."""
+    if ov is None:
+        return sale
+    if ov.liters is not None:
+        sale["liters"] = float(ov.liters)
+    if ov.amount is not None:
+        sale["amount"] = float(ov.amount)
+    if ov.discount is not None:
+        sale["discount"] = float(ov.discount)
+    if ov.warehouse_name is not None:
+        sale["warehouse_name"] = ov.warehouse_name
+    return sale
+
+
+def _sale_out_with_override(s: FuelShiftSale, ov: "FuelShiftSaleOverride | None") -> ShiftSaleOut:
+    """ShiftSaleOut с наложенной корректировкой (+ исходные src_* и флаг is_manual)."""
+    liters = float(s.liters or 0)
+    amount = float(s.amount or 0)
+    discount = float(s.discount or 0)
+    if ov is None:
+        return ShiftSaleOut(
+            payment_channel=s.payment_channel, fuel_code=s.fuel_code,
+            liters=liters, amount=amount, discount=discount,
+            warehouse_name=s.warehouse_name,
+        )
+    return ShiftSaleOut(
+        payment_channel=s.payment_channel, fuel_code=s.fuel_code,
+        liters=float(ov.liters) if ov.liters is not None else liters,
+        amount=float(ov.amount) if ov.amount is not None else amount,
+        discount=float(ov.discount) if ov.discount is not None else discount,
+        warehouse_name=ov.warehouse_name or s.warehouse_name,
+        is_manual=True,
+        src_liters=liters, src_amount=amount, src_discount=discount,
+        note=ov.note,
+    )
+
+
 async def _build_shift_docs(db: AsyncSession, shift: FuelShift, company_id: uuid.UUID) -> list[dict]:
-    """Построить документы 1С из разбивки смены (FuelShiftSale)."""
+    """Построить документы 1С из разбивки смены (FuelShiftSale + корректировки L2)."""
     station = await db.get(FuelStation, shift.station_id)
     ctx = await load_mapping_context(db, company_id)
     fuel_by_code = {
@@ -1178,9 +1340,12 @@ async def _build_shift_docs(db: AsyncSession, shift: FuelShift, company_id: uuid
     rows = (await db.execute(
         select(FuelShiftSale).where(FuelShiftSale.shift_id == shift.id)
     )).scalars().all()
-    sales = [{"payment_channel": s.payment_channel, "fuel_code": s.fuel_code,
-              "liters": float(s.liters or 0), "amount": float(s.amount or 0),
-              "discount": float(s.discount or 0), "warehouse_name": s.warehouse_name}
+    ov_map = await _load_sale_overrides(db, company_id, shift.station_id, shift.shift_number)
+    sales = [_apply_sale_override(
+                {"payment_channel": s.payment_channel, "fuel_code": s.fuel_code,
+                 "liters": float(s.liters or 0), "amount": float(s.amount or 0),
+                 "discount": float(s.discount or 0), "warehouse_name": s.warehouse_name},
+                ov_map.get((s.payment_channel, s.fuel_code)))
              for s in rows]
     return build_shift_documents(
         system=station.sts_system_code or 15,
@@ -1195,17 +1360,25 @@ async def _build_shift_docs(db: AsyncSession, shift: FuelShift, company_id: uuid
 
 
 async def _build_receipt_docs(db: AsyncSession, receipt: FuelReceipt, company_id: uuid.UUID) -> list[dict]:
-    """Построить документы 1С из ТТН (Перемещение тонн + Комплектация)."""
+    """Построить документы 1С из ТТН (Перемещение тонн + Комплектация) с корректировками L2."""
     station = await db.get(FuelStation, receipt.station_id)
     ctx = await load_mapping_context(db, company_id)
     fm = ctx.fuel(receipt.fuel_code) if receipt.fuel_code is not None else None
+    # Ручная корректировка ТТН перед выгрузкой (L2): объём/масса/плотность документа.
+    ov = (await db.execute(select(FuelReceiptOverride).where(
+        FuelReceiptOverride.company_id == company_id,
+        FuelReceiptOverride.station_id == receipt.station_id,
+        FuelReceiptOverride.ttn == receipt.ttn,
+        FuelReceiptOverride.fuel_code == _receipt_fuel_key(receipt.fuel_code),
+    ).limit(1))).scalar_one_or_none()
     # Тонны для документов: из массы ТТН, а при её отсутствии — из объёма×плотности
     # (плотность ТТН или справочная из маппинга). Иначе ТТН без массы не дала бы
     # НИ ОДНОГО документа (гард tonnes>0 в build_ttn_documents).
-    liters = float(receipt.doc_volume_liters or 0)
-    mass_kg = float(receipt.doc_mass_kg or 0)
-    dens = float(receipt.density) if receipt.density else (
-        float(fm.density) if (fm and fm.density is not None) else None)
+    liters = float(ov.doc_volume_liters) if ov and ov.doc_volume_liters is not None else float(receipt.doc_volume_liters or 0)
+    mass_kg = float(ov.doc_mass_kg) if ov and ov.doc_mass_kg is not None else float(receipt.doc_mass_kg or 0)
+    dens = float(ov.density) if ov and ov.density is not None else (
+        float(receipt.density) if receipt.density else (
+            float(fm.density) if (fm and fm.density is not None) else None))
     if mass_kg <= 0 and liters > 0 and dens:
         mass_kg = round(liters * dens, 3)
     return build_ttn_documents(
@@ -1279,6 +1452,168 @@ async def build_shift_packets(
     return await _materialize_packets(db, cid, docs, [shift_id])
 
 
+class SaleEdit(BaseModel):
+    """Корректировка одной строки продаж смены (канал оплаты × топливо).
+    NULL-показатель = не переопределён (берётся исходное STS-значение)."""
+    payment_channel: str
+    fuel_code: int
+    liters: float | None = None
+    amount: float | None = None
+    discount: float | None = None
+    warehouse_name: str | None = None
+    note: str | None = None
+
+
+@router.patch("/shifts/{shift_id}/sales")
+async def patch_shift_sales(
+    shift_id: str,
+    edits: list[SaleEdit],
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ручная корректировка строк продаж смены (слой L2 CLEAN).
+
+    Правки хранятся в отдельном override-слое по натуральному ключу смены —
+    переживают «Обновить период» (delete+reingest) и накладываются при построении
+    документов 1С. Для применения к очереди — повторить build-packets.
+    """
+    cid = await _company_id(user, db)
+    shift = await db.get(FuelShift, uuid.UUID(shift_id))
+    if shift is None or shift.company_id != cid:
+        raise HTTPException(404, "Смена не найдена")
+    if shift.is_locked:
+        raise HTTPException(409, "Смена в закрытом периоде — корректировка запрещена")
+
+    # Исходные STS-значения (для снимка src_* и сравнения — правка ли).
+    base = {(s.payment_channel, s.fuel_code): s for s in (await db.execute(
+        select(FuelShiftSale).where(FuelShiftSale.shift_id == shift.id))).scalars().all()}
+    existing = await _load_sale_overrides(db, cid, shift.station_id, shift.shift_number)
+
+    _EPS = 0.005  # порог сравнения (копейки/мл) — float STS vs введённое
+
+    def _diff(new: float | None, src: float | None) -> bool:
+        """Изменено ли поле относительно STS (None во вводе = поле не правится)."""
+        return new is not None and (src is None or abs(float(new) - float(src)) > _EPS)
+
+    changed = 0
+    for e in edits:
+        key = (e.payment_channel, e.fuel_code)
+        src = base.get(key)
+        s_lit = float(src.liters) if src and src.liters is not None else None
+        s_amt = float(src.amount) if src and src.amount is not None else None
+        s_dis = float(src.discount) if src and src.discount is not None else None
+        # Поля, реально отличающиеся от STS (остальные не считаются правкой).
+        f_lit = e.liters if _diff(e.liters, s_lit) else None
+        f_amt = e.amount if _diff(e.amount, s_amt) else None
+        f_dis = e.discount if _diff(e.discount, s_dis) else None
+        f_wh = e.warehouse_name if (e.warehouse_name is not None
+                                    and e.warehouse_name != (src.warehouse_name if src else None)) else None
+        has_change = f_lit is not None or f_amt is not None or f_dis is not None or f_wh is not None
+
+        ov = existing.get(key)
+        if not has_change:
+            # Значения вернулись к STS — правки нет: убрать прежний ложный override.
+            if ov is not None:
+                await db.delete(ov)
+            continue
+        if ov is None:
+            ov = FuelShiftSaleOverride(
+                company_id=cid, station_id=shift.station_id,
+                shift_number=shift.shift_number,
+                payment_channel=e.payment_channel, fuel_code=e.fuel_code,
+                src_liters=s_lit, src_amount=s_amt, src_discount=s_dis,
+            )
+            db.add(ov)
+        # В override — только изменённые поля (NULL = берётся из STS при наложении).
+        ov.liters = f_lit
+        ov.amount = f_amt
+        ov.discount = f_dis
+        if f_wh is not None:
+            ov.warehouse_name = f_wh
+        if e.note is not None:
+            ov.note = e.note
+        changed += 1
+
+    if changed and shift.status == "new":
+        shift.status = "verified"
+    await db.commit()
+    return {"ok": True, "changed": changed}
+
+
+@router.delete("/shifts/{shift_id}/sales/override")
+async def reset_shift_sale_overrides(
+    shift_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Откатить все ручные корректировки смены к исходным STS-значениям."""
+    cid = await _company_id(user, db)
+    shift = await db.get(FuelShift, uuid.UUID(shift_id))
+    if shift is None or shift.company_id != cid:
+        raise HTTPException(404, "Смена не найдена")
+    res = await db.execute(
+        delete(FuelShiftSaleOverride).where(
+            FuelShiftSaleOverride.company_id == cid,
+            FuelShiftSaleOverride.station_id == shift.station_id,
+            FuelShiftSaleOverride.shift_number == shift.shift_number,
+        )
+    )
+    # Полный сброс — убрать и комментарий корректировки
+    await db.execute(
+        delete(FuelShiftCorrectionNote).where(
+            FuelShiftCorrectionNote.company_id == cid,
+            FuelShiftCorrectionNote.station_id == shift.station_id,
+            FuelShiftCorrectionNote.shift_number == shift.shift_number,
+        )
+    )
+    await db.commit()
+    return {"ok": True, "removed": res.rowcount}
+
+
+class ShiftNoteEdit(BaseModel):
+    note: str
+
+
+@router.put("/shifts/{shift_id}/correction-note")
+async def put_shift_correction_note(
+    shift_id: str,
+    body: ShiftNoteEdit,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Комментарий менеджера по корректировке смены (в целом по документу).
+
+    Пустой текст удаляет комментарий. Хранится по натуральному ключу смены — переживает reingest.
+    """
+    cid = await _company_id(user, db)
+    shift = await db.get(FuelShift, uuid.UUID(shift_id))
+    if shift is None or shift.company_id != cid:
+        raise HTTPException(404, "Смена не найдена")
+    text = (body.note or "").strip()[:2000]
+    existing = (await db.execute(select(FuelShiftCorrectionNote).where(
+        FuelShiftCorrectionNote.company_id == cid,
+        FuelShiftCorrectionNote.station_id == shift.station_id,
+        FuelShiftCorrectionNote.shift_number == shift.shift_number,
+    ))).scalar_one_or_none()
+    if not text:
+        if existing is not None:
+            await db.delete(existing)
+        await db.commit()
+        return {"ok": True, "note": "", "author": None}
+    author = getattr(user, "full_name", None) or getattr(user, "name", None) or user.email
+    if existing is None:
+        existing = FuelShiftCorrectionNote(
+            company_id=cid, station_id=shift.station_id,
+            shift_number=shift.shift_number, note=text, author=author,
+        )
+        db.add(existing)
+    else:
+        existing.note = text
+        existing.author = author
+    await db.commit()
+    return {"ok": True, "note": text, "author": author}
+
+
 @router.get("/receipts/{receipt_id}/documents")
 async def preview_receipt_documents(
     receipt_id: str,
@@ -1307,3 +1642,538 @@ async def build_receipt_packets(
         raise HTTPException(404, "ТТН не найдена")
     docs = await _build_receipt_docs(db, rcpt, cid)
     return await _materialize_packets(db, cid, docs, [receipt_id])
+
+
+class ReceiptEdit(BaseModel):
+    """Корректировка ТТН перед выгрузкой (значения документа: объём/масса/плотность).
+    NULL-показатель = не переопределён (берётся исходное STS-значение)."""
+    doc_volume_liters: float | None = None
+    doc_mass_kg: float | None = None
+    density: float | None = None
+    note: str | None = None
+
+
+@router.patch("/receipts/{receipt_id}/override")
+async def patch_receipt_override(
+    receipt_id: str,
+    edit: ReceiptEdit,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ручная корректировка значений ТТН (L2 CLEAN) перед выгрузкой в 1С.
+
+    Правки хранятся в override-слое по натуральному ключу ТТН — переживают
+    reingest и накладываются при построении документов (Перемещение тонн +
+    Комплектация). Для применения к очереди — повторить build-packets.
+    """
+    cid = await _company_id(user, db)
+    rcpt = await db.get(FuelReceipt, uuid.UUID(receipt_id))
+    if rcpt is None or rcpt.company_id != cid:
+        raise HTTPException(404, "ТТН не найдена")
+    if rcpt.is_locked:
+        raise HTTPException(409, "ТТН в закрытом периоде — корректировка запрещена")
+    fkey = _receipt_fuel_key(rcpt.fuel_code)
+    ov = (await db.execute(select(FuelReceiptOverride).where(
+        FuelReceiptOverride.company_id == cid,
+        FuelReceiptOverride.station_id == rcpt.station_id,
+        FuelReceiptOverride.ttn == rcpt.ttn,
+        FuelReceiptOverride.fuel_code == fkey,
+    ).limit(1))).scalar_one_or_none()
+
+    _EPS = 0.005
+    src_vol = float(rcpt.doc_volume_liters or 0)
+    src_mass = float(rcpt.doc_mass_kg or 0)
+    src_dens = float(rcpt.density) if rcpt.density else None
+
+    def _diff(new: float | None, src: float | None) -> bool:
+        return new is not None and (src is None or abs(float(new) - float(src)) > _EPS)
+
+    # В override — только поля, реально отличные от STS (NULL = берётся из STS).
+    f_vol = edit.doc_volume_liters if _diff(edit.doc_volume_liters, src_vol) else None
+    f_mass = edit.doc_mass_kg if _diff(edit.doc_mass_kg, src_mass) else None
+    f_dens = edit.density if _diff(edit.density, src_dens) else None
+    note = (edit.note or "").strip()[:500] or None
+    has_change = f_vol is not None or f_mass is not None or f_dens is not None or note is not None
+
+    if not has_change:
+        # Ни правки значений, ни комментария — убрать прежний (в т.ч. ложный) override.
+        if ov is not None:
+            await db.delete(ov)
+        await db.commit()
+        return {"ok": True}
+    if ov is None:
+        ov = FuelReceiptOverride(
+            company_id=cid, station_id=rcpt.station_id, ttn=rcpt.ttn, fuel_code=fkey,
+            src_volume=src_vol, src_mass=src_mass, src_density=src_dens,
+        )
+        db.add(ov)
+    ov.doc_volume_liters = f_vol
+    ov.doc_mass_kg = f_mass
+    ov.density = f_dens
+    ov.note = note
+    if (f_vol is not None or f_mass is not None or f_dens is not None) and rcpt.status == "new":
+        rcpt.status = "verified"
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/receipts/{receipt_id}/override")
+async def reset_receipt_override(
+    receipt_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Откатить корректировку ТТН к исходным STS-значениям."""
+    cid = await _company_id(user, db)
+    rcpt = await db.get(FuelReceipt, uuid.UUID(receipt_id))
+    if rcpt is None or rcpt.company_id != cid:
+        raise HTTPException(404, "ТТН не найдена")
+    res = await db.execute(delete(FuelReceiptOverride).where(
+        FuelReceiptOverride.company_id == cid,
+        FuelReceiptOverride.station_id == rcpt.station_id,
+        FuelReceiptOverride.ttn == rcpt.ttn,
+        FuelReceiptOverride.fuel_code == _receipt_fuel_key(rcpt.fuel_code),
+    ))
+    await db.commit()
+    return {"ok": True, "removed": res.rowcount}
+
+
+class CostEdit(BaseModel):
+    """Себестоимость партии ТТН. unit: 'liter' (₽/л) | 'kg' (₽/кг, пересчёт по плотности)."""
+    unit: str = "liter"
+    unit_cost: float
+    density: float | None = None  # для ₽/кг; если пусто — берётся плотность ТТН
+    note: str | None = None
+
+
+@router.patch("/receipts/{receipt_id}/cost")
+async def patch_receipt_cost(
+    receipt_id: str,
+    edit: CostEdit,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Задать себестоимость партии (ТТН) — ₽/л или ₽/кг. Нормализуется в ₽/л для FIFO-маржи."""
+    cid = await _company_id(user, db)
+    rcpt = await db.get(FuelReceipt, uuid.UUID(receipt_id))
+    if rcpt is None or rcpt.company_id != cid:
+        raise HTTPException(404, "ТТН не найдена")
+    dens = edit.density or (float(rcpt.density) if rcpt.density else None)
+    if edit.unit == "kg":
+        if not dens:
+            raise HTTPException(422, "Для ₽/кг нужна плотность (в ТТН нет — укажите вручную)")
+        cost_per_liter = round(edit.unit_cost * dens, 4)   # ₽/кг × кг/л = ₽/л
+    else:
+        cost_per_liter = round(edit.unit_cost, 4)
+    fkey = _receipt_fuel_key(rcpt.fuel_code)
+    row = (await db.execute(select(FuelReceiptCost).where(
+        FuelReceiptCost.company_id == cid,
+        FuelReceiptCost.station_id == rcpt.station_id,
+        FuelReceiptCost.ttn == rcpt.ttn,
+        FuelReceiptCost.fuel_code == fkey,
+    ).limit(1))).scalar_one_or_none()
+    if row is None:
+        row = FuelReceiptCost(company_id=cid, station_id=rcpt.station_id, ttn=rcpt.ttn, fuel_code=fkey)
+        db.add(row)
+    row.unit = edit.unit
+    row.unit_cost = edit.unit_cost
+    row.density_used = dens
+    row.cost_per_liter = cost_per_liter
+    row.source = "manual"
+    if edit.note is not None:
+        row.note = edit.note
+    await db.commit()
+    return {"ok": True, "cost_per_liter": cost_per_liter}
+
+
+@router.delete("/receipts/{receipt_id}/cost")
+async def delete_receipt_cost(
+    receipt_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Убрать себестоимость партии (ТТН)."""
+    cid = await _company_id(user, db)
+    rcpt = await db.get(FuelReceipt, uuid.UUID(receipt_id))
+    if rcpt is None or rcpt.company_id != cid:
+        raise HTTPException(404, "ТТН не найдена")
+    res = await db.execute(delete(FuelReceiptCost).where(
+        FuelReceiptCost.company_id == cid,
+        FuelReceiptCost.station_id == rcpt.station_id,
+        FuelReceiptCost.ttn == rcpt.ttn,
+        FuelReceiptCost.fuel_code == _receipt_fuel_key(rcpt.fuel_code),
+    ))
+    await db.commit()
+    return {"ok": True, "removed": res.rowcount}
+
+
+@router.get("/costing/margin")
+async def costing_margin(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    group_by: str = Query("fuel"),   # fuel | payment | station | month | fuel_payment
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Управленческая маржа по FIFO-себестоимости партий (по разрезам).
+    Независимо от проводок 1С: продажи − себестоимость партий (ТТН), списанная по ФИФО."""
+    cid = await _company_id(user, db)
+    svc = FuelCostingService(db, cid)
+    return await svc.compute(date.fromisoformat(date_from), date.fromisoformat(date_to), group_by)
+
+
+@router.get("/receipts/{receipt_id}/costing")
+async def receipt_costing(
+    receipt_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Показатели партии (ТТН): списано/остаток/средняя цена реализации/маржа (FIFO)."""
+    cid = await _company_id(user, db)
+    rcpt = await db.get(FuelReceipt, uuid.UUID(receipt_id))
+    if rcpt is None or rcpt.company_id != cid:
+        raise HTTPException(404, "ТТН не найдена")
+    svc = FuelCostingService(db, cid)
+    return await svc.batch_stats(rcpt)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Закупочные партии (Шаг 2): крупная закупка → FIFO-распределение на ТТН АЗС
+# ═══════════════════════════════════════════════════════════════
+
+class PurchaseBatchCreate(BaseModel):
+    supplier: str | None = None
+    fuel_code: int
+    fuel_name: str | None = None
+    total_liters: float
+    unit: str = "liter"           # 'liter' | 'kg'
+    unit_cost: float
+    density: float | None = None  # для ₽/кг
+    purchase_date: str | None = None
+    target_station_ids: list[str] = []
+    note: str | None = None
+
+
+class PurchaseBatchOut(BaseModel):
+    id: str
+    supplier: str | None = None
+    fuel_code: int
+    fuel_name: str | None = None
+    total_liters: float
+    unit: str
+    unit_cost: float
+    cost_per_liter: float
+    density: float | None = None
+    purchase_date: str | None = None
+    target_station_ids: list[str] = []
+    status: str
+    allocated_liters: float
+    note: str | None = None
+
+
+def _batch_out(b: FuelPurchaseBatch) -> PurchaseBatchOut:
+    return PurchaseBatchOut(
+        id=str(b.id), supplier=b.supplier, fuel_code=b.fuel_code, fuel_name=b.fuel_name,
+        total_liters=float(b.total_liters or 0), unit=b.unit, unit_cost=float(b.unit_cost or 0),
+        cost_per_liter=float(b.cost_per_liter or 0),
+        density=float(b.density) if b.density else None,
+        purchase_date=b.purchase_date.isoformat() if b.purchase_date else None,
+        target_station_ids=list(b.target_station_ids or []),
+        status=b.status, allocated_liters=float(b.allocated_liters or 0), note=b.note,
+    )
+
+
+@router.get("/purchase-batches", response_model=list[PurchaseBatchOut])
+async def list_purchase_batches(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await _company_id(user, db)
+    rows = (await db.execute(select(FuelPurchaseBatch).where(
+        FuelPurchaseBatch.company_id == cid)
+        .order_by(FuelPurchaseBatch.created_at.desc()))).scalars().all()
+    return [_batch_out(b) for b in rows]
+
+
+@router.post("/purchase-batches", response_model=PurchaseBatchOut)
+async def create_purchase_batch(
+    body: PurchaseBatchCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завести закупочную партию. cost_per_liter нормализуется (₽/кг × плотность → ₽/л)."""
+    cid = await _company_id(user, db)
+    dens = body.density
+    if body.unit == "kg":
+        if not dens:
+            raise HTTPException(422, "Для ₽/кг нужна плотность")
+        cost_per_liter = round(body.unit_cost * dens, 4)
+    else:
+        cost_per_liter = round(body.unit_cost, 4)
+    b = FuelPurchaseBatch(
+        company_id=cid, supplier=body.supplier, fuel_code=body.fuel_code, fuel_name=body.fuel_name,
+        total_liters=body.total_liters, unit=body.unit, unit_cost=body.unit_cost,
+        cost_per_liter=cost_per_liter, density=dens,
+        purchase_date=_parse_dt(body.purchase_date),
+        target_station_ids=body.target_station_ids, note=body.note, status="draft",
+    )
+    db.add(b)
+    await db.commit()
+    await db.refresh(b)
+    return _batch_out(b)
+
+
+@router.delete("/purchase-batches/{batch_id}")
+async def delete_purchase_batch(
+    batch_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Удалить закупочную партию и снять созданную ею себестоимость с ТТН."""
+    cid = await _company_id(user, db)
+    b = await db.get(FuelPurchaseBatch, uuid.UUID(batch_id))
+    if b is None or b.company_id != cid:
+        raise HTTPException(404, "Партия не найдена")
+    await db.execute(delete(FuelReceiptCost).where(
+        FuelReceiptCost.company_id == cid,
+        FuelReceiptCost.purchase_batch_id == b.id))
+    await db.delete(b)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/purchase-batches/{batch_id}/allocate")
+async def allocate_purchase_batch(
+    batch_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Распределить объём закупки на ТТН выбранных АЗС по ФИФО (по дате поступления):
+    покрытые ТТН получают себестоимость партии (FuelReceiptCost source='purchase_batch')."""
+    cid = await _company_id(user, db)
+    b = await db.get(FuelPurchaseBatch, uuid.UUID(batch_id))
+    if b is None or b.company_id != cid:
+        raise HTTPException(404, "Партия не найдена")
+    try:
+        station_uuids = [uuid.UUID(s) for s in (b.target_station_ids or [])]
+    except (ValueError, TypeError):
+        station_uuids = []
+    if not station_uuids:
+        raise HTTPException(422, "Не выбраны АЗС для распределения")
+
+    receipts = (await db.execute(select(FuelReceipt).where(
+        FuelReceipt.company_id == cid,
+        FuelReceipt.station_id.in_(station_uuids),
+        FuelReceipt.fuel_code == b.fuel_code,
+    ).order_by(FuelReceipt.received_at))).scalars().all()
+
+    remaining = float(b.total_liters or 0)
+    allocated = 0.0
+    covered = 0
+    for r in receipts:
+        if remaining <= 1e-6:
+            break
+        liters = float(r.doc_volume_liters or 0)
+        if liters <= 0:
+            continue
+        fkey = _receipt_fuel_key(r.fuel_code)
+        cost = (await db.execute(select(FuelReceiptCost).where(
+            FuelReceiptCost.company_id == cid,
+            FuelReceiptCost.station_id == r.station_id,
+            FuelReceiptCost.ttn == r.ttn,
+            FuelReceiptCost.fuel_code == fkey,
+        ).limit(1))).scalar_one_or_none()
+        if cost is None:
+            cost = FuelReceiptCost(company_id=cid, station_id=r.station_id, ttn=r.ttn, fuel_code=fkey)
+            db.add(cost)
+        cost.unit = b.unit
+        cost.unit_cost = b.unit_cost
+        cost.cost_per_liter = b.cost_per_liter
+        cost.density_used = b.density or (float(r.density) if r.density else None)
+        cost.source = "purchase_batch"
+        cost.purchase_batch_id = b.id
+        remaining -= liters
+        allocated += liters
+        covered += 1
+
+    b.allocated_liters = allocated
+    b.status = "allocated"
+    await db.commit()
+    return {
+        "ok": True,
+        "allocated_liters": round(allocated, 2),
+        "receipts_covered": covered,
+        "remaining_liters": round(max(0.0, remaining), 2),
+    }
+
+
+@router.get("/shift-dashboard")
+async def shift_dashboard(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),   # CSV station_ids (UUID); пусто = все АЗС компании
+    compare: bool = Query(False),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Дашборд аналитики по сменным отчётам: виды топлива · способы оплаты · поступления ТТН ·
+    движение наличных · инкассация · график по дням · тренды (сравнение периодов)."""
+    cid = await _company_id(user, db)
+    station_ids = None
+    if stations:
+        try:
+            station_ids = [uuid.UUID(s.strip()) for s in stations.split(",") if s.strip()]
+        except ValueError:
+            station_ids = None
+    svc = FuelDashboardService(db, cid)
+    return await svc.compute(
+        date.fromisoformat(date_from), date.fromisoformat(date_to), station_ids, compare)
+
+
+@router.get("/readiness")
+async def fuel_readiness(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Готовность к 1С за период: смены и ТТН (приёмка, корректировки) + очередь выгрузки."""
+    cid = await _company_id(user, db)
+    station_ids = None
+    if stations:
+        try:
+            station_ids = [uuid.UUID(s.strip()) for s in stations.split(",") if s.strip()]
+        except ValueError:
+            station_ids = None
+    df = date.fromisoformat(date_from)
+    dtt = date.fromisoformat(date_to)
+    dt_from = datetime(df.year, df.month, df.day)
+    dt_to = datetime(dtt.year, dtt.month, dtt.day, 23, 59, 59)
+
+    # ── Смены периода ──
+    sq = select(FuelShift).where(
+        FuelShift.company_id == cid,
+        FuelShift.opened_at >= dt_from, FuelShift.opened_at <= dt_to)
+    if station_ids:
+        sq = sq.where(FuelShift.station_id.in_(station_ids))
+    shifts = (await db.execute(sq)).scalars().all()
+    shift_keys = {(s.station_id, s.shift_number) for s in shifts}
+
+    ov_rows = (await db.execute(
+        select(FuelShiftSaleOverride.station_id, FuelShiftSaleOverride.shift_number).where(
+            FuelShiftSaleOverride.company_id == cid,
+            or_(
+                and_(FuelShiftSaleOverride.liters.isnot(None), FuelShiftSaleOverride.liters != FuelShiftSaleOverride.src_liters),
+                and_(FuelShiftSaleOverride.amount.isnot(None), FuelShiftSaleOverride.amount != FuelShiftSaleOverride.src_amount),
+                and_(FuelShiftSaleOverride.discount.isnot(None), FuelShiftSaleOverride.discount != FuelShiftSaleOverride.src_discount),
+            )).distinct())).all()
+    shift_ov_keys = {(r[0], r[1]) for r in ov_rows}
+
+    # ── ТТН периода (статусы приёмки) ──
+    rq = select(FuelReceipt).where(
+        FuelReceipt.company_id == cid,
+        FuelReceipt.received_at >= dt_from, FuelReceipt.received_at <= dt_to)
+    if station_ids:
+        rq = rq.where(FuelReceipt.station_id.in_(station_ids))
+    receipts = (await db.execute(rq)).scalars().all()
+    st_counts = {"pending": 0, "confirmed": 0, "corrected": 0, "rejected": 0}
+    for r in receipts:
+        st_counts[r.status if r.status in st_counts else "pending"] += 1
+
+    rcpt_ov = (await db.execute(select(FuelReceiptOverride).where(
+        FuelReceiptOverride.company_id == cid))).scalars().all()
+    ov_keys = set()
+    for o in rcpt_ov:
+        changed = (
+            (o.doc_volume_liters is not None and o.src_volume is not None and abs(float(o.doc_volume_liters) - float(o.src_volume)) > 0.005)
+            or (o.doc_mass_kg is not None and o.src_mass is not None and abs(float(o.doc_mass_kg) - float(o.src_mass)) > 0.005)
+            or (o.density is not None and o.src_density is not None and abs(float(o.density) - float(o.src_density)) > 0.005)
+            or bool(o.note and o.note.strip())
+        )
+        if changed:
+            ov_keys.add((str(o.station_id), o.ttn, o.fuel_code))
+    receipts_corrected = sum(1 for r in receipts
+                             if (str(r.station_id), r.ttn, _receipt_fuel_key(r.fuel_code)) in ov_keys)
+
+    # ── Очередь выгрузки (пакеты по компании) ──
+    pk_rows = (await db.execute(select(ExportPacket.status, func.count()).where(
+        ExportPacket.company_id == cid).group_by(ExportPacket.status))).all()
+    pk = {row[0]: row[1] for row in pk_rows}
+
+    return {
+        "period": {"from": df.isoformat(), "to": dtt.isoformat()},
+        "shifts": {"total": len(shifts), "corrected": len(shift_keys & shift_ov_keys)},
+        "receipts": {"total": len(receipts), **st_counts, "with_corrections": receipts_corrected},
+        "packets": {
+            "draft": pk.get("draft", 0),
+            "in_flight": pk.get("queued", 0) + pk.get("sent", 0),
+            "acked": pk.get("acked", 0),
+            "rejected": pk.get("rejected", 0),
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Подтверждение приёмки ТТН менеджером (workflow статусов)
+# ═══════════════════════════════════════════════════════════════
+
+_RECEIPT_STATUSES = {"pending", "confirmed", "corrected", "rejected"}
+
+
+class ReceiptStatusEdit(BaseModel):
+    status: str            # pending | confirmed | corrected | rejected
+    reason: str | None = None  # обязателен для rejected
+
+
+@router.patch("/receipts/{receipt_id}/status")
+async def patch_receipt_status(
+    receipt_id: str,
+    edit: ReceiptStatusEdit,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Подтверждение приёмки ТТН: принято/скорректировано/отклонено (сверка док↔факт до 1С)."""
+    if edit.status not in _RECEIPT_STATUSES:
+        raise HTTPException(422, f"Недопустимый статус: {edit.status}")
+    cid = await _company_id(user, db)
+    rcpt = await db.get(FuelReceipt, uuid.UUID(receipt_id))
+    if rcpt is None or rcpt.company_id != cid:
+        raise HTTPException(404, "ТТН не найдена")
+    if rcpt.is_locked:
+        raise HTTPException(409, "ТТН в закрытом периоде")
+    if edit.status == "rejected" and not (edit.reason and edit.reason.strip()):
+        raise HTTPException(422, "Для отклонения нужна причина")
+    rcpt.status = edit.status
+    await db.commit()
+    return {"ok": True, "status": rcpt.status}
+
+
+class BulkReceiptStatus(BaseModel):
+    ids: list[str]
+    status: str
+
+
+@router.post("/receipts/status/bulk")
+async def bulk_receipt_status(
+    body: BulkReceiptStatus,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Массовое подтверждение приёмки ТТН."""
+    if body.status not in _RECEIPT_STATUSES:
+        raise HTTPException(422, f"Недопустимый статус: {body.status}")
+    cid = await _company_id(user, db)
+    try:
+        ids = [uuid.UUID(i) for i in body.ids]
+    except (ValueError, TypeError):
+        raise HTTPException(422, "Некорректные id")
+    if not ids:
+        return {"ok": True, "updated": 0}
+    res = await db.execute(update(FuelReceipt).where(
+        FuelReceipt.company_id == cid,
+        FuelReceipt.id.in_(ids),
+        FuelReceipt.is_locked == False,  # noqa: E712
+    ).values(status=body.status))
+    await db.commit()
+    return {"ok": True, "updated": res.rowcount}

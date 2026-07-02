@@ -7,10 +7,16 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { WorkspaceModuleDef, ModuleProfile } from '@/config/workspaceModules'
+import type { ModuleComponent } from '@/config/moduleComponents'
+import { defaultComponentEnabled, getModuleComponentDefs } from '@/config/moduleComponents'
 
 const key = (companyId: string) => `tl-module-connections-${companyId}`
 
-export interface ModuleConn { connected?: boolean; params?: Record<string, string> }
+export interface ModuleConn {
+  connected?: boolean
+  params?: Record<string, string>
+  components?: Record<string, boolean>   // сборка модуля под компанию: componentId → включён
+}
 export type ModuleConnMap = Record<string, ModuleConn>
 
 export function getModuleConnections(companyId: string): ModuleConnMap {
@@ -32,6 +38,22 @@ export function setModuleParams(companyId: string, moduleId: string, params: Rec
 
 export function getModuleParams(companyId: string, moduleId: string): Record<string, string> {
   return getModuleConnections(companyId)[moduleId]?.params ?? {}
+}
+
+/* ── Компоненты модуля (сборка под компанию) ── */
+
+export function getModuleComponents(companyId: string, moduleId: string): Record<string, boolean> {
+  return getModuleConnections(companyId)[moduleId]?.components ?? {}
+}
+export function setComponentEnabled(companyId: string, moduleId: string, cmpId: string, enabled: boolean) {
+  const m = getModuleConnections(companyId)
+  const components = { ...(m[moduleId]?.components ?? {}), [cmpId]: enabled }
+  m[moduleId] = { ...m[moduleId], components }
+  saveConnections(companyId, m)
+}
+/** Итог: явная запись сборки или дефолт (standard→on, specialized→off). */
+export function isComponentEnabled(conn: ModuleConnMap, cmp: ModuleComponent, _profileId?: string): boolean {
+  return conn[cmp.moduleId]?.components?.[cmp.id] ?? defaultComponentEnabled(cmp)
 }
 
 /** Подключён ли модуль по умолчанию (профиль компании подходит). */
@@ -63,4 +85,17 @@ export function useModuleConnections() {
 export function useModuleParams(moduleId: string): Record<string, string> {
   const { conn } = useModuleConnections()
   return conn[moduleId]?.params ?? {}
+}
+
+/** Хук: сборка компонентов модуля для активной компании (реактивно). */
+export function useModuleComponents(moduleId: string) {
+  const { companyId, profileId, conn, refresh } = useModuleConnections()
+  const defs = getModuleComponentDefs(moduleId, profileId)
+  const isEnabled = (cmp: ModuleComponent) => isComponentEnabled(conn, cmp, profileId)
+  return {
+    companyId, profileId, conn, refresh,
+    defs,                                 // все компоненты, применимые к профилю
+    enabledDefs: defs.filter(isEnabled),  // включённые в сборку (standard + активные specialized)
+    isEnabled,
+  }
 }

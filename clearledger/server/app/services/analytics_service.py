@@ -24,18 +24,22 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AccountingDoc,
+    ChargeSession,
     ExportPacket,
     FuelPump,
     FuelReceipt,
     FuelShift,
+    FuelShiftSale,
     FuelStation,
+    FuelTank,
     Period,
 )
+from app.services.mapping import normalize_default
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -107,6 +111,12 @@ class PeriodFilter:
     date_from: date
     date_to: date
     station_id: uuid.UUID | None = None
+    # Сужение сессий ЭЗС (energy): коды станций и/или каноничные регионы. Пусто = вся сеть.
+    station_codes: list[str] | None = None
+    regions: list[str] | None = None
+    # Точечный фильтр по значению разреза (drill-down строки): dim_by=поле, dim_val=значение.
+    dim_by: str | None = None
+    dim_val: str | None = None
 
 
 @dataclass
@@ -375,6 +385,698 @@ class AnalyticsService:
                 "voucher": round(100 * mix.voucher / mix.total, 2) if mix.total else 0.0,
                 "other": round(100 * mix.other / mix.total, 2) if mix.total else 0.0,
             },
+        }
+
+    # ─── management: топливный баланс ─────────────────────────────────
+
+    async def fuel_balance(self, f: PeriodFilter, group_by: str = "station") -> dict[str, Any]:
+        """Топливный баланс сети АЗС по резервуарам (FuelTank):
+          недостача_смены = (остаток_нач + приход_ТТН − реализация) − остаток_факт
+          сумма по сменам/резервуарам за период = потери учёта/хранения.
+        group_by = station | fuel | station_fuel.
+        """
+        shifts = await self._load_shifts(f)
+        shift_station = {s.id: s.station_id for s in shifts}
+        shift_ids = [s.id for s in shifts]
+
+        station_ids = {s.station_id for s in shifts if s.station_id}
+        stations_map: dict[uuid.UUID, FuelStation] = {}
+        if station_ids:
+            for st in (await self.session.execute(
+                select(FuelStation).where(FuelStation.id.in_(station_ids))
+            )).scalars().all():
+                stations_map[st.id] = st
+
+        tanks: list[FuelTank] = []
+        if shift_ids:
+            tanks = list((await self.session.execute(
+                select(FuelTank).where(FuelTank.shift_id.in_(shift_ids))
+            )).scalars().all())
+
+        agg: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {"label": "", "start": 0.0, "receipts": 0.0, "sales": 0.0, "end": 0.0, "loss": 0.0, "tanks": 0}
+        )
+        for t in tanks:
+            st = stations_map.get(shift_station.get(t.shift_id)) if t.shift_id else None
+            station_name = st.name if st else "АЗС без привязки"
+            fuel = (t.fuel_type or (str(t.fuel_code) if t.fuel_code is not None else "—")).strip() or "—"
+            if group_by == "fuel":
+                key = label = fuel
+            elif group_by == "station_fuel":
+                key = f"{station_name}|{fuel}"
+                label = f"{station_name} · {fuel}"
+            else:
+                key = label = station_name
+
+            vs = float(t.volume_start or 0.0)
+            ve = float(t.volume_end or 0.0)
+            vr = float(t.volume_received or 0.0)
+            sl = float(t.sales or 0.0)
+
+            g = agg[key]
+            g["label"] = label
+            g["start"] += vs
+            g["receipts"] += vr
+            g["sales"] += sl
+            g["end"] += ve
+            g["loss"] += (vs + vr - sl) - ve  # недостача(+)/излишек(−) смены
+            g["tanks"] += 1
+
+        def _line(g: dict[str, Any]) -> dict[str, Any]:
+            throughput = g["start"] + g["receipts"]
+            loss = g["loss"]
+            return {
+                "label": g["label"],
+                "balance_start_liters": round(g["start"], 1),
+                "receipts_liters": round(g["receipts"], 1),
+                "sales_liters": round(g["sales"], 1),
+                "balance_end_liters": round(g["end"], 1),
+                "loss_liters": round(loss, 1),
+                "loss_pct": round(loss / throughput * 100, 3) if throughput else 0.0,
+                "tanks_count": g["tanks"],
+            }
+
+        lines = sorted((_line(g) for g in agg.values()), key=lambda x: -abs(x["loss_liters"]))
+
+        tot = {"start": 0.0, "receipts": 0.0, "sales": 0.0, "end": 0.0, "loss": 0.0, "tanks": 0}
+        for g in agg.values():
+            for k in ("start", "receipts", "sales", "end", "loss", "tanks"):
+                tot[k] += g[k]
+        tot_through = tot["start"] + tot["receipts"]
+        totals = {
+            "label": "Итого",
+            "balance_start_liters": round(tot["start"], 1),
+            "receipts_liters": round(tot["receipts"], 1),
+            "sales_liters": round(tot["sales"], 1),
+            "balance_end_liters": round(tot["end"], 1),
+            "loss_liters": round(tot["loss"], 1),
+            "loss_pct": round(tot["loss"] / tot_through * 100, 3) if tot_through else 0.0,
+            "tanks_count": tot["tanks"],
+        }
+
+        return {
+            "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
+            "group_by": group_by,
+            "lines": lines,
+            "totals": totals,
+            "shifts_count": len(shifts),
+        }
+
+    # ─── management: каналы продаж ────────────────────────────────────
+
+    async def sales_channels(self, f: PeriodFilter) -> dict[str, Any]:
+        """Разрез продаж по каналам оплаты (FuelShiftSale.payment_channel):
+        объём, сумма, доля, ср. цена ₽/л. Комиссии/категории — на клиенте (конфиг).
+        """
+        shifts = await self._load_shifts(f)
+        shift_ids = [s.id for s in shifts]
+
+        sales: list[FuelShiftSale] = []
+        if shift_ids:
+            sales = list((await self.session.execute(
+                select(FuelShiftSale).where(FuelShiftSale.shift_id.in_(shift_ids))
+            )).scalars().all())
+
+        agg: dict[str, dict[str, float]] = defaultdict(lambda: {"liters": 0.0, "amount": 0.0, "count": 0})
+        for s in sales:
+            ch = (s.payment_channel or "—").strip() or "—"
+            g = agg[ch]
+            g["liters"] += float(s.liters or 0.0)
+            g["amount"] += float(s.amount or 0.0)
+            g["count"] += 1
+
+        total_amount = sum(g["amount"] for g in agg.values())
+        total_liters = sum(g["liters"] for g in agg.values())
+
+        lines = [
+            {
+                "channel": ch,
+                "label": normalize_default("paytype", ch),
+                "liters": round(g["liters"], 1),
+                "amount": round(g["amount"], 2),
+                "count": int(g["count"]),
+                "avg_price": round(g["amount"] / g["liters"], 2) if g["liters"] else 0.0,
+                "share_pct": round(g["amount"] / total_amount * 100, 2) if total_amount else 0.0,
+            }
+            for ch, g in agg.items()
+        ]
+        lines.sort(key=lambda x: -x["amount"])
+
+        return {
+            "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
+            "lines": lines,
+            "total_amount": round(total_amount, 2),
+            "total_liters": round(total_liters, 1),
+            "shifts_count": len(shifts),
+        }
+
+    # ─── management (energy): зарядные сессии ЭЗС ──────────────────────
+
+    def _cs_group_col(self, group_by: str):
+        S = ChargeSession
+        if group_by == "region":
+            return func.coalesce(S.region, "—")
+        if group_by == "connector":
+            return func.coalesce(S.connector_type, "—")
+        if group_by == "user_type":
+            return func.coalesce(S.user_type, "—")
+        if group_by == "charge_type":
+            return func.coalesce(S.charge_type, "—")
+        if group_by == "result":
+            return func.coalesce(S.result, "—")
+        if group_by == "tariff":
+            return S.tariff
+        if group_by == "hour":
+            return func.extract("hour", S.started_at)
+        if group_by == "weekday":
+            return func.extract("isodow", S.started_at)  # 1=Пн .. 7=Вс
+        if group_by == "day":
+            return func.to_char(S.started_at, "YYYY-MM-DD")
+        if group_by == "week":
+            # понедельник недели (как date_trunc('week')); лейбл сортируем лексически
+            return func.to_char(func.date_trunc("week", S.started_at), "YYYY-MM-DD")
+        if group_by == "decade":
+            # декада = треть месяца (1–10 / 11–20 / 21–конец) → "YYYY-MM-Дn"
+            day = func.extract("day", S.started_at)
+            dec = case((day <= 10, 1), (day <= 20, 2), else_=3)
+            return func.concat(func.to_char(S.started_at, "YYYY-MM"), "-Д", dec)
+        if group_by == "month":
+            return func.to_char(S.started_at, "YYYY-MM")
+        if group_by == "quarter":
+            return func.concat(func.to_char(S.started_at, "YYYY"), "-Q", func.to_char(S.started_at, "Q"))
+        # station: уникальна по КОДУ (одно имя часто у многих ЭЗС, напр. «СНК» у 60 станций),
+        # поэтому в ключ включаем код — иначе одноимённые станции схлопываются. Подпись «Имя (код)».
+        return func.concat(func.coalesce(S.station_name, "Станция"), " (", func.coalesce(S.station_code, "—"), ")")
+
+    @staticmethod
+    def _dim_cond(dim_by, dim_val):
+        """Точечный фильтр по значению разреза (drill-down строки)."""
+        if not dim_by or dim_val is None:
+            return None
+        S = ChargeSession
+        cols = {"station": S.station_code, "region": S.region, "connector": S.connector_type,
+                "user_type": S.user_type, "charge_type": S.charge_type, "result": S.result}
+        if dim_by in cols:
+            return cols[dim_by] == dim_val
+        if dim_by == "tariff":
+            try:
+                return S.tariff == float(str(dim_val).replace(",", "."))
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def _cs_conds(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None):
+        """Условия WHERE для сессий: период + сужение по станциям/регионам + точечный dim-фильтр."""
+        S = ChargeSession
+        lo = datetime.combine(date_from, datetime.min.time())
+        hi = datetime.combine(date_to, datetime.max.time())
+        conds = [S.company_id == company_id, S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+        if station_codes:
+            conds.append(S.station_code.in_(station_codes))
+        if regions:
+            conds.append(S.region.in_(regions))
+        dc = self._dim_cond(dim_by, dim_val)
+        if dc is not None:
+            conds.append(dc)
+        return conds
+
+    @staticmethod
+    def _port_key():
+        """Физический порт = станция + номер коннектора (для распределения на порты)."""
+        S = ChargeSession
+        return func.concat(func.coalesce(S.station_code, ""), "|", func.coalesce(S.connector_no, ""))
+
+    async def _cs_aggregate(self, company_id, date_from, date_to, group_by: str,
+                            station_codes=None, regions=None, dim_by=None, dim_val=None) -> list[Any]:
+        S = ChargeSession
+        gcol = self._cs_group_col(group_by)
+        stmt = select(
+            gcol.label("g"),
+            func.count().label("cnt"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+            func.coalesce(func.sum(S.amount), 0).label("amount"),
+            func.coalesce(func.sum(S.duration_min), 0).label("duration"),
+            func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
+            func.coalesce(func.sum(case((S.paid_at.is_not(None), 1), else_=0)), 0).label("paid"),
+            func.count(distinct(self._port_key())).label("ports"),
+        ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)).group_by(gcol)
+        return list((await self.session.execute(stmt)).all())
+
+    async def _cs_ports(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None) -> int:
+        """Число физических портов сети (distinct станция+коннектор) за период/сужение."""
+        stmt = select(func.count(distinct(self._port_key()))).where(
+            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val))
+        return int((await self.session.execute(stmt)).scalar_one() or 0)
+
+    @staticmethod
+    def _cs_label(group_by: str, g) -> str:
+        if g is None:
+            return "—"
+        if group_by == "hour":
+            try:
+                return f"{int(float(g)):02d}:00"
+            except (ValueError, TypeError):
+                return str(g)
+        if group_by == "tariff":
+            return f"{float(g):g} ₽/кВтч"
+        if group_by == "decade":  # "YYYY-MM-Дn" → "Дn MM.YYYY"
+            try:
+                ym, dn = str(g).rsplit("-Д", 1)
+                y, m = ym.split("-")
+                return f"Д{dn} {m}.{y}"
+            except ValueError:
+                return str(g)
+        if group_by == "month":  # "YYYY-MM" → "MM.YYYY"
+            try:
+                y, m = str(g).split("-")[:2]
+                return f"{m}.{y}"
+            except (ValueError, IndexError):
+                return str(g)
+        if group_by == "quarter":  # "YYYY-Qn" → "Qn YYYY"
+            try:
+                y, q = str(g).split("-Q")
+                return f"Q{q} {y}"
+            except ValueError:
+                return str(g)
+        return str(g)
+
+    def _cs_metrics(self, group_by: str, r, period_days: int = 0) -> dict[str, Any]:
+        cnt = int(r.cnt); energy = float(r.energy); amount = float(r.amount)
+        dur = float(r.duration); success = int(r.success)
+        paid = int(getattr(r, "paid", 0) or 0)
+        ports = int(getattr(r, "ports", 0) or 0)
+        port_min = ports * period_days * 1440  # доступные порт-минуты за период
+        return {
+            "label": self._cs_label(group_by, r.g),
+            "sessions": cnt,
+            "energy_kwh": round(energy, 1),
+            "amount": round(amount, 2),
+            "avg_check": round(amount / cnt, 2) if cnt else 0.0,
+            "avg_energy": round(energy / cnt, 2) if cnt else 0.0,
+            "avg_duration_min": round(dur / cnt, 1) if cnt else 0.0,
+            "success_pct": round(success / cnt * 100, 1) if cnt else 0.0,
+            "price_per_kwh": round(amount / energy, 2) if energy else 0.0,
+            # порт-нормированные метрики (валидны для физических разрезов: станция/коннектор/регион)
+            "ports": ports,
+            "utilization_pct": round(dur / port_min * 100, 1) if port_min else 0.0,
+            "throughput_port": round(energy / ports / period_days, 1) if (ports and period_days) else 0.0,
+            "revenue_port": round(amount / ports, 0) if ports else 0.0,
+            "unpaid_pct": round((cnt - paid) / cnt * 100, 1) if cnt else 0.0,
+            "_dur_sum": dur, "_success": success, "_paid": paid,
+        }
+
+    async def _cs_aggregate_2d(
+        self, company_id, date_from, date_to, bucket_by: str, series_by: str | None,
+        station_codes=None, regions=None, dim_by=None, dim_val=None,
+    ) -> list[Any]:
+        """Сырые суммы по (бакет [× серия]). series_by=None → только колонка бакета."""
+        S = ChargeSession
+        bcol = self._cs_group_col(bucket_by)
+        sel = [
+            bcol.label("b"),
+            func.count().label("cnt"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+            func.coalesce(func.sum(S.amount), 0).label("amount"),
+            func.coalesce(func.sum(S.duration_min), 0).label("duration"),
+            func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
+        ]
+        groups = [bcol]
+        if series_by:
+            scol = self._cs_group_col(series_by)
+            sel.insert(1, scol.label("s"))
+            groups.append(scol)
+        stmt = select(*sel).where(
+            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)
+        ).group_by(*groups)
+        return list((await self.session.execute(stmt)).all())
+
+    _CS_METRICS = ("sessions", "energy_kwh", "amount", "avg_check", "avg_energy",
+                   "avg_duration_min", "success_pct", "price_per_kwh")
+
+    @staticmethod
+    def _cs_metric_from_sums(metric: str, cnt, energy, amount, dur, success) -> float:
+        """Значение метрики из сырых сумм ячейки (guard-деление)."""
+        cnt = int(cnt); energy = float(energy); amount = float(amount)
+        dur = float(dur); success = int(success)
+        m = {
+            "sessions": cnt, "energy_kwh": round(energy, 1), "amount": round(amount, 2),
+            "avg_check": amount / cnt if cnt else 0.0,
+            "avg_energy": energy / cnt if cnt else 0.0,
+            "avg_duration_min": dur / cnt if cnt else 0.0,
+            "success_pct": success / cnt * 100 if cnt else 0.0,
+            "price_per_kwh": amount / energy if energy else 0.0,
+        }
+        return round(float(m.get(metric, 0.0)), 2)
+
+    @staticmethod
+    def _cs_is_ratio(metric: str) -> bool:
+        """Ratio-метрики: пустой бакет → null (не 0), чтобы линия не проваливалась."""
+        return metric in ("avg_check", "avg_energy", "avg_duration_min", "success_pct", "price_per_kwh")
+
+    @staticmethod
+    def _cs_bucket_axis(date_from, date_to, bucket: str) -> list[str]:
+        """Полная ось бакетов (формат совпадает с _cs_group_col) — заполнение пустых."""
+        out: list[str] = []
+        if bucket == "day":
+            d = date_from
+            while d <= date_to:
+                out.append(d.strftime("%Y-%m-%d")); d += timedelta(days=1)
+        elif bucket == "week":
+            d = date_from - timedelta(days=date_from.weekday())  # выравнивание на понедельник
+            while d <= date_to:
+                out.append(d.strftime("%Y-%m-%d")); d += timedelta(days=7)
+        elif bucket == "decade":
+            y, m = date_from.year, date_from.month
+            while (y, m) <= (date_to.year, date_to.month):
+                for n in (1, 2, 3):
+                    out.append(f"{y}-{m:02d}-Д{n}")
+                m += 1
+                if m > 12:
+                    y += 1; m = 1
+        elif bucket == "month":
+            y, m = date_from.year, date_from.month
+            while (y, m) <= (date_to.year, date_to.month):
+                out.append(f"{y}-{m:02d}")
+                m += 1
+                if m > 12:
+                    y += 1; m = 1
+        else:  # quarter
+            y, q = date_from.year, (date_from.month - 1) // 3 + 1
+            endy, endq = date_to.year, (date_to.month - 1) // 3 + 1
+            while (y, q) <= (endy, endq):
+                out.append(f"{y}-Q{q}")
+                q += 1
+                if q > 4:
+                    y += 1; q = 1
+        return out
+
+    async def charge_sessions(self, f: PeriodFilter, group_by: str = "station") -> dict[str, Any]:
+        """Разрез зарядных сессий ЭЗС: выручка/энергия/сессии/ср.чек/успех по группе."""
+        period_days = (f.date_to - f.date_from).days + 1
+        rows = await self._cs_aggregate(f.company_id, f.date_from, f.date_to, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        lines = [self._cs_metrics(group_by, r, period_days) for r in rows]
+        total_amount = sum(l["amount"] for l in lines)
+        for l in lines:
+            l["share_pct"] = round(l["amount"] / total_amount * 100, 2) if total_amount else 0.0
+        if group_by in ("hour", "day"):
+            lines.sort(key=lambda x: x["label"])
+        else:
+            lines.sort(key=lambda x: -x["amount"])
+
+        ts = sum(l["sessions"] for l in lines)
+        te = sum(l["energy_kwh"] for l in lines)
+        td = sum(l["_dur_sum"] for l in lines)
+        tsucc = sum(l["_success"] for l in lines)
+        tpaid = sum(l["_paid"] for l in lines)
+        # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят сегменты)
+        net_ports = await self._cs_ports(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        port_min = net_ports * period_days * 1440
+        totals = {
+            "label": "Итого", "sessions": ts, "energy_kwh": round(te, 1), "amount": round(total_amount, 2),
+            "avg_check": round(total_amount / ts, 2) if ts else 0.0,
+            "avg_energy": round(te / ts, 2) if ts else 0.0,
+            "avg_duration_min": round(td / ts, 1) if ts else 0.0,
+            "success_pct": round(tsucc / ts * 100, 1) if ts else 0.0,
+            "price_per_kwh": round(total_amount / te, 2) if te else 0.0,
+            "ports": net_ports,
+            "utilization_pct": round(td / port_min * 100, 1) if port_min else 0.0,
+            "throughput_port": round(te / net_ports / period_days, 1) if (net_ports and period_days) else 0.0,
+            "revenue_port": round(total_amount / net_ports, 0) if net_ports else 0.0,
+            "unpaid_pct": round((ts - tpaid) / ts * 100, 1) if ts else 0.0,
+            "share_pct": 100.0,
+        }
+        for l in lines:
+            l.pop("_dur_sum", None); l.pop("_success", None); l.pop("_paid", None)
+        return {"period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
+                "group_by": group_by, "lines": lines, "totals": totals, "period_days": period_days}
+
+    async def charge_sessions_compare(
+        self, company_id, a_from, a_to, b_from, b_to, group_by: str = "station",
+    ) -> dict[str, Any]:
+        """Сравнение двух периодов по группе (обычно station): Δ выручка/энергия/сессии."""
+        rows_a = await self._cs_aggregate(company_id, a_from, a_to, group_by)
+        rows_b = await self._cs_aggregate(company_id, b_from, b_to, group_by)
+        ma = {self._cs_label(group_by, r.g): r for r in rows_a}
+        mb = {self._cs_label(group_by, r.g): r for r in rows_b}
+        labels = sorted(set(ma) | set(mb))
+
+        def val(r, attr):
+            return float(getattr(r, attr)) if r is not None else 0.0
+
+        lines = []
+        for lb in labels:
+            ra, rb = ma.get(lb), mb.get(lb)
+            a_amt, b_amt = val(ra, "amount"), val(rb, "amount")
+            a_en, b_en = val(ra, "energy"), val(rb, "energy")
+            a_ss, b_ss = int(val(ra, "cnt")), int(val(rb, "cnt"))
+            lines.append({
+                "label": lb,
+                "a_amount": round(a_amt, 2), "b_amount": round(b_amt, 2),
+                "delta_amount": round(b_amt - a_amt, 2),
+                "delta_pct": round((b_amt - a_amt) / a_amt * 100, 1) if a_amt else (100.0 if b_amt else 0.0),
+                "a_energy": round(a_en, 1), "b_energy": round(b_en, 1),
+                "delta_energy": round(b_en - a_en, 1),
+                "a_sessions": a_ss, "b_sessions": b_ss, "delta_sessions": b_ss - a_ss,
+            })
+        lines.sort(key=lambda x: -abs(x["delta_amount"]))
+        return {
+            "period_a": {"from": a_from.isoformat(), "to": a_to.isoformat()},
+            "period_b": {"from": b_from.isoformat(), "to": b_to.isoformat()},
+            "group_by": group_by, "lines": lines,
+            "totals": {
+                "a_amount": round(sum(l["a_amount"] for l in lines), 2),
+                "b_amount": round(sum(l["b_amount"] for l in lines), 2),
+                "delta_amount": round(sum(l["delta_amount"] for l in lines), 2),
+                "a_sessions": sum(l["a_sessions"] for l in lines),
+                "b_sessions": sum(l["b_sessions"] for l in lines),
+            },
+        }
+
+    async def charge_timeseries(
+        self, f: PeriodFilter, bucket: str = "day",
+        series_by: str | None = None, metric: str = "amount", top_n: int = 5,
+    ) -> dict[str, Any]:
+        """Динамика метрики по бакетам времени; series_by → multi-series (топ-N + «Прочие»)."""
+        rows = await self._cs_aggregate_2d(f.company_id, f.date_from, f.date_to, bucket, series_by, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        axis = self._cs_bucket_axis(f.date_from, f.date_to, bucket)
+        empty = None if self._cs_is_ratio(metric) else 0
+        base = {"bucket": bucket, "metric": metric,
+                "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()}}
+
+        if not series_by:
+            by = {r.b: r for r in rows}
+            data = [{"bucket": b,
+                     "value": (self._cs_metric_from_sums(metric, by[b].cnt, by[b].energy, by[b].amount, by[b].duration, by[b].success)
+                               if b in by else empty)} for b in axis]
+            return {**base, "series": ["value"], "data": data}
+
+        # multi-series: топ-N серий по суммарной выручке, остальное сворачиваем в «Прочие»
+        tot: dict[str, float] = defaultdict(float)
+        for r in rows:
+            tot[self._cs_label(series_by, r.s)] += float(r.amount)
+        top = [s for s, _ in sorted(tot.items(), key=lambda kv: -kv[1])[:top_n]]
+        top_set = set(top)
+        has_other = len(tot) > len(top_set)
+        # сырые суммы по (бакет × эффективная серия) — «Прочие» суммируем ДО метрики
+        cell: dict[tuple, list] = defaultdict(lambda: [0, 0.0, 0.0, 0.0, 0])  # cnt,energy,amount,dur,success
+        for r in rows:
+            lbl = self._cs_label(series_by, r.s)
+            key = lbl if lbl in top_set else "Прочие"
+            c = cell[(r.b, key)]
+            c[0] += int(r.cnt); c[1] += float(r.energy); c[2] += float(r.amount)
+            c[3] += float(r.duration); c[4] += int(r.success)
+        series = top + (["Прочие"] if has_other else [])
+        data = []
+        for b in axis:
+            row: dict[str, Any] = {"bucket": b}
+            for s in series:
+                c = cell.get((b, s))
+                row[s] = self._cs_metric_from_sums(metric, *c) if c else empty
+            data.append(row)
+        return {**base, "series": series, "data": data}
+
+    async def charge_heatmap(self, f: PeriodFilter, metric: str = "sessions") -> dict[str, Any]:
+        """Матрица загрузки час (0–23) × день недели (1=Пн..7=Вс) для heatmap."""
+        rows = await self._cs_aggregate_2d(
+            f.company_id, f.date_from, f.date_to, "hour", "weekday", f.station_codes, f.regions)
+        cells = []
+        for r in rows:
+            try:
+                h = int(float(r.b)); wd = int(float(r.s))
+            except (ValueError, TypeError):
+                continue
+            cells.append({
+                "hour": h, "weekday": wd,
+                "value": self._cs_metric_from_sums(metric, r.cnt, r.energy, r.amount, r.duration, r.success),
+            })
+        return {"metric": metric, "cells": cells,
+                "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()}}
+
+    async def charge_sessions_compare_multi(
+        self, company_id, periods: list[tuple[date, date]],
+        group_by: str = "station", metric: str = "amount",
+        station_codes=None, regions=None,
+    ) -> dict[str, Any]:
+        """Сравнение N периодов (2–4) по разрезу: значения метрики каждого + дельты."""
+        maps: list[dict[str, Any]] = []
+        totals: list[float] = []
+        for pf, pt in periods:
+            rows = await self._cs_aggregate(company_id, pf, pt, group_by, station_codes, regions)
+            maps.append({self._cs_label(group_by, r.g): r for r in rows})
+            # total метрики за период из сырых сумм всех групп (корректно для ratio-метрик)
+            tc = sum(int(r.cnt) for r in rows)
+            te = sum(float(r.energy) for r in rows)
+            ta = sum(float(r.amount) for r in rows)
+            tdur = sum(float(r.duration) for r in rows)
+            tsucc = sum(int(r.success) for r in rows)
+            totals.append(self._cs_metric_from_sums(metric, tc, te, ta, tdur, tsucc))
+        labels = sorted(set().union(*[set(m) for m in maps])) if maps else []
+
+        def mv(m, lb):
+            r = m.get(lb)
+            if r is None:
+                return None if self._cs_is_ratio(metric) else 0
+            return self._cs_metric_from_sums(metric, r.cnt, r.energy, r.amount, r.duration, r.success)
+
+        lines = []
+        for lb in labels:
+            vals = [mv(m, lb) for m in maps]
+            first = vals[0] or 0
+            prev = (vals[-2] if len(vals) > 1 else 0) or 0
+            last = vals[-1] or 0
+            lines.append({
+                "label": lb, "values": vals,
+                "delta_first": round(last - first, 2),
+                "delta_prev": round(last - prev, 2),
+                "delta_pct_prev": round((last - prev) / prev * 100, 1) if prev else (100.0 if last else 0.0),
+            })
+        lines.sort(key=lambda x: -abs(x["delta_prev"]))
+        return {
+            "periods": [{"from": pf.isoformat(), "to": pt.isoformat()} for pf, pt in periods],
+            "group_by": group_by, "metric": metric, "lines": lines,
+            "totals": {"values": [round(t, 2) for t in totals]},
+        }
+
+    @staticmethod
+    def _cs_interval(bucket: str, key: str) -> dict[str, str]:
+        """Границы и подпись интервала по его ключу (из _cs_group_col/_cs_bucket_axis)."""
+        try:
+            if bucket == "day":
+                return {"key": key, "from": key, "to": key, "label": key[5:]}
+            if bucket == "week":
+                d = date.fromisoformat(key)
+                end = d + timedelta(days=6)
+                return {"key": key, "from": key, "to": end.isoformat(),
+                        "label": f"{d.strftime('%d.%m')}–{end.strftime('%d.%m')}"}
+            if bucket == "decade":
+                ym, dn = key.rsplit("-Д", 1)
+                y, m = (int(x) for x in ym.split("-"))
+                n = int(dn)
+                start_day = 1 + (n - 1) * 10
+                end_day = n * 10 if n < 3 else calendar.monthrange(y, m)[1]
+                return {"key": key, "from": date(y, m, start_day).isoformat(),
+                        "to": date(y, m, end_day).isoformat(), "label": f"Д{n} {m:02d}.{y}"}
+            if bucket == "month":
+                y, m = (int(x) for x in key.split("-"))
+                last = calendar.monthrange(y, m)[1]
+                return {"key": key, "from": date(y, m, 1).isoformat(),
+                        "to": date(y, m, last).isoformat(), "label": f"{m:02d}.{y}"}
+            # quarter "YYYY-Qn"
+            ys, qs = key.split("-Q")
+            y = int(ys); q = int(qs)
+            sm = (q - 1) * 3 + 1; em = sm + 2
+            last = calendar.monthrange(y, em)[1]
+            return {"key": key, "from": date(y, sm, 1).isoformat(),
+                    "to": date(y, em, last).isoformat(), "label": f"Q{q} {y}"}
+        except (ValueError, IndexError):
+            return {"key": key, "from": key, "to": key, "label": key}
+
+    def _cs_slice_line(self, label: str, values: list, complete_idx: list[int] | None = None) -> dict[str, Any]:
+        """Строка нарезки: значения по интервалам + дельты. Дельты считаются только по
+        ПОЛНЫМ интервалам (complete_idx) — неполный последний/первый в сравнение не идёт."""
+        idx = complete_idx if complete_idx else list(range(len(values)))
+        last_i = idx[-1]
+        prev_i = idx[-2] if len(idx) > 1 else None
+        first = values[idx[0]] or 0
+        last = values[last_i] or 0
+        prev = (values[prev_i] if prev_i is not None else 0) or 0
+        return {
+            "label": label, "values": values,
+            "delta_first": round(last - first, 2),
+            "delta_prev": round(last - prev, 2),
+            "delta_pct_prev": round((last - prev) / prev * 100, 1) if prev else (100.0 if last else 0.0),
+        }
+
+    async def charge_sessions_slice(
+        self, f: PeriodFilter, bucket: str = "month",
+        group_by: str | None = None, metric: str = "amount", top_n: int = 8,
+    ) -> dict[str, Any]:
+        """Нарезка периода на интервалы (bucket) и сравнение по разрезу (group_by).
+        Строки = разрез (или «Вся сеть»), колонки = интервалы. Один SQL-проход."""
+        rows = await self._cs_aggregate_2d(f.company_id, f.date_from, f.date_to, bucket, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        axis = self._cs_bucket_axis(f.date_from, f.date_to, bucket)
+        # интервалы + пометка «неполный» (границы выходят за пределы заданного периода)
+        intervals = []
+        for b in axis:
+            iv = self._cs_interval(bucket, b)
+            iv["partial"] = (date.fromisoformat(iv["from"]) < f.date_from) or (date.fromisoformat(iv["to"]) > f.date_to)
+            intervals.append(iv)
+        complete_idx = [i for i, iv in enumerate(intervals) if not iv["partial"]]
+        empty = None if self._cs_is_ratio(metric) else 0
+
+        # «Вся сеть» по интервалам (для totals и режима без разреза) — из сырых сумм
+        net: dict[str, list] = defaultdict(lambda: [0, 0.0, 0.0, 0.0, 0])
+        for r in rows:
+            c = net[r.b]
+            c[0] += int(r.cnt); c[1] += float(r.energy); c[2] += float(r.amount)
+            c[3] += float(r.duration); c[4] += int(r.success)
+        net_values = [self._cs_metric_from_sums(metric, *net[b]) if b in net else empty for b in axis]
+
+        if not group_by:
+            lines = [self._cs_slice_line("Вся сеть", net_values, complete_idx)]
+        else:
+            tot: dict[str, float] = defaultdict(float)
+            for r in rows:
+                tot[self._cs_label(group_by, r.s)] += float(r.amount)
+            top = [s for s, _ in sorted(tot.items(), key=lambda kv: -kv[1])[:top_n]]
+            top_set = set(top)
+            has_other = len(tot) > len(top_set)
+            cell: dict[tuple, list] = defaultdict(lambda: [0, 0.0, 0.0, 0.0, 0])
+            for r in rows:
+                lbl = self._cs_label(group_by, r.s)
+                key = lbl if lbl in top_set else "Прочие"
+                c = cell[(key, r.b)]
+                c[0] += int(r.cnt); c[1] += float(r.energy); c[2] += float(r.amount)
+                c[3] += float(r.duration); c[4] += int(r.success)
+            series = top + (["Прочие"] if has_other else [])
+            lines = []
+            for s in series:
+                values = [self._cs_metric_from_sums(metric, *cell[(s, b)]) if (s, b) in cell else empty for b in axis]
+                lines.append(self._cs_slice_line(s, values, complete_idx))
+
+        return {
+            "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
+            "bucket": bucket, "metric": metric, "group_by": group_by or "__net__",
+            "intervals": intervals, "lines": lines,
+            "totals": {"values": net_values},
+        }
+
+    async def charge_dimensions(self, company_id) -> dict[str, Any]:
+        """Справочник для фильтра раздела: станции ЭЗС (код+имя) и регионы компании."""
+        S = ChargeSession
+        st_rows = (await self.session.execute(
+            select(S.station_code, func.max(S.station_name).label("name"), func.count().label("cnt"))
+            .where(S.company_id == company_id, S.station_code.is_not(None))
+            .group_by(S.station_code).order_by(func.count().desc())
+        )).all()
+        rg_rows = (await self.session.execute(
+            select(S.region, func.count().label("cnt"))
+            .where(S.company_id == company_id, S.region.is_not(None))
+            .group_by(S.region).order_by(S.region)
+        )).all()
+        return {
+            "stations": [{"code": r.station_code, "name": r.name or r.station_code, "sessions": int(r.cnt)} for r in st_rows],
+            "regions": [{"region": r.region, "sessions": int(r.cnt)} for r in rg_rows],
         }
 
     # ─── financial: cash flow + дебиторка/кредиторка ──────────────────

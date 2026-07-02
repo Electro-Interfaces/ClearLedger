@@ -202,6 +202,25 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
         reconcile_rules=["energy_suppliers", "energy_rent"],
         schedule={"mode": "manual"},
     ),
+    ChannelTemplateDecl(
+        id="charge_sessions",
+        label="Зарядные сессии ЭЗС",
+        category="Электромобильность",
+        description=(
+            "Выгрузка зарядных сессий (xlsx, ChargeTransactions): по каждой сессии — "
+            "станция, коннектор, энергия (кВтч), сумма, тариф, тип пользователя, результат. "
+            "Загрузка файла → L1 RAW → нормализация (коннектор/ФЛ-ЮЛ) → L2 (charge_sessions) "
+            "→ разрезы реализации ЭЗС. Разрез учёта привяжем позже."
+        ),
+        icon="Zap",
+        direction="energy",
+        status="available",
+        streams=[
+            StreamDecl("charge_sessions_excel", "charge_sessions", "anchor", "Сессии реализации"),
+        ],
+        stages=_STAGES_INGEST,
+        schedule={"mode": "manual"},
+    ),
 
     # ── Эталон ───────────────────────────────────────────────────────────
     ChannelTemplateDecl(

@@ -29,3 +29,6 @@ deploy/data/
 deploy/backups/
 server/probe_*.py
 server/uploads/
+
+# Windows reserved-name junk (случайные редиректы в nul)
+nul

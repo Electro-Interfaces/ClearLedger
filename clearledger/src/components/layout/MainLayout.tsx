@@ -1,11 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { AppSidebar } from './AppSidebar'
 import { Header } from './Header'
+import { WorkspaceTabBar } from './WorkspaceTabBar'
+import { KeepAliveOutlet } from './KeepAliveOutlet'
 import InteractionHost from '@/components/support/InteractionHost'
-import { Outlet, useLocation } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { isWorkspacePath } from '@/config/tabRegistry'
+import { useCompany } from '@/contexts/CompanyContext'
+import { routeAllowed } from '@/config/accessModules'
 
 /**
  * Layout с скроллящимся sidebar — паттерн из shadcn issue #6651:
@@ -20,11 +25,16 @@ export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const isMobile = useIsMobile()
   const location = useLocation()
+  const navigate = useNavigate()
+  const { companyModules } = useCompany()
+  // RBAC route-guard: прямой переход на недоступный по модулям роут → на рабочий стол.
+  useEffect(() => {
+    if (!routeAllowed(location.pathname, companyModules)) navigate('/', { replace: true })
+  }, [location.pathname, companyModules, navigate])
   // Рабочие области с фиксированной высотой (без скролла страницы, h-full внутри):
-  // рабочий стол и отдельная область разрезов «Сверка данных».
-  const isWorkspace =
-    location.pathname === '/' || location.pathname === '/reconciliation' ||
-    location.pathname === '/normalization'
+  // рабочий стол, разрезы «Сверка данных», нормализация и хранилище «Документы».
+  // На десктопе overflow решает per-tab KeepAliveOutlet; здесь — только для мобильной ветки.
+  const isWorkspace = isWorkspacePath(location.pathname)
 
   return (
     <SidebarProvider
@@ -52,14 +62,23 @@ export function MainLayout() {
         )}
 
         <SidebarInset id="workspace-area" className="overflow-hidden">
-          {isWorkspace ? (
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <Outlet />
-            </div>
+          {isMobile ? (
+            // Мобильный: одностраничная навигация без вкладок (как раньше).
+            isWorkspace ? (
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <Outlet />
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-12">
+                <Outlet />
+              </div>
+            )
           ) : (
-            <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-12">
-              <Outlet />
-            </div>
+            // Десктоп: полоса вкладок + keep-alive рабочая область.
+            <>
+              <WorkspaceTabBar />
+              <KeepAliveOutlet />
+            </>
           )}
         </SidebarInset>
       </div>

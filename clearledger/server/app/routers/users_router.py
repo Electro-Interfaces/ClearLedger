@@ -11,13 +11,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, hash_password
+from app.access_catalog import sanitize_modules
+from app.audit import log_audit
+from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
-from app.models import Company, User, UserCompany
+from app.models import Company, CompanyRole, User, UserCompany
 from app.utils import resolve_company_id
 from app.schemas import (
     CompanyMembership,
     GrantCompanyBody,
+    MemberAccessUpdate,
+    MemberModulesUpdate,
     UserAdminResponse,
     UserAdminUpdate,
     UserCreate,
@@ -65,13 +69,13 @@ async def _is_company_admin(user: User, cid: uuid.UUID, db: AsyncSession) -> boo
 async def _memberships(user_id: uuid.UUID, db: AsyncSession) -> list[CompanyMembership]:
     rows = (
         await db.execute(
-            select(Company.slug, Company.name, UserCompany.role, UserCompany.position)
+            select(Company.slug, Company.name, UserCompany.role, UserCompany.position, UserCompany.modules)
             .join(UserCompany, UserCompany.company_id == Company.id)
             .where(UserCompany.user_id == user_id)
             .order_by(Company.slug)
         )
     ).all()
-    return [CompanyMembership(slug=s, name=n, role=r, position=p) for s, n, r, p in rows]
+    return [CompanyMembership(slug=s, name=n, role=r, position=p, modules=mods) for s, n, r, p, mods in rows]
 
 
 async def _resp(
@@ -81,15 +85,25 @@ async def _resp(
     # role/position: в контексте компании — из членства; иначе глобальная роль.
     role = u.role
     position = None
+    modules: list[str] | None = None    # эффективные (с учётом назначенной роли)
+    role_id_str: str | None = None
+    role_name: str | None = None
     if scope_cid is not None:
         m = await db.get(UserCompany, (u.id, scope_cid))
         if m is not None:
             role = m.role
             position = m.position
+            modules = await resolve_member_modules(m, db)
+            if m.role_id is not None:
+                r = await db.get(CompanyRole, m.role_id)
+                if r is not None:
+                    role_id_str = str(r.id)
+                    role_name = r.name
     return UserAdminResponse(
         id=str(u.id), email=u.email, name=u.name,
-        role=role, position=position, is_superadmin=u.is_superadmin,
-        companies=memberships,
+        role=role, position=position, modules=modules,
+        role_id=role_id_str, role_name=role_name,
+        is_superadmin=u.is_superadmin, companies=memberships,
     )
 
 
@@ -151,6 +165,8 @@ async def create_user(
     db.add(UserCompany(user_id=user.id, company_id=cid,
                        role=payload.role, position=payload.position))
     await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid, action="user.create",
+                    target=user.email, details={"role": payload.role})
     return await _resp(user, db, scope_cid=cid)
 
 
@@ -190,12 +206,81 @@ async def update_user(
         membership = await db.get(UserCompany, (uid, cid))
         if membership is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не в компании")
-        if payload.role is not None:
+        if payload.role is not None and payload.role != membership.role:
             membership.role = payload.role
+            await log_audit(db, actor=current_user, company_id=cid, action="member.role",
+                            target=target.email, details={"role": payload.role})
         if payload.position is not None:
             membership.position = payload.position or None  # "" → очистить
     await db.flush()
     return await _resp(target, db, scope_cid=cid if payload.company_id else None)
+
+
+@router.put("/{user_id}/modules", response_model=UserAdminResponse)
+async def set_member_modules(
+    user_id: str,
+    payload: MemberModulesUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Назначить члену компании набор модулей доступа (RBAC).
+    modules=null → полный доступ. Требует прав админа компании."""
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    cid = await require_company_admin(payload.company_id, current_user, db)
+    membership = await db.get(UserCompany, (uid, cid))
+    if membership is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
+    target = await db.get(User, uid)
+    if target is not None and target.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя ограничивать суперадмина")
+    # admin-члену модули не ограничиваем (у него полный доступ по роли).
+    membership.modules = None if membership.role == "admin" else sanitize_modules(payload.modules)
+    membership.role_id = None  # ad-hoc набор отменяет назначенную роль
+    await db.flush()
+    return await _resp(target, db, scope_cid=cid)
+
+
+@router.put("/{user_id}/access", response_model=UserAdminResponse)
+async def set_member_access(
+    user_id: str,
+    payload: MemberAccessUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Назначить доступ члену: именованная роль (mode=role) ИЛИ ad-hoc модули (mode=custom)."""
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    cid = await require_company_admin(payload.company_id, current_user, db)
+    m = await db.get(UserCompany, (uid, cid))
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
+    target = await db.get(User, uid)
+    if target is not None and target.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя ограничивать суперадмина")
+    if m.role == "admin":
+        m.role_id = None
+        m.modules = None
+        detail = "администратор — полный доступ"
+    elif payload.mode == "role":
+        role = await db.get(CompanyRole, uuid.UUID(payload.role_id)) if payload.role_id else None
+        if role is None or role.company_id != cid:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Роль не найдена")
+        m.role_id = role.id
+        m.modules = None
+        detail = f"роль «{role.name}»"
+    else:  # custom
+        m.role_id = None
+        m.modules = sanitize_modules(payload.modules)
+        detail = "модули: " + (", ".join(m.modules) if m.modules else "все")
+    await log_audit(db, actor=current_user, company_id=cid, action="member.access",
+                    target=(target.email if target else user_id), details={"set": detail})
+    await db.commit()
+    return await _resp(target, db, scope_cid=cid)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -225,6 +310,7 @@ async def remove_user(
     if membership:
         await db.delete(membership)
         await db.flush()
+    await log_audit(db, actor=current_user, company_id=cid, action="user.remove", target=target.email)
     # Остались ли ещё членства?
     remaining = (
         await db.execute(

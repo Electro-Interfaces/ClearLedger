@@ -19,6 +19,7 @@ from app.routers import (
     auth_router,
     companies_router,
     connectors_router,
+    roles_router,
     document_links_router,
     entries_router,
     export_router,
@@ -31,6 +32,7 @@ from app.routers import (
     mappings_router,
     ocr_router,
     analytics_router,
+    charge_sessions_router,
     onec_router,
     periods_router,
     policy_router,
@@ -125,6 +127,7 @@ API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(users_router.router, prefix=API_PREFIX)
+app.include_router(roles_router.router, prefix=API_PREFIX)
 app.include_router(invitations_router.router, prefix=API_PREFIX)
 app.include_router(companies_router.router, prefix=API_PREFIX)
 app.include_router(entries_router.router, prefix=API_PREFIX)
@@ -159,6 +162,7 @@ app.include_router(mappings_router.router, prefix=API_PREFIX)
 app.include_router(export_packets_router.router, prefix=API_PREFIX)
 app.include_router(policy_router.router, prefix=API_PREFIX)
 app.include_router(analytics_router.router, prefix=API_PREFIX)
+app.include_router(charge_sessions_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 
 

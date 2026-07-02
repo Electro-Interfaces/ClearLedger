@@ -199,7 +199,12 @@ async function extractPdfViaOcr(
   }
 
   try {
-    const Tesseract = await import('tesseract.js')
+    // OCR (tesseract.js) — опциональная зависимость вне основного стека проекта.
+    // Спецификатор через переменную + @vite-ignore: отсутствие пакета не должно
+    // ломать сборку графа intake. Если пакет не установлен — import упадёт, и
+    // внешний try/catch деградирует gracefully (скан просто без OCR-текста).
+    const ocrModule = 'tesseract.js'
+    const Tesseract: any = await import(/* @vite-ignore */ ocrModule)
 
     const textParts: string[] = []
     let totalConfidence = 0

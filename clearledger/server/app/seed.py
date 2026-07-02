@@ -81,8 +81,32 @@ async def seed_data(db: AsyncSession) -> None:
     # --- Достройка предустановленных разрезов учёта каналов (из шаблонов) ---
     await _backfill_channel_cuts(db)
 
+    # --- Системные роли доступа (RBAC) для всех компаний ---
+    await _seed_system_roles(db)
+
     await db.commit()
     logger.info("Seed завершён")
+
+
+async def _seed_system_roles(db: AsyncSession) -> None:
+    """Идемпотентно создаёт системные роли доступа в каждой компании."""
+    from app.access_catalog import SYSTEM_ROLES
+    from app.models import CompanyRole
+
+    companies = (await db.execute(select(Company.id))).scalars().all()
+    for cid in companies:
+        existing = (await db.execute(
+            select(CompanyRole.name).where(
+                CompanyRole.company_id == cid, CompanyRole.is_system.is_(True)
+            )
+        )).scalars().all()
+        have = set(existing)
+        for role in SYSTEM_ROLES:
+            if role["name"] not in have:
+                db.add(CompanyRole(
+                    company_id=cid, name=role["name"],
+                    modules=role["modules"], is_system=True,
+                ))
 
 
 async def _seed_gig_msto_source(db: AsyncSession) -> None:
