@@ -387,12 +387,18 @@ function ManualTableCard({ channel }: { channel: Channel }) {
         toast.success('Таблица загружена (L1)')
       }
       const res: any = await runChannel(channel.id)
-      if (res?.status === 'success') {
-        toast.success(
-          `Обработано: строк ${res.shifts ?? res.rows ?? 0} · контрагентов +${res.counterparties ?? 0} · ` +
-          `договоров +${res.contracts ?? 0} · платёжных записей ${res.settlements ?? 0}` +
-          (res.unmatched ? ` · не сопоставлено ${res.unmatched}` : ''),
-        )
+      if (res && res.status !== 'error' && res.status !== 'skipped') {
+        const bits: string[] = []
+        if (res.created != null) bits.push(`создано ${res.created}`)       // сессии/записи
+        if (res.skipped != null) bits.push(`пропущено ${res.skipped}`)     // дубли
+        if (res.errors) bits.push(`ошибок ${res.errors}`)
+        if (res.shifts != null || res.rows != null) bits.push(`строк ${res.shifts ?? res.rows}`)
+        if (res.counterparties) bits.push(`контрагентов +${res.counterparties}`)
+        if (res.contracts) bits.push(`договоров +${res.contracts}`)
+        if (res.settlements != null) bits.push(`платёжных ${res.settlements}`)
+        if (res.unmatched) bits.push(`не сопоставлено ${res.unmatched}`)
+        if (bits.length) toast.success('Обработано: ' + bits.join(' · '))
+        else toast.warning(res.message || 'Обработка без изменений')
       } else {
         toast.warning(res?.message || 'Обработка без изменений')
       }
@@ -415,8 +421,9 @@ function ManualTableCard({ channel }: { channel: Channel }) {
       </CardHeader>
       <CardContent className="pt-0 pb-3 space-y-2">
         <p className="text-xs text-muted-foreground">
-          Файл реестра (xlsx) → загрузка как сырьё (L1) → нормализация → нормализованная БД (L2)
-          и разрезы «Поставщики э/э» / «Аренда».
+          {channel.templateId === 'charge_sessions'
+            ? 'Файл выгрузки зарядных сессий (xlsx, ChargeTransactions) → L1 RAW → нормализация (коннектор/ФЛ-ЮЛ) → сессии (L2). Повтор не задваивает — дубли по «ID сессии» пропускаются.'
+            : 'Файл реестра (xlsx) → загрузка как сырьё (L1) → нормализация → нормализованная БД (L2) и разрезы «Поставщики э/э» / «Аренда».'}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <Input type="file" accept=".xlsx,.xls"
@@ -757,7 +764,9 @@ function OverviewTab({ channel, onUpdate, isFuelApi, syncing, availableStations,
   onRepeat: (r: ChannelRun) => void
   onDelete: (r: ChannelRun) => void
 }) {
+  // Каналы с ручной загрузкой xlsx: реестр энергоснабжения/аренды и зарядные сессии ЭЗС.
   const isManualTable = channel.templateId === 'reestr_contracts_payments'
+    || channel.templateId === 'charge_sessions'
   return (
     <div className="space-y-5">
       {isManualTable && (
