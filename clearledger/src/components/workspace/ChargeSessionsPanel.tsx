@@ -197,12 +197,19 @@ function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: Cha
 }
 
 /** Универсальная таблица разреза сессий — сортируемая, с data-bars загрузки. */
-function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKpis = false }: {
-  companyId: string; dateFrom: string; dateTo: string; groupBy: ChargeGroupBy; firstCol: string; withKpis?: boolean
+function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKpis = false, controls = false, tabKey = 'cs_bd' }: {
+  companyId: string; dateFrom: string; dateTo: string; groupBy: ChargeGroupBy; firstCol: string
+  withKpis?: boolean; controls?: boolean; tabKey?: string
 }) {
-  const { data, isLoading, error } = useCS(companyId, dateFrom, dateTo, groupBy)
+  // Свой период + разрез + метрика распределения + топ-N (когда controls); иначе — период раздела.
+  const [p, patch] = useTabParams(tabKey, { override: null as Period | null, metric: 'amount' as ChargeMetric, rows: 0, group: groupBy as ChargeGroupBy })
+  const gb = (controls ? p.group : groupBy) as ChargeGroupBy
+  const period = controls && p.override ? p.override : { from: dateFrom, to: dateTo }
+  const distMetric = controls ? p.metric : 'amount'
+  const col = controls ? (GROUP_LABELS[gb] ?? firstCol) : firstCol
+  const { data, isLoading, error } = useCS(companyId, period.from, period.to, gb)
   const n = useNarrow()
-  const physical = PHYSICAL_GROUPS.includes(groupBy)
+  const physical = PHYSICAL_GROUPS.includes(gb)
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'amount', dir: 'desc' })
   const lines = data?.lines ?? []
   const sortedLines = useMemo(() => {
@@ -212,10 +219,11 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
       ? dir * a.label.localeCompare(b.label, 'ru')
       : dir * (((get(a as unknown as Record<string, unknown>) as number) ?? 0) - ((get(b as unknown as Record<string, unknown>) as number) ?? 0))))
   }, [lines, sort])
+  const shownLines = controls && p.rows > 0 ? sortedLines.slice(0, p.rows) : sortedLines
   // Батч-тренд по месяцам для sparkline в строке (только физические разрезы).
   const spark = useQuery({
-    queryKey: ['charge-slice-spark', companyId, dateFrom, dateTo, groupBy, n.key],
-    queryFn: () => getChargeSlice({ companyId, dateFrom, dateTo, bucket: 'month', groupBy: groupBy as ChargeSeriesBy, metric: 'amount', topN: 1000, stations: n.stations, regions: n.regions }),
+    queryKey: ['charge-slice-spark', companyId, period.from, period.to, gb, n.key],
+    queryFn: () => getChargeSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', groupBy: gb as ChargeSeriesBy, metric: 'amount', topN: 1000, stations: n.stations, regions: n.regions }),
     enabled: physical,
   })
   const sparkMap = useMemo(() => {
@@ -228,7 +236,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   if (data.lines.length === 0) return <Empty />
   const t = data.totals
   const maxUtil = Math.max(...data.lines.map((l) => l.utilization_pct), 0.01)
-  const exCols = [firstCol, ...(physical ? ['Портов'] : []), 'Сессий', 'Энергия, кВтч', 'Выручка, ₽', 'Доля, %',
+  const exCols = [col, ...(physical ? ['Портов'] : []), 'Сессий', 'Энергия, кВтч', 'Выручка, ₽', 'Доля, %',
     ...(physical ? ['Загрузка, %', 'кВтч/д·порт'] : []), 'Ср. чек, ₽', '₽/кВтч', 'Успех, %']
   const exData: (string | number)[][] = [
     ...sortedLines.map((l) => [l.label, ...(physical ? [l.ports] : []), l.sessions, l.energy_kwh, l.amount, l.share_pct,
@@ -245,19 +253,32 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   )
   return (
     <div className="p-4 space-y-4">
+      {controls && (
+        <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+          <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+          <Field label="Разрез"><SeriesSelect value={p.group} onChange={(v) => patch({ group: v as ChargeGroupBy })} /></Field>
+          <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
+          <Field label="Строк">
+            <Select value={String(p.rows)} onValueChange={(v) => patch({ rows: Number(v) })}>
+              <SelectTrigger className="h-7 w-[110px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>{ROWS_OPTS.map((o) => <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+        </div>
+      )}
       {withKpis && <SessionKpis t={t} />}
       {data.lines.length >= 3 && (
         <div className="space-y-1.5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение выручки по разрезу</div>
-          <DistributionKpis lines={data.lines} metric="amount" dimGen={DIM_GEN[groupBy] ?? 'разрез'} />
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение по разрезу: {CHARGE_METRIC_LABELS[distMetric]}</div>
+          <DistributionKpis lines={data.lines} metric={distMetric} dimGen={DIM_GEN[gb] ?? 'разрез'} />
         </div>
       )}
       <Card>
         <CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-xs" {...exportRows(firstCol, exCols, exData)}>
+          <table className="w-full text-xs" {...exportRows(col, exCols, exData)}>
             <thead>
               <tr className="border-b bg-muted/40 text-muted-foreground">
-                <H k="label" left>{firstCol}</H>
+                <H k="label" left>{col}</H>
                 {physical && <H k="ports">Портов</H>}
                 <H k="sessions">Сессий</H>
                 <H k="energy_kwh">Энергия, кВтч</H>
@@ -272,7 +293,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
               </tr>
             </thead>
             <tbody>
-              {sortedLines.map((l) => (
+              {shownLines.map((l) => (
                 <tr key={l.label} className="border-b border-border/30 hover:bg-muted/30">
                   <td className="p-2 font-medium truncate max-w-[240px]">{l.label}</td>
                   {physical && <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(l.ports)}</td>}
@@ -319,9 +340,11 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
 
 /** Обзор: KPI + доли коннекторов и клиентов. */
 function Overview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const st = useCS(companyId, dateFrom, dateTo, 'station')
-  const conn = useCS(companyId, dateFrom, dateTo, 'connector')
-  const usr = useCS(companyId, dateFrom, dateTo, 'user_type')
+  const [ov, setOv] = useTabParams('cs_overview', { override: null as Period | null })
+  const period = ov.override ?? { from: dateFrom, to: dateTo }
+  const st = useCS(companyId, period.from, period.to, 'station')
+  const conn = useCS(companyId, period.from, period.to, 'connector')
+  const usr = useCS(companyId, period.from, period.to, 'user_type')
   if (st.isLoading) return <Loading />
   if (!st.data || st.data.lines.length === 0) return <Empty />
   const t = st.data.totals
@@ -332,6 +355,9 @@ function Overview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   if (t.unpaid_pct > 3) alerts.push(`Без оплаты ${t.unpaid_pct.toFixed(1)}% сессий`)
   return (
     <div className="p-4 space-y-4">
+      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
+      </div>
       <SessionKpis t={t} />
       {alerts.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -435,12 +461,17 @@ function ChargeHeatmap({ companyId, dateFrom, dateTo }: { companyId: string; dat
 
 /** Время и загрузка — heatmap час×день + профиль по часам суток. */
 function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const { data, isLoading } = useCS(companyId, dateFrom, dateTo, 'hour')
+  const [ov, setOv] = useTabParams('cs_time', { override: null as Period | null })
+  const period = ov.override ?? { from: dateFrom, to: dateTo }
+  const { data, isLoading } = useCS(companyId, period.from, period.to, 'hour')
   if (isLoading) return <Loading />
   if (!data || data.lines.length === 0) return <Empty />
   const max = Math.max(...data.lines.map((l) => l.sessions), 1)
   return (
     <div className="p-4 space-y-4">
+      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
+      </div>
       <SessionKpis t={data.totals} />
       {data.lines.length >= 3 && (
         <div className="space-y-1.5">
@@ -448,7 +479,7 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
           <DistributionKpis lines={data.lines} metric="sessions" dimGen="час" topLabel="Пиковый час" bottomLabel="Тихий час" />
         </div>
       )}
-      <ChargeHeatmap companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+      <ChargeHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       <Card>
         <CardContent className="pt-4">
           <div className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Профиль по часам суток (число сессий)</div>
@@ -471,11 +502,16 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
 
 /** Клиенты и тарифы — ФЛ/ЮЛ + канал запуска + разрез по тарифам. */
 function Clients({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  const [ov, setOv] = useTabParams('cs_clients', { override: null as Period | null })
+  const period = ov.override ?? { from: dateFrom, to: dateTo }
   return (
     <div className="space-y-4">
-      <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="user_type" firstCol="Тип клиента" withKpis />
-      <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="charge_type" firstCol="Канал запуска" />
-      <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="tariff" firstCol="Тариф (₽/кВтч)" />
+      <div className="flex flex-wrap items-center gap-3 px-4 pt-4" data-export-ignore>
+        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
+      </div>
+      <BreakdownTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="user_type" firstCol="Тип клиента" withKpis />
+      <BreakdownTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="charge_type" firstCol="Канал запуска" />
+      <BreakdownTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="tariff" firstCol="Тариф (₽/кВтч)" />
     </div>
   )
 }
@@ -1129,13 +1165,15 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
 
 /** Надёжность: успех сессий, исходы, худшие станции (кандидаты на ТО), тренд. */
 function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const outcomes = useCS(companyId, dateFrom, dateTo, 'result')
-  const byConn = useCS(companyId, dateFrom, dateTo, 'connector')
-  const byStation = useCS(companyId, dateFrom, dateTo, 'station')
+  const [ov, setOv] = useTabParams('cs_reliability', { override: null as Period | null })
+  const period = ov.override ?? { from: dateFrom, to: dateTo }
+  const outcomes = useCS(companyId, period.from, period.to, 'result')
+  const byConn = useCS(companyId, period.from, period.to, 'connector')
+  const byStation = useCS(companyId, period.from, period.to, 'station')
   const n = useNarrow()
   const trend = useQuery({
-    queryKey: ['charge-timeseries', companyId, dateFrom, dateTo, 'month', 'success_pct', '__net__', n.key],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'month', metric: 'success_pct', stations: n.stations, regions: n.regions }),
+    queryKey: ['charge-timeseries', companyId, period.from, period.to, 'month', 'success_pct', '__net__', n.key],
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', metric: 'success_pct', stations: n.stations, regions: n.regions }),
   })
   if (outcomes.isLoading) return <Loading />
   if (!outcomes.data || outcomes.data.lines.length === 0) return <Empty />
@@ -1148,6 +1186,9 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
 
   return (
     <div className="p-4 space-y-4">
+      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} hint={`${nf0.format(complete)} из ${nf0.format(t.sessions)}`} />
         <KpiCard label="С ошибкой" value={nf0.format(errors)} accent="danger" hint={`${(errors / t.sessions * 100).toFixed(1)}% сессий`} />
@@ -1253,8 +1294,8 @@ export function ChargeSessionsPanel({ tab, companyId, dateFrom, dateTo }: {
   )
   switch (tab) {
     case 'cs_overview': return wrap('Обзор', <Overview companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
-    case 'cs_stations': return wrap('По станциям', <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="station" firstCol="Станция" withKpis />)
-    case 'cs_connectors': return wrap('По коннекторам', <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="connector" firstCol="Коннектор" withKpis />)
+    case 'cs_stations': return wrap('По станциям', <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="station" firstCol="Станция" withKpis controls tabKey="cs_stations" />)
+    case 'cs_connectors': return wrap('По коннекторам', <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="connector" firstCol="Коннектор" withKpis controls tabKey="cs_connectors" />)
     case 'cs_time': return wrap('Время и загрузка', <TimeLoad companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
     case 'cs_clients': return wrap('Клиенты и тарифы', <Clients companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
     case 'cs_reliability': return wrap('Надёжность', <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
