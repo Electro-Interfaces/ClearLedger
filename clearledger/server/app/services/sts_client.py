@@ -8,17 +8,16 @@ from typing import Any
 
 import httpx
 
-# Кэш токена в памяти процесса
-_token: str | None = None
-_token_expiry: float = 0
+# Кэш токенов в памяти процесса. КЛЮЧ = (base_url, login): иначе токен одного
+# STS-аккаунта протекал бы на запросы другого канала/компании в том же воркере
+# (общий модульный глобал) → нормализация под чужим аккаунтом.
+_token_cache: dict[tuple[str, str], tuple[str, float]] = {}
 
 
 async def _login(
     base_url: str, login: str, password: str
 ) -> str:
     """Получить JWT-токен от STS API."""
-    global _token, _token_expiry
-
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             f"{base_url}/v2/login",
@@ -38,16 +37,15 @@ async def _login(
     if not text:
         raise ValueError("Токен STS не получен")
 
-    _token = text
-    _token_expiry = time.time() + 18 * 60  # 18 минут
+    _token_cache[(base_url, login)] = (text, time.time() + 18 * 60)  # 18 минут
     return text
 
 
 async def _get_token(base_url: str, login: str, password: str) -> str:
-    """Получить токен из кэша или залогиниться."""
-    global _token, _token_expiry
-    if _token and time.time() < _token_expiry:
-        return _token
+    """Получить токен из кэша (по base_url+login) или залогиниться."""
+    cached = _token_cache.get((base_url, login))
+    if cached and time.time() < cached[1]:
+        return cached[0]
     return await _login(base_url, login, password)
 
 

@@ -468,6 +468,12 @@ export function NormalizationPanel() {
   return (
     <CentralPanelLayout items={NORM_MENU} activeKey={tab} onSelect={(k) => setTab(k as NormTab)}>
       <ScrollArea className="h-full">
+        {/* Для не-energy профилей раздел пока иллюстративный — честно помечаем как демо,
+            чтобы конвейер/правила/журнал не читались как реальные данные компании. */}
+        <div className="mx-4 mt-4 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          Демонстрационные данные. Реальная нормализация для этого профиля к разделу ещё не подключена —
+          конвейер, правила, маппинг, агенты и журнал ниже иллюстративны.
+        </div>
         {tab === 'pipeline' && <PipelineView />}
         {tab === 'rules' && <RulesView />}
         {tab === 'mapping' && <MappingView />}

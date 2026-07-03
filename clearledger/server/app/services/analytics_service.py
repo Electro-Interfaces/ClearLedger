@@ -262,15 +262,20 @@ class AnalyticsService:
                 stations_map[st.id] = st
 
         if group_by == "station":
+            # Даты, уже закрытые ОРП (проведены в 1С) — их выручку берём из проводок.
+            # Смены за даты БЕЗ ОРП учитываем в выручке как fallback. Раньше гейт был
+            # ГЛОБАЛЬНЫМ (`if not orps`): при одном ОРП в периоде терялась вся
+            # fallback-выручка непроведённых смен → занижение P&L при частичной
+            # 1С-синхронизации. Теперь гейт по-сменный (по покрытию даты смены ОРП).
+            orp_dates = {d for doc in orps if (d := _parse_date(doc.date))}
             for sh in shifts:
                 st = stations_map.get(sh.station_id) if sh.station_id else None
                 key = label = (st.name if st else "АЗС без привязки")
                 g = groups[key]
                 g.label = label
                 g.liters += float(sh.total_liters or 0.0)
-                # Если ОРП ещё не создан для смены — учтём её в выручке fallback
-                # (отметка по флагу: shift.status == 'pending' и нет docs_count)
-                if not orps:
+                sh_date = sh.opened_at.date() if sh.opened_at else None
+                if sh_date is None or sh_date not in orp_dates:
                     g.revenue += float(sh.total_amount or 0.0)
                     g.revenue_net += float(sh.total_amount or 0.0) * 100 / 122
         elif group_by == "fuel":
@@ -541,6 +546,10 @@ class AnalyticsService:
             return func.coalesce(S.connector_type, "—")
         if group_by == "user_type":
             return func.coalesce(S.user_type, "—")
+        if group_by == "client":
+            # Наименование корпоративного клиента (обогащение справочником
+            # «Организации»); ФЛ/несопоставленные → «Без клиента (ФЛ)».
+            return func.coalesce(S.client_name, "Без клиента (ФЛ)")
         if group_by == "charge_type":
             return func.coalesce(S.charge_type, "—")
         if group_by == "result":

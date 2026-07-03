@@ -153,13 +153,18 @@ export function OneCSyncStatus({ connectionId, exchangePath }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={handleExport}
-                disabled={exportTo1C.isPending}
+                disabled
+                title="Прямой экспорт в папку обмена ещё не реализован"
               >
-                {exportTo1C.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Upload className="mr-2 size-4" />}
+                <Upload className="mr-2 size-4" />
                 Экспорт в папку обмена
+                <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  в разработке
+                </span>
               </Button>
               <p className="text-xs text-muted-foreground">
-                Верифицированные записи → EnterpriseData XML → {exchangePath}/to_1c/
+                Прямой push EnterpriseData XML в {exchangePath}/to_1c/ пока не реализован.
+                Выгрузка в 1С идёт через пакеты выгрузки (расширение 1С забирает их из очереди).
               </p>
             </div>
           </>
