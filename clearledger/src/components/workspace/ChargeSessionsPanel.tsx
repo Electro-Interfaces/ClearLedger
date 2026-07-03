@@ -246,6 +246,12 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   return (
     <div className="p-4 space-y-4">
       {withKpis && <SessionKpis t={t} />}
+      {data.lines.length >= 3 && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение выручки по разрезу</div>
+          <DistributionKpis lines={data.lines} metric="amount" dimGen={DIM_GEN[groupBy] ?? 'разрез'} />
+        </div>
+      )}
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-xs" {...exportRows(firstCol, exCols, exData)}>
@@ -436,6 +442,12 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   return (
     <div className="p-4 space-y-4">
       <SessionKpis t={data.totals} />
+      {data.lines.length >= 3 && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение сессий по часам суток</div>
+          <DistributionKpis lines={data.lines} metric="sessions" dimGen="час" topLabel="Пиковый час" bottomLabel="Тихий час" />
+        </div>
+      )}
       <ChargeHeatmap companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
       <Card>
         <CardContent className="pt-4">
@@ -515,6 +527,15 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
           </Button>
         )}
       </div>
+      {hasData && !isLoading && (
+        <PeriodSummaryKpis
+          points={data!.data.map((row) => ({
+            label: String(row.bucket),
+            v: data!.series.reduce((a, s) => a + (typeof row[s] === 'number' ? (row[s] as number) : 0), 0),
+          }))}
+          metric={p.metric}
+          unit={BUCKET_UNIT[p.bucket] ?? 'интервал'} />
+      )}
       <Card>
         <CardContent className="pt-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -627,6 +648,8 @@ function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; date
 
 const SLICE_CHART_MAX = 12  // на графике — топ-N линий для читаемости; таблица показывает все
 const RATIO_METRICS: ChargeMetric[] = ['avg_check', 'avg_energy', 'avg_duration_min', 'success_pct', 'price_per_kwh']
+const BUCKET_UNIT: Record<string, string> = { day: 'день', week: 'неделя', decade: 'декада', month: 'месяц', quarter: 'квартал' }
+const DIM_GEN: Record<string, string> = { station: 'станцию', connector: 'коннектор', user_type: 'клиента', charge_type: 'канал', region: 'регион', tariff: 'тариф', result: 'исход' }
 
 /** Выделить ключ разреза из подписи строки для drill-down (станция: «Имя (код)» → код). */
 function rowDimVal(groupBy: string, label: string): string {
@@ -635,31 +658,89 @@ function rowDimVal(groupBy: string, label: string): string {
   return label
 }
 
-/** 6 KPI сводки нарезанного периода по сети (полные интервалы). */
-function SliceKpis({ data, metric }: { data: ChargeSliceResponse; metric: ChargeMetric }) {
-  const pts = data.intervals
-    .map((iv, i) => ({ label: iv.label, v: data.totals.values[i], partial: iv.partial }))
-    .filter((x) => !x.partial && x.v != null) as { label: string; v: number; partial: boolean }[]
-  if (pts.length === 0) return null
-  const nums = pts.map((x) => x.v)
+/** Значение метрики из строки-разреза (для распределения по разрезу). */
+function lineMetricValue(metric: ChargeMetric, l: ChargeSessionLine): number {
+  switch (metric) {
+    case 'sessions': return l.sessions
+    case 'energy_kwh': return l.energy_kwh
+    case 'avg_check': return l.avg_check
+    case 'avg_energy': return l.avg_energy
+    case 'avg_duration_min': return l.avg_duration_min
+    case 'success_pct': return l.success_pct
+    case 'price_per_kwh': return l.price_per_kwh
+    default: return l.amount
+  }
+}
+
+/** 6 KPI сводки ВРЕМЕННОГО РЯДА: за период / среднее / пик(когда) / мин(когда) / тренд / стабильность. */
+function PeriodSummaryKpis({ points, metric, unit }: { points: { label: string; v: number }[]; metric: ChargeMetric; unit: string }) {
+  if (points.length === 0) return null
+  const nums = points.map((x) => x.v)
   const isRatio = RATIO_METRICS.includes(metric)
   const total = nums.reduce((a, b) => a + b, 0)
   const mean = total / nums.length
-  const peak = pts.reduce((m, x) => (x.v > m.v ? x : m), pts[0])
-  const low = pts.reduce((m, x) => (x.v < m.v ? x : m), pts[0])
+  const peak = points.reduce((m, x) => (x.v > m.v ? x : m), points[0])
+  const low = points.reduce((m, x) => (x.v < m.v ? x : m), points[0])
   const first = nums[0], last = nums[nums.length - 1]
   const trend = first ? (last - first) / first * 100 : 0
   const cv = mean ? Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length) / Math.abs(mean) * 100 : 0
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <KpiCard label="За период" value={fmtMetric(metric, isRatio ? mean : total)} accent="success" hint={isRatio ? 'среднее' : 'сумма'} />
-      <KpiCard label="Среднее / интервал" value={fmtMetric(metric, mean)} />
+      <KpiCard label={`Среднее / ${unit}`} value={fmtMetric(metric, mean)} />
       <KpiCard label="Пик" value={fmtMetric(metric, peak.v)} accent="info" hint={peak.label} />
       <KpiCard label="Минимум" value={fmtMetric(metric, low.v)} hint={low.label} />
       <KpiCard label="Тренд" value={`${trend >= 0 ? '+' : ''}${trend.toFixed(0)}%`} accent={trend >= 0 ? 'success' : 'danger'} hint="последний vs первый" />
       <KpiCard label="Стабильность" value={`${cv.toFixed(0)}%`} accent={cv <= 30 ? 'success' : cv <= 70 ? 'warning' : 'danger'} hint="разброс (CV)" />
     </div>
   )
+}
+
+/** KPI РАСПРЕДЕЛЕНИЯ по разрезу. Суммовые метрики: итого/среднее/лидер/аутсайдер/концентрация.
+ * Ratio-метрики (%, ₽/кВтч): среднее/лидер/аутсайдер/разброс (сумма процентов бессмысленна). */
+function DistributionKpis({ lines, metric, dimGen, topLabel = 'Лидер', bottomLabel = 'Аутсайдер' }: {
+  lines: ChargeSessionLine[]; metric: ChargeMetric; dimGen: string; topLabel?: string; bottomLabel?: string
+}) {
+  const pts = lines.filter((l) => l.label !== 'Прочие').map((l) => ({ label: l.label, v: lineMetricValue(metric, l) }))
+    .filter((p) => Number.isFinite(p.v))
+  if (pts.length === 0) return null
+  const isRatio = RATIO_METRICS.includes(metric)
+  const nums = pts.map((p) => p.v)
+  const total = nums.reduce((a, b) => a + b, 0)
+  const mean = total / nums.length
+  const top = pts.reduce((m, x) => (x.v > m.v ? x : m), pts[0])
+  const bottom = pts.reduce((m, x) => (x.v < m.v ? x : m), pts[0])
+  const cv = mean ? Math.sqrt(nums.reduce((a, b) => a + (b - mean) ** 2, 0) / nums.length) / Math.abs(mean) * 100 : 0
+  if (isRatio) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Среднее" value={fmtMetric(metric, mean)} accent="success" hint={`${pts.length} ${dimGen}`} />
+        <KpiCard label={topLabel} value={fmtMetric(metric, top.v)} accent="info" hint={top.label} />
+        <KpiCard label={bottomLabel} value={fmtMetric(metric, bottom.v)} accent="danger" hint={bottom.label} />
+        <KpiCard label="Разброс" value={`${cv.toFixed(0)}%`} hint="разброс (CV)" />
+      </div>
+    )
+  }
+  const top3 = [...nums].sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b, 0)
+  const conc = total ? top3 / total * 100 : 0
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+      <KpiCard label="Итого" value={fmtMetric(metric, total)} accent="success" hint={`${pts.length} ${dimGen}`} />
+      <KpiCard label={`Среднее / ${dimGen}`} value={fmtMetric(metric, mean)} />
+      <KpiCard label={topLabel} value={fmtMetric(metric, top.v)} accent="info" hint={top.label} />
+      <KpiCard label={bottomLabel} value={fmtMetric(metric, bottom.v)} hint={bottom.label} />
+      <KpiCard label="Концентрация" value={`${conc.toFixed(0)}%`} hint="доля топ-3" />
+    </div>
+  )
+}
+
+/** Сводка нарезки (полные интервалы) — обёртка PeriodSummaryKpis. */
+function SliceKpis({ data, metric }: { data: ChargeSliceResponse; metric: ChargeMetric }) {
+  const pts = data.intervals
+    .map((iv, i) => ({ label: iv.label, v: data.totals.values[i], partial: iv.partial }))
+    .filter((x) => !x.partial && x.v != null)
+    .map((x) => ({ label: x.label, v: x.v as number }))
+  return <PeriodSummaryKpis points={pts} metric={metric} unit="интервал" />
 }
 
 function SliceView({ data, metric, companyId, dateFrom, dateTo, bucket, narrow }: {
@@ -1073,6 +1154,14 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
         <KpiCard label="Станций риска" value={nf0.format(risk.length)} accent={risk.length ? 'warning' : 'success'} hint="success < 70% (≥30 сессий)" />
         <KpiCard label="Без оплаты" value={t.unpaid_pct.toFixed(1) + '%'} accent={t.unpaid_pct >= 10 ? 'danger' : t.unpaid_pct >= 3 ? 'warning' : 'success'} hint="сессий без отметки оплаты" />
       </div>
+
+      {stations.filter((l) => l.sessions >= 30).length >= 3 && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение успеха по станциям (≥30 сессий)</div>
+          <DistributionKpis lines={stations.filter((l) => l.sessions >= 30)} metric="success_pct" dimGen="станцию"
+            topLabel="Лучшая станция" bottomLabel="Худшая станция" />
+        </div>
+      )}
 
       <Card>
         <CardContent className="pt-4">
