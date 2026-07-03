@@ -261,6 +261,42 @@ export async function getChargeDimensions(companyId: string): Promise<ChargeDime
   return get<ChargeDimensions>('/api/analytics/charge-sessions/dimensions', { company_id: companyId })
 }
 
+// ─── модель данных ЭЗС для раздела «Нормализация» (слои L1→L4 + звёздная схема) ───
+export interface ChargeModelMember { label: string; count: number }
+export interface ChargeModelLayer {
+  key: string; code: string; title: string; desc: string
+  records: number | null; unit: string; tone: 'raw' | 'clean' | 'export' | 'ref'
+  status?: string
+}
+export interface ChargeModelMeasure {
+  key: string; label: string; value: number; unit: string; agg: string
+}
+export interface ChargeModelDimension {
+  key: string; label: string; field: string; cardinality: number
+  fill_pct: number; canonical: boolean; grain?: string; members: ChargeModelMember[]
+}
+export interface ChargeModelQualityField {
+  field: string; label: string; role: string; fill_pct: number
+}
+export interface ChargeModelCanon {
+  name: string; from: string; to: string; members: number | null; coverage_pct: number
+}
+export interface ChargeModelResponse {
+  rows: number
+  l1_files: number
+  layers: ChargeModelLayer[]
+  fact: {
+    table: string; name: string; grain: string; rows: number
+    period: { from: string | null; to: string | null }
+    measures: ChargeModelMeasure[]
+  } | null
+  dimensions: ChargeModelDimension[]
+  quality: { fields: ChargeModelQualityField[]; canonicalization: ChargeModelCanon[] } | null
+}
+export async function getChargeModel(companyId: string): Promise<ChargeModelResponse> {
+  return get<ChargeModelResponse>('/api/analytics/charge-sessions/model', { company_id: companyId })
+}
+
 export interface ChargeHeatmapResponse {
   metric: ChargeMetric
   cells: { hour: number; weekday: number; value: number }[]

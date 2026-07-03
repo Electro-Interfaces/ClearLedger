@@ -261,6 +261,18 @@ async def get_charge_dimensions(
     return await AnalyticsService(db).charge_dimensions(cid)
 
 
+@router.get("/charge-sessions/model")
+async def get_charge_model(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Модель данных ЭЗС для раздела «Нормализация»: слои L1→L4, звёздная схема
+    (факт + измерения), качество нормализации. По всему датасету компании."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await AnalyticsService(db).charge_model(cid)
+
+
 @router.get("/payment-mix")
 async def get_payment_mix(
     company_id: str,

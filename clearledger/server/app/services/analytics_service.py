@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AccountingDoc,
+    Channel,
     ChargeSession,
     ExportPacket,
     FuelPump,
@@ -1077,6 +1078,203 @@ class AnalyticsService:
         return {
             "stations": [{"code": r.station_code, "name": r.name or r.station_code, "sessions": int(r.cnt)} for r in st_rows],
             "regions": [{"region": r.region, "sessions": int(r.cnt)} for r in rg_rows],
+        }
+
+    async def charge_model(self, company_id) -> dict[str, Any]:
+        """Модель данных зарядных сессий для раздела «Нормализация» (energy).
+
+        Отражает нашу внутреннюю многослойную БД на РЕАЛЬНЫХ данных компании
+        (весь датасет, без периода), правильно организованную под сводные
+        таблицы / OLAP:
+          • слои L1 RAW → L2 CLEAN → L3 EXPORT → L4 1C_REF (реальные счётчики);
+          • звёздная схема: факт «Сессия зарядки» (меры) + измерения (кардинальность);
+          • качество нормализации: заполнение полей + канонизация (коннектор/ФЛ-ЮЛ/регион).
+        """
+        S = ChargeSession
+        paid_c = case((S.paid_at.is_not(None), 1), else_=0)
+        succ_c = case((S.result == "Complete", 1), else_=0)
+        agg = (await self.session.execute(select(
+            func.count().label("rows"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+            func.coalesce(func.sum(S.amount), 0).label("amount"),
+            func.coalesce(func.sum(S.duration_min), 0).label("duration"),
+            func.coalesce(func.sum(paid_c), 0).label("paid"),
+            func.coalesce(func.sum(succ_c), 0).label("success"),
+            func.min(S.started_at).label("dt_min"),
+            func.max(S.started_at).label("dt_max"),
+            # заполнение ключевых полей (COUNT игнорирует NULL → доля непустых)
+            func.count(S.session_ext_id).label("f_sid"),
+            func.count(S.station_code).label("f_station"),
+            func.count(S.region).label("f_region"),
+            func.count(S.connector_no).label("f_conn_no"),
+            func.count(S.connector_type).label("f_conn_type"),
+            func.count(S.started_at).label("f_started"),
+            func.count(S.finished_at).label("f_finished"),
+            func.count(S.result).label("f_result"),
+            func.count(S.charge_type).label("f_charge_type"),
+            func.count(S.user_type).label("f_user_type"),
+            func.count(S.user_id).label("f_user_id"),
+            func.count(S.rfid).label("f_rfid"),
+            func.count(S.paid_at).label("f_paid"),
+            func.count(S.payment_id).label("f_payment_id"),
+            # числовые меры считаем «непустыми» по >0 (колонки NOT NULL с дефолтом 0)
+            func.coalesce(func.sum(case((S.energy_kwh > 0, 1), else_=0)), 0).label("f_energy"),
+            func.coalesce(func.sum(case((S.amount > 0, 1), else_=0)), 0).label("f_amount"),
+            func.coalesce(func.sum(case((S.tariff > 0, 1), else_=0)), 0).label("f_tariff"),
+            # кардинальность измерений (distinct членов)
+            func.count(distinct(S.station_code)).label("d_station"),
+            func.count(distinct(S.region)).label("d_region"),
+            func.count(distinct(S.connector_type)).label("d_conn_type"),
+            func.count(distinct(S.charge_type)).label("d_charge_type"),
+            func.count(distinct(S.user_type)).label("d_user_type"),
+            func.count(distinct(S.result)).label("d_result"),
+            func.count(distinct(func.to_char(S.started_at, "YYYY-MM"))).label("d_month"),
+            func.count(distinct(self._port_key())).label("d_ports"),
+        ).where(S.company_id == company_id))).one()
+
+        rows = int(agg.rows or 0)
+
+        # L1 RAW: загруженные выгрузки (xlsx) — по каналам шаблона charge_sessions.
+        ch_cfgs = (await self.session.execute(
+            select(Channel.config).where(
+                Channel.company_id == company_id, Channel.template_id == "charge_sessions")
+        )).scalars().all()
+        file_ids = {(c or {}).get("uploadFileId") or (c or {}).get("upload_file_id") for c in ch_cfgs}
+        file_ids.discard(None)
+        l1_files = len(file_ids)
+
+        if rows == 0:
+            return {"rows": 0, "l1_files": l1_files, "layers": [], "fact": None,
+                    "dimensions": [], "quality": None}
+
+        def pct(n) -> float:
+            return round(int(n or 0) / rows * 100, 1) if rows else 0.0
+
+        energy = float(agg.energy or 0); amount = float(agg.amount or 0)
+        duration = float(agg.duration or 0)
+        paid = int(agg.paid or 0); success = int(agg.success or 0)
+        ports = int(agg.d_ports or 0)
+        dt_min = agg.dt_min.date().isoformat() if agg.dt_min else None
+        dt_max = agg.dt_max.date().isoformat() if agg.dt_max else None
+
+        # члены измерений (превью): станции/регионы — топ-6, остальные — до 12.
+        async def members(col, limit: int) -> list[dict[str, Any]]:
+            r = (await self.session.execute(
+                select(col.label("m"), func.count().label("cnt"))
+                .where(S.company_id == company_id, col.is_not(None))
+                .group_by(col).order_by(func.count().desc()).limit(limit)
+            )).all()
+            return [{"label": str(x.m), "count": int(x.cnt)} for x in r]
+
+        station_lbl = func.concat(func.coalesce(S.station_name, "Станция"), " (", S.station_code, ")")
+        m_station = await members(station_lbl, 6)
+        m_region = await members(S.region, 6)
+        m_conn = await members(S.connector_type, 12)
+        m_charge = await members(S.charge_type, 12)
+        m_user = await members(S.user_type, 12)
+        m_result = await members(S.result, 12)
+        # оплата — синтетическое измерение (paid_at заполнен → оплачено)
+        m_payment = [{"label": "Оплачено", "count": paid}, {"label": "Без оплаты", "count": rows - paid}]
+
+        layers = [
+            {"key": "l1", "code": "L1 · RAW", "title": "Сырьё",
+             "desc": "Выгрузки ChargeTransactions (xlsx) «как есть» — до разбора.",
+             "records": l1_files, "unit": "выгрузок", "tone": "raw",
+             # 0 файлов при наличии сессий → данные приняты прямым импортом (без канала)
+             **({"status": "direct"} if l1_files == 0 else {})},
+            {"key": "l2", "code": "L2 · CLEAN", "title": "Нормализованная база",
+             "desc": "Сессии: канонизированы тип коннектора, тип клиента (ФЛ/ЮЛ), регион; дедуп по «ID сессии».",
+             "records": rows, "unit": "сессий", "tone": "clean"},
+            {"key": "l3", "code": "L3 · EXPORT", "title": "Витрины / срезы (OLAP)",
+             "desc": "Агрегаты куба: измерения × меры — под сводные таблицы, дашборды, экспорт.",
+             "records": None, "unit": "куб", "tone": "export"},
+            {"key": "l4", "code": "L4 · 1C_REF", "title": "Связь с 1С",
+             "desc": "Выгрузка/сверка с 1С. Для энергопрофиля пока не подключена.",
+             "records": 0, "unit": "", "tone": "ref", "status": "planned"},
+        ]
+
+        fact = {
+            "table": "charge_sessions",
+            "name": "Сессия зарядки",
+            "grain": "1 строка = 1 зарядная сессия ЭЗС",
+            "rows": rows,
+            "period": {"from": dt_min, "to": dt_max},
+            "measures": [
+                {"key": "count", "label": "Сессии", "value": rows, "unit": "шт", "agg": "COUNT"},
+                {"key": "energy_kwh", "label": "Энергия", "value": round(energy, 1), "unit": "кВт·ч", "agg": "SUM"},
+                {"key": "amount", "label": "Сумма списания", "value": round(amount, 2), "unit": "₽", "agg": "SUM"},
+                {"key": "duration_min", "label": "Длительность", "value": round(duration, 0), "unit": "мин", "agg": "SUM"},
+                {"key": "success_pct", "label": "Успешных (Complete)", "value": pct(success), "unit": "%", "agg": "AVG"},
+                {"key": "unpaid_pct", "label": "Без оплаты", "value": pct(rows - paid), "unit": "%", "agg": "AVG"},
+                {"key": "ports", "label": "Портов (станция×коннектор)", "value": ports, "unit": "шт", "agg": "DISTINCT"},
+            ],
+        }
+
+        dimensions = [
+            {"key": "station", "label": "Станция", "field": "station_code / station_name",
+             "cardinality": int(agg.d_station or 0), "fill_pct": pct(agg.f_station),
+             "canonical": False, "members": m_station},
+            {"key": "region", "label": "Регион", "field": "region",
+             "cardinality": int(agg.d_region or 0), "fill_pct": pct(agg.f_region),
+             "canonical": True, "members": m_region},
+            {"key": "connector", "label": "Тип коннектора", "field": "connector_type",
+             "cardinality": int(agg.d_conn_type or 0), "fill_pct": pct(agg.f_conn_type),
+             "canonical": True, "members": m_conn},
+            {"key": "user_type", "label": "Тип клиента", "field": "user_type",
+             "cardinality": int(agg.d_user_type or 0), "fill_pct": pct(agg.f_user_type),
+             "canonical": True, "members": m_user},
+            {"key": "charge_type", "label": "Тип запуска", "field": "charge_type",
+             "cardinality": int(agg.d_charge_type or 0), "fill_pct": pct(agg.f_charge_type),
+             "canonical": False, "members": m_charge},
+            {"key": "result", "label": "Результат", "field": "result",
+             "cardinality": int(agg.d_result or 0), "fill_pct": pct(agg.f_result),
+             "canonical": False, "members": m_result},
+            {"key": "payment", "label": "Оплата", "field": "paid_at",
+             "cardinality": 2, "fill_pct": pct(agg.f_paid),
+             "canonical": True, "members": m_payment},
+            {"key": "time", "label": "Время", "field": "started_at",
+             "cardinality": int(agg.d_month or 0), "fill_pct": pct(agg.f_started), "canonical": False,
+             "grain": "год → квартал → месяц → неделя → день → час / день недели", "members": []},
+        ]
+
+        # качество нормализации: заполнение ключевых полей + роль в модели
+        quality_fields = [
+            {"field": "session_ext_id", "label": "ID сессии", "role": "ключ (дедуп)", "fill_pct": pct(agg.f_sid)},
+            {"field": "started_at", "label": "Начало сессии", "role": "измерение · время", "fill_pct": pct(agg.f_started)},
+            {"field": "finished_at", "label": "Завершение", "role": "мера · длительность", "fill_pct": pct(agg.f_finished)},
+            {"field": "station_code", "label": "Номер станции", "role": "измерение", "fill_pct": pct(agg.f_station)},
+            {"field": "region", "label": "Регион", "role": "измерение (канон.)", "fill_pct": pct(agg.f_region)},
+            {"field": "connector_type", "label": "Тип коннектора", "role": "измерение (канон.)", "fill_pct": pct(agg.f_conn_type)},
+            {"field": "user_type", "label": "Тип клиента ФЛ/ЮЛ", "role": "измерение (канон.)", "fill_pct": pct(agg.f_user_type)},
+            {"field": "charge_type", "label": "Тип запуска", "role": "измерение", "fill_pct": pct(agg.f_charge_type)},
+            {"field": "result", "label": "Результат", "role": "измерение", "fill_pct": pct(agg.f_result)},
+            {"field": "energy_kwh", "label": "Энергия, кВт·ч", "role": "мера (>0)", "fill_pct": pct(agg.f_energy)},
+            {"field": "amount", "label": "Сумма списания", "role": "мера (>0)", "fill_pct": pct(agg.f_amount)},
+            {"field": "tariff", "label": "Цена тарифа", "role": "мера (>0)", "fill_pct": pct(agg.f_tariff)},
+            {"field": "paid_at", "label": "Дата оплаты", "role": "измерение · оплата", "fill_pct": pct(agg.f_paid)},
+            {"field": "rfid", "label": "RFID-карта", "role": "атрибут (RFID-сессии)", "fill_pct": pct(agg.f_rfid)},
+        ]
+
+        # канонизация: сырое значение выгрузки → канонический член измерения (реальные правила ingest)
+        canonicalization = [
+            {"name": "Тип коннектора", "from": "текст типа из выгрузки (UPPER)", "to": "справочник коннекторов",
+             "members": int(agg.d_conn_type or 0), "coverage_pct": pct(agg.f_conn_type)},
+            {"name": "Тип клиента", "from": "признак клиента из выгрузки", "to": "ФЛ / ЮЛ (справочник)",
+             "members": int(agg.d_user_type or 0), "coverage_pct": pct(agg.f_user_type)},
+            {"name": "Регион", "from": "наименование региона «как есть»", "to": "канонический регион",
+             "members": int(agg.d_region or 0), "coverage_pct": pct(agg.f_region)},
+            {"name": "Длительность", "from": "начало / завершение сессии", "to": "минуты (вычислено)",
+             "members": None, "coverage_pct": pct(agg.f_finished)},
+            {"name": "Оплата", "from": "дата оплаты (paid_at)", "to": "оплачено / без оплаты",
+             "members": 2, "coverage_pct": 100.0},
+            {"name": "Дедупликация", "from": "ID сессии", "to": "UNIQUE(company, session_ext_id)",
+             "members": rows, "coverage_pct": 100.0},
+        ]
+
+        return {
+            "rows": rows, "l1_files": l1_files,
+            "layers": layers, "fact": fact, "dimensions": dimensions,
+            "quality": {"fields": quality_fields, "canonicalization": canonicalization},
         }
 
     # ─── financial: cash flow + дебиторка/кредиторка ──────────────────
