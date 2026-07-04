@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/breadcrumb'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useEntry } from '@/hooks/useEntries'
-import { useConnector } from '@/hooks/useConnectors'
+import { getChannels } from '@/services/channelService'
 
 const ROUTE_LABELS: Record<string, string> = {
   '': 'Дашборд',
@@ -95,7 +95,7 @@ function BreadcrumbItemResolved({
   const connectorId = isConnectorId ? segments[index] : ''
 
   const { data: entry } = useEntry(entryId)
-  const { data: connector } = useConnector(connectorId)
+  const connector = connectorId ? getChannels().find((c) => c.id === connectorId) : undefined
 
   let label = crumb.label
   if (entry) label = entry.title.length > 40 ? entry.title.slice(0, 40) + '...' : entry.title

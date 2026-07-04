@@ -341,6 +341,35 @@ RECONCILE_RULES: list[ReconRuleDecl] = [
         compare=[CompareField("paid_through", 0.0, "период")],
         severity=SeveritySpec(thresholds={"none": 0.0, "minor": 1.0, "material": 2.0}),
     ),
+
+    # ── ENERGY (РусГидро): расчёты по зарядным сессиям ЭЗС ──
+    # Классификационный разрез: каждая сессия при нормализации помечается cut_key-
+    # корзиной по каналу расчёта (эквайринг / корп.карты / без оплаты / служебные).
+    # Ставит сессии ЭЗС в конвейер достоверности — основа сверки их выручки с
+    # эквайрингом/ведомостями/1С (встречный источник для матча — план).
+    ReconRuleDecl(
+        id="ezs_settlement",
+        label="Расчёты по сессиям ЭЗС (канал оплаты)",
+        module="energy",
+        description=(
+            "Разрез зарядных сессий по каналу расчёта: моб. приложение ФЛ (эквайринг), "
+            "юрлица/корп. (ведомости/договоры per-контрагент — client_name из "
+            "обогащения), картовые без оплаты (утечка), служебные. Каждая сессия "
+            "помечается cut_key при нормализации; корп-выручка сверяется по энергии×"
+            "тарифу (amount мгновенного списания у ЮЛ = 0). Встречный источник — план."
+        ),
+        status="planned",
+        impl="ChargeSession.cut_key (charge_sessions_normalize._cut_key); группировка по cut_key/client_name",
+        streams=[
+            StreamRef("anchor", "charge_sessions_excel", "sessions", "Сессии ЭЗС"),
+        ],
+        filter={"cut_key": {"in": ["ezs_app", "ezs_corp", "ezs_unpaid", "ezs_admin"]}},
+        key=["cut_key", "client_name", "station"],
+        match=MatchSpec(time_tolerance="0", pick="exact"),
+        compare=[CompareField("amount", 0.01, "₽")],
+        severity=SeveritySpec(thresholds={"none": 0.0, "minor": 100.0, "material": 1000.0}),
+        statuses_codomain=["ezs_app", "ezs_corp", "ezs_unpaid", "ezs_admin"],
+    ),
 ]
 
 

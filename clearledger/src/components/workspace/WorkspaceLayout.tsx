@@ -91,7 +91,7 @@ function DesktopWorkspace() {
             <div className="h-full flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  {{ normalize: 'Нормализация', reconcile: 'Сверка данных', management: 'Управленческий учёт', financial: 'Финансовый учёт', accounting: 'Бухгалтерский учёт', tax: 'Налоговый учёт', export: isEnergy ? 'Выгрузка' : 'Выгрузка в 1С' }[coreMode]}
+                  {{ normalize: 'Нормализация', reconcile: 'Сверка данных', management: 'Продажи', operations: 'Управленческий', financial: 'Финансовый учёт', accounting: 'Бухгалтерский учёт', tax: 'Налоговый учёт', export: isEnergy ? 'Выгрузка' : 'Выгрузка в 1С' }[coreMode]}
                 </h2>
 
                 {/* KPI результатов сверки */}
@@ -128,6 +128,7 @@ function DesktopWorkspace() {
                 {coreMode === 'normalize' && <NormalizationPanel />}
                 {coreMode === 'reconcile' && <ReconciliationPanel />}
                 {coreMode === 'management' && <ManagementPanel />}
+                {coreMode === 'operations' && <ManagementPanel mode="operations" />}
                 {coreMode === 'financial' && <FinancialPanel />}
                 {coreMode === 'accounting' && <AccountingPanel />}
                 {coreMode === 'tax' && <TaxPanel />}

@@ -6,7 +6,7 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Radio } from 'lucide-react'
+import { Plug } from 'lucide-react'
 import type { ComponentType } from 'react'
 import {
   mainNavItems, dataItems, oneCItems, settingsItems, adminItem,
@@ -48,13 +48,13 @@ export function resolveTab(pathname: string): ResolvedTab | null {
       closable: pathname !== '/',
     }
   }
-  // Динамика: детальная страница канала.
-  const ch = matchPath('/channels/:id', pathname)
+  // Динамика: детальная страница коннектора.
+  const ch = matchPath('/connectors/:id', pathname)
   if (ch) {
     return {
       key: pathname,
-      title: `Канал #${ch.params.id}`,
-      icon: Radio,
+      title: `Коннектор #${ch.params.id}`,
+      icon: Plug,
       workspace: false,
       fuelOnly: false,
       closable: true,

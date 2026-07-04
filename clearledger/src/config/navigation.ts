@@ -7,9 +7,9 @@
  */
 import type { ComponentType } from 'react'
 import {
-  LayoutDashboard, Settings, Upload, FileText, Radio, Database,
-  Plug, BookOpen, CalendarClock, MapPin, Link2, Package,
-  Landmark, ScrollText, Tag, Layers, CalendarCheck2, GitCompare,
+  LayoutDashboard, Settings, Upload, FileText,
+  Plug, BookOpen, CalendarClock, Link2, Package,
+  Landmark, ScrollText, Tag, Layers, GitCompare,
   Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw,
 } from 'lucide-react'
 
@@ -29,18 +29,15 @@ export const mainNavItems: NavItemDef[] = [
   { to: '/objects', icon: Boxes, label: 'Объекты' },
   { to: '/reconciliation', icon: GitCompare, label: 'Разрезы учёта' },
   { to: '/files', icon: FileText, label: 'Документы' },           // первый слой данных (L1 RAW)
+  { to: '/contractors', icon: Building2, label: 'Контрагенты' },  // справочник контрагентов (рядом с документами)
   { to: '/intake', icon: Upload, label: 'Загрузка' },             // ручная drag-n-drop загрузка
 ]
 
 // Раздел «Данные»
 export const dataItems: NavItemDef[] = [
   { to: '/organization', icon: Building, label: 'Организация' },
-  { to: '/locations', icon: MapPin, label: 'Точки обслуживания' },
-  { to: '/contractors', icon: Building2, label: 'Контрагенты' },
-  { to: '/sources', icon: Database, label: 'Источники' },
-  { to: '/channels', icon: Radio, label: 'Каналы' },
+  { to: '/connectors', icon: Plug, label: 'Коннекторы' },
   { to: '/normalization', icon: Sparkles, label: 'Нормализация' },
-  { to: '/forecast', icon: CalendarCheck2, label: 'Закрытие месяца' },
 ]
 
 // Раздел «1С» — только для fuel-профиля (ГИГ)

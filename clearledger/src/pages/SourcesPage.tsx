@@ -368,7 +368,7 @@ const ADAPTER_STATUS_META: Record<string, { label: string; cls: string; dot: str
  * источник (draft + описание), менеджер компании настраивает реквизиты по описанию.
  * Показывает: статус/версию интеграции · логику обработки и данные · форму доступов.
  */
-function SchemaConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s: Source) => void }) {
+export function SchemaConnectionForm({ source, onUpdate }: { source: Source; onUpdate: (s: Source) => void }) {
   const { companyId } = useCompany()
   const { data: types, isLoading } = useQuery({
     queryKey: ['catalog', 'source-types'],

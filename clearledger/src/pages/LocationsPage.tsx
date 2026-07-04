@@ -380,6 +380,29 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
   const stats = useMemo(() => computeFleetStats(filtered, typeByCode), [filtered, typeByCode])
   const options = useMemo(() => collectFilterOptions(locations, typeByCode), [locations, typeByCode])
 
+  // Сводка нормализованного слоя L2 (типизированный паспорт из нормализации станций).
+  const l2 = useMemo(() => {
+    const wp = locations.filter((l) => l.passport)
+    const pnum = (l: ServiceLocation, k: string) => {
+      const v = (l.passport as Record<string, unknown> | undefined)?.[k]
+      return typeof v === 'number' ? v : 0
+    }
+    const regions = new Set(locations
+      .map((l) => (l.metadata as Record<string, unknown> | undefined)?.federalSubject)
+      .filter(Boolean))
+    const owners = new Set(wp
+      .map((l) => (l.passport as Record<string, unknown> | undefined)?.owner)
+      .filter(Boolean))
+    return {
+      count: wp.length,
+      ezs: locations.filter((l) => l.type === 'ev_charging').length,
+      power: wp.reduce((a, l) => a + pnum(l, 'powerKwt'), 0),
+      conns: wp.reduce((a, l) => a + pnum(l, 'connectorsCount'), 0),
+      regions: regions.size,
+      owners: owners.size,
+    }
+  }, [locations])
+
   // Режим отображения списка: единый вид по умолчанию — таблица (как у РусГидро/
   // энергетики). Карточки доступны вручную через переключатель вида.
   const [viewOverride, setViewOverride] = useState<'cards' | 'table' | null>(null)
@@ -408,7 +431,7 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
           <div className="flex items-center gap-2">
             <MapPin className="h-6 w-6 text-primary shrink-0" />
             <div>
-              <h1 className="text-xl font-semibold">Точки обслуживания</h1>
+              <h1 className="text-xl font-semibold">Объекты</h1>
               <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
                 {isEnergy
                   ? 'Места работы клиента: ЭЗС, объекты инфраструктуры, офисы, склады.'
@@ -445,10 +468,10 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
         {locations.length === 0 ? (
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              Точки обслуживания не настроены.{' '}
+              Объекты не настроены.{' '}
               {sourcesCount > 0
-                ? 'Создайте первую точку через кнопку выше — она появится во всех отчётах и каналах.'
-                : 'Сначала настройте хотя бы один источник в разделе «Настройки → Источники».'}
+                ? 'Создайте первый объект через кнопку выше — он появится во всех отчётах и коннекторах.'
+                : 'Сначала настройте хотя бы один коннектор в разделе «Коннекторы».'}
             </CardContent>
           </Card>
         ) : (
@@ -459,6 +482,32 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
               onSlice={(patch) => { sliceTo(patch); setFleetMode('list') }}
               onShowDashboard={() => setFleetMode('dashboard')}
             />
+
+            {/* Сводка нормализованного слоя L2 — типизированный паспорт объектов ЭЗС. */}
+            {l2.count > 0 && (
+              <Card className="border-l-2 border-l-primary/60">
+                <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 py-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <span className="h-2 w-2 rounded-full bg-primary" />
+                    Паспорт L2 (нормализовано)
+                    <Badge variant="secondary" className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">из нормализации станций</Badge>
+                  </div>
+                  {([
+                    ['Станций ЭЗС', l2.ezs.toLocaleString('ru-RU')],
+                    ['С паспортом', l2.count.toLocaleString('ru-RU')],
+                    ['Σ мощность', `${Math.round(l2.power).toLocaleString('ru-RU')} кВт`],
+                    ['Σ коннекторов', l2.conns.toLocaleString('ru-RU')],
+                    ['Регионов', l2.regions.toLocaleString('ru-RU')],
+                    ['Владельцев', l2.owners.toLocaleString('ru-RU')],
+                  ] as [string, string][]).map(([label, value]) => (
+                    <div key={label} className="flex flex-col">
+                      <span className="text-[11px] text-muted-foreground">{label}</span>
+                      <span className="text-sm font-semibold tabular-nums">{value}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Режим + (вид списка только в режиме «Список») */}
             <div className="flex flex-wrap items-center justify-between gap-2">

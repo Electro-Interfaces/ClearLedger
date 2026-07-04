@@ -8,7 +8,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Landmark, BookOpen, Receipt, FileOutput } from 'lucide-react'
+import { BarChart3, Gauge, Landmark, BookOpen, Receipt, FileOutput } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import type { CentralMenuItem } from './CentralPanelLayout'
@@ -36,15 +36,15 @@ export const ENERGY_MGMT: CentralMenuItem[] = [
 export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 
 // Анализ зарядных сессий ЭЗС (реальные данные, для energy-профиля).
+// «Сессии» — единый пункт с внутренними табами (обзор/станции/коннекторы/время/
+// надёжность/динамика/сравнение). Клиенты и Корпоратив — отдельными пунктами.
 export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
-  { key: 'cs_overview',   label: 'Сессии: обзор' },
-  { key: 'cs_stations',   label: 'По станциям' },
-  { key: 'cs_connectors', label: 'По коннекторам' },
-  { key: 'cs_time',       label: 'Время и загрузка' },
-  { key: 'cs_clients',    label: 'Клиенты и тарифы' },
-  { key: 'cs_reliability', label: 'Надёжность' },
-  { key: 'cs_dynamics',   label: 'Динамика (тренд)' },
-  { key: 'cs_compare',    label: 'Сравнение периодов' },
+  { key: 'cs_dashboard',  label: 'Обзор' },
+  { key: 'cs_map',        label: 'Карта' },
+  { key: 'cs_list',       label: 'Транзакции' },
+  { key: 'cs_sessions',   label: 'Сессии' },
+  { key: 'cs_clients',    label: 'Тарифы' },
+  { key: 'cs_corporate',  label: 'Корпоратив' },
 ]
 export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
 
@@ -92,11 +92,14 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     return m ? isModuleConnected(conn, m, company.profileId) : false
   }
 
-  // Управленческий — динамически из подключённых модулей (топливный P&L + энергомодули + баланс).
+  // «Продажи» (mode=management) — аналитика продаж: топливный P&L + сессии ЭЗС.
+  // «Управленческий» (mode=operations) — энергозакупка/аренда/баланс (перенесено из management).
   const balMod = balanceModuleForProfile(company.profileId)
   const mgmtItems: CentralMenuItem[] = [
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
     ...(isEnergy ? CHARGE_SESSIONS_MENU : []),
+  ]
+  const opsItems: CentralMenuItem[] = [
     ...ENERGY_MGMT.filter((m) => on(m.key)),
     ...(balMod && on(balMod.id) ? [{ key: 'balance', label: balMod.navLabel }] : []),
   ]
@@ -116,7 +119,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     : []
 
   return [
-    { mode: 'management', label: 'Управленческий', icon: BarChart3,  items: mgmtItems, connected: mgmtItems.length > 0 },
+    { mode: 'management', label: 'Продажи',        icon: BarChart3,  items: mgmtItems, connected: mgmtItems.length > 0 },
+    { mode: 'operations', label: 'Управленческий', icon: Gauge,      items: opsItems, connected: opsItems.length > 0 },
     { mode: 'financial',  label: 'Финансовый',     icon: Landmark,   items: !isEnergy && finOn ? FIN_MENU : [], connected: finOn },
     { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,   items: accItems, connected: accOn },
     { mode: 'tax',        label: 'Налоговый',      icon: Receipt,    items: !isEnergy && taxOn ? TAX_MENU : [], connected: taxOn },

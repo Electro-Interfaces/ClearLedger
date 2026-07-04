@@ -83,6 +83,7 @@ export interface ChargeSessionLine {
   share_pct: number
   // порт-нормированные метрики (валидны для физических разрезов: станция/коннектор/регион; и в totals)
   ports: number
+  stations: number          // уникальных станций в группе (для не-станционных разрезов)
   utilization_pct: number   // time-based: активные минуты ÷ (порты × период) × 100
   throughput_port: number   // кВтч/день на порт
   revenue_port: number      // ₽ на порт за период
@@ -95,11 +96,11 @@ export interface ChargeSessionsResponse {
   totals: ChargeSessionLine
   period_days?: number
 }
-export type ChargeGroupBy = 'station' | 'region' | 'connector' | 'user_type' | 'charge_type' | 'tariff' | 'hour' | 'day' | 'result'
+export type ChargeGroupBy = 'station' | 'region' | 'connector' | 'user_type' | 'client' | 'charge_type' | 'tariff' | 'hour' | 'day' | 'result'
 export type ChargeMetric = 'sessions' | 'energy_kwh' | 'amount' | 'avg_check' | 'avg_energy' | 'avg_duration_min' | 'success_pct' | 'price_per_kwh'
 export type ChargeBucket = 'day' | 'week' | 'decade' | 'month' | 'quarter'
 /** Разрез для серий графика/строк сравнения (без временных бакетов). */
-export type ChargeSeriesBy = 'station' | 'region' | 'connector' | 'user_type' | 'charge_type' | 'tariff' | 'result'
+export type ChargeSeriesBy = 'station' | 'region' | 'connector' | 'user_type' | 'client' | 'charge_type' | 'tariff' | 'result'
 
 export interface ChargeInterval { key: string; from: string; to: string; label: string; partial: boolean }
 export interface ChargeSliceResponse {
@@ -295,6 +296,78 @@ export interface ChargeModelResponse {
 }
 export async function getChargeModel(companyId: string): Promise<ChargeModelResponse> {
   return get<ChargeModelResponse>('/api/analytics/charge-sessions/model', { company_id: companyId })
+}
+
+/** Модель данных станций ЭЗС (объекты) для «Нормализации» — тот же контракт, что getChargeModel. */
+export async function getStationsModel(companyId: string): Promise<ChargeModelResponse> {
+  return get<ChargeModelResponse>('/api/analytics/stations/model', { company_id: companyId })
+}
+
+// ─── связь каналов по станции (конформная размерность) ───
+export interface StationsLinkageChannel {
+  name: string; template: string; key: string; materialized: boolean
+  stations: number; linked: number; linked_pct: number
+  records: number; records_linked: number; records_pct: number
+  orphans: number; orphan_examples: string[]
+}
+export interface StationsLinkage {
+  key_label: string
+  objects: number
+  objects_enriched: number
+  objects_without_sessions: number
+  channels: StationsLinkageChannel[]
+}
+export async function getStationsLinkage(companyId: string): Promise<StationsLinkage> {
+  return get<StationsLinkage>('/api/analytics/stations/linkage', { company_id: companyId })
+}
+
+// ─── сводная таблица (pivot) для экспорта из «Нормализации» ───
+export type ChargePivotDim =
+  | 'station' | 'region' | 'connector' | 'user_type' | 'client'
+  | 'charge_type' | 'result' | 'cut' | 'tariff'
+  | 'month' | 'week' | 'day' | 'decade' | 'quarter' | 'hour' | 'weekday'
+export interface ChargePivotResponse {
+  rows_dim: ChargePivotDim
+  cols_dim: ChargePivotDim | null
+  metric: ChargeMetric
+  row_labels: string[]
+  col_labels: string[]
+  matrix: number[][]
+  row_totals: number[]
+  col_totals: number[]
+  grand_total: number
+  truncated: { rows: number; cols: number }
+  period: { from: string; to: string }
+}
+export async function getChargePivot(p: {
+  companyId: string; dateFrom: string; dateTo: string
+  rows: ChargePivotDim; cols?: ChargePivotDim | null; metric?: ChargeMetric
+  stations?: string[]; regions?: string[]
+}): Promise<ChargePivotResponse> {
+  return get<ChargePivotResponse>('/api/analytics/charge-sessions/pivot', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    rows: p.rows, cols: p.cols || undefined, metric: p.metric ?? 'amount',
+    stations: p.stations?.length ? p.stations.join(',') : undefined,
+    regions: p.regions?.length ? p.regions.join(',') : undefined,
+  })
+}
+
+// ─── детальные строки сессий (лист «Сессии» в шаблонах экспорта) ───
+export interface ChargeSessionRow {
+  session_ext_id: string; station_code: string | null; station_name: string | null
+  region: string | null; connector_type: string | null
+  started_at: string | null; finished_at: string | null; duration_min: number
+  result: string | null; charge_type: string | null; user_type: string | null
+  client_name: string | null; energy_kwh: number; amount: number; tariff: number
+  paid_at: string | null; cut_key: string | null
+}
+export interface ChargeSessionRowsResponse { rows: ChargeSessionRow[]; total: number; truncated: boolean }
+export async function getChargeSessionRows(p: {
+  companyId: string; dateFrom: string; dateTo: string; limit?: number
+}): Promise<ChargeSessionRowsResponse> {
+  return get<ChargeSessionRowsResponse>('/api/analytics/charge-sessions/rows', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, limit: p.limit ?? 100000,
+  })
 }
 
 export interface ChargeHeatmapResponse {

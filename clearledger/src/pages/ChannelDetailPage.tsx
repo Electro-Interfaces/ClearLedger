@@ -12,8 +12,9 @@ import { Progress } from '@/components/ui/progress'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
-import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel, getChannelRunStatus, getChannelRuns, type ChannelRun } from '@/services/channelService'
+import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel, getChannelRunStatus, getChannelRuns, type ChannelRun, type ChannelRunStatus } from '@/services/channelService'
 import { uploadTableFile, getNomenclature, getWarehouses, getCounterparties } from '@/services/referenceService'
+import { enrichChargeSessions, reenrichChargeSessions } from '@/services/chargeSessionsService'
 import { getSources, loadSources } from '@/services/sourceService'
 import { listMappings, createMapping, deleteMapping, type ReconcileMapping, type MappingKind } from '@/services/mappingService'
 import { isApiEnabled } from '@/services/apiClient'
@@ -43,7 +44,7 @@ import {
   ArrowLeft, Play, Loader2, Radio, Database, Download, Shuffle,
   GitCompare, ShieldCheck, ArrowRightLeft, Trash2, Plus, History,
   Settings2, FileText, AlertTriangle, CheckCircle2, XCircle, GripVertical, MapPin,
-  Search, Filter, Upload, RotateCcw, ChevronsUpDown, Check, ChevronDown,
+  Search, Filter, Upload, RotateCcw, ChevronsUpDown, Check, ChevronDown, Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -375,6 +376,12 @@ function ManualTableCard({ channel }: { channel: Channel }) {
   const qc = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
+  const [prog, setProg] = useState<{ pct: number | null; msg: string } | null>(null)  // прогресс загрузки
+  // Режим загрузки таблицы сессий ЭЗС: 'append' подгрузить новые / 'replace' переписать всё.
+  const [mode, setMode] = useState<'append' | 'replace'>('append')
+  const isSessions = channel.templateId === 'charge_sessions'
+  const isStations = channel.templateId === 'stations'
+  const supportsMode = isSessions || isStations   // таблицы с режимом подгрузить/переписать
   const fileId = (channel.config ?? {}).uploadFileId as string | undefined
 
   async function uploadAndRun() {
@@ -386,28 +393,41 @@ function ManualTableCard({ channel }: { channel: Channel }) {
         await updateChannel(channel.id, { config: { ...channel.config, uploadFileId: r.source_id } })
         toast.success('Таблица загружена (L1)')
       }
-      const res: any = await runChannel(channel.id)
-      if (res && res.status !== 'error' && res.status !== 'skipped') {
-        const bits: string[] = []
-        if (res.created != null) bits.push(`создано ${res.created}`)       // сессии/записи
-        if (res.skipped != null) bits.push(`пропущено ${res.skipped}`)     // дубли
-        if (res.errors) bits.push(`ошибок ${res.errors}`)
-        if (res.shifts != null || res.rows != null) bits.push(`строк ${res.shifts ?? res.rows}`)
-        if (res.counterparties) bits.push(`контрагентов +${res.counterparties}`)
-        if (res.contracts) bits.push(`договоров +${res.contracts}`)
-        if (res.settlements != null) bits.push(`платёжных ${res.settlements}`)
-        if (res.unmatched) bits.push(`не сопоставлено ${res.unmatched}`)
-        if (bits.length) toast.success('Обработано: ' + bits.join(' · '))
-        else toast.warning(res.message || 'Обработка без изменений')
+      // Прогон идёт В ФОНЕ (эндпоинт сразу возвращает running) — поллим статус до
+      // завершения и показываем итог (для «переписать» — «удалено N, загружено M»).
+      await runChannel(channel.id, supportsMode ? { mode } : undefined)
+      setProg({ pct: null, msg: 'Обработка…' })
+      let final: ChannelRunStatus | null = null
+      for (let i = 0; i < 400 && !final; i++) {
+        await new Promise((r) => setTimeout(r, i === 0 ? 700 : 1200))
+        try {
+          const st = await getChannelRunStatus(channel.id)
+          if (st.running) {
+            // stations_done/stations_total = строки-прогресс (done/total) → проценты
+            const p = st.stations_total > 0 ? Math.round((st.stations_done / st.stations_total) * 100) : null
+            setProg({ pct: p, msg: st.message || 'Обработка…' })
+          } else {
+            final = st
+          }
+        } catch { /* транзиентная ошибка сети — повторим */ }
+      }
+      setProg(null)
+      if (final) {
+        const msg = final.message || `Загружено ${final.loaded ?? 0}`
+        if (final.status === 'error') toast.error(msg)
+        else toast.success('Обработано: ' + msg)
       } else {
-        toast.warning(res?.message || 'Обработка без изменений')
+        toast.message('Обработка продолжается в фоне', { description: 'Обновите страницу позже' })
       }
       qc.invalidateQueries({ queryKey: ['axis'] })
+      qc.invalidateQueries({ queryKey: ['channel-runs', channel.id] })
+      qc.invalidateQueries({ queryKey: ['channel-loaded', channel.id] })
       setFile(null)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
+      setProg(null)
     }
   }
 
@@ -421,10 +441,36 @@ function ManualTableCard({ channel }: { channel: Channel }) {
       </CardHeader>
       <CardContent className="pt-0 pb-3 space-y-2">
         <p className="text-xs text-muted-foreground">
-          {channel.templateId === 'charge_sessions'
-            ? 'Файл выгрузки зарядных сессий (xlsx, ChargeTransactions) → L1 RAW → нормализация (коннектор/ФЛ-ЮЛ) → сессии (L2). Повтор не задваивает — дубли по «ID сессии» пропускаются.'
+          {isSessions
+            ? 'Файл выгрузки зарядных сессий (xlsx, ChargeTransactions) → L1 RAW → нормализация (коннектор/ФЛ-ЮЛ) → сессии (L2).'
+            : isStations
+            ? 'Справочник станций ЭЗС (xlsx, лист «Станции») → L1 RAW → нормализация паспорта → объекты / Точки обслуживания (L2, ЭЗС).'
             : 'Файл реестра (xlsx) → загрузка как сырьё (L1) → нормализация → нормализованная БД (L2) и разрезы «Поставщики э/э» / «Аренда».'}
         </p>
+        {supportsMode && (
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-muted-foreground">Режим загрузки таблицы</span>
+            <div className="inline-flex w-fit rounded-md border border-border p-0.5 gap-0.5">
+              <button type="button" disabled={busy} onClick={() => setMode('append')}
+                className={`px-2.5 py-1 text-xs rounded-[5px] transition-colors ${mode === 'append' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                Подгрузить
+              </button>
+              <button type="button" disabled={busy} onClick={() => setMode('replace')}
+                className={`px-2.5 py-1 text-xs rounded-[5px] transition-colors ${mode === 'replace' ? 'bg-destructive text-white' : 'text-muted-foreground hover:text-foreground'}`}>
+                Переписать
+              </button>
+            </div>
+            <span className="text-[10px] text-muted-foreground/80 leading-snug">
+              {mode === 'append'
+                ? (isStations
+                    ? 'Добавит только новые станции (дедуп по «ID станции»); имеющиеся не тронет.'
+                    : 'Добавит только новые сессии (дедуп по «ID сессии»); имеющиеся не тронет.')
+                : (isStations
+                    ? 'Обновит существующие станции и добавит новые (справочник = источник истины). Пропавшие из файла не удаляются.'
+                    : 'Удалит ВСЕ сессии компании и загрузит заново из этой таблицы (полная замена).')}
+            </span>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <Input type="file" accept=".xlsx,.xls"
             className="h-8 max-w-xs text-xs"
@@ -436,6 +482,84 @@ function ManualTableCard({ channel }: { channel: Channel }) {
           {fileId && !file && (
             <span className="text-[10px] text-muted-foreground">файл загружен ранее · {String(fileId).slice(0, 8)}…</span>
           )}
+        </div>
+        {prog && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span className="truncate">{prog.msg}</span>
+              {prog.pct != null && <span className="tabular-nums shrink-0">{prog.pct}%</span>}
+            </div>
+            <Progress value={prog.pct ?? undefined} className={prog.pct == null ? 'animate-pulse' : ''} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── Карточка обогащения сессий справочником «Организации» ──────────────────
+
+/** Пример enrichment-шага канала: подгрузка справочника + джойн в основную
+ *  таблицу. Проставляет наименование корпоративного клиента (client_name)
+ *  ЮЛ-сессиям по телефону. Идемпотентно, отдельно от загрузки сессий. */
+function OrgEnrichmentCard({ channel }: { channel: Channel }) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const [file, setFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [lastMsg, setLastMsg] = useState<string | null>(null)
+
+  async function run(fn: () => Promise<{ message: string }>) {
+    setBusy(true)
+    try {
+      const r = await fn()
+      setLastMsg(r.message)
+      toast.success('Обогащение выполнено', { description: r.message })
+      qc.invalidateQueries({ queryKey: ['axis'] })
+      qc.invalidateQueries({ queryKey: ['charge-sessions'] })
+      setFile(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  function apply() {
+    if (!file) { toast.error('Выберите файл справочника (xlsx)'); return }
+    run(() => enrichChargeSessions(companyId, file))
+  }
+
+  return (
+    <Card className="md:col-span-3 py-3 gap-2 border-l-2 border-l-violet-500/70">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          <Sparkles className="h-3.5 w-3.5 text-violet-400" />
+          Обогащение: справочник организаций
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-0 pb-3 space-y-2">
+        <p className="text-xs text-muted-foreground">
+          Файл «Организации (тарифы)» (xlsx) → наименование клиента + договорной тариф +
+          корп-выручка проставляются ЮЛ-сессиям по телефону. Идемпотентно, реестр клиентов
+          сохраняется. <b>После перезагрузки таблицы сессий</b> распределение по ЮЛ восстанавливается
+          кнопкой «Переприменить» — файл заново не нужен.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="file" accept=".xlsx,.xls"
+            className="h-8 max-w-xs text-xs"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <Button size="sm" variant="outline" className="h-8 gap-1.5 border-violet-500/40"
+            disabled={busy || !file} onClick={apply}>
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            Загрузить справочник и обогатить
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-violet-300/90"
+            disabled={busy} onClick={() => run(() => reenrichChargeSessions(companyId))}
+            title="Переприменить обогащение из сохранённого реестра (без файла)">
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+            Переприменить из реестра
+          </Button>
+          {lastMsg && <span className="text-[10px] text-muted-foreground">{lastMsg}</span>}
         </div>
       </CardContent>
     </Card>
@@ -714,6 +838,7 @@ const ROLE_META: Record<string, { label: string; cls: string; dot: string }> = {
 
 /** Разрезы учёта канала: какие потоки он формирует и какие из них сверяемы. */
 function ChannelCutsCard({ channel }: { channel: Channel }) {
+  const navigate = useNavigate()
   const cuts = channel.streams
   const anchor = cuts.find((s) => (s.role ?? 'control') === 'anchor')
   const reconcilable = cuts.filter((s) => s.role === 'control')
@@ -738,6 +863,12 @@ function ChannelCutsCard({ channel }: { channel: Channel }) {
                   <span className={`h-2 w-2 rounded-full shrink-0 ${m.dot}`} />
                   <span className="text-sm text-foreground/90 truncate">{s.name}</span>
                   {!s.sourceId && <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60 shrink-0">не подключён</span>}
+                  {s.sourceId && (
+                    <button type="button" onClick={() => navigate(`/sources?focus=${s.sourceId}`)}
+                      className="text-[10px] text-primary hover:underline shrink-0" title="Настроить подключение (связь + тест)">
+                      Настроить
+                    </button>
+                  )}
                   <span className={`ml-auto text-[10px] font-semibold uppercase tracking-wide shrink-0 ${m.cls}`}>{m.label}</span>
                 </div>
               )
@@ -767,15 +898,23 @@ function OverviewTab({ channel, onUpdate, isFuelApi, syncing, availableStations,
   // Каналы с ручной загрузкой xlsx: реестр энергоснабжения/аренды и зарядные сессии ЭЗС.
   const isManualTable = channel.templateId === 'reestr_contracts_payments'
     || channel.templateId === 'charge_sessions'
+    || channel.templateId === 'stations'
+  const isSessions = channel.templateId === 'charge_sessions'
   return (
     <div className="space-y-5">
-      {isManualTable && (
+      {isManualTable ? (
+        // Файловый канал (реестр/сессии): единственный способ загрузки — карточка с
+        // файлом + режимом. STS-панель «Период → Загрузить · N дн.» здесь не нужна
+        // (у файла нет периода — оркестратор даты игнорирует), поэтому её скрываем.
+        // Для сессий — доп. карточка обогащения справочником организаций.
         <div className="grid gap-3 md:grid-cols-3">
           <ManualTableCard channel={channel} />
+          {isSessions && <OrgEnrichmentCard channel={channel} />}
         </div>
+      ) : (
+        <LoadPanel channel={channel} onUpdate={onUpdate} syncing={syncing}
+          isFuelApi={isFuelApi} availableStations={availableStations} onRun={onRun} />
       )}
-      <LoadPanel channel={channel} onUpdate={onUpdate} syncing={syncing}
-        isFuelApi={isFuelApi} availableStations={availableStations} onRun={onRun} />
       <ChannelCutsCard channel={channel} />
       <RunsList channel={channel} isFuelApi={isFuelApi} onRepeat={onRepeat} onDelete={onDelete} />
     </div>
@@ -2176,7 +2315,7 @@ export function ChannelDetailPage() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate('/channels')}>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate('/connectors')}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="flex-1">

@@ -9,6 +9,7 @@
 
 import { toPng } from 'html-to-image'
 import { saveAs } from 'file-saver'
+import { getChargePivot, getChargeSessionRows, type ChargePivotDim, type ChargeMetric, type ChargeSessionRow } from './analyticsService'
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
@@ -157,4 +158,101 @@ export async function exportChargePdf(el: HTMLElement, title: string): Promise<v
     heightLeft -= (pageH - margin * 2)
   }
   doc.save(`${fileBase(title)}.pdf`)
+}
+
+
+/* ── Сводные таблицы (pivot) для «Нормализации» ────────────────────────────
+ * Мультилистовой Excel: опц. лист «Сессии» (детально) + лист на каждую сводную.
+ * Данные тянутся с бэкенда (/charge-sessions/pivot|rows), листы строятся ExcelJS.
+ */
+
+export const PIVOT_DIM_LABEL: Record<string, string> = {
+  station: 'Станция', region: 'Регион', connector: 'Тип коннектора', user_type: 'Тип клиента',
+  client: 'Клиент (ЮЛ)', charge_type: 'Канал запуска', result: 'Исход', cut: 'Разрез расчёта',
+  tariff: 'Тариф', month: 'Месяц', week: 'Неделя', day: 'День', decade: 'Декада',
+  quarter: 'Квартал', hour: 'Час', weekday: 'День недели',
+}
+export const PIVOT_METRIC_LABEL: Record<string, string> = {
+  sessions: 'Сессии, шт', energy_kwh: 'Энергия, кВт·ч', amount: 'Сумма, ₽',
+  avg_check: 'Средний чек, ₽', avg_energy: 'Ср. энергия, кВт·ч',
+  avg_duration_min: 'Ср. длительность, мин', success_pct: 'Успешных, %', price_per_kwh: '₽/кВт·ч',
+}
+
+export interface PivotSpec { title: string; rows: ChargePivotDim; cols?: ChargePivotDim; metric?: ChargeMetric }
+
+// Pivot-ready колонки листа «Данные» (Excel-таблица): измерения + меры + счётчик.
+// Пользователь строит свою сводную поверх — выделить таблицу → Вставка → Сводная.
+const WD = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+const PIVOT_READY_COLS: [string, (r: ChargeSessionRow) => string | number][] = [
+  ['Регион', (r) => r.region || '—'],
+  ['Станция', (r) => r.station_name || r.station_code || '—'],
+  ['Коннектор', (r) => r.connector_type || '—'],
+  ['Тип клиента', (r) => r.user_type || '—'],
+  ['Клиент (ЮЛ)', (r) => r.client_name || 'Без клиента (ФЛ)'],
+  ['Канал запуска', (r) => r.charge_type || '—'],
+  ['Исход', (r) => r.result || '—'],
+  ['Разрез', (r) => r.cut_key || '—'],
+  ['Месяц', (r) => (r.started_at || '').slice(0, 7) || '—'],
+  ['Час', (r) => (r.started_at || '').slice(11, 13) || '—'],
+  ['День недели', (r) => (r.started_at ? WD[new Date(r.started_at).getDay()] : '—')],
+  ['Энергия кВт·ч', (r) => Number(r.energy_kwh) || 0],
+  ['Сумма ₽', (r) => Number(r.amount) || 0],
+  ['Длительность мин', (r) => Number(r.duration_min) || 0],
+  ['Сессии', () => 1],
+]
+
+export async function exportChargePivots(opts: {
+  companyId: string; dateFrom: string; dateTo: string; title: string
+  pivots: PivotSpec[]; onProgress?: (msg: string) => void
+}): Promise<void> {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  const used = new Set<string>()
+
+  // Лист «Данные» — настоящая Excel-таблица (pivot-ready). Свою сводную строит сам
+  // Excel: выделить ячейку в таблице → Вставка → Сводная таблица (область полей).
+  opts.onProgress?.('Загрузка сессий…')
+  const res = await getChargeSessionRows({ companyId: opts.companyId, dateFrom: opts.dateFrom, dateTo: opts.dateTo })
+  if (res.rows.length) {
+    const ws = wb.addWorksheet(safeSheet('Данные', used))
+    ws.addTable({
+      name: 'СессииЭЗС', displayName: 'СессииЭЗС', ref: 'A1', headerRow: true,
+      style: { theme: 'TableStyleMedium2', showRowStripes: true },
+      columns: PIVOT_READY_COLS.map((c) => ({ name: c[0], filterButton: true })),
+      rows: res.rows.map((r) => PIVOT_READY_COLS.map((c) => c[1](r))),
+    })
+    ws.views = [{ state: 'frozen', ySplit: 1 }]
+    for (let i = 1; i <= PIVOT_READY_COLS.length; i++) ws.getColumn(i).width = i <= 2 ? 20 : i === 5 ? 24 : 13
+    if (res.truncated) {
+      const w = ws.getCell(`A${res.rows.length + 3}`)
+      w.value = `⚠ Показаны первые ${res.rows.length} строк — для полного экспорта сузьте период.`
+      w.font = { italic: true, color: { argb: 'FFB8760A' } }
+    }
+  }
+
+  for (const pv of opts.pivots) {
+    opts.onProgress?.(`Сводная: ${pv.title}…`)
+    const d = await getChargePivot({
+      companyId: opts.companyId, dateFrom: opts.dateFrom, dateTo: opts.dateTo,
+      rows: pv.rows, cols: pv.cols, metric: pv.metric,
+    })
+    const ws = wb.addWorksheet(safeSheet(pv.title, used))
+    const corner = PIVOT_DIM_LABEL[pv.rows] + (pv.cols ? ` \ ${PIVOT_DIM_LABEL[pv.cols]}` : '')
+    ws.addRow([`${pv.title} — ${PIVOT_METRIC_LABEL[pv.metric ?? 'amount']}`]).font = { bold: true, size: 13 }
+    ws.addRow([`Период ${opts.dateFrom} … ${opts.dateTo}`]).font = { italic: true, color: { argb: 'FF888888' } }
+    ws.addRow([])
+    ws.addRow([corner, ...d.col_labels, 'Итого']).font = { bold: true }
+    d.row_labels.forEach((rl, i) => ws.addRow([rl, ...d.matrix[i], d.row_totals[i]]))
+    ws.addRow(['Итого', ...d.col_totals, d.grand_total]).font = { bold: true }
+    ws.getColumn(1).width = 30
+    ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 4 }]
+    if (d.truncated.rows || d.truncated.cols) {
+      const w = ws.addRow([`⚠ Свёрнуто в «Прочие»: строк ${d.truncated.rows}, столбцов ${d.truncated.cols}.`])
+      w.font = { italic: true, color: { argb: 'FFB8760A' } }
+    }
+  }
+
+  opts.onProgress?.('Формирование файла…')
+  const buf = await wb.xlsx.writeBuffer()
+  saveAs(new Blob([buf], { type: XLSX_MIME }), `${fileBase(opts.title)}.xlsx`)
 }

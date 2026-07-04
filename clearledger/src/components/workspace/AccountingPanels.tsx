@@ -7,7 +7,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
+import { useWorkspaceSubView, type CoreMode } from '@/contexts/WorkspaceContext'
 import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS } from './workspaceSections'
 import { ChargeSessionsPanel } from './ChargeSessionsPanel'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -97,11 +97,13 @@ function EnergyMgmtVitrine({ tab }: { tab: string }) {
   }
 }
 
-export function ManagementPanel() {
+export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {}) {
   // Меню (под-разделы) собирается из подключённых модулей в общем хуке — им же
   // рисуется гармошка в левом вертикальном меню. Здесь — только контент.
+  // Параметр mode: 'management' («Продажи») или 'operations' («Управленческий»)
+  // — панель одна, роутинг пунктов (сессии/энергомодули/баланс/P&L) общий.
   const sections = useWorkspaceSections()
-  const menu = sections.find((s) => s.mode === 'management')?.items ?? []
+  const menu = sections.find((s) => s.mode === mode)?.items ?? []
   const menuKeys = menu.map((m) => m.key)
   const [tab] = useWorkspaceSubView(menuKeys[0] ?? 'overview')
   const { period } = useFilters()

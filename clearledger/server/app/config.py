@@ -23,6 +23,15 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
+    # Имя среды — для «отпечатка среды» /api/_debug/state и баннера в UI.
+    # dev по умолчанию; прод переопределяет APP_ENV=prod в .env/compose. Помогает
+    # мгновенно понять, dev это или прод (частый источник путаницы при разработке).
+    app_env: str = "dev"
+
+    # SHA сборки (опц.) — прод может пробросить GIT_SHA в окружение контейнера,
+    # чтобы /api/_debug/state показывал, какой код реально задеплоен.
+    git_sha: str = ""
+
     # База данных
     database_url: str = (
         "postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger"

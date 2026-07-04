@@ -2115,6 +2115,33 @@ class ServiceLocation(Base):
         UUID(as_uuid=True), ForeignKey("regions.id", ondelete="SET NULL"),
         nullable=True, index=True,
     )
+    # ── Паспорт ЭЗС-станции (нормализованный L2 из справочника станций; заполнен
+    #    для type='charge_station', иначе NULL). Полный сырой паспорт — в extra_metadata.
+    serial_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    station_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    street: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    house: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    connectors_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    connector_types: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    owner: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    owner_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    brand: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ocpp_protocol: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    firmware: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    access_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    is_published: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_test: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"))
+    hubex_asset_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    hubex_link_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    success_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -2758,6 +2785,10 @@ class ChargeSession(Base):
 
     # Станция/объект
     station_code: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)   # «Номер станции» (65.245)
+    # Материализованная связь с объектом-станцией (конформная размерность): резолв
+    # station_code → ServiceLocation по № при загрузке/бэкфилле. NULL = станция-сирота.
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True, index=True)
     station_name: Mapped[str | None] = mapped_column(String(160), nullable=True)              # «Наименование станции» (СНК)
     region: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)        # «Регион станции»
     address: Mapped[str | None] = mapped_column(String(300), nullable=True)                   # «Адрес станции»
@@ -2775,8 +2806,16 @@ class ChargeSession(Base):
     result: Mapped[str | None] = mapped_column(String(40), nullable=True)                     # «Результат зарядки» (Complete/…)
     charge_type: Mapped[str | None] = mapped_column(String(40), nullable=True)                # «Тип зарядки» (USER)
     user_type: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)      # «Тип пользователя» (ФЛ/ЮЛ)
-    user_id: Mapped[str | None] = mapped_column(String(160), nullable=True)                   # «Пользователь» (телефон)
+    user_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)       # «Пользователь» (телефон)
     rfid: Mapped[str | None] = mapped_column(String(120), nullable=True)                      # «RFID-карта»
+    # Обогащение: наименование корпоративного клиента (ЮЛ) — джойн справочника
+    # «Организации» по телефону (user_id). NULL для ФЛ/несопоставленных.
+    client_name: Mapped[str | None] = mapped_column(String(300), nullable=True, index=True)
+    # Договорной тариф корп-клиента (₽/кВтч) и вычисленная корп-выручка
+    # (energy_kwh × client_tariff). У ЮЛ session.amount=0 (постоплата) — реальная
+    # выручка считается тут по тарифной модели (матрица/плоский/розница).
+    client_tariff: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    client_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     # Показатели
     energy_kwh: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False, default=0)       # «Энергия», кВтч
@@ -2794,4 +2833,37 @@ class ChargeSession(Base):
 
     __table_args__ = (
         Index("uq_charge_sessions", "company_id", "session_ext_id", unique=True),
+    )
+
+
+class CorporateClient(Base):
+    """Реестр корпоративных клиентов (ЮЛ) ЭЗС — из справочника «Организации».
+    Ключ джойна с сессиями — phone (= charge_sessions.user_id). Договорной тариф:
+    mode matrix/flat/retail (+ rate для flat, matrix регион×коннектор для matrix)."""
+    __tablename__ = "corporate_clients"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)          # ключ = user_id сессии
+    ext_id: Mapped[str | None] = mapped_column(String(40), nullable=True)   # «ID организации» из файла
+    inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="retail")  # matrix|flat|retail
+    rate: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)         # для flat
+    matrix: Mapped[dict | None] = mapped_column(JSONB, nullable=True)       # {region: {CCS2,TYPE2,TYPE1}} — РОЗНИЦА
+    # Скидка клиента к рознице, % (напр. каршеринг = 25). Применяется к матрице:
+    # цена = розница_матрицы × (1 − discount_pct/100). Регионы вне матрицы = розница.
+    discount_pct: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0, server_default=text("0"))
+    contract_start: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    users: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_corporate_clients", "company_id", "phone", unique=True),
     )

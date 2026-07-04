@@ -17,7 +17,7 @@ import type { Channel } from '@/types/channel'
 import { Plus, Trash2, Radio, Database, Clock, Loader2, ArrowRightLeft, CheckCircle2, XCircle, Circle, PauseCircle } from 'lucide-react'
 import { FuelMappingsPanel } from '@/components/fuel/FuelMappingsPanel'
 import { format } from 'date-fns'
-import { ChannelWizard } from '@/components/channels/ChannelWizard'
+import { ConnectorWizard } from '@/components/channels/ConnectorWizard'
 import { ScheduleOverview } from '@/components/channels/ScheduleOverview'
 
 const STATUS_MAP: Record<string, { label: string; cls: string; Icon: ComponentType<{ className?: string }> }> = {
@@ -65,7 +65,7 @@ function ChannelListItem({ channel, onDelete }: { channel: Channel; onDelete: ()
         <div className="mt-0.5 text-base font-bold tracking-tight truncate">{channel.name}</div>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Database className="h-3 w-3" />{channelSources.length} источник{channelSources.length !== 1 ? 'ов' : ''}
+            <Database className="h-3 w-3" />{channelSources.length} вход{channelSources.length === 1 ? '' : channelSources.length >= 2 && channelSources.length <= 4 ? 'а' : 'ов'}
           </span>
           <span>{cuts} разрез{cuts === 1 ? '' : 'ов'} учёта</span>
           {reconcilable > 0 && <span className="text-emerald-500">{reconcilable} сверяемых</span>}
@@ -123,9 +123,9 @@ export function ChannelsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">Каналы данных</h1>
+          <h1 className="text-xl font-bold">Коннекторы</h1>
           <p className="text-sm text-muted-foreground">
-            Комбинация источников → загрузка → сверка → результат
+            Подключения к системам → загрузка → сверка → результат
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -135,12 +135,12 @@ export function ChannelsPage() {
           </Button>
           <Button size="sm" className="gap-1.5" onClick={() => setWizardOpen(true)}>
             <Plus className="h-4 w-4" />
-            Создать канал
+            Создать коннектор
           </Button>
         </div>
       </div>
 
-      <ChannelWizard open={wizardOpen} onOpenChange={(v) => { setWizardOpen(v); if (!v) refresh() }} />
+      <ConnectorWizard open={wizardOpen} onOpenChange={(v) => { setWizardOpen(v); if (!v) refresh() }} />
       <ScheduleOverview open={scheduleOpen} onOpenChange={setScheduleOpen} />
 
       {/* Канонические маппинги компании — единый источник для всех каналов */}

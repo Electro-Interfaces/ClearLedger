@@ -212,7 +212,7 @@ export function LocationsTable({
               {showRegion && <SortHead k="region" className="hidden md:table-cell">Регион</SortHead>}
               {showCity && <SortHead k="city" className="hidden lg:table-cell">Город</SortHead>}
               {showBrand && <SortHead k="brand" className="hidden lg:table-cell">Бренд</SortHead>}
-              {showConnectors && <TableHead className="hidden xl:table-cell">Коннекторы</TableHead>}
+              {showConnectors && <TableHead className="hidden xl:table-cell text-right">Коннекторы</TableHead>}
               {showPower && <SortHead k="power" className="hidden md:table-cell text-right">кВт</SortHead>}
               {showOpStatus && <TableHead>Статус станции</TableHead>}
               {showPayment && <TableHead className="hidden md:table-cell">Оплата</TableHead>}
@@ -248,7 +248,7 @@ export function LocationsTable({
                   {showRegion && <TableCell className="hidden md:table-cell text-muted-foreground">{m(l, 'federalSubject')}</TableCell>}
                   {showCity && <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'cityName')}</TableCell>}
                   {showBrand && <TableCell className="hidden lg:table-cell text-muted-foreground">{m(l, 'manufacturer') || '—'}</TableCell>}
-                  {showConnectors && <TableCell className="hidden xl:table-cell text-xs text-muted-foreground tabular-nums">{m(l, 'connectorTypes') || '—'}</TableCell>}
+                  {showConnectors && <TableCell className="hidden xl:table-cell text-right text-xs text-muted-foreground tabular-nums" title={m(l, 'connectorTypes')}>{m(l, 'connectorCount') || (String(m(l, 'connectorTypes')).split(',').filter((x) => x.trim()).length || '—')}</TableCell>}
                   {showPower && <TableCell className="hidden md:table-cell text-right tabular-nums">{m(l, 'maxPowerKw')}</TableCell>}
                   {showOpStatus && (
                     <TableCell>

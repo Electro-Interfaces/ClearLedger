@@ -22,13 +22,13 @@ export interface AccessModuleDef {
 }
 
 export const ACCESS_MODULES: AccessModuleDef[] = [
-  { key: 'management', label: 'Управленческий', group: 'Режимы учёта', mode: 'management', routes: [], hint: 'аналитика, KPI, сессии, баланс' },
+  { key: 'management', label: 'Продажи', group: 'Режимы учёта', mode: 'management', routes: [], hint: 'аналитика, KPI, сессии, баланс' },
   { key: 'financial', label: 'Финансовый', group: 'Режимы учёта', mode: 'financial', routes: [], hint: 'денежные потоки, ДЗ/КЗ' },
   { key: 'accounting', label: 'Бухгалтерский', group: 'Режимы учёта', mode: 'accounting', routes: ['/forecast'], hint: 'проводки, 1С, закрытие месяца' },
   { key: 'tax', label: 'Налоговый', group: 'Режимы учёта', mode: 'tax', routes: [], hint: 'НДС, налог на прибыль' },
   { key: 'documents', label: 'Документы и загрузка', group: 'Данные и настройка', routes: ['/files', '/intake'] },
   { key: 'reconciliation', label: 'Разрезы и нормализация', group: 'Данные и настройка', routes: ['/reconciliation', '/normalization'] },
-  { key: 'sources', label: 'Источники и каналы', group: 'Данные и настройка', routes: ['/sources', '/channels'] },
+  { key: 'sources', label: 'Коннекторы', group: 'Данные и настройка', routes: ['/connectors', '/sources', '/channels'] },
   { key: 'locations', label: 'Объекты и контрагенты', group: 'Данные и настройка', routes: ['/objects', '/locations', '/contractors', '/organization'] },
   { key: 'onec', label: 'Интеграция 1С', group: 'Данные и настройка', routes: ['/1c'] },
   { key: 'catalog', label: 'Каталоги и параметры', group: 'Данные и настройка', routes: ['/settings', '/catalog'] },

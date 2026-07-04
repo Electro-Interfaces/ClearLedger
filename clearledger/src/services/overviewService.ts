@@ -1,0 +1,149 @@
+/**
+ * Клиент API /api/analytics/charge-sessions/overview — executive-дашборд сети ЭЗС.
+ * Один запрос: KPI с Δ% к прошлому периоду + спарклайны, гейджи, тренд с оверлеем,
+ * доли, топ/дно станций, корпоратив, алерты, meta. Дельты считает сервер.
+ */
+import { get } from './apiClient'
+
+export type KpiFmt = 'moneyShort' | 'money' | 'int' | 'kwh' | 'pct' | 'price'
+export type Accent = 'success' | 'warning' | 'danger' | 'info'
+export type DeltaDir = 'up' | 'down' | 'flat'
+
+export interface OverviewKpi {
+  key: string
+  label: string
+  value: number
+  prev: number
+  fmt: KpiFmt
+  unit: string
+  delta_pct: number | null
+  dir: DeltaDir
+  spark?: (number | null)[]
+  accent?: Accent
+  good: 'higher' | 'lower'
+}
+
+export interface OverviewGauge {
+  key: string
+  label: string
+  value: number        // %
+  unit: string
+  accent: Accent
+  hint?: string
+}
+
+export interface TrendPoint {
+  label: string
+  current: number | null
+  previous: number | null
+}
+export interface OverviewTrend {
+  bucket: string
+  points: TrendPoint[]
+}
+
+export interface ShareRow {
+  label: string
+  amount: number
+  sessions: number
+  energy_kwh?: number
+  share_pct: number
+}
+export interface OverviewShares {
+  connector: ShareRow[]
+  user_type: ShareRow[]
+  corp_retail: ShareRow[]
+}
+
+export interface StationRow {
+  label: string
+  sessions: number
+  energy_kwh: number
+  amount: number
+  utilization_pct: number
+  success_pct: number
+  throughput_port: number
+}
+export interface OverviewStations {
+  top: StationRow[]
+  bottom: StationRow[]
+  by_revenue: StationRow[]
+  qualified: number
+  min_sessions: number
+}
+
+export interface CorpTopClient {
+  name: string
+  corp_revenue: number
+  retail_revenue: number
+  discount_pct: number
+  sessions: number
+  energy_kwh: number
+  avg_tariff: number
+}
+export interface OverviewCorporate {
+  corp_revenue: number
+  retail_revenue: number
+  discount: number
+  discount_pct: number
+  active_clients: number
+  clients: number
+  corp_share_pct: number
+  top_clients: CorpTopClient[]
+}
+
+export interface HourPoint { hour: number; label: string; sessions: number; amount: number }
+export interface WeekdayPoint { weekday: number; label: string; amount: number; sessions: number; energy_kwh: number }
+export interface OverviewWeekday { days: WeekdayPoint[]; best: number | null; worst: number | null }
+
+export interface OverviewAlert { level: string; message: string }
+export interface OverviewMeta { active_stations: number; ports: number; sessions: number }
+
+export interface OverviewResponse {
+  period: { from: string; to: string }
+  prev_period: { from: string; to: string }
+  has_baseline: boolean
+  compare: string
+  period_days: number
+  kpis: OverviewKpi[]
+  gauges: OverviewGauge[]
+  trend: OverviewTrend
+  shares: OverviewShares
+  stations: OverviewStations
+  hourly: HourPoint[]
+  weekday: OverviewWeekday
+  corporate: OverviewCorporate
+  alerts: OverviewAlert[]
+  meta: OverviewMeta
+}
+
+export async function getChargeOverview(p: {
+  companyId: string; dateFrom: string; dateTo: string; compare?: string
+}): Promise<OverviewResponse> {
+  return get<OverviewResponse>('/api/analytics/charge-sessions/overview', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    compare: p.compare ?? 'prev',
+  })
+}
+
+// ─── метрики сессий по станции (для раскраски/размера точек на «Карте») ───
+export interface StationMetric {
+  location_id: string
+  sessions: number
+  energy_kwh: number
+  amount: number
+  success_pct: number
+  utilization_pct: number
+}
+export interface StationMetricsResponse {
+  period: { from: string; to: string }
+  metrics: StationMetric[]
+}
+/** Агрегаты сессий по станции (location_id) за период — джойнится на фронте по id локации. */
+export async function getStationMetrics(p: {
+  companyId: string; dateFrom: string; dateTo: string
+}): Promise<StationMetricsResponse> {
+  return get<StationMetricsResponse>('/api/analytics/charge-sessions/station-metrics', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+  })
+}

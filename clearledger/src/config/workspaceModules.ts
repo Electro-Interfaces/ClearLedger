@@ -26,7 +26,7 @@ export interface WorkspaceModuleDef {
 export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
   // ── Управленческий ──
   {
-    id: 'balance_ezs', label: 'Баланс ЭЗС', section: 'Управленческий',
+    id: 'balance_ezs', label: 'Баланс ЭЗС', section: 'Продажи',
     description: 'Поступление − Полезный отпуск = Потери по ЭЗС: технолог./коммерч. потери, сверки ПУ↔ПУ и ПУ↔ПК, договоры+взаиморасчёты, обращения, паспорт.',
     profiles: ['energy'], status: 'demo',
     params: [
@@ -37,7 +37,7 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
     ],
   },
   {
-    id: 'balance_azs', label: 'Баланс АЗС', section: 'Управленческий',
+    id: 'balance_azs', label: 'Баланс АЗС', section: 'Продажи',
     description: 'Приход (ТТН) − Реализация = Потери по АЗС: естественная убыль, температурная коррекция по плотности, недостача/излишек ТМЦ.',
     profiles: ['fuel'], status: 'planned',
     params: [
@@ -47,7 +47,7 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
     ],
   },
   {
-    id: 'mgmt_pnl', label: 'Управленческий P&L', section: 'Управленческий',
+    id: 'mgmt_pnl', label: 'Управленческий P&L', section: 'Продажи',
     description: 'Выручка / себестоимость / валовая маржа по станциям, топливу, месяцам + структура оплат.',
     profiles: ['fuel'], status: 'active',
     params: [
@@ -57,7 +57,7 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
     ],
   },
   {
-    id: 'procurement', label: 'Энергозакупка', section: 'Управленческий',
+    id: 'procurement', label: 'Энергозакупка', section: 'Продажи',
     description: 'Закупка э/э по поставщикам, ₽/кВт·ч, договоры энергоснабжения, эффективность закупки.',
     profiles: ['energy'], status: 'demo',
     params: [
@@ -65,7 +65,7 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
     ],
   },
   {
-    id: 'rent', label: 'Аренда', section: 'Управленческий',
+    id: 'rent', label: 'Аренда', section: 'Продажи',
     description: 'Аренда земли/площадок ЭЗС: договоры и разрешения на размещение, арендодатели (в т.ч. муниципалитеты), статус оплаты «оплачено по», особый порядок (% от выручки/фикс/сервитут), проблемные позиции.',
     profiles: ['energy'], status: 'demo',
     params: [

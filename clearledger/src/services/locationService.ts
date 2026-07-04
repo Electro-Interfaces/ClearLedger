@@ -103,6 +103,7 @@ interface ApiLocation {
   description: string | null
   sourceBindings: LocationSourceBinding[]
   metadata: Record<string, unknown> | null
+  passport?: Record<string, unknown> | null
   createdAt: string
   updatedAt: string
 }
@@ -119,6 +120,7 @@ function fromApi(r: ApiLocation): ServiceLocation {
     description: r.description ?? undefined,
     sourceBindings: r.sourceBindings ?? [],
     metadata: r.metadata ?? undefined,
+    passport: r.passport ?? undefined,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }

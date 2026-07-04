@@ -9,7 +9,8 @@
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 
 export const MODE_LABELS: Record<CoreMode, string> = {
-  management: 'Управленческий',
+  management: 'Продажи',
+  operations: 'Управленческий',
   financial: 'Финансовый',
   accounting: 'Бухгалтерский',
   tax: 'Налоговый',
@@ -25,9 +26,10 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     'by-month': 'По месяцам', channels: 'Каналы продаж', margin: 'Маржа и цены',
     purchases: 'Поступления', tanks: 'Топливный баланс', balance: 'Баланс',
     procurement: 'Энергозакупка', rent: 'Аренда',
-    cs_overview: 'Сессии: обзор', cs_stations: 'Сессии: станции', cs_connectors: 'Сессии: коннекторы',
-    cs_time: 'Сессии: время', cs_clients: 'Сессии: клиенты', cs_reliability: 'Сессии: надёжность',
-    cs_dynamics: 'Сессии: динамика', cs_compare: 'Сессии: сравнение',
+    cs_dashboard: 'Сессии: обзор', cs_map: 'Сессии: карта', cs_list: 'Сессии: транзакции', cs_sessions: 'Сессии', cs_clients: 'Сессии: тарифы', cs_corporate: 'Сессии: корпоратив',
+  },
+  operations: {
+    procurement: 'Энергозакупка', rent: 'Аренда', balance: 'Баланс ЭЗС',
   },
   financial: {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',

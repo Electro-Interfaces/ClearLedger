@@ -7,9 +7,10 @@ import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth import get_current_user
 from app.config import get_settings
 from app.database import async_session_factory, create_all
 from app.routers import (
@@ -33,6 +34,9 @@ from app.routers import (
     ocr_router,
     analytics_router,
     charge_sessions_router,
+    corporate_router,
+    tariff_router,
+    overview_router,
     onec_router,
     periods_router,
     policy_router,
@@ -163,6 +167,9 @@ app.include_router(export_packets_router.router, prefix=API_PREFIX)
 app.include_router(policy_router.router, prefix=API_PREFIX)
 app.include_router(analytics_router.router, prefix=API_PREFIX)
 app.include_router(charge_sessions_router.router, prefix=API_PREFIX)
+app.include_router(corporate_router.router, prefix=API_PREFIX)
+app.include_router(tariff_router.router, prefix=API_PREFIX)
+app.include_router(overview_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 
 
@@ -173,4 +180,64 @@ async def health_check():
         "status": "ok",
         "version": "0.7.0",
         "service": "TradeLedger API",
+    }
+
+
+def _git_sha_local() -> str:
+    """SHA текущего кода из git (dev). В прод-контейнере .git обычно нет → ''."""
+    import subprocess
+    from pathlib import Path
+    try:
+        root = Path(__file__).resolve().parents[2]  # …/clearledger
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except Exception:  # noqa: BLE001 — git недоступен → пусто
+        return ""
+
+
+@app.get("/api/_debug/state")
+async def debug_state(current_user=Depends(get_current_user)):
+    """«Отпечаток среды»: env, git-SHA, БД и счётчики по компаниям.
+
+    Назначение — мгновенно отличать dev от прода и видеть расхождение данных
+    (напр. канал сессий есть в проде, но не в dev). Сравни вывод на dev и на
+    проде — расхождение видно сразу, без расследования. Требует авторизации;
+    отдаёт только агрегаты (без ПДн)."""
+    import re
+    from sqlalchemy import func, select
+    from app.models import Channel, ChargeSession, Company, DataEntry, FuelShift
+
+    s = get_settings()
+    m = re.search(r"@([^/]+)/([^?]+)", s.database_url)  # host:port/dbname без логина/пароля
+    db_fp = f"{m.group(1)}/{m.group(2)}" if m else "?"
+
+    async with async_session_factory() as db:
+        companies = list((await db.execute(
+            select(Company.id, Company.slug, Company.name))).all())
+
+        async def _counts(model) -> dict:
+            rows = (await db.execute(
+                select(model.company_id, func.count()).group_by(model.company_id))).all()
+            return {cid: int(n) for cid, n in rows}
+
+        ch, cs, fs, de = (await _counts(Channel), await _counts(ChargeSession),
+                          await _counts(FuelShift), await _counts(DataEntry))
+
+    per = [{
+        "slug": slug, "name": name,
+        "channels": ch.get(cid, 0),
+        "charge_sessions": cs.get(cid, 0),
+        "fuel_shifts": fs.get(cid, 0),
+        "entries": de.get(cid, 0),
+    } for cid, slug, name in companies]
+
+    return {
+        "env": s.app_env,
+        "git_sha": s.git_sha or _git_sha_local() or "unknown",
+        "db": db_fp,
+        "version": "0.7.0",
+        "companies": sorted(per, key=lambda x: x["slug"]),
     }

@@ -554,6 +554,9 @@ class AnalyticsService:
             return func.coalesce(S.charge_type, "—")
         if group_by == "result":
             return func.coalesce(S.result, "—")
+        if group_by == "cut":
+            # Разрез расчёта (cut_key): ezs_app/ezs_corp/ezs_unpaid/ezs_admin.
+            return func.coalesce(S.cut_key, "—")
         if group_by == "tariff":
             return S.tariff
         if group_by == "hour":
@@ -585,7 +588,8 @@ class AnalyticsService:
             return None
         S = ChargeSession
         cols = {"station": S.station_code, "region": S.region, "connector": S.connector_type,
-                "user_type": S.user_type, "charge_type": S.charge_type, "result": S.result}
+                "user_type": S.user_type, "client": S.client_name,
+                "charge_type": S.charge_type, "result": S.result}
         if dim_by in cols:
             return cols[dim_by] == dim_val
         if dim_by == "tariff":
@@ -624,17 +628,26 @@ class AnalyticsService:
             gcol.label("g"),
             func.count().label("cnt"),
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
-            func.coalesce(func.sum(S.amount), 0).label("amount"),
+            # Выручка = корп-выручка (client_amount) для ЮЛ, иначе розничная amount.
+            # У ЮЛ session.amount=0 (постоплата) — реальная выручка в client_amount.
+            func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(S.duration_min), 0).label("duration"),
             func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
             func.coalesce(func.sum(case((S.paid_at.is_not(None), 1), else_=0)), 0).label("paid"),
             func.count(distinct(self._port_key())).label("ports"),
+            func.count(distinct(S.station_code)).label("stations"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)).group_by(gcol)
         return list((await self.session.execute(stmt)).all())
 
     async def _cs_ports(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None) -> int:
         """Число физических портов сети (distinct станция+коннектор) за период/сужение."""
         stmt = select(func.count(distinct(self._port_key()))).where(
+            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val))
+        return int((await self.session.execute(stmt)).scalar_one() or 0)
+
+    async def _cs_stations(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None) -> int:
+        """Число уникальных станций сети (distinct station_code) за период/сужение."""
+        stmt = select(func.count(distinct(ChargeSession.station_code))).where(
             *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val))
         return int((await self.session.execute(stmt)).scalar_one() or 0)
 
@@ -675,6 +688,7 @@ class AnalyticsService:
         dur = float(r.duration); success = int(r.success)
         paid = int(getattr(r, "paid", 0) or 0)
         ports = int(getattr(r, "ports", 0) or 0)
+        stations = int(getattr(r, "stations", 0) or 0)
         port_min = ports * period_days * 1440  # доступные порт-минуты за период
         return {
             "label": self._cs_label(group_by, r.g),
@@ -688,6 +702,7 @@ class AnalyticsService:
             "price_per_kwh": round(amount / energy, 2) if energy else 0.0,
             # порт-нормированные метрики (валидны для физических разрезов: станция/коннектор/регион)
             "ports": ports,
+            "stations": stations,   # уникальных станций в группе (для не-станционных разрезов)
             "utilization_pct": round(dur / port_min * 100, 1) if port_min else 0.0,
             "throughput_port": round(energy / ports / period_days, 1) if (ports and period_days) else 0.0,
             "revenue_port": round(amount / ports, 0) if ports else 0.0,
@@ -706,7 +721,9 @@ class AnalyticsService:
             bcol.label("b"),
             func.count().label("cnt"),
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
-            func.coalesce(func.sum(S.amount), 0).label("amount"),
+            # Выручка = корп-выручка (client_amount) для ЮЛ, иначе розничная amount.
+            # У ЮЛ session.amount=0 (постоплата) — реальная выручка в client_amount.
+            func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(S.duration_min), 0).label("duration"),
             func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
         ]
@@ -800,9 +817,11 @@ class AnalyticsService:
         tpaid = sum(l["_paid"] for l in lines)
         # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят сегменты)
         net_ports = await self._cs_ports(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        net_stations = await self._cs_stations(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
         port_min = net_ports * period_days * 1440
         totals = {
             "label": "Итого", "sessions": ts, "energy_kwh": round(te, 1), "amount": round(total_amount, 2),
+            "stations": net_stations,
             "avg_check": round(total_amount / ts, 2) if ts else 0.0,
             "avg_energy": round(te / ts, 2) if ts else 0.0,
             "avg_duration_min": round(td / ts, 1) if ts else 0.0,
@@ -1105,7 +1124,9 @@ class AnalyticsService:
         agg = (await self.session.execute(select(
             func.count().label("rows"),
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
-            func.coalesce(func.sum(S.amount), 0).label("amount"),
+            # Выручка = корп-выручка (client_amount) для ЮЛ, иначе розничная amount.
+            # У ЮЛ session.amount=0 (постоплата) — реальная выручка в client_amount.
+            func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(S.duration_min), 0).label("duration"),
             func.coalesce(func.sum(paid_c), 0).label("paid"),
             func.coalesce(func.sum(succ_c), 0).label("success"),
@@ -1139,6 +1160,11 @@ class AnalyticsService:
             func.count(distinct(S.result)).label("d_result"),
             func.count(distinct(func.to_char(S.started_at, "YYYY-MM"))).label("d_month"),
             func.count(distinct(self._port_key())).label("d_ports"),
+            # обогащение ЮЛ (client_name) + разрез расчёта (cut_key)
+            func.count(S.client_name).label("f_client"),
+            func.count(S.cut_key).label("f_cut"),
+            func.count(distinct(S.client_name)).label("d_client"),
+            func.count(distinct(S.cut_key)).label("d_cut"),
         ).where(S.company_id == company_id))).one()
 
         rows = int(agg.rows or 0)
@@ -1182,6 +1208,8 @@ class AnalyticsService:
         m_charge = await members(S.charge_type, 12)
         m_user = await members(S.user_type, 12)
         m_result = await members(S.result, 12)
+        m_client = await members(S.client_name, 6)   # топ юрлиц (обогащение)
+        m_cut = await members(S.cut_key, 8)          # корзины разреза расчёта
         # оплата — синтетическое измерение (paid_at заполнен → оплачено)
         m_payment = [{"label": "Оплачено", "count": paid}, {"label": "Без оплаты", "count": rows - paid}]
 
@@ -1192,7 +1220,7 @@ class AnalyticsService:
              # 0 файлов при наличии сессий → данные приняты прямым импортом (без канала)
              **({"status": "direct"} if l1_files == 0 else {})},
             {"key": "l2", "code": "L2 · CLEAN", "title": "Нормализованная база",
-             "desc": "Сессии: канонизированы тип коннектора, тип клиента (ФЛ/ЮЛ), регион; дедуп по «ID сессии».",
+             "desc": "Сессии: канонизация (коннектор, ФЛ/ЮЛ, регион) + обогащение client_name (ЮЛ) по справочнику «Организации» + разрез расчёта (cut_key); дедуп по «ID сессии».",
              "records": rows, "unit": "сессий", "tone": "clean"},
             {"key": "l3", "code": "L3 · EXPORT", "title": "Витрины / срезы (OLAP)",
              "desc": "Агрегаты куба: измерения × меры — под сводные таблицы, дашборды, экспорт.",
@@ -1232,6 +1260,9 @@ class AnalyticsService:
             {"key": "user_type", "label": "Тип клиента", "field": "user_type",
              "cardinality": int(agg.d_user_type or 0), "fill_pct": pct(agg.f_user_type),
              "canonical": True, "members": m_user},
+            {"key": "client", "label": "Клиент (ЮЛ)", "field": "client_name",
+             "cardinality": int(agg.d_client or 0), "fill_pct": pct(agg.f_client),
+             "canonical": True, "members": m_client},
             {"key": "charge_type", "label": "Тип запуска", "field": "charge_type",
              "cardinality": int(agg.d_charge_type or 0), "fill_pct": pct(agg.f_charge_type),
              "canonical": False, "members": m_charge},
@@ -1241,6 +1272,9 @@ class AnalyticsService:
             {"key": "payment", "label": "Оплата", "field": "paid_at",
              "cardinality": 2, "fill_pct": pct(agg.f_paid),
              "canonical": True, "members": m_payment},
+            {"key": "cut", "label": "Разрез расчёта", "field": "cut_key",
+             "cardinality": int(agg.d_cut or 0), "fill_pct": pct(agg.f_cut),
+             "canonical": True, "members": m_cut},
             {"key": "time", "label": "Время", "field": "started_at",
              "cardinality": int(agg.d_month or 0), "fill_pct": pct(agg.f_started), "canonical": False,
              "grain": "год → квартал → месяц → неделя → день → час / день недели", "members": []},
@@ -1262,6 +1296,8 @@ class AnalyticsService:
             {"field": "tariff", "label": "Цена тарифа", "role": "мера (>0)", "fill_pct": pct(agg.f_tariff)},
             {"field": "paid_at", "label": "Дата оплаты", "role": "измерение · оплата", "fill_pct": pct(agg.f_paid)},
             {"field": "rfid", "label": "RFID-карта", "role": "атрибут (RFID-сессии)", "fill_pct": pct(agg.f_rfid)},
+            {"field": "client_name", "label": "Клиент (ЮЛ)", "role": "измерение · обогащение", "fill_pct": pct(agg.f_client)},
+            {"field": "cut_key", "label": "Разрез расчёта", "role": "разрез сверки", "fill_pct": pct(agg.f_cut)},
         ]
 
         # канонизация: сырое значение выгрузки → канонический член измерения (реальные правила ingest)
@@ -1278,6 +1314,10 @@ class AnalyticsService:
              "members": 2, "coverage_pct": 100.0},
             {"name": "Дедупликация", "from": "ID сессии", "to": "UNIQUE(company, session_ext_id)",
              "members": rows, "coverage_pct": 100.0},
+            {"name": "Обогащение ЮЛ", "from": "справочник «Организации» (телефон=user_id)", "to": "client_name (юрлицо)",
+             "members": int(agg.d_client or 0), "coverage_pct": pct(agg.f_client)},
+            {"name": "Разрез расчёта", "from": "user_type / charge_type / paid_at", "to": "cut_key (ezs_corp/app/unpaid/admin)",
+             "members": int(agg.d_cut or 0), "coverage_pct": pct(agg.f_cut)},
         ]
 
         return {
@@ -1285,6 +1325,108 @@ class AnalyticsService:
             "layers": layers, "fact": fact, "dimensions": dimensions,
             "quality": {"fields": quality_fields, "canonicalization": canonicalization},
         }
+
+    async def charge_pivot(self, f: PeriodFilter, rows: str, cols: str | None,
+                           metric: str = "amount", top_rows: int = 400, top_cols: int = 60) -> dict[str, Any]:
+        """Сводная таблица сессий ЭЗС: строки=rows-разрез × столбцы=cols-разрез,
+        значения=metric. cols=None → одномерная (только строки). Оверфлоу строк/
+        столбцов сворачивается в «Прочие» (без тихой потери сумм). Основа табличного
+        экспорта сводной из «Нормализации»/аналитики. Движок — общий _cs_aggregate_2d."""
+        TIME_DIMS = ("hour", "weekday", "day", "week", "decade", "month", "quarter")
+        raw = await self._cs_aggregate_2d(
+            f.company_id, f.date_from, f.date_to, rows, cols,
+            f.station_codes, f.regions, f.dim_by, f.dim_val)
+
+        def zero() -> list[float]:
+            return [0.0, 0.0, 0.0, 0.0, 0.0]  # cnt, energy, amount, dur, success
+
+        def add(acc: list[float], r) -> None:
+            acc[0] += float(r.cnt); acc[1] += float(r.energy); acc[2] += float(r.amount)
+            acc[3] += float(r.duration); acc[4] += float(r.success)
+
+        cells: dict[tuple[str, str], list[float]] = {}
+        row_tot: dict[str, list[float]] = {}
+        col_tot: dict[str, list[float]] = {}
+        grand = zero()
+        for r in raw:
+            rl = self._cs_label(rows, r.b)
+            cl = self._cs_label(cols, r.s) if cols else "Всего"
+            cells.setdefault((rl, cl), zero()); add(cells[(rl, cl)], r)
+            row_tot.setdefault(rl, zero()); add(row_tot[rl], r)
+            col_tot.setdefault(cl, zero()); add(col_tot[cl], r)
+            add(grand, r)
+
+        def order(tot: dict[str, list[float]], dim: str | None) -> list[str]:
+            keys = list(tot)
+            if dim in TIME_DIMS:
+                return sorted(keys)                       # хронологически по ключу
+            return sorted(keys, key=lambda k: -tot[k][0])  # по числу сессий убыв.
+
+        def cap(keys: list[str], limit: int) -> tuple[list[str], set[str]]:
+            if len(keys) <= limit:
+                return keys, set()
+            return keys[:limit] + ["Прочие"], set(keys[limit:])
+
+        row_keys, row_over = cap(order(row_tot, rows), top_rows)
+        col_keys, col_over = cap(order(col_tot, cols), top_cols)
+
+        # Свернуть оверфлоу в «Прочие» (без потери сумм) — пересобрать ячейки/итоги.
+        if row_over or col_over:
+            folded: dict[tuple[str, str], list[float]] = {}
+            r_tot2: dict[str, list[float]] = {}
+            c_tot2: dict[str, list[float]] = {}
+            for (rl, cl), s in cells.items():
+                frl = "Прочие" if rl in row_over else rl
+                fcl = "Прочие" if cl in col_over else cl
+                folded.setdefault((frl, fcl), zero())
+                r_tot2.setdefault(frl, zero()); c_tot2.setdefault(fcl, zero())
+                for i in range(5):
+                    folded[(frl, fcl)][i] += s[i]
+                    r_tot2[frl][i] += s[i]; c_tot2[fcl][i] += s[i]
+            cells, row_tot, col_tot = folded, r_tot2, c_tot2
+
+        def mv(sums: list[float]) -> float:
+            return self._cs_metric_from_sums(metric, *sums)
+
+        matrix = [[mv(cells.get((rl, cl), zero())) for cl in col_keys] for rl in row_keys]
+        return {
+            "rows_dim": rows, "cols_dim": cols, "metric": metric,
+            "row_labels": row_keys, "col_labels": col_keys,
+            "matrix": matrix,
+            "row_totals": [mv(row_tot.get(rl, zero())) for rl in row_keys],
+            "col_totals": [mv(col_tot.get(cl, zero())) for cl in col_keys],
+            "grand_total": mv(grand),
+            "truncated": {"rows": len(row_over), "cols": len(col_over)},
+            "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
+        }
+
+    async def charge_rows(self, f: PeriodFilter, limit: int = 100000) -> dict[str, Any]:
+        """Детальные строки нормализованных сессий (L2) за период — лист «Сессии»
+        в шаблонах экспорта. limit+1 для детекции усечения (без тихой потери)."""
+        S = ChargeSession
+        stmt = select(
+            S.session_ext_id, S.station_code, S.station_name, S.region, S.connector_type,
+            S.started_at, S.finished_at, S.duration_min, S.result, S.charge_type, S.user_type,
+            S.client_name, S.energy_kwh, S.amount, S.tariff, S.paid_at, S.cut_key,
+        ).where(
+            *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        ).order_by(S.started_at).limit(limit + 1)
+        res = (await self.session.execute(stmt)).all()
+        truncated = len(res) > limit
+
+        def iso(dt):
+            return dt.isoformat() if dt else None
+
+        out = [{
+            "session_ext_id": r.session_ext_id, "station_code": r.station_code, "station_name": r.station_name,
+            "region": r.region, "connector_type": r.connector_type,
+            "started_at": iso(r.started_at), "finished_at": iso(r.finished_at),
+            "duration_min": float(r.duration_min or 0), "result": r.result, "charge_type": r.charge_type,
+            "user_type": r.user_type, "client_name": r.client_name, "energy_kwh": float(r.energy_kwh or 0),
+            "amount": float(r.amount or 0), "tariff": float(r.tariff or 0), "paid_at": iso(r.paid_at),
+            "cut_key": r.cut_key,
+        } for r in res[:limit]]
+        return {"rows": out, "total": len(out), "truncated": truncated}
 
     # ─── financial: cash flow + дебиторка/кредиторка ──────────────────
 

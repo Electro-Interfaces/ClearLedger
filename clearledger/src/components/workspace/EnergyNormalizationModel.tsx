@@ -9,6 +9,7 @@
  *
  * Данные: GET /api/analytics/charge-sessions/model (по всему датасету, без периода).
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
@@ -16,12 +17,15 @@ import {
   type ChargeModelDimension,
   type ChargeModelLayer,
   type ChargeModelMeasure,
+  type ChargeModelResponse,
 } from '@/services/analyticsService'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { fmtN } from '@/components/balance/balanceCalc'
-import { ArrowRight, Database, KeyRound, Layers, Ruler, Sparkles, Star } from 'lucide-react'
+import { ArrowRight, Database, Download, KeyRound, Layers, Ruler, Sparkles, Star } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { ChargePivotExportDialog } from './analytics/ChargePivotExportDialog'
 
 /* ── тона слоёв (theme-aware) ── */
 const LAYER_TONE: Record<ChargeModelLayer['tone'], { badge: string; bar: string; border: string }> = {
@@ -99,11 +103,34 @@ function DimensionCard({ d }: { d: ChargeModelDimension }) {
   )
 }
 
-export function EnergyNormalizationModel() {
+interface NormModelProps {
+  fetchModel?: (companyId: string) => Promise<ChargeModelResponse>
+  queryKey?: string
+  title?: string
+  subtitle?: string
+  emptyText?: string
+  entityUnit?: string        // единица строк L2 в KPI: «Сессий» / «Станций»
+  showPivotExport?: boolean   // кнопка «Выгрузить сводную» (пока только для сессий)
+}
+
+const SESSIONS_SUBTITLE =
+  'Внутренняя многослойная база (L1 RAW → L2 CLEAN → L3 EXPORT → L4 1C_REF), организованная звёздной схемой: '
+  + 'факт «Сессия зарядки» + измерения. Готова к сводным таблицам и OLAP-анализу — строки/столбцы сводной = измерения, значения = меры.'
+
+export function EnergyNormalizationModel({
+  fetchModel = getChargeModel,
+  queryKey = 'charge-model',
+  title = 'Модель данных · сеть ЭЗС',
+  subtitle = SESSIONS_SUBTITLE,
+  emptyText = 'Нет загруженных сессий ЭЗС. Загрузите выгрузку ChargeTransactions в канале «Зарядные сессии ЭЗС», затем модель данных (слои, звёздная схема, качество) отобразится здесь на реальных данных.',
+  entityUnit = 'Записей',
+  showPivotExport = true,
+}: NormModelProps = {}) {
   const { companyId } = useCompany()
+  const [exportOpen, setExportOpen] = useState(false)
   const q = useQuery({
-    queryKey: ['charge-model', companyId],
-    queryFn: () => getChargeModel(companyId),
+    queryKey: [queryKey, companyId],
+    queryFn: () => fetchModel(companyId),
     enabled: !!companyId,
     staleTime: 60_000,
   })
@@ -113,22 +140,15 @@ export function EnergyNormalizationModel() {
     return <div className="px-6 py-10 text-sm text-muted-foreground">Загрузка модели данных…</div>
   }
   if (!m || m.rows === 0 || !m.fact) {
-    return (
-      <div className="px-6 py-10 text-sm text-muted-foreground">
-        Нет загруженных сессий ЭЗС. Загрузите выгрузку ChargeTransactions в канале «Зарядные сессии ЭЗС»,
-        затем модель данных (слои, звёздная схема, качество) отобразится здесь на реальных данных.
-      </div>
-    )
+    return <div className="px-6 py-10 text-sm text-muted-foreground">{emptyText}</div>
   }
 
   const { fact, layers, dimensions, quality } = m
   const period = fact.period.from && fact.period.to
     ? `${fact.period.from.split('-').reverse().join('.')} – ${fact.period.to.split('-').reverse().join('.')}`
     : '—'
-  const energy = fact.measures.find((x) => x.key === 'energy_kwh')
-  const amount = fact.measures.find((x) => x.key === 'amount')
-  const ports = fact.measures.find((x) => x.key === 'ports')
-  const success = fact.measures.find((x) => x.key === 'success_pct')
+  // KPI-полоса measure-driven: строки L2 + первые меры (кроме count-дубликата) + число измерений.
+  const kpiMeasures = fact.measures.filter((x) => x.key !== 'count').slice(0, 4)
 
   return (
     <div className="space-y-5 px-6 py-6">
@@ -136,24 +156,29 @@ export function EnergyNormalizationModel() {
       <div>
         <div className="flex items-center gap-2">
           <Database className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-semibold">Модель данных · сеть ЭЗС</h1>
+          <h1 className="text-xl font-semibold">{title}</h1>
           <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+          {showPivotExport && (
+            <Button size="sm" variant="outline" className="ml-auto gap-1.5" onClick={() => setExportOpen(true)}>
+              <Download className="size-4" />
+              Выгрузить сводную
+            </Button>
+          )}
         </div>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Внутренняя многослойная база (L1 RAW → L2 CLEAN → L3 EXPORT → L4 1C_REF), организованная
-          звёздной схемой: факт «Сессия зарядки» + измерения. Готова к сводным таблицам и OLAP-анализу —
-          строки/столбцы сводной = измерения, значения = меры.
-        </p>
+        {showPivotExport && (
+          <ChargePivotExportDialog
+            open={exportOpen} onOpenChange={setExportOpen} companyId={companyId}
+            defaultFrom={fact.period.from ?? ''} defaultTo={fact.period.to ?? ''}
+          />
+        )}
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{subtitle}</p>
       </div>
 
       {/* KPI-полоса L2 */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <Kpi label="Сессий (L2)" value={fmtN(fact.rows)} sub={period} />
-        <Kpi label="Энергия" value={energy ? fmtMeasure(energy) : '—'} />
-        <Kpi label="Сумма списаний" value={amount ? fmtMeasure(amount) : '—'} />
+        <Kpi label={`${entityUnit} (L2)`} value={fmtN(fact.rows)} sub={period !== '—' ? period : undefined} />
+        {kpiMeasures.map((x) => <Kpi key={x.key} label={x.label} value={fmtMeasure(x)} />)}
         <Kpi label="Измерений" value={fmtN(dimensions.length)} sub="осей куба" />
-        <Kpi label="Портов" value={ports ? fmtN(ports.value) : '—'} sub="станция × коннектор" />
-        <Kpi label="Успешных" value={success ? fmtMeasure(success) : '—'} />
       </div>
 
       {/* Слои данных L1→L4 */}

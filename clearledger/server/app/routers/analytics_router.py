@@ -36,6 +36,8 @@ def _parse_iso_date(s: str, field: str) -> date:
 # Разрезы и метрики зарядных сессий (переиспользуются в /timeseries и /compare).
 _CS_METRIC_PATTERN = "^(sessions|energy_kwh|amount|avg_check|avg_energy|avg_duration_min|success_pct|price_per_kwh)$"
 _CS_GROUP_PATTERN = "^(station|region|connector|user_type|client|charge_type|tariff|result)$"
+# Оси сводной таблицы (строки/столбцы): разрезы + временные бакеты.
+_CS_PIVOT_DIM = "^(station|region|connector|user_type|client|charge_type|result|cut|tariff|month|week|day|decade|quarter|hour|weekday)$"
 
 
 def _csv(s: str | None) -> list[str] | None:
@@ -130,7 +132,7 @@ async def get_charge_sessions(
     company_id: str,
     date_from: str,
     date_to: str,
-    group_by: str = Query("station", pattern="^(station|region|connector|user_type|charge_type|tariff|hour|day|result)$"),
+    group_by: str = Query("station", pattern="^(station|region|connector|user_type|client|charge_type|tariff|hour|day|result)$"),
     station_id: str | None = None,
     stations: str | None = None,
     regions: str | None = None,
@@ -271,6 +273,72 @@ async def get_charge_model(
     (факт + измерения), качество нормализации. По всему датасету компании."""
     cid = await assert_company_module(company_id, current_user, db, "management")
     return await AnalyticsService(db).charge_model(cid)
+
+
+@router.get("/stations/model")
+async def get_stations_model(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Модель данных станций ЭЗС (объекты) для «Нормализации»: слои L1→L4, звёздная
+    схема (факт «Станция» + измерения), качество паспорта. По всему датасету компании."""
+    from app.services.stations_model_service import stations_model
+    cid = await assert_company_module(company_id, current_user, db, "management")
+    return await stations_model(db, cid)
+
+
+@router.get("/stations/linkage")
+async def get_stations_linkage(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Связь каналов по станции (конформная размерность): покрытие и разрывы —
+    сессии/оплаты/справочник ссылаются на общий объект-станцию."""
+    from app.services.stations_model_service import stations_linkage
+    cid = await assert_company_module(company_id, current_user, db, "management")
+    return await stations_linkage(db, cid)
+
+
+@router.get("/charge-sessions/pivot")
+async def get_charge_pivot(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    rows: str = Query("region", pattern=_CS_PIVOT_DIM),
+    cols: str | None = Query(None, pattern=_CS_PIVOT_DIM),
+    metric: str = Query("amount", pattern=_CS_METRIC_PATTERN),
+    stations: str | None = None,
+    regions: str | None = None,
+    station_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сводная таблица сессий ЭЗС (строки × столбцы × мера) для экспорта из
+    «Нормализации». cols пусто → одномерная. Оси — разрезы + временные бакеты."""
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f.station_codes = _csv(stations); f.regions = _csv(regions)
+    return await AnalyticsService(db).charge_pivot(f, rows=rows, cols=cols or None, metric=metric)
+
+
+@router.get("/charge-sessions/rows")
+async def get_charge_rows(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    limit: int = Query(100000, ge=1, le=500000),
+    stations: str | None = None,
+    regions: str | None = None,
+    station_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Детальные строки нормализованных сессий (L2) за период — лист «Сессии»
+    в шаблонах экспорта сводной из «Нормализации»."""
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f.station_codes = _csv(stations); f.regions = _csv(regions)
+    return await AnalyticsService(db).charge_rows(f, limit=limit)
 
 
 @router.get("/payment-mix")

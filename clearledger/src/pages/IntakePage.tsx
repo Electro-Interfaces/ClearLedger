@@ -618,6 +618,9 @@ function ChannelsScheduleTab() {
   const autoCount = channels.filter((c) => scheduleOf(c).mode !== 'manual').length
 
   async function handleRun(ch: Channel) {
+    // Файловые каналы (реестр/сессии) запускаются НЕ отсюда, а со страницы канала
+    // (карточка «Загрузка таблицы» — файл + режим); на мониторе у них ссылка
+    // «Открыть канал». Поэтому handleRun вызывается только для STS/API-каналов.
     setRunningId(ch.id)
     try {
       if (isApiEnabled()) {
@@ -669,13 +672,18 @@ function ChannelsScheduleTab() {
             const chSources = sources.filter((s) => getChannelSourceIds(ch).includes(s.id))
             const nextSync = getNextSyncTime(ch)
             const running = runningId === ch.id
+            // Файловый канал (реестр/сессии): загрузка — только на странице канала
+            // (файл + режим Подгрузить/Переписать). На мониторе — ссылка «Открыть
+            // канал», а не «Запустить сейчас» (у файла нет расписания/автотяги).
+            const isFileChannel = ch.templateId === 'charge_sessions'
+              || ch.templateId === 'reestr_contracts_payments'
             return (
               <Card key={ch.id} className="py-3 gap-1">
                 <CardContent className="py-0 flex items-center gap-3 flex-wrap">
                   <Radio className="h-4 w-4 text-primary shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Link to={`/channels/${ch.id}`} className="font-medium text-sm hover:underline truncate">{ch.name}</Link>
+                      <Link to={`/connectors/${ch.id}`} className="font-medium text-sm hover:underline truncate">{ch.name}</Link>
                       <span className={`inline-flex items-center gap-1 text-[11px] ${meta.cls}`}>
                         <meta.Icon className="h-3.5 w-3.5" />{meta.label}
                       </span>
@@ -694,10 +702,19 @@ function ChannelsScheduleTab() {
                       {nextSync && <span className="text-primary">след: {format(nextSync, 'dd.MM HH:mm')}</span>}
                     </div>
                   </div>
-                  <Button size="sm" className="h-8 text-xs gap-1.5 shrink-0" onClick={() => handleRun(ch)} disabled={running}>
-                    {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                    Запустить сейчас
-                  </Button>
+                  {isFileChannel ? (
+                    <Button asChild size="sm" variant="outline" className="h-8 text-xs gap-1.5 shrink-0">
+                      <Link to={`/connectors/${ch.id}`}>
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Открыть канал
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button size="sm" className="h-8 text-xs gap-1.5 shrink-0" onClick={() => handleRun(ch)} disabled={running}>
+                      {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                      Запустить сейчас
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             )

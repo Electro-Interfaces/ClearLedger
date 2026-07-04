@@ -221,6 +221,25 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
         stages=_STAGES_INGEST,
         schedule={"mode": "manual"},
     ),
+    ChannelTemplateDecl(
+        id="stations",
+        label="Справочник станций ЭЗС",
+        category="Электромобильность",
+        description=(
+            "Справочник объектов ЭЗС (xlsx): по каждой станции — паспорт (серийный, "
+            "адрес, координаты, коннекторы, мощность, OCPP, бренд, владелец, HubEx). "
+            "Загрузка файла → L1 RAW → нормализация → L2 (объекты / Точки обслуживания) "
+            "→ разрез по региону / владельцу / статусу."
+        ),
+        icon="MapPin",
+        direction="energy",
+        status="available",
+        streams=[
+            StreamDecl("stations_excel", "stations", "anchor", "Паспорт станций"),
+        ],
+        stages=_STAGES_INGEST,
+        schedule={"mode": "manual"},
+    ),
 
     # ── Эталон ───────────────────────────────────────────────────────────
     ChannelTemplateDecl(

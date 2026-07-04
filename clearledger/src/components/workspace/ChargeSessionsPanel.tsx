@@ -4,13 +4,18 @@
  * динамика (тренд) · сравнение периодов. Данные — /api/analytics/charge-sessions(/timeseries|/compare).
  */
 
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Loader2, AlertTriangle } from 'lucide-react'
+import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
+import { CorporatePanel } from './CorporatePanel'
+import { TariffsPanel } from './TariffsPanel'
+import { OverviewDashboardPanel } from './OverviewDashboardPanel'
+import { ChargeListPanel } from './ChargeListPanel'
+import { ChargeMapPanel } from './ChargeMapPanel'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { PeriodRangePicker, MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
@@ -19,6 +24,7 @@ import { type Period, buildMoM, isoLocal } from './analytics/periodPresets'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
 import { ExportButton } from './analytics/ExportButton'
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
@@ -30,6 +36,14 @@ const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 const kwh = (v: number) => nf0.format(v) + ' кВтч'
 
+// Палитра донат-диаграмм долей — как в analytics/ChargeChart.tsx (приглушённая, без неона);
+// последний сегмент («Прочие») — нейтральный серый.
+const DONUT_COLORS = [
+  'hsl(217, 91%, 60%)', 'hsl(152, 69%, 45%)', 'hsl(25, 100%, 55%)',
+  'hsl(280, 65%, 65%)', 'hsl(340, 75%, 55%)', 'hsl(190, 70%, 50%)',
+]
+const donutColor = (i: number, n: number) => (i === n - 1 && n > 1 ? 'hsl(215, 16%, 55%)' : DONUT_COLORS[i % DONUT_COLORS.length])
+
 function Loading() {
   return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
 }
@@ -39,12 +53,33 @@ function Empty({ text = 'Нет сессий за период' }: { text?: stri
 
 /** Обёртка пункта: кнопка экспорта (Excel/PDF) + ref на содержимое для снимка.
  * Padding даёт сам пункт; здесь — только строка с кнопкой и ref вокруг содержимого. */
-function PanelExport({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+function PanelExport({ title, subtitle, toolbar, children }: { title: string; subtitle?: string; toolbar?: ReactNode; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   return (
     <div>
-      <div className="flex justify-end px-4 pt-2"><ExportButton title={title} subtitle={subtitle} getEl={() => ref.current} /></div>
+      {/* toolbar (напр. фильтр ФЛ/ЮЛ) слева, экспорт справа — вне ref, в снимок не попадают */}
+      <div className="flex items-center justify-between gap-2 px-4 pt-2">
+        <div className="min-w-0">{toolbar}</div>
+        <ExportButton title={title} subtitle={subtitle} getEl={() => ref.current} />
+      </div>
       <div ref={ref}>{children}</div>
+    </div>
+  )
+}
+
+/** Сегмент-переключатель типа клиента (Все / ФЛ / ЮЛ) — общий для пунктов сессий. */
+function ClientTypeToggle({ value, onChange }: { value: ClientType; onChange: (v: ClientType) => void }) {
+  const opts: { v: ClientType; label: string }[] = [
+    { v: 'all', label: 'Все' }, { v: 'fl', label: 'ФЛ' }, { v: 'ul', label: 'ЮЛ' },
+  ]
+  return (
+    <div className="inline-flex w-fit rounded-md border border-border p-0.5 gap-0.5" title="Фильтр по типу клиента">
+      {opts.map((o) => (
+        <button key={o.v} type="button" onClick={() => onChange(o.v)}
+          className={`px-2.5 py-0.5 text-xs rounded-[5px] transition-colors ${value === o.v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+          {o.label}
+        </button>
+      ))}
     </div>
   )
 }
@@ -67,6 +102,7 @@ const SERIES_OPTS: { value: string; label: string }[] = [
   { value: 'station', label: 'По станциям' },
   { value: 'connector', label: 'По коннекторам' },
   { value: 'user_type', label: 'По клиентам (ФЛ/ЮЛ)' },
+  { value: 'client', label: 'По организациям (ЮЛ)' },
   { value: 'charge_type', label: 'По каналу запуска' },
   { value: 'region', label: 'По регионам' },
   { value: 'tariff', label: 'По тарифам' },
@@ -178,12 +214,23 @@ function SessionKpis({ t }: { t: ChargeSessionLine }) {
 }
 
 /** Сужение из фильтра раздела (energy): выбранные ЭЗС-станции и регионы. */
+// Фильтр типа клиента (ФЛ/ЮЛ) — общий для всех пунктов сессий. Прокидывается
+// через контекст в useNarrow → в dim/dimVal каждого запроса (WHERE user_type).
+// Компонуется с group_by (разрезом). Пункт «Корпоратив» жёстко ставит 'ul'.
+export type ClientType = 'all' | 'fl' | 'ul'
+const ChargeClientCtx = createContext<ClientType>('all')
+const CLIENT_DIMVAL: Record<ClientType, string | undefined> = { all: undefined, fl: 'ФЛ', ul: 'ЮЛ' }
+
 function useNarrow() {
   const { stationCodes, regionIds } = useFilters()
+  const clientType = useContext(ChargeClientCtx)
+  const dimVal = CLIENT_DIMVAL[clientType]
   return {
     stations: stationCodes.length ? stationCodes : undefined,
     regions: regionIds.length ? regionIds : undefined,
-    key: `${stationCodes.join(',')}|${regionIds.join(',')}`,  // для queryKey
+    dim: dimVal ? 'user_type' : undefined,   // фильтр ФЛ/ЮЛ как точечный dim (не мешает group_by)
+    dimVal,
+    key: `${stationCodes.join(',')}|${regionIds.join(',')}|${clientType}`,  // для queryKey
   }
 }
 type Narrow = ReturnType<typeof useNarrow>
@@ -192,7 +239,7 @@ function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: Cha
   const n = useNarrow()
   return useQuery({
     queryKey: ['charge-sessions', groupBy, companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy, stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
   })
 }
 
@@ -201,15 +248,19 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   companyId: string; dateFrom: string; dateTo: string; groupBy: ChargeGroupBy; firstCol: string
   withKpis?: boolean; controls?: boolean; tabKey?: string
 }) {
-  // Свой период + разрез + метрика распределения + топ-N (когда controls); иначе — период раздела.
-  const [p, patch] = useTabParams(tabKey, { override: null as Period | null, metric: 'amount' as ChargeMetric, rows: 0, group: groupBy as ChargeGroupBy })
-  const gb = (controls ? p.group : groupBy) as ChargeGroupBy
+  // Свой период + метрика распределения + топ-N (когда controls); иначе — период раздела.
+  const [p, patch] = useTabParams(tabKey, { override: null as Period | null, metric: 'amount' as ChargeMetric, rows: 0 })
+  // Разрез — ЛОКАЛЬНО (не в useTabParams): всегда стартует от groupBy таба. Иначе при
+  // переиспользовании экземпляра между табами (станции↔коннекторы) разрез залипал.
+  const [group, setGroup] = useState<ChargeGroupBy>(groupBy)
+  const gb = (controls ? group : groupBy) as ChargeGroupBy
   const period = controls && p.override ? p.override : { from: dateFrom, to: dateTo }
   const distMetric = controls ? p.metric : 'amount'
   const col = controls ? (GROUP_LABELS[gb] ?? firstCol) : firstCol
   const { data, isLoading, error } = useCS(companyId, period.from, period.to, gb)
   const n = useNarrow()
   const physical = PHYSICAL_GROUPS.includes(gb)
+  const showStations = physical && gb !== 'station'   // число станций в группе; для разреза «станция» = 1, скрываем
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'amount', dir: 'desc' })
   const lines = data?.lines ?? []
   const sortedLines = useMemo(() => {
@@ -223,7 +274,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   // Батч-тренд по месяцам для sparkline в строке (только физические разрезы).
   const spark = useQuery({
     queryKey: ['charge-slice-spark', companyId, period.from, period.to, gb, n.key],
-    queryFn: () => getChargeSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', groupBy: gb as ChargeSeriesBy, metric: 'amount', topN: 1000, stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', groupBy: gb as ChargeSeriesBy, metric: 'amount', topN: 1000, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
     enabled: physical,
   })
   const sparkMap = useMemo(() => {
@@ -236,27 +287,36 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   if (data.lines.length === 0) return <Empty />
   const t = data.totals
   const maxUtil = Math.max(...data.lines.map((l) => l.utilization_pct), 0.01)
-  const exCols = [col, ...(physical ? ['Портов'] : []), 'Сессий', 'Энергия, кВтч', 'Выручка, ₽', 'Доля, %',
+  const exCols = [col, ...(physical ? ['Портов'] : []), ...(showStations ? ['Станций'] : []), 'Сессий', 'Энергия, кВтч', 'Выручка, ₽', 'Доля, %',
     ...(physical ? ['Загрузка, %', 'кВтч/д·порт'] : []), 'Ср. чек, ₽', '₽/кВтч', 'Успех, %']
   const exData: (string | number)[][] = [
-    ...sortedLines.map((l) => [l.label, ...(physical ? [l.ports] : []), l.sessions, l.energy_kwh, l.amount, l.share_pct,
+    ...sortedLines.map((l) => [l.label, ...(physical ? [l.ports] : []), ...(showStations ? [l.stations] : []), l.sessions, l.energy_kwh, l.amount, l.share_pct,
       ...(physical ? [l.utilization_pct, l.throughput_port] : []), l.avg_check, l.price_per_kwh, l.success_pct]),
-    ['Итого', ...(physical ? [t.ports] : []), t.sessions, t.energy_kwh, t.amount, 100,
+    ['Итого', ...(physical ? [t.ports] : []), ...(showStations ? [t.stations] : []), t.sessions, t.energy_kwh, t.amount, 100,
       ...(physical ? [t.utilization_pct, t.throughput_port] : []), t.avg_check, t.price_per_kwh, t.success_pct],
   ]
   const toggle = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }))
-  const arrow = (key: string) => (sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '')
-  const H = ({ k, children, left }: { k: string; children: ReactNode; left?: boolean }) => (
-    <th className={`p-2 font-medium ${left ? 'text-left' : 'text-right'}`}>
-      <button className="hover:text-foreground transition-colors" onClick={() => toggle(k)}>{children}{arrow(k)}</button>
-    </th>
-  )
+  // Каждый столбец сортируемый: бледная ↕ всегда видна (ярче на hover), активный —
+  // цветная стрелка направления. Так понятно, что кликается любой заголовок.
+  const H = ({ k, children, left }: { k: string; children: ReactNode; left?: boolean }) => {
+    const active = sort.key === k
+    const Ico = active ? (sort.dir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+    return (
+      <th className={`p-2 font-medium ${left ? 'text-left' : 'text-right'}`}>
+        <button onClick={() => toggle(k)} title="Сортировать по столбцу"
+          className={`group inline-flex items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${left ? '' : 'flex-row-reverse'} ${active ? 'text-foreground' : ''}`}>
+          <span className="whitespace-nowrap">{children}</span>
+          <Ico className={`h-3 w-3 shrink-0 ${active ? 'text-primary opacity-100' : 'opacity-30 group-hover:opacity-70'}`} />
+        </button>
+      </th>
+    )
+  }
   return (
     <div className="p-4 space-y-4">
       {controls && (
         <div className="flex flex-wrap items-center gap-3" data-export-ignore>
           <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-          <Field label="Разрез"><SeriesSelect value={p.group} onChange={(v) => patch({ group: v as ChargeGroupBy })} /></Field>
+          <Field label="Разрез"><SeriesSelect value={group} onChange={(v) => setGroup(v as ChargeGroupBy)} /></Field>
           <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
           <Field label="Строк">
             <Select value={String(p.rows)} onValueChange={(v) => patch({ rows: Number(v) })}>
@@ -280,6 +340,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
               <tr className="border-b bg-muted/40 text-muted-foreground">
                 <H k="label" left>{col}</H>
                 {physical && <H k="ports">Портов</H>}
+                {showStations && <H k="stations">Станций</H>}
                 <H k="sessions">Сессий</H>
                 <H k="energy_kwh">Энергия, кВтч</H>
                 <H k="amount">Выручка</H>
@@ -297,6 +358,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
                 <tr key={l.label} className="border-b border-border/30 hover:bg-muted/30">
                   <td className="p-2 font-medium truncate max-w-[240px]">{l.label}</td>
                   {physical && <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(l.ports)}</td>}
+                  {showStations && <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(l.stations)}</td>}
                   <td className="p-2 text-right font-mono">{nf0.format(l.sessions)}</td>
                   <td className="p-2 text-right font-mono">{nf0.format(l.energy_kwh)}</td>
                   <td className="p-2 text-right font-mono">{fmtMoney(l.amount)}</td>
@@ -319,6 +381,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
               <tr className="bg-muted/60 font-medium">
                 <td className="p-2">Итого</td>
                 {physical && <td className="p-2 text-right font-mono">{nf0.format(t.ports)}</td>}
+                {showStations && <td className="p-2 text-right font-mono">{nf0.format(t.stations)}</td>}
                 <td className="p-2 text-right font-mono">{nf0.format(t.sessions)}</td>
                 <td className="p-2 text-right font-mono">{nf0.format(t.energy_kwh)}</td>
                 <td className="p-2 text-right font-mono">{fmtMoney(t.amount)}</td>
@@ -368,9 +431,9 @@ function Overview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
           ))}
         </div>
       )}
-      <div className="grid md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <ShareCard title="По коннекторам" rows={bar(conn.data?.lines)} />
-        <ShareCard title="По типу клиента" rows={bar(usr.data?.lines)} />
+        <ShareDonut title="По типу клиента" rows={bar(usr.data?.lines)} />
       </div>
       <Card>
         <CardContent className="p-0">
@@ -395,6 +458,7 @@ function Overview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   )
 }
 
+/** Доли горизонтальными полосами-рейтингом (для разрезов с многими категориями). */
 function ShareCard({ title, rows }: { title: string; rows: ChargeSessionLine[] }) {
   return (
     <Card>
@@ -418,6 +482,45 @@ function ShareCard({ title, rows }: { title: string; rows: ChargeSessionLine[] }
   )
 }
 
+/** Доли донат-диаграммой + легенда (для разрезов с малым числом категорий). */
+function ShareDonut({ title, rows }: { title: string; rows: ChargeSessionLine[] }) {
+  const total = rows.reduce((s, r) => s + r.amount, 0)
+  const data = rows.map((r) => ({ name: r.label, value: Math.max(0, r.amount) }))
+  const n = rows.length
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">{title}</div>
+        <div className="flex items-center gap-4">
+          <div className="relative shrink-0" style={{ width: 132, height: 132 }} data-chart>
+            <ResponsiveContainer width={132} height={132}>
+              <PieChart>
+                <Pie data={data} dataKey="value" nameKey="name" innerRadius={44} outerRadius={62} paddingAngle={1.5} stroke="none" isAnimationActive={false}>
+                  {data.map((_, i) => <Cell key={i} fill={donutColor(i, n)} />)}
+                </Pie>
+                <RTooltip formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <div className="text-sm font-semibold tabular-nums">{fmtMoneyShort(total)}</div>
+              <div className="text-[9px] text-muted-foreground">₽ итого</div>
+            </div>
+          </div>
+          <div className="min-w-0 flex-1 space-y-1.5 text-xs">
+            {rows.map((r, i) => (
+              <div key={r.label} className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: donutColor(i, n) }} />
+                <span className="flex-1 truncate">{r.label}</span>
+                <span className="font-mono tabular-nums text-muted-foreground">{fmtMoneyShort(r.amount)} ₽ · {r.share_pct.toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']  // isodow 1..7
 
 /** Heatmap загрузки: час × день недели (цвет = интенсивность). */
@@ -425,7 +528,7 @@ function ChargeHeatmap({ companyId, dateFrom, dateTo }: { companyId: string; dat
   const n = useNarrow()
   const { data, isLoading } = useQuery({
     queryKey: ['charge-heatmap', companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getChargeHeatmap({ companyId, dateFrom, dateTo, metric: 'sessions', stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeHeatmap({ companyId, dateFrom, dateTo, metric: 'sessions', stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
   })
   if (isLoading) return <Loading />
   if (!data || data.cells.length === 0) return <Empty />
@@ -500,22 +603,6 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   )
 }
 
-/** Клиенты и тарифы — ФЛ/ЮЛ + канал запуска + разрез по тарифам. */
-function Clients({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const [ov, setOv] = useTabParams('cs_clients', { override: null as Period | null })
-  const period = ov.override ?? { from: dateFrom, to: dateTo }
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 px-4 pt-4" data-export-ignore>
-        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
-      </div>
-      <BreakdownTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="user_type" firstCol="Тип клиента" withKpis />
-      <BreakdownTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="charge_type" firstCol="Канал запуска" />
-      <BreakdownTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="tariff" firstCol="Тариф (₽/кВтч)" />
-    </div>
-  )
-}
-
 const DYN_DEFAULTS = { metric: 'amount' as ChargeMetric, seriesSel: '__net__', bucket: 'month' as ChargeBucket, override: null as Period | null, yoy: false }
 const shiftYearISO = (iso: string, delta: number): string => {
   const d = new Date(iso); d.setFullYear(d.getFullYear() + delta); return isoLocal(d)
@@ -531,7 +618,7 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['charge-timeseries', companyId, period.from, period.to, p.bucket, p.metric, p.seriesSel, n.key],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, seriesBy, stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, seriesBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
     enabled: !!period.from && !!period.to,
   })
   // YoY-оверлей — только для «Вся сеть» (одна линия): тот же интервал год назад.
@@ -539,7 +626,7 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   const prevFrom = shiftYearISO(period.from, -1), prevTo = shiftYearISO(period.to, -1)
   const prev = useQuery({
     queryKey: ['charge-timeseries-yoy', companyId, prevFrom, prevTo, p.bucket, p.metric, n.key],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom: prevFrom, dateTo: prevTo, bucket: p.bucket, metric: p.metric, stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom: prevFrom, dateTo: prevTo, bucket: p.bucket, metric: p.metric, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
     enabled: yoyOn,
   })
   const hasData = data && data.data.length > 0
@@ -655,7 +742,7 @@ function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; date
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['charge-slice', companyId, period.from, period.to, p.bucket, p.metric, p.seriesSel, p.topN, n.key],
-    queryFn: () => getChargeSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, groupBy, topN: p.topN, stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, groupBy, topN: p.topN, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
     enabled: !!period.from && !!period.to,
   })
   const hasData = data && data.intervals.length > 0
@@ -1021,7 +1108,7 @@ function ManualCompare({ companyId, dateFrom, dateTo }: { companyId: string; dat
   const ready = periods.length >= 2 && periods.every((x) => x.from && x.to)
   const { data, isLoading, error } = useQuery({
     queryKey: ['charge-compare-multi', companyId, JSON.stringify(periods), p.metric, p.groupBy, n.key],
-    queryFn: () => getChargeCompareMulti({ companyId, periods, metric: p.metric, groupBy: p.groupBy, stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeCompareMulti({ companyId, periods, metric: p.metric, groupBy: p.groupBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
     enabled: ready,
   })
 
@@ -1072,7 +1159,6 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null)
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s && s.key === key ? (s.dir === 'desc' ? { key, dir: 'asc' } : null) : { key, dir: 'desc' }))
-  const arrow = (key: SortKey) => (sort?.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '')
 
   const sortedLines = useMemo(() => {
     if (!sort) return lines
@@ -1087,9 +1173,17 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
     return [...rest, ...others]
   }, [lines, sort])
 
-  const HdBtn = ({ k, children }: { k: SortKey; children: ReactNode }) => (
-    <button className="hover:text-foreground transition-colors" onClick={() => toggleSort(k)}>{children}{arrow(k)}</button>
-  )
+  const HdBtn = ({ k, children, left }: { k: SortKey; children: ReactNode; left?: boolean }) => {
+    const dir = sort && sort.key === k ? sort.dir : null
+    const Ico = dir === 'asc' ? ArrowUp : dir === 'desc' ? ArrowDown : ChevronsUpDown
+    return (
+      <button onClick={() => toggleSort(k)} title="Сортировать по столбцу"
+        className={`group inline-flex items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${left ? '' : 'flex-row-reverse'} ${dir ? 'text-foreground' : ''}`}>
+        <span className="whitespace-nowrap">{children}</span>
+        <Ico className={`h-3 w-3 shrink-0 ${dir ? 'text-primary opacity-100' : 'opacity-30 group-hover:opacity-70'}`} />
+      </button>
+    )
+  }
 
   // Выгрузка полного вида = интервалы + сводка (Итого/Среднее·Мин·Макс) + Δ — как в компактном.
   const isRatioC = RATIO_METRICS.includes(metric)
@@ -1114,7 +1208,7 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
         <table className="w-full text-xs" {...exportRows(firstCol, exCols, exData)}>
           <thead>
             <tr className="border-b bg-muted/40 text-muted-foreground">
-              <th className="text-left p-2 font-medium sticky left-0 bg-muted/40 z-10"><HdBtn k="label">{firstCol}</HdBtn></th>
+              <th className="text-left p-2 font-medium sticky left-0 bg-muted/40 z-10"><HdBtn k="label" left>{firstCol}</HdBtn></th>
               {columns.map((c, i) => (
                 <th key={i} className={`text-right p-2 font-medium whitespace-nowrap ${c.partial ? 'text-muted-foreground/50' : ''}`}>
                   <HdBtn k={i}>{c.label}{c.partial && <span className="text-amber-400/70"> *</span>}</HdBtn>
@@ -1173,7 +1267,7 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   const n = useNarrow()
   const trend = useQuery({
     queryKey: ['charge-timeseries', companyId, period.from, period.to, 'month', 'success_pct', '__net__', n.key],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', metric: 'success_pct', stations: n.stations, regions: n.regions }),
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', metric: 'success_pct', stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
   })
   if (outcomes.isLoading) return <Loading />
   if (!outcomes.data || outcomes.data.lines.length === 0) return <Empty />
@@ -1285,22 +1379,94 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   )
 }
 
+// Внутренние табы пункта «Сессии» (обзор + операционные разрезы). Клиенты и
+// Корпоратив — отдельные пункты меню, не сюда.
+const SUB_TABS: { k: string; label: string }[] = [
+  { k: 'overview',   label: 'Обзор' },
+  { k: 'stations',   label: 'По станциям' },
+  { k: 'connectors', label: 'По коннекторам' },
+  { k: 'time',       label: 'Время и загрузка' },
+  { k: 'reliability', label: 'Надёжность' },
+  { k: 'dynamics',   label: 'Динамика (тренд)' },
+  { k: 'compare',    label: 'Сравнение периодов' },
+]
+
+function subView(sub: string, p: { companyId: string; dateFrom: string; dateTo: string }): { title: string; node: ReactNode } {
+  const { companyId, dateFrom, dateTo } = p
+  switch (sub) {
+    case 'stations': return { title: 'По станциям', node: <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="station" firstCol="Станция" withKpis controls tabKey="cs_stations" /> }
+    case 'connectors': return { title: 'По коннекторам', node: <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="connector" firstCol="Коннектор" withKpis controls tabKey="cs_connectors" /> }
+    case 'time': return { title: 'Время и загрузка', node: <TimeLoad companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
+    case 'reliability': return { title: 'Надёжность', node: <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
+    case 'dynamics': return { title: 'Динамика', node: <Dynamics companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
+    case 'compare': return { title: 'Сравнение периодов', node: <Compare companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
+    default: return { title: 'Обзор', node: <Overview companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
+  }
+}
+
+/** Пункт «Сессии» — контейнер с внутренними табами разрезов + общий тумблер ФЛ/ЮЛ. */
+function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, setClientType }: {
+  companyId: string; dateFrom: string; dateTo: string; subtitle?: string
+  clientType: ClientType; setClientType: (v: ClientType) => void
+}) {
+  const [st, patch] = useTabParams('cs_sessions', { sub: 'overview' })
+  const v = subView(st.sub, { companyId, dateFrom, dateTo })
+  const ref = useRef<HTMLDivElement>(null)
+  return (
+    <ChargeClientCtx.Provider value={clientType}>
+      {/* Единая шапка-таббар: underline-табы слева + фильтр/экспорт справа. Общий
+          нижний бордер связывает активный таб с содержимым панели под ним. */}
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4">
+        <div className="flex items-stretch gap-0.5 overflow-x-auto">
+          {SUB_TABS.map((x) => {
+            const on = st.sub === x.k
+            return (
+              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
+                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
+                {x.label}
+              </button>
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <ClientTypeToggle value={clientType} onChange={setClientType} />
+          <ExportButton title={`Сессии ЭЗС · ${v.title}`} subtitle={subtitle} getEl={() => ref.current} />
+        </div>
+      </div>
+      {/* key={st.sub} — ремаунт под-вида при смене таба: иначе React переиспользует
+          один экземпляр BreakdownTable (станции↔коннекторы — один тип) и его разрез
+          (useTabParams) залипает от прошлого таба. */}
+      <div ref={ref} className="pt-3" key={st.sub}>{v.node}</div>
+    </ChargeClientCtx.Provider>
+  )
+}
+
 export function ChargeSessionsPanel({ tab, companyId, dateFrom, dateTo }: {
   tab: string; companyId: string; dateFrom: string; dateTo: string
 }) {
   const sub = periodSub(dateFrom, dateTo)
+  const [clientType, setClientType] = useState<ClientType>('all')
+  const isCorporate = tab === 'cs_corporate'
+  // «Корпоратив» жёстко фильтрует ЮЛ (тумблер скрыт); остальные пункты — по тумблеру.
+  const effective: ClientType = isCorporate ? 'ul' : clientType
   const wrap = (title: string, node: ReactNode) => (
-    <PanelExport title={`Сессии ЭЗС · ${title}`} subtitle={sub}>{node}</PanelExport>
+    <ChargeClientCtx.Provider value={effective}>
+      <PanelExport title={`Сессии ЭЗС · ${title}`} subtitle={sub}
+        toolbar={isCorporate ? undefined : <ClientTypeToggle value={clientType} onChange={setClientType} />}>
+        {node}
+      </PanelExport>
+    </ChargeClientCtx.Provider>
   )
   switch (tab) {
-    case 'cs_overview': return wrap('Обзор', <Overview companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
-    case 'cs_stations': return wrap('По станциям', <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="station" firstCol="Станция" withKpis controls tabKey="cs_stations" />)
-    case 'cs_connectors': return wrap('По коннекторам', <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="connector" firstCol="Коннектор" withKpis controls tabKey="cs_connectors" />)
-    case 'cs_time': return wrap('Время и загрузка', <TimeLoad companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
-    case 'cs_clients': return wrap('Клиенты и тарифы', <Clients companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
-    case 'cs_reliability': return wrap('Надёжность', <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
-    case 'cs_dynamics': return wrap('Динамика', <Dynamics companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
-    case 'cs_compare': return wrap('Сравнение периодов', <Compare companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
+    case 'cs_dashboard': return <OverviewDashboardPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+    case 'cs_list': return <ChargeListPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+    case 'cs_map': return <ChargeMapPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+    case 'cs_sessions': return (
+      <SessionsTabbed companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} subtitle={sub}
+        clientType={clientType} setClientType={setClientType} />
+    )
+    case 'cs_clients': return <TariffsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+    case 'cs_corporate': return <CorporatePanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
     default: return null
   }
 }

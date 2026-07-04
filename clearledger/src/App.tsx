@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { createBrowserRouter, RouterProvider, Outlet, Link, Navigate } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useParams } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
@@ -107,6 +107,12 @@ function Providers() {
   )
 }
 
+/** Редирект старого маршрута канала на коннектор с сохранением id. */
+function ChannelDetailRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/connectors/${id}`} replace />
+}
+
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 const router = createBrowserRouter([
@@ -123,11 +129,15 @@ const router = createBrowserRouter([
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
-          { path: '/channels', element: <LazyPage><ChannelsPage /></LazyPage> },
-          { path: '/channels/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
+          { path: '/connectors', element: <LazyPage><ChannelsPage /></LazyPage> },
+          { path: '/connectors/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
+          // Старые маршруты → «Коннекторы» (редирект). /sources пока доступен (настройка
+          // подключения встраивается в коннектор в Фазе 3).
+          { path: '/channels', element: <Navigate to="/connectors" replace /> },
+          { path: '/channels/:id', element: <ChannelDetailRedirect /> },
           { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
           { path: '/catalog', element: <LazyPage><CatalogPage /></LazyPage> },
-          { path: '/locations', element: <LazyPage><LocationsPage cockpitVariant="intake" /></LazyPage> },
+          { path: '/locations', element: <Navigate to="/objects" replace /> },
           { path: '/contractors', element: <LazyPage><ContractorsPage /></LazyPage> },
           { path: '/organization', element: <LazyPage><OrganizationPage /></LazyPage> },
           { path: '/1c/connection', element: <RequireFuel><LazyPage><ConnectionPage /></LazyPage></RequireFuel> },

@@ -69,6 +69,10 @@ export const BACKEND_SOURCE_META: Record<string, { label: string; category: stri
   ofd: { label: 'ОФД', category: 'Фискализация', icon: 'Receipt' },
   chestny_znak: { label: 'Честный Знак', category: 'Маркировка', icon: 'ScanBarcode' },
   neftoms: { label: 'NeftoMS (POS)', category: 'Касса/POS АЗС', icon: 'Server' },
+  manual_table: { label: 'Таблица (Excel)', category: 'Ручные подключения', icon: 'Table' },
+  charge_sessions_excel: { label: 'ЭЗС: сессии (Excel)', category: 'Электромобильность (ЭЗС)', icon: 'Zap' },
+  stations_excel: { label: 'ЭЗС: справочник станций (Excel)', category: 'Электромобильность (ЭЗС)', icon: 'MapPin' },
+  manual_form: { label: 'Форма (ручной ввод)', category: 'Ручные подключения', icon: 'PenLine' },
 }
 
 /**

@@ -10,7 +10,7 @@
 import { useState, type ReactNode } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Database, Radio, GitCompare, ChevronDown, Plug, Plus, Boxes, Blocks, Settings2 } from 'lucide-react'
+import { Database, GitCompare, ChevronDown, Plug, Plus, Boxes, Blocks, Settings2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -269,7 +269,7 @@ export function CatalogPage() {
       group: c.category,
       meta: `${c.streams.length} потоков · ${c.stages.length} стадий`,
       chips: c.reconcile_rules,
-      action: { label: 'Создать канал', kind: 'create', onClick: () => navigate('/channels?wizard=1') },
+      action: { label: 'Создать коннектор', kind: 'create', onClick: () => navigate('/connectors?wizard=1') },
     }))
 
   const ruleRows = (items: ReconcileRuleItem[]): CatalogRow[] =>
@@ -333,7 +333,7 @@ export function CatalogPage() {
       group: 'Нормализация L1 → L2',
       meta: `источник: ${energySource(ch.sourceId)?.label ?? ch.sourceId}`,
       chips: cutsForChannel(ch.id).map((c) => c.label),
-      action: { label: 'Открыть', kind: 'create', onClick: () => navigate('/channels') },
+      action: { label: 'Открыть', kind: 'create', onClick: () => navigate('/connectors') },
     }))
 
   const energyCutRows = (items: EnergyCut[]): CatalogRow[] =>
@@ -369,14 +369,14 @@ export function CatalogPage() {
       />
       {isEnergy ? (
         <>
-          <Section title="Источники" icon={<Database className="h-5 w-5" />} query={eSources} toRows={energySourceRows} />
-          <Section title="Каналы" icon={<Radio className="h-5 w-5" />} query={eChannels} toRows={energyChannelRows} />
+          <Section title="Подключения" icon={<Database className="h-5 w-5" />} query={eSources} toRows={energySourceRows} />
+          <Section title="Коннекторы" icon={<Plug className="h-5 w-5" />} query={eChannels} toRows={energyChannelRows} />
           <Section title="Разрезы учёта" icon={<GitCompare className="h-5 w-5" />} query={eCuts} toRows={energyCutRows} />
         </>
       ) : (
         <>
-          <Section title="Источники" icon={<Database className="h-5 w-5" />} query={sources} toRows={sourceRows} />
-          <Section title="Каналы" icon={<Radio className="h-5 w-5" />} query={channels} toRows={channelRows} />
+          <Section title="Подключения" icon={<Database className="h-5 w-5" />} query={sources} toRows={sourceRows} />
+          <Section title="Коннекторы" icon={<Plug className="h-5 w-5" />} query={channels} toRows={channelRows} />
           <Section title="Разрезы учёта" icon={<GitCompare className="h-5 w-5" />} query={rules} toRows={ruleRows} />
         </>
       )}

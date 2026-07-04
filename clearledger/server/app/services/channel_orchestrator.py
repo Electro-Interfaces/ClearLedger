@@ -29,14 +29,24 @@ from app.services.onec.crypto import decrypt_password
 from app.services.sts_client import sts_get_points
 
 
+_STREAM_ROLE_RANK = {"anchor": 0, "control": 1, "reference": 2, "external": 3}
+
+
 async def _channel_source(db: AsyncSession, channel_id, source_type: str | None = None) -> Source | None:
-    """Первый Source среди потоков канала (опц. фильтр по source_type)."""
+    """Source канала среди потоков (опц. фильтр по source_type).
+
+    ДЕТЕРМИНИРОВАННО: учитываем только включённые потоки с подключённым источником,
+    приоритет по роли (anchor → control → reference → external), затем стабильный
+    порядок (имя, id). Иначе (без ORDER BY) многопоточный канал недетерминированно
+    выбирал бы источник — и мог уйти в не ту ветку оркестратора или в skipped."""
     streams = (
         await db.execute(select(ChannelStream).where(ChannelStream.channel_id == channel_id))
     ).scalars().all()
+    streams = sorted(
+        (s for s in streams if s.enabled and s.source_id is not None),
+        key=lambda s: (_STREAM_ROLE_RANK.get(s.role, 9), s.name or "", str(s.id)),
+    )
     for s in streams:
-        if s.source_id is None:
-            continue
         src = await db.get(Source, s.source_id)
         if src is not None and (source_type is None or src.source_type == source_type):
             return src
@@ -309,9 +319,12 @@ async def _run_reestr(db: AsyncSession, channel: Channel, src: Source) -> dict[s
 # ---------------------------------------------------------------------------
 # Ветка зарядных сессий ЭЗС (Excel) — server-side L1→L2 (ChargeSession)
 # ---------------------------------------------------------------------------
-async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
+async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source,
+                               mode: str = "append", log_id=None) -> dict[str, Any]:
     """Загруженный xlsx сессий ЭЗС (SourceFile из config.uploadFileId) → L1 RAW →
-    нормализация (connector/user_type) → L2 (ChargeSession с channel_id)."""
+    нормализация (connector/user_type) → L2 (ChargeSession с channel_id).
+
+    mode: 'append' (подгрузить новые) | 'replace' (переписать весь датасет компании)."""
     cfg = channel.config or {}
     file_id = cfg.get("uploadFileId") or cfg.get("upload_file_id")
     if not file_id:
@@ -327,7 +340,33 @@ async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source) 
         content = fh.read()
     from app.services.charge_sessions_normalize import ingest_charge_sessions, parse_sessions_xlsx
     rows = parse_sessions_xlsx(content)
-    return await ingest_charge_sessions(db, channel.company_id, rows, channel_id=channel.id)
+    return await ingest_charge_sessions(db, channel.company_id, rows, channel_id=channel.id,
+                                        mode=mode, log_id=log_id)
+
+
+async def _run_stations(db: AsyncSession, channel: Channel, src: Source,
+                        mode: str = "append", log_id=None) -> dict[str, Any]:
+    """Загруженный xlsx справочника станций (SourceFile из config.uploadFileId) → L1 →
+    нормализация паспорта → L2 (ServiceLocation type='charge_station' с region_id).
+
+    mode: 'append' (только новые) | 'replace' (обновить существующие + добавить новые)."""
+    cfg = channel.config or {}
+    file_id = cfg.get("uploadFileId") or cfg.get("upload_file_id")
+    if not file_id:
+        return {"status": "skipped",
+                "message": "не загружен справочник станций: сначала «Загрузить таблицу» (config.uploadFileId пуст)"}
+    try:
+        sf = await db.get(SourceFile, _uuid.UUID(str(file_id)))
+    except (ValueError, TypeError):
+        sf = None
+    if sf is None:
+        return {"status": "error", "message": f"файл {file_id} не найден"}
+    with open(sf.storage_path, "rb") as fh:
+        content = fh.read()
+    from app.services.stations_normalize import ingest_stations, parse_stations_xlsx
+    rows = parse_stations_xlsx(content)
+    return await ingest_stations(db, channel.company_id, rows, channel_id=channel.id,
+                                 mode=mode, log_id=log_id)
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +380,7 @@ async def run_channel(
     log_id=None,
     station_codes: list[int] | None = None,
     all_period: bool = False,
+    mode: str = "append",
 ) -> dict[str, Any]:
     """Прогон канала: fetch→normalize→save, ветка по типу источника и шаблону.
 
@@ -348,7 +388,9 @@ async def run_channel(
     Приоритетнее config канала и period_days. log_id — ChannelSyncLog для
     обновления прогресса по ходу (живое «загружено N» в UI-поллинге).
     station_codes — точечный отбор станций (UI «Обновить»); None → вся сеть STS.
-    all_period — вся история (без ограничения по датам)."""
+    all_period — вся история (без ограничения по датам).
+    mode — режим загрузки табличных источников (сессии ЭЗС): 'append' подгрузить
+    новые / 'replace' переписать весь датасет компании."""
     src = await _channel_source(db, channel.id)
     if src is None:
         return {"status": "skipped", "message": "в потоках канала нет источника"}
@@ -357,7 +399,9 @@ async def run_channel(
     if src.source_type == "manual_table":
         return await _run_reestr(db, channel, src)
     if src.source_type == "charge_sessions_excel":
-        return await _run_charge_sessions(db, channel, src)
+        return await _run_charge_sessions(db, channel, src, mode=mode, log_id=log_id)
+    if src.source_type == "stations_excel":
+        return await _run_stations(db, channel, src, mode=mode, log_id=log_id)
     if src.source_type == "sts":
         if (channel.template_id or "") == "fuel_delivery":
             return await _run_fuel_delivery(db, channel, src, date_from, date_to, log_id, station_codes, all_period)

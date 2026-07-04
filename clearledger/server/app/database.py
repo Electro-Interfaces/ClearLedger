@@ -149,6 +149,14 @@ async def create_all() -> None:
             # v3.6: зарядные сессии ЭЗС — привязка к каналу-обработчику (цепочка).
             "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS channel_id UUID "
             "REFERENCES channels(id) ON DELETE SET NULL",
+            # v3.7: обогащение сессий — наименование корпоративного клиента (ЮЛ),
+            # проставляется джойном справочника «Организации» по телефону (user_id).
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS client_name VARCHAR(300)",
+            "CREATE INDEX IF NOT EXISTS ix_charge_sessions_user_id ON charge_sessions (user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_charge_sessions_client_name ON charge_sessions (client_name)",
+            # v3.8: договорной тариф корп-клиента + вычисленная корп-выручка.
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS client_tariff NUMERIC(10,2)",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS client_amount NUMERIC(14,2)",
             # v3.0: натуральный ключ ТТН — дедуп существующих дублей + уникальный
             # индекс (DB-страховка от задвоения; как уже дедуплицирует delivery-ветка
             # по (company, station, ttn, code)). COALESCE(fuel_code,-1) — чтобы NULL
@@ -303,6 +311,37 @@ async def create_all() -> None:
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS valid_until VARCHAR(20)",
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS is_closed BOOLEAN NOT NULL DEFAULT false",
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS scope_type VARCHAR(20) NOT NULL DEFAULT 'unassigned'",
+            # v2.6: паспорт ЭЗС-станции в service_locations (нормализованный L2 из справочника станций)
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS serial_number VARCHAR(120)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS station_number VARCHAR(60)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS city VARCHAR(120)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS street VARCHAR(200)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS house VARCHAR(40)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS power_kwt DOUBLE PRECISION",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS connectors_count INTEGER",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS connector_types VARCHAR(200)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS owner VARCHAR(200)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS owner_id INTEGER",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS brand VARCHAR(120)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS model VARCHAR(120)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS ocpp_protocol VARCHAR(40)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS firmware VARCHAR(80)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS stage VARCHAR(40)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS access_type VARCHAR(60)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS is_published BOOLEAN",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS hubex_asset_id VARCHAR(80)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS hubex_link_status VARCHAR(40)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS rating DOUBLE PRECISION",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS success_pct DOUBLE PRECISION",
+            "CREATE INDEX IF NOT EXISTS idx_service_locations_type ON service_locations(company_id, type)",
+            # v2.7: материализованная связь сессии → объект-станция (конформная размерность)
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS location_id VARCHAR(40) REFERENCES service_locations(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS idx_charge_sessions_location ON charge_sessions(location_id)",
+            # v2.8: скидка корп-клиента к рознице (каршеринг = 25%; применяется к матрице)
+            "ALTER TABLE corporate_clients ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

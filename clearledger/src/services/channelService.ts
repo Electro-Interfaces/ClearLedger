@@ -302,7 +302,7 @@ export async function addSyncLog(channelId: string, entries: SyncLogEntry[]): Pr
 /** Запустить канал (API-режим: бэкенд-оркестратор; localStorage: см. channelSyncService). */
 export async function runChannel(
   id: string,
-  period?: { dateFrom?: string; dateTo?: string; stationCodes?: number[]; allPeriod?: boolean },
+  period?: { dateFrom?: string; dateTo?: string; stationCodes?: number[]; allPeriod?: boolean; mode?: 'append' | 'replace' },
 ): Promise<any> {
   if (!isApiEnabled()) throw new Error('runChannel: доступно только в API-режиме')
   const body = period
@@ -311,6 +311,8 @@ export async function runChannel(
         date_to: period.allPeriod ? undefined : period.dateTo,
         station_codes: period.stationCodes && period.stationCodes.length ? period.stationCodes : undefined,
         all_period: period.allPeriod || undefined,
+        // режим табличной загрузки (сессии ЭЗС): 'replace' переписать / 'append' подгрузить
+        mode: period.mode && period.mode !== 'append' ? period.mode : undefined,
       }
     : undefined
   // Бэкенд запускает прогон в ФОНЕ и сразу возвращает {status:'running'}.

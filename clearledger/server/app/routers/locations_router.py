@@ -59,8 +59,35 @@ class LocationOut(BaseModel):
     description: str | None = None
     sourceBindings: list[Any]
     metadata: dict[str, Any] | None = None
+    # Нормализованный паспорт L2 (типизированные колонки) — заполнен для объектов ЭЗС
+    # (type=ev_charging), NULL для прочих. Приходит из нормализации канала «Справочник станций».
+    passport: dict[str, Any] | None = None
     createdAt: str
     updatedAt: str
+
+
+def _passport(l: ServiceLocation) -> dict[str, Any] | None:
+    """Типизированный паспорт (L2) объекта → dict непустых полей, либо None."""
+    fields = {
+        "serialNumber": getattr(l, "serial_number", None),
+        "stationNumber": getattr(l, "station_number", None),
+        "city": getattr(l, "city", None), "street": getattr(l, "street", None),
+        "house": getattr(l, "house", None),
+        "latitude": getattr(l, "latitude", None), "longitude": getattr(l, "longitude", None),
+        "powerKwt": getattr(l, "power_kwt", None),
+        "connectorsCount": getattr(l, "connectors_count", None),
+        "connectorTypes": getattr(l, "connector_types", None),
+        "owner": getattr(l, "owner", None), "ownerId": getattr(l, "owner_id", None),
+        "brand": getattr(l, "brand", None), "model": getattr(l, "model", None),
+        "ocppProtocol": getattr(l, "ocpp_protocol", None), "firmware": getattr(l, "firmware", None),
+        "stage": getattr(l, "stage", None), "isTest": getattr(l, "is_test", None),
+        "hubexAssetId": getattr(l, "hubex_asset_id", None),
+        "hubexLinkStatus": getattr(l, "hubex_link_status", None),
+        "rating": getattr(l, "rating", None), "successPct": getattr(l, "success_pct", None),
+        "regionId": str(l.region_id) if getattr(l, "region_id", None) else None,
+    }
+    out = {k: v for k, v in fields.items() if v is not None}
+    return out or None
 
 
 def _out(l: ServiceLocation) -> LocationOut:
@@ -70,6 +97,7 @@ def _out(l: ServiceLocation) -> LocationOut:
         address=l.address, description=l.description,
         sourceBindings=l.source_bindings or [],
         metadata=l.extra_metadata,
+        passport=_passport(l),
         createdAt=l.created_at.isoformat() if l.created_at else "",
         updatedAt=l.updated_at.isoformat() if l.updated_at else "",
     )

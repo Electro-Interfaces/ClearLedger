@@ -296,6 +296,7 @@ class RunRequest(BaseModel):
     date_to: str | None = None
     station_codes: list[int] | None = None
     all_period: bool = False   # вся история (игнорировать даты)
+    mode: str = "append"       # режим табличной загрузки: append | replace (сессии ЭЗС)
 
 
 def _loaded_total(result: dict) -> int:
@@ -308,13 +309,20 @@ def _loaded_total(result: dict) -> int:
 def _run_summary(result: dict) -> str:
     n = _loaded_total(result)
     if result.get("stations_total") is not None:
-        return f"загружено {n}, станций {result.get('stations_ok', '?')}/{result.get('stations_total', '?')}"
-    return result.get("message") or f"загружено {n}"
+        base = f"загружено {n}, станций {result.get('stations_ok', '?')}/{result.get('stations_total', '?')}"
+    else:
+        base = result.get("message") or f"загружено {n}"
+    # ошибки табличных источников (сессии ЭЗС / реестр / ЦБ) иначе не видны в UI
+    err = int(result.get("errors", 0) or 0)
+    if err and "ошиб" not in base:
+        base += f", ошибок {err}"
+    return base
 
 
 async def _run_channel_background(
     channel_id: uuid.UUID, date_from: str | None, date_to: str | None, log_id: uuid.UUID,
     station_codes: list[int] | None = None, all_period: bool = False,
+    mode: str = "append",
 ) -> None:
     """Фоновый прогон: своя сессия, поэтапный commit внутри оркестратора.
     Запуск НЕ держит HTTP-запрос — UI поллит статус через /run-status."""
@@ -327,7 +335,7 @@ async def _run_channel_background(
         try:
             result = await orchestrate_channel(
                 db, ch, date_from=date_from, date_to=date_to, log_id=log_id,
-                station_codes=station_codes, all_period=all_period)
+                station_codes=station_codes, all_period=all_period, mode=mode)
             status = result.get("status", "success")
         except Exception as exc:  # noqa: BLE001
             logging.getLogger("clearledger.channel").exception("Фоновый прогон канала упал")
@@ -345,9 +353,17 @@ async def _run_channel_background(
             log.loaded = _loaded_total(result)
             # Счётчики и per-station детали для строки прогона в кокпите.
             by = result.get("by_station") if isinstance(result.get("by_station"), list) else []
-            log.skipped = sum(int(r.get("skipped", 0) or 0) for r in by)
-            log.duplicates = sum(int(r.get("duplicates", 0) or 0) for r in by)
-            log.errors = sum(1 for r in by if "error" in r)
+            if by:
+                log.skipped = sum(int(r.get("skipped", 0) or 0) for r in by)
+                log.duplicates = sum(int(r.get("duplicates", 0) or 0) for r in by)
+                log.errors = sum(1 for r in by if "error" in r)
+            else:
+                # Табличные источники (сессии ЭЗС / реестр / ЦБ) не имеют by_station —
+                # берём счётчики с верхнего уровня result, иначе errors/skipped теряются
+                # (лог показывал 0 ошибок при молча дропнутых строках).
+                log.skipped = int(result.get("skipped", 0) or 0)
+                log.duplicates = int(result.get("duplicates", 0) or 0)
+                log.errors = int(result.get("errors", 0) or 0)
             st_total = result.get("stations_total")
             log.events = [{
                 "level": "info" if status in ("success", "skipped") else "error",
@@ -385,19 +401,21 @@ async def run_channel(
     dt = payload.date_to if payload else None
     sc = payload.station_codes if payload else None
     ap = bool(payload.all_period) if payload else False
+    md = (payload.mode if payload else None) or "append"
     _scn = f", станций {len(sc)}" if sc else ""
+    _mdn = " · переписать" if md == "replace" else ""
     _per = "вся история" if ap else f"{df or '—'}…{dt or '—'}"
     log = ChannelSyncLog(
         channel_id=ch.id, status="running", finished_at=None,
         date_from=None if ap else df, date_to=None if ap else dt,
         events=[{"level": "info", "event": "run",
-                 "message": f"загрузка запущена ({_per}{_scn})"}],
+                 "message": f"загрузка запущена ({_per}{_scn}{_mdn})"}],
     )
     db.add(log)
     await db.flush()
     log_id = log.id
     await db.commit()  # зафиксировать лог до старта фоновой задачи
-    asyncio.create_task(_run_channel_background(ch.id, df, dt, log_id, sc, ap))
+    asyncio.create_task(_run_channel_background(ch.id, df, dt, log_id, sc, ap, md))
     return {"sync_log_id": str(log_id), "status": "running",
             "message": "Загрузка запущена в фоне"}
 

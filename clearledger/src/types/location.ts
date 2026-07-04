@@ -47,6 +47,9 @@ export interface ServiceLocation {
   sourceBindings: LocationSourceBinding[]
   /** Произвольные метаданные (lat/lng, контакты, ответственный, ...) */
   metadata?: Record<string, unknown>
+  /** Нормализованный паспорт L2 (типизированные колонки: мощность, коннекторы,
+   *  бренд, владелец, координаты…) — для объектов ЭЗС. Из нормализации станций. */
+  passport?: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }

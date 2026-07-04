@@ -546,6 +546,35 @@ class ManualTableAdapter(SourceAdapter):
 
 
 # ---------------------------------------------------------------------------
+# Форма (ручной ввод) — третий механизм подключения наравне с API и Файлом.
+# Данные вводятся в приложении по схеме сущности и пишутся в L2 (без файла/API).
+# Ввод происходит через форму в карточке коннектора (не через fetch/расписание).
+# ---------------------------------------------------------------------------
+@register_adapter("manual_form")
+class ManualFormAdapter(SourceAdapter):
+    status = "available"
+    label = "Форма (ручной ввод)"
+    category = "Ручные источники"
+    description = (
+        "Ручной ввод данных по схеме прямо в приложении — без файла и без API. "
+        "Пользователь заполняет форму в карточке коннектора → строки пишутся в "
+        "нормализованную базу (L2). Схема полей задаётся под сущность (напр. ТТН)."
+    )
+    icon = "PenLine"
+    setup_schema = []  # у самого подключения нет настройки связи; схема — у данных формы
+    available_doc_types = [
+        SourceDocType(id="manual_entry", name="Ручной ввод (форма)", category="anchor"),
+    ]
+
+    async def test_connection(self, connection: dict[str, Any]) -> TestResult:
+        return TestResult(ok=True, message="Форма: заполните данные в карточке коннектора.")
+
+    async def fetch_delta(self, connection, doc_type, since=None, until=None, filters=None) -> RawBatch:
+        # Данные поступают из формы (submit), а не из fetch — здесь пусто.
+        return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
+
+
+# ---------------------------------------------------------------------------
 # ЭЗС: зарядные сессии (загруженный Excel) — парсинг/нормализация server-side
 # ---------------------------------------------------------------------------
 @register_adapter("charge_sessions_excel")
@@ -570,6 +599,33 @@ class ChargeSessionsExcelAdapter(SourceAdapter):
 
     async def test_connection(self, connection: dict[str, Any]) -> TestResult:
         return TestResult(ok=True, message="Источник сессий: загрузите таблицу в канал и запустите обработку.")
+
+    async def fetch_delta(self, connection, doc_type, since=None, until=None, filters=None) -> RawBatch:
+        return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
+
+
+@register_adapter("stations_excel")
+class StationsExcelAdapter(SourceAdapter):
+    status = "available"
+    label = "ЭЗС: Справочник станций (Excel)"
+    category = "Электромобильность (ЭЗС)"
+    description = (
+        "Справочник станций ЭЗС (паспорт: серийный, адрес, координаты, коннекторы, "
+        "мощность, OCPP, бренд, владелец, HubEx-связка) как источник. Файл грузится "
+        "в канал, парсинг и нормализация в объекты (Точки обслуживания) — server-side "
+        "при запуске обработки канала. Для РусГидро."
+    )
+    icon = "MapPin"
+    setup_schema = [
+        SetupField(key="sheet", label="Лист", field_type="text", required=False,
+                   default_value="Станции", help_text="Имя листа Excel со станциями."),
+    ]
+    available_doc_types = [
+        SourceDocType(id="stations", name="Справочник станций ЭЗС", category="anchor"),
+    ]
+
+    async def test_connection(self, connection: dict[str, Any]) -> TestResult:
+        return TestResult(ok=True, message="Источник станций: загрузите справочник в канал и запустите обработку.")
 
     async def fetch_delta(self, connection, doc_type, since=None, until=None, filters=None) -> RawBatch:
         return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
