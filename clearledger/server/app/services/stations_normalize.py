@@ -79,6 +79,8 @@ def _oper_status(status_dev) -> str:
     s = (status_dev or "").strip().lower()
     if not s:
         return "unknown"
+    if "выведен" in s or "демонтир" in s or "демонтаж" in s:
+        return "decommissioned"  # выведена из эксплуатации — не в сети
     if "ремонт" in s:
         return "on_repair"
     if "обслуж" in s or "maintenance" in s:
@@ -199,14 +201,26 @@ async def ingest_stations(
         sid = md.get("stationId") or md.get("ext_id")
         if sid:
             by_sid.setdefault(str(sid).strip(), loc)
+        # Тест-объекты — только по ext_id: НЕ индексируем по serial/№, чтобы боевые
+        # строки не сливались в них (и наоборот). Иначе мусор «001/Симулятор» с чужим
+        # № затирает боевую станцию.
+        if loc.is_test:
+            continue
         if loc.code:
             by_serial.setdefault(str(loc.code).strip(), loc)
         num = loc.station_number or md.get("number")
         if num is not None and str(num).strip():
             by_num.setdefault(str(num).strip(), loc)
 
+    def _is_non_network(r) -> bool:
+        return bool(r.get("is_test")) or "выведен" in str(r.get("status_dev") or "").lower()
+
     def _resolve(r) -> ServiceLocation | None:
         ext_, serial, num = r.get("ext_id"), r.get("serial_number"), r.get("number")
+        # Тест/выведенные резолвим ТОЛЬКО по ext_id (уникален) — отдельные объекты,
+        # не сливаем по serial/№ с боевыми станциями.
+        if _is_non_network(r):
+            return by_sid.get(str(ext_).strip()) if ext_ else None
         return ((by_sid.get(str(ext_).strip()) if ext_ else None)
                 or (by_serial.get(str(serial).strip()) if serial else None)
                 or (by_num.get(str(num).strip()) if num else None))
@@ -289,6 +303,11 @@ async def ingest_stations(
             errors += 1
 
     await db.flush()
+    # Защита: боевая станция (имя «ЭЗС №…») не может быть тестовой — мусорные тест-строки
+    # могли зацепить её по загрязнённым метаданным. Тест = только мусорные имена.
+    await db.execute(update(ServiceLocation).where(
+        ServiceLocation.company_id == company_id, ServiceLocation.type == "ev_charging",
+        ServiceLocation.is_test.is_(True), ServiceLocation.name.like("ЭЗС%")).values(is_test=False))
     await _bump(db, log_id, total, total, created, updated)
     message = (f"переписано: обновлено {updated}, добавлено {created}" if mode == "replace"
                else f"добавлено {created}, пропущено {skipped}")

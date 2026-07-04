@@ -31,6 +31,12 @@ async def stations_linkage(db: AsyncSession, company_id) -> dict[str, Any]:
     objs = (await db.execute(select(L).where(
         L.company_id == company_id, L.type == "ev_charging"))).scalars().all()
     obj_ids = {o.id for o in objs}
+    # «В сети» = боевые станции: без тестовых (is_test) и без выведенных из эксплуатации
+    # (operational_status='decommissioned'). Объекты остаются в каталоге, но не в KPI сети.
+    n_test = sum(1 for o in objs if o.is_test)
+    n_decomm = sum(1 for o in objs if (o.operational_status or "") == "decommissioned")
+    n_network = sum(1 for o in objs
+                    if not o.is_test and (o.operational_status or "") != "decommissioned")
     obj_numbers: set[str] = set()
     for o in objs:
         n = o.station_number or (o.extra_metadata or {}).get("number")
@@ -85,7 +91,10 @@ async def stations_linkage(db: AsyncSession, company_id) -> dict[str, Any]:
 
     return {
         "key_label": "станция № (number)",
-        "objects": len(objs),
+        "objects": n_network,           # ЭЗС в сети (боевые: без тест/выведенных) — для KPI
+        "objects_total": len(objs),     # всего объектов в каталоге
+        "objects_test": n_test,
+        "objects_decommissioned": n_decomm,
         "objects_enriched": enriched,
         "objects_without_sessions": len(obj_numbers - sess_codes),
         "channels": channels,

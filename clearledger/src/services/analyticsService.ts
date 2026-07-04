@@ -312,7 +312,10 @@ export interface StationsLinkageChannel {
 }
 export interface StationsLinkage {
   key_label: string
-  objects: number
+  objects: number            // ЭЗС в сети (боевые: без тест/выведенных) — для KPI
+  objects_total?: number     // всего объектов в каталоге
+  objects_test?: number
+  objects_decommissioned?: number
   objects_enriched: number
   objects_without_sessions: number
   channels: StationsLinkageChannel[]

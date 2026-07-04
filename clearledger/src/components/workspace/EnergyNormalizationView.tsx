@@ -105,7 +105,8 @@ function ChannelLinkageBlock({ companyId }: { companyId: string }) {
     enabled: !!companyId, staleTime: 60_000,
   })
   const lk = q.data
-  if (!lk || lk.objects === 0) return null
+  if (!lk || (lk.objects_total ?? lk.objects) === 0) return null
+  const objTotal = lk.objects_total ?? lk.objects
   return (
     <Card><CardContent className="space-y-3 overflow-x-auto pt-5">
       <div className="flex flex-wrap items-center gap-2">
@@ -115,7 +116,10 @@ function ChannelLinkageBlock({ companyId }: { companyId: string }) {
       </div>
       <p className="text-xs text-muted-foreground">
         Объект-станция (<span className="font-mono">service_locations</span>) — общий хаб; каналы-факты ссылаются на него.
-        Объектов <b className="text-foreground">{fmtN(lk.objects)}</b> · с типизированным паспортом <b className="text-foreground">{fmtN(lk.objects_enriched)}</b> · без сессий <b className="text-foreground">{fmtN(lk.objects_without_sessions)}</b>.
+        Объектов <b className="text-foreground">{fmtN(objTotal)}</b> · в сети <b className="text-foreground">{fmtN(lk.objects)}</b>
+        {(lk.objects_test ?? 0) > 0 && <> · тест <b className="text-foreground">{fmtN(lk.objects_test ?? 0)}</b></>}
+        {(lk.objects_decommissioned ?? 0) > 0 && <> · выведено <b className="text-foreground">{fmtN(lk.objects_decommissioned ?? 0)}</b></>}
+        {' · '}с типизированным паспортом <b className="text-foreground">{fmtN(lk.objects_enriched)}</b> · без сессий <b className="text-foreground">{fmtN(lk.objects_without_sessions)}</b>.
       </p>
       <Table>
         <TableHeader><TableRow>

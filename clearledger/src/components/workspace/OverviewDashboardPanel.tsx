@@ -466,7 +466,7 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
 
             {/* статистика по объектам сети */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-              <CountCard label="ЭЗС (всего в сети)" value={nf0.format(linkage.data?.objects || data.meta.active_stations)} hint="станций в справочнике" />
+              <CountCard label="ЭЗС (всего в сети)" value={nf0.format(linkage.data?.objects || data.meta.active_stations)} hint="боевых (без тест/выведенных)" />
               <CountCard label="Активных ЭЗС" value={nf0.format(data.meta.active_stations)} hint="с сессиями за период" />
               <CountCard label="Регионов" value={nf0.format(regQ.data?.lines.length ?? 0)} hint="за период" />
               <CountCard label="Коннекторов (типов)" value={nf0.format(connQ.data?.lines.length ?? 0)} hint="за период" />
