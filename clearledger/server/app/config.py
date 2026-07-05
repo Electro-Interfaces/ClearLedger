@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     seed_superadmin_email: str = ""
     seed_superadmin_password: str = ""
 
+    # Видеоконференции Jitsi (meet.dataworker.ru, RS256/ASAP). TradeLedger подписывает
+    # JWT организатора СВОИМ приватным ключом (iss=ledger); prosody проверяет публичным
+    # ключом с keyserver по kid. Приватный ключ (PEM) — в base64, НЕ в git.
+    jitsi_signing_key: str = ""            # приватный RSA-ключ (PEM) в base64
+    jitsi_kid: str = "ledger/1"
+    jitsi_issuer: str = "ledger"
+    jitsi_domain: str = "meet.dataworker.ru"   # публичный домен ссылки
+    jitsi_xmpp_domain: str = "meet.jitsi"      # внутренний XMPP-домен (sub)
+
+    @property
+    def jitsi_enabled(self) -> bool:
+        """Конференции доступны (задан приватный ключ подписи)?"""
+        return bool(self.jitsi_signing_key)
+
     @property
     def secret_is_insecure(self) -> bool:
         """Секрет не задан в окружении (используется небезопасный дефолт)?"""

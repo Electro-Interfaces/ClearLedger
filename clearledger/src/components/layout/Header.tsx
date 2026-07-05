@@ -1,7 +1,10 @@
-import { User, Menu, Sun, Moon, BookText, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle } from 'lucide-react'
+import { User, Menu, Sun, Moon, BookText, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle, Video } from 'lucide-react'
+import { useState } from 'react'
+import { toast } from 'sonner'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import { Button } from '@/components/ui/button'
+import { createMeeting } from '@/services/conferenceService'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +35,23 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   function handleLogout() {
     logout()
     navigate('/login')
+  }
+
+  const [confBusy, setConfBusy] = useState(false)
+  async function startConference() {
+    if (confBusy) return
+    setConfBusy(true)
+    try {
+      const m = await createMeeting()
+      window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+      try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
+      toast.success('Конференция создана — гостевая ссылка скопирована', { description: m.guest_url })
+    } catch (e) {
+      const msg = (e as Error).message || ''
+      toast.error(/503|не настроен/i.test(msg) ? 'Видеоконференции не настроены' : 'Не удалось создать конференцию')
+    } finally {
+      setConfBusy(false)
+    }
   }
 
   // Пилюля-кнопка взаимодействия в стиле TradeFrame: синий акцент, активное состояние.
@@ -73,6 +93,11 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
 
           <div className="hidden md:flex items-center gap-2 pl-1">
             <div className="w-px h-6 bg-border/50" />
+            {/* Конференция */}
+            <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy} className={btnCls(false)} title="Видеоконференция">
+              <Video className="h-4 w-4" />
+              <span className="hidden lg:inline">Конференция</span>
+            </Button>
             {/* Чат */}
             <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={btnCls(interactionSection === 'chat')} title="Чат с поддержкой">
               <MessageCircle className="h-4 w-4" />

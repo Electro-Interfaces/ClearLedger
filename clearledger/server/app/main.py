@@ -31,6 +31,7 @@ from app.routers import (
     export_packets_router,
     intake_router,
     mappings_router,
+    meetings_router,
     ocr_router,
     analytics_router,
     charge_sessions_router,
@@ -171,6 +172,7 @@ app.include_router(corporate_router.router, prefix=API_PREFIX)
 app.include_router(tariff_router.router, prefix=API_PREFIX)
 app.include_router(overview_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
+app.include_router(meetings_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")
