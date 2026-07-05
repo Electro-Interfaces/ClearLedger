@@ -71,6 +71,9 @@ services:
       SMTP_FROM: ${SMTP_FROM:-TradeLedger <ledger@dataworker.ru>}
       SMTP_SERVERNAME: ${SMTP_SERVERNAME:-mail.dataworker.ru}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://ledger.dataworker.ru/ClearLedger}
+      # Видеоконференции Jitsi (RS256/ASAP). Приватный ключ (base64 PEM) — в deploy/.env, НЕ в git.
+      JITSI_SIGNING_KEY: ${JITSI_SIGNING_KEY:-}
+      JITSI_KID: ${JITSI_KID:-ledger/1}
       # HubEx FSM (сервисные заявки ЭЗС). Токен — секрет, только в deploy/.env.
       HUBEX_SERVICE_TOKEN: ${HUBEX_SERVICE_TOKEN:-}
       HUBEX_BASE_URL: ${HUBEX_BASE_URL:-https://api.hubex.ru/fsm}
