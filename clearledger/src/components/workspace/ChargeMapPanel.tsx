@@ -6,12 +6,12 @@
  * Слои раскраски, размер, фильтры, адаптивная легенда, размер точек растёт с зумом.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { Loader2, Search } from 'lucide-react'
+import { Loader2, Search, MapPin, Zap, Plug, Hash, Gauge, Wallet, type LucideIcon } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { loadLocations } from '@/services/locationService'
@@ -157,41 +157,105 @@ function MapInvalidate() {
   return null
 }
 
-/** Маркеры: цвет и размер по функциям (слои), базовый радиус растёт с зумом. */
-function StationMarkers({ points, colorFn, sizeFn, metricMap }: {
-  points: Pt[]; colorFn: (p: Pt) => string; sizeFn: (p: Pt) => number; metricMap: Map<string, StationMetric>
+// ── строительные блоки карточки станции в попапе ──
+/** Нейтральный чип паспорта (номер, мощность, коннекторы, регион). */
+function Chip({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-[3px] text-[10px] font-medium text-muted-foreground">
+      {Icon ? <Icon className="h-2.5 w-2.5 opacity-70" /> : null}{children}
+    </span>
+  )
+}
+/** Мини-тайл метрики: подпись + крупное значение. */
+function Stat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="rounded-md bg-muted/60 px-2 py-1.5">
+      <div className="flex items-center gap-1 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-2.5 w-2.5" />{label}
+      </div>
+      <div className="mt-0.5 text-[13px] font-semibold tabular-nums text-foreground">{value}</div>
+    </div>
+  )
+}
+/** Горизонтальный прогресс-бар «параллельная графика» для процентных метрик. */
+function Bar({ label, pct, color }: { label: string; pct: number; color: string }) {
+  const w = Math.max(0, Math.min(100, pct))
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-semibold tabular-nums text-foreground">{pct.toFixed(pct < 10 ? 1 : 0)}%</span>
+      </div>
+      <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full transition-[width]" style={{ width: `${w}%`, background: color }} />
+      </div>
+    </div>
+  )
+}
+/** Цвет полосы «Успех» по величине (семантика: хорошо/средне/плохо). */
+const successColor = (pct: number) => (pct >= 75 ? 'hsl(var(--success))' : pct >= 50 ? 'hsl(var(--warning))' : 'hsl(var(--error))')
+
+/** Маркеры: цвет и размер по функциям (слои), базовый радиус растёт с зумом.
+ *  Против «каши» в плотных городах: halo-обводка цветом фона карты разделяет
+ *  соприкасающиеся круги, полупрозрачная заливка показывает наложения, а z-order
+ *  (крупные снизу, мелкие сверху) не даёт большим кругам «съедать» соседей. */
+function StationMarkers({ points, colorFn, sizeFn, metricMap, dark }: {
+  points: Pt[]; colorFn: (p: Pt) => string; sizeFn: (p: Pt) => number; metricMap: Map<string, StationMetric>; dark: boolean
 }) {
   const map = useMap()
   const [zoom, setZoom] = useState(map.getZoom())
   useMapEvents({ zoomend: () => setZoom(map.getZoom()) })
-  const base = Math.max(3, Math.min(14, (zoom - 3) * 1.6 + 3))
+  const base = Math.max(3, Math.min(13, (zoom - 3) * 1.5 + 3))
+  const halo = dark ? '#0b1220' : '#ffffff'
+  // рисуем крупные первыми (внизу), мелкие последними (поверх) → мелкие не теряются
+  const ordered = useMemo(() => [...points].sort((a, b) => sizeFn(b) - sizeFn(a)), [points, sizeFn])
   return (
     <>
-      {points.map((p) => {
+      {ordered.map((p) => {
         const mx = metricMap.get(p.id)
+        const op = opMeta(p.opStatus)
+        const radius = Math.min(26, base * sizeFn(p))
         return (
-          <CircleMarker key={p.id} center={[p.lat, p.lon]} radius={base * sizeFn(p)}
-            pathOptions={{ color: '#0b1220', weight: 0.5, fillColor: colorFn(p), fillOpacity: 0.95 }}>
-            <Popup>
-              <div className="min-w-[200px] text-xs">
-                <div className="mb-1 text-sm font-semibold">{p.name}</div>
-                {p.address && <div className="text-muted-foreground">{p.address}</div>}
-                <div className="mt-1.5 space-y-0.5">
-                  <div><span className="text-muted-foreground">Регион:</span> {p.region}</div>
-                  <div><span className="text-muted-foreground">Станция №:</span> {p.number}</div>
-                  {p.power != null && <div><span className="text-muted-foreground">Мощность:</span> {nf0.format(p.power)} кВт</div>}
-                  {p.connectors != null && <div><span className="text-muted-foreground">Коннекторов:</span> {nf0.format(p.connectors)}</div>}
-                  <div className="flex items-center gap-1.5"><span className="text-muted-foreground">Статус:</span>
-                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: opMeta(p.opStatus).color }} />{opMeta(p.opStatus).label}</span>
+          <CircleMarker key={p.id} center={[p.lat, p.lon]} radius={radius}
+            pathOptions={{ color: halo, weight: 1.4, fillColor: colorFn(p), fillOpacity: 0.82 }}>
+            <Popup className="cl-map-popup">
+              <div className="w-[240px]">
+                {/* шапка: имя + адрес + чипы паспорта (место справа сверху — под крестик) */}
+                <div className="px-3 pb-2 pr-6 pt-2.5">
+                  <div className="truncate text-[13px] font-semibold leading-tight text-foreground">{p.name}</div>
+                  {p.address && (
+                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <MapPin className="h-3 w-3 shrink-0 opacity-70" /><span className="truncate">{p.address}</span>
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-[3px] text-[10px] font-medium"
+                      style={{ background: `${op.color}1f`, color: op.color }}>
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: op.color }} />{op.label}
+                    </span>
+                    <Chip icon={Hash}>{p.number}</Chip>
+                    {p.power != null && <Chip icon={Zap}>{nf0.format(p.power)} кВт</Chip>}
+                    {p.connectors != null && <Chip icon={Plug}>{nf0.format(p.connectors)}</Chip>}
+                    {p.region !== '—' && <Chip icon={MapPin}>{p.region}</Chip>}
                   </div>
                 </div>
+                {/* метрики: два тайла + параллельные полосы загрузки/успеха */}
                 {mx ? (
-                  <div className="mt-1.5 border-t border-border/40 pt-1 space-y-0.5">
-                    <div><span className="text-muted-foreground">Сессий за период:</span> {nf0.format(mx.sessions)}</div>
-                    <div><span className="text-muted-foreground">Выручка:</span> {fmtMoneyShort(mx.amount)} ₽</div>
-                    <div><span className="text-muted-foreground">Загрузка:</span> {mx.utilization_pct.toFixed(1)}% · Успех {mx.success_pct.toFixed(0)}%</div>
+                  <div className="border-t border-border/60 bg-muted/20 px-3 py-2">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <Stat icon={Wallet} label="Выручка" value={`${fmtMoneyShort(mx.amount)} ₽`} />
+                      <Stat icon={Gauge} label="Сессии" value={nf0.format(mx.sessions)} />
+                    </div>
+                    <div className="mt-2 space-y-1.5">
+                      <Bar label="Загрузка" pct={mx.utilization_pct} color="hsl(var(--primary))" />
+                      <Bar label="Успех сессий" pct={mx.success_pct} color={successColor(mx.success_pct)} />
+                    </div>
                   </div>
-                ) : <div className="mt-1.5 border-t border-border/40 pt-1 text-muted-foreground">Нет сессий за период</div>}
+                ) : (
+                  <div className="border-t border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+                    Нет сессий за выбранный период
+                  </div>
+                )}
               </div>
             </Popup>
           </CircleMarker>
@@ -364,7 +428,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
             subdomains="abcd" maxZoom={19} />
           <FitBounds points={allPoints} />
           <MapInvalidate />
-          <StationMarkers points={points} colorFn={colorFn} sizeFn={sizeFn} metricMap={metricMap} />
+          <StationMarkers points={points} colorFn={colorFn} sizeFn={sizeFn} metricMap={metricMap} dark={dark} />
         </MapContainer>
       </div>
     </div>

@@ -455,3 +455,41 @@
     overscroll-behavior-y: contain;
   }
 }
+
+/* ── Карточка станции в попапе карты ЭЗС (ChargeMapPanel) ──
+   Тема-aware обёртка Leaflet-попапа: фон/бордер/тень по токенам темы,
+   без дефолтных отступов (карточка «edge-to-edge»). Селектор с классом
+   `.cl-map-popup` (react-leaflet `className`) перебивает стили leaflet.css. */
+.cl-map-popup .leaflet-popup-content-wrapper {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  box-shadow: var(--shadow-large);
+  padding: 0;
+  overflow: hidden;
+}
+.cl-map-popup .leaflet-popup-content {
+  margin: 0;
+  line-height: 1.35;
+}
+.cl-map-popup .leaflet-popup-tip {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  box-shadow: none;
+}
+.cl-map-popup a.leaflet-popup-close-button {
+  top: 5px;
+  right: 5px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 22px;
+  color: hsl(var(--muted-foreground));
+  transition: color 0.15s;
+}
+.cl-map-popup a.leaflet-popup-close-button:hover {
+  color: hsl(var(--foreground));
+  background: transparent;
+}
