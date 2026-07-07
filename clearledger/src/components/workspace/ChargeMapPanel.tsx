@@ -420,8 +420,9 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
         )}
       </div>
 
-      {/* карта */}
-      <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
+      {/* карта — isolate: свой stacking-контекст, чтобы z-index панелей Leaflet
+          (popupPane 700 и др.) не всплывал поверх модальных диалогов приложения */}
+      <div className="isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
         <MapContainer center={[62, 94]} zoom={3} style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }} scrollWheelZoom preferCanvas>
           <TileLayer key={dark ? 'dark' : 'light'} url={tileUrl}
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
