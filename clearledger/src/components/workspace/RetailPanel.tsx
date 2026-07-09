@@ -700,7 +700,7 @@ function AccountsTable({ rows, sort, onSort, onRow }: {
           {rows.map((a) => (
             <tr key={a.account} onClick={() => onRow(a.account)} title="Открыть карточку аккаунта"
               className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
-              <td className="p-2 font-medium tabular-nums">{a.masked}</td>
+              <td className="p-2 font-medium tabular-nums whitespace-nowrap">{a.masked}</td>
               <td className="p-2"><SegBadge seg={a.segment} /></td>
               <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
               <td className="p-2 text-right tabular-nums text-muted-foreground">{nf0.format(a.energy_kwh)}</td>
@@ -882,7 +882,7 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
                         {d.top_accounts.map((a: RetailAccount) => (
                           <tr key={a.account} onClick={() => setDetail(a.account)} title="Открыть карточку аккаунта"
                             className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
-                            <td className="p-2 font-medium tabular-nums">{a.masked}</td>
+                            <td className="p-2 font-medium tabular-nums whitespace-nowrap">{a.masked}</td>
                             <td className="p-2"><SegBadge seg={a.segment} /></td>
                             <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
                             <td className="p-2 text-right tabular-nums font-medium">{moneyK(a.revenue)}</td>

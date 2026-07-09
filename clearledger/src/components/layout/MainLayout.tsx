@@ -7,7 +7,7 @@ import { WorkspaceTabBar } from './WorkspaceTabBar'
 import { KeepAliveOutlet } from './KeepAliveOutlet'
 import InteractionHost from '@/components/support/InteractionHost'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { useMaxWidth } from '@/hooks/use-mobile'
 import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
@@ -23,7 +23,9 @@ import { routeAllowed } from '@/config/accessModules'
  */
 export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const isMobile = useIsMobile()
+  // ≤1024: компактный shell (гамбургер-меню в drawer, без десктопных вкладок) —
+  // чтобы планшеты не теряли ширину под inline-сайдбар (согласовано с WorkspaceLayout).
+  const isMobile = useMaxWidth(1024)
   const location = useLocation()
   const navigate = useNavigate()
   const { companyModules } = useCompany()

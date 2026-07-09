@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { usePanelRef } from 'react-resizable-panels'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { useMaxWidth } from '@/hooks/use-mobile'
 import { useWorkspace, WorkspaceProvider } from '@/contexts/WorkspaceContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getSettings } from '@/services/settingsService'
@@ -30,7 +30,9 @@ import {
 } from 'lucide-react'
 
 function WorkspaceContent() {
-  const isMobile = useIsMobile()
+  // Компактная раскладка (горизонтальные полосы, без вертикального меню режимов)
+  // для телефонов И планшетов ≤1024px — на десктопе два боковых меню + resizable.
+  const compact = useMaxWidth(1024)
   const settings = getSettings()
   const hasCredentials = !!settings.stsLogin && !!settings.stsPassword
 
@@ -38,7 +40,7 @@ function WorkspaceContent() {
     return <OnboardingScreen />
   }
 
-  return isMobile ? <MobileWorkspace /> : <DesktopWorkspace />
+  return compact ? <MobileWorkspace /> : <DesktopWorkspace />
 }
 
 function DesktopWorkspace() {

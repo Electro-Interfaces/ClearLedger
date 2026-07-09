@@ -17,3 +17,22 @@ export function useIsMobile() {
 
   return !!isMobile
 }
+
+/**
+ * Ширина вьюпорта ≤ maxPx. Для точечных порогов (напр. рабочий стол переходит на
+ * компактную раскладку на планшетах ≤1024, где десктопные боковые меню съедают
+ * почти всё место под контент).
+ */
+export function useMaxWidth(maxPx: number) {
+  const [below, setBelow] = React.useState<boolean | undefined>(undefined)
+
+  React.useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${maxPx}px)`)
+    const onChange = () => setBelow(window.innerWidth <= maxPx)
+    mql.addEventListener("change", onChange)
+    setBelow(window.innerWidth <= maxPx)
+    return () => mql.removeEventListener("change", onChange)
+  }, [maxPx])
+
+  return !!below
+}
