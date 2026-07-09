@@ -119,3 +119,15 @@ async def retail_profile(
     cid = await assert_company_member(company_id, current_user, db)
     return await RetailService(db).profile(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), station=station, region=region)
+
+
+@router.get("/account")
+async def retail_account(
+    company_id: str, date_from: str, date_to: str, account: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Детальная карточка аккаунта ФЛ (по хеш-ID): разбивки + последние сессии."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await RetailService(db).account(
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), account)

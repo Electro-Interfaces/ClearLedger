@@ -443,15 +443,19 @@ class RetailService:
         ).where(*base, S.location_id.is_not(None)).group_by(S.location_id)
          .order_by(func.count().desc()))).all()
         loc_ids = [r.loc for r in st_rows]
-        names: dict[str, tuple] = {}
+        meta: dict[str, tuple] = {}
         if loc_ids:
+            join = ServiceLocation.__table__.outerjoin(
+                Region.__table__, Region.id == ServiceLocation.region_id)
             for sl in (await self.db.execute(select(
                 ServiceLocation.id, ServiceLocation.name, ServiceLocation.station_number,
-            ).where(ServiceLocation.id.in_(loc_ids)))).all():
-                names[str(sl.id)] = (sl.name, sl.station_number)
+                Region.name.label("region"),
+            ).select_from(join).where(ServiceLocation.id.in_(loc_ids)))).all():
+                meta[str(sl.id)] = (sl.name, sl.station_number, sl.region)
         stations = [{"location_id": r.loc,
-                     "name": names.get(str(r.loc), (None, None))[0] or r.loc,
-                     "number": names.get(str(r.loc), (None, None))[1],
+                     "name": (meta.get(str(r.loc)) or (None, None, None))[0] or r.loc,
+                     "number": (meta.get(str(r.loc)) or (None, None, None))[1],
+                     "region": (meta.get(str(r.loc)) or (None, None, None))[2],
                      "accounts": int(r.accounts), "sessions": int(r.sessions)}
                     for r in st_rows]
         return {"regions": regions, "stations": stations}
@@ -518,3 +522,71 @@ class RetailService:
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
                 "scope": scope, "totals": totals, "hourly": hourly,
                 "weekday": weekday, "top_accounts": top}
+
+    # ── account: подробная карточка одного аккаунта ──────────────────────
+    async def account(self, company_id, df: date, dt: date, account_hash: str) -> dict[str, Any]:
+        """Детализация одного аккаунта ФЛ (по хеш-ID): сводка + разбивки по станциям/
+        месяцам/часам/коннекторам + последние сессии. Хеш резолвится в телефон
+        сканом distinct user_id (телефон в ответ НЕ уходит)."""
+        accts = self._tag_segments(await self._accounts(company_id, df, dt))
+        me = next((a for a in accts if a["account"] == account_hash), None)
+        if not me:
+            return {"found": False}
+        phone = me["phone"]
+        lo, hi = _period(df, dt)
+        base = [S.company_id == company_id, S.user_id == phone,
+                S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+
+        # По станциям (объект L2 + имя)
+        loc_rows = (await self.db.execute(select(
+            S.location_id.label("loc"), func.count().label("sessions"),
+            func.coalesce(func.sum(S.amount), 0).label("revenue"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+        ).where(*base).group_by(S.location_id).order_by(func.count().desc()))).all()
+        loc_ids = [r.loc for r in loc_rows if r.loc]
+        names: dict[str, tuple] = {}
+        if loc_ids:
+            for sl in (await self.db.execute(select(
+                ServiceLocation.id, ServiceLocation.name, ServiceLocation.station_number,
+            ).where(ServiceLocation.id.in_(loc_ids)))).all():
+                names[str(sl.id)] = (sl.name, sl.station_number)
+        by_station = [{"name": (names.get(str(r.loc), (None, None))[0] if r.loc else None) or "— без объекта",
+                       "number": names.get(str(r.loc), (None, None))[1] if r.loc else None,
+                       "sessions": int(r.sessions), "revenue": round(float(r.revenue), 2),
+                       "energy_kwh": round(float(r.energy), 1)} for r in loc_rows]
+
+        # По месяцам
+        mm = func.date_trunc("month", S.started_at)
+        mrows = (await self.db.execute(select(
+            mm.label("m"), func.count().label("sessions"),
+            func.coalesce(func.sum(S.amount), 0).label("revenue"),
+        ).where(*base).group_by(mm).order_by(mm))).all()
+        by_month = [{"month": r.m.strftime("%Y-%m"), "sessions": int(r.sessions),
+                     "revenue": round(float(r.revenue), 2)} for r in mrows]
+
+        # По часам суток
+        he = func.extract("hour", S.started_at)
+        hrows = (await self.db.execute(select(
+            he.label("h"), func.count().label("sessions"),
+        ).where(*base).group_by(he))).all()
+        hmap = {int(r.h): int(r.sessions) for r in hrows if r.h is not None}
+        hourly = [{"hour": hh, "sessions": hmap.get(hh, 0)} for hh in range(24)]
+
+        # По коннекторам
+        cc = func.coalesce(S.connector_type, "—")
+        crows = (await self.db.execute(select(
+            cc.label("c"), func.count().label("sessions"),
+        ).where(*base).group_by(cc).order_by(func.count().desc()))).all()
+        connectors = [{"type": r.c, "sessions": int(r.sessions)} for r in crows]
+
+        # Последние сессии
+        recent_rows = (await self.db.execute(select(S).where(*base)
+            .order_by(S.started_at.desc()).limit(15))).scalars().all()
+        recent = [{"started_at": s.started_at.isoformat() if s.started_at else None,
+                   "station": s.station_name or s.station_code,
+                   "connector": s.connector_type, "energy_kwh": round(float(s.energy_kwh or 0), 1),
+                   "amount": round(float(s.amount or 0), 2), "result": s.result} for s in recent_rows]
+
+        return {"found": True, "period": {"from": df.isoformat(), "to": dt.isoformat()},
+                "account": self._pub(me), "by_station": by_station, "by_month": by_month,
+                "hourly": hourly, "connectors": connectors, "recent": recent}

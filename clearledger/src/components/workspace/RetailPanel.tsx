@@ -8,12 +8,15 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, Search } from 'lucide-react'
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, Search, Check } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useTabParams } from '@/hooks/useTabParams'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
-  getRetailAccounts, getRetailDimensions, getRetailProfile,
+  getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount,
   type RetailSegment, type RetailAccount,
 } from '@/services/retailService'
 
@@ -77,6 +80,141 @@ function SegBadge({ seg }: { seg: string }) {
   return <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><span className={`h-2 w-2 rounded-full ${segMeta(seg).dot}`} />{seg}</span>
 }
 
+// ── Searchable combobox (поиск + фильтр по type-ahead) ──
+interface Opt { value: string; label: string; keywords?: string }
+function SearchableSelect({ value, onChange, options, placeholder, triggerWidth = 'w-[240px]' }: {
+  value: string; onChange: (v: string) => void; options: Opt[]; placeholder: string; triggerWidth?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const cur = options.find((o) => o.value === value)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className={`inline-flex h-8 items-center justify-between gap-2 rounded-md border bg-background px-3 text-xs ${triggerWidth}`}>
+          <span className="truncate">{cur ? cur.label : placeholder}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[340px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Поиск…" className="text-xs" />
+          <CommandList>
+            <CommandEmpty>Ничего не найдено</CommandEmpty>
+            <CommandGroup>
+              {options.map((o) => (
+                <CommandItem key={o.value} value={`${o.label} ${o.keywords ?? ''}`} className="text-xs"
+                  onSelect={() => { onChange(o.value); setOpen(false) }}>
+                  <Check className={`mr-2 h-3.5 w-3.5 ${value === o.value ? 'opacity-100' : 'opacity-0'}`} />
+                  <span className="truncate">{o.label}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+// ── Детальная карточка аккаунта (модалка) ──
+function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: TabProps & { account: string | null; onClose: () => void }) {
+  const q = useQuery({
+    enabled: !!account,
+    queryKey: ['retail-acct-detail', companyId, dateFrom, dateTo, account],
+    queryFn: () => getRetailAccount({ companyId, dateFrom, dateTo, account: account! }),
+  })
+  const d = q.data
+  const maxStRev = Math.max(1, ...(d?.by_station ?? []).map((s) => s.revenue))
+  const maxConn = Math.max(1, ...(d?.connectors ?? []).map((c) => c.sessions))
+  const resTint = (r: string | null) => (r === 'Complete' ? 'text-emerald-400/80' : 'text-amber-400/80')
+  return (
+    <Dialog open={!!account} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            {d?.found && d.account ? <><span className="tabular-nums">{d.account.masked}</span><SegBadge seg={d.account.segment} /></> : 'Аккаунт'}
+          </DialogTitle>
+        </DialogHeader>
+        {q.isLoading ? <Loading /> : !d || !d.found || !d.account ? <Empty text="Аккаунт не найден за период" /> : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
+              <Kpi label="Сессий" value={nf0.format(d.account.sessions)} />
+              <Kpi label="Выручка" value={moneyK(d.account.revenue)} />
+              <Kpi label="Ср. чек" value={money(d.account.avg_check)} />
+              <Kpi label="Энергия" value={nf0.format(d.account.energy_kwh)} sub="кВтч" />
+              <Kpi label="Станций" value={String(d.account.stations)} />
+              <Kpi label="Успех" value={pct(d.account.success_pct)} />
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              Первая {fmtDate(d.account.first_at)} · последняя {fmtDate(d.account.last_at)} · давность {d.account.recency_days ?? '—'} дн · ср. тариф {nf1.format(d.account.avg_tariff)} ₽/кВтч
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Widget title="Выручка по месяцам">
+                <div data-chart><ResponsiveContainer width="100%" height={170}>
+                  <BarChart data={(d.by_month ?? []).map((m) => ({ label: m.month.slice(5), revenue: m.revenue }))} margin={{ top: 6, right: 6, left: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
+                    <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} width={40} tickFormatter={(v) => moneyK(Number(v)).replace(' ₽', '')} />
+                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => [moneyK(Number(v)), 'Выручка']} />
+                    <Bar dataKey="revenue" fill="hsl(217, 91%, 60%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  </BarChart>
+                </ResponsiveContainer></div>
+              </Widget>
+              <Widget title="Когда заряжается — по часам">
+                <div data-chart><ResponsiveContainer width="100%" height={170}>
+                  <BarChart data={d.hourly ?? []} margin={{ top: 6, right: 6, left: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                    <XAxis dataKey="hour" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} interval={2} tickFormatter={(h) => String(h).padStart(2, '0')} />
+                    <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} width={28} />
+                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(h) => `${String(h).padStart(2, '0')}:00`} formatter={(v) => [`${nf0.format(Number(v))} сес`, 'Сессий']} />
+                    <Bar dataKey="sessions" fill="hsl(152, 60%, 45%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  </BarChart>
+                </ResponsiveContainer></div>
+              </Widget>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Widget title="Любимые станции">
+                {(d.by_station ?? []).slice(0, 6).map((s) => (
+                  <BarRow key={s.name + (s.number ?? '')} label={`${s.name}${s.number ? ` (${s.number})` : ''}`} value={moneyK(s.revenue)} frac={s.revenue / maxStRev} sub={`${nf0.format(s.sessions)} сес`} />
+                ))}
+              </Widget>
+              <Widget title="Коннекторы">
+                {(d.connectors ?? []).map((c) => (
+                  <BarRow key={c.type} label={c.type} value={`${nf0.format(c.sessions)} сес`} frac={c.sessions / maxConn} />
+                ))}
+              </Widget>
+            </div>
+            <div className="space-y-1.5">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Последние сессии</div>
+              <Card><CardContent className="p-0 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+                    <th className="p-2 text-left font-medium">Дата</th><th className="p-2 text-left font-medium">Станция</th>
+                    <th className="p-2 text-left font-medium">Коннектор</th><th className="p-2 text-right font-medium">кВтч</th>
+                    <th className="p-2 text-right font-medium">Сумма</th><th className="p-2 text-left font-medium">Результат</th>
+                  </tr></thead>
+                  <tbody>
+                    {(d.recent ?? []).map((s, i) => (
+                      <tr key={i} className="border-b border-border/30">
+                        <td className="p-2 tabular-nums text-muted-foreground">{s.started_at ? new Date(s.started_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                        <td className="p-2 truncate max-w-[180px]">{s.station ?? '—'}</td>
+                        <td className="p-2 text-muted-foreground">{s.connector ?? '—'}</td>
+                        <td className="p-2 text-right tabular-nums">{nf1.format(s.energy_kwh)}</td>
+                        <td className="p-2 text-right tabular-nums">{money(s.amount)}</td>
+                        <td className={`p-2 ${resTint(s.result)}`}>{s.result ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </CardContent></Card>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Таб: Обзор ──
 function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
   const p = { companyId, dateFrom, dateTo }
@@ -128,7 +266,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
 }
 
 // ── Таб: Сегменты (RFM) ──
-function RetailSegmentsTab({ companyId, dateFrom, dateTo }: TabProps) {
+function RetailSegmentsTab({ companyId, dateFrom, dateTo, onDrill }: TabProps & { onDrill?: (seg: string) => void }) {
   const { data, isLoading } = useQuery({ queryKey: ['retail-seg', companyId, dateFrom, dateTo], queryFn: () => getRetailSegments({ companyId, dateFrom, dateTo }) })
   if (isLoading) return <Loading />
   if (!data || data.segments.length === 0) return <Empty text="Нет данных за период" />
@@ -138,7 +276,7 @@ function RetailSegmentsTab({ companyId, dateFrom, dateTo }: TabProps) {
   return (
     <div className="space-y-3">
       <div className="text-xs text-muted-foreground">
-        RFM: сегмент по давности последней сессии (R) и частоте (F); сумма (M) — для порядка. Всего аккаунтов: <b className="text-foreground">{nf0.format(totalAcc)}</b>.
+        RFM: сегмент по давности последней сессии (R) и частоте (F); сумма (M) — для порядка. Всего аккаунтов: <b className="text-foreground">{nf0.format(totalAcc)}</b>. Клик по строке — <span className="text-primary/80">отбор аккаунтов сегмента</span> во вкладке «Аккаунты».
       </div>
       <Card><CardContent className="p-0 overflow-x-auto">
         <table className="w-full text-xs">
@@ -153,12 +291,14 @@ function RetailSegmentsTab({ companyId, dateFrom, dateTo }: TabProps) {
           </tr></thead>
           <tbody>
             {segs.map((s: RetailSegment) => (
-              <tr key={s.segment} className="border-b border-border/30 hover:bg-muted/30">
+              <tr key={s.segment} onClick={() => onDrill?.(s.segment)} title={`Отобрать аккаунты: ${s.segment}`}
+                className="group cursor-pointer border-b border-border/30 hover:bg-muted/30">
                 <td className="p-2">
                   <span className="inline-flex items-center gap-2">
                     <span className={`h-2.5 w-2.5 rounded-full ${segMeta(s.segment).dot}`} />
                     <span className="font-medium">{s.segment}</span>
                     <span className="text-[10px] text-muted-foreground">{segMeta(s.segment).hint}</span>
+                    <span className="text-[10px] text-primary/70 opacity-0 transition-opacity group-hover:opacity-100">отбор →</span>
                   </span>
                 </td>
                 <td className="p-2 text-right tabular-nums">{nf0.format(s.accounts)}</td>
@@ -316,15 +456,20 @@ const ACC_COLS = [
   { key: 'stations', label: 'Станций' },
   { key: 'last_at', label: 'Последняя' },
 ]
-function RetailAccountsTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const [segment, setSegment] = useState('all')
+function RetailAccountsTab({ companyId, dateFrom, dateTo, initialSegment }: TabProps & { initialSegment?: string | null }) {
+  const [segment, setSegment] = useState(initialSegment || 'all')
   const [region, setRegion] = useState('all')
   const [station, setStation] = useState('all')
   const [minSessions, setMinSessions] = useState('')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'revenue', order: 'desc' })
+  const [detail, setDetail] = useState<string | null>(null)
   const p = { companyId, dateFrom, dateTo }
   const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo], queryFn: () => getRetailDimensions(p) })
+  const regionOpts: Opt[] = useMemo(() => [{ value: 'all', label: 'Все регионы' },
+    ...(dims.data?.regions ?? []).map((r) => ({ value: r.region, label: `${r.region} · ${r.accounts}` }))], [dims.data])
+  const stationOpts: Opt[] = useMemo(() => [{ value: 'all', label: 'Все станции' },
+    ...(dims.data?.stations ?? []).map((s) => ({ value: s.location_id, label: `${s.name}${s.number ? ` (${s.number})` : ''} · ${s.accounts}`, keywords: `${s.region ?? ''} ${s.number ?? ''}` }))], [dims.data])
   const q = useQuery({
     queryKey: ['retail-accts', companyId, dateFrom, dateTo, segment, region, station, minSessions, search, sort],
     queryFn: () => getRetailAccounts({
@@ -359,14 +504,8 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo }: TabProps) {
           <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="Сегмент" /></SelectTrigger>
           <SelectContent><SelectItem value="all" className="text-xs">Все сегменты</SelectItem>{SEGMENTS.map((s) => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}</SelectContent>
         </Select>
-        <Select value={region} onValueChange={setRegion}>
-          <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue placeholder="Регион" /></SelectTrigger>
-          <SelectContent><SelectItem value="all" className="text-xs">Все регионы</SelectItem>{(dims.data?.regions ?? []).map((r) => <SelectItem key={r.region} value={r.region} className="text-xs">{r.region} · {r.accounts}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={station} onValueChange={setStation}>
-          <SelectTrigger className="h-8 w-[210px] text-xs"><SelectValue placeholder="Станция" /></SelectTrigger>
-          <SelectContent><SelectItem value="all" className="text-xs">Все станции</SelectItem>{(dims.data?.stations ?? []).map((s) => <SelectItem key={s.location_id} value={s.location_id} className="text-xs">{s.name}{s.number ? ` (${s.number})` : ''} · {s.accounts}</SelectItem>)}</SelectContent>
-        </Select>
+        <SearchableSelect value={region} onChange={setRegion} options={regionOpts} placeholder="Регион" triggerWidth="w-[200px]" />
+        <SearchableSelect value={station} onChange={setStation} options={stationOpts} placeholder="Станция" triggerWidth="w-[220px]" />
         <input value={minSessions} onChange={(e) => setMinSessions(e.target.value.replace(/\D/g, ''))} placeholder="мин. сессий"
           className="h-8 w-[110px] rounded-md border bg-background px-2 text-xs" inputMode="numeric" />
         <div className="relative">
@@ -391,7 +530,8 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo }: TabProps) {
             </tr></thead>
             <tbody>
               {rows.map((a: RetailAccount) => (
-                <tr key={a.account} className="border-b border-border/30 hover:bg-muted/30">
+                <tr key={a.account} onClick={() => setDetail(a.account)} title="Открыть карточку аккаунта"
+                  className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
                   <td className="p-2 font-medium tabular-nums">{a.masked}</td>
                   <td className="p-2"><SegBadge seg={a.segment} /></td>
                   <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
@@ -406,6 +546,7 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo }: TabProps) {
           </table>
         </CardContent></Card>
       )}
+      <AccountDetailDialog {...p} account={detail} onClose={() => setDetail(null)} />
     </div>
   )
 }
@@ -432,8 +573,13 @@ function ChartBox({ data, xKey, color, tip }: { data: { sessions: number }[]; xK
 function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
   const [mode, setMode] = useState<'station' | 'region'>('station')
   const [value, setValue] = useState('')
+  const [detail, setDetail] = useState<string | null>(null)
   const p = { companyId, dateFrom, dateTo }
   const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo], queryFn: () => getRetailDimensions(p) })
+  const stationOpts: Opt[] = useMemo(() => (dims.data?.stations ?? []).map((s) => ({
+    value: s.location_id, label: `${s.name}${s.number ? ` (${s.number})` : ''} · ${s.accounts} акк`, keywords: `${s.region ?? ''} ${s.number ?? ''}` })), [dims.data])
+  const regionOpts: Opt[] = useMemo(() => (dims.data?.regions ?? []).map((r) => ({
+    value: r.region, label: `${r.region} · ${r.accounts} акк` })), [dims.data])
   const q = useQuery({
     enabled: !!value,
     queryKey: ['retail-profile', companyId, dateFrom, dateTo, mode, value],
@@ -452,14 +598,9 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
             </button>
           ))}
         </div>
-        <Select value={value} onValueChange={setValue}>
-          <SelectTrigger className="h-8 w-[300px] text-xs"><SelectValue placeholder={mode === 'station' ? 'Выберите станцию…' : 'Выберите регион…'} /></SelectTrigger>
-          <SelectContent>
-            {mode === 'station'
-              ? (dims.data?.stations ?? []).map((s) => <SelectItem key={s.location_id} value={s.location_id} className="text-xs">{s.name}{s.number ? ` (${s.number})` : ''} · {s.accounts} акк</SelectItem>)
-              : (dims.data?.regions ?? []).map((r) => <SelectItem key={r.region} value={r.region} className="text-xs">{r.region} · {r.accounts} акк</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <SearchableSelect value={value} onChange={setValue}
+          options={mode === 'station' ? stationOpts : regionOpts}
+          placeholder={mode === 'station' ? 'Выберите станцию…' : 'Выберите регион…'} triggerWidth="w-[320px]" />
       </div>
       {!value ? <Empty text="Выберите станцию или регион — увидите клиентов и профиль зарядок (часы, дни, средние)" />
         : q.isLoading ? <Loading />
@@ -489,7 +630,8 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
                       </tr></thead>
                       <tbody>
                         {d.top_accounts.map((a: RetailAccount) => (
-                          <tr key={a.account} className="border-b border-border/30 hover:bg-muted/30">
+                          <tr key={a.account} onClick={() => setDetail(a.account)} title="Открыть карточку аккаунта"
+                            className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
                             <td className="p-2 font-medium tabular-nums">{a.masked}</td>
                             <td className="p-2"><SegBadge seg={a.segment} /></td>
                             <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
@@ -504,6 +646,7 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
                 </div>
               </>
             )}
+      <AccountDetailDialog {...p} account={detail} onClose={() => setDetail(null)} />
     </div>
   )
 }
@@ -521,8 +664,10 @@ const RETAIL_TABS: { k: string; label: string }[] = [
 /** Контейнер пункта «Частные лица» с внутренними табами. */
 export function RetailPanel({ companyId, dateFrom, dateTo }: TabProps) {
   const [t, patch] = useTabParams('retail', { sub: 'overview' })
+  const [drillSeg, setDrillSeg] = useState<string | null>(null)
   const p: TabProps = { companyId, dateFrom, dateTo }
   const tab = useMemo(() => t.sub, [t.sub])
+  const drill = (seg: string) => { setDrillSeg(seg); patch({ sub: 'accounts' }) }
   return (
     <div>
       <div className="flex items-center gap-3 border-b border-border px-4">
@@ -543,8 +688,8 @@ export function RetailPanel({ companyId, dateFrom, dateTo }: TabProps) {
       </div>
       <div className="p-4">
         {tab === 'overview' && <RetailOverviewTab {...p} />}
-        {tab === 'segments' && <RetailSegmentsTab {...p} />}
-        {tab === 'accounts' && <RetailAccountsTab {...p} />}
+        {tab === 'segments' && <RetailSegmentsTab {...p} onDrill={drill} />}
+        {tab === 'accounts' && <RetailAccountsTab {...p} initialSegment={drillSeg} />}
         {tab === 'profile' && <RetailProfileTab {...p} />}
         {tab === 'economics' && <RetailEconomicsTab {...p} />}
         {tab === 'cohorts' && <RetailCohortsTab {...p} />}

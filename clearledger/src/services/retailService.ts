@@ -97,7 +97,7 @@ export interface RetailAccountsResponse {
 }
 
 export interface DimRegion { region: string; accounts: number; sessions: number }
-export interface DimStation { location_id: string; name: string; number: string | null; accounts: number; sessions: number }
+export interface DimStation { location_id: string; name: string; number: string | null; region: string | null; accounts: number; sessions: number }
 export interface RetailDimensions { regions: DimRegion[]; stations: DimStation[] }
 
 export interface HourBucket { hour: number; sessions: number; revenue: number }
@@ -145,4 +145,22 @@ export function getRetailProfile(p: P & { station?: string; region?: string }): 
   if (p.station) q.station = p.station
   if (p.region) q.region = p.region
   return get<RetailProfile>('/api/retail/profile', q)
+}
+
+export interface AccountStation { name: string; number: string | null; sessions: number; revenue: number; energy_kwh: number }
+export interface AccountMonth { month: string; sessions: number; revenue: number }
+export interface AccountConnector { type: string; sessions: number }
+export interface AccountSession { started_at: string | null; station: string | null; connector: string | null; energy_kwh: number; amount: number; result: string | null }
+export interface RetailAccountDetail {
+  found: boolean
+  period?: { from: string; to: string }
+  account?: RetailAccount
+  by_station?: AccountStation[]
+  by_month?: AccountMonth[]
+  hourly?: { hour: number; sessions: number }[]
+  connectors?: AccountConnector[]
+  recent?: AccountSession[]
+}
+export function getRetailAccount(p: P & { account: string }): Promise<RetailAccountDetail> {
+  return get<RetailAccountDetail>('/api/retail/account', { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, account: p.account })
 }
