@@ -65,10 +65,17 @@ function Loading() {
 function SortTh({ k, label, right, sortKey, sortDir, onSort }: {
   k: SortKey; label: string; right?: boolean; sortKey: SortKey; sortDir: 'asc' | 'desc'; onSort: (k: SortKey) => void
 }) {
-  const Icon = sortKey === k ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+  const active = sortKey === k
+  const Icon = active ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+  // aria-sort → скринридер объявляет направление сортировки колонки (WCAG).
+  const ariaSort: 'ascending' | 'descending' | 'none' = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'
   return (
-    <TableHead className={`cursor-pointer select-none whitespace-nowrap hover:text-foreground ${right ? 'text-right' : ''}`} onClick={() => onSort(k)}>
-      <span className={`inline-flex items-center gap-0.5 ${right ? 'flex-row-reverse' : ''}`}>{label}<Icon className={`h-3 w-3 ${sortKey === k ? 'text-foreground' : 'text-muted-foreground/40'}`} /></span>
+    <TableHead className={`whitespace-nowrap ${right ? 'text-right' : ''}`} aria-sort={ariaSort}>
+      {/* <button> вместо onClick на <th>: операбельно с клавиатуры + фокус (см. index.css) */}
+      <button type="button" onClick={() => onSort(k)} aria-label={`Сортировать по «${label}»`}
+        className={`inline-flex items-center gap-0.5 rounded select-none cursor-pointer hover:text-foreground ${right ? 'flex-row-reverse' : ''}`}>
+        {label}<Icon className={`h-3 w-3 ${active ? 'text-foreground' : 'text-muted-foreground/40'}`} />
+      </button>
     </TableHead>
   )
 }
@@ -214,7 +221,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
         )}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Поиск: станция, клиент, ID…" className="h-8 w-[240px] pl-8 text-xs" />
+          <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} aria-label="Поиск транзакций" placeholder="Поиск: станция, клиент, ID…" className="h-8 w-[240px] pl-8 text-xs" />
         </div>
         <Select value={p.userType} onValueChange={(v) => patch({ userType: v })}>
           <SelectTrigger className="h-8 w-[110px] text-xs"><SelectValue /></SelectTrigger>
@@ -289,7 +296,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                     <TableCell className="text-right font-mono tabular-nums">{fmtMoney(r.revenue)}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.result || '—'}</TableCell>
                     <TableCell className="text-center">
-                      {r.paid_at ? <span className="text-emerald-400" title={fmtDT(r.paid_at)}>✓</span> : <span className="text-muted-foreground/50">✗</span>}
+                      {r.paid_at ? <span className="text-emerald-400" title={fmtDT(r.paid_at)} aria-label="Оплачено">✓</span> : <span className="text-muted-foreground/70" aria-label="Не оплачено">✗</span>}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -249,6 +249,17 @@
     @apply border-border outline-ring/50;
   }
 
+  /* Видимый фокус клавиатуры для кастомных интерактивных элементов (таб-бары,
+     сортируемые заголовки таблиц и пр.), у которых нет своего focus-visible:ring.
+     shadcn-компоненты задают focus-visible:outline-none + ring — утилита
+     переопределяет это базовое правило, так что двойного контура нет. */
+  button:focus-visible,
+  [role="button"]:focus-visible,
+  [tabindex]:not([tabindex="-1"]):focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
   body {
     @apply bg-di-bg text-foreground;
     font-family: var(--font-body);

@@ -65,8 +65,17 @@ function Heatmap({ cells }: { cells: HeatCell[] }) {
     }
   })
   return (
-    <div className="overflow-x-auto">
-      <div className="inline-grid min-w-[560px] gap-0.5" style={{ gridTemplateColumns: '28px repeat(24, 1fr)' }}>{items}</div>
+    <div className="space-y-1.5">
+      <div className="overflow-x-auto">
+        <div className="inline-grid min-w-[560px] gap-0.5" style={{ gridTemplateColumns: '28px repeat(24, 1fr)' }}>{items}</div>
+      </div>
+      {/* легенда-шкала интенсивности (число сессий) — чтобы цвет читался без наведения */}
+      <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+        <span>меньше</span>
+        <span className="h-2 w-16 rounded-sm" style={{ background: 'linear-gradient(to right, rgba(96,165,250,0.12), rgba(96,165,250,0.9))' }} />
+        <span>больше</span>
+        <span className="ml-auto tabular-nums">макс {max} сес/час</span>
+      </div>
     </div>
   )
 }
