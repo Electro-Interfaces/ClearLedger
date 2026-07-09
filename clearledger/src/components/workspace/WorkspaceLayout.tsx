@@ -4,15 +4,15 @@
  */
 
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { usePanelRef } from 'react-resizable-panels'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useWorkspace, WorkspaceProvider } from '@/contexts/WorkspaceContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getSettings } from '@/services/settingsService'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { modeAllowed } from '@/config/accessModules'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Button } from '@/components/ui/button'
-import { CorePanel } from './CorePanel'
 import { NormalizationPanel } from './NormalizationPanel'
 import { ReconciliationPanel } from './ReconciliationPanel'
 import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
@@ -22,6 +22,7 @@ import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 import { WorkspaceModeSidebar } from './WorkspaceModeSidebar'
 import { EnergyExportDocsPanel } from './EnergySidePanels'
+import { useWorkspaceSections } from './workspaceSections'
 import {
   Database, FileOutput,
   PanelLeftClose, PanelLeftOpen,
@@ -190,37 +191,65 @@ function DesktopWorkspace() {
 }
 
 function MobileWorkspace() {
-  const { activeTab, setActiveTab, exportDocs } = useWorkspace()
-  // Первый слой («Документы») вынесен в отдельный раздел /files —
-  // вкладки «Смены» здесь больше нет; дефолтный 'raw' маппим на 'core'.
-  const tab = activeTab === 'raw' ? 'core' : activeTab
+  // Мобильный рабочий стол: горизонтальные полосы «режимы» + «под-виды» вместо
+  // десктопного вертикального меню; контент — тот же диспетчер по coreMode.
+  const { companyModules } = useCompany()
+  const sections = useWorkspaceSections().filter((s) => modeAllowed(s.mode, companyModules))
+  const { coreMode, setCoreMode } = useWorkspace()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlSub = searchParams.get('sub')
+  const active = sections.find((s) => s.mode === coreMode)
+  const items = active?.items ?? []
+  const activeSub = urlSub && items.some((i) => i.key === urlSub) ? urlSub : items[0]?.key
+  const setSub = (key: string) => setSearchParams((prev) => {
+    const n = new URLSearchParams(prev); n.set('sub', key); return n
+  }, { replace: true })
 
   return (
-    <div className="h-full pb-14">
-      <Tabs value={tab} onValueChange={(v) => setActiveTab(v as 'raw' | 'core' | 'export')}>
-        <TabsList className="w-full rounded-none border-b h-10 bg-card">
-          <TabsTrigger value="core" className="flex-1 gap-1.5 text-xs">
-            <Database className="h-3.5 w-3.5" />
-            Детали
-          </TabsTrigger>
-          <TabsTrigger value="export" className="flex-1 gap-1.5 text-xs">
-            <FileOutput className="h-3.5 w-3.5" />
-            Для 1С
-            {exportDocs.length > 0 && (
-              <span className="ml-1 bg-primary text-primary-foreground text-xs rounded-full h-4 min-w-[16px] flex items-center justify-center px-1">
-                {exportDocs.length}
-              </span>
-            )}
-          </TabsTrigger>
-        </TabsList>
+    <div className="h-full min-h-0 flex flex-col pb-14">
+      {/* Фильтр рабочей области (период/станции/…) — прокрутка при переполнении */}
+      <div className="overflow-x-auto shrink-0"><WorkspaceToolbar /></div>
 
-        <TabsContent value="core" className="mt-0 h-[calc(100vh-8rem)]">
-          <CorePanel />
-        </TabsContent>
-        <TabsContent value="export" className="mt-0 h-[calc(100vh-8rem)]">
-          <ExportPanel />
-        </TabsContent>
-      </Tabs>
+      {/* Полоса режимов */}
+      <div className="flex gap-1 overflow-x-auto border-b border-border/50 bg-muted/20 px-2 py-1.5 shrink-0">
+        {sections.map((s) => {
+          const Icon = s.icon
+          const on = s.mode === coreMode
+          return (
+            <button key={s.mode} onClick={() => setCoreMode(s.mode)}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs transition-colors ${on ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground'}`}>
+              <Icon className="h-3.5 w-3.5 shrink-0" />{s.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Полоса под-видов активного режима */}
+      {items.length > 0 && (
+        <div className="flex gap-1 overflow-x-auto border-b border-border/40 px-2 py-1 shrink-0">
+          {items.map((it) => {
+            const on = it.key === activeSub
+            return (
+              <button key={it.key} onClick={() => setSub(it.key)}
+                className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs transition-colors ${on ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'}`}>
+                {it.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Контент режима — тот же диспетчер, что на десктопе */}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        {coreMode === 'normalize' && <NormalizationPanel />}
+        {coreMode === 'reconcile' && <ReconciliationPanel />}
+        {coreMode === 'management' && <ManagementPanel />}
+        {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+        {coreMode === 'financial' && <FinancialPanel />}
+        {coreMode === 'accounting' && <AccountingPanel />}
+        {coreMode === 'tax' && <TaxPanel />}
+        {coreMode === 'export' && <ExportLayerPanel />}
+      </div>
     </div>
   )
 }

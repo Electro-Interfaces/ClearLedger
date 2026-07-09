@@ -177,7 +177,7 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
   const resTint = (r: string | null) => (r === 'Complete' ? 'text-emerald-400/80' : 'text-amber-400/80')
   return (
     <Dialog open={!!account} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
+      <DialogContent className="max-w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[88vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             {d?.found && d.account ? <><span className="tabular-nums">{d.account.masked}</span><SegBadge seg={d.account.segment} /></> : 'Аккаунт'}
@@ -185,7 +185,7 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
         </DialogHeader>
         {q.isLoading ? <Loading /> : !d || !d.found || !d.account ? <Empty text="Аккаунт не найден за период" /> : (
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
               <Kpi label="Сессий" value={nf0.format(d.account.sessions)} />
               <Kpi label="Выручка" value={moneyK(d.account.revenue)} />
               <Kpi label="Ср. чек" value={money(d.account.avg_check)} />
