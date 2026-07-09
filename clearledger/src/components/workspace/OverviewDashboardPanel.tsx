@@ -94,6 +94,44 @@ function CountCard({ label, value, hint }: { label: string; value: string; hint?
   )
 }
 
+/** Мини-спарклайн (inline SVG, без recharts). Цвет — нейтральный currentColor,
+ * семантику роста несёт Δ-бейдж. Пустые бакеты (null) — разрыв линии. */
+function Sparkline({ data }: { data: (number | null)[] }) {
+  const vals = data.filter((v): v is number => v != null)
+  if (vals.length < 2) return null
+  const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1
+  const n = data.length
+  const pts = data
+    .map((v, i) => (v == null ? null : `${((i / (n - 1)) * 100).toFixed(1)},${(100 - ((v - min) / rng) * 100).toFixed(1)}`))
+    .filter(Boolean).join(' ')
+  return (
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-2 h-7 w-full text-muted-foreground/60" aria-hidden>
+      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  )
+}
+
+/** KPI-плитка с Δ% к прошлому периоду (абс. в углу) + мини-спарклайн.
+ * Контракт экспорта сохранён: первые три ребёнка — label/value/hint;
+ * Δ-бейдж и спарклайн идут ПОСЛЕ (экспорт читает детей по индексу 0..2). */
+function KpiCard({ k, hint }: { k: OverviewKpi; hint?: string }) {
+  const showDelta = k.delta_pct != null && Math.abs(k.delta_pct) <= 500  // абсурдные % (пустая база) прячем
+  const up = (k.delta_pct ?? 0) >= 0
+  return (
+    <div data-kpi className="relative rounded-xl border bg-card/50 p-3.5 shadow-sm">
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{k.label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight">{kpiDisplay(k)}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">{hint ?? ''}</div>
+      {showDelta && (
+        <span className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-400/90' : 'text-red-400/90'}`}>
+          {up ? '▲' : '▼'}{Math.abs(k.delta_pct!).toFixed(1)}%
+        </span>
+      )}
+      {k.spark && <Sparkline data={k.spark} />}
+    </div>
+  )
+}
+
 /** Донат долей + легенда со значениями и %. */
 function DonutCard({ title, rows }: { title: string; rows: ShareRow[] }) {
   const total = rows.reduce((s, r) => s + r.amount, 0)
@@ -473,11 +511,11 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
               <CountCard label="Коннекторов в сети" value={nf0.format(data.meta.ports)} hint="физических портов" />
             </div>
 
-            {/* ключевые KPI (тот же чистый дизайн) — под статистикой */}
+            {/* ключевые KPI с Δ% к прошлому периоду + спарклайн — под статистикой */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               {(['revenue', 'sessions', 'energy_kwh', 'price_per_kwh', 'success_pct'] as const).map((key) => {
                 const k = data.kpis.find((x) => x.key === key)
-                return k ? <CountCard key={key} label={k.label} value={kpiDisplay(k)} hint={KPI_HINTS[key]} /> : null
+                return k ? <KpiCard key={key} k={k} hint={KPI_HINTS[key]} /> : null
               })}
             </div>
 

@@ -12,6 +12,7 @@ import { Loader2, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { useTabParams } from '@/hooks/useTabParams'
 import { getTariffGrid, getFactVsNominal, type FvnLine } from '@/services/tariffService'
 import { getChargeSessions, getChargeTimeseries, type ChargeSessionLine } from '@/services/analyticsService'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -245,17 +246,24 @@ function TariffDynamics({ companyId, dateFrom, dateTo }: TabProps) {
   if (isLoading) return <Loading />
   const rows = (data?.data ?? []).map((r) => ({ bucket: String(r.bucket), value: Number(r['Вся сеть'] ?? r.value ?? 0) }))
   if (rows.length === 0) return <Empty text="Нет данных за период" />
-  const max = Math.max(1, ...rows.map((r) => r.value))
   return (
     <div className="space-y-2">
       <div className="text-xs text-muted-foreground">Средневзвешенный тариф сети ₽/кВтч по месяцам (индексация/изменения цен).</div>
-      <Card><CardContent className="p-3 space-y-1.5">
-        {rows.map((r) => (
-          <div key={r.bucket} className="space-y-0.5">
-            <div className="flex justify-between text-xs"><span className="text-muted-foreground">{r.bucket}</span><span className="tabular-nums">{rub(r.value)} ₽/кВтч</span></div>
-            <div className="h-2 rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary/70" style={{ width: `${(r.value / max) * 100}%` }} /></div>
-          </div>
-        ))}
+      <Card><CardContent className="p-3">
+        <div data-chart>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={rows} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+              <XAxis dataKey="bucket" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
+                tickFormatter={(b: string) => (b.length === 7 ? `${b.slice(5)}.${b.slice(2, 4)}` : b)} />
+              <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--muted-foreground))"
+                width={52} domain={['auto', 'auto']} tickFormatter={(v: number) => rub(v)} />
+              <Tooltip cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeDasharray: '3 3' }}
+                labelFormatter={(b) => String(b)} formatter={(v) => [`${rub(Number(v))} ₽/кВтч`, 'Тариф']} />
+              <Line type="monotone" dataKey="value" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       </CardContent></Card>
     </div>
   )
