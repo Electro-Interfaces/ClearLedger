@@ -11,12 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
-import { CorporatePanel } from './CorporatePanel'
-import { RetailPanel } from './RetailPanel'
-import { TariffsPanel } from './TariffsPanel'
-import { OverviewDashboardPanel } from './OverviewDashboardPanel'
-import { ChargeListPanel } from './ChargeListPanel'
-import { ChargeMapPanel } from './ChargeMapPanel'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { PeriodRangePicker, MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
@@ -1441,35 +1435,26 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
   )
 }
 
-export function ChargeSessionsPanel({ tab, companyId, dateFrom, dateTo }: {
+/** Подразделы, которым нужен общий стейт типа клиента (ФЛ/ЮЛ): «Сессии»
+ * (внутренние табы) и «Надёжность». Остальные пункты раздаёт ChargeSalesRouter. */
+export function SessionsPanel({ tab, companyId, dateFrom, dateTo }: {
   tab: string; companyId: string; dateFrom: string; dateTo: string
 }) {
   const sub = periodSub(dateFrom, dateTo)
   const [clientType, setClientType] = useState<ClientType>('all')
-  const isCorporate = tab === 'cs_corporate'
-  // «Корпоратив» жёстко фильтрует ЮЛ (тумблер скрыт); остальные пункты — по тумблеру.
-  const effective: ClientType = isCorporate ? 'ul' : clientType
-  const wrap = (title: string, node: ReactNode) => (
-    <ChargeClientCtx.Provider value={effective}>
-      <PanelExport title={`Сессии ЭЗС · ${title}`} subtitle={sub}
-        toolbar={isCorporate ? undefined : <ClientTypeToggle value={clientType} onChange={setClientType} />}>
-        {node}
-      </PanelExport>
-    </ChargeClientCtx.Provider>
-  )
-  switch (tab) {
-    case 'cs_dashboard': return <OverviewDashboardPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-    case 'cs_list': return <ChargeListPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-    case 'cs_map': return <ChargeMapPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-    case 'cs_sessions': return (
-      <SessionsTabbed companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} subtitle={sub}
-        clientType={clientType} setClientType={setClientType} />
+  // «Надёжность» — отдельный подраздел (ТОиР: приоритет РусГидро), не 3-й уровень.
+  if (tab === 'cs_reliability') {
+    return (
+      <ChargeClientCtx.Provider value={clientType}>
+        <PanelExport title="Сессии ЭЗС · Надёжность" subtitle={sub}
+          toolbar={<ClientTypeToggle value={clientType} onChange={setClientType} />}>
+          <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+        </PanelExport>
+      </ChargeClientCtx.Provider>
     )
-    // «Надёжность» — отдельный подраздел (ТОиР: приоритет РусГидро), не 3-й уровень.
-    case 'cs_reliability': return wrap('Надёжность', <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
-    case 'cs_clients': return <TariffsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-    case 'cs_corporate': return <CorporatePanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-    case 'cs_retail': return <RetailPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-    default: return null
   }
+  return (
+    <SessionsTabbed companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} subtitle={sub}
+      clientType={clientType} setClientType={setClientType} />
+  )
 }

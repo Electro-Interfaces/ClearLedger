@@ -9,7 +9,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceSubView, type CoreMode } from '@/contexts/WorkspaceContext'
 import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS } from './workspaceSections'
-import { ChargeSessionsPanel } from './ChargeSessionsPanel'
+import { ChargeSalesRouter } from './ChargeSalesRouter'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -122,7 +122,7 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
     return <div className="h-full overflow-y-auto"><BalanceVitrine /></div>
   }
   if (CHARGE_SESSIONS_KEYS.includes(activeTab)) {
-    return <div className="h-full overflow-y-auto"><ChargeSessionsPanel tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} /></div>
+    return <div className="h-full overflow-y-auto"><ChargeSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} /></div>
   }
   if (ENERGY_MGMT_KEYS.includes(activeTab)) {
     return <div className="h-full overflow-y-auto"><EnergyMgmtVitrine tab={activeTab} /></div>
