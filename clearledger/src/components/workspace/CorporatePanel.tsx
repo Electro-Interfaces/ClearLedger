@@ -7,6 +7,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { Kpi } from './analytics/Kpi'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Download, AlertTriangle, Info, ArrowUp, ArrowDown, ChevronsUpDown, FileSpreadsheet } from 'lucide-react'
@@ -31,17 +32,6 @@ function Loading() { return <div className="flex justify-center py-12"><Loader2 
 function Empty({ text }: { text: string }) { return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div> }
 
 // ── KPI карточка ──
-function Kpi({ label, value, sub, cls }: { label: string; value: string; sub?: string; cls?: string }) {
-  return (
-    <Card className="py-0">
-      <CardContent className="p-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={`text-lg font-semibold tabular-nums ${cls ?? ''}`}>{value}</div>
-        {sub && <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>}
-      </CardContent>
-    </Card>
-  )
-}
 
 // ── Сортируемая таблица клиентов (общая для Клиенты/Тарифы/Биллинг) ──
 interface Col { key: string; label: string; left?: boolean; get: (c: CorpClient) => number | string; cell: (c: CorpClient) => ReactNode }
