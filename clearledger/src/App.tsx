@@ -25,6 +25,7 @@ const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ defa
 const CatalogPage = lazy(() => import('@/pages/CatalogPage').then((m) => ({ default: m.CatalogPage })))
 const LocationsPage = lazy(() => import('@/pages/LocationsPage').then((m) => ({ default: m.LocationsPage })))
 const ContractorsPage = lazy(() => import('@/pages/ContractorsPage').then((m) => ({ default: m.ContractorsPage })))
+const MetrikaPage = lazy(() => import('@/pages/MetrikaPage').then((m) => ({ default: m.MetrikaPage })))
 const OrganizationPage = lazy(() => import('@/pages/OrganizationPage').then((m) => ({ default: m.OrganizationPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AdminPage = lazy(() => import('@/pages/AdminPage').then((m) => ({ default: m.AdminPage })))
@@ -130,6 +131,7 @@ const router = createBrowserRouter([
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
           { path: '/connectors', element: <LazyPage><ChannelsPage /></LazyPage> },
+          { path: '/metrika', element: <LazyPage><MetrikaPage /></LazyPage> },
           { path: '/connectors/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
           // Старые маршруты → «Коннекторы» (редирект). /sources пока доступен (настройка
           // подключения встраивается в коннектор в Фазе 3).

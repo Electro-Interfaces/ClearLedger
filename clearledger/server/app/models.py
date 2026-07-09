@@ -2867,3 +2867,25 @@ class CorporateClient(Base):
     __table_args__ = (
         Index("uq_corporate_clients", "company_id", "phone", unique=True),
     )
+
+
+class MetrikaConnection(Base):
+    """Подключение к Яндекс.Метрике (per-company): счётчик + OAuth-токен (шифрован
+    через onec.crypto). Живой fetch аналитики через Reporting API — НЕ ingest в L2.
+    Токен фронту не отдаётся (только статус configured/enabled)."""
+    __tablename__ = "metrika_connections"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    counter_id: Mapped[str] = mapped_column(String(40), nullable=False)      # № счётчика Метрики
+    token_encrypted: Mapped[str] = mapped_column(String(2048), nullable=False)  # OAuth-токен (Fernet)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")  # ok|error|unknown
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    counter_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (Index("uq_metrika_company", "company_id", unique=True),)

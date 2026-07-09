@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Settings, Upload, FileText,
   Plug, BookOpen, CalendarClock, Link2, Package,
   Landmark, ScrollText, Tag, Layers, GitCompare,
-  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw,
+  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw, LineChart,
 } from 'lucide-react'
 
 export interface NavItemDef {
@@ -37,6 +37,7 @@ export const mainNavItems: NavItemDef[] = [
 export const dataItems: NavItemDef[] = [
   { to: '/organization', icon: Building, label: 'Организация' },
   { to: '/connectors', icon: Plug, label: 'Коннекторы' },
+  { to: '/metrika', icon: LineChart, label: 'Яндекс.Метрика' },
   { to: '/normalization', icon: Sparkles, label: 'Нормализация' },
 ]
 
