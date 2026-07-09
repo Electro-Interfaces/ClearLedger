@@ -25,6 +25,7 @@ import { useTabParams } from '@/hooks/useTabParams'
 import { ExportButton } from './analytics/ExportButton'
 import { PeriodRangePicker } from './analytics/PeriodRangePicker'
 import { type Period } from './analytics/periodPresets'
+import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
 import {
   getChargeSessions, getStationsLinkage, getChargeTimeseries, fmtMoney, fmtMoneyShort,
 } from '@/services/analyticsService'
@@ -37,13 +38,6 @@ import {
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 
-// Палитра серий — как в analytics/ChargeChart.tsx (приглушённая, богатая, без неона).
-const SERIES = [
-  'hsl(217, 91%, 60%)', 'hsl(152, 69%, 45%)', 'hsl(25, 100%, 55%)',
-  'hsl(280, 65%, 65%)', 'hsl(340, 75%, 55%)', 'hsl(190, 70%, 50%)',
-]
-const OTHER_COLOR = 'hsl(215, 16%, 55%)'
-const seriesColor = (i: number, n: number) => (i === n - 1 ? OTHER_COLOR : SERIES[i % SERIES.length])
 const ACCENT_HSL: Record<Accent, string> = {
   success: 'hsl(152, 69%, 45%)', warning: 'hsl(38, 92%, 50%)',
   danger: 'hsl(0, 84%, 60%)', info: 'hsl(217, 91%, 60%)',

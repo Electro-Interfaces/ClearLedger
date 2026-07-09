@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
+import { seriesColor } from './analytics/palette'
 import { PeriodRangePicker, MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
 import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChart'
@@ -33,11 +34,6 @@ const kwh = (v: number) => nf0.format(v) + ' кВтч'
 
 // Палитра донат-диаграмм долей — как в analytics/ChargeChart.tsx (приглушённая, без неона);
 // последний сегмент («Прочие») — нейтральный серый.
-const DONUT_COLORS = [
-  'hsl(217, 91%, 60%)', 'hsl(152, 69%, 45%)', 'hsl(25, 100%, 55%)',
-  'hsl(280, 65%, 65%)', 'hsl(340, 75%, 55%)', 'hsl(190, 70%, 50%)',
-]
-const donutColor = (i: number, n: number) => (i === n - 1 && n > 1 ? 'hsl(215, 16%, 55%)' : DONUT_COLORS[i % DONUT_COLORS.length])
 
 function Loading() {
   return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -491,7 +487,7 @@ function ShareDonut({ title, rows }: { title: string; rows: ChargeSessionLine[] 
             <ResponsiveContainer width={132} height={132}>
               <PieChart>
                 <Pie data={data} dataKey="value" nameKey="name" innerRadius={44} outerRadius={62} paddingAngle={1.5} stroke="none" isAnimationActive={false}>
-                  {data.map((_, i) => <Cell key={i} fill={donutColor(i, n)} />)}
+                  {data.map((_, i) => <Cell key={i} fill={seriesColor(i, n)} />)}
                 </Pie>
                 <RTooltip formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
               </PieChart>
@@ -504,7 +500,7 @@ function ShareDonut({ title, rows }: { title: string; rows: ChargeSessionLine[] 
           <div className="min-w-0 flex-1 space-y-1.5 text-xs">
             {rows.map((r, i) => (
               <div key={r.label} className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: donutColor(i, n) }} />
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: seriesColor(i, n) }} />
                 <span className="flex-1 truncate">{r.label}</span>
                 <span className="font-mono tabular-nums text-muted-foreground">{fmtMoneyShort(r.amount)} ₽ · {r.share_pct.toFixed(1)}%</span>
               </div>

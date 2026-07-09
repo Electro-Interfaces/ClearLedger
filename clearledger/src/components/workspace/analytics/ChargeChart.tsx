@@ -15,10 +15,7 @@ import {
   fmtMetric, fmtMetricShort, CHARGE_METRIC_LABELS, type ChargeMetric,
 } from '@/services/analyticsService'
 
-const COLORS = [
-  'hsl(217, 91%, 60%)', 'hsl(152, 69%, 45%)', 'hsl(25, 100%, 55%)',
-  'hsl(280, 65%, 65%)', 'hsl(340, 75%, 55%)', 'hsl(280, 100%, 70%)',
-]
+import { CHART_SERIES as COLORS } from './palette'
 
 export type ChartType = 'bar' | 'line' | 'area'
 export type ChartMode = 'plain' | 'cumulative' | 'index'
