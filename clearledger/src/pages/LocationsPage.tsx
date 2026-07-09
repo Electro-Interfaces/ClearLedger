@@ -426,8 +426,8 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
 
   return (
     <div className="flex-1 min-w-0">
-      <div className="px-6 py-6 space-y-6">
-        <div className="flex items-start justify-between gap-4">
+      <div className="px-4 py-4 sm:px-6 sm:py-6 space-y-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="flex items-center gap-2">
             <MapPin className="h-6 w-6 text-primary shrink-0" />
             <div>
