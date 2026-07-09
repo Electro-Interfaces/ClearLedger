@@ -2836,6 +2836,17 @@ class ChargeSession(Base):
     )
 
 
+class AnalyticsCacheVersion(Base):
+    """Версия агрегатных данных компании — для инвалидации кеша раздела «Продажи».
+    Инкрементируется при ingest/обогащении сессий: все прежние кеш-ключи
+    (содержащие версию) становятся недостижимы. См. services/analytics_cache.py."""
+    __tablename__ = "analytics_cache_version"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 class CorporateClient(Base):
     """Реестр корпоративных клиентов (ЮЛ) ЭЗС — из справочника «Организации».
     Ключ джойна с сессиями — phone (= charge_sessions.user_id). Договорной тариф:

@@ -19,6 +19,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChannelSyncLog, ChargeSession, CorporateClient
+from app.services.analytics_cache import bump_version
 from app.services.mapping import apply, canon_region, load_kind_map
 
 # Форматы дат в выгрузках сессий. Точки = DD.MM (RU), слэши = MM/DD (US, выгрузка
@@ -241,6 +242,7 @@ async def ingest_charge_sessions(
         message = f"загружено {created}, пропущено {skipped}"
     if heal.get("stations_created"):
         message += f"; станций заведено из сессий: {heal['stations_created']}"
+    await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
             "errors": errors, "deleted": deleted, "stations_created": heal.get("stations_created", 0),
             "message": message}
@@ -367,6 +369,7 @@ async def enrich_sessions_with_orgs(
     await db.flush()
 
     named, priced, matched = await _apply_org_enrichment(db, company_id, orgs, matrix, channel_id)
+    await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)
 
 
@@ -441,4 +444,5 @@ async def enrich_from_registry(db: AsyncSession, company_id, channel_id=None) ->
             for c in clients]
     matrix = {c.name: c.matrix for c in clients if c.matrix}
     named, priced, matched = await _apply_org_enrichment(db, company_id, orgs, matrix, channel_id)
+    await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)

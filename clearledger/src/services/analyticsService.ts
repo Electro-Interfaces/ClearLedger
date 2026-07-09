@@ -361,7 +361,9 @@ export interface ChargeSessionRow {
   region: string | null; connector_type: string | null
   started_at: string | null; finished_at: string | null; duration_min: number
   result: string | null; charge_type: string | null; user_type: string | null
-  client_name: string | null; energy_kwh: number; amount: number; tariff: number
+  client_name: string | null; energy_kwh: number; amount: number
+  /** Выручка = client_amount (ЮЛ) либо amount (розница). У ЮЛ amount=0 — реальная выручка тут. */
+  revenue: number; tariff: number
   paid_at: string | null; cut_key: string | null
 }
 export interface ChargeSessionRowsResponse { rows: ChargeSessionRow[]; total: number; truncated: boolean }

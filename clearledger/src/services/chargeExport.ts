@@ -196,7 +196,7 @@ const PIVOT_READY_COLS: [string, (r: ChargeSessionRow) => string | number][] = [
   ['Час', (r) => (r.started_at || '').slice(11, 13) || '—'],
   ['День недели', (r) => (r.started_at ? WD[new Date(r.started_at).getDay()] : '—')],
   ['Энергия кВт·ч', (r) => Number(r.energy_kwh) || 0],
-  ['Сумма ₽', (r) => Number(r.amount) || 0],
+  ['Выручка ₽', (r) => Number(r.revenue) || 0],
   ['Длительность мин', (r) => Number(r.duration_min) || 0],
   ['Сессии', () => 1],
 ]

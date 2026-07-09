@@ -51,8 +51,9 @@ export interface ShareRow {
 }
 export interface OverviewShares {
   connector: ShareRow[]
-  user_type: ShareRow[]
-  corp_retail: ShareRow[]
+  /** Каноническая сегментация: Корпоратив (ЮЛ) / Розница (ФЛ) / Анонимные.
+   * Согласована с панелями «Корпоратив» и «Частные лица». */
+  by_segment: ShareRow[]
 }
 
 export interface StationRow {

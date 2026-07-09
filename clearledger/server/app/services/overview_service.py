@@ -17,6 +17,7 @@ from sqlalchemy import case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession
+from app.services.analytics_cache import cached_report
 from app.services.analytics_service import AnalyticsService, PeriodFilter
 from app.services.corporate_service import CorporateService
 
@@ -67,10 +68,54 @@ class OverviewService:
             return "week"
         return "month"
 
-    async def _spark(self, f: PeriodFilter, bucket: str, metric: str) -> list[float | None]:
-        ts = await self.a.charge_timeseries(f, bucket=bucket, metric=metric)
-        return [d.get("value") for d in ts["data"]]
+    async def _bucket_series(self, f: PeriodFilter, bucket: str) -> tuple[list[str], dict]:
+        """Один скан `_cs_aggregate_2d(bucket)` → (ось бакетов, суммы по бакету).
+        Из него выводятся ВСЕ спарклайны и тренд — вместо 5+ отдельных
+        timeseries-запросов (каждый = полнотабличный скан того же периода)."""
+        rows = await self.a._cs_aggregate_2d(
+            f.company_id, f.date_from, f.date_to, bucket, None,
+            f.station_codes, f.regions, f.dim_by, f.dim_val)
+        by = {r.b: r for r in rows}
+        axis = self.a._cs_bucket_axis(f.date_from, f.date_to, bucket)
+        return axis, by
 
+    def _series(self, axis: list[str], by: dict, metric: str) -> list[float | None]:
+        """Значения метрики по оси бакетов (пустой бакет → null для ratio, иначе 0).
+        Семантика идентична `charge_timeseries` (series_by=None)."""
+        empty = None if self.a._cs_is_ratio(metric) else 0
+        out: list[float | None] = []
+        for b in axis:
+            r = by.get(b)
+            out.append(
+                self.a._cs_metric_from_sums(metric, r.cnt, r.energy, r.amount, r.duration, r.success)
+                if r is not None else empty)
+        return out
+
+    async def _segments(self, f: PeriodFilter) -> dict[str, dict]:
+        """Каноническая сегментация выручки/сессий/оплат ОДНИМ сканом:
+          corp   — ЮЛ (client_name задан, сматчен на организацию);
+          retail — ФЛ (есть телефон-аккаунт, не корп);
+          anon   — без телефона.
+        Совпадает с corporate_service (client_name) и retail_service (user_id) —
+        поэтому Обзор смыкается с панелями «Корпоратив»/«Частные лица»."""
+        S = ChargeSession
+        seg = case(
+            (S.client_name.is_not(None), "corp"),
+            (S.user_id.is_not(None), "retail"),
+            else_="anon",
+        ).label("seg")
+        stmt = select(
+            seg,
+            func.count().label("cnt"),
+            func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
+            func.coalesce(func.sum(case((S.paid_at.is_not(None), 1), else_=0)), 0).label("paid"),
+        ).where(*self.a._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions)).group_by(seg)
+        out = {k: {"amount": 0.0, "sessions": 0, "paid": 0} for k in ("corp", "retail", "anon")}
+        for r in (await self.db.execute(stmt)).all():
+            out[r.seg] = {"amount": float(r.amount), "sessions": int(r.cnt), "paid": int(r.paid)}
+        return out
+
+    @cached_report("ezs:overview")
     async def overview(self, company_id: Any, df: date, dt: date, compare: str = "prev") -> dict[str, Any]:
         period_days = (dt - df).days + 1
         prev_to = df - timedelta(days=1)
@@ -91,12 +136,13 @@ class OverviewService:
         # Иначе (данные начались позже) все дельты — фиктивные «+100%»; честнее null.
         has_prev = tp["sessions"] > 0
 
-        # ─── спарклайны (по метрикам, что поддерживает timeseries) ───
-        spark_amount = await self._spark(f_cur, bucket, "amount")
-        spark_sessions = await self._spark(f_cur, bucket, "sessions")
-        spark_energy = await self._spark(f_cur, bucket, "energy")
-        spark_success = await self._spark(f_cur, bucket, "success_pct")
-        spark_price = await self._spark(f_cur, bucket, "price_per_kwh")
+        # ─── спарклайны + тренд из ОДНОГО скана на период (было 5 timeseries + 2) ───
+        cur_axis, cur_by = await self._bucket_series(f_cur, bucket)
+        spark_amount = self._series(cur_axis, cur_by, "amount")
+        spark_sessions = self._series(cur_axis, cur_by, "sessions")
+        spark_energy = self._series(cur_axis, cur_by, "energy")
+        spark_success = self._series(cur_axis, cur_by, "success_pct")
+        spark_price = self._series(cur_axis, cur_by, "price_per_kwh")
 
         def kpi(key, label, value, prev_value, fmt, unit, spark=None, accent=None):
             d = _dpct(float(value), float(prev_value)) if has_prev else None
@@ -142,24 +188,25 @@ class OverviewService:
              "unit": "%", "accent": "info"},
         ]
 
-        # ─── тренд выручки с оверлеем прошлого периода (выравнивание по индексу) ───
-        cur_ts = await self.a.charge_timeseries(f_cur, bucket=bucket, metric="amount")
-        prev_ts = await self.a.charge_timeseries(f_prev, bucket=bucket, metric="amount")
-        cur_pts = cur_ts["data"]
-        prev_vals = [d.get("value") for d in prev_ts["data"]] if has_prev else []
-        n = len(cur_pts)
+        # ─── тренд выручки с оверлеем прошлого периода (текущий ряд = spark_amount,
+        #     без повторного скана; прошлый период — один доп. скан) ───
+        prev_vals: list[float | None] = []
+        if has_prev:
+            prev_axis, prev_by = await self._bucket_series(f_prev, bucket)
+            prev_vals = self._series(prev_axis, prev_by, "amount")
+        n = len(cur_axis)
         prev_aligned = (prev_vals + [None] * n)[:n]  # паддинг/усечение под текущую ось
         trend = {
             "bucket": bucket,
             "points": [
-                {"label": cur_pts[i]["bucket"], "current": cur_pts[i].get("value"), "previous": prev_aligned[i]}
+                {"label": cur_axis[i], "current": spark_amount[i], "previous": prev_aligned[i]}
                 for i in range(n)
             ],
         }
 
-        # ─── доли (донаты): коннекторы + тип клиента ───
-        conn = await self.a.charge_sessions(f_cur, "connector")
-        usr = await self.a.charge_sessions(f_cur, "user_type")
+        # ─── доли: коннекторы (донат) + каноническая сегментация (донат + алерт) ───
+        conn = await self.a.charge_sessions(f_cur, "connector", with_totals=False)
+        seg = await self._segments(f_cur)
 
         def share_rows(lines: list[dict], top: int = 6) -> list[dict]:
             rows = [{"label": l["label"], "amount": l["amount"], "sessions": l["sessions"],
@@ -175,16 +222,21 @@ class OverviewService:
                 })
             return rows
 
+        # каноническая сегментация выручки (corp/retail/anon) — донат «По сегменту».
+        # Анонимные выделены отдельно (раньше подмешивались в «Розницу ФЛ»).
+        seg_total = sum(v["amount"] for v in seg.values()) or 0.0
+
+        def seg_row(label: str, key: str) -> dict:
+            v = seg[key]
+            return {"label": label, "amount": round(v["amount"], 2), "sessions": v["sessions"],
+                    "share_pct": round(v["amount"] / seg_total * 100, 1) if seg_total else 0.0}
+
+        by_segment = [seg_row("Корпоратив (ЮЛ)", "corp"), seg_row("Розница (ФЛ)", "retail")]
+        if seg["anon"]["sessions"] > 0:
+            by_segment.append(seg_row("Анонимные", "anon"))
         shares = {
             "connector": share_rows(conn["lines"]),
-            "user_type": share_rows(usr["lines"]),
-            "corp_retail": [
-                {"label": "Корпоратив (ЮЛ)", "amount": round(corp_rev, 2),
-                 "share_pct": corp_share, "sessions": corp["totals"]["sessions"]},
-                {"label": "Розница (ФЛ)", "amount": round(total_rev - corp_rev, 2),
-                 "share_pct": round(100 - corp_share, 1),
-                 "sessions": max(0, tc["sessions"] - corp["totals"]["sessions"])},
-            ],
+            "by_segment": by_segment,
         }
 
         # ─── топ/дно станций по загрузке (порт-нормировано; фильтр по объёму) ───
@@ -205,7 +257,7 @@ class OverviewService:
         }
 
         # ─── профиль активности: по часам суток (0-23) + по дням недели (1=Пн..7=Вс) ───
-        hourly_raw = await self.a.charge_sessions(f_cur, "hour")
+        hourly_raw = await self.a.charge_sessions(f_cur, "hour", with_totals=False)
         hmap: dict[int, dict] = {}
         for l in hourly_raw["lines"]:
             try:
@@ -216,7 +268,7 @@ class OverviewService:
                    "sessions": hmap[h]["sessions"] if h in hmap else 0,
                    "amount": hmap[h]["amount"] if h in hmap else 0.0} for h in range(24)]
 
-        wd_raw = await self.a.charge_sessions(f_cur, "weekday")
+        wd_raw = await self.a.charge_sessions(f_cur, "weekday", with_totals=False)
         _WD = {1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Вс"}
         wdm: dict[int, dict] = {}
         for l in wd_raw["lines"]:
@@ -243,8 +295,13 @@ class OverviewService:
         if tc["utilization_pct"] < 15:
             alerts.append({"level": "warn",
                            "message": f"Загрузка сети {tc['utilization_pct']:.1f}% — ниже порога безубыточности (15%)"})
-        if tc["unpaid_pct"] > 3:
-            alerts.append({"level": "warn", "message": f"Без оплаты {tc['unpaid_pct']:.1f}% сессий"})
+        # «Без оплаты» — только по не-постоплатным (розница+аноним): у ЮЛ постоплата,
+        # paid_at штатно пуст → не считаем их неоплаченными (иначе ложный алерт).
+        noncorp_sess = seg["retail"]["sessions"] + seg["anon"]["sessions"]
+        noncorp_paid = seg["retail"]["paid"] + seg["anon"]["paid"]
+        noncorp_unpaid_pct = round((noncorp_sess - noncorp_paid) / noncorp_sess * 100, 1) if noncorp_sess else 0.0
+        if noncorp_unpaid_pct > 3:
+            alerts.append({"level": "warn", "message": f"Без оплаты {noncorp_unpaid_pct:.1f}% розничных сессий"})
         risky = [l for l in stations_lines if l["sessions"] >= MIN_SESS and l["success_pct"] < 70]
         if risky:
             names = ", ".join(l["label"] for l in sorted(risky, key=lambda l: l["success_pct"])[:3])
@@ -283,6 +340,7 @@ class OverviewService:
             },
         }
 
+    @cached_report("ezs:station_metrics")
     async def station_metrics(self, company_id: Any, df: date, dt: date) -> dict[str, Any]:
         """Агрегаты сессий по станции (location_id) за период — для раскраски/размера
         точек на карте. Джойн с координатами делает фронт по location_id (= ServiceLocation.id).

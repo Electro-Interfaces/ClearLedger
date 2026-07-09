@@ -26,6 +26,7 @@ from sqlalchemy import String, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, Region, ServiceLocation
+from app.services.analytics_cache import cached_report
 from app.services.pii_account import account_hash, mask_phone
 
 S = ChargeSession
@@ -50,6 +51,7 @@ class RetailService:
         self.db = db
 
     # ── ядро: агрегат по аккаунтам за период ─────────────────────────────
+    @cached_report("retail:_accounts", copy_rows=True)
     async def _accounts(self, company_id, df: date, dt: date, *,
                         region: str | None = None, station: str | None = None) -> list[dict[str, Any]]:
         """Одна строка на аккаунт ФЛ за период. Отсюда питаются RFM/экономика/гео/
@@ -101,6 +103,7 @@ class RetailService:
         return out
 
     # ── overview: KPI розничной базы ─────────────────────────────────────
+    @cached_report("retail:overview")
     async def overview(self, company_id, df: date, dt: date) -> dict[str, Any]:
         accts = await self._accounts(company_id, df, dt)
         lo, hi = _period(df, dt)
@@ -178,6 +181,7 @@ class RetailService:
             a["segment"] = self._rfm_segment(a["recency_days"], a["sessions"], a["revenue"], r_thr, f_thr)
         return accts
 
+    @cached_report("retail:segments")
     async def segments(self, company_id, df: date, dt: date) -> dict[str, Any]:
         accts = await self._accounts(company_id, df, dt)
         if not accts:
@@ -212,6 +216,7 @@ class RetailService:
                 "thresholds": {"recency": r_thr, "frequency": f_thr}}
 
     # ── economics: Pareto/концентрация ───────────────────────────────────
+    @cached_report("retail:economics")
     async def economics(self, company_id, df: date, dt: date) -> dict[str, Any]:
         accts = await self._accounts(company_id, df, dt)
         n = len(accts)
@@ -245,6 +250,7 @@ class RetailService:
                            "arpa": round(total / n, 2)}}
 
     # ── geo: мобильность/привязка к станциям (НОРМАЛИЗОВАННЫЙ слой) ────────
+    @cached_report("retail:geo")
     async def geo(self, company_id, df: date, dt: date) -> dict[str, Any]:
         """Гео/мобильность на L2-слое: станции считаются по `location_id` (объект
         `service_locations`), регионы — канон `regions.name` (join по location_id).
@@ -324,6 +330,7 @@ class RetailService:
                 "coverage": coverage, "regions": regions, "totals": {"accounts": n}}
 
     # ── cohorts: удержание (вся история, не период) ──────────────────────
+    @cached_report("retail:cohorts")
     async def cohorts(self, company_id, months: int = 12) -> dict[str, Any]:
         """Retention-матрица: когорта = месяц первой сессии; ячейка = сколько
         аккаунтов когорты были активны через N месяцев. По всей истории."""
@@ -384,6 +391,7 @@ class RetailService:
         """Публичная строка аккаунта — БЕЗ сырого телефона (только хеш+маска)."""
         return {k: v for k, v in a.items() if k != "phone"}
 
+    @cached_report("retail:accounts")
     async def accounts(self, company_id, df: date, dt: date, *, region: str | None = None,
                        station: str | None = None, segment: str | None = None,
                        min_sessions: int = 0, search: str | None = None,
@@ -425,6 +433,7 @@ class RetailService:
         }
 
     # ── dimensions: справочники фильтров (регионы/станции) ────────────────
+    @cached_report("retail:dimensions")
     async def dimensions(self, company_id, df: date, dt: date) -> dict[str, Any]:
         """Списки регионов и станций (с числом аккаунтов/сессий) для селектов фильтра."""
         lo, hi = _period(df, dt)
@@ -464,6 +473,7 @@ class RetailService:
     # ── profile: клиенты по станции/региону + профиль времени ────────────
     _WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
+    @cached_report("retail:profile")
     async def profile(self, company_id, df: date, dt: date, *,
                       station: str | None = None, region: str | None = None) -> dict[str, Any]:
         """Разрез по конкретной станции ИЛИ региону: KPI + профиль по часам суток и
@@ -525,6 +535,7 @@ class RetailService:
                 "weekday": weekday, "top_accounts": top}
 
     # ── account: подробная карточка одного аккаунта ──────────────────────
+    @cached_report("retail:account")
     async def account(self, company_id, df: date, dt: date, account_hash: str) -> dict[str, Any]:
         """Детализация одного аккаунта ФЛ (по хеш-ID): сводка + разбивки по станциям/
         месяцам/часам/коннекторам + последние сессии. Хеш резолвится в телефон
@@ -593,6 +604,7 @@ class RetailService:
                 "hourly": hourly, "connectors": connectors, "recent": recent}
 
     # ── marketing: B2C-KPI розничной базы + автоматические выводы ─────────
+    @cached_report("retail:marketing")
     async def marketing(self, company_id, df: date, dt: date) -> dict[str, Any]:
         """Маркетинговая витрина частных клиентов (B2C): повторные/разовые, ядро
         лояльности, зона оттока, концентрация выручки, retention когорт, AOV/частота
@@ -683,6 +695,7 @@ class RetailService:
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "kpis": kpis, "insights": ins}
 
     # ── dashboard: собранная BI-витрина «Обзора ФЛ» ──────────────────────
+    @cached_report("retail:dashboard")
     async def dashboard(self, company_id, df: date, dt: date) -> dict[str, Any]:
         """Расширенная витрина: динамика базы+выручки и Δ к прошлому периоду,
         retention-кривая, CLV/LTV, тепловая карта 7×24, поведение (коннекторы/

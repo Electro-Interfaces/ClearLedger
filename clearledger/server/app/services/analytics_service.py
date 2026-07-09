@@ -797,8 +797,13 @@ class AnalyticsService:
                     y += 1; q = 1
         return out
 
-    async def charge_sessions(self, f: PeriodFilter, group_by: str = "station") -> dict[str, Any]:
-        """Разрез зарядных сессий ЭЗС: выручка/энергия/сессии/ср.чек/успех по группе."""
+    async def charge_sessions(self, f: PeriodFilter, group_by: str = "station",
+                              with_totals: bool = True) -> dict[str, Any]:
+        """Разрез зарядных сессий ЭЗС: выручка/энергия/сессии/ср.чек/успех по группе.
+
+        with_totals=False — не считать сетевые distinct-тоталы портов/станций
+        (2 доп. скана). Для разрезов, где вызывающий читает только `lines`
+        (доли/профиль в overview), это экономит 2 полнотабличных distinct-скана."""
         period_days = (f.date_to - f.date_from).days + 1
         rows = await self._cs_aggregate(f.company_id, f.date_from, f.date_to, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val)
         lines = [self._cs_metrics(group_by, r, period_days) for r in rows]
@@ -815,9 +820,13 @@ class AnalyticsService:
         td = sum(l["_dur_sum"] for l in lines)
         tsucc = sum(l["_success"] for l in lines)
         tpaid = sum(l["_paid"] for l in lines)
-        # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят сегменты)
-        net_ports = await self._cs_ports(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
-        net_stations = await self._cs_stations(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят
+        # сегменты). 2 доп. distinct-скана; пропускаем, если totals не нужны.
+        if with_totals:
+            net_ports = await self._cs_ports(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+            net_stations = await self._cs_stations(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        else:
+            net_ports = net_stations = 0
         port_min = net_ports * period_days * 1440
         totals = {
             "label": "Итого", "sessions": ts, "energy_kwh": round(te, 1), "amount": round(total_amount, 2),
@@ -1407,7 +1416,7 @@ class AnalyticsService:
         stmt = select(
             S.session_ext_id, S.station_code, S.station_name, S.region, S.connector_type,
             S.started_at, S.finished_at, S.duration_min, S.result, S.charge_type, S.user_type,
-            S.client_name, S.energy_kwh, S.amount, S.tariff, S.paid_at, S.cut_key,
+            S.client_name, S.energy_kwh, S.amount, S.client_amount, S.tariff, S.paid_at, S.cut_key,
         ).where(
             *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
         ).order_by(S.started_at).limit(limit + 1)
@@ -1423,7 +1432,12 @@ class AnalyticsService:
             "started_at": iso(r.started_at), "finished_at": iso(r.finished_at),
             "duration_min": float(r.duration_min or 0), "result": r.result, "charge_type": r.charge_type,
             "user_type": r.user_type, "client_name": r.client_name, "energy_kwh": float(r.energy_kwh or 0),
-            "amount": float(r.amount or 0), "tariff": float(r.tariff or 0), "paid_at": iso(r.paid_at),
+            "amount": float(r.amount or 0),
+            # Выручка = корп-выручка (client_amount) для ЮЛ, иначе розничное списание (amount).
+            # У ЮЛ amount=0 (постоплата) — реальная выручка в client_amount. Сырой amount
+            # оставляем отдельным полем «списание».
+            "revenue": float(r.client_amount if r.client_amount is not None else (r.amount or 0)),
+            "tariff": float(r.tariff or 0), "paid_at": iso(r.paid_at),
             "cut_key": r.cut_key,
         } for r in res[:limit]]
         return {"rows": out, "total": len(out), "truncated": truncated}

@@ -33,9 +33,9 @@ function fmtDT(iso: string | null): string {
 }
 
 type SortKey = 'started_at' | 'station' | 'region' | 'connector' | 'user_type' | 'client'
-  | 'charge_type' | 'energy_kwh' | 'duration_min' | 'tariff' | 'amount' | 'result'
+  | 'charge_type' | 'energy_kwh' | 'duration_min' | 'tariff' | 'revenue' | 'result'
 
-const NUM_KEYS: SortKey[] = ['energy_kwh', 'duration_min', 'tariff', 'amount']
+const NUM_KEYS: SortKey[] = ['energy_kwh', 'duration_min', 'tariff', 'revenue']
 
 function rowVal(r: ChargeSessionRow, k: SortKey): string | number {
   switch (k) {
@@ -172,7 +172,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
         'Энергия кВтч': Number(r.energy_kwh) || 0,
         'Длительность мин': Number(r.duration_min) || 0,
         'Тариф ₽/кВтч': Number(r.tariff) || 0,
-        'Выручка ₽': Number(r.amount) || 0,
+        'Выручка ₽': Number(r.revenue) || 0,
         'Исход': r.result || '',
         'Оплата': r.paid_at ? fmtDT(r.paid_at) : '',
       }))
@@ -260,7 +260,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                   {th('energy_kwh', 'Энергия, кВтч', true)}
                   {th('duration_min', 'Длит., мин', true)}
                   {th('tariff', 'Тариф ₽/кВтч', true)}
-                  {th('amount', 'Выручка, ₽', true)}
+                  {th('revenue', 'Выручка, ₽', true)}
                   {th('result', 'Исход')}
                   <TableHead className="text-center">Оплата</TableHead>
                 </TableRow>
@@ -278,7 +278,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                     <TableCell className="text-right font-mono tabular-nums">{nf1.format(r.energy_kwh)}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{nf0.format(r.duration_min)}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{fmtMoney(r.tariff)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{fmtMoney(r.amount)}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">{fmtMoney(r.revenue)}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.result || '—'}</TableCell>
                     <TableCell className="text-center">
                       {r.paid_at ? <span className="text-emerald-400" title={fmtDT(r.paid_at)}>✓</span> : <span className="text-muted-foreground/50">✗</span>}

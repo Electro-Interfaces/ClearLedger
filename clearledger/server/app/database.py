@@ -342,6 +342,20 @@ async def create_all() -> None:
             "CREATE INDEX IF NOT EXISTS idx_charge_sessions_location ON charge_sessions(location_id)",
             # v2.8: скидка корп-клиента к рознице (каршеринг = 25%; применяется к матрице)
             "ALTER TABLE corporate_clients ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0",
+            # v3.9: составные индексы под шаблон WHERE аналитики «Продаж». Одиночный
+            # company_id неселективен (≈одна компания на всю таблицу) — диапазонные
+            # сканы опирались на голый ix_started_at. Составные ускоряют overview/
+            # retail/corporate (диапазон по started_at + сегмент).
+            "CREATE INDEX IF NOT EXISTS idx_cs_company_started "
+            "ON charge_sessions (company_id, started_at)",
+            # розница ФЛ: user_id NOT NULL AND client_name IS NULL (retail_service._accounts)
+            "CREATE INDEX IF NOT EXISTS idx_cs_retail_started "
+            "ON charge_sessions (company_id, started_at, user_id) "
+            "WHERE client_name IS NULL AND user_id IS NOT NULL",
+            # корпоратив ЮЛ: client_name NOT NULL (corporate_service/billing)
+            "CREATE INDEX IF NOT EXISTS idx_cs_corp_started "
+            "ON charge_sessions (company_id, client_name, started_at) "
+            "WHERE client_name IS NOT NULL",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

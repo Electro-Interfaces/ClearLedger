@@ -488,11 +488,11 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
             <div className="grid items-stretch gap-3 lg:grid-cols-4">
               <div className="lg:col-span-3 [&>div]:h-full">
                 <AvgCheckLine companyId={companyId} dateFrom={period.from} dateTo={period.to}
-                  bigValue={(() => { const fl = data.shares.user_type.find((r) => r.label === 'ФЛ'); return fl && fl.sessions ? fl.amount / fl.sessions : 0 })()} />
+                  bigValue={(() => { const fl = data.shares.by_segment.find((r) => r.label === 'Розница (ФЛ)'); return fl && fl.sessions ? fl.amount / fl.sessions : 0 })()} />
               </div>
               <div className="flex flex-col gap-3 lg:col-span-1">
                 <div className="min-h-0 flex-1 [&>div]:h-full"><DonutCard title="По коннекторам" rows={data.shares.connector} /></div>
-                <div className="min-h-0 flex-1 [&>div]:h-full"><DonutCard title="По типу клиента" rows={data.shares.user_type} /></div>
+                <div className="min-h-0 flex-1 [&>div]:h-full"><DonutCard title="По сегменту" rows={data.shares.by_segment} /></div>
               </div>
             </div>
 

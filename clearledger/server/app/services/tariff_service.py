@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession
+from app.services.analytics_cache import cached_report
 
 _GROUP_COLS = {
     "region": ChargeSession.region,
@@ -39,6 +40,7 @@ class TariffService:
             conds.append(S.user_type == user_type)
         return conds
 
+    @cached_report("tariff:grid")
     async def price_grid(self, company_id, df: date, dt: date, by: str = "region",
                          user_type: str | None = None) -> dict[str, Any]:
         """Тарифная сетка: <разрез by> × коннектор → преобладающий тариф (mode),
@@ -89,6 +91,7 @@ class TariffService:
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "by": by,
                 "rows": row_order, "connectors": conn_order, "cells": cells}
 
+    @cached_report("tariff:fact_vs_nominal")
     async def fact_vs_nominal(self, company_id, df: date, dt: date, group_by: str = "region",
                               user_type: str | None = None) -> dict[str, Any]:
         """По разрезу: номинал (энерговзвеш. tariff) vs факт (выручка÷энергия) + отклонение."""

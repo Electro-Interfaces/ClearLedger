@@ -14,6 +14,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, CorporateClient
+from app.services.analytics_cache import cached_report
 
 
 class CorporateService:
@@ -74,6 +75,7 @@ class CorporateService:
             "avg_tariff": round(corp / energy, 2) if energy else 0.0,
         }
 
+    @cached_report("corp:clients")
     async def clients(self, company_id, df: date, dt: date) -> dict[str, Any]:
         """Полная строка по каждому клиенту реестра: договор + метрики + гэп. Питает
         табы Клиенты / Тарифы / Рентабельность / Биллинг."""
@@ -86,6 +88,7 @@ class CorporateService:
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
                 "clients": lines, "totals": self._totals(lines)}
 
+    @cached_report("corp:billing")
     async def billing(self, company_id, df: date, dt: date, client: str | None = None,
                       vat_rate: float = 20.0) -> dict[str, Any]:
         """Данные под УПД: сводка на клиента + детализация-номенклатура (по договорному
@@ -142,6 +145,7 @@ class CorporateService:
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
                 "vat_rate": vat_rate, "summary": summary, "detail": detail}
 
+    @cached_report("corp:overview")
     async def overview(self, company_id, df: date, dt: date) -> dict[str, Any]:
         """Стратегический слой ЮЛ: KPI + топ-клиенты + алерты."""
         data = await self.clients(company_id, df, dt)
