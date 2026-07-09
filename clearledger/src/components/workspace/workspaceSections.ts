@@ -36,16 +36,18 @@ export const ENERGY_MGMT: CentralMenuItem[] = [
 export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 
 // Анализ зарядных сессий ЭЗС (реальные данные, для energy-профиля).
-// «Сессии» — единый пункт с внутренними табами (обзор/станции/коннекторы/время/
-// надёжность/динамика/сравнение). Клиенты и Корпоратив — отдельными пунктами.
+// Сгруппировано по смыслу (заголовки групп рисует сайдбар по полю group):
+//   СЕТЬ — состояние сети (обзор + карта);
+//   АНАЛИТИКА СЕССИЙ — агрегаты (Сессии: внутр. табы) + построчный реестр;
+//   КОММЕРЦИЯ — цена (тарифы) и клиентские направления (ЮЛ/ФЛ).
 export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
-  { key: 'cs_dashboard',  label: 'Обзор' },
-  { key: 'cs_map',        label: 'Карта' },
-  { key: 'cs_list',       label: 'Транзакции' },
-  { key: 'cs_sessions',   label: 'Сессии' },
-  { key: 'cs_clients',    label: 'Тарифы' },
-  { key: 'cs_corporate',  label: 'Корпоратив' },
-  { key: 'cs_retail',     label: 'Частные лица' },
+  { key: 'cs_dashboard',  label: 'Обзор',         group: 'Сеть' },
+  { key: 'cs_map',        label: 'Карта',         group: 'Сеть' },
+  { key: 'cs_sessions',   label: 'Сессии',        group: 'Аналитика сессий' },
+  { key: 'cs_list',       label: 'Реестр сессий', group: 'Аналитика сессий' },
+  { key: 'cs_clients',    label: 'Тарифы',        group: 'Коммерция' },
+  { key: 'cs_corporate',  label: 'Корпоратив',    group: 'Коммерция' },
+  { key: 'cs_retail',     label: 'Частные лица',  group: 'Коммерция' },
 ]
 export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
 

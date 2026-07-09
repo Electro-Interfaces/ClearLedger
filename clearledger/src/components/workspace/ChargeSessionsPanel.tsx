@@ -1380,10 +1380,9 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   )
 }
 
-// Внутренние табы пункта «Сессии» (обзор + операционные разрезы). Клиенты и
-// Корпоратив — отдельные пункты меню, не сюда.
+// Внутренние табы пункта «Сессии» (операционные разрезы). Сетевой «Обзор» —
+// отдельный пункт cs_dashboard (не дублируем здесь). Клиенты/Корпоратив — свои пункты.
 const SUB_TABS: { k: string; label: string }[] = [
-  { k: 'overview',   label: 'Обзор' },
   { k: 'stations',   label: 'По станциям' },
   { k: 'connectors', label: 'По коннекторам' },
   { k: 'time',       label: 'Время и загрузка' },
@@ -1410,7 +1409,7 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
   companyId: string; dateFrom: string; dateTo: string; subtitle?: string
   clientType: ClientType; setClientType: (v: ClientType) => void
 }) {
-  const [st, patch] = useTabParams('cs_sessions', { sub: 'overview' })
+  const [st, patch] = useTabParams('cs_sessions', { sub: 'stations' })
   const v = subView(st.sub, { companyId, dateFrom, dateTo })
   const ref = useRef<HTMLDivElement>(null)
   return (
