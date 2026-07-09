@@ -230,12 +230,20 @@ async def ingest_charge_sessions(
         db.add_all(batch)
         await db.flush()
 
+    # Durable self-heal: неизвестные станции из сессий → объекты L2 + резолв location_id,
+    # чтобы «сироты» (location_id NULL) не копились после загрузки.
+    from app.services.stations_normalize import backfill_session_locations
+    heal = await backfill_session_locations(db, company_id, auto_create=True)
+
     if mode == "replace":
         message = f"переписано: удалено {deleted}, загружено {created}"
     else:
         message = f"загружено {created}, пропущено {skipped}"
+    if heal.get("stations_created"):
+        message += f"; станций заведено из сессий: {heal['stations_created']}"
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
-            "errors": errors, "deleted": deleted, "message": message}
+            "errors": errors, "deleted": deleted, "stations_created": heal.get("stations_created", 0),
+            "message": message}
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ from app.routers import (
     analytics_router,
     charge_sessions_router,
     corporate_router,
+    retail_router,
     tariff_router,
     overview_router,
     onec_router,
@@ -169,6 +170,7 @@ app.include_router(policy_router.router, prefix=API_PREFIX)
 app.include_router(analytics_router.router, prefix=API_PREFIX)
 app.include_router(charge_sessions_router.router, prefix=API_PREFIX)
 app.include_router(corporate_router.router, prefix=API_PREFIX)
+app.include_router(retail_router.router, prefix=API_PREFIX)
 app.include_router(tariff_router.router, prefix=API_PREFIX)
 app.include_router(overview_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)

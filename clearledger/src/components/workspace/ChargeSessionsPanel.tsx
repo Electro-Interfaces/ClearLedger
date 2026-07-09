@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { CorporatePanel } from './CorporatePanel'
+import { RetailPanel } from './RetailPanel'
 import { TariffsPanel } from './TariffsPanel'
 import { OverviewDashboardPanel } from './OverviewDashboardPanel'
 import { ChargeListPanel } from './ChargeListPanel'
@@ -1467,6 +1468,7 @@ export function ChargeSessionsPanel({ tab, companyId, dateFrom, dateTo }: {
     )
     case 'cs_clients': return <TariffsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
     case 'cs_corporate': return <CorporatePanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+    case 'cs_retail': return <RetailPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
     default: return null
   }
 }

@@ -45,6 +45,7 @@ export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
   { key: 'cs_sessions',   label: 'Сессии' },
   { key: 'cs_clients',    label: 'Тарифы' },
   { key: 'cs_corporate',  label: 'Корпоратив' },
+  { key: 'cs_retail',     label: 'Частные лица' },
 ]
 export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
 

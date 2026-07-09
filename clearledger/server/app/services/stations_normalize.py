@@ -327,9 +327,83 @@ async def build_station_index(db: AsyncSession, company_id) -> dict[str, str]:
     return idx
 
 
-async def backfill_session_locations(db: AsyncSession, company_id) -> dict[str, Any]:
+async def ensure_stations_from_sessions(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Durable self-heal каталога L2. Для КАЖДОГО номера станции, который встречается
+    в сессиях, но отсутствует в справочнике объектов, создаём объект-ЗАГЛУШКУ ЭЗС из
+    данных самих сессий (№/наименование/адрес/регион/коннекторы). Так «сироты»
+    (location_id NULL) больше не копятся: неизвестная станция сразу заводится в L2.
+
+    Заглушка помечена extra_metadata.source='auto_from_sessions' и station_number=№,
+    поэтому позже официальный справочник (ingest_stations резолвит по № → by_num)
+    попадёт на ЭТУ же строку и дообогатит её типизированным паспортом — без дублей."""
+    existing = set((await build_station_index(db, company_id)).keys())
+
+    grp = (await db.execute(select(
+        ChargeSession.station_code.label("code"),
+        func.max(ChargeSession.station_name).label("name"),
+        func.max(ChargeSession.address).label("address"),
+        func.max(ChargeSession.region).label("region"),
+        func.array_agg(func.distinct(ChargeSession.connector_type)).label("conns"),
+    ).where(ChargeSession.company_id == company_id, ChargeSession.station_code.is_not(None))
+     .group_by(ChargeSession.station_code))).all()
+
+    # Кэш регионов компании: canon-name → region_id (get-or-create) — как в ingest_stations.
+    region_cache: dict[str, _uuid.UUID] = {}
+    for nm, rid in (await db.execute(
+        select(Region.name, Region.id).where(Region.company_id == company_id))).all():
+        region_cache[nm] = rid
+
+    async def _region_id(raw):
+        canon = canon_region(raw)
+        if not canon:
+            return None
+        rid = region_cache.get(canon)
+        if rid is None:
+            reg = Region(company_id=company_id, name=canon, federal_subject=_s(raw, 200))
+            db.add(reg)
+            await db.flush()
+            rid = reg.id
+            region_cache[canon] = rid
+        return rid
+
+    created = 0
+    codes: list[str] = []
+    for r in grp:
+        code = str(r.code).strip()
+        if not code or code in existing:
+            continue
+        conns = ",".join(sorted({str(c) for c in (r.conns or []) if c})) or None
+        rid = await _region_id(r.region)
+        canon = canon_region(r.region)
+        db.add(ServiceLocation(
+            id=_loc_id(company_id, f"sess:{code}"),   # namespace 'sess:' — не коллидит с ext_id каталога
+            company_id=company_id, type="ev_charging",
+            code=code, station_number=code,
+            name=_s(r.name, 255) or f"ЭЗС №{code}",
+            address=_s(r.address, 500),
+            region_id=rid,
+            connector_types=_s(conns, 200),
+            status="active", operational_status="unknown", is_test=False,
+            source_bindings=[],
+            extra_metadata={"number": code, "source": "auto_from_sessions",
+                            "regionRaw": r.region, "federalSubject": canon or r.region},
+        ))
+        created += 1
+        codes.append(code)
+        existing.add(code)
+    await db.flush()
+    return {"status": "success", "created": created, "codes": codes}
+
+
+async def backfill_session_locations(db: AsyncSession, company_id, auto_create: bool = False) -> dict[str, Any]:
     """Материализация связи сессии → объект-станция: проставить ChargeSession.location_id
-    по № (резолв на объект). Bulk-UPDATE по каждому station_code. Идемпотентно."""
+    по № (резолв на объект). Bulk-UPDATE по каждому station_code. Идемпотентно.
+
+    auto_create=True → сначала self-heal каталога (ensure_stations_from_sessions):
+    неизвестные станции заводятся из сессий, поэтому покрытие уходит к ~100%."""
+    created_stations = 0
+    if auto_create:
+        created_stations = (await ensure_stations_from_sessions(db, company_id))["created"]
     idx = await build_station_index(db, company_id)
     codes = [str(x).strip() for x in (await db.execute(
         select(ChargeSession.station_code).where(ChargeSession.company_id == company_id).distinct()
@@ -349,4 +423,7 @@ async def backfill_session_locations(db: AsyncSession, company_id) -> dict[str, 
         ChargeSession.company_id == company_id))).scalar() or 0)
     return {"status": "success", "sessions_linked": linked_rows, "sessions_total": total,
             "stations_matched": matched, "stations_total": len(codes),
-            "message": f"связано {linked_rows} из {total} сессий ({matched}/{len(codes)} станций)"}
+            "stations_created": created_stations,
+            "message": (f"связано {linked_rows} из {total} сессий "
+                        f"({matched}/{len(codes)} станций"
+                        + (f", создано {created_stations} из сессий" if created_stations else "") + ")")}
