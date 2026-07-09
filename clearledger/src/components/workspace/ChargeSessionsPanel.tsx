@@ -1380,13 +1380,12 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   )
 }
 
-// Внутренние табы пункта «Сессии» (операционные разрезы). Сетевой «Обзор» —
-// отдельный пункт cs_dashboard (не дублируем здесь). Клиенты/Корпоратив — свои пункты.
+// Внутренние табы пункта «Сессии». «Разрезы» — единая таблица с селектором разреза
+// (станция/коннектор/регион/тариф/клиент). Сетевой «Обзор» (cs_dashboard),
+// «Надёжность» (cs_reliability), Клиенты/Корпоратив — отдельные пункты меню.
 const SUB_TABS: { k: string; label: string }[] = [
-  { k: 'stations',   label: 'По станциям' },
-  { k: 'connectors', label: 'По коннекторам' },
+  { k: 'breakdown',  label: 'Разрезы' },
   { k: 'time',       label: 'Время и загрузка' },
-  { k: 'reliability', label: 'Надёжность' },
   { k: 'dynamics',   label: 'Динамика (тренд)' },
   { k: 'compare',    label: 'Сравнение периодов' },
 ]
@@ -1394,8 +1393,10 @@ const SUB_TABS: { k: string; label: string }[] = [
 function subView(sub: string, p: { companyId: string; dateFrom: string; dateTo: string }): { title: string; node: ReactNode } {
   const { companyId, dateFrom, dateTo } = p
   switch (sub) {
-    case 'stations': return { title: 'По станциям', node: <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="station" firstCol="Станция" withKpis controls tabKey="cs_stations" /> }
-    case 'connectors': return { title: 'По коннекторам', node: <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="connector" firstCol="Коннектор" withKpis controls tabKey="cs_connectors" /> }
+    case 'breakdown': return { title: 'Разрезы', node: <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="station" firstCol="Станция" withKpis controls tabKey="cs_breakdown" /> }
+    // legacy ?sub=stations|connectors — теперь один таб «Разрезы» с селектором разреза
+    case 'stations': return { title: 'По станциям', node: <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="station" firstCol="Станция" withKpis controls tabKey="cs_breakdown" /> }
+    case 'connectors': return { title: 'По коннекторам', node: <BreakdownTable companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} groupBy="connector" firstCol="Коннектор" withKpis controls tabKey="cs_breakdown" /> }
     case 'time': return { title: 'Время и загрузка', node: <TimeLoad companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
     case 'reliability': return { title: 'Надёжность', node: <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
     case 'dynamics': return { title: 'Динамика', node: <Dynamics companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
@@ -1409,7 +1410,7 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
   companyId: string; dateFrom: string; dateTo: string; subtitle?: string
   clientType: ClientType; setClientType: (v: ClientType) => void
 }) {
-  const [st, patch] = useTabParams('cs_sessions', { sub: 'stations' })
+  const [st, patch] = useTabParams('cs_sessions', { sub: 'breakdown' })
   const v = subView(st.sub, { companyId, dateFrom, dateTo })
   const ref = useRef<HTMLDivElement>(null)
   return (
@@ -1433,9 +1434,8 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
           <ExportButton title={`Сессии ЭЗС · ${v.title}`} subtitle={subtitle} getEl={() => ref.current} />
         </div>
       </div>
-      {/* key={st.sub} — ремаунт под-вида при смене таба: иначе React переиспользует
-          один экземпляр BreakdownTable (станции↔коннекторы — один тип) и его разрез
-          (useTabParams) залипает от прошлого таба. */}
+      {/* key={st.sub} — ремаунт под-вида при смене таба (чистое локальное состояние
+          на вкладку: напр. выбранный разрез в «Разрезах» не тянется в другие табы). */}
       <div ref={ref} className="pt-3" key={st.sub}>{v.node}</div>
     </ChargeClientCtx.Provider>
   )
@@ -1465,6 +1465,8 @@ export function ChargeSessionsPanel({ tab, companyId, dateFrom, dateTo }: {
       <SessionsTabbed companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} subtitle={sub}
         clientType={clientType} setClientType={setClientType} />
     )
+    // «Надёжность» — отдельный подраздел (ТОиР: приоритет РусГидро), не 3-й уровень.
+    case 'cs_reliability': return wrap('Надёжность', <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />)
     case 'cs_clients': return <TariffsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
     case 'cs_corporate': return <CorporatePanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
     case 'cs_retail': return <RetailPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />

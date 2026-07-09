@@ -43,8 +43,9 @@ export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
   { key: 'cs_dashboard',  label: 'Обзор',         group: 'Сеть' },
   { key: 'cs_map',        label: 'Карта',         group: 'Сеть' },
-  { key: 'cs_sessions',   label: 'Сессии',        group: 'Аналитика сессий' },
-  { key: 'cs_list',       label: 'Реестр сессий', group: 'Аналитика сессий' },
+  { key: 'cs_sessions',    label: 'Сессии',        group: 'Аналитика сессий' },
+  { key: 'cs_reliability', label: 'Надёжность',    group: 'Аналитика сессий' },
+  { key: 'cs_list',        label: 'Реестр сессий', group: 'Аналитика сессий' },
   { key: 'cs_clients',    label: 'Тарифы',        group: 'Коммерция' },
   { key: 'cs_corporate',  label: 'Корпоратив',    group: 'Коммерция' },
   { key: 'cs_retail',     label: 'Частные лица',  group: 'Коммерция' },

@@ -26,7 +26,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     'by-month': 'По месяцам', channels: 'Каналы продаж', margin: 'Маржа и цены',
     purchases: 'Поступления', tanks: 'Топливный баланс', balance: 'Баланс',
     procurement: 'Энергозакупка', rent: 'Аренда',
-    cs_dashboard: 'Обзор сети', cs_map: 'Карта', cs_list: 'Реестр сессий', cs_sessions: 'Сессии', cs_clients: 'Тарифы', cs_corporate: 'Корпоратив', cs_retail: 'Частные лица',
+    cs_dashboard: 'Обзор сети', cs_map: 'Карта', cs_list: 'Реестр сессий', cs_sessions: 'Сессии', cs_reliability: 'Надёжность', cs_clients: 'Тарифы', cs_corporate: 'Корпоратив', cs_retail: 'Частные лица',
   },
   operations: {
     procurement: 'Энергозакупка', rent: 'Аренда', balance: 'Баланс ЭЗС',
