@@ -4,10 +4,11 @@
  * Данные — /api/tariffs/* (сетка, факт vs номинал) + analytics (разрезы, timeseries).
  * Договорные тарифы ЮЛ — в «Корпоратив».
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Kpi } from './analytics/Kpi'
+import { ExportButton } from './analytics/ExportButton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { useTabParams } from '@/hooks/useTabParams'
@@ -273,9 +274,11 @@ const TARIFF_TABS: { k: string; label: string }[] = [
 export function TariffsPanel({ companyId, dateFrom, dateTo }: TabProps) {
   const [t, patch] = useTabParams('tariffs', { sub: 'grid' })
   const p: TabProps = { companyId, dateFrom, dateTo }
+  const ref = useRef<HTMLDivElement>(null)
+  const curLabel = TARIFF_TABS.find((x) => x.k === t.sub)?.label ?? 'Тарифы'
   return (
     <div>
-      <div className="flex items-center gap-3 border-b border-border px-4">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4">
         <div className="flex items-stretch gap-0.5 overflow-x-auto">
           {TARIFF_TABS.map((x) => {
             const on = t.sub === x.k
@@ -287,8 +290,9 @@ export function TariffsPanel({ companyId, dateFrom, dateTo }: TabProps) {
             )
           })}
         </div>
+        <ExportButton title={`Тарифы ЭЗС · ${curLabel}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
       </div>
-      <div className="p-4" key={t.sub}>
+      <div ref={ref} className="p-4" key={t.sub}>
         {t.sub === 'grid' && <PriceGrid {...p} />}
         {t.sub === 'by' && <ByTariff {...p} />}
         {t.sub === 'avg' && <AvgTariff {...p} />}

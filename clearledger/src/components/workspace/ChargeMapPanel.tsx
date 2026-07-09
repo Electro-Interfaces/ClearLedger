@@ -61,7 +61,10 @@ const METRICS: Record<Metric, { label: string; get: (m: StationMetric) => number
   sessions: { label: 'Сессии', get: (m) => m.sessions, fmt: (v) => nf0.format(v) },
   utilization: { label: 'Загрузка', get: (m) => m.utilization_pct, fmt: (v) => v.toFixed(1) + '%' },
 }
-const RAMP = ['#60a5fa', '#34d399', '#fbbf24', '#fb923c', '#ef4444'] // низкая → высокая
+// viridis (перцептивно-равномерная, colorblind-safe): низкая → высокая. Для
+// магнитуды (выручка/сессии/загрузка) нейтральнее «светофора» (там red=высокая
+// читался как тревога), и различима при дальтонизме.
+const RAMP = ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725']
 const NODATA = '#4b5563'
 const isMetric = (c: string): c is Metric => c === 'revenue' || c === 'sessions' || c === 'utilization'
 
