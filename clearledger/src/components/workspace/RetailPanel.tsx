@@ -4,20 +4,23 @@
  * Когорты · Гео. Данные — /api/retail/*. Телефоны псевдонимизированы (хеш-ID +
  * маска), сырой номер в панель не приходит.
  */
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, useRef, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, Search, Check } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, Search, Check, FileDown } from 'lucide-react'
+import { exportChargePdf } from '@/services/chargeExport'
+import { BarChart, Bar, LineChart, Line, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useTabParams } from '@/hooks/useTabParams'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
-  getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount, getRetailMarketing,
-  type RetailSegment, type RetailAccount,
+  getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount, getRetailMarketing, getRetailDashboard,
+  type RetailSegment, type RetailAccount, type HeatCell,
 } from '@/services/retailService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -29,15 +32,60 @@ const pct = (v: number) => nf1.format(v) + '%'
 function Loading() { return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> }
 function Empty({ text }: { text: string }) { return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div> }
 
-function Kpi({ label, value, sub, cls }: { label: string; value: string; sub?: string; cls?: string }) {
+function Kpi({ label, value, sub, cls, delta }: { label: string; value: string; sub?: string; cls?: string; delta?: number | null }) {
+  const showDelta = delta != null && Math.abs(delta) <= 500   // абсурдные % (пустой прошлый период) прячем
   return (
     <Card className="py-0">
       <CardContent className="p-3">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={`text-lg font-semibold tabular-nums ${cls ?? ''}`}>{value}</div>
+        <div className="flex items-baseline gap-1.5">
+          <div className={`text-lg font-semibold tabular-nums ${cls ?? ''}`}>{value}</div>
+          {showDelta && (
+            <span className={`text-[11px] font-medium tabular-nums ${delta! >= 0 ? 'text-emerald-400/90' : 'text-red-400/90'}`}>
+              {delta! >= 0 ? '▲' : '▼'}{Math.abs(delta!).toFixed(1)}%
+            </span>
+          )}
+        </div>
         {sub && <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>}
       </CardContent>
     </Card>
+  )
+}
+
+// Заголовок секции дашборда.
+function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-baseline gap-2 border-b border-border/40 pb-1">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/80">{title}</h3>
+        {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// Тепловая карта активности 7×24 (день недели × час).
+const WD_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+function Heatmap({ cells }: { cells: HeatCell[] }) {
+  const grid = new Map<string, number>()
+  let max = 1
+  for (const c of cells) { grid.set(`${c.dow}-${c.hour}`, c.sessions); if (c.sessions > max) max = c.sessions }
+  const items: ReactNode[] = [<div key="corner" />]
+  for (let h = 0; h < 24; h++) items.push(<div key={`h${h}`} className="text-center text-[8px] text-muted-foreground">{h % 3 === 0 ? String(h).padStart(2, '0') : ''}</div>)
+  WD_SHORT.forEach((wd, di) => {
+    items.push(<div key={`l${di}`} className="pr-1 text-right text-[9px] leading-4 text-muted-foreground">{wd}</div>)
+    for (let h = 0; h < 24; h++) {
+      const v = grid.get(`${di + 1}-${h}`) ?? 0
+      const a = v ? 0.12 + (v / max) * 0.78 : 0
+      items.push(<div key={`${di}-${h}`} title={`${wd} ${String(h).padStart(2, '0')}:00 — ${v} сес`} className="h-4 rounded-[2px]"
+        style={{ backgroundColor: v ? `rgba(96,165,250,${a.toFixed(3)})` : 'hsl(var(--muted) / 0.4)' }} />)
+    }
+  })
+  return (
+    <div className="overflow-x-auto">
+      <div className="inline-grid min-w-[560px] gap-0.5" style={{ gridTemplateColumns: '28px repeat(24, 1fr)' }}>{items}</div>
+    </div>
   )
 }
 function Widget({ title, children }: { title: string; children: ReactNode }) {
@@ -215,32 +263,61 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
   )
 }
 
-// ── Таб: Обзор ──
+// ── Таб: Обзор (собранный BI-дашборд частных клиентов) ──
+const AX = { tick: { fontSize: 10, fill: 'hsl(var(--muted-foreground))' } }
 function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
   const p = { companyId, dateFrom, dateTo }
   const ov = useQuery({ queryKey: ['retail-ov', companyId, dateFrom, dateTo], queryFn: () => getRetailOverview(p) })
   const seg = useQuery({ queryKey: ['retail-seg', companyId, dateFrom, dateTo], queryFn: () => getRetailSegments(p) })
-  const eco = useQuery({ queryKey: ['retail-eco', companyId, dateFrom, dateTo], queryFn: () => getRetailEconomics(p) })
   const mk = useQuery({ queryKey: ['retail-mk', companyId, dateFrom, dateTo], queryFn: () => getRetailMarketing(p) })
+  const dash = useQuery({ queryKey: ['retail-dash', companyId, dateFrom, dateTo], queryFn: () => getRetailDashboard(p) })
+  const exportRef = useRef<HTMLDivElement>(null)
+  const [exporting, setExporting] = useState(false)
+  async function exportPdf() {
+    if (!exportRef.current) return
+    setExporting(true)
+    try { await exportChargePdf(exportRef.current, `Обзор частных клиентов · ${dateFrom} — ${dateTo}`) }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось выгрузить PDF') }
+    finally { setExporting(false) }
+  }
   if (ov.isLoading) return <Loading />
   if (!ov.data) return <Empty text="Нет данных" />
   const t = ov.data.totals
-  const segs = [...(seg.data?.segments ?? [])].sort((a, b) => b.revenue - a.revenue)  // бары по убыванию выручки
+  const segs = [...(seg.data?.segments ?? [])].sort((a, b) => b.revenue - a.revenue)
   const maxSeg = Math.max(1, ...segs.map((s) => s.revenue))
-  const pareto = eco.data?.pareto ?? []
   const k = mk.data?.kpis ?? {}
+  const dd = dash.data
+  const dl = (key: string) => dd?.deltas?.[key]?.delta_pct
+
+  const dyn = (dd?.dynamics ?? []).map((m) => ({ m: m.month.slice(5), Новые: m.new, Вернувшиеся: m.returning, Реактив: m.reactivated, revenue: m.revenue }))
+  const ret = (dd?.retention_curve ?? []).map((r) => ({ m: `M${r.offset}`, pct: r.pct ?? 0 }))
+  const lorenz = (dd?.concentration?.lorenz ?? []).map((pt) => ({ pop: pt.pop, Выручка: pt.rev, Равенство: pt.pop }))
+  const conns = dd?.connectors ?? []
+  const maxConn = Math.max(1, ...conns.map((c) => c.sessions))
+  const clvSeg = dd?.clv?.by_segment ?? []
+  const maxLtv = Math.max(1, ...clvSeg.map((s) => s.ltv))
+  const maxSpend = Math.max(1, ...(dd?.concentration?.spend_buckets ?? []).map((b) => b.accounts))
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2" data-export-ignore>
+        <div className="text-xs text-muted-foreground">Аналитическая витрина частных клиентов (ФЛ) · телефоны псевдонимизированы</div>
+        <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" disabled={exporting} onClick={exportPdf}>
+          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}Выгрузить PDF
+        </Button>
+      </div>
+      <div ref={exportRef} className="space-y-5">
+      {/* Хиро-KPI + Δ к прошлому периоду */}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
-        <Kpi label="Аккаунтов ФЛ" value={nf0.format(t.accounts)} sub={`${nf0.format(t.new_accounts)} новых за период`} />
-        <Kpi label="Выручка" value={moneyK(t.revenue)} sub={`ср. тариф ${nf1.format(t.avg_tariff)} ₽/кВтч`} />
-        <Kpi label="ARPA" value={money(t.arpa)} sub="доход на аккаунт" />
-        <Kpi label="Ср. чек" value={money(t.avg_check)} sub={`${nf0.format(t.sessions)} сессий`} />
+        <Kpi label="Аккаунтов ФЛ" value={nf0.format(t.accounts)} sub={`${nf0.format(t.new_accounts)} новых`} delta={dl('accounts')} />
+        <Kpi label="Выручка" value={moneyK(t.revenue)} sub={`ср. тариф ${nf1.format(t.avg_tariff)} ₽/кВтч`} delta={dl('revenue')} />
+        <Kpi label="ARPA" value={money(t.arpa)} sub="доход на аккаунт" delta={dl('arpa')} />
+        <Kpi label="Ср. чек" value={money(t.avg_check)} sub={`${nf0.format(t.sessions)} сессий`} delta={dl('avg_check')} />
         <Kpi label="Сессий/аккаунт" value={nf1.format(t.avg_sessions)} sub="в среднем" />
-        <Kpi label="Энергия" value={`${nf0.format(t.energy_kwh)}`} sub="кВтч за период" />
+        <Kpi label="Энергия" value={nf0.format(t.energy_kwh)} sub="кВтч за период" />
       </div>
 
-      {/* Маркетинговые KPI B2C (потребительский сектор) */}
+      {/* Маркетинговые KPI B2C */}
       {mk.data?.kpis && (
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
           <Kpi label="Повторные" value={pct(k.repeat_rate ?? 0)} sub="заряжаются >1 раза" />
@@ -252,7 +329,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
         </div>
       )}
 
-      {/* Ключевые выводы (авто, маркетинг B2C) */}
+      {/* Ключевые выводы */}
       {mk.data && mk.data.insights.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Ключевые выводы</div>
@@ -267,29 +344,136 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Widget title="Выручка по RFM-сегментам">
-          {seg.isLoading ? <Loading /> : segs.length === 0 ? <Empty text="Нет данных" />
-            : segs.map((s) => (
-              <BarRow key={s.segment} tint={segMeta(s.segment).bar} frac={s.revenue / maxSeg}
-                label={<span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${segMeta(s.segment).dot}`} />{s.segment}</span>}
-                value={moneyK(s.revenue)} sub={`${nf0.format(s.accounts)} акк · ${pct(s.revenue_pct)}`} />
-            ))}
-        </Widget>
-        <Widget title="Концентрация выручки (Pareto)">
-          {eco.isLoading ? <Loading /> : pareto.length === 0 ? <Empty text="Нет данных" />
-            : (
-              <>
-                {pareto.map((r) => (
-                  <BarRow key={r.top_pct} label={`Топ-${r.top_pct}% аккаунтов`} value={pct(r.revenue_pct)}
-                    frac={r.revenue_pct / 100} sub={`${nf0.format(r.accounts)} акк`} />
+      {dash.isLoading && <Loading />}
+
+      {/* Динамика базы и выручки */}
+      {dd && dyn.length > 0 && (
+        <Section title="Динамика базы и выручки" hint="приток / отток по месяцам">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Widget title="Состав активной базы (MAU)">
+              <div data-chart><ResponsiveContainer width="100%" height={210}>
+                <BarChart data={dyn} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="m" tick={AX.tick} /><YAxis tick={AX.tick} width={36} />
+                  <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="Новые" stackId="a" fill="hsl(217, 91%, 60%)" isAnimationActive={false} />
+                  <Bar dataKey="Вернувшиеся" stackId="a" fill="hsl(152, 60%, 45%)" isAnimationActive={false} />
+                  <Bar dataKey="Реактив" stackId="a" fill="hsl(38, 92%, 60%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer></div>
+            </Widget>
+            <Widget title="Выручка по месяцам">
+              <div data-chart><ResponsiveContainer width="100%" height={210}>
+                <BarChart data={dyn} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="m" tick={AX.tick} />
+                  <YAxis tick={AX.tick} width={48} tickFormatter={(v) => moneyK(Number(v)).replace(' ₽', '')} />
+                  <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(v) => [moneyK(Number(v)), 'Выручка']} />
+                  <Bar dataKey="revenue" fill="hsl(217, 91%, 60%)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                </BarChart>
+              </ResponsiveContainer></div>
+            </Widget>
+          </div>
+        </Section>
+      )}
+
+      {/* Удержание и ценность клиента */}
+      {dd && (
+        <Section title="Удержание и ценность клиента" hint="cohort retention · CLV / LTV">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Widget title="Кривая удержания когорт">
+              <div data-chart><ResponsiveContainer width="100%" height={210}>
+                <LineChart data={ret} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                  <XAxis dataKey="m" tick={AX.tick} /><YAxis tick={AX.tick} width={36} unit="%" domain={[0, 100]} />
+                  <Tooltip formatter={(v) => [`${nf1.format(Number(v))}%`, 'Активны']} />
+                  <Line type="monotone" dataKey="pct" stroke="hsl(152, 60%, 45%)" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer></div>
+            </Widget>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <Kpi label="LTV (оценка)" value={money(dd.clv.ltv)} sub={`${money(dd.clv.monthly_arpu)}/мес × ${nf1.format(dd.clv.expected_months)} мес активн.`} cls="text-emerald-400/90" />
+                <Kpi label="Срок жизни" value={`${nf1.format(dd.clv.avg_lifetime_months)} мес`} sub="в среднем по базе" />
+              </div>
+              <Widget title="LTV по сегментам (оценка)">
+                {clvSeg.map((s) => (
+                  <BarRow key={s.segment} tint={segMeta(s.segment).bar} frac={s.ltv / maxLtv}
+                    label={<span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${segMeta(s.segment).dot}`} />{s.segment}</span>}
+                    value={money(s.ltv)} sub={`${money(s.monthly_arpu)}/мес`} />
                 ))}
-                <div className="border-t border-border/40 pt-1.5 text-[11px] text-muted-foreground">
-                  Чем круче кривая — тем сильнее выручка держится на «тяжёлых» аккаунтах.
-                </div>
-              </>
-            )}
-        </Widget>
+              </Widget>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* Поведение */}
+      {dd && (
+        <Section title="Поведение" hint="когда, чем и как заряжаются">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Widget title="Активность 7×24 (день недели × час)"><Heatmap cells={dd.heatmap} /></Widget>
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <Kpi label="Приложение" value={pct(dd.payment.app_pct)} sub="vs RFID" />
+                <Kpi label="RFID-карта" value={pct(dd.payment.rfid_pct)} sub="доля сессий" />
+                <Kpi label="Успешных" value={pct(dd.success.pct)} sub={`неоплач. ${pct(dd.payment.unpaid_pct)}`} cls={dd.success.pct < 75 ? 'text-amber-400/90' : undefined} />
+              </div>
+              <Widget title="Коннекторы (сессии)">
+                {conns.slice(0, 6).map((c) => (
+                  <BarRow key={c.type} label={c.type} value={`${nf0.format(c.sessions)} сес`} frac={c.sessions / maxConn} sub={moneyK(c.revenue)} />
+                ))}
+              </Widget>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {/* Концентрация и структура */}
+      {dd && (
+        <Section title="Концентрация и структура базы" hint={`индекс Джини ${nf1.format((dd.concentration.gini ?? 0) * 100)} из 100 — чем выше, тем сильнее зависимость от ядра`}>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Widget title={`Кривая Лоренца · Джини ${nf1.format((dd.concentration.gini ?? 0) * 100)}`}>
+              <div data-chart><ResponsiveContainer width="100%" height={210}>
+                <LineChart data={lorenz} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="pop" tick={AX.tick} unit="%" type="number" domain={[0, 100]} />
+                  <YAxis tick={AX.tick} width={36} unit="%" domain={[0, 100]} />
+                  <Tooltip formatter={(v, nm) => [`${nf1.format(Number(v))}%`, String(nm)]} labelFormatter={(l) => `${nf1.format(Number(l))}% аккаунтов`} />
+                  <Line type="monotone" dataKey="Выручка" stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="Равенство" stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" strokeWidth={1} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer></div>
+            </Widget>
+            <Widget title="Распределение расхода на аккаунт">
+              {(dd.concentration.spend_buckets ?? []).map((b) => (
+                <BarRow key={b.bucket} label={b.bucket} value={`${nf0.format(b.accounts)} акк`} frac={b.accounts / maxSpend} sub={pct(b.accounts_pct)} />
+              ))}
+            </Widget>
+          </div>
+        </Section>
+      )}
+
+      {/* Сегменты (RFM) */}
+      <Section title="Сегменты (RFM)" hint="структура базы по ценности">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Widget title="Выручка по RFM-сегментам">
+            {seg.isLoading ? <Loading /> : segs.length === 0 ? <Empty text="Нет данных" />
+              : segs.map((s) => (
+                <BarRow key={s.segment} tint={segMeta(s.segment).bar} frac={s.revenue / maxSeg}
+                  label={<span className="inline-flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${segMeta(s.segment).dot}`} />{s.segment}</span>}
+                  value={moneyK(s.revenue)} sub={`${nf0.format(s.accounts)} акк · ${pct(s.revenue_pct)}`} />
+              ))}
+          </Widget>
+          <Widget title="Распределение по числу зарядок">
+            {(dd?.concentration?.session_buckets ?? []).map((b) => (
+              <BarRow key={b.bucket} label={`${b.bucket} зар.`} value={`${nf0.format(b.accounts)} акк`}
+                frac={b.accounts / Math.max(1, ...(dd?.concentration?.session_buckets ?? []).map((x) => x.accounts))} sub={pct(b.accounts_pct)} />
+            ))}
+          </Widget>
+        </div>
+      </Section>
       </div>
     </div>
   )

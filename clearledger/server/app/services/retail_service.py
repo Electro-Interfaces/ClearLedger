@@ -18,7 +18,8 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import String, case, cast, func, select
@@ -680,3 +681,154 @@ class RetailService:
             f"Новых за период {mm(new_accounts)} ({f1(kpis['new_share'])}%), возвращающихся {mm(returning)}.")
 
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "kpis": kpis, "insights": ins}
+
+    # ── dashboard: собранная BI-витрина «Обзора ФЛ» ──────────────────────
+    async def dashboard(self, company_id, df: date, dt: date) -> dict[str, Any]:
+        """Расширенная витрина: динамика базы+выручки и Δ к прошлому периоду,
+        retention-кривая, CLV/LTV, тепловая карта 7×24, поведение (коннекторы/
+        оплата/качество), концентрация (Лоренц/Джини) + распределения."""
+        accts = self._tag_segments(await self._accounts(company_id, df, dt))
+        n = len(accts)
+        empty = {"period": {"from": df.isoformat(), "to": dt.isoformat()}}
+        if not n:
+            return {**empty, "dynamics": [], "deltas": {}, "retention_curve": [], "clv": {},
+                    "heatmap": [], "connectors": [], "payment": {}, "success": {}, "concentration": {}}
+        lo, hi = _period(df, dt)
+        total_rev = sum(a["revenue"] for a in accts) or 1.0
+        total_sessions = sum(a["sessions"] for a in accts)
+        months_span = (dt.year - df.year) * 12 + (dt.month - df.month) + 1
+
+        # ── Динамика: активность (аккаунт, месяц) за всю историю ──
+        amh = func.date_trunc("month", S.started_at)
+        act_rows = (await self.db.execute(select(S.user_id.label("u"), amh.label("m"))
+            .where(*_retail_conds(company_id), S.started_at.is_not(None)).group_by(S.user_id, amh))).all()
+        active_by_user: dict[str, set] = defaultdict(set)
+        for r in act_rows:
+            active_by_user[r.u].add((r.m.year, r.m.month))
+        first_month = {u: min(ms) for u, ms in active_by_user.items()}
+        rev_rows = (await self.db.execute(select(amh.label("m"),
+            func.coalesce(func.sum(S.amount), 0).label("rev"), func.count().label("sess"))
+            .where(*_retail_conds(company_id), S.started_at.is_not(None),
+                   S.started_at >= lo, S.started_at <= hi).group_by(amh))).all()
+        rev_by_m = {(r.m.year, r.m.month): (float(r.rev), int(r.sess)) for r in rev_rows}
+        period_months: list[tuple] = []
+        y, mo = df.year, df.month
+        while (y, mo) <= (dt.year, dt.month):
+            period_months.append((y, mo))
+            mo, y = (1, y + 1) if mo == 12 else (mo + 1, y)
+        dynamics = []
+        for ym in period_months:
+            new = ret = react = 0
+            for u, ms in active_by_user.items():
+                if ym not in ms:
+                    continue
+                if first_month[u] == ym:
+                    new += 1
+                else:
+                    prev = (ym[0], ym[1] - 1) if ym[1] > 1 else (ym[0] - 1, 12)
+                    ret, react = (ret + 1, react) if prev in ms else (ret, react + 1)
+            rev, _sess = rev_by_m.get(ym, (0.0, 0))
+            dynamics.append({"month": f"{ym[0]:04d}-{ym[1]:02d}", "new": new, "returning": ret,
+                             "reactivated": react, "active": new + ret + react, "revenue": round(rev, 2)})
+
+        # ── Δ к прошлому периоду равной длины ──
+        span_days = (dt - df).days + 1
+        prev = await self.overview(company_id, df - timedelta(days=span_days), df - timedelta(days=1))
+        pt = prev["totals"]
+        cur = {"accounts": n, "revenue": round(total_rev, 2), "arpa": round(total_rev / n, 2),
+               "avg_check": round(total_rev / total_sessions, 2) if total_sessions else 0.0,
+               "sessions": total_sessions}
+        def dlt(key):
+            c, pv = cur[key], (pt.get(key, 0) or 0)
+            return {"cur": c, "prev": pv, "delta_pct": round((c - pv) / pv * 100, 1) if pv else None}
+        deltas = {k: dlt(k) for k in ("accounts", "revenue", "arpa", "avg_check", "sessions")}
+
+        # ── Retention-кривая ──
+        coh = (await self.cohorts(company_id, months=12))["cohorts"]
+        def avg_ret(offset):
+            elig = coh[:len(coh) - offset] if len(coh) > offset else []
+            num = sum(next((x["count"] for x in c["retention"] if x["offset"] == offset), 0) for c in elig)
+            den = sum(c["size"] for c in elig)
+            return round(num / den * 100, 1) if den else None
+        max_off = max((c["retention"][-1]["offset"] for c in coh), default=0) if coh else 0
+        retention_curve = [{"offset": o, "pct": avg_ret(o)} for o in range(0, max_off + 1)]
+
+        # ── CLV / LTV = месячный ARPU × площадь под retention-кривой ──
+        expected_months = sum((p["pct"] or 0) / 100 for p in retention_curve) or 1.0
+        monthly_arpu = total_rev / n / max(1, months_span)
+        seg_agg: dict[str, list] = defaultdict(lambda: [0, 0.0])
+        for a in accts:
+            g = seg_agg[a["segment"]]; g[0] += 1; g[1] += a["revenue"]
+        by_seg = []
+        for name in self.SEG_ORDER:
+            if name in seg_agg:
+                cnt, rev = seg_agg[name]
+                m_arpu = rev / cnt / max(1, months_span)
+                by_seg.append({"segment": name, "accounts": int(cnt),
+                               "monthly_arpu": round(m_arpu, 2), "ltv": round(m_arpu * expected_months, 2)})
+        lifespans = [((datetime.fromisoformat(a["last_at"]) - datetime.fromisoformat(a["first_at"])).days / 30.44 + 1)
+                     for a in accts if a["first_at"] and a["last_at"]]
+        clv = {"monthly_arpu": round(monthly_arpu, 2), "expected_months": round(expected_months, 1),
+               "ltv": round(monthly_arpu * expected_months, 2),
+               "avg_lifetime_months": round(sum(lifespans) / len(lifespans), 1) if lifespans else 0.0,
+               "by_segment": by_seg}
+
+        # ── Тепловая карта 7×24 ──
+        hd, hh = func.extract("isodow", S.started_at), func.extract("hour", S.started_at)
+        hm_rows = (await self.db.execute(select(hd.label("d"), hh.label("h"), func.count().label("s"))
+            .where(*_retail_conds(company_id), S.started_at.is_not(None),
+                   S.started_at >= lo, S.started_at <= hi).group_by(hd, hh))).all()
+        heatmap = [{"dow": int(r.d), "hour": int(r.h), "sessions": int(r.s)}
+                   for r in hm_rows if r.d is not None and r.h is not None]
+
+        # ── Поведение: коннекторы / оплата / качество ──
+        base = [*_retail_conds(company_id), S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+        cc = func.coalesce(S.connector_type, "—")
+        conn_rows = (await self.db.execute(select(cc.label("c"), func.count().label("s"),
+            func.coalesce(func.sum(S.amount), 0).label("rev")).where(*base).group_by(cc)
+            .order_by(func.count().desc()))).all()
+        connectors = [{"type": r.c, "sessions": int(r.s), "revenue": round(float(r.rev), 2)} for r in conn_rows]
+        pay = (await self.db.execute(select(
+            func.count().label("total"),
+            func.coalesce(func.sum(case((S.rfid.is_not(None), 1), else_=0)), 0).label("rfid"),
+            func.coalesce(func.sum(case((S.amount <= 0, 1), else_=0)), 0).label("unpaid"),
+            func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
+        ).where(*base))).one()
+        ptot = int(pay.total) or 1
+        payment = {"rfid_pct": round(int(pay.rfid) / ptot * 100, 1),
+                   "app_pct": round((ptot - int(pay.rfid)) / ptot * 100, 1),
+                   "unpaid_pct": round(int(pay.unpaid) / ptot * 100, 1)}
+        sm_rows = (await self.db.execute(select(amh.label("mon"), func.count().label("tot"),
+            func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("ok"))
+            .where(*base).group_by(amh).order_by(amh))).all()
+        success = {"pct": round(int(pay.success) / ptot * 100, 1),
+                   "by_month": [{"month": f"{r.mon.year:04d}-{r.mon.month:02d}",
+                                 "pct": round(int(r.ok) / int(r.tot) * 100, 1) if r.tot else 0.0} for r in sm_rows]}
+
+        # ── Концентрация: Лоренц + Джини + распределения ──
+        rev_sorted = sorted(a["revenue"] for a in accts)
+        tot = sum(rev_sorted) or 1.0
+        lorenz = [{"pop": 0.0, "rev": 0.0}]
+        step = max(1, n // 20)
+        running = 0.0
+        for i, v in enumerate(rev_sorted, 1):
+            running += v
+            if i % step == 0 or i == n:
+                lorenz.append({"pop": round(i / n * 100, 1), "rev": round(running / tot * 100, 1)})
+        gini = round(sum((2 * i - n - 1) * v for i, v in enumerate(rev_sorted, 1)) / (n * tot), 3)
+
+        def buckets(edges, valuef):
+            return [{"bucket": lab, "accounts": sum(1 for a in accts if loe <= valuef(a) <= hie),
+                     "accounts_pct": round(sum(1 for a in accts if loe <= valuef(a) <= hie) / n * 100, 1)}
+                    for loe, hie, lab in edges]
+        concentration = {
+            "gini": gini, "lorenz": lorenz,
+            "session_buckets": buckets([(1, 1, "1"), (2, 3, "2–3"), (4, 10, "4–10"),
+                                        (11, 50, "11–50"), (51, 10**9, "50+")], lambda a: a["sessions"]),
+            "spend_buckets": buckets([(0, 500, "<500 ₽"), (500, 2000, "0.5–2 тыс"), (2000, 5000, "2–5 тыс"),
+                                      (5000, 20000, "5–20 тыс"), (20000, 10**12, "20 тыс+")], lambda a: a["revenue"]),
+        }
+
+        return {**empty, "dynamics": dynamics, "deltas": deltas, "retention_curve": retention_curve,
+                "clv": clv, "heatmap": heatmap, "connectors": connectors, "payment": payment,
+                "success": success, "concentration": concentration}

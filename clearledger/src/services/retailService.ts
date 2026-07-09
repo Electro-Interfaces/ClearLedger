@@ -177,3 +177,29 @@ export interface MarketingKpis {
 export interface MarketingInsight { level: string; text: string }
 export interface RetailMarketing { period: { from: string; to: string }; kpis: Partial<MarketingKpis>; insights: MarketingInsight[] }
 export const getRetailMarketing = (p: P) => get<RetailMarketing>('/api/retail/marketing', params(p))
+
+export interface DashDelta { cur: number; prev: number; delta_pct: number | null }
+export interface DashDynamics { month: string; new: number; returning: number; reactivated: number; active: number; revenue: number }
+export interface RetentionPoint { offset: number; pct: number | null }
+export interface ClvSegment { segment: string; accounts: number; monthly_arpu: number; ltv: number }
+export interface DashClv { monthly_arpu: number; expected_months: number; ltv: number; avg_lifetime_months: number; by_segment: ClvSegment[] }
+export interface HeatCell { dow: number; hour: number; sessions: number }
+export interface DashConnector { type: string; sessions: number; revenue: number }
+export interface DashPayment { rfid_pct: number; app_pct: number; unpaid_pct: number }
+export interface DashSuccess { pct: number; by_month: { month: string; pct: number }[] }
+export interface LorenzPoint { pop: number; rev: number }
+export interface DistBucket { bucket: string; accounts: number; accounts_pct: number }
+export interface DashConcentration { gini: number; lorenz: LorenzPoint[]; session_buckets: DistBucket[]; spend_buckets: DistBucket[] }
+export interface RetailDashboard {
+  period: { from: string; to: string }
+  dynamics: DashDynamics[]
+  deltas: Record<string, DashDelta>
+  retention_curve: RetentionPoint[]
+  clv: DashClv
+  heatmap: HeatCell[]
+  connectors: DashConnector[]
+  payment: DashPayment
+  success: DashSuccess
+  concentration: DashConcentration
+}
+export const getRetailDashboard = (p: P) => get<RetailDashboard>('/api/retail/dashboard', params(p))
