@@ -11,7 +11,7 @@ import { Loader2, Search, Download, AlertTriangle, ChevronsUpDown, ArrowUp, Arro
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DualScrollX } from '@/components/common/DualScrollX'
 import { PaginationWrapper } from '@/components/common/PaginationWrapper'
 import { PeriodRangePicker } from './analytics/PeriodRangePicker'
@@ -148,6 +148,14 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
       return dir * String(va).localeCompare(String(vb), 'ru')
     })
   }, [filtered, p.sortKey, p.sortDir])
+
+  // Тоталы по ВСЕМУ отфильтрованному набору (не по странице) — сверяемо с Обзором:
+  // без фильтров Σ выручки == KPI «Выручка» раздела «Обзор».
+  const totals = useMemo(() => {
+    let revenue = 0, energy = 0
+    for (const r of filtered) { revenue += r.revenue || 0; energy += r.energy_kwh || 0 }
+    return { revenue, energy }
+  }, [filtered])
 
   // сброс страницы при смене выборки
   useEffect(() => { setPage(1) }, [search, p.userType, p.region, p.connector, p.result, p.paid, period.from, period.to])
@@ -286,6 +294,18 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                   </TableRow>
                 ))}
               </TableBody>
+              <TableFooter>
+                <TableRow>
+                  <TableCell colSpan={7} className="text-muted-foreground">
+                    Итого по фильтру: <span className="font-medium text-foreground">{nf0.format(filtered.length)}</span> транзакций
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">{nf1.format(totals.energy)}</TableCell>
+                  <TableCell />
+                  <TableCell />
+                  <TableCell className="text-right font-mono tabular-nums">{fmtMoney(totals.revenue)}</TableCell>
+                  <TableCell colSpan={2} />
+                </TableRow>
+              </TableFooter>
             </Table>
           </DualScrollX>
           <PaginationWrapper total={filtered.length} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} />
