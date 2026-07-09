@@ -71,7 +71,8 @@ async def metrika_delete(
     company_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> None:
+):
+    # без возвращаемой аннотации: FastAPI 0.115 запрещает тело ответа при 204.
     cid = await assert_company_member(company_id, current_user, db)
     await MetrikaService(db).delete(cid)
 
