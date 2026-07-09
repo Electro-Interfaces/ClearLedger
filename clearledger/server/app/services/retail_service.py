@@ -49,9 +49,18 @@ class RetailService:
         self.db = db
 
     # ── ядро: агрегат по аккаунтам за период ─────────────────────────────
-    async def _accounts(self, company_id, df: date, dt: date) -> list[dict[str, Any]]:
-        """Одна строка на аккаунт ФЛ за период. Отсюда питаются RFM/экономика/гео."""
+    async def _accounts(self, company_id, df: date, dt: date, *,
+                        region: str | None = None, station: str | None = None) -> list[dict[str, Any]]:
+        """Одна строка на аккаунт ФЛ за период. Отсюда питаются RFM/экономика/гео/
+        список аккаунтов/профиль. Опц. скоуп: region (канон S.region) / station
+        (location_id объекта L2) — тогда агрегируем только сессии этого разреза."""
         lo, hi = _period(df, dt)
+        conds = [*_retail_conds(company_id),
+                 S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+        if region:
+            conds.append(S.region == region)
+        if station:
+            conds.append(S.location_id == station)
         stmt = select(
             S.user_id.label("phone"),
             func.count().label("sessions"),
@@ -62,10 +71,7 @@ class RetailService:
             func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
             func.count(func.distinct(S.location_id)).label("stations"),   # объекты L2 (нормализ.)
             func.count(func.distinct(S.region)).label("regions"),
-        ).where(
-            *_retail_conds(company_id),
-            S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
-        ).group_by(S.user_id)
+        ).where(*conds).group_by(S.user_id)
         rows = (await self.db.execute(stmt)).all()
         end = hi
         out: list[dict[str, Any]] = []
@@ -146,23 +152,38 @@ class RetailService:
             return "Под риском"
         return "Случайные"
 
-    async def segments(self, company_id, df: date, dt: date) -> dict[str, Any]:
-        accts = await self._accounts(company_id, df, dt)
-        if not accts:
-            return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
-                    "segments": [], "totals": {"accounts": 0}}
+    SEG_ORDER = ["Чемпионы", "Лояльные", "Под риском", "Новички", "Случайные", "Разовые", "Уснувшие", "Отток"]
 
+    @staticmethod
+    def _rfm_thresholds(accts: list[dict[str, Any]]) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Пороги R (давность) и F (частота) по квантилям набора аккаунтов."""
         recencies = sorted(a["recency_days"] for a in accts if a["recency_days"] is not None)
         freqs = sorted(a["sessions"] for a in accts)
 
         def q(arr: list[float], p: float) -> float:
             if not arr:
                 return 0.0
-            i = min(len(arr) - 1, int(p * len(arr)))
-            return float(arr[i])
+            return float(arr[min(len(arr) - 1, int(p * len(arr)))])
 
-        r_thr = (q(recencies, 0.33), q(recencies, 0.66))   # свежие / уснувшие пороги
-        f_thr = (q(freqs, 0.50), q(freqs, 0.80))           # частота: медиана / топ-20%
+        return ((q(recencies, 0.33), q(recencies, 0.66)),   # свежие / уснувшие
+                (q(freqs, 0.50), q(freqs, 0.80)))           # медиана / топ-20%
+
+    def _tag_segments(self, accts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Проставить RFM-класс каждому аккаунту (по порогам всего набора)."""
+        if not accts:
+            return accts
+        r_thr, f_thr = self._rfm_thresholds(accts)
+        for a in accts:
+            a["segment"] = self._rfm_segment(a["recency_days"], a["sessions"], a["revenue"], r_thr, f_thr)
+        return accts
+
+    async def segments(self, company_id, df: date, dt: date) -> dict[str, Any]:
+        accts = await self._accounts(company_id, df, dt)
+        if not accts:
+            return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
+                    "segments": [], "totals": {"accounts": 0}}
+
+        r_thr, f_thr = self._rfm_thresholds(accts)
 
         buckets: dict[str, dict[str, float]] = {}
         for a in accts:
@@ -174,7 +195,7 @@ class RetailService:
             b["revenue"] += a["revenue"]
 
         total_rev = sum(b["revenue"] for b in buckets.values()) or 1.0
-        order = ["Чемпионы", "Лояльные", "Под риском", "Новички", "Случайные", "Разовые", "Уснувшие", "Отток"]
+        order = self.SEG_ORDER
         segs = [{
             "segment": name,
             "accounts": int(b["accounts"]),
@@ -352,3 +373,148 @@ class RetailService:
                 ],
             })
         return {"cohorts": matrix, "max_offset": max_off}
+
+    # ── accounts: список аккаунтов с фильтрами/отборами/сортировкой ───────
+    _SORTABLE = {"revenue", "sessions", "energy_kwh", "avg_check", "avg_kwh",
+                 "avg_tariff", "recency_days", "success_pct", "stations", "last_at"}
+
+    @staticmethod
+    def _pub(a: dict[str, Any]) -> dict[str, Any]:
+        """Публичная строка аккаунта — БЕЗ сырого телефона (только хеш+маска)."""
+        return {k: v for k, v in a.items() if k != "phone"}
+
+    async def accounts(self, company_id, df: date, dt: date, *, region: str | None = None,
+                       station: str | None = None, segment: str | None = None,
+                       min_sessions: int = 0, search: str | None = None,
+                       sort: str = "revenue", order: str = "desc", limit: int = 200) -> dict[str, Any]:
+        """Реестр аккаунтов ФЛ с фильтрами (сегмент/регион/станция/мин-сессий/поиск)
+        и сортировкой. Регион/станция сужают агрегацию (только их сессии). Телефон
+        не отдаётся — только хеш-ID + маска."""
+        rows = self._tag_segments(await self._accounts(
+            company_id, df, dt, region=region, station=station))
+        if segment:
+            rows = [a for a in rows if a.get("segment") == segment]
+        if min_sessions and min_sessions > 1:
+            rows = [a for a in rows if a["sessions"] >= min_sessions]
+        if search and search.strip():
+            s = search.strip()
+            rows = [a for a in rows if s in (a["masked"] or "") or s in (a["account"] or "")]
+
+        key = sort if sort in self._SORTABLE else "revenue"
+        reverse = order != "asc"
+        def _sk(a: dict[str, Any]):
+            v = a.get(key)
+            if key == "last_at":
+                return a.get("last_at") or ""
+            return v if v is not None else -1
+        ordered = sorted(rows, key=_sk, reverse=reverse)
+
+        n = len(rows)
+        tot_sessions = sum(a["sessions"] for a in rows)
+        tot_rev = sum(a["revenue"] for a in rows)
+        tot_energy = sum(a["energy_kwh"] for a in rows)
+        return {
+            "period": {"from": df.isoformat(), "to": dt.isoformat()},
+            "accounts": [self._pub(a) for a in ordered[:limit]],
+            "total": n, "returned": min(n, limit),
+            "totals": {"accounts": n, "sessions": tot_sessions,
+                       "revenue": round(tot_rev, 2), "energy_kwh": round(tot_energy, 1),
+                       "avg_check": round(tot_rev / tot_sessions, 2) if tot_sessions else 0.0,
+                       "arpa": round(tot_rev / n, 2) if n else 0.0},
+        }
+
+    # ── dimensions: справочники фильтров (регионы/станции) ────────────────
+    async def dimensions(self, company_id, df: date, dt: date) -> dict[str, Any]:
+        """Списки регионов и станций (с числом аккаунтов/сессий) для селектов фильтра."""
+        lo, hi = _period(df, dt)
+        base = [*_retail_conds(company_id), S.started_at.is_not(None),
+                S.started_at >= lo, S.started_at <= hi]
+        reg = func.coalesce(S.region, "— (без региона)")
+        reg_rows = (await self.db.execute(select(
+            reg.label("region"), func.count(func.distinct(S.user_id)).label("accounts"),
+            func.count().label("sessions"),
+        ).where(*base).group_by(reg).order_by(func.count().desc()))).all()
+        regions = [{"region": r.region, "accounts": int(r.accounts), "sessions": int(r.sessions)}
+                   for r in reg_rows]
+
+        st_rows = (await self.db.execute(select(
+            S.location_id.label("loc"), func.count(func.distinct(S.user_id)).label("accounts"),
+            func.count().label("sessions"),
+        ).where(*base, S.location_id.is_not(None)).group_by(S.location_id)
+         .order_by(func.count().desc()))).all()
+        loc_ids = [r.loc for r in st_rows]
+        names: dict[str, tuple] = {}
+        if loc_ids:
+            for sl in (await self.db.execute(select(
+                ServiceLocation.id, ServiceLocation.name, ServiceLocation.station_number,
+            ).where(ServiceLocation.id.in_(loc_ids)))).all():
+                names[str(sl.id)] = (sl.name, sl.station_number)
+        stations = [{"location_id": r.loc,
+                     "name": names.get(str(r.loc), (None, None))[0] or r.loc,
+                     "number": names.get(str(r.loc), (None, None))[1],
+                     "accounts": int(r.accounts), "sessions": int(r.sessions)}
+                    for r in st_rows]
+        return {"regions": regions, "stations": stations}
+
+    # ── profile: клиенты по станции/региону + профиль времени ────────────
+    _WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+    async def profile(self, company_id, df: date, dt: date, *,
+                      station: str | None = None, region: str | None = None) -> dict[str, Any]:
+        """Разрез по конкретной станции ИЛИ региону: KPI + профиль по часам суток и
+        дням недели + топ аккаунтов этого разреза."""
+        lo, hi = _period(df, dt)
+        conds = [*_retail_conds(company_id), S.started_at.is_not(None),
+                 S.started_at >= lo, S.started_at <= hi]
+        scope: dict[str, Any] = {"kind": None, "label": "Вся розница ФЛ"}
+        if station:
+            conds.append(S.location_id == station)
+            sl = (await self.db.execute(select(
+                ServiceLocation.name, ServiceLocation.station_number).where(
+                ServiceLocation.id == station))).first()
+            scope = {"kind": "station", "value": station,
+                     "label": (sl.name if sl else None) or station,
+                     "number": (sl.station_number if sl else None)}
+        elif region:
+            conds.append(S.region == region)
+            scope = {"kind": "region", "value": region, "label": region}
+
+        tot = (await self.db.execute(select(
+            func.count(func.distinct(S.user_id)).label("accounts"),
+            func.count().label("sessions"),
+            func.coalesce(func.sum(S.amount), 0).label("revenue"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+        ).where(*conds))).one()
+        sessions, revenue, energy = int(tot.sessions), float(tot.revenue), float(tot.energy)
+        totals = {"accounts": int(tot.accounts), "sessions": sessions,
+                  "revenue": round(revenue, 2), "energy_kwh": round(energy, 1),
+                  "avg_check": round(revenue / sessions, 2) if sessions else 0.0,
+                  "avg_kwh": round(energy / sessions, 2) if sessions else 0.0}
+
+        he = func.extract("hour", S.started_at)
+        hrows = (await self.db.execute(select(
+            he.label("h"), func.count().label("sessions"),
+            func.coalesce(func.sum(S.amount), 0).label("revenue"),
+        ).where(*conds).group_by(he))).all()
+        hmap = {int(r.h): (int(r.sessions), float(r.revenue)) for r in hrows if r.h is not None}
+        hourly = [{"hour": hh, "sessions": hmap.get(hh, (0, 0.0))[0],
+                   "revenue": round(hmap.get(hh, (0, 0.0))[1], 2)} for hh in range(24)]
+
+        we = func.extract("isodow", S.started_at)   # 1=Пн … 7=Вс
+        wrows = (await self.db.execute(select(
+            we.label("d"), func.count().label("sessions"),
+            func.coalesce(func.sum(S.amount), 0).label("revenue"),
+        ).where(*conds).group_by(we))).all()
+        wmap = {int(r.d): (int(r.sessions), float(r.revenue)) for r in wrows if r.d is not None}
+        weekday = [{"dow": i + 1, "label": self._WD[i],
+                    "sessions": wmap.get(i + 1, (0, 0.0))[0],
+                    "revenue": round(wmap.get(i + 1, (0, 0.0))[1], 2)} for i in range(7)]
+
+        accts = self._tag_segments(await self._accounts(
+            company_id, df, dt, region=region, station=station))
+        accts.sort(key=lambda a: -a["revenue"])
+        top = [self._pub(a) for a in accts[:25]]
+
+        return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
+                "scope": scope, "totals": totals, "hourly": hourly,
+                "weekday": weekday, "top_accounts": top}

@@ -4,14 +4,17 @@
  * Когорты · Гео. Данные — /api/retail/*. Телефоны псевдонимизированы (хеш-ID +
  * маска), сырой номер в панель не приходит.
  */
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, Search } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useTabParams } from '@/hooks/useTabParams'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
-  type RetailSegment,
+  getRetailAccounts, getRetailDimensions, getRetailProfile,
+  type RetailSegment, type RetailAccount,
 } from '@/services/retailService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -68,6 +71,11 @@ const SEG_META: Record<string, { dot: string; bar: string; hint: string }> = {
   'Отток':      { dot: 'bg-red-400/70',     bar: 'bg-red-400/60',     hint: 'были частыми, ушли' },
 }
 const segMeta = (s: string) => SEG_META[s] ?? { dot: 'bg-zinc-400/60', bar: 'bg-zinc-400/50', hint: '' }
+const SEGMENTS = ['Чемпионы', 'Лояльные', 'Под риском', 'Новички', 'Случайные', 'Разовые', 'Уснувшие', 'Отток']
+const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '—')
+function SegBadge({ seg }: { seg: string }) {
+  return <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><span className={`h-2 w-2 rounded-full ${segMeta(seg).dot}`} />{seg}</span>
+}
 
 // ── Таб: Обзор ──
 function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
@@ -78,7 +86,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
   if (ov.isLoading) return <Loading />
   if (!ov.data) return <Empty text="Нет данных" />
   const t = ov.data.totals
-  const segs = seg.data?.segments ?? []
+  const segs = [...(seg.data?.segments ?? [])].sort((a, b) => b.revenue - a.revenue)  // бары по убыванию выручки
   const maxSeg = Math.max(1, ...segs.map((s) => s.revenue))
   const pareto = eco.data?.pareto ?? []
   return (
@@ -299,9 +307,212 @@ function RetailCohortsTab({ companyId }: TabProps) {
   )
 }
 
+// ── Таб: Аккаунты (реестр с фильтрами/отборами/сортировкой) ──
+const ACC_COLS = [
+  { key: 'sessions', label: 'Сессий' },
+  { key: 'energy_kwh', label: 'кВтч' },
+  { key: 'revenue', label: 'Выручка' },
+  { key: 'avg_check', label: 'Ср. чек' },
+  { key: 'stations', label: 'Станций' },
+  { key: 'last_at', label: 'Последняя' },
+]
+function RetailAccountsTab({ companyId, dateFrom, dateTo }: TabProps) {
+  const [segment, setSegment] = useState('all')
+  const [region, setRegion] = useState('all')
+  const [station, setStation] = useState('all')
+  const [minSessions, setMinSessions] = useState('')
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'revenue', order: 'desc' })
+  const p = { companyId, dateFrom, dateTo }
+  const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo], queryFn: () => getRetailDimensions(p) })
+  const q = useQuery({
+    queryKey: ['retail-accts', companyId, dateFrom, dateTo, segment, region, station, minSessions, search, sort],
+    queryFn: () => getRetailAccounts({
+      ...p,
+      segment: segment === 'all' ? undefined : segment,
+      region: region === 'all' ? undefined : region,
+      station: station === 'all' ? undefined : station,
+      minSessions: minSessions ? Number(minSessions) : undefined,
+      search: search || undefined, sort: sort.key, order: sort.order, limit: 200,
+    }),
+  })
+  const toggle = (k: string) => setSort((s) => (s.key === k ? { key: k, order: s.order === 'desc' ? 'asc' : 'desc' } : { key: k, order: 'desc' }))
+  const H = ({ c }: { c: { key: string; label: string } }) => {
+    const on = sort.key === c.key
+    const Ico = on ? (sort.order === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+    return (
+      <th className="p-2 text-right font-medium">
+        <button onClick={() => toggle(c.key)} title="Сортировать"
+          className={`group inline-flex flex-row-reverse items-center gap-1 cursor-pointer hover:text-foreground ${on ? 'text-foreground' : ''}`}>
+          <span className="whitespace-nowrap">{c.label}</span>
+          <Ico className={`h-3 w-3 shrink-0 ${on ? 'text-primary' : 'opacity-30 group-hover:opacity-70'}`} />
+        </button>
+      </th>
+    )
+  }
+  const rows = q.data?.accounts ?? []
+  const t = q.data?.totals
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={segment} onValueChange={setSegment}>
+          <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="Сегмент" /></SelectTrigger>
+          <SelectContent><SelectItem value="all" className="text-xs">Все сегменты</SelectItem>{SEGMENTS.map((s) => <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={region} onValueChange={setRegion}>
+          <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue placeholder="Регион" /></SelectTrigger>
+          <SelectContent><SelectItem value="all" className="text-xs">Все регионы</SelectItem>{(dims.data?.regions ?? []).map((r) => <SelectItem key={r.region} value={r.region} className="text-xs">{r.region} · {r.accounts}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={station} onValueChange={setStation}>
+          <SelectTrigger className="h-8 w-[210px] text-xs"><SelectValue placeholder="Станция" /></SelectTrigger>
+          <SelectContent><SelectItem value="all" className="text-xs">Все станции</SelectItem>{(dims.data?.stations ?? []).map((s) => <SelectItem key={s.location_id} value={s.location_id} className="text-xs">{s.name}{s.number ? ` (${s.number})` : ''} · {s.accounts}</SelectItem>)}</SelectContent>
+        </Select>
+        <input value={minSessions} onChange={(e) => setMinSessions(e.target.value.replace(/\D/g, ''))} placeholder="мин. сессий"
+          className="h-8 w-[110px] rounded-md border bg-background px-2 text-xs" inputMode="numeric" />
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="поиск по номеру"
+            className="h-8 w-[170px] rounded-md border bg-background pl-7 pr-2 text-xs" />
+        </div>
+      </div>
+      {t && (
+        <div className="text-xs text-muted-foreground">
+          Найдено <b className="text-foreground">{nf0.format(t.accounts)}</b> аккаунтов · выручка {moneyK(t.revenue)} · ср. чек {money(t.avg_check)} · ARPA {money(t.arpa)}
+          {q.data && q.data.total > q.data.returned ? ` · показаны первые ${q.data.returned}` : ''}
+        </div>
+      )}
+      {q.isLoading ? <Loading /> : rows.length === 0 ? <Empty text="Нет аккаунтов под фильтр" /> : (
+        <Card><CardContent className="p-0 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+              <th className="p-2 text-left font-medium">Аккаунт</th>
+              <th className="p-2 text-left font-medium">Сегмент</th>
+              {ACC_COLS.map((c) => <H key={c.key} c={c} />)}
+            </tr></thead>
+            <tbody>
+              {rows.map((a: RetailAccount) => (
+                <tr key={a.account} className="border-b border-border/30 hover:bg-muted/30">
+                  <td className="p-2 font-medium tabular-nums">{a.masked}</td>
+                  <td className="p-2"><SegBadge seg={a.segment} /></td>
+                  <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
+                  <td className="p-2 text-right tabular-nums text-muted-foreground">{nf0.format(a.energy_kwh)}</td>
+                  <td className="p-2 text-right tabular-nums font-medium">{moneyK(a.revenue)}</td>
+                  <td className="p-2 text-right tabular-nums text-muted-foreground">{money(a.avg_check)}</td>
+                  <td className="p-2 text-right tabular-nums text-muted-foreground">{a.stations}</td>
+                  <td className="p-2 text-right tabular-nums text-muted-foreground">{fmtDate(a.last_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent></Card>
+      )}
+    </div>
+  )
+}
+
+// ── Таб: Станция/регион (профиль: клиенты + когда заряжаются) ──
+function ChartBox({ data, xKey, color, tip }: { data: { sessions: number }[]; xKey: string; color: string; tip: (v: number) => [string, string] }) {
+  return (
+    <div data-chart>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={data} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+          <XAxis dataKey={xKey} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} interval={xKey === 'hour' ? 1 : 0}
+            tickFormatter={(v) => (xKey === 'hour' ? String(v).padStart(2, '0') : String(v))} />
+          <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} width={34} />
+          <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }}
+            labelFormatter={(v) => (xKey === 'hour' ? `${String(v).padStart(2, '0')}:00` : String(v))}
+            formatter={(v) => tip(Number(v))} />
+          <Bar dataKey="sessions" fill={color} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
+  const [mode, setMode] = useState<'station' | 'region'>('station')
+  const [value, setValue] = useState('')
+  const p = { companyId, dateFrom, dateTo }
+  const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo], queryFn: () => getRetailDimensions(p) })
+  const q = useQuery({
+    enabled: !!value,
+    queryKey: ['retail-profile', companyId, dateFrom, dateTo, mode, value],
+    queryFn: () => getRetailProfile({ ...p, station: mode === 'station' ? value : undefined, region: mode === 'region' ? value : undefined }),
+  })
+  const d = q.data
+  const tip = (v: number): [string, string] => [`${nf0.format(v)} сес`, 'Сессий']
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-md border p-0.5">
+          {(['station', 'region'] as const).map((m) => (
+            <button key={m} onClick={() => { setMode(m); setValue('') }}
+              className={`rounded px-3 py-1 text-xs transition-colors ${mode === m ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
+              {m === 'station' ? 'Станция' : 'Регион'}
+            </button>
+          ))}
+        </div>
+        <Select value={value} onValueChange={setValue}>
+          <SelectTrigger className="h-8 w-[300px] text-xs"><SelectValue placeholder={mode === 'station' ? 'Выберите станцию…' : 'Выберите регион…'} /></SelectTrigger>
+          <SelectContent>
+            {mode === 'station'
+              ? (dims.data?.stations ?? []).map((s) => <SelectItem key={s.location_id} value={s.location_id} className="text-xs">{s.name}{s.number ? ` (${s.number})` : ''} · {s.accounts} акк</SelectItem>)
+              : (dims.data?.regions ?? []).map((r) => <SelectItem key={r.region} value={r.region} className="text-xs">{r.region} · {r.accounts} акк</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      {!value ? <Empty text="Выберите станцию или регион — увидите клиентов и профиль зарядок (часы, дни, средние)" />
+        : q.isLoading ? <Loading />
+          : !d || d.totals.sessions === 0 ? <Empty text="Нет сессий за период" />
+            : (
+              <>
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+                  <Kpi label="Аккаунтов" value={nf0.format(d.totals.accounts)} />
+                  <Kpi label="Сессий" value={nf0.format(d.totals.sessions)} />
+                  <Kpi label="Выручка" value={moneyK(d.totals.revenue)} />
+                  <Kpi label="Ср. чек" value={money(d.totals.avg_check)} />
+                  <Kpi label="Ср. кВтч/сес" value={nf1.format(d.totals.avg_kwh)} />
+                  <Kpi label="Энергия" value={`${nf0.format(d.totals.energy_kwh)}`} sub="кВтч" />
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <Widget title="Когда заряжаются — по часам суток"><ChartBox data={d.hourly} xKey="hour" color="hsl(217, 91%, 60%)" tip={tip} /></Widget>
+                  <Widget title="По дням недели"><ChartBox data={d.weekday} xKey="label" color="hsl(152, 60%, 45%)" tip={tip} /></Widget>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Топ клиентов · {d.scope.label}</div>
+                  <Card><CardContent className="p-0 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+                        <th className="p-2 text-left font-medium">Аккаунт</th><th className="p-2 text-left font-medium">Сегмент</th>
+                        <th className="p-2 text-right font-medium">Сессий</th><th className="p-2 text-right font-medium">Выручка</th>
+                        <th className="p-2 text-right font-medium">Ср. чек</th><th className="p-2 text-right font-medium">Последняя</th>
+                      </tr></thead>
+                      <tbody>
+                        {d.top_accounts.map((a: RetailAccount) => (
+                          <tr key={a.account} className="border-b border-border/30 hover:bg-muted/30">
+                            <td className="p-2 font-medium tabular-nums">{a.masked}</td>
+                            <td className="p-2"><SegBadge seg={a.segment} /></td>
+                            <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
+                            <td className="p-2 text-right tabular-nums font-medium">{moneyK(a.revenue)}</td>
+                            <td className="p-2 text-right tabular-nums text-muted-foreground">{money(a.avg_check)}</td>
+                            <td className="p-2 text-right tabular-nums text-muted-foreground">{fmtDate(a.last_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent></Card>
+                </div>
+              </>
+            )}
+    </div>
+  )
+}
+
 const RETAIL_TABS: { k: string; label: string }[] = [
   { k: 'overview', label: 'Обзор' },
   { k: 'segments', label: 'Сегменты (RFM)' },
+  { k: 'accounts', label: 'Аккаунты' },
+  { k: 'profile', label: 'Станция/регион' },
   { k: 'economics', label: 'Экономика' },
   { k: 'cohorts', label: 'Когорты' },
   { k: 'geo', label: 'Гео' },
@@ -333,6 +544,8 @@ export function RetailPanel({ companyId, dateFrom, dateTo }: TabProps) {
       <div className="p-4">
         {tab === 'overview' && <RetailOverviewTab {...p} />}
         {tab === 'segments' && <RetailSegmentsTab {...p} />}
+        {tab === 'accounts' && <RetailAccountsTab {...p} />}
+        {tab === 'profile' && <RetailProfileTab {...p} />}
         {tab === 'economics' && <RetailEconomicsTab {...p} />}
         {tab === 'cohorts' && <RetailCohortsTab {...p} />}
         {tab === 'geo' && <RetailGeoTab {...p} />}

@@ -71,6 +71,46 @@ export interface CohortRow {
 }
 export interface RetailCohorts { cohorts: CohortRow[]; max_offset: number }
 
+export interface RetailAccount {
+  account: string
+  masked: string
+  segment: string
+  sessions: number
+  energy_kwh: number
+  revenue: number
+  avg_check: number
+  avg_kwh: number
+  avg_tariff: number
+  first_at: string | null
+  last_at: string | null
+  recency_days: number | null
+  success_pct: number
+  stations: number
+  regions: number
+}
+export interface RetailAccountsResponse {
+  period: { from: string; to: string }
+  accounts: RetailAccount[]
+  total: number
+  returned: number
+  totals: { accounts: number; sessions: number; revenue: number; energy_kwh: number; avg_check: number; arpa: number }
+}
+
+export interface DimRegion { region: string; accounts: number; sessions: number }
+export interface DimStation { location_id: string; name: string; number: string | null; accounts: number; sessions: number }
+export interface RetailDimensions { regions: DimRegion[]; stations: DimStation[] }
+
+export interface HourBucket { hour: number; sessions: number; revenue: number }
+export interface WeekdayBucket { dow: number; label: string; sessions: number; revenue: number }
+export interface RetailProfile {
+  period: { from: string; to: string }
+  scope: { kind: string | null; label: string; value?: string; number?: string | null }
+  totals: { accounts: number; sessions: number; revenue: number; energy_kwh: number; avg_check: number; avg_kwh: number }
+  hourly: HourBucket[]
+  weekday: WeekdayBucket[]
+  top_accounts: RetailAccount[]
+}
+
 type P = { companyId: string; dateFrom: string; dateTo: string }
 const params = (p: P) => ({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
 
@@ -80,3 +120,29 @@ export const getRetailEconomics = (p: P) => get<RetailEconomics>('/api/retail/ec
 export const getRetailGeo = (p: P) => get<RetailGeo>('/api/retail/geo', params(p))
 export const getRetailCohorts = (p: { companyId: string; months?: number }) =>
   get<RetailCohorts>('/api/retail/cohorts', { company_id: p.companyId, months: p.months ?? 12 })
+
+export interface AccountsParams extends P {
+  region?: string; station?: string; segment?: string
+  minSessions?: number; search?: string; sort?: string; order?: string; limit?: number
+}
+export function getRetailAccounts(p: AccountsParams): Promise<RetailAccountsResponse> {
+  const q: Record<string, string> = { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo }
+  if (p.region) q.region = p.region
+  if (p.station) q.station = p.station
+  if (p.segment) q.segment = p.segment
+  if (p.minSessions) q.min_sessions = String(p.minSessions)
+  if (p.search) q.search = p.search
+  if (p.sort) q.sort = p.sort
+  if (p.order) q.order = p.order
+  if (p.limit) q.limit = String(p.limit)
+  return get<RetailAccountsResponse>('/api/retail/accounts', q)
+}
+
+export const getRetailDimensions = (p: P) => get<RetailDimensions>('/api/retail/dimensions', params(p))
+
+export function getRetailProfile(p: P & { station?: string; region?: string }): Promise<RetailProfile> {
+  const q: Record<string, string> = { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo }
+  if (p.station) q.station = p.station
+  if (p.region) q.region = p.region
+  return get<RetailProfile>('/api/retail/profile', q)
+}
