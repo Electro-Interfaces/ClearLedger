@@ -165,7 +165,7 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
   const d = q.data
   const maxStRev = Math.max(1, ...(d?.by_station ?? []).map((s) => s.revenue))
   const maxConn = Math.max(1, ...(d?.connectors ?? []).map((c) => c.sessions))
-  const resTint = (r: string | null) => (r === 'Complete' ? 'text-emerald-400/80' : 'text-amber-400/80')
+  const resTint = (r: string | null) => (r === 'Complete' ? 'text-emerald-600/80 dark:text-emerald-400/80' : 'text-amber-600/80 dark:text-amber-400/80')
   return (
     <Dialog open={!!account} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[88vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6">
@@ -313,8 +313,8 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
           <Kpi label="Повторные" value={pct(k.repeat_rate ?? 0)} sub="заряжаются >1 раза" />
           <Kpi label="Разовые" value={pct(k.one_time_share ?? 0)} sub={`${pct(k.one_time_revenue_share ?? 0)} выручки`} />
-          <Kpi label="Ядро выручки" value={pct(k.core_revenue_share ?? 0)} sub={`ядро — ${pct(k.core_accounts_share ?? 0)} базы`} cls="text-emerald-400/90" />
-          <Kpi label="Выручка в риске" value={pct(k.risk_revenue_share ?? 0)} sub="отток / сон / риск" cls="text-amber-400/90" />
+          <Kpi label="Ядро выручки" value={pct(k.core_revenue_share ?? 0)} sub={`ядро — ${pct(k.core_accounts_share ?? 0)} базы`} cls="text-emerald-600/90 dark:text-emerald-400/90" />
+          <Kpi label="Выручка в риске" value={pct(k.risk_revenue_share ?? 0)} sub="отток / сон / риск" cls="text-amber-600/90 dark:text-amber-400/90" />
           <Kpi label="Удержание M1" value={k.retention_m1 != null ? pct(k.retention_m1) : '—'} sub={k.retention_m3 != null ? `M3 ${pct(k.retention_m3)}` : 'по когортам'} />
           <Kpi label="Топ-20% → выручки" value={pct(k.top20_revenue_share ?? 0)} sub={`топ-10% — ${pct(k.top10_revenue_share ?? 0)}`} />
         </div>
@@ -385,7 +385,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
             </Widget>
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <Kpi label="LTV (оценка)" value={money(dd.clv.ltv)} sub={`${money(dd.clv.monthly_arpu)}/мес × ${nf1.format(dd.clv.expected_months)} мес активн.`} cls="text-emerald-400/90" />
+                <Kpi label="LTV (оценка)" value={money(dd.clv.ltv)} sub={`${money(dd.clv.monthly_arpu)}/мес × ${nf1.format(dd.clv.expected_months)} мес активн.`} cls="text-emerald-600/90 dark:text-emerald-400/90" />
                 <Kpi label="Срок жизни" value={`${nf1.format(dd.clv.avg_lifetime_months)} мес`} sub="в среднем по базе" />
               </div>
               <Widget title="LTV по сегментам (оценка)">
@@ -409,7 +409,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
               <div className="grid grid-cols-3 gap-2">
                 <Kpi label="Приложение" value={pct(dd.payment.app_pct)} sub="vs RFID" />
                 <Kpi label="RFID-карта" value={pct(dd.payment.rfid_pct)} sub="доля сессий" />
-                <Kpi label="Успешных" value={pct(dd.success.pct)} sub={`неоплач. ${pct(dd.payment.unpaid_pct)}`} cls={dd.success.pct < 75 ? 'text-amber-400/90' : undefined} />
+                <Kpi label="Успешных" value={pct(dd.success.pct)} sub={`неоплач. ${pct(dd.payment.unpaid_pct)}`} cls={dd.success.pct < 75 ? 'text-amber-600/90 dark:text-amber-400/90' : undefined} />
               </div>
               <Widget title="Коннекторы (сессии)">
                 {conns.slice(0, 6).map((c) => (
@@ -572,7 +572,7 @@ function RetailGeoTab({ companyId, dateFrom, dateTo }: TabProps) {
         <Kpi label="Аккаунтов" value={nf0.format(data.totals.accounts)} />
         <Kpi label="Объектов L2 на аккаунт" value={nf1.format(data.avg_stations)} sub="среди привязанных" />
         <Kpi label="Моно-объект" value={pct(mono / data.totals.accounts * 100)} sub="один объект L2" />
-        <Kpi label="Привязано к L2" value={pct(cov.resolved_pct)} sub={`${nf0.format(cov.sessions_orphan)} сессий-сирот`} cls={cov.resolved_pct < 90 ? 'text-amber-400/90' : undefined} />
+        <Kpi label="Привязано к L2" value={pct(cov.resolved_pct)} sub={`${nf0.format(cov.sessions_orphan)} сессий-сирот`} cls={cov.resolved_pct < 90 ? 'text-amber-600/90 dark:text-amber-400/90' : undefined} />
       </div>
       {cov.orphan_revenue_pct > 0.5 && (
         <div className="flex items-start gap-2 rounded-md border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-amber-300/90">

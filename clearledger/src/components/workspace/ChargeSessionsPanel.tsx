@@ -149,7 +149,7 @@ function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
   if (override) {
     return (
       <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-        <span className="text-[11px] uppercase tracking-wider text-amber-400/70">Свой период</span>
+        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
         <PeriodRangePicker period={override} onChange={(p) => onChange(p)} />
         <Button variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => onChange(null)}>← период раздела</Button>
       </div>
@@ -168,8 +168,8 @@ function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
 type KpiAccent = 'success' | 'danger' | 'warning' | 'info'
 const utilAccent = (v: number): KpiAccent => (v >= 15 ? 'success' : v >= 10 ? 'warning' : 'danger')
 const succAccent = (v: number): KpiAccent => (v >= 85 ? 'success' : v >= 70 ? 'warning' : 'danger')
-const utilTxt = (v: number) => (v >= 15 ? 'text-emerald-400' : v >= 10 ? 'text-amber-400' : 'text-red-400')
-const succTxt = (v: number) => (v >= 85 ? 'text-emerald-400' : v >= 70 ? 'text-amber-400' : 'text-red-400')
+const utilTxt = (v: number) => (v >= 15 ? 'text-emerald-600 dark:text-emerald-400' : v >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
+const succTxt = (v: number) => (v >= 85 ? 'text-emerald-600 dark:text-emerald-400' : v >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
 /** Физический разрез — порт-нормированные метрики (загрузка) имеют смысл. */
 const PHYSICAL_GROUPS = ['station', 'connector', 'region']
 
@@ -942,7 +942,7 @@ function SliceCompactTable({ data, metric, onRow, drillable }: {
   // Выгрузка компактного вида = ПОЛНАЯ матрица: все интервалы + сводка (не только сводка на экране).
   const exCols = [firstCol, ...data.intervals.map((iv) => iv.label), isRatio ? 'Среднее' : 'Итого', 'Мин', 'Макс', 'Δ посл.', 'Δ %']
   const exData: (string | number | null)[][] = rows.map((r) => [r.l.label, ...r.l.values, r.agg, r.mn, r.mx, r.l.delta_prev, r.l.delta_pct_prev])
-  const deltaCls = (v: number) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-red-400' : 'text-muted-foreground')
+  const deltaCls = (v: number) => (v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')
   return (
     <Card>
       <CardContent className="p-0">
@@ -1067,9 +1067,9 @@ function RowDetailModal({ open, onClose, companyId, dateFrom, dateTo, bucket, me
                           const d = v != null && prev != null ? v - prev : null
                           return (
                             <tr key={iv.label} className={`border-b border-border/30 ${iv.partial ? 'text-muted-foreground/50' : ''}`}>
-                              <td className="p-2">{iv.label}{iv.partial && <span className="text-amber-400/70"> *</span>}</td>
+                              <td className="p-2">{iv.label}{iv.partial && <span className="text-amber-600/70 dark:text-amber-400/70"> *</span>}</td>
                               <td className="p-2 text-right font-mono">{fmtMetricCompact(metric, v)}</td>
-                              <td className={`p-2 text-right font-mono ${d == null ? '' : d > 0 ? 'text-emerald-400' : d < 0 ? 'text-red-400' : ''}`}>
+                              <td className={`p-2 text-right font-mono ${d == null ? '' : d > 0 ? 'text-emerald-600 dark:text-emerald-400' : d < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
                                 {d == null ? '—' : (d > 0 ? '+' : '') + fmtMetricCompact(metric, d)}
                               </td>
                             </tr>
@@ -1143,7 +1143,7 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
   firstCol: string
   onRow?: (label: string) => void
 }) {
-  const deltaCls = (v: number) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-red-400' : 'text-muted-foreground')
+  const deltaCls = (v: number) => (v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')
   const cellDim = (i: number) => (columns[i]?.partial ? 'text-muted-foreground/40' : '')
   const hasPartial = columns.some((c) => c.partial)
 
@@ -1203,7 +1203,7 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
               <th className="text-left p-2 font-medium sticky left-0 bg-muted/40 z-10"><HdBtn k="label" left>{firstCol}</HdBtn></th>
               {columns.map((c, i) => (
                 <th key={i} className={`text-right p-2 font-medium whitespace-nowrap ${c.partial ? 'text-muted-foreground/50' : ''}`}>
-                  <HdBtn k={i}>{c.label}{c.partial && <span className="text-amber-400/70"> *</span>}</HdBtn>
+                  <HdBtn k={i}>{c.label}{c.partial && <span className="text-amber-600/70 dark:text-amber-400/70"> *</span>}</HdBtn>
                   {c.hint && <div className="text-[10px] font-normal text-muted-foreground/70">{c.hint}{c.partial ? ' · неполн.' : ''}</div>}
                 </th>
               ))}
@@ -1241,7 +1241,7 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
         </div>
         {hasPartial && (
           <div className="px-3 py-2 text-[11px] text-muted-foreground border-t">
-            <span className="text-amber-400/70">*</span> неполный интервал (частично вне периода) — не участвует в расчёте Δ
+            <span className="text-amber-600/70 dark:text-amber-400/70">*</span> неполный интервал (частично вне периода) — не участвует в расчёте Δ
           </div>
         )}
       </CardContent>

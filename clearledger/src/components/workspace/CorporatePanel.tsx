@@ -26,7 +26,7 @@ const pct = (v: number) => nf1.format(v) + '%'
 const MODE_LABEL: Record<string, string> = { matrix: 'Матрица', flat: 'Плоский', retail: 'Розница' }
 
 /** Цвет для скидки/наценки к рознице: скидка (<0, сеть недополучает) — amber; наценка — emerald. */
-const gapCls = (v: number) => (v < -0.5 ? 'text-amber-400/90' : v > 0.5 ? 'text-emerald-400/90' : 'text-muted-foreground')
+const gapCls = (v: number) => (v < -0.5 ? 'text-amber-600/90 dark:text-amber-400/90' : v > 0.5 ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-muted-foreground')
 
 function Loading() { return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> }
 function Empty({ text }: { text: string }) { return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div> }
@@ -275,7 +275,7 @@ function CorpTariffs({ companyId, dateFrom, dateTo }: TabProps) {
     { key: 'tariff', label: 'Условие тарифа', left: true, get: (c) => c.mode, cell: (c) => <span className="text-[11px] text-muted-foreground">{tariffDesc(c)}</span> },
     { key: 'avg_tariff', label: 'Эфф. ₽/кВтч', get: (c) => c.avg_tariff, cell: (c) => nf1.format(c.avg_tariff) },
     { key: 'contract_start', label: 'Договор с', get: (c) => c.contract_start ?? '', cell: (c) => <span className="text-[11px]">{c.contract_start ?? '—'}</span> },
-    { key: 'status', label: 'Статус', get: (c) => c.status ?? '', cell: (c) => <span className={`text-[11px] ${c.status && c.status !== 'Действующая' ? 'text-amber-400/90' : ''}`}>{c.status ?? '—'}</span> },
+    { key: 'status', label: 'Статус', get: (c) => c.status ?? '', cell: (c) => <span className={`text-[11px] ${c.status && c.status !== 'Действующая' ? 'text-amber-600/90 dark:text-amber-400/90' : ''}`}>{c.status ?? '—'}</span> },
     { key: 'users', label: 'Юзеров', get: (c) => c.users ?? 0, cell: (c) => c.users ?? '—' },
   ]
   return (

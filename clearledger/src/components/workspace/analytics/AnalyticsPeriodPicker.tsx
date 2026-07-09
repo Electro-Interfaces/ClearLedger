@@ -79,10 +79,10 @@ export function KpiCard({ label, value, hint, accent }: {
   accent?: 'success' | 'danger' | 'warning' | 'info'
 }) {
   const accentCls: Record<string, string> = {
-    success: 'text-emerald-400',
-    danger:  'text-red-400',
-    warning: 'text-amber-400',
-    info:    'text-blue-400',
+    success: 'text-emerald-600 dark:text-emerald-400',
+    danger:  'text-red-600 dark:text-red-400',
+    warning: 'text-amber-600 dark:text-amber-400',
+    info:    'text-blue-600 dark:text-blue-400',
   }
   return (
     <div data-kpi className="rounded-md border bg-card/40 p-3">

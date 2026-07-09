@@ -22,7 +22,7 @@ const nf2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 const money = (v: number) => nf0.format(Math.round(v || 0)) + ' ₽'
 const moneyK = (v: number) => (Math.abs(v) >= 10000 ? nf1.format(v / 1000) + ' тыс' : nf0.format(v)) + ' ₽'
 const rub = (v: number) => nf2.format(v)
-const gapCls = (v: number) => (v < -0.05 ? 'text-amber-400/90' : v > 0.05 ? 'text-emerald-400/90' : 'text-muted-foreground')
+const gapCls = (v: number) => (v < -0.05 ? 'text-amber-600/90 dark:text-amber-400/90' : v > 0.05 ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-muted-foreground')
 
 function Loading() { return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> }
 function Empty({ text }: { text: string }) { return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div> }

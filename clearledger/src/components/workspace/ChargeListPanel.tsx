@@ -209,7 +209,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
       <div className="flex flex-wrap items-center gap-2" data-export-ignore>
         {p.override ? (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wider text-amber-400/70">Свой период</span>
+            <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
             <PeriodRangePicker period={p.override} onChange={(o) => patch({ override: o })} />
             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => patch({ override: null })}>← период раздела</Button>
           </div>
@@ -296,7 +296,7 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                     <TableCell className="text-right font-mono tabular-nums">{fmtMoney(r.revenue)}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.result || '—'}</TableCell>
                     <TableCell className="text-center">
-                      {r.paid_at ? <span className="text-emerald-400" title={fmtDT(r.paid_at)} aria-label="Оплачено">✓</span> : <span className="text-muted-foreground/70" aria-label="Не оплачено">✗</span>}
+                      {r.paid_at ? <span className="text-emerald-600 dark:text-emerald-400" title={fmtDT(r.paid_at)} aria-label="Оплачено">✓</span> : <span className="text-muted-foreground/70" aria-label="Не оплачено">✗</span>}
                     </TableCell>
                   </TableRow>
                 ))}

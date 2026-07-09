@@ -117,7 +117,7 @@ function KpiCard({ k, hint }: { k: OverviewKpi; hint?: string }) {
       <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight">{kpiDisplay(k)}</div>
       <div className="mt-0.5 text-xs text-muted-foreground">{hint ?? ''}</div>
       {showDelta && (
-        <span className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-400/90' : 'text-red-400/90'}`}>
+        <span className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-red-600/90 dark:text-red-400/90'}`}>
           {up ? '▲' : '▼'}{Math.abs(k.delta_pct!).toFixed(1)}%
         </span>
       )}
@@ -209,7 +209,7 @@ function DailyRevenueBar({ companyId, dateFrom, dateTo }: { companyId: string; d
       <CardContent className="pt-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <span className="text-emerald-400">₽</span>Реализация по дням{data ? ` (${data.data.length} дн.)` : ''}
+            <span className="text-emerald-600 dark:text-emerald-400">₽</span>Реализация по дням{data ? ` (${data.data.length} дн.)` : ''}
           </div>
           <Segmented value={mode} onChange={setMode} options={REV_MODES} />
         </div>
@@ -283,7 +283,7 @@ function AvgCheckLine({ companyId, dateFrom, dateTo, bigValue }: { companyId: st
       <CardContent className="pt-4">
         <div className="mb-2 flex items-start justify-between gap-2">
           <div>
-            <div className="flex items-center gap-2 text-sm font-medium"><span className="text-blue-400">₽</span>Средний чек (частные)</div>
+            <div className="flex items-center gap-2 text-sm font-medium"><span className="text-blue-600 dark:text-blue-400">₽</span>Средний чек (частные)</div>
             <div className="text-[11px] text-muted-foreground">без корп. карт, талонов, купонов</div>
             <div className="mt-1 text-2xl font-semibold tabular-nums">{fmtMoney(bigValue)} ₽</div>
           </div>
@@ -318,7 +318,7 @@ function HourlyBar({ hourly }: { hourly: HourPoint[] }) {
   return (
     <Card>
       <CardContent className="pt-4">
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Zap className="h-4 w-4 text-blue-400" />Суточная активность по часам</div>
+        <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />Суточная активность по часам</div>
         <div data-chart>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={hourly} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
@@ -411,7 +411,7 @@ function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
   if (override) {
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] uppercase tracking-wider text-amber-400/70">Свой период</span>
+        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
         <PeriodRangePicker period={override} onChange={onChange} />
         <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onChange(null)}>← период раздела</Button>
       </div>
@@ -462,7 +462,7 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
     <div className="p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3" data-export-ignore>
         <div className="space-y-1.5">
-          <h2 className="flex items-center gap-2 text-base font-semibold"><Zap className="h-4 w-4 text-blue-400" />Обзор сети ЭЗС</h2>
+          <h2 className="flex items-center gap-2 text-base font-semibold"><Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор сети ЭЗС</h2>
           <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
           {data && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -563,7 +563,7 @@ function CorpMini({ c }: { c: OverviewCorporate }) {
       <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-3 pt-4">
         {stat('Корп. выручка (ЮЛ)', fmtMoneyShort(c.corp_revenue) + ' ₽')}
         {stat('Розница-эквивалент', fmtMoneyShort(c.retail_revenue) + ' ₽')}
-        {stat('Скидка ЮЛ', `${c.discount_pct > 0 ? '+' : ''}${nf1.format(c.discount_pct)}%`, c.discount < 0 ? 'text-amber-400' : 'text-emerald-400')}
+        {stat('Скидка ЮЛ', `${c.discount_pct > 0 ? '+' : ''}${nf1.format(c.discount_pct)}%`, c.discount < 0 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400')}
         {stat('Активных ЮЛ', nf0.format(c.active_clients) + ` из ${nf0.format(c.clients)}`)}
         {stat('Доля ЮЛ в выручке', nf1.format(c.corp_share_pct) + '%')}
         <span className="ml-auto text-[11px] text-muted-foreground">Детали — в пункте «Корпоратив»</span>
