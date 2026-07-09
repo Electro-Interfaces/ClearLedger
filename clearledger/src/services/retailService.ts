@@ -164,3 +164,16 @@ export interface RetailAccountDetail {
 export function getRetailAccount(p: P & { account: string }): Promise<RetailAccountDetail> {
   return get<RetailAccountDetail>('/api/retail/account', { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, account: p.account })
 }
+
+export interface MarketingKpis {
+  accounts: number; new_accounts: number; returning_accounts: number; new_share: number
+  repeat_rate: number; one_time_share: number; one_time_revenue_share: number
+  aov: number; frequency: number; arpa: number
+  core_accounts_share: number; core_revenue_share: number
+  risk_accounts_share: number; risk_revenue: number; risk_revenue_share: number
+  top10_revenue_share: number; top20_revenue_share: number
+  retention_m1: number | null; retention_m3: number | null
+}
+export interface MarketingInsight { level: string; text: string }
+export interface RetailMarketing { period: { from: string; to: string }; kpis: Partial<MarketingKpis>; insights: MarketingInsight[] }
+export const getRetailMarketing = (p: P) => get<RetailMarketing>('/api/retail/marketing', params(p))

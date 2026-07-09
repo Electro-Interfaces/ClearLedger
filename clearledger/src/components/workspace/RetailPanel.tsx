@@ -16,7 +16,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useTabParams } from '@/hooks/useTabParams'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
-  getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount,
+  getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount, getRetailMarketing,
   type RetailSegment, type RetailAccount,
 } from '@/services/retailService'
 
@@ -221,12 +221,14 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
   const ov = useQuery({ queryKey: ['retail-ov', companyId, dateFrom, dateTo], queryFn: () => getRetailOverview(p) })
   const seg = useQuery({ queryKey: ['retail-seg', companyId, dateFrom, dateTo], queryFn: () => getRetailSegments(p) })
   const eco = useQuery({ queryKey: ['retail-eco', companyId, dateFrom, dateTo], queryFn: () => getRetailEconomics(p) })
+  const mk = useQuery({ queryKey: ['retail-mk', companyId, dateFrom, dateTo], queryFn: () => getRetailMarketing(p) })
   if (ov.isLoading) return <Loading />
   if (!ov.data) return <Empty text="Нет данных" />
   const t = ov.data.totals
   const segs = [...(seg.data?.segments ?? [])].sort((a, b) => b.revenue - a.revenue)  // бары по убыванию выручки
   const maxSeg = Math.max(1, ...segs.map((s) => s.revenue))
   const pareto = eco.data?.pareto ?? []
+  const k = mk.data?.kpis ?? {}
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
@@ -237,6 +239,34 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
         <Kpi label="Сессий/аккаунт" value={nf1.format(t.avg_sessions)} sub="в среднем" />
         <Kpi label="Энергия" value={`${nf0.format(t.energy_kwh)}`} sub="кВтч за период" />
       </div>
+
+      {/* Маркетинговые KPI B2C (потребительский сектор) */}
+      {mk.data?.kpis && (
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
+          <Kpi label="Повторные" value={pct(k.repeat_rate ?? 0)} sub="заряжаются >1 раза" />
+          <Kpi label="Разовые" value={pct(k.one_time_share ?? 0)} sub={`${pct(k.one_time_revenue_share ?? 0)} выручки`} />
+          <Kpi label="Ядро выручки" value={pct(k.core_revenue_share ?? 0)} sub={`ядро — ${pct(k.core_accounts_share ?? 0)} базы`} cls="text-emerald-400/90" />
+          <Kpi label="Выручка в риске" value={pct(k.risk_revenue_share ?? 0)} sub="отток / сон / риск" cls="text-amber-400/90" />
+          <Kpi label="Удержание M1" value={k.retention_m1 != null ? pct(k.retention_m1) : '—'} sub={k.retention_m3 != null ? `M3 ${pct(k.retention_m3)}` : 'по когортам'} />
+          <Kpi label="Топ-20% → выручки" value={pct(k.top20_revenue_share ?? 0)} sub={`топ-10% — ${pct(k.top10_revenue_share ?? 0)}`} />
+        </div>
+      )}
+
+      {/* Ключевые выводы (авто, маркетинг B2C) */}
+      {mk.data && mk.data.insights.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Ключевые выводы</div>
+          <Card><CardContent className="space-y-2 p-3">
+            {mk.data.insights.map((it, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs leading-snug">
+                <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${it.level === 'good' ? 'bg-emerald-400/80' : it.level === 'warn' ? 'bg-amber-400/80' : 'bg-zinc-400/70'}`} />
+                <span className={it.level === 'warn' ? 'text-amber-200/90' : it.level === 'good' ? 'text-emerald-200/90' : ''}>{it.text}</span>
+              </div>
+            ))}
+          </CardContent></Card>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <Widget title="Выручка по RFM-сегментам">
           {seg.isLoading ? <Loading /> : segs.length === 0 ? <Empty text="Нет данных" />
@@ -456,6 +486,51 @@ const ACC_COLS = [
   { key: 'stations', label: 'Станций' },
   { key: 'last_at', label: 'Последняя' },
 ]
+
+// Переиспользуемая сортируемая таблица аккаунтов (клик по строке → карточка).
+function AccountsTable({ rows, sort, onSort, onRow }: {
+  rows: RetailAccount[]; sort: { key: string; order: 'asc' | 'desc' }; onSort: (k: string) => void; onRow: (acc: string) => void
+}) {
+  const H = ({ c }: { c: { key: string; label: string } }) => {
+    const on = sort.key === c.key
+    const Ico = on ? (sort.order === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+    return (
+      <th className="p-2 text-right font-medium">
+        <button onClick={() => onSort(c.key)} title="Сортировать"
+          className={`group inline-flex flex-row-reverse items-center gap-1 cursor-pointer hover:text-foreground ${on ? 'text-foreground' : ''}`}>
+          <span className="whitespace-nowrap">{c.label}</span>
+          <Ico className={`h-3 w-3 shrink-0 ${on ? 'text-primary' : 'opacity-30 group-hover:opacity-70'}`} />
+        </button>
+      </th>
+    )
+  }
+  return (
+    <Card><CardContent className="p-0 overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+          <th className="p-2 text-left font-medium">Аккаунт</th>
+          <th className="p-2 text-left font-medium">Сегмент</th>
+          {ACC_COLS.map((c) => <H key={c.key} c={c} />)}
+        </tr></thead>
+        <tbody>
+          {rows.map((a) => (
+            <tr key={a.account} onClick={() => onRow(a.account)} title="Открыть карточку аккаунта"
+              className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
+              <td className="p-2 font-medium tabular-nums">{a.masked}</td>
+              <td className="p-2"><SegBadge seg={a.segment} /></td>
+              <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
+              <td className="p-2 text-right tabular-nums text-muted-foreground">{nf0.format(a.energy_kwh)}</td>
+              <td className="p-2 text-right tabular-nums font-medium">{moneyK(a.revenue)}</td>
+              <td className="p-2 text-right tabular-nums text-muted-foreground">{money(a.avg_check)}</td>
+              <td className="p-2 text-right tabular-nums text-muted-foreground">{a.stations}</td>
+              <td className="p-2 text-right tabular-nums text-muted-foreground">{fmtDate(a.last_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </CardContent></Card>
+  )
+}
 function RetailAccountsTab({ companyId, dateFrom, dateTo, initialSegment }: TabProps & { initialSegment?: string | null }) {
   const [segment, setSegment] = useState(initialSegment || 'all')
   const [region, setRegion] = useState('all')
@@ -482,19 +557,6 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo, initialSegment }: TabP
     }),
   })
   const toggle = (k: string) => setSort((s) => (s.key === k ? { key: k, order: s.order === 'desc' ? 'asc' : 'desc' } : { key: k, order: 'desc' }))
-  const H = ({ c }: { c: { key: string; label: string } }) => {
-    const on = sort.key === c.key
-    const Ico = on ? (sort.order === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
-    return (
-      <th className="p-2 text-right font-medium">
-        <button onClick={() => toggle(c.key)} title="Сортировать"
-          className={`group inline-flex flex-row-reverse items-center gap-1 cursor-pointer hover:text-foreground ${on ? 'text-foreground' : ''}`}>
-          <span className="whitespace-nowrap">{c.label}</span>
-          <Ico className={`h-3 w-3 shrink-0 ${on ? 'text-primary' : 'opacity-30 group-hover:opacity-70'}`} />
-        </button>
-      </th>
-    )
-  }
   const rows = q.data?.accounts ?? []
   const t = q.data?.totals
   return (
@@ -521,30 +583,7 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo, initialSegment }: TabP
         </div>
       )}
       {q.isLoading ? <Loading /> : rows.length === 0 ? <Empty text="Нет аккаунтов под фильтр" /> : (
-        <Card><CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead><tr className="border-b bg-muted/40 text-muted-foreground">
-              <th className="p-2 text-left font-medium">Аккаунт</th>
-              <th className="p-2 text-left font-medium">Сегмент</th>
-              {ACC_COLS.map((c) => <H key={c.key} c={c} />)}
-            </tr></thead>
-            <tbody>
-              {rows.map((a: RetailAccount) => (
-                <tr key={a.account} onClick={() => setDetail(a.account)} title="Открыть карточку аккаунта"
-                  className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
-                  <td className="p-2 font-medium tabular-nums">{a.masked}</td>
-                  <td className="p-2"><SegBadge seg={a.segment} /></td>
-                  <td className="p-2 text-right tabular-nums">{nf0.format(a.sessions)}</td>
-                  <td className="p-2 text-right tabular-nums text-muted-foreground">{nf0.format(a.energy_kwh)}</td>
-                  <td className="p-2 text-right tabular-nums font-medium">{moneyK(a.revenue)}</td>
-                  <td className="p-2 text-right tabular-nums text-muted-foreground">{money(a.avg_check)}</td>
-                  <td className="p-2 text-right tabular-nums text-muted-foreground">{a.stations}</td>
-                  <td className="p-2 text-right tabular-nums text-muted-foreground">{fmtDate(a.last_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent></Card>
+        <AccountsTable rows={rows} sort={sort} onSort={toggle} onRow={setDetail} />
       )}
       <AccountDetailDialog {...p} account={detail} onClose={() => setDetail(null)} />
     </div>
@@ -574,6 +613,8 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
   const [mode, setMode] = useState<'station' | 'region'>('station')
   const [value, setValue] = useState('')
   const [detail, setDetail] = useState<string | null>(null)
+  const [scopeAll, setScopeAll] = useState(false)
+  const [sortAll, setSortAll] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'revenue', order: 'desc' })
   const p = { companyId, dateFrom, dateTo }
   const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo], queryFn: () => getRetailDimensions(p) })
   const stationOpts: Opt[] = useMemo(() => (dims.data?.stations ?? []).map((s) => ({
@@ -585,6 +626,15 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
     queryKey: ['retail-profile', companyId, dateFrom, dateTo, mode, value],
     queryFn: () => getRetailProfile({ ...p, station: mode === 'station' ? value : undefined, region: mode === 'region' ? value : undefined }),
   })
+  const allQ = useQuery({
+    enabled: !!value && scopeAll,
+    queryKey: ['retail-scope-accts', companyId, dateFrom, dateTo, mode, value, sortAll],
+    queryFn: () => getRetailAccounts({ ...p,
+      station: mode === 'station' ? value : undefined,
+      region: mode === 'region' ? value : undefined,
+      sort: sortAll.key, order: sortAll.order, limit: 2000 }),
+  })
+  const toggleAll = (k: string) => setSortAll((s) => (s.key === k ? { key: k, order: s.order === 'desc' ? 'asc' : 'desc' } : { key: k, order: 'desc' }))
   const d = q.data
   const tip = (v: number): [string, string] => [`${nf0.format(v)} сес`, 'Сессий']
   return (
@@ -620,7 +670,23 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
                   <Widget title="По дням недели"><ChartBox data={d.weekday} xKey="label" color="hsl(152, 60%, 45%)" tip={tip} /></Widget>
                 </div>
                 <div className="space-y-1.5">
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Топ клиентов · {d.scope.label}</div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{scopeAll ? 'Все клиенты' : 'Топ клиентов'} · {d.scope.label}</div>
+                    <div className="inline-flex rounded-md border p-0.5 text-xs">
+                      <button onClick={() => setScopeAll(false)} className={`rounded px-2 py-0.5 transition-colors ${!scopeAll ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground'}`}>Топ-25</button>
+                      <button onClick={() => setScopeAll(true)} className={`rounded px-2 py-0.5 transition-colors ${scopeAll ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground'}`}>Все{d.totals.accounts ? ` (${nf0.format(d.totals.accounts)})` : ''}</button>
+                    </div>
+                  </div>
+                  {scopeAll ? (
+                    allQ.isLoading ? <Loading /> : (
+                      <>
+                        {allQ.data && allQ.data.total > allQ.data.returned && (
+                          <div className="text-[11px] text-muted-foreground">Показаны первые {nf0.format(allQ.data.returned)} из {nf0.format(allQ.data.total)}.</div>
+                        )}
+                        <AccountsTable rows={allQ.data?.accounts ?? []} sort={sortAll} onSort={toggleAll} onRow={setDetail} />
+                      </>
+                    )
+                  ) : (
                   <Card><CardContent className="p-0 overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead><tr className="border-b bg-muted/40 text-muted-foreground">
@@ -643,6 +709,7 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
                       </tbody>
                     </table>
                   </CardContent></Card>
+                  )}
                 </div>
               </>
             )}

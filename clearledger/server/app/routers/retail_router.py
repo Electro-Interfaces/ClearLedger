@@ -131,3 +131,14 @@ async def retail_account(
     cid = await assert_company_member(company_id, current_user, db)
     return await RetailService(db).account(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), account)
+
+
+@router.get("/marketing")
+async def retail_marketing(
+    company_id: str, date_from: str, date_to: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """B2C-KPI розничной базы + автоматические маркетинговые выводы."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await RetailService(db).marketing(cid, _d(date_from, "date_from"), _d(date_to, "date_to"))

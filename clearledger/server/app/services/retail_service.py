@@ -590,3 +590,93 @@ class RetailService:
         return {"found": True, "period": {"from": df.isoformat(), "to": dt.isoformat()},
                 "account": self._pub(me), "by_station": by_station, "by_month": by_month,
                 "hourly": hourly, "connectors": connectors, "recent": recent}
+
+    # ── marketing: B2C-KPI розничной базы + автоматические выводы ─────────
+    async def marketing(self, company_id, df: date, dt: date) -> dict[str, Any]:
+        """Маркетинговая витрина частных клиентов (B2C): повторные/разовые, ядро
+        лояльности, зона оттока, концентрация выручки, retention когорт, AOV/частота
+        + авто-выводы (принятые в потребительском маркетинге разрезы)."""
+        accts = self._tag_segments(await self._accounts(company_id, df, dt))
+        n = len(accts)
+        if not n:
+            return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "kpis": {}, "insights": []}
+        total_rev = sum(a["revenue"] for a in accts) or 1.0
+        total_sessions = sum(a["sessions"] for a in accts)
+
+        lo, hi = _period(df, dt)
+        new_accounts = int((await self.db.execute(select(func.count()).select_from(
+            select(S.user_id, func.min(S.started_at).label("f"))
+            .where(*_retail_conds(company_id), S.started_at.is_not(None))
+            .group_by(S.user_id).having(func.min(S.started_at) >= lo)
+            .having(func.min(S.started_at) <= hi).subquery()))).scalar() or 0)
+        returning = max(0, n - new_accounts)
+
+        repeat = sum(1 for a in accts if a["sessions"] > 1)
+        one_time = sum(1 for a in accts if a["sessions"] == 1)
+        one_time_rev = sum(a["revenue"] for a in accts if a["sessions"] == 1)
+
+        core = [a for a in accts if a["segment"] in ("Чемпионы", "Лояльные")]
+        risk = [a for a in accts if a["segment"] in ("Под риском", "Уснувшие", "Отток")]
+        core_rev = sum(a["revenue"] for a in core)
+        risk_rev = sum(a["revenue"] for a in risk)
+
+        by_rev = sorted((a["revenue"] for a in accts), reverse=True)
+        def top_share(pct: float) -> float:
+            k = max(1, round(n * pct / 100))
+            return round(sum(by_rev[:k]) / total_rev * 100, 1)
+        top10, top20 = top_share(10), top_share(20)
+
+        coh = (await self.cohorts(company_id, months=12))["cohorts"]
+        def avg_ret(offset: int) -> float | None:
+            elig = coh[:len(coh) - offset] if len(coh) > offset else []   # исключаем молодые когорты
+            num = sum(next((x["count"] for x in c["retention"] if x["offset"] == offset), 0) for c in elig)
+            den = sum(c["size"] for c in elig)
+            return round(num / den * 100, 1) if den else None
+        r1, r3 = avg_ret(1), avg_ret(3)
+
+        def pf(x: float) -> float:
+            return round(x / n * 100, 1)
+        def rf(x: float) -> float:
+            return round(x / total_rev * 100, 1)
+        kpis = {
+            "accounts": n, "new_accounts": new_accounts, "returning_accounts": returning,
+            "new_share": pf(new_accounts),
+            "repeat_rate": pf(repeat), "one_time_share": pf(one_time), "one_time_revenue_share": rf(one_time_rev),
+            "aov": round(total_rev / total_sessions, 2) if total_sessions else 0.0,
+            "frequency": round(total_sessions / n, 1), "arpa": round(total_rev / n, 2),
+            "core_accounts_share": pf(len(core)), "core_revenue_share": rf(core_rev),
+            "risk_accounts_share": pf(len(risk)), "risk_revenue": round(risk_rev, 2), "risk_revenue_share": rf(risk_rev),
+            "top10_revenue_share": top10, "top20_revenue_share": top20,
+            "retention_m1": r1, "retention_m3": r3,
+        }
+
+        # Автоматические выводы (потребительский маркетинг).
+        ins: list[dict[str, str]] = []
+        def add(level: str, text: str) -> None:
+            ins.append({"level": level, "text": text})
+        f1 = lambda v: f"{v:.1f}".replace(".", ",")
+        mm = lambda v: f"{round(v):,}".replace(",", " ")
+        add("warn" if top20 >= 75 else "info",
+            f"Концентрация: топ-20% клиентов дают {f1(top20)}% выручки (топ-10% — {f1(top10)}%). "
+            + ("База сильно зависит от ядра — приоритет удержания Чемпионов/Лояльных."
+               if top20 >= 75 else "Выручка распределена относительно равномерно."))
+        add("good" if kpis["repeat_rate"] >= 60 else "warn",
+            f"Повторно заряжаются {f1(kpis['repeat_rate'])}% клиентов; разовых — {f1(kpis['one_time_share'])}% "
+            f"({f1(kpis['one_time_revenue_share'])}% выручки). "
+            + ("Здоровая возвращаемость." if kpis["repeat_rate"] >= 60 else "Резерв — перевод разовых в повторные (welcome-механики)."))
+        add("good",
+            f"Ядро лояльности (Чемпионы+Лояльные) — {f1(kpis['core_accounts_share'])}% базы формирует "
+            f"{f1(kpis['core_revenue_share'])}% выручки. Удержание ядра — приоритет №1.")
+        add("warn" if kpis["risk_revenue_share"] >= 15 else "info",
+            f"В зоне риска (Под риском/Уснувшие/Отток) — {f1(kpis['risk_accounts_share'])}% клиентов и "
+            f"{mm(risk_rev)} ₽ ({f1(kpis['risk_revenue_share'])}% выручки). Цель — ре-активация (push/скидка).")
+        if r1 is not None:
+            add("good" if (r1 or 0) >= 40 else "warn",
+                f"Удержание когорт: M1 {f1(r1)}%" + (f", M3 {f1(r3)}%" if r3 is not None else "")
+                + (" — здоровый уровень для сети ЭЗС." if (r1 or 0) >= 40 else " — низкое: усилить онбординг и удержание в 1-й месяц."))
+        add("info",
+            f"Средняя частота {f1(kpis['frequency'])} зарядок/клиент · средний чек {mm(kpis['aov'])} ₽ · ARPA {mm(kpis['arpa'])} ₽.")
+        add("info",
+            f"Новых за период {mm(new_accounts)} ({f1(kpis['new_share'])}%), возвращающихся {mm(returning)}.")
+
+        return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "kpis": kpis, "insights": ins}
