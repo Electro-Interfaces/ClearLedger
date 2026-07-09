@@ -51,8 +51,9 @@ function SortTable<T>({ rows, cols, initial, rowKey }: { rows: T[]; cols: Col<T>
           {cols.map((c) => {
             const on = sort.key === c.key
             const Ico = on ? (sort.dir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+            const ariaSort: 'ascending' | 'descending' | 'none' = on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
             return (
-              <th key={c.key} className={`p-2 font-medium ${c.left ? 'text-left' : 'text-right'}`}>
+              <th key={c.key} aria-sort={ariaSort} className={`p-2 font-medium ${c.left ? 'text-left' : 'text-right'}`}>
                 <button onClick={() => toggle(c.key)} title="Сортировать"
                   className={`group inline-flex items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${c.left ? '' : 'flex-row-reverse'} ${on ? 'text-foreground' : ''}`}>
                   <span className="whitespace-nowrap">{c.label}</span>

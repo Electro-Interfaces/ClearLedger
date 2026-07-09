@@ -669,8 +669,9 @@ function AccountsTable({ rows, sort, onSort, onRow }: {
   const H = ({ c }: { c: { key: string; label: string } }) => {
     const on = sort.key === c.key
     const Ico = on ? (sort.order === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+    const ariaSort: 'ascending' | 'descending' | 'none' = on ? (sort.order === 'asc' ? 'ascending' : 'descending') : 'none'
     return (
-      <th className="p-2 text-right font-medium">
+      <th aria-sort={ariaSort} className="p-2 text-right font-medium">
         <button onClick={() => onSort(c.key)} title="Сортировать"
           className={`group inline-flex flex-row-reverse items-center gap-1 cursor-pointer hover:text-foreground ${on ? 'text-foreground' : ''}`}>
           <span className="whitespace-nowrap">{c.label}</span>

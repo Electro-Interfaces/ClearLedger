@@ -292,8 +292,9 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   const H = ({ k, children, left }: { k: string; children: ReactNode; left?: boolean }) => {
     const active = sort.key === k
     const Ico = active ? (sort.dir === 'asc' ? ArrowUp : ArrowDown) : ChevronsUpDown
+    const ariaSort: 'ascending' | 'descending' | 'none' = active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
     return (
-      <th className={`p-2 font-medium ${left ? 'text-left' : 'text-right'}`}>
+      <th aria-sort={ariaSort} className={`p-2 font-medium ${left ? 'text-left' : 'text-right'}`}>
         <button onClick={() => toggle(k)} title="Сортировать по столбцу"
           className={`group inline-flex items-center gap-1 cursor-pointer transition-colors hover:text-foreground ${left ? '' : 'flex-row-reverse'} ${active ? 'text-foreground' : ''}`}>
           <span className="whitespace-nowrap">{children}</span>
