@@ -134,6 +134,16 @@ async def store_writeoffs(
     )
 
 
+@router.get("/transfers")
+async def store_transfers(
+    direction: str | None = Query(None, description="фильтр по направлению"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Реестр перемещений ЦБ (ПеремещениеТоваров) откуда→куда + направления."""
+    return await GoodsDashboardService(db, user.company_id).transfers(direction=direction)
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 

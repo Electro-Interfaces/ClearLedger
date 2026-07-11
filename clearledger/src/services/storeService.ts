@@ -264,6 +264,32 @@ export const getStoreWriteoffs = (opts?: { warehouse?: string; reason?: string }
     reason: opts?.reason || undefined,
   })
 
+// ── Перемещения: реестр откуда→куда + направления ──
+export interface StoreTransferLine { ref: string; name: string; qty: number; price: number; amount: number }
+export interface StoreTransferDoc {
+  ref: string; number: string | null; date: string | null
+  from_code: string; from_name: string | null; to_code: string | null; to_name: string | null
+  direction: string | null; comment: string | null
+  positions: number; total_qty: number; total_amount: number
+  lines: StoreTransferLine[]
+}
+export interface StoreTransferData {
+  direction: string | null
+  docs: StoreTransferDoc[]
+  by_direction: { direction: string; count: number; amount: number }[]
+  top_sku: { name: string; qty: number; amount: number; docs: number }[]
+  summary: {
+    docs_count: number; total_amount: number
+    inbound_amount: number; outbound_amount: number; internal_amount: number
+    period_from: string | null; period_to: string | null
+  }
+}
+
+export const getStoreTransfers = (opts?: { direction?: string }) =>
+  get<StoreTransferData>('/api/store/transfers', {
+    direction: opts?.direction || undefined,
+  })
+
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null

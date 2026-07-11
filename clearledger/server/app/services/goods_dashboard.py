@@ -667,6 +667,71 @@ class GoodsDashboardService:
             },
         }
 
+    # ── Перемещения: реестр откуда→куда + направления (внутр/приход/расход) ──
+    async def transfers(self, *, direction: str | None = None) -> dict:
+        """Реестр перемещений ЦБ (ПеремещениеТоваров) относительно складов магазина.
+
+        Сумма = розн. стоимость перемещённого (Количество × Цена; себестоимость у
+        внутренних перемещений не заполнена). direction — фильтр по направлению.
+        """
+        docs = (await self.session.execute(select(CbMovementDoc).where(
+            CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.kind == "transfer"))).scalars().all()
+
+        dirs_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
+        for d in docs:
+            dirs_all[d.reason or "Прочее"]["count"] += 1
+            dirs_all[d.reason or "Прочее"]["amount"] += float(d.total_amount or 0)
+
+        sel = [d for d in docs if (not direction or d.reason == direction)]
+
+        out_docs = []
+        sku: dict[str, dict] = defaultdict(lambda: {"name": None, "qty": 0.0, "amount": 0.0, "docs": 0})
+        tot_amt = 0.0
+        dates = []
+        for d in sel:
+            amt = float(d.total_amount or 0)
+            tot_amt += amt
+            if d.doc_date:
+                dates.append(d.doc_date)
+            for ln in (d.lines or []):
+                k = ln.get("ref") or ln.get("name")
+                sk = sku[k]; sk["name"] = ln.get("name")
+                sk["qty"] += float(ln.get("qty") or 0)
+                sk["amount"] += float(ln.get("amount") or 0)
+                sk["docs"] += 1
+            out_docs.append({
+                "ref": d.external_ref, "number": d.number, "date": d.doc_date,
+                "from_code": d.warehouse_code, "from_name": d.warehouse_name,
+                "to_code": d.warehouse_to_code, "to_name": d.warehouse_to_name,
+                "direction": d.reason, "comment": d.comment,
+                "positions": d.positions, "total_qty": float(d.total_qty or 0),
+                "total_amount": amt, "lines": d.lines or [],
+            })
+        out_docs.sort(key=lambda x: (x["date"] or ""), reverse=True)
+
+        by_direction = [{"direction": r, "count": v["count"], "amount": round(v["amount"], 2)}
+                        for r, v in sorted(dirs_all.items(), key=lambda x: -x[1]["amount"])]
+        top_sku = sorted(sku.values(), key=lambda x: -x["amount"])[:12]
+        for t in top_sku:
+            t["qty"] = round(t["qty"], 3); t["amount"] = round(t["amount"], 2)
+
+        return {
+            "direction": direction,
+            "docs": out_docs,
+            "by_direction": by_direction,
+            "top_sku": top_sku,
+            "summary": {
+                "docs_count": len(sel),
+                "total_amount": round(tot_amt, 2),
+                "inbound_amount": round(dirs_all.get("Приход (на 208)", {}).get("amount", 0.0), 2),
+                "outbound_amount": round(dirs_all.get("Расход (с 208)", {}).get("amount", 0.0), 2),
+                "internal_amount": round(dirs_all.get("Внутреннее (склад↔зал)", {}).get("amount", 0.0), 2),
+                "period_from": (min(dates) if dates else None),
+                "period_to": (max(dates) if dates else None),
+            },
+        }
+
     # ── Рецептуры (ТТК): блюда общепита → ингредиенты ──
     async def recipes(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
         metas = self._select(await self._load(), date_from, date_to, stations)
