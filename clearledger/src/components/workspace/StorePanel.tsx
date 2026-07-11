@@ -21,6 +21,7 @@ import { StoreStockPanel } from './StoreStockPanel'
 import { StoreInventoryPanel } from './StoreInventoryPanel'
 import { StoreWriteoffPanel } from './StoreWriteoffPanel'
 import { StoreTransferPanel } from './StoreTransferPanel'
+import { StoreRevaluationPanel } from './StoreRevaluationPanel'
 import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCateringPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
 import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
 
@@ -145,6 +146,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreTransferPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'revaluation') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreRevaluationPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

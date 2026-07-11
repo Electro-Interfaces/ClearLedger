@@ -144,6 +144,16 @@ async def store_transfers(
     return await GoodsDashboardService(db, user.company_id).transfers(direction=direction)
 
 
+@router.get("/revaluation")
+async def store_revaluation(
+    reason: str | None = Query(None, description="фильтр направления (Подорожание/Удешевление/Смешанная)"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Реестр переоценок ЦБ (ПереоценкаТоваровАЗК): старая→новая цена, Δ%, влияние."""
+    return await GoodsDashboardService(db, user.company_id).revaluation(reason=reason)
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 

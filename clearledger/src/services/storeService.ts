@@ -290,6 +290,34 @@ export const getStoreTransfers = (opts?: { direction?: string }) =>
     direction: opts?.direction || undefined,
   })
 
+// ── Переоценка: изменения цен (старая→новая, Δ%) + подорожания/удешевления ──
+export interface StoreRevalLine { ref: string; name: string; old: number; new: number; delta: number; pct: number | null; qty: number }
+export interface StoreRevalMove { name: string; old: number; new: number; delta: number; pct: number | null }
+export interface StoreRevalDoc {
+  ref: string; number: string | null; date: string | null
+  warehouse_code: string; warehouse_name: string | null
+  reason: string | null; comment: string | null
+  positions: number; up_count: number; value_impact: number
+  lines: StoreRevalLine[]
+}
+export interface StoreRevaluationData {
+  reason: string | null
+  docs: StoreRevalDoc[]
+  by_reason: { reason: string; count: number }[]
+  top_up: StoreRevalMove[]
+  top_down: StoreRevalMove[]
+  summary: {
+    docs_count: number; up_lines: number; down_lines: number
+    avg_pct: number | null; value_impact: number
+    period_from: string | null; period_to: string | null
+  }
+}
+
+export const getStoreRevaluation = (opts?: { reason?: string }) =>
+  get<StoreRevaluationData>('/api/store/revaluation', {
+    reason: opts?.reason || undefined,
+  })
+
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null

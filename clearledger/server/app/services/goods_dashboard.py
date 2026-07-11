@@ -732,6 +732,74 @@ class GoodsDashboardService:
             },
         }
 
+    # ── Переоценка: реестр изменений цен + подорожания/удешевления ──
+    async def revaluation(self, *, reason: str | None = None) -> dict:
+        """Реестр переоценок ЦБ (ПереоценкаТоваровАЗК): старая→новая розн. цена,
+        Δ%, влияние на стоимость остатка (Σ Δ×кол). reason — фильтр направления."""
+        docs = (await self.session.execute(select(CbMovementDoc).where(
+            CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.kind == "revaluation"))).scalars().all()
+
+        reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0})
+        for d in docs:
+            reasons_all[d.reason or "—"]["count"] += 1
+
+        sel = [d for d in docs if (not reason or d.reason == reason)]
+
+        out_docs = []
+        up_lines = down_lines = 0
+        pct_sum = pct_n = 0.0
+        impact = 0.0
+        dates = []
+        best_by_sku: dict[str, dict] = {}  # SKU → строка с макс |delta|
+        for d in sel:
+            impact += float(d.total_amount or 0)
+            if d.doc_date:
+                dates.append(d.doc_date)
+            for ln in (d.lines or []):
+                delta = float(ln.get("delta") or 0)
+                if delta > 0:
+                    up_lines += 1
+                elif delta < 0:
+                    down_lines += 1
+                if ln.get("pct") is not None:
+                    pct_sum += float(ln["pct"]); pct_n += 1
+                k = ln.get("ref") or ln.get("name")
+                prev = best_by_sku.get(k)
+                if prev is None or abs(delta) > abs(prev["delta"]):
+                    best_by_sku[k] = {"name": ln.get("name"), "old": ln.get("old"),
+                                      "new": ln.get("new"), "delta": delta, "pct": ln.get("pct")}
+            out_docs.append({
+                "ref": d.external_ref, "number": d.number, "date": d.doc_date,
+                "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
+                "reason": d.reason, "comment": d.comment,
+                "positions": d.positions, "up_count": int(d.total_qty or 0),
+                "value_impact": float(d.total_amount or 0), "lines": d.lines or [],
+            })
+        out_docs.sort(key=lambda x: (x["date"] or ""), reverse=True)
+
+        moves = list(best_by_sku.values())
+        top_up = sorted([m for m in moves if (m["pct"] or 0) > 0], key=lambda x: -(x["pct"] or 0))[:10]
+        top_down = sorted([m for m in moves if (m["pct"] or 0) < 0], key=lambda x: (x["pct"] or 0))[:10]
+        by_reason = [{"reason": r, "count": v["count"]}
+                     for r, v in sorted(reasons_all.items(), key=lambda x: -x[1]["count"])]
+
+        return {
+            "reason": reason,
+            "docs": out_docs,
+            "by_reason": by_reason,
+            "top_up": top_up,
+            "top_down": top_down,
+            "summary": {
+                "docs_count": len(sel),
+                "up_lines": up_lines, "down_lines": down_lines,
+                "avg_pct": round(pct_sum / pct_n, 1) if pct_n else None,
+                "value_impact": round(impact, 2),
+                "period_from": (min(dates) if dates else None),
+                "period_to": (max(dates) if dates else None),
+            },
+        }
+
     # ── Рецептуры (ТТК): блюда общепита → ингредиенты ──
     async def recipes(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
         metas = self._select(await self._load(), date_from, date_to, stations)
