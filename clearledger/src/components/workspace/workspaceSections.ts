@@ -8,7 +8,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, Landmark, BookOpen, Receipt, FileOutput } from 'lucide-react'
+import { BarChart3, Gauge, Landmark, BookOpen, Receipt, FileOutput, ShoppingCart } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import type { CentralMenuItem } from './CentralPanelLayout'
@@ -16,16 +16,19 @@ import { getWorkspaceModule } from '@/config/workspaceModules'
 import { balanceModuleForProfile } from '@/config/balanceModules'
 import { useModuleConnections, isModuleConnected, isComponentEnabled } from '@/services/moduleConnectionService'
 import { getModuleComponentDefs } from '@/config/moduleComponents'
+import { STORE_MENU } from '@/config/storeCatalog'
 
 /* ── Наборы под-разделов ── */
 
 // Управленческий контур сети АЗС (нефтепродукты)
 export const MGMT_MENU: CentralMenuItem[] = [
-  { key: 'overview',   label: 'Обзор' },
-  { key: 'channels',   label: 'Каналы продаж' },
-  { key: 'margin',     label: 'Маржа и цены' },
-  { key: 'purchases',  label: 'Поступления' },
-  { key: 'tanks',      label: 'Топливный баланс' },
+  { key: 'overview',     label: 'Обзор' },
+  { key: 'map',          label: 'Карта' },
+  { key: 'channels',     label: 'Каналы продаж' },
+  { key: 'transactions', label: 'Операции' },
+  { key: 'margin',       label: 'Маржа и цены' },
+  { key: 'purchases',    label: 'Поступления' },
+  { key: 'tanks',        label: 'Топливный баланс' },
 ]
 
 // Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).
@@ -72,6 +75,10 @@ export const TAX_MENU: CentralMenuItem[] = [
   { key: 'compliance', label: 'Соответствие' },
 ]
 
+// «Магазин» (mode=store) — товароучёт сопутки/общепита: полная целевая карта
+// (коннектор, аналитика, товары/НСИ, движение, Честный Знак, выгрузка в БП).
+// Меню задаётся data-driven в config/storeCatalog.ts (STORE_MENU).
+
 /* ── Разделы ── */
 
 export interface WorkspaceSection {
@@ -108,6 +115,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ...(balMod && on(balMod.id) ? [{ key: 'balance', label: balMod.navLabel }] : []),
   ]
 
+  const storeOn = on('store_module')
   const finOn = isEnergy ? on('fin_energy') : on('financial')
   const accOn = isEnergy ? on('acc_energy') : on('accounting')
   const taxOn = isEnergy ? on('tax_energy') : on('tax')
@@ -125,6 +133,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   return [
     { mode: 'management', label: 'Продажи',        icon: BarChart3,  items: mgmtItems, connected: mgmtItems.length > 0 },
     { mode: 'operations', label: 'Управленческий', icon: Gauge,      items: opsItems, connected: opsItems.length > 0 },
+    { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn },
     { mode: 'financial',  label: 'Финансовый',     icon: Landmark,   items: !isEnergy && finOn ? FIN_MENU : [], connected: finOn },
     { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,   items: accItems, connected: accOn },
     { mode: 'tax',        label: 'Налоговый',      icon: Receipt,    items: !isEnergy && taxOn ? TAX_MENU : [], connected: taxOn },

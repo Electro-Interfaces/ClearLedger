@@ -9,7 +9,7 @@
  */
 
 export type AccessKey =
-  | 'management' | 'financial' | 'accounting' | 'tax'
+  | 'management' | 'store' | 'financial' | 'accounting' | 'tax'
   | 'documents' | 'reconciliation' | 'sources' | 'locations' | 'onec' | 'catalog'
 
 export interface AccessModuleDef {
@@ -23,6 +23,7 @@ export interface AccessModuleDef {
 
 export const ACCESS_MODULES: AccessModuleDef[] = [
   { key: 'management', label: 'Продажи', group: 'Режимы учёта', mode: 'management', routes: [], hint: 'аналитика, KPI, сессии, баланс' },
+  { key: 'store', label: 'Магазин', group: 'Режимы учёта', mode: 'store', routes: [], hint: 'сопутка/общепит: коннектор 1С, аналитика ассортимента, выгрузка в БП' },
   { key: 'financial', label: 'Финансовый', group: 'Режимы учёта', mode: 'financial', routes: [], hint: 'денежные потоки, ДЗ/КЗ' },
   { key: 'accounting', label: 'Бухгалтерский', group: 'Режимы учёта', mode: 'accounting', routes: ['/forecast'], hint: 'проводки, 1С, закрытие месяца' },
   { key: 'tax', label: 'Налоговый', group: 'Режимы учёта', mode: 'tax', routes: [], hint: 'НДС, налог на прибыль' },

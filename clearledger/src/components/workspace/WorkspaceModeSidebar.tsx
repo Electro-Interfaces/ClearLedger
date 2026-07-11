@@ -12,9 +12,22 @@ import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { modeAllowed } from '@/config/accessModules'
 import { useWorkspaceSections } from './workspaceSections'
+import type { CentralMenuItem } from './CentralPanelLayout'
 import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 const COLLAPSE_KEY = 'cl-mode-sidebar-collapsed'
+const GROUPS_KEY = 'cl-mode-sidebar-groups-v2'
+
+/** Сгруппировать под-разделы по полю group, сохраняя порядок. */
+function groupItems(items: CentralMenuItem[]): { name?: string; items: CentralMenuItem[] }[] {
+  const groups: { name?: string; items: CentralMenuItem[] }[] = []
+  for (const it of items) {
+    const last = groups[groups.length - 1]
+    if (last && last.name === it.group) last.items.push(it)
+    else groups.push({ name: it.group, items: [it] })
+  }
+  return groups
+}
 
 export function WorkspaceModeSidebar() {
   const { companyModules } = useCompany()
@@ -44,6 +57,20 @@ export function WorkspaceModeSidebar() {
     const nv = !c
     try { localStorage.setItem(COLLAPSE_KEY, nv ? '1' : '0') } catch { /* ignore */ }
     return nv
+  })
+
+  // Явные переключения групп пользователем (ключ mode:group → свёрнута?). Персист
+  // между сессиями. Дефолт (нет override) — группа СВЁРНУТА, кроме активной.
+  const [groupOverrides, setGroupOverrides] = useState<Record<string, boolean>>(() => {
+    try {
+      const p = JSON.parse(localStorage.getItem(GROUPS_KEY) || '{}')
+      return p && typeof p === 'object' && !Array.isArray(p) ? p as Record<string, boolean> : {}
+    } catch { return {} }
+  })
+  const setGroupCollapsed = (k: string, collapsed: boolean) => setGroupOverrides((prev) => {
+    const n = { ...prev, [k]: collapsed }
+    try { localStorage.setItem(GROUPS_KEY, JSON.stringify(n)) } catch { /* ignore */ }
+    return n
   })
 
   const setSub = (key: string) => {
@@ -141,29 +168,44 @@ export function WorkspaceModeSidebar() {
               )}
             </button>
 
-            {/* Под-разделы раскрытого раздела — гармошка */}
+            {/* Под-разделы раскрытого раздела — гармошка со сворачиваемыми группами */}
             {expanded && hasItems && (
               <div className="mt-0.5 mb-1 ml-4 pl-2 border-l border-border/40 flex flex-col gap-0.5">
-                {section.items.map((item, i) => {
-                  const subActive = item.key === activeSub
-                  const showGroup = !!item.group && item.group !== section.items[i - 1]?.group
+                {groupItems(section.items).map((grp) => {
+                  const gKey = `${section.mode}:${grp.name ?? ''}`
+                  const groupActive = grp.items.some((i) => i.key === activeSub)
+                  const override = grp.name ? groupOverrides[gKey] : undefined
+                  // Дефолт: свёрнута, если НЕ содержит активный под-раздел; override переопределяет.
+                  const gCollapsed = !!grp.name && (override !== undefined ? override : !groupActive)
                   return (
-                    <div key={item.key}>
-                      {showGroup && (
-                        <div className="px-3 pt-2 pb-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/50">
-                          {item.group}
-                        </div>
+                    <div key={gKey}>
+                      {grp.name && (
+                        <button
+                          onClick={() => setGroupCollapsed(gKey, !gCollapsed)}
+                          className="flex items-center gap-1.5 w-full px-2 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75 hover:text-foreground transition-colors"
+                        >
+                          {gCollapsed
+                            ? <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                            : <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />}
+                          <span className="flex-1 text-left">{grp.name}</span>
+                        </button>
                       )}
-                      <button
-                        onClick={() => setSub(item.key)}
-                        className={`w-full px-3 py-1.5 rounded-md text-[13px] text-left whitespace-nowrap transition-colors ${
-                          subActive
-                            ? 'bg-primary/10 text-primary font-medium'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
+                      {!gCollapsed && grp.items.map((item) => {
+                        const subActive = item.key === activeSub
+                        return (
+                          <button
+                            key={item.key}
+                            onClick={() => setSub(item.key)}
+                            className={`w-full px-3 py-1.5 rounded-md text-[13px] text-left whitespace-nowrap transition-colors ${
+                              subActive
+                                ? 'bg-primary/10 text-primary font-medium'
+                                : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        )
+                      })}
                     </div>
                   )
                 })}

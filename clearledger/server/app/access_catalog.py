@@ -8,7 +8,7 @@
 
 # Все допустимые ключи доступа (валидация входных modules).
 ACCESS_KEYS: set[str] = {
-    "management", "financial", "accounting", "tax",
+    "management", "store", "financial", "accounting", "tax",
     "documents", "reconciliation", "sources", "locations", "onec", "catalog",
 }
 

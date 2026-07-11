@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { NormalizationPanel } from './NormalizationPanel'
 import { ReconciliationPanel } from './ReconciliationPanel'
 import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
+import { StorePanel } from './StorePanel'
 import { ExportLayerPanel } from './ExportLayerPanel'
 import { ExportPanel } from './ExportPanel'
 import { OnboardingScreen } from './OnboardingScreen'
@@ -94,7 +95,7 @@ function DesktopWorkspace() {
             <div className="h-full flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  {{ normalize: 'Нормализация', reconcile: 'Сверка данных', management: 'Продажи', operations: 'Управленческий', financial: 'Финансовый учёт', accounting: 'Бухгалтерский учёт', tax: 'Налоговый учёт', export: isEnergy ? 'Выгрузка' : 'Выгрузка в 1С' }[coreMode]}
+                  {{ normalize: 'Нормализация', reconcile: 'Сверка данных', management: 'Продажи', operations: 'Управленческий', store: 'Магазин', financial: 'Финансовый учёт', accounting: 'Бухгалтерский учёт', tax: 'Налоговый учёт', export: isEnergy ? 'Выгрузка' : 'Выгрузка в 1С' }[coreMode]}
                 </h2>
 
                 {/* KPI результатов сверки */}
@@ -132,6 +133,7 @@ function DesktopWorkspace() {
                 {coreMode === 'reconcile' && <ReconciliationPanel />}
                 {coreMode === 'management' && <ManagementPanel />}
                 {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+                {coreMode === 'store' && <StorePanel />}
                 {coreMode === 'financial' && <FinancialPanel />}
                 {coreMode === 'accounting' && <AccountingPanel />}
                 {coreMode === 'tax' && <TaxPanel />}
@@ -247,6 +249,7 @@ function MobileWorkspace() {
         {coreMode === 'reconcile' && <ReconciliationPanel />}
         {coreMode === 'management' && <ManagementPanel />}
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+        {coreMode === 'store' && <StorePanel />}
         {coreMode === 'financial' && <FinancialPanel />}
         {coreMode === 'accounting' && <AccountingPanel />}
         {coreMode === 'tax' && <TaxPanel />}

@@ -7,10 +7,12 @@
  * под-раздел в заголовок не попадает (не критично).
  */
 import type { CoreMode } from '@/contexts/WorkspaceContext'
+import { STORE_MENU } from './storeCatalog'
 
 export const MODE_LABELS: Record<CoreMode, string> = {
   management: 'Продажи',
   operations: 'Управленческий',
+  store: 'Магазин',
   financial: 'Финансовый',
   accounting: 'Бухгалтерский',
   tax: 'Налоговый',
@@ -31,6 +33,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   operations: {
     procurement: 'Энергозакупка', rent: 'Аренда', balance: 'Баланс ЭЗС',
   },
+  store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),
   financial: {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',
   },

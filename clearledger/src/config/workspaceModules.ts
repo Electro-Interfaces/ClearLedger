@@ -56,6 +56,18 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
       { key: 'vat', label: 'Ставка НДС, %' },
     ],
   },
+  // ── Магазин ──
+  {
+    id: 'store_module', label: 'Магазин (сопутка/общепит)', section: 'Магазин',
+    description: 'Товароучёт сопутствующих товаров и общепита: коннектор чтения из 1С (ЦБ/станция), управленческая аналитика по ассортименту (продажи, маржа, оборачиваемость, ABC/XYZ), выгрузка пакетов в БП ГИГ. Первый шаг — Ledger как единый продюсер пакетов вместо TL_ЭкспортБП.',
+    profiles: ['fuel'], status: 'active',
+    params: [
+      { key: 'stations', label: 'Станции', hint: '208 (Выборг); далее 5/8/209/210' },
+      { key: 'cbConnection', label: 'Подключение ЦБ', hint: 'azs_centre (COM через vpn-gw, read-only)' },
+      { key: 'defaultPeriod', label: 'Период по умолчанию' },
+      { key: 'parallelReconcile', label: 'Параллельная сверка с текущим каналом', hint: 'вкл — сверять пакеты Ledger ↔ TL_ЭкспортБП' },
+    ],
+  },
   {
     id: 'procurement', label: 'Энергозакупка', section: 'Продажи',
     description: 'Закупка э/э по поставщикам, ₽/кВт·ч, договоры энергоснабжения, эффективность закупки.',

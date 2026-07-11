@@ -1,0 +1,141 @@
+/**
+ * Раздел «Магазин» — товароучёт сопутки/общепита (профиль fuel, компания ГИГ).
+ *
+ * Полная целевая карта раздела задаётся data-driven в `@/config/storeCatalog`
+ * (STORE_VIEWS): 22 под-экрана в 5 группах — Аналитика, Данные, Товары, Движение,
+ * Честный Знак. Часть — заглушки (status='planned'), наполняются по мере данных.
+ *
+ * Под-навигация (меню с под-разделами) рисуется гармошкой WorkspaceModeSidebar
+ * из STORE_MENU — здесь только КОНТЕНТ активного под-раздела (без своего меню-столбца,
+ * иначе меню задвоится).
+ */
+
+import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
+import { useFilters } from '@/contexts/FilterContext'
+import { useCompany } from '@/contexts/CompanyContext'
+import { StoreOverviewPanel } from './StoreOverviewPanel'
+import { StoreSalesPanel } from './StoreSalesPanel'
+import { StoreNomenclaturePanel } from './StoreNomenclaturePanel'
+import { StoreSkuPanel, type SkuMode } from './StoreSkuPanel'
+import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCateringPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
+import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
+
+// Под-экраны, работающие на реестре SKU (/api/store/skus).
+const SKU_MODES: Record<string, SkuMode> = {
+  assortment: 'assortment', pricing: 'pricing',
+  stock: 'stock', gtin: 'marked',
+}
+
+// Под-экраны на отчётных эндпоинтах (/api/store/{report}).
+const REPORT_PANELS: Record<string, typeof StoreReceiptsPanel> = {
+  receipts: StoreReceiptsPanel, suppliers: StoreSuppliersPanel,
+  menu: StoreCateringPanel, categories: StoreCategoriesPanel,
+  barcodes: StoreBarcodesPanel, recipes: StoreRecipesPanel,
+}
+
+const STATUS_STYLE: Record<StoreStatus, { label: string; cls: string }> = {
+  ready:   { label: 'основа готова', cls: 'border-emerald-400/40 text-emerald-300/80' },
+  wip:     { label: 'в работе',      cls: 'border-amber-400/40 text-amber-300/80' },
+  planned: { label: 'заложено',      cls: 'border-zinc-600 text-zinc-400' },
+}
+
+function StatusBadge({ status }: { status: StoreStatus }) {
+  const s = STATUS_STYLE[status]
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${s.cls}`}>
+      {s.label}
+    </span>
+  )
+}
+
+function ViewScaffold({ view }: { view: StoreView }) {
+  const Icon = view.icon
+  return (
+    <div className="max-w-4xl">
+      <div className="flex items-start gap-3 mb-1.5">
+        <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary shrink-0">
+          <Icon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-base font-semibold">{view.title}</h3>
+            <StatusBadge status={view.status} />
+          </div>
+          <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">{view.subtitle}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+        {view.blocks.map((b) => (
+          <div key={b.name} className="rounded-lg border border-border/50 bg-card/40 p-3">
+            <div className="text-sm font-medium">{b.name}</div>
+            <div className="text-xs text-muted-foreground mt-1 leading-relaxed">{b.desc}</div>
+            {b.source && (
+              <div className="text-[10px] text-muted-foreground/60 mt-1.5 font-mono break-all">{b.source}</div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {view.status === 'planned' && (
+        <div className="mt-4 rounded-lg border border-dashed border-amber-400/30 bg-amber-400/5 p-3 text-xs text-amber-200/70 leading-relaxed">
+          ⚠ Данных для этого экрана в текущем канале (ЦБ ЭЛСИ.АЗК · АЗС 208) пока нет — таких
+          документов канал не передаёт. Появятся при подключении источника: регистр штрихкодов,
+          документы перемещений / инвентаризаций / списаний / возвратов, ЭДО и Честный Знак.
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function StorePanel() {
+  const [sub] = useWorkspaceSubView(STORE_DEFAULT_KEY, STORE_KEYS)
+  const { period } = useFilters()
+  const { companyId } = useCompany()
+
+  // «Обзор» — executive-дашборд; SKU-экраны — реестр товаров; прочие — scaffold.
+  if (sub === 'overview') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreOverviewPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'sales') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreSalesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'nomenclature') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreNomenclaturePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  const skuMode = SKU_MODES[sub]
+  if (skuMode) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreSkuPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} mode={skuMode} />
+      </div>
+    )
+  }
+  const Report = REPORT_PANELS[sub]
+  if (Report) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <Report companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+
+  const view = getStoreView(sub) ?? getStoreView(STORE_DEFAULT_KEY)!
+  return (
+    <div className="h-full overflow-y-auto p-6">
+      <ViewScaffold view={view} />
+    </div>
+  )
+}
