@@ -236,6 +236,34 @@ export const getStoreInventory = (opts?: { warehouse?: string; onlyDev?: boolean
     only_dev: opts?.onlyDev ? 'true' : undefined,
   })
 
+// ── Списания: реестр + причины (недостача/брак/срок/…) + топ SKU ──
+export interface StoreWriteoffLine { ref: string; name: string; qty: number; amount: number; price: number }
+export interface StoreWriteoffDoc {
+  ref: string; number: string | null; date: string | null
+  warehouse_code: string; warehouse_name: string | null
+  reason: string | null; from_inventory: boolean; comment: string | null
+  positions: number; total_qty: number; total_amount: number
+  lines: StoreWriteoffLine[]
+}
+export interface StoreWriteoffData {
+  warehouse: string | null
+  warehouses: { code: string; name: string | null; count: number }[]
+  docs: StoreWriteoffDoc[]
+  by_reason: { reason: string; count: number; amount: number }[]
+  top_sku: { name: string; qty: number; amount: number; docs: number }[]
+  summary: {
+    docs_count: number; total_amount: number
+    from_inventory_amount: number; other_amount: number
+    period_from: string | null; period_to: string | null
+  }
+}
+
+export const getStoreWriteoffs = (opts?: { warehouse?: string; reason?: string }) =>
+  get<StoreWriteoffData>('/api/store/writeoffs', {
+    warehouse: opts?.warehouse || undefined,
+    reason: opts?.reason || undefined,
+  })
+
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null

@@ -121,6 +121,19 @@ async def store_inventory(
     )
 
 
+@router.get("/writeoffs")
+async def store_writeoffs(
+    warehouse: str | None = Query(None, description="код склада (по умолч. — все склады магазина)"),
+    reason: str | None = Query(None, description="фильтр по причине"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Реестр списаний ЦБ (СписаниеТоваров) + причины + топ списанных SKU."""
+    return await GoodsDashboardService(db, user.company_id).writeoffs(
+        warehouse=warehouse, reason=reason,
+    )
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 

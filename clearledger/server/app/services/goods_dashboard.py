@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand, CbInventoryDoc
+from app.models import DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand, CbInventoryDoc, CbMovementDoc
 
 # секция meta → категория UI
 _SECTIONS = (("продажа_сопутка", "Сопутка"), ("продажа_общепит", "Общепит"))
@@ -595,6 +595,73 @@ class GoodsDashboardService:
                 "shortage_amount": round(tot_sh, 2),
                 "surplus_amount": round(tot_su, 2),
                 "net_amount": round(tot_sh + tot_su, 2),
+                "period_from": (min(dates) if dates else None),
+                "period_to": (max(dates) if dates else None),
+            },
+        }
+
+    # ── Списания: реестр + причины (недостача/брак/…) + топ списанных SKU ──
+    async def writeoffs(self, *, warehouse: str | None = None, reason: str | None = None) -> dict:
+        """Реестр списаний ЦБ (СписаниеТоваров) + разбивка по причинам и топ SKU."""
+        docs = (await self.session.execute(select(CbMovementDoc).where(
+            CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.kind == "writeoff"))).scalars().all()
+
+        wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
+        reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
+        for d in docs:
+            w = wh_agg[d.warehouse_code]; w["name"] = d.warehouse_name; w["count"] += 1
+        warehouses = [{"code": c, "name": v["name"], "count": v["count"]}
+                      for c, v in sorted(wh_agg.items(), key=lambda x: -x[1]["count"])]
+
+        sel = [d for d in docs if (not warehouse or d.warehouse_code == warehouse)
+               and (not reason or d.reason == reason)]
+
+        out_docs = []
+        sku: dict[str, dict] = defaultdict(lambda: {"name": None, "qty": 0.0, "amount": 0.0, "docs": 0})
+        tot_amt = inv_amt = 0.0
+        dates = []
+        for d in sel:
+            amt = float(d.total_amount or 0)
+            tot_amt += amt
+            if d.from_inventory:
+                inv_amt += amt
+            reasons_all[d.reason or "Прочее"]["count"] += 1
+            reasons_all[d.reason or "Прочее"]["amount"] += amt
+            if d.doc_date:
+                dates.append(d.doc_date)
+            for ln in (d.lines or []):
+                k = ln.get("ref") or ln.get("name")
+                sk = sku[k]; sk["name"] = ln.get("name")
+                sk["qty"] += float(ln.get("qty") or 0)
+                sk["amount"] += float(ln.get("amount") or 0)
+                sk["docs"] += 1
+            out_docs.append({
+                "ref": d.external_ref, "number": d.number, "date": d.doc_date,
+                "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
+                "reason": d.reason, "from_inventory": d.from_inventory, "comment": d.comment,
+                "positions": d.positions, "total_qty": float(d.total_qty or 0),
+                "total_amount": amt, "lines": d.lines or [],
+            })
+        out_docs.sort(key=lambda x: (x["date"] or ""), reverse=True)
+
+        by_reason = [{"reason": r, "count": v["count"], "amount": round(v["amount"], 2)}
+                     for r, v in sorted(reasons_all.items(), key=lambda x: -x[1]["amount"])]
+        top_sku = sorted(sku.values(), key=lambda x: -x["amount"])[:12]
+        for t in top_sku:
+            t["qty"] = round(t["qty"], 3); t["amount"] = round(t["amount"], 2)
+
+        return {
+            "warehouse": warehouse,
+            "warehouses": warehouses,
+            "docs": out_docs,
+            "by_reason": by_reason,
+            "top_sku": top_sku,
+            "summary": {
+                "docs_count": len(sel),
+                "total_amount": round(tot_amt, 2),
+                "from_inventory_amount": round(inv_amt, 2),
+                "other_amount": round(tot_amt - inv_amt, 2),
                 "period_from": (min(dates) if dates else None),
                 "period_to": (max(dates) if dates else None),
             },

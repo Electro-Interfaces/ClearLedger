@@ -385,6 +385,44 @@ class CbInventoryDoc(Base):
 
 
 # ---------------------------------------------------------------------------
+# CbMovementDoc — обобщённый документ товародвижения из ЦБ (снимок, режим A).
+# kind: writeoff (СписаниеТоваров) | transfer (ПеремещениеТоваров) | …
+# Реестр + строки (lines JSONB). Для списаний: reason/from_inventory; для
+# перемещений: warehouse_to_*. Наполняется скриптами pull_cb_<kind>_dev.py.
+# ---------------------------------------------------------------------------
+class CbMovementDoc(Base):
+    __tablename__ = "cb_movement_doc"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # writeoff | transfer
+    external_ref: Mapped[str] = mapped_column(String(36), nullable=False)
+    number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    doc_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    warehouse_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    warehouse_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    warehouse_to_code: Mapped[str | None] = mapped_column(String(20), nullable=True)     # перемещение → получатель
+    warehouse_to_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(60), nullable=True)                 # классификация (списания)
+    from_inventory: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    positions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_qty: Mapped[float] = mapped_column(Numeric(16, 3), nullable=False, default=0)
+    total_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    lines: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # [{ref,name,qty,amount,price}]
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uq_cb_movement_doc", "company_id", "kind", "external_ref", unique=True),
+        Index("ix_cb_movement_kind", "company_id", "kind"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # AuditEvent
 # ---------------------------------------------------------------------------
 class AuditEvent(Base):
