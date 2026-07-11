@@ -182,7 +182,9 @@ export interface StoreStockItem {
   guid: string; name: string; article: string | null; vat: string | null
   marked: boolean; weighed: boolean; barcode: string | null
   qty: number; negative: boolean
-  retail_price: number | null; retail_value: number | null; cost_amount: number | null
+  retail_price: number | null; retail_value: number | null
+  cost_unit: number | null; cost_amount: number | null
+  margin: number | null; margin_pct: number | null
 }
 export interface StoreStockWarehouse { code: string; name: string | null; sku: number; retail_value: number }
 export interface StoreStockData {
@@ -191,7 +193,9 @@ export interface StoreStockData {
   items: StoreStockItem[]
   summary: {
     sku_count: number; positive: number; negative: number
-    retail_value_positive: number; retail_value_all: number; marked_count: number; units_positive: number
+    retail_value_positive: number; retail_value_all: number
+    cost_value: number; costed_count: number; margin_value: number; margin_pct: number | null
+    marked_count: number; units_positive: number
   }
 }
 

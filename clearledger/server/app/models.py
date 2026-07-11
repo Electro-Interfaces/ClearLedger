@@ -337,7 +337,10 @@ class StockOnHand(Base):
     nomenclature_ref: Mapped[str] = mapped_column(String(36), nullable=False)  # GUID номенклатуры ЦБ
     quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)
     retail_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)   # ЦенаВРознице
-    cost_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)    # Σ Стоимость партий (себест.)
+    cost_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)    # (не используется)
+    # Удельная себестоимость (закуп.) за БАЗОВУЮ единицу = ПартииТоваровНаСкладах
+    # Стоимость/Количество — в тех же единицах, что и остаток (сигареты/блоки, весовые).
+    cost_unit: Mapped[float | None] = mapped_column(Numeric(16, 4), nullable=True)
     barcode: Mapped[str | None] = mapped_column(String(64), nullable=True)
     snapshot_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -1604,6 +1607,64 @@ class OnlineOrder(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_online_orders_ext", "company_id", "external_id", unique=True),
+        Index("idx_online_orders_company_date", "company_id", "order_date"),
+        Index("idx_online_orders_station_date", "company_id", "station_id", "order_date"),
+    )
+
+
+class OnlineReconciliationDecision(Base):
+    """Решение оператора по расхождению онлайн-заказов и корректировка L2."""
+    __tablename__ = "online_reconciliation_decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    case_key: Mapped[str] = mapped_column(String(180), nullable=False)
+    station_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="SET NULL"), nullable=True
+    )
+    shift_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fuel_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    online_order_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("online_orders.id", ondelete="SET NULL"), nullable=True
+    )
+    fuel_transaction_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_transactions.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    resolution: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    target_system: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    canonical_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    canonical_volume: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_online_recon_decision", "company_id", "case_key", unique=True),
+        Index("idx_online_recon_status", "company_id", "status"),
+        Index(
+            "idx_online_recon_shift", "company_id", "station_id", "shift_number"
+        ),
     )
 
 

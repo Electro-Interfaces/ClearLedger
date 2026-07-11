@@ -46,15 +46,19 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
   const kpiRetailPos = items.reduce((s, i) => s + (i.qty > 0 ? (i.retail_value ?? 0) : 0), 0)
   const kpiPos = items.filter((i) => i.qty > 0).length
   const kpiNeg = items.filter((i) => i.negative).length
-  const kpiMarked = items.filter((i) => i.marked).length
+  const costed = items.filter((i) => i.qty > 0 && i.cost_amount != null)
+  const kpiCost = costed.reduce((s, i) => s + (i.cost_amount ?? 0), 0)
+  const kpiRetailCosted = costed.reduce((s, i) => s + (i.retail_value ?? 0), 0)
+  const kpiMarginPct = kpiRetailCosted ? ((kpiRetailCosted - kpiCost) / kpiRetailCosted) * 100 : null
   const curWh = data.warehouses.find((w) => w.code === data.warehouse)
 
   const KPIS: { label: string; value: string; hint?: string; danger?: boolean }[] = [
     { label: 'Позиций (SKU)', value: nf(items.length) },
     { label: 'На полке (>0)', value: nf(kpiPos), hint: 'положительный остаток' },
     { label: 'В минусе', value: nf(kpiNeg), danger: kpiNeg > 0, hint: 'продажи опередили приёмку' },
-    { label: 'Розн. стоимость', value: fmtMoney(kpiRetailPos), hint: 'товар на полке (>0) × цена' },
-    { label: 'Маркированных', value: nf(kpiMarked) },
+    { label: 'Розн. стоимость', value: fmtMoney(kpiRetailPos), hint: 'товар на полке × цена' },
+    { label: 'Себест. остатка', value: fmtMoney(kpiCost), hint: `${nf(costed.length)} SKU с себест.` },
+    { label: 'Потенц. маржа', value: kpiMarginPct == null ? '—' : `${nf(kpiMarginPct, 1)}%`, hint: 'на полке (закуп.)' },
   ]
 
   return (
@@ -96,7 +100,7 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
         </div>
       </div>
 
-      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         {KPIS.map((k) => (
           <div key={k.label} className="rounded-lg border border-border/50 bg-card/40 p-3">
             <div className="text-[11px] text-muted-foreground">{k.label}</div>
@@ -107,9 +111,10 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
       </div>
 
       <p className="text-[11px] text-muted-foreground/70 -mt-1">
-        ⚠ Весовые товары считаются в базовых единицах (мл/г/л), цена — за базовую единицу.
-        Надёжная метрика — розничная стоимость (кол-во × цена). Отрицательные остатки — норма
-        для розницы по средней (флаг красным). Себестоимость остатка — следующий шаг.
+        ⚠ Весовые считаются в базовых единицах (мл/г/л). Себестоимость — удельная из партий
+        (Стоимость/Количество, те же единицы, что и остаток). Маржа ориентировочна: у части SKU
+        цена/партия устаревшие → возможны выбросы (напр. &gt;80% или отрицательная). Отрицательные
+        остатки — норма для розницы по средней (флаг красным).
       </p>
 
       <div className="overflow-x-auto rounded-lg border border-border/50">
@@ -120,6 +125,8 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
               <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Штрихкод</th>
               <th className="px-3 py-2 font-medium text-right">Остаток</th>
               <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Розн. цена</th>
+              <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Себест/ед</th>
+              <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Маржа %</th>
               <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Розн. стоимость</th>
               <th className="px-3 py-2 font-medium text-left">НДС</th>
             </tr>
@@ -134,6 +141,8 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
                 <td className="px-3 py-1.5 text-muted-foreground tabular-nums">{i.barcode ?? '—'}</td>
                 <td className={`px-3 py-1.5 text-right tabular-nums ${i.negative ? 'text-red-400/80 font-medium' : ''}`}>{nf(i.qty, 3)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{i.retail_price != null ? fmtMoney(i.retail_price) : '—'}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{i.cost_unit != null ? nf(i.cost_unit, 2) : '—'}</td>
+                <td className={`px-3 py-1.5 text-right tabular-nums ${i.margin_pct == null ? '' : i.margin_pct < 0 ? 'text-red-400/80' : 'text-emerald-300/70'}`}>{i.margin_pct != null ? `${nf(i.margin_pct, 1)}%` : '—'}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{i.retail_value != null ? fmtMoney(i.retail_value) : '—'}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{i.vat ?? '—'}</td>
               </tr>

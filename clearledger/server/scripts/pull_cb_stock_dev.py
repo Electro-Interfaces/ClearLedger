@@ -47,9 +47,9 @@ async def main() -> None:
         await c.run_sync(Base.metadata.create_all)
 
     async with OneCComClient(conn) as client:
-        # склад GUID → (код, имя)
+        # склад GUID → (код, имя). Код 1С — фикс-ширина с хвостовыми пробелами → strip.
         skl = await client.fetch_entity("Catalog_Склады", select=["Ref_Key", "Code", "Description"], top=500)
-        wh = {r.get("Ref_Key"): (str(r.get("Code") or ""), str(r.get("Description") or "")) for r in skl}
+        wh = {r.get("Ref_Key"): (str(r.get("Code") or "").strip(), str(r.get("Description") or "")) for r in skl}
 
         # розничный остаток на АЗК: кол-во + цена + ШК. ⚠ ЦенаВРознице/ШтрихКод —
         # измерения регистра: у SKU несколько комбинаций (истории цен). Корректная
@@ -60,9 +60,16 @@ async def main() -> None:
             dimensions=["Номенклатура", "Склад", "ЦенаВРознице", "ШтрихКод"],
             resources=["Количество"],
         )
-    print(f"получено: ТоварыНаАЗК {len(azk)} строк, складов {len(wh)}")
+        # партии: удельная себестоимость за базовую ед. = Σ Стоимость / Σ Количество
+        # (в тех же единицах, что и остаток → корректная маржа даже для блоков/весовых).
+        parts = await client.fetch_register_balance(
+            "AccumulationRegister_ПартииТоваровНаСкладах",
+            dimensions=["Номенклатура", "Склад"],
+            resources=["Количество", "Стоимость"],
+        )
+    print(f"получено: ТоварыНаАЗК {len(azk)}, партий {len(parts)}, складов {len(wh)}")
 
-    # агрегация по (склад, номенклатура): qty=Σкол, value=Σ(кол×цена)
+    # агрегация остатка по (склад, номенклатура): qty=Σкол, value=Σ(кол×цена)
     onhand: dict[tuple[str, str], dict] = defaultdict(
         lambda: {"qty": 0.0, "value": 0.0, "barcode": None})
     for r in azk:
@@ -78,6 +85,19 @@ async def main() -> None:
         if not o["barcode"] and r.get("ШтрихКод"):
             o["barcode"] = str(r.get("ШтрихКод"))
 
+    # удельная себестоимость по (склад, номенклатура)
+    pc: dict[tuple[str, str], list] = defaultdict(lambda: [0.0, 0.0])  # [Σкол, Σстоим]
+    for r in parts:
+        nom = str(r.get("Номенклатура") or "")
+        whg = str(r.get("Склад") or "")
+        if not nom or nom == _NULL_GUID or not whg:
+            continue
+        code = wh.get(whg, ("?", ""))[0]
+        pc[(code, nom)][0] += _num(r.get("Количество"))
+        pc[(code, nom)][1] += _num(r.get("Стоимость"))
+    cost_unit = {k: (v[1] / v[0]) for k, v in pc.items()
+                 if abs(v[0]) > 0.001 and (v[1] / v[0]) > 0}  # только положительная себест.
+
     wh_name_by_code = {c: n for (c, n) in wh.values()}
 
     async with async_session_factory() as db:
@@ -88,13 +108,15 @@ async def main() -> None:
             qty = o["qty"]
             # средняя розн. цена (взвеш.) — чтобы qty×price = корректная стоимость остатка
             price = (o["value"] / qty) if qty else None
+            cu = cost_unit.get((code, nom))
             db.add(StockOnHand(
                 company_id=cid, warehouse_code=code,
                 warehouse_name=wh_name_by_code.get(code),
                 nomenclature_ref=nom,
                 quantity=round(qty, 3),
                 retail_price=(round(price, 2) if price is not None else None),
-                cost_amount=None,  # себест. остатка — Этап 1b (партии на АЗС ненадёжны)
+                cost_amount=None,
+                cost_unit=(round(cu, 4) if cu is not None else None),
                 barcode=o["barcode"],
             ))
             n += 1

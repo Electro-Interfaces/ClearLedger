@@ -492,8 +492,15 @@ class GoodsDashboardService:
             if only_negative and qty >= 0:
                 continue
             price = float(r.retail_price) if r.retail_price is not None else None
-            cost = float(r.cost_amount) if r.cost_amount is not None else None
             retail_value = round(qty * price, 2) if price is not None else None
+            # себест. остатка и маржа из удельной себест. партий (базовые единицы —
+            # совпадают с остатком, корректно для блоков/весовых).
+            cu = float(r.cost_unit) if r.cost_unit is not None else None
+            cost_amount = round(qty * cu, 2) if cu is not None else None
+            margin = (round(retail_value - cost_amount, 2)
+                      if retail_value is not None and cost_amount is not None else None)
+            margin_pct = (round(100 * margin / retail_value, 1)
+                          if margin is not None and retail_value else None)
             items.append({
                 "guid": r.nomenclature_ref,
                 "name": name,
@@ -506,12 +513,18 @@ class GoodsDashboardService:
                 "negative": qty < 0,
                 "retail_price": round(price, 2) if price is not None else None,
                 "retail_value": retail_value,
-                "cost_amount": round(cost, 2) if cost is not None else None,
+                "cost_unit": round(cu, 4) if cu is not None else None,
+                "cost_amount": cost_amount,
+                "margin": margin,
+                "margin_pct": margin_pct,
             })
         items.sort(key=lambda x: (x["retail_value"] is None, -(x["retail_value"] or 0)))
 
         pos = [i for i in items if i["qty"] > 0]
         neg = [i for i in items if i["qty"] < 0]
+        costed = [i for i in pos if i["cost_amount"] is not None]
+        cost_value = sum(i["cost_amount"] for i in costed)
+        retail_costed = sum((i["retail_value"] or 0) for i in costed)
         return {
             "warehouse": wh,
             "warehouses": warehouses,
@@ -524,6 +537,11 @@ class GoodsDashboardService:
                 # retail_value_all включает отрицательные позиции (для сверки).
                 "retail_value_positive": round(sum((i["retail_value"] or 0) for i in pos), 2),
                 "retail_value_all": round(sum((i["retail_value"] or 0) for i in items), 2),
+                # себест. остатка (закуп.) и потенц. маржа «на полке» — по costed-позициям
+                "cost_value": round(cost_value, 2),
+                "costed_count": len(costed),
+                "margin_value": round(retail_costed - cost_value, 2),
+                "margin_pct": round(100 * (retail_costed - cost_value) / retail_costed, 1) if retail_costed else None,
                 "marked_count": sum(1 for i in items if i["marked"]),
                 "units_positive": round(sum(i["qty"] for i in pos), 3),
             },

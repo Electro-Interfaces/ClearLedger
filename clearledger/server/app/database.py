@@ -134,6 +134,8 @@ async def create_all() -> None:
             "ALTER TABLE fuel_stations ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION",
             "ALTER TABLE fuel_stations ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION",
             "ALTER TABLE fuel_stations ADD COLUMN IF NOT EXISTS address VARCHAR(300)",
+            # v4.1: удельная себестоимость остатка (ПартииТоваровНаСкладах Стоимость/Количество)
+            "ALTER TABLE stock_on_hand ADD COLUMN IF NOT EXISTS cost_unit NUMERIC(16,4)",
             # v3.1: период прогона в логе — для ленты прогонов кокпита канала
             # (строка прогона показывает, за какой период он грузил).
             "ALTER TABLE channel_sync_logs ADD COLUMN IF NOT EXISTS date_from VARCHAR(10)",
@@ -142,6 +144,10 @@ async def create_all() -> None:
             # (повторный прогон периода не плодит дубли заказов).
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_online_orders_ext "
             "ON online_orders(company_id, external_id)",
+            "CREATE INDEX IF NOT EXISTS idx_online_orders_company_date "
+            "ON online_orders(company_id, order_date)",
+            "CREATE INDEX IF NOT EXISTS idx_online_orders_station_date "
+            "ON online_orders(company_id, station_id, order_date)",
             # v3.3: канон топлива (резолв имени MSTO → эталон компании).
             "ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS fuel_code INTEGER",
             # v3.4: роль разреза учёта на потоке канала (anchor/control/reference);
