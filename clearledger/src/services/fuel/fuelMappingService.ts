@@ -343,14 +343,29 @@ export interface DashCashDetail { operation: string; type: string; amount: numbe
 export interface DashCashoutDetail { operation: string; amount: number; pos: number | null; shift: number | null }
 export interface DashDaily { date: string; revenue: number; volume: number; cash: number; card: number; online: number; corporate: number; coupon: number }
 export interface DashTrend { current: number; previous: number; delta: number; percent: number; direction: 'up' | 'down' | 'neutral' }
+export interface DashStation { station_id: string; station_name: string; revenue: number; volume: number; shifts: number; avg_price: number }
+export interface DashOnboarding { station_id: string; code: number | null; name: string; date: string }
+export interface DashPayMethod { name: string; revenue: number; volume: number; count?: number }
+export interface DashFuelRaw { name: string; code: number | null; revenue: number; volume: number; count?: number }
+export interface DashHour { hour: number; label: string; count: number; amount: number }
+export interface DashWeekday { weekday: number; label: string; count: number; amount: number }
+export interface DashActivity { hourly: DashHour[]; weekday: DashWeekday[]; peak_hour: number | null; best_weekday: number | null }
+export interface DashCard { card: string; count: number; liters: number; amount: number }
 export interface ShiftDashboardData {
   period: { from: string; to: string; days: number }
   volume: { total: number; by_fuel: DashFuelItem[] }
-  financial: { total_revenue: number; payment_details: Record<string, DashPaymentDetail> }
+  financial: { total_revenue: number; avg_price?: number; payment_details: Record<string, DashPaymentDetail> }
   receipts: { total_doc: number; total_fact: number; total_diff: number; ttn_count: number; by_fuel: DashReceiptFuel[]; details: DashReceiptDetail[] }
   cash_flow: { income: number; expense: number; calculated: number; closing: number; difference: number; operations_count: number; details: DashCashDetail[] }
   cashout: { total: number; count: number; details: DashCashoutDetail[] }
-  operational: { shifts_count: number }
+  operational: { shifts_count: number; stations_count?: number; fuel_types_count?: number }
+  by_station?: DashStation[]
+  onboarding?: DashOnboarding[]
+  payment_methods?: DashPayMethod[]
+  fuel_types_raw?: DashFuelRaw[]
+  activity?: DashActivity
+  top_cards?: DashCard[]
+  averages?: { tx_count: number; avg_check: number; avg_fill_liters: number; ops_per_day: number }
   charts: { daily: DashDaily[]; by_fuel: DashFuelItem[] }
   trends?: { revenue: DashTrend; volume: DashTrend; shifts: DashTrend }
 }
@@ -361,6 +376,91 @@ export const getShiftDashboard = (dateFrom: string, dateTo: string, opts?: { sta
     stations: opts?.stations?.length ? opts.stations.join(',') : undefined,
     compare: opts?.compare ? 'true' : undefined,
   })
+
+// ─── Реестр пооперационных транзакций (наливов) ───
+export interface FuelTxRow {
+  id: string
+  dt: string | null
+  station_code: number
+  station_name: string
+  shift_number: number | null
+  pos: number | null
+  nozzle: number | null
+  tank: number | null
+  fuel_code: number | null
+  fuel_name: string | null
+  pay_type_name: string | null
+  card: string | null
+  liters: number
+  price: number | null
+  amount: number
+}
+export interface FuelTxRowsResp {
+  total: number
+  totals: { count: number; liters: number; amount: number }
+  rows: FuelTxRow[]
+}
+export interface FuelTxFilters {
+  stations: { code: number; name: string }[]
+  fuels: { code: number; name: string }[]
+  pay_types: string[]
+}
+export interface FuelTxRowsParams {
+  dateFrom: string
+  dateTo: string
+  stationCode?: number
+  fuelCodes?: number[]
+  payTypes?: string[]
+  search?: string
+  sort?: string
+  order?: 'asc' | 'desc'
+  limit?: number
+  offset?: number
+}
+export const getFuelTxRows = (p: FuelTxRowsParams) =>
+  get<FuelTxRowsResp>('/api/fuel/transactions/rows', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    station_code: p.stationCode,
+    fuel_codes: p.fuelCodes?.length ? p.fuelCodes.join(',') : undefined,
+    pay_types: p.payTypes?.length ? p.payTypes.join(',') : undefined,
+    search: p.search,
+    sort: p.sort, order: p.order, limit: p.limit, offset: p.offset,
+  })
+export const getFuelTxFilters = (dateFrom: string, dateTo: string) =>
+  get<FuelTxFilters>('/api/fuel/transactions/filters', { date_from: dateFrom, date_to: dateTo })
+
+// KPI-агрегаты периода для «Операций» (итого + по топливу + по оплате)
+export interface FuelTxOverview {
+  kpi: { count: number; liters: number; amount: number }
+  by_fuel: { fuel_code: number | null; fuel_name: string; count: number; liters: number; amount: number }[]
+  by_payment: { name: string; count: number; liters: number; amount: number }[]
+}
+export const getFuelTxOverview = (dateFrom: string, dateTo: string, stationCode?: number) =>
+  get<FuelTxOverview>('/api/fuel/transactions/overview', { date_from: dateFrom, date_to: dateTo, station_code: stationCode })
+export const getFuelTxCount = () => get<{ transactions: number }>('/api/fuel/transactions/count')
+
+// Загрузка наливов из STS (фон) + статус прогона
+export interface FuelTxSyncStatus { running: boolean; stations_done: number; stations_total: number; loaded: number; message: string }
+export const syncFuelTransactions = (body: { date_from?: string; date_to?: string; all_period?: boolean; station_codes?: number[] }) =>
+  post<{ status: string }>('/api/fuel/transactions/sync', body)
+export const getFuelTxSyncStatus = () => get<FuelTxSyncStatus>('/api/fuel/transactions/sync-status')
+
+// ─── Карта АЗС (координаты + метрики за период) ───
+export interface FuelMapStation {
+  code: number
+  name: string
+  address: string | null
+  latitude: number | null
+  longitude: number | null
+  transactions: number
+  liters: number
+  amount: number
+}
+export interface FuelMapResp { stations: FuelMapStation[]; with_coords: number; total: number }
+export const getFuelStationsMap = (dateFrom: string, dateTo: string) =>
+  get<FuelMapResp>('/api/fuel/stations/map', { date_from: dateFrom, date_to: dateTo })
+export const syncFuelStationsGeo = () =>
+  post<{ updated: number; with_coords: number }>('/api/fuel/stations/sync-geo')
 
 // ─── Готовность к 1С (агрегация статусов за период) ───
 export interface FuelReadiness {

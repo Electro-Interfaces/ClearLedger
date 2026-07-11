@@ -10,20 +10,22 @@ import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceSubView, type CoreMode } from '@/contexts/WorkspaceContext'
 import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS } from './workspaceSections'
 import { ChargeSalesRouter } from './ChargeSalesRouter'
+import { FuelOverviewPanel } from './FuelOverviewPanel'
+import { FuelTransactionsPanel } from './FuelTransactionsPanel'
+import { FuelMapPanel } from './FuelMapPanel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, AlertCircle, TrendingUp, Wallet, Receipt, AlertTriangle, Pencil, Banknote, CreditCard, Ticket, Fuel, Layers } from 'lucide-react'
+import { Loader2, AlertCircle, Receipt, AlertTriangle, Pencil, Banknote, CreditCard, Ticket, Fuel, Layers } from 'lucide-react'
 
 import { useCompany } from '@/contexts/CompanyContext'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { useFilters } from '@/contexts/FilterContext'
-import { useAllReceipts } from '@/hooks/useFuel'
 import {
-  getPnL, getPaymentMix, getCashFlow, getPayablesReceivables,
-  getVat, getProfit, getFuelBalance, getSalesChannels,
+  getPnL, getCashFlow, getPayablesReceivables,
+  getVat, getProfit, getFuelBalance,
   fmtMoney, fmtMoneyShort, fmtLiters, fmtPct,
 } from '@/services/analyticsService'
 import { BalanceVitrine } from '@/components/balance/BalanceVitrine'
@@ -42,7 +44,7 @@ import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
 import { SyncWith1CPanel } from '@/components/fuel/SyncWith1CPanel'
 import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
 import {
-  getLoadedShifts, getCostingMargin, type LoadedShift,
+  getLoadedShifts, getCostingMargin, getShiftDashboard, type LoadedShift,
 } from '@/services/fuel/fuelMappingService'
 
 /* ── общие виджеты ── */
@@ -128,104 +130,17 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
     return <div className="h-full overflow-y-auto"><EnergyMgmtVitrine tab={activeTab} /></div>
   }
   return (
-    <div className="h-full flex flex-col">
-      <ScrollArea className="flex-1">
-        {activeTab === 'overview' && <MgmtOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-        {activeTab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
-        {activeTab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
-        {activeTab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
-        {activeTab === 'channels' && <MgmtChannels companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-        {activeTab === 'margin' && <MgmtMargin companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-        {activeTab === 'purchases' && <MgmtPurchases dateFrom={period.from} dateTo={period.to} />}
-        {activeTab === 'tanks' && <MgmtBalance companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-      </ScrollArea>
-    </div>
-  )
-}
-
-function MgmtOverview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const pnl = useQuery({
-    queryKey: ['analytics-pnl', companyId, dateFrom, dateTo, 'station'],
-    queryFn: () => getPnL({ companyId, dateFrom, dateTo, groupBy: 'station' }),
-  })
-  const mix = useQuery({
-    queryKey: ['analytics-paymentmix', companyId, dateFrom, dateTo],
-    queryFn: () => getPaymentMix({ companyId, dateFrom, dateTo }),
-  })
-  if (pnl.isLoading || mix.isLoading) return <LoadingState />
-  if (pnl.error || mix.error) return <ErrorState message={String((pnl.error || mix.error) as Error)} />
-  const t = pnl.data!.totals
-  const m = mix.data!
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Выручка С НДС" value={fmtMoneyShort(t.revenue) + ' ₽'} hint={`по ${pnl.data!.lines.length} группам`} />
-        <KpiCard label="Выручка без НДС" value={fmtMoneyShort(t.revenue_net) + ' ₽'} />
-        <KpiCard label="Себестоимость" value={fmtMoneyShort(t.cogs) + ' ₽'} accent="info" />
-        <KpiCard label="Валовая маржа" value={fmtMoneyShort(t.gross_margin) + ' ₽'}
-          hint={fmtPct(t.gross_margin_pct)}
-          accent={t.gross_margin >= 0 ? 'success' : 'danger'} />
-        <KpiCard label="Литров продано" value={fmtLiters(t.liters)} />
-        <KpiCard label="ОРП документов" value={String(t.docs_count)} />
-        <KpiCard label="ПТУ документов" value={String(pnl.data!.ptu_count)} />
-        <KpiCard label="Закрытых смен" value={String(pnl.data!.shifts_count)} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Card>
-          <CardContent className="pt-4">
-            <div className="text-xs uppercase text-muted-foreground mb-2 flex items-center gap-1.5">
-              <Wallet className="h-3 w-3" />
-              Структура оплат на АЗС
-            </div>
-            <div className="space-y-1.5 text-xs">
-              {(['cash', 'card', 'voucher', 'other'] as const).map((k) => (
-                <PayBar key={k} label={LABELS[k]} amount={m.breakdown[k]} pct={m.shares_pct[k]} />
-              ))}
-            </div>
-            <div className="mt-3 pt-2 border-t text-sm text-muted-foreground">
-              Средний чек на смену: <span className="font-mono text-foreground">{fmtMoney(m.avg_per_shift)} ₽</span>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <div className="text-xs uppercase text-muted-foreground mb-2 flex items-center gap-1.5">
-              <TrendingUp className="h-3 w-3" />
-              Топ-3 группы по выручке
-            </div>
-            <div className="space-y-2">
-              {pnl.data!.lines.slice(0, 3).map((l) => (
-                <div key={l.label} className="text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium truncate">{l.label}</span>
-                    <span className="font-mono">{fmtMoneyShort(l.revenue)} ₽</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground flex items-center justify-between">
-                    <span>Маржа {fmtPct(l.gross_margin_pct)}</span>
-                    <span>{fmtLiters(l.liters)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  )
-}
-
-const LABELS: Record<string, string> = { cash: 'Наличные', card: 'Карты', voucher: 'Талоны/ведомости', other: 'Прочее' }
-
-function PayBar({ label, amount, pct }: { label: string; amount: number; pct: number }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-0.5">
-        <span>{label}</span>
-        <span className="font-mono">{fmtMoneyShort(amount)} ₽ · {pct.toFixed(1)}%</span>
-      </div>
-      <div className="h-1.5 bg-muted rounded overflow-hidden">
-        <div className="h-full bg-primary" style={{ width: `${Math.min(100, pct)}%` }} />
-      </div>
+    <div className="h-full overflow-y-auto">
+      {activeTab === 'overview' && <FuelOverviewPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'map' && <FuelMapPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
+      {activeTab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
+      {activeTab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
+      {activeTab === 'channels' && <MgmtChannels companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'transactions' && <FuelTransactionsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'margin' && <MgmtMargin companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'purchases' && <ReceiptsSection />}
+      {activeTab === 'tanks' && <MgmtBalance companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
     </div>
   )
 }
@@ -292,120 +207,92 @@ function MgmtPnLTable({ companyId, dateFrom, dateTo, groupBy }: { companyId: str
   )
 }
 
-/* ── Каналы оплаты и продаж (комиссии, розница/корп/онлайн) ── */
+/* ── Каналы продаж (полный разрез по видам оплаты — из сырых отчётов STS) ── */
 
-// Справочник: категория + ставка комиссии % (эквайринг банк-карт, процессинг
-// топливных карт, комиссии агрегаторов). Дефолты — в перспективе редактируемы.
-const CHANNEL_META: Record<string, { category: string; commission: number }> = {
-  'Наличные':         { category: 'Розница', commission: 0 },
-  'Банковская карта': { category: 'Розница', commission: 1.8 },
-  'Топливная карта':  { category: 'Корпоратив', commission: 1.5 },
-  'Онлайн':           { category: 'Онлайн-агрегаторы', commission: 7 },
-  'Талоны':           { category: 'Талоны/ведомости', commission: 0 },
-  'Ведомости':        { category: 'Талоны/ведомости', commission: 0 },
-}
-const channelMeta = (label: string) => CHANNEL_META[label] ?? { category: 'Прочее', commission: 0 }
-const CATEGORY_ACCENT: Record<string, string> = {
-  'Розница': 'text-emerald-400', 'Корпоратив': 'text-blue-400',
-  'Онлайн-агрегаторы': 'text-amber-400', 'Талоны/ведомости': 'text-purple-400',
-  'Прочее': 'text-muted-foreground',
+// Таблица разреза продаж: все строки (виды оплаты / топлива), Наливы·Выручка·Объём·Доля·₽л·Итого.
+// Наливы (count) — из пооперационных транзакций; при отсутствии колонка скрыта.
+function ChannelBreakTable({ title, nameCol, rows }: {
+  title: string; nameCol: string; rows: { name: string; revenue: number; volume: number; count?: number }[]
+}) {
+  const totRev = rows.reduce((s, r) => s + r.revenue, 0)
+  const totVol = rows.reduce((s, r) => s + r.volume, 0)
+  const hasCount = rows.some((r) => r.count != null)
+  const totCnt = rows.reduce((s, r) => s + (r.count ?? 0), 0)
+  const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">{title} ({rows.length})</div>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b bg-muted/20 text-muted-foreground">
+              <th className="text-left p-2 font-medium">{nameCol}</th>
+              {hasCount && <th className="text-right p-2 font-medium">Наливы</th>}
+              <th className="text-right p-2 font-medium">Выручка</th>
+              <th className="text-right p-2 font-medium">Объём, л</th>
+              <th className="text-right p-2 font-medium">Доля</th>
+              <th className="text-right p-2 font-medium">₽/л</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.name} className="border-b border-border/30 hover:bg-muted/30">
+                <td className="p-2 font-medium truncate max-w-[180px]">{r.name}</td>
+                {hasCount && <td className="p-2 text-right font-mono tabular-nums text-muted-foreground">{r.count != null ? nf0.format(r.count) : '—'}</td>}
+                <td className="p-2 text-right font-mono">{fmtMoney(r.revenue)}</td>
+                <td className="p-2 text-right font-mono text-muted-foreground">{fmtLiters(r.volume)}</td>
+                <td className="p-2 text-right font-mono">{totRev ? (r.revenue / totRev * 100).toFixed(1) : '0.0'}%</td>
+                <td className="p-2 text-right font-mono text-muted-foreground">{r.volume ? fmtMoney(r.revenue / r.volume) : '—'}</td>
+              </tr>
+            ))}
+            <tr className="bg-muted/60 font-medium">
+              <td className="p-2">Итого</td>
+              {hasCount && <td className="p-2 text-right font-mono">{nf0.format(totCnt)}</td>}
+              <td className="p-2 text-right font-mono">{fmtMoney(totRev)}</td>
+              <td className="p-2 text-right font-mono">{fmtLiters(totVol)}</td>
+              <td className="p-2 text-right font-mono">100%</td>
+              <td className="p-2 text-right font-mono">{totVol ? fmtMoney(totRev / totVol) : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  )
 }
 
 function MgmtChannels({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  // Полный разрез из сырых отчётов STS (все виды оплаты как есть) — как в эталонной
+  // системе. Комиссий в ленте STS нет, поэтому фиктивных ставок/«чистой выручки» здесь больше нет.
   const { data, isLoading, error } = useQuery({
-    queryKey: ['analytics-saleschannels', companyId, dateFrom, dateTo],
-    queryFn: () => getSalesChannels({ companyId, dateFrom, dateTo }),
+    queryKey: ['fuel-channels', companyId, dateFrom, dateTo],
+    queryFn: () => getShiftDashboard(dateFrom, dateTo),
   })
   if (isLoading) return <LoadingState />
   if (error) return <ErrorState message={String(error)} />
-  if (!data || data.lines.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет продаж по каналам за период</div>
+  const pays = (data?.payment_methods ?? []).slice().sort((a, b) => b.revenue - a.revenue)
+  const fuels = (data?.fuel_types_raw ?? []).slice().sort((a, b) => b.revenue - a.revenue)
+  if (pays.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет продаж по каналам за период</div>
 
-  const rows = data.lines.map((l) => {
-    const meta = channelMeta(l.label)
-    const commission = l.amount * meta.commission / 100
-    return { ...l, category: meta.category, commissionPct: meta.commission, commission, net: l.amount - commission }
-  })
-  const totalCommission = rows.reduce((a, r) => a + r.commission, 0)
-  const totalNet = data.total_amount - totalCommission
-
-  const catMap = new Map<string, { amount: number; commission: number }>()
-  for (const r of rows) {
-    const cur = catMap.get(r.category) ?? { amount: 0, commission: 0 }
-    cur.amount += r.amount; cur.commission += r.commission
-    catMap.set(r.category, cur)
-  }
-  const categories = [...catMap.entries()]
-    .map(([label, v]) => ({ label, ...v, share: data.total_amount ? v.amount / data.total_amount * 100 : 0 }))
-    .sort((a, b) => b.amount - a.amount)
+  const totRev = pays.reduce((s, r) => s + r.revenue, 0)
+  const totVol = pays.reduce((s, r) => s + r.volume, 0)
+  const totCnt = pays.reduce((s, r) => s + (r.count ?? 0), 0)
 
   return (
     <div className="p-4 space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Оборот всего" value={fmtMoneyShort(data.total_amount) + ' ₽'} hint={`${fmtLiters(data.total_liters)} · ${data.shifts_count} смен`} />
-        <KpiCard label="Комиссии каналов" value={fmtMoneyShort(totalCommission) + ' ₽'} accent="warning" hint="эквайринг + агрегаторы" />
-        <KpiCard label="Чистая выручка" value={fmtMoneyShort(totalNet) + ' ₽'} accent="success" />
-        <KpiCard label="Каналов" value={String(rows.length)} />
+        <KpiCard label="Оборот (все оплаты)" value={fmtMoneyShort(totRev) + ' ₽'} hint={`${data?.operational.shifts_count ?? 0} смен`} />
+        <KpiCard label="Наливов" value={totCnt ? totCnt.toLocaleString('ru-RU') : '—'} accent="info" hint="операций отпуска" />
+        <KpiCard label="Объём" value={fmtLiters(totVol)} />
+        <KpiCard label="Видов оплаты" value={String(pays.length)} />
       </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {categories.map((c) => (
-          <Card key={c.label}>
-            <CardContent className="pt-3 pb-3">
-              <div className={`text-xs font-medium ${CATEGORY_ACCENT[c.label] ?? ''}`}>{c.label}</div>
-              <div className="text-lg font-semibold mt-0.5">{c.share.toFixed(1)}%</div>
-              <div className="text-[11px] text-muted-foreground">
-                {fmtMoneyShort(c.amount)} ₽{c.commission > 0 ? ` · комиссия ${fmtMoneyShort(c.commission)}` : ''}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <ChannelBreakTable title="Способы оплаты" nameCol="Вид" rows={pays} />
+        <ChannelBreakTable title="Виды топлива" nameCol="Топливо" rows={fuels.map((f) => ({ name: f.name, revenue: f.revenue, volume: f.volume, count: f.count }))} />
       </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b bg-muted/40 text-muted-foreground">
-                <th className="text-left p-2 font-medium">Канал</th>
-                <th className="text-left p-2 font-medium">Категория</th>
-                <th className="text-right p-2 font-medium">Объём, л</th>
-                <th className="text-right p-2 font-medium">Оборот</th>
-                <th className="text-right p-2 font-medium">Доля</th>
-                <th className="text-right p-2 font-medium">₽/л</th>
-                <th className="text-right p-2 font-medium">Комиссия</th>
-                <th className="text-right p-2 font-medium">Чистая</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.channel} className="border-b border-border/30 hover:bg-muted/30">
-                  <td className="p-2 font-medium">{r.label}</td>
-                  <td className={`p-2 ${CATEGORY_ACCENT[r.category] ?? ''}`}>{r.category}</td>
-                  <td className="p-2 text-right font-mono">{fmtLiters(r.liters)}</td>
-                  <td className="p-2 text-right font-mono">{fmtMoney(r.amount)}</td>
-                  <td className="p-2 text-right font-mono">{r.share_pct.toFixed(1)}%</td>
-                  <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(r.avg_price)}</td>
-                  <td className="p-2 text-right font-mono text-amber-400">{r.commissionPct > 0 ? `${fmtMoney(r.commission)} · ${r.commissionPct}%` : '—'}</td>
-                  <td className="p-2 text-right font-mono text-emerald-400">{fmtMoney(r.net)}</td>
-                </tr>
-              ))}
-              <tr className="bg-muted/60 font-medium">
-                <td className="p-2" colSpan={2}>Итого</td>
-                <td className="p-2 text-right font-mono">{fmtLiters(data.total_liters)}</td>
-                <td className="p-2 text-right font-mono">{fmtMoney(data.total_amount)}</td>
-                <td className="p-2 text-right font-mono">100%</td>
-                <td className="p-2"></td>
-                <td className="p-2 text-right font-mono text-amber-400">{fmtMoney(totalCommission)}</td>
-                <td className="p-2 text-right font-mono text-emerald-400">{fmtMoney(totalNet)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
       <Card>
         <CardContent className="pt-4 text-xs text-muted-foreground">
-          Ставки комиссий (эквайринг банк-карт, процессинг топливных карт, агрегаторы Яндекс/Benzuber) заданы по умолчанию —
-          в перспективе редактируются в справочнике. «Чистая выручка» = оборот − комиссия канала.
+          Разрез — по сырым отчётам STS: каждый вид оплаты как есть (вкл. Купон/Прокачку/Тех.отпуск), ничего не свёрнуто и не отброшено.
+          Комиссий эквайринга/агрегаторов в ленте STS нет — они появятся после подключения эквайринг-реестра (Сбербанк) с реальными ставками по договорам.
         </CardContent>
       </Card>
     </div>
@@ -466,81 +353,6 @@ function MgmtMargin({ companyId, dateFrom, dateTo }: { companyId: string; dateFr
         <CardContent className="pt-4 text-xs text-muted-foreground">
           Маржа = выручка без НДС − себестоимость (COGS из проводок 90.02). «₽/литр» — валовая маржа на литр
           проданного топлива. Динамика закупочных цен — на вкладке «Поступления» и в разделе «1С → Цены».
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-/* ── Поступления/закупки (ТТН: поставщики, объёмы, закупочные цены) ── */
-
-function MgmtPurchases({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
-  const { data: receipts, isLoading } = useAllReceipts()
-  if (isLoading) return <LoadingState />
-  const inPeriod = (receipts ?? []).filter((r) => {
-    const d = (r.dt || '').slice(0, 10)
-    return d && d >= dateFrom && d <= dateTo
-  })
-  if (inPeriod.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет поступлений (ТТН) за выбранный период</div>
-
-  const sum = (f: (r: typeof inPeriod[number]) => number) => inPeriod.reduce((a, r) => a + (f(r) || 0), 0)
-  const totalDoc = sum((r) => r.docVolume)
-  const totalFact = sum((r) => r.factVolume)
-  const diff = totalDoc - totalFact
-
-  const byFuel = (() => {
-    const m = new Map<string, { doc: number; fact: number; count: number }>()
-    for (const r of inPeriod) {
-      const k = r.fuel || '—'
-      const cur = m.get(k) ?? { doc: 0, fact: 0, count: 0 }
-      cur.doc += r.docVolume || 0
-      cur.fact += r.factVolume || 0
-      cur.count += 1
-      m.set(k, cur)
-    }
-    return [...m.entries()].map(([label, v]) => ({ label, ...v, diff: v.doc - v.fact })).sort((a, b) => b.doc - a.doc)
-  })()
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Принято (документ)" value={fmtLiters(totalDoc)} hint={`${inPeriod.length} ТТН`} />
-        <KpiCard label="Принято (факт)" value={fmtLiters(totalFact)} accent="info" />
-        <KpiCard label="Расхождение" value={fmtLiters(diff)}
-          accent={Math.abs(diff) < 1 ? 'success' : 'warning'} hint="документ − факт (приёмка)" />
-        <KpiCard label="ТТН за период" value={String(inPeriod.length)} />
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">По видам топлива</div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b bg-muted/20 text-muted-foreground">
-                <th className="text-left p-2 font-medium">Топливо</th>
-                <th className="text-right p-2 font-medium">Документ, л</th>
-                <th className="text-right p-2 font-medium">Факт, л</th>
-                <th className="text-right p-2 font-medium">Расхождение</th>
-                <th className="text-right p-2 font-medium">ТТН</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byFuel.map((r) => (
-                <tr key={r.label} className="border-b border-border/30 hover:bg-muted/30">
-                  <td className="p-2 font-medium">{r.label}</td>
-                  <td className="p-2 text-right font-mono">{fmtLiters(r.doc)}</td>
-                  <td className="p-2 text-right font-mono">{fmtLiters(r.fact)}</td>
-                  <td className={`p-2 text-right font-mono ${Math.abs(r.diff) < 1 ? 'text-muted-foreground' : 'text-amber-400'}`}>{fmtLiters(r.diff)}</td>
-                  <td className="p-2 text-right font-mono text-muted-foreground">{r.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="pt-4 text-xs text-muted-foreground">
-          Поставщики и закупочные цены — из детализации ТТН и раздела «1С → Цены/Партии» (в STS-ленте ТТН их нет).
-          Здесь — объёмы приёмки (документ vs факт) и расхождения по видам топлива.
         </CardContent>
       </Card>
     </div>
@@ -637,7 +449,7 @@ export function FinancialPanel() {
 
   return (
     <div className="h-full flex flex-col">
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {tab === 'overview' && <FinOverview companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {tab === 'cashflow' && <FinCashFlow companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {tab === 'receivables' && <FinContragents companyId={companyId} dateFrom={period.from} dateTo={period.to} mode="receivables" />}
@@ -1060,7 +872,7 @@ export function TaxPanel() {
   if (isEnergy) return <div className="h-full overflow-y-auto"><TaxVitrine /></div>
   return (
     <div className="h-full flex flex-col">
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {tab === 'vat' && <TaxVat companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {tab === 'profit' && <TaxProfit companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {tab === 'compliance' && <TaxCompliance companyId={companyId} dateFrom={period.from} dateTo={period.to} />}

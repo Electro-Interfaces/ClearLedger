@@ -3,6 +3,7 @@ Fuel CRUD: станции, смены, ТТН, документы на эксп�
 + Нормализация из STS API.
 """
 
+import asyncio
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -55,12 +56,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
-from app.database import get_db
+from app.database import get_db, async_session_factory
 from app.models import (
     FuelStation, FuelShift, FuelTank, FuelPump, FuelCashMovement,
     FuelReceipt, FuelReceiptOverride, FuelReceiptCost, FuelPurchaseBatch,
     FuelExportDoc, FuelShiftSale, FuelShiftSaleOverride, FuelShiftCorrectionNote,
-    ExportPacket, User, DataEntry,
+    FuelTransaction, ExportPacket, User, DataEntry,
 )
 from app.services.fuel_documents import build_shift_documents, build_ttn_documents
 from app.services.fuel_costing import FuelCostingService
@@ -514,6 +515,7 @@ async def loaded_stations(
 @router.get("/receipts", response_model=list[ReceiptOut])
 async def list_receipts(
     station_code: int | None = Query(None),
+    limit: int = Query(5000, le=20000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -521,7 +523,7 @@ async def list_receipts(
     q = select(FuelReceipt).where(FuelReceipt.company_id == company_id)
     if station_code is not None:
         q = q.join(FuelStation).where(FuelStation.code == station_code)
-    q = q.order_by(FuelReceipt.created_at.desc()).limit(200)
+    q = q.order_by(FuelReceipt.created_at.desc()).limit(limit)
     rcpts = list((await db.execute(q)).scalars())
     st_ids = {r.station_id for r in rcpts}
     stations = {st.id: st for st in (await db.execute(
@@ -2112,6 +2114,322 @@ async def fuel_readiness(
             "rejected": pk.get("rejected", 0),
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Пооперационные транзакции (наливы) — STS /v2/transactions
+# ═══════════════════════════════════════════════════════════════
+
+# Прогресс фонового синка транзакций по компании (в памяти воркера).
+_TX_SYNC: dict[str, dict] = {}
+
+
+class TxSyncRequest(BaseModel):
+    date_from: str | None = None
+    date_to: str | None = None
+    station_codes: list[int] | None = None
+    all_period: bool = False
+
+
+async def _tx_sync_bg(company_id, date_from, date_to, station_codes, all_period):
+    """Фоновая загрузка наливов: по станциям × помесячным окнам, дедуп по STS id."""
+    from app.services.fuel_transactions import (
+        resolve_sts, list_stations, ingest_station_window, month_windows,
+    )
+    key = str(company_id)
+    try:
+        async with async_session_factory() as db:
+            conn = await resolve_sts(db, company_id)
+            if conn is None:
+                _TX_SYNC[key] = {"running": False, "stations_done": 0, "stations_total": 0,
+                                 "loaded": 0, "message": "нет STS-источника у компании"}
+                return
+            # Период: явный [date_from, date_to] или (all_period) от первой смены до сегодня.
+            if all_period or not (date_from and date_to):
+                first = await db.scalar(select(func.min(FuelShift.opened_at)).where(
+                    FuelShift.company_id == company_id))
+                df = first.date().isoformat() if first else "2025-01-01"
+                dt = datetime.now(timezone.utc).date().isoformat()
+            else:
+                df, dt = date_from, date_to
+            stations = await list_stations(db, company_id, conn)
+            if station_codes:
+                wanted = {int(c) for c in station_codes}
+                stations = [s for s in stations if s["code"] in wanted]
+            windows = month_windows(df, dt)
+            total = len(stations)
+            loaded = 0
+            _TX_SYNC[key] = {"running": True, "stations_done": 0, "stations_total": total,
+                             "loaded": 0, "message": f"период {df}…{dt}, станций {total}"}
+            for idx, st in enumerate(stations):
+                _TX_SYNC[key].update({"message": f"АЗС {idx + 1}/{total} (код {st['code']})…"})
+                for wf, wt in windows:
+                    try:
+                        r = await ingest_station_window(db, company_id, st, conn, wf, wt)
+                        loaded += r["created"]
+                        await db.commit()
+                    except Exception as e:  # noqa: BLE001 — окно не валит весь синк
+                        await db.rollback()
+                        _TX_SYNC[key].update({"message": f"АЗС {st['code']} {wf}: ошибка {str(e)[:60]}"})
+                    _TX_SYNC[key].update({"loaded": loaded})
+                _TX_SYNC[key].update({"stations_done": idx + 1, "loaded": loaded})
+            _TX_SYNC[key] = {"running": False, "stations_done": total, "stations_total": total,
+                             "loaded": loaded, "message": f"готово: {loaded} наливов"}
+    except Exception as e:  # noqa: BLE001
+        _TX_SYNC[key] = {"running": False, "stations_done": 0, "stations_total": 0,
+                         "loaded": 0, "message": f"сбой синка: {str(e)[:80]}"}
+
+
+@router.post("/transactions/sync")
+async def transactions_sync(
+    body: TxSyncRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Запустить фоновую загрузку пооперационных транзакций (наливов) из STS /v2/transactions."""
+    cid = await _company_id(user, db)
+    key = str(cid)
+    if _TX_SYNC.get(key, {}).get("running"):
+        return {"status": "already_running", **_TX_SYNC[key]}
+    b = body or TxSyncRequest()
+    _TX_SYNC[key] = {"running": True, "stations_done": 0, "stations_total": 0, "loaded": 0, "message": "старт…"}
+    asyncio.create_task(_tx_sync_bg(cid, b.date_from, b.date_to, b.station_codes, b.all_period))
+    return {"status": "running"}
+
+
+@router.get("/transactions/sync-status")
+async def transactions_sync_status(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await _company_id(user, db)
+    return _TX_SYNC.get(str(cid), {"running": False, "stations_done": 0, "stations_total": 0, "loaded": 0, "message": ""})
+
+
+@router.get("/transactions/count")
+async def transactions_count(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await _company_id(user, db)
+    n = await db.scalar(select(func.count()).select_from(FuelTransaction).where(FuelTransaction.company_id == cid))
+    return {"transactions": int(n or 0)}
+
+
+_TX_SORT = {
+    "dt": FuelTransaction.dt, "amount": FuelTransaction.amount,
+    "liters": FuelTransaction.liters, "price": FuelTransaction.price,
+    "station": FuelTransaction.station_code, "fuel": FuelTransaction.fuel_name,
+    "pay_type": FuelTransaction.pay_type_name,
+}
+
+
+def _csv_ints(v: str | None) -> list[int]:
+    if not v:
+        return []
+    out = []
+    for x in v.split(","):
+        try:
+            out.append(int(x.strip()))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _csv_strs(v: str | None) -> list[str]:
+    return [x.strip() for x in v.split(",") if x.strip()] if v else []
+
+
+def _tx_conds(cid, df: str, dt: str, station_code, fuel_codes: list[int], pay_types: list[str], search):
+    d0, d1 = date.fromisoformat(df), date.fromisoformat(dt)
+    T = FuelTransaction
+    conds = [T.company_id == cid,
+             T.dt >= datetime(d0.year, d0.month, d0.day),
+             T.dt <= datetime(d1.year, d1.month, d1.day, 23, 59, 59)]
+    if station_code:
+        conds.append(T.station_code == station_code)
+    if fuel_codes:
+        conds.append(T.fuel_code.in_(fuel_codes))
+    if pay_types:
+        conds.append(T.pay_type_name.in_(pay_types))
+    if search:
+        conds.append(T.card.ilike(f"%{search.strip()}%"))
+    return conds
+
+
+@router.get("/transactions/rows")
+async def transactions_rows(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_code: int | None = Query(None), fuel_codes: str | None = Query(None),
+    pay_types: str | None = Query(None), search: str | None = Query(None),
+    sort: str = Query("dt"), order: str = Query("desc"),
+    limit: int = Query(100, le=1000), offset: int = Query(0),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Построчный реестр наливов (пооперационно) — серверная пагинация/фильтры/сортировка.
+    fuel_codes/pay_types — CSV (мультивыбор через KPI-карточки)."""
+    cid = await _company_id(user, db)
+    T = FuelTransaction
+    conds = _tx_conds(cid, date_from, date_to, station_code, _csv_ints(fuel_codes), _csv_strs(pay_types), search)
+    tot = (await db.execute(select(
+        func.count(), func.coalesce(func.sum(T.liters), 0), func.coalesce(func.sum(T.amount), 0)
+    ).where(*conds))).one()
+    col = _TX_SORT.get(sort, T.dt)
+    col = col.desc() if order == "desc" else col.asc()
+    rows = (await db.execute(
+        select(T).where(*conds).order_by(col, T.id.desc()).limit(limit).offset(offset))).scalars().all()
+    names = {int(s.code): s.name for s in (await db.execute(
+        select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
+    out = [{
+        "id": str(r.id), "dt": r.dt.isoformat() if r.dt else None,
+        "station_code": r.station_code, "station_name": names.get(r.station_code) or f"АЗС {r.station_code}",
+        "shift_number": r.shift_number, "pos": r.pos, "nozzle": r.nozzle, "tank": r.tank,
+        "fuel_code": r.fuel_code, "fuel_name": r.fuel_name,
+        "pay_type_name": r.pay_type_name, "card": r.card,
+        "liters": float(r.liters or 0), "price": float(r.price) if r.price is not None else None,
+        "amount": float(r.amount or 0),
+    } for r in rows]
+    return {
+        "total": int(tot[0]),
+        "totals": {"count": int(tot[0]), "liters": round(float(tot[1]), 2), "amount": round(float(tot[2]), 2)},
+        "rows": out,
+    }
+
+
+@router.get("/transactions/filters")
+async def transactions_filters(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Значения для фильтров реестра (станции/топливо/виды оплаты за период)."""
+    cid = await _company_id(user, db)
+    T = FuelTransaction
+    conds = _tx_conds(cid, date_from, date_to, None, [], [], None)
+    names = {int(s.code): s.name for s in (await db.execute(
+        select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
+    st = (await db.execute(select(T.station_code).where(*conds).distinct().order_by(T.station_code))).scalars().all()
+    fu = (await db.execute(select(T.fuel_code, T.fuel_name).where(*conds).distinct())).all()
+    pt = (await db.execute(select(T.pay_type_name).where(*conds).distinct().order_by(T.pay_type_name))).scalars().all()
+    fuels = sorted({(r[0], r[1]) for r in fu if r[0] is not None}, key=lambda x: x[0])
+    return {
+        "stations": [{"code": c, "name": names.get(c) or f"АЗС {c}"} for c in st],
+        "fuels": [{"code": c, "name": n} for c, n in fuels],
+        "pay_types": [p for p in pt if p],
+    }
+
+
+@router.get("/transactions/overview")
+async def transactions_overview(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_code: int | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Агрегаты периода для KPI-карточек «Операций»: итого + по видам топлива + по оплате.
+    Не зависит от кликов по KPI (fuel/pay) — они фильтруют только список."""
+    cid = await _company_id(user, db)
+    T = FuelTransaction
+    conds = _tx_conds(cid, date_from, date_to, station_code, [], [], None)
+    kpi = (await db.execute(select(
+        func.count(), func.coalesce(func.sum(T.liters), 0), func.coalesce(func.sum(T.amount), 0)
+    ).where(*conds))).one()
+    fu = (await db.execute(select(
+        T.fuel_code, T.fuel_name, func.count().label("n"),
+        func.coalesce(func.sum(T.liters), 0).label("l"), func.coalesce(func.sum(T.amount), 0).label("a"),
+    ).where(*conds).group_by(T.fuel_code, T.fuel_name)
+        .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+    pm = (await db.execute(select(
+        T.pay_type_name, func.count().label("n"),
+        func.coalesce(func.sum(T.liters), 0).label("l"), func.coalesce(func.sum(T.amount), 0).label("a"),
+    ).where(*conds).group_by(T.pay_type_name)
+        .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+    return {
+        "kpi": {"count": int(kpi[0]), "liters": round(float(kpi[1]), 2), "amount": round(float(kpi[2]), 2)},
+        "by_fuel": [{"fuel_code": r.fuel_code, "fuel_name": r.fuel_name or "—", "count": int(r.n),
+                     "liters": round(float(r.l), 2), "amount": round(float(r.a), 2)} for r in fu],
+        "by_payment": [{"name": r.pay_type_name or "—", "count": int(r.n),
+                        "liters": round(float(r.l), 2), "amount": round(float(r.a), 2)} for r in pm],
+    }
+
+
+@router.post("/stations/sync-geo")
+async def stations_sync_geo(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Подтянуть координаты/адрес АЗС из STS /v1/points → FuelStation (для Карты АЗС)."""
+    from app.services.fuel_transactions import resolve_sts
+    from app.services.sts_client import sts_get_points as _points
+    cid = await _company_id(user, db)
+    conn = await resolve_sts(db, cid)
+    if conn is None:
+        return {"updated": 0, "message": "нет STS-источника у компании"}
+    geo: dict[int, dict] = {}
+    for sysid in conn["systems"]:
+        try:
+            pts = await _points(conn["base_url"], conn["login"], conn["pwd"], sysid)
+        except Exception:  # noqa: BLE001
+            pts = []
+        for p in pts:
+            try:
+                code = int(p.get("number") or p.get("id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not code:
+                continue
+            geo[code] = {
+                "lat": _num_or_none(p.get("latitude")), "lon": _num_or_none(p.get("longitude")),
+                "address": p.get("address"),
+            }
+    stations = (await db.execute(select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()
+    updated = 0
+    for s in stations:
+        g = geo.get(int(s.code))
+        if not g:
+            continue
+        if g["lat"] is not None:
+            s.latitude = g["lat"]
+        if g["lon"] is not None:
+            s.longitude = g["lon"]
+        if g.get("address"):
+            s.address = g["address"]
+        updated += 1
+    await db.commit()
+    return {"updated": updated, "with_coords": sum(1 for s in stations if s.latitude is not None)}
+
+
+@router.get("/stations/map")
+async def stations_map(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """АЗС с координатами + метрики за период (наливы/объём/выручка) — для Карты АЗС."""
+    cid = await _company_id(user, db)
+    d0, d1 = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    T = FuelTransaction
+    agg = (await db.execute(select(
+        T.station_code, func.count().label("n"),
+        func.coalesce(func.sum(T.liters), 0).label("l"),
+        func.coalesce(func.sum(T.amount), 0).label("a"),
+    ).where(
+        T.company_id == cid,
+        T.dt >= datetime(d0.year, d0.month, d0.day),
+        T.dt <= datetime(d1.year, d1.month, d1.day, 23, 59, 59),
+    ).group_by(T.station_code))).all()
+    m = {int(r.station_code): r for r in agg}
+    stations = (await db.execute(select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()
+    out = []
+    for s in stations:
+        r = m.get(int(s.code))
+        out.append({
+            "code": s.code, "name": s.name, "address": s.address,
+            "latitude": float(s.latitude) if s.latitude is not None else None,
+            "longitude": float(s.longitude) if s.longitude is not None else None,
+            "transactions": int(r.n) if r else 0,
+            "liters": round(float(r.l), 2) if r else 0.0,
+            "amount": round(float(r.a), 2) if r else 0.0,
+        })
+    with_coords = sum(1 for s in out if s["latitude"] is not None)
+    return {"stations": out, "with_coords": with_coords, "total": len(out)}
 
 
 # ═══════════════════════════════════════════════════════════════

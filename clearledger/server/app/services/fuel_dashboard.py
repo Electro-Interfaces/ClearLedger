@@ -11,11 +11,11 @@ import uuid
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    FuelShift, FuelShiftSale, FuelReceipt, FuelCashMovement,
+    FuelShift, FuelShiftSale, FuelReceipt, FuelCashMovement, FuelStation, FuelTransaction,
 )
 from app.services.fuel_mappings import load_mapping_context
 
@@ -72,6 +72,28 @@ class FuelDashboardService:
         shifts, sales, cash, receipts = await self._load(date_from, date_to, station_ids)
         kpis = self._kpis(shifts, sales, cash, receipts, fuel_name)
         charts = self._charts(shifts, sales, date_from, date_to, fuel_name)
+        by_station = await self._by_station(shifts, sales)
+        onboarding = await self._onboarding()
+        # Разрез оплат/топлива со счётчиком НАЛИВОВ — из пооперационных транзакций
+        # (fuel_transactions, грейн=налив). Фолбэк на сырые отчёты смен (без count),
+        # если транзакции за период ещё не загружены.
+        payment_methods, fuel_types_raw = await self._tx_breakdowns(date_from, date_to, station_ids)
+        if not payment_methods:
+            payment_methods, fuel_types_raw = await self._raw_breakdowns(date_from, date_to, station_ids)
+        activity = await self._activity(date_from, date_to, station_ids)
+        top_cards = await self._top_cards(date_from, date_to, station_ids)
+        # Средние показатели АЗС (по наливам): средний чек, средний объём заправки,
+        # операций/день — как OverviewKPICards в TradeFrame. Из транзакций (count).
+        _txc = sum(int(p.get("count") or 0) for p in payment_methods)
+        _txa = sum(float(p.get("revenue") or 0) for p in payment_methods)
+        _txl = sum(float(p.get("volume") or 0) for p in payment_methods)
+        _days = (date_to - date_from).days + 1
+        averages = {
+            "tx_count": _txc,
+            "avg_check": round(_txa / _txc, 2) if _txc else 0.0,
+            "avg_fill_liters": round(_txl / _txc, 2) if _txc else 0.0,
+            "ops_per_day": round(_txc / _days, 1) if _days else 0.0,
+        }
 
         result = {
             "period": {
@@ -80,7 +102,20 @@ class FuelDashboardService:
             },
             **kpis,
             "charts": charts,
+            "by_station": by_station,
+            "onboarding": onboarding,
+            "payment_methods": payment_methods,
+            "fuel_types_raw": fuel_types_raw,
+            "activity": activity,
+            "top_cards": top_cards,
+            "averages": averages,
         }
+        # Средняя цена ₽/л + счётчики размерностей (для executive-«Обзора»).
+        tv = result["volume"]["total"]
+        tr = result["financial"]["total_revenue"]
+        result["financial"]["avg_price"] = round(tr / tv, 2) if tv else 0.0
+        result["operational"]["stations_count"] = len({s.station_id for s in shifts})
+        result["operational"]["fuel_types_count"] = len(result["volume"]["by_fuel"])
         if compare:
             days = (date_to - date_from).days + 1
             cmp_to = date_from - timedelta(days=1)
@@ -134,6 +169,213 @@ class FuelDashboardService:
             **self._cash(cash, shifts),
             "operational": {"shifts_count": len(shifts)},
         }
+
+    async def _by_station(self, shifts, sales) -> list[dict]:
+        """Продажи по АЗС (revenue/volume/смены/ср.цена) — для «Станции: лидеры/аутсайдеры»
+        и разреза Обзора. Имена станций резолвятся из FuelStation по station_id."""
+        if not shifts:
+            return []
+        shift_station = {s.id: s.station_id for s in shifts}
+        st_ids = {s.station_id for s in shifts}
+        rows = (await self.session.execute(select(
+            FuelStation.id, FuelStation.code, FuelStation.name,
+        ).where(FuelStation.id.in_(st_ids)))).all()
+        names = {r.id: (r.name or f"АЗС {r.code}") for r in rows}
+
+        agg: dict = defaultdict(lambda: {"volume": 0.0, "revenue": 0.0})
+        for s in sales:
+            st = shift_station.get(s.shift_id)
+            if st is None:
+                continue
+            agg[st]["volume"] += float(s.liters or 0)
+            agg[st]["revenue"] += float(s.amount or 0)
+        shift_cnt: dict = defaultdict(int)
+        for s in shifts:
+            shift_cnt[s.station_id] += 1
+
+        out = [{
+            "station_id": str(st),
+            "station_name": names.get(st, "—"),
+            "revenue": round(d["revenue"], 2),
+            "volume": round(d["volume"], 2),
+            "shifts": shift_cnt.get(st, 0),
+            "avg_price": round(d["revenue"] / d["volume"], 2) if d["volume"] else 0.0,
+        } for st, d in agg.items()]
+        out.sort(key=lambda x: -x["revenue"])
+        return out
+
+    def _tx_conds(self, date_from: date, date_to: date, station_ids: list | None):
+        T = FuelTransaction
+        conds = [T.company_id == self.company_id,
+                 T.dt >= datetime(date_from.year, date_from.month, date_from.day),
+                 T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)]
+        if station_ids:
+            conds.append(T.station_id.in_(station_ids))
+        return conds
+
+    async def _activity(self, date_from: date, date_to: date, station_ids: list | None) -> dict:
+        """Профиль активности из транзакций: по часам суток (0-23) и дням недели (Пн-Вс),
+        число наливов + выручка. Час/день — в МСК (AT TIME ZONE), независимо от TZ сессии."""
+        T = FuelTransaction
+        conds = self._tx_conds(date_from, date_to, station_ids) + [T.dt.is_not(None)]
+        msk = func.timezone("Europe/Moscow", T.dt)
+        hh = (await self.session.execute(select(
+            func.extract("hour", msk).label("k"), func.count().label("n"),
+            func.coalesce(func.sum(T.amount), 0).label("a")).where(*conds).group_by("k"))).all()
+        hmap = {int(r.k): r for r in hh}
+        hourly = [{"hour": h, "label": f"{h:02d}", "count": int(hmap[h].n) if h in hmap else 0,
+                   "amount": round(float(hmap[h].a), 2) if h in hmap else 0.0} for h in range(24)]
+        wd = (await self.session.execute(select(
+            func.extract("isodow", msk).label("k"), func.count().label("n"),
+            func.coalesce(func.sum(T.amount), 0).label("a")).where(*conds).group_by("k"))).all()
+        wmap = {int(r.k): r for r in wd}
+        _WD = {1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Вс"}
+        weekday = [{"weekday": w, "label": _WD[w], "count": int(wmap[w].n) if w in wmap else 0,
+                    "amount": round(float(wmap[w].a), 2) if w in wmap else 0.0} for w in range(1, 8)]
+        _nz = [x for x in weekday if x["amount"] > 0]
+        return {
+            "hourly": hourly, "weekday": weekday,
+            "peak_hour": max(hourly, key=lambda x: x["count"])["hour"] if any(x["count"] for x in hourly) else None,
+            "best_weekday": max(_nz, key=lambda x: x["amount"])["weekday"] if _nz else None,
+        }
+
+    async def _top_cards(self, date_from: date, date_to: date, station_ids: list | None,
+                         top: int = 12) -> list[dict]:
+        """Топ карт по обороту (корпоратив/лояльность) — из транзакций. Технические
+        «нулевые» карты (наличные без карты) исключаются."""
+        T = FuelTransaction
+        conds = self._tx_conds(date_from, date_to, station_ids) + [
+            T.card.is_not(None), T.card != "", T.card.op("!~")("^0+$")]
+        rows = (await self.session.execute(select(
+            T.card, func.count().label("n"),
+            func.coalesce(func.sum(T.liters), 0).label("l"),
+            func.coalesce(func.sum(T.amount), 0).label("a"))
+            .where(*conds).group_by(T.card)
+            .order_by(func.coalesce(func.sum(T.amount), 0).desc()).limit(top))).all()
+        return [{
+            "card": (r.card or "").lstrip("0") or r.card,
+            "count": int(r.n), "liters": round(float(r.l), 2), "amount": round(float(r.a), 2),
+        } for r in rows]
+
+    async def _tx_breakdowns(self, date_from: date, date_to: date,
+                             station_ids: list | None) -> tuple[list[dict], list[dict]]:
+        """Разрез по видам оплаты и топлива из пооперационных транзакций (наливов).
+        Даёт три колонки как в эталоне: наливы(count) · выручка · объём."""
+        dt_from = datetime(date_from.year, date_from.month, date_from.day)
+        dt_to = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        T = FuelTransaction
+        conds = [T.company_id == self.company_id, T.dt >= dt_from, T.dt <= dt_to]
+        if station_ids:
+            conds.append(T.station_id.in_(station_ids))
+        pay = (await self.session.execute(
+            select(T.pay_type_name, func.count().label("n"),
+                   func.coalesce(func.sum(T.liters), 0).label("vol"),
+                   func.coalesce(func.sum(T.amount), 0).label("rev"))
+            .where(*conds).group_by(T.pay_type_name)
+            .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+        fuel = (await self.session.execute(
+            select(T.fuel_name, T.fuel_code, func.count().label("n"),
+                   func.coalesce(func.sum(T.liters), 0).label("vol"),
+                   func.coalesce(func.sum(T.amount), 0).label("rev"))
+            .where(*conds).group_by(T.fuel_name, T.fuel_code)
+            .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+        payments = [{
+            "name": r.pay_type_name or "—", "count": int(r.n),
+            "revenue": round(float(r.rev), 2), "volume": round(float(r.vol), 2),
+        } for r in pay]
+        fuel_agg: dict = defaultdict(lambda: {"code": None, "count": 0, "revenue": 0.0, "volume": 0.0})
+        for r in fuel:
+            nm = r.fuel_name or "—"
+            fuel_agg[nm]["count"] += int(r.n)
+            fuel_agg[nm]["revenue"] += float(r.rev)
+            fuel_agg[nm]["volume"] += float(r.vol)
+            if fuel_agg[nm]["code"] is None and r.fuel_code is not None:
+                fuel_agg[nm]["code"] = r.fuel_code
+        fuels = [{
+            "name": nm, "code": d["code"], "count": d["count"],
+            "revenue": round(d["revenue"], 2), "volume": round(d["volume"], 2),
+        } for nm, d in sorted(fuel_agg.items(), key=lambda x: -x[1]["revenue"])]
+        return payments, fuels
+
+    async def _raw_breakdowns(self, date_from: date, date_to: date,
+                              station_ids: list | None) -> tuple[list[dict], list[dict]]:
+        """Полный разрез продаж из СЫРЫХ отчётов STS (raw_report.sales) — по КАЖДОМУ
+        виду оплаты (pay_type.name) и по видам топлива, БЕЗ маппинга/отбрасывания.
+        Именно так «Способы оплаты» показывает эталонная система (все методы, вкл.
+        Купон/Прокачку/Тех.отпуск). FuelShiftSale для этого не годится — он свёрнут в
+        каналы 1С и роняет неучётные типы."""
+        dt_from = datetime(date_from.year, date_from.month, date_from.day)
+        dt_to = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        params: dict = {"cid": self.company_id, "df": dt_from, "dt": dt_to}
+        st_clause = ""
+        if station_ids:
+            st_clause = " AND fs.station_id = ANY(:sids)"
+            params["sids"] = list(station_ids)
+        base_from = (
+            "FROM fuel_shifts fs, "
+            "jsonb_array_elements(fs.raw_report->'sales') s, "
+            "jsonb_array_elements(s->'fuel') f "
+            "WHERE fs.company_id = :cid AND fs.raw_report IS NOT NULL "
+            "AND fs.opened_at >= :df AND fs.opened_at <= :dt" + st_clause
+        )
+        pay_sql = text(
+            "SELECT s->'pay_type'->>'name' AS name, "
+            "COALESCE(sum((f->'release'->>'cost')::numeric), 0) AS revenue, "
+            "COALESCE(sum((f->'release'->>'volume')::numeric), 0) AS volume "
+            + base_from + " GROUP BY 1 ORDER BY 2 DESC")
+        fuel_sql = text(
+            "SELECT f->'service'->>'service_name' AS name, "
+            "(f->'service'->>'service_code') AS code, "
+            "COALESCE(sum((f->'release'->>'cost')::numeric), 0) AS revenue, "
+            "COALESCE(sum((f->'release'->>'volume')::numeric), 0) AS volume "
+            + base_from + " GROUP BY 1, 2 ORDER BY 3 DESC")
+        pm_rows = (await self.session.execute(pay_sql, params)).all()
+        ft_rows = (await self.session.execute(fuel_sql, params)).all()
+        payments = [{
+            "name": r.name or "—",
+            "revenue": round(float(r.revenue), 2), "volume": round(float(r.volume), 2),
+        } for r in pm_rows]
+        # схлопнуть дубли имён видов топлива (разные service_code с одним именем)
+        fuel_agg: dict = defaultdict(lambda: {"code": None, "revenue": 0.0, "volume": 0.0})
+        for r in ft_rows:
+            nm = r.name or "—"
+            fuel_agg[nm]["revenue"] += float(r.revenue)
+            fuel_agg[nm]["volume"] += float(r.volume)
+            if fuel_agg[nm]["code"] is None and r.code:
+                try:
+                    fuel_agg[nm]["code"] = int(r.code)
+                except (TypeError, ValueError):
+                    pass
+        fuels = [{
+            "name": nm, "code": d["code"],
+            "revenue": round(d["revenue"], 2), "volume": round(d["volume"], 2),
+        } for nm, d in sorted(fuel_agg.items(), key=lambda x: -x[1]["revenue"])]
+        return payments, fuels
+
+    async def _onboarding(self) -> list[dict]:
+        """Даты подключения станций = первая смена за ВСЮ историю (не за период) —
+        маркеры на графике «Реализация по дням»; фронт рисует их, если дата попадает
+        в видимый диапазон. Абсолютная дата, чтобы маркер был стабилен при смене периода."""
+        rows = (await self.session.execute(
+            select(FuelShift.station_id, func.min(FuelShift.opened_at).label("fst"))
+            .where(FuelShift.company_id == self.company_id, FuelShift.opened_at.is_not(None))
+            .group_by(FuelShift.station_id))).all()
+        if not rows:
+            return []
+        ids = [r.station_id for r in rows]
+        srows = (await self.session.execute(select(
+            FuelStation.id, FuelStation.code, FuelStation.name).where(FuelStation.id.in_(ids)))).all()
+        nm = {r.id: (r.code, r.name) for r in srows}
+        out = []
+        for r in rows:
+            code, name = nm.get(r.station_id, (None, None))
+            out.append({
+                "station_id": str(r.station_id), "code": code,
+                "name": name or (f"АЗС {code}" if code is not None else "—"),
+                "date": r.fst.date().isoformat(),
+            })
+        out.sort(key=lambda x: x["date"])
+        return out
 
     def _receipts(self, receipts, fuel_name) -> dict:
         agg = defaultdict(lambda: {"doc": 0.0, "fact": 0.0, "diff": 0.0, "count": 0})
