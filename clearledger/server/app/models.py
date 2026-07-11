@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -249,6 +250,71 @@ class DataEntry(Base):
     # Связи
     company: Mapped["Company"] = relationship(back_populates="entries")
     audit_events: Mapped[list["AuditEvent"]] = relationship(back_populates="entry")
+
+
+# ---------------------------------------------------------------------------
+# CbNomenclature — кеш НСИ номенклатуры ЦБ ЭЛСИ.АЗК (GUID → имя/атрибуты).
+# GUID (Ref) из ЦБ ≠ external_ref зеркала БП, поэтому отдельная таблица.
+# Наполняется скриптом enrich_cb_nomenclature_dev.py (fetch Catalog.Номенклатура).
+# Джойнится по external_ref с GUID номенклатуры в продажах/закупках сопутки.
+# ---------------------------------------------------------------------------
+class CbNomenclature(Base):
+    __tablename__ = "cb_nomenclature"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    external_ref: Mapped[str] = mapped_column(String(36), nullable=False)  # Ref (GUID) из ЦБ
+    name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    article: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    vat: Mapped[str | None] = mapped_column(String(20), nullable=True)        # «22%» / «10%» / …
+    marked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    weighed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    group_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)  # НоменклатурнаяГруппа GUID
+    kind_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)   # ВидНоменклатуры GUID
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (Index("uq_cb_nom_company_ref", "company_id", "external_ref", unique=True),)
+
+
+# ---------------------------------------------------------------------------
+# CbRef — универсальный кеш ссылок ЦБ (контрагенты, номенклатурные группы, …):
+# GUID → имя. kind разделяет справочники. Для Приёмки/Поставщиков/Категорий.
+# ---------------------------------------------------------------------------
+class CbRef(Base):
+    __tablename__ = "cb_ref"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # counterparty | nom_group
+    external_ref: Mapped[str] = mapped_column(String(36), nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+
+    __table_args__ = (Index("uq_cb_ref_ck", "company_id", "kind", "external_ref", unique=True),)
+
+
+# ---------------------------------------------------------------------------
+# CbBarcode — штрихкоды/EAN из РегистрСведений.Штрихкоды ЦБ (Штрихкод → товар).
+# ---------------------------------------------------------------------------
+class CbBarcode(Base):
+    __tablename__ = "cb_barcode"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    barcode: Mapped[str] = mapped_column(String(64), nullable=False)
+    owner_name: Mapped[str] = mapped_column(String(500), nullable=False, default="")  # имя товара
+    owner_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)          # GUID (если извлечён)
+    btype: Mapped[str | None] = mapped_column(String(30), nullable=True)              # EAN13 / EAN8 / Ручной
+    main: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+
+    __table_args__ = (Index("ix_cb_barcode_company", "company_id", "barcode"),)
 
 
 # ---------------------------------------------------------------------------
@@ -1099,8 +1165,63 @@ class FuelStation(Base):
     code: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     sts_system_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Гео-паспорт (координаты/адрес из STS /v1/points) — для Карты АЗС.
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    address: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelTransaction (пооперационный налив — STS /v2/transactions)
+# ---------------------------------------------------------------------------
+class FuelTransaction(Base):
+    """Пооперационная транзакция отпуска топлива (налив) из STS /v2/transactions.
+
+    Грейн = одна операция на ТРК (в отличие от FuelShiftSale = агрегат смена×канал×
+    топливо). Даёт счётчик наливов (как в эталонной системе), реестр операций и
+    точные метрики (по часам/картам/ТРК). Дедуп по STS `id` в скоупе компания+станция.
+    """
+    __tablename__ = "fuel_transactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    station_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="SET NULL"), nullable=True
+    )
+    station_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    ext_id: Mapped[int] = mapped_column(BigInteger, nullable=False)  # STS transaction id (дедуп)
+
+    dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shift_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nozzle: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    fuel_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fuel_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    pay_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pay_type_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    card: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    liters: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False, default=0)   # quantity
+    price: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)          # ₽/л
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)    # ₽ (STS cost)
+    density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_fuel_transactions", "company_id", "station_code", "ext_id", unique=True),
+        Index("idx_ftx_company_dt", "company_id", "dt"),
     )
 
 

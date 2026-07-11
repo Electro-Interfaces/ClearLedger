@@ -270,6 +270,11 @@ class OneCComClient:
         result = await self._call("enrich_nomenclature", {"refs": refs})
         return dict(result or {})
 
+    async def fetch_barcodes(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Штрихкоды из РегистрСведений.Штрихкоды: [{barcode, owner(GUID номенклатуры), type, main}]."""
+        result = await self._call("fetch_barcodes", {"limit": limit} if limit is not None else {})
+        return list(result or [])
+
     async def fetch_doc_lines(
         self,
         doc_type: str,

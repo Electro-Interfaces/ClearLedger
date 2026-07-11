@@ -835,6 +835,34 @@ def op_fetch_cb_shifts(period_from: str, period_to: str,
     return packages
 
 
+def op_fetch_barcodes(limit: int | None = None) -> list[dict[str, Any]]:
+    """Штрихкоды из РегистрСведений.Штрихкоды: Штрихкод + GUID номенклатуры (Владелец).
+    fetch_entity не годится (строит запрос под справочник с Т.Ссылка)."""
+    ib = _require_ib()
+    top = f"ПЕРВЫЕ {int(limit)} " if limit else ""
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        "ВЫБРАТЬ " + top
+        + "Т.Штрихкод КАК Barcode, Н.Ссылка КАК Owner, Н.Наименование КАК OwnerName, "
+        + "ПРЕДСТАВЛЕНИЕ(Т.ТипШтрихкода) КАК Type, Т.Основной КАК Main "
+        + "ИЗ РегистрСведений.Штрихкоды КАК Т "
+        + "ВНУТРЕННЕЕ СОЕДИНЕНИЕ Справочник.Номенклатура КАК Н "
+        + "ПО Н.Ссылка = ВЫРАЗИТЬ(Т.Владелец КАК Справочник.Номенклатура) "
+        + 'ГДЕ Т.Штрихкод <> ""'
+    )
+    sel = q.Выполнить().Выбрать()
+    rows: list[dict[str, Any]] = []
+    while sel.Следующий():
+        rows.append({
+            "barcode": _val(sel.Barcode),
+            "owner": _val(sel.Owner),        # Н.Ссылка — обычная ссылка → GUID номенклатуры
+            "owner_name": _val(sel.OwnerName),
+            "type": _val(sel.Type),
+            "main": _val(sel.Main),
+        })
+    return rows
+
+
 def main() -> int:
     while True:
         line = sys.stdin.readline()
@@ -871,6 +899,8 @@ def main() -> int:
                 result = op_fetch_postings(**args)
             elif op == "enrich_nomenclature":
                 result = op_enrich_nomenclature(**args)
+            elif op == "fetch_barcodes":
+                result = op_fetch_barcodes(**args)
             elif op == "exit":
                 return 0
             else:

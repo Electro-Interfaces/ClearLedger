@@ -130,6 +130,10 @@ async def create_all() -> None:
             # v2.9: сырой сменный отчёт STS на смене — вход эталонного просмотрщика
             # TradeFrame (форма «Детали смены» строится адаптером из этого JSON).
             "ALTER TABLE fuel_shifts ADD COLUMN IF NOT EXISTS raw_report JSONB",
+            # v4.0: гео-паспорт АЗС (координаты/адрес из STS /v1/points) — для Карты АЗС.
+            "ALTER TABLE fuel_stations ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION",
+            "ALTER TABLE fuel_stations ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION",
+            "ALTER TABLE fuel_stations ADD COLUMN IF NOT EXISTS address VARCHAR(300)",
             # v3.1: период прогона в логе — для ленты прогонов кокпита канала
             # (строка прогона показывает, за какой период он грузил).
             "ALTER TABLE channel_sync_logs ADD COLUMN IF NOT EXISTS date_from VARCHAR(10)",
