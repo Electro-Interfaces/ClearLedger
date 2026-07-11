@@ -349,6 +349,42 @@ class StockOnHand(Base):
 
 
 # ---------------------------------------------------------------------------
+# CbInventoryDoc — документы инвентаризации из ЦБ ЭЛСИ.АЗК (снимок, режим A).
+# Реестр Document.ИнвентаризацияТоваровНаСкладе + агрегаты отклонений факт↔учёт
+# (недостачи/излишки, shrinkage). Строки-отклонения — в lines (JSONB) для drill.
+# Наполняется скриптом pull_cb_inventory_dev.py.
+# ---------------------------------------------------------------------------
+class CbInventoryDoc(Base):
+    __tablename__ = "cb_inventory_doc"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    external_ref: Mapped[str] = mapped_column(String(36), nullable=False)  # GUID документа
+    number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    doc_date: Mapped[str | None] = mapped_column(String(20), nullable=True)  # ISO дата
+    warehouse_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    warehouse_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Агрегаты отклонений (факт − учёт)
+    dev_positions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    shortage_qty: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)      # недостача, ед. (<0)
+    shortage_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)   # недостача, ₽ (<0)
+    surplus_qty: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)       # излишки, ед. (>0)
+    surplus_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)    # излишки, ₽ (>0)
+    net_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)        # чистое отклонение, ₽
+    lines: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # строки-отклонения [{ref,name,fact,uchet,dev,amount_dev}]
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uq_cb_inventory_doc", "company_id", "external_ref", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
 # AuditEvent
 # ---------------------------------------------------------------------------
 class AuditEvent(Base):

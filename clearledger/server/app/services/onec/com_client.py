@@ -256,6 +256,27 @@ class OneCComClient:
         result = await self._call("fetch_register_balance", args)
         return list(result or [])
 
+    async def query_tabular(
+        self,
+        doc_type: str,
+        tabular: str,
+        *,
+        select: list[str] | None = None,
+        where: str | None = None,
+        top: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Строки ТЧ документа (для чтения движений): поля ТЧ + шапки через «Ссылка.Поле»,
+        сырое условие where с префиксом Т. Ссылки → GUID."""
+        args: dict[str, Any] = {"doc_type": doc_type, "tabular": tabular}
+        if select is not None:
+            args["select"] = select
+        if where is not None:
+            args["where"] = where
+        if top is not None:
+            args["top"] = top
+        result = await self._call("query_tabular", args)
+        return list(result or [])
+
     async def describe_entity(self, entity: str) -> dict[str, list[str]]:
         """Возвращает {dimensions, resources, attributes} объекта метаданных 1С.
         Нужен для устойчивого построения запросов к УчетнойПолитике и другим

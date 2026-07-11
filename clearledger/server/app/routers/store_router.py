@@ -108,6 +108,19 @@ async def store_stock(
     )
 
 
+@router.get("/inventory")
+async def store_inventory(
+    warehouse: str | None = Query(None, description="код склада (по умолч. — все склады магазина)"),
+    only_dev: bool = Query(False, description="только документы с отклонениями"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Реестр инвентаризаций ЦБ + недостачи/излишки (shrinkage) с drill-down по строкам."""
+    return await GoodsDashboardService(db, user.company_id).inventory(
+        warehouse=warehouse, only_dev=only_dev,
+    )
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 

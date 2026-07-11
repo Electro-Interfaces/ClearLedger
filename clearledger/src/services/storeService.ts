@@ -205,6 +205,37 @@ export const getStoreStock = (opts?: {
     only_negative: opts?.onlyNegative ? 'true' : undefined,
   })
 
+// ── Инвентаризация: реестр + отклонения (недостачи/излишки, shrinkage) ──
+export interface StoreInventoryLine {
+  ref: string; name: string
+  fact: number; uchet: number; dev: number; amount_dev: number
+}
+export interface StoreInventoryDoc {
+  ref: string; number: string | null; date: string | null
+  warehouse_code: string; warehouse_name: string | null; comment: string | null
+  dev_positions: number
+  shortage_qty: number; shortage_amount: number
+  surplus_qty: number; surplus_amount: number; net_amount: number
+  lines: StoreInventoryLine[]
+}
+export interface StoreInventoryData {
+  warehouse: string | null
+  warehouses: { code: string; name: string | null; count: number }[]
+  docs: StoreInventoryDoc[]
+  top_shortage: { name: string; qty: number; amount: number; docs: number }[]
+  summary: {
+    docs_count: number; docs_with_dev: number
+    shortage_amount: number; surplus_amount: number; net_amount: number
+    period_from: string | null; period_to: string | null
+  }
+}
+
+export const getStoreInventory = (opts?: { warehouse?: string; onlyDev?: boolean }) =>
+  get<StoreInventoryData>('/api/store/inventory', {
+    warehouse: opts?.warehouse || undefined,
+    only_dev: opts?.onlyDev ? 'true' : undefined,
+  })
+
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null

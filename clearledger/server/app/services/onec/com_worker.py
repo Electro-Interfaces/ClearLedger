@@ -235,6 +235,44 @@ def op_fetch_register_balance(
     return rows
 
 
+def op_query_tabular(
+    doc_type: str,
+    tabular: str,
+    select: list[str] | None = None,
+    where: str | None = None,
+    top: int | None = None,
+) -> list[dict[str, Any]]:
+    """Строки табличной части документа через прямой запрос (для чтения движений).
+
+    doc_type — имя документа (ИнвентаризацияТоваровНаСкладе), tabular — ТЧ (Товары).
+    select — поля ТЧ (Номенклатура/Количество/…) и шапки через «Ссылка.Поле»
+    (Ссылка, Ссылка.Номер, Ссылка.Дата, Ссылка.Склад). where — сырое условие 1С
+    с префиксом Т. (напр. «Т.Количество <> Т.КоличествоУчет»). Безопасные алиасы fN.
+    Ссылки конвертируются в GUID через _val.
+    """
+    ib = _require_ib()
+    fields = select or ["Номенклатура"]
+    alias_map: list[tuple[str, str]] = []
+    parts: list[str] = []
+    for i, f in enumerate(fields):
+        a = f"f{i}"
+        parts.append(f"Т.{f} КАК {a}")
+        alias_map.append((a, f))
+    top_clause = f"ПЕРВЫЕ {int(top)} " if top else ""
+    where_clause = f"ГДЕ {where} " if where else ""
+    text = (
+        f"ВЫБРАТЬ {top_clause}" + ", ".join(parts)
+        + f" ИЗ Документ.{doc_type}.{tabular} КАК Т " + where_clause
+    ).strip()
+    q = ib.NewObject("Запрос")
+    q.Текст = text
+    sel = q.Выполнить().Выбрать()
+    rows: list[dict[str, Any]] = []
+    while sel.Следующий():
+        rows.append({out: _val(getattr(sel, a)) for a, out in alias_map})
+    return rows
+
+
 # Маппинг имён полей OData → выражения языка запросов 1С.
 # Если поля нет в карте — берём как Т.<поле> (кириллица as-is).
 ODATA_TO_QUERY_FIELDS: dict[str, str] = {
@@ -384,6 +422,18 @@ def op_describe_entity(entity: str) -> dict[str, list[str]]:
             result[key] = _names(getattr(obj, attr_name))
         except AttributeError:
             result[key] = []
+    # Табличные части (для документов) — {имя ТЧ: [реквизиты]}. Нужно для маппинга
+    # колонок ТЧ движений (Инвентаризация.Товары: факт/учёт/отклонение и т.п.).
+    try:
+        tabs: dict[str, list[str]] = {}
+        tcoll = obj.ТабличныеЧасти
+        for i in range(tcoll.Количество()):
+            t = tcoll.Получить(i)
+            tabs[str(t.Имя)] = _names(t.Реквизиты)
+        if tabs:
+            result["tabulars"] = tabs
+    except Exception:
+        pass
     return result
 
 
@@ -975,6 +1025,8 @@ def main() -> int:
                 result = op_metadata_accum_registers(**args)
             elif op == "fetch_register_balance":
                 result = op_fetch_register_balance(**args)
+            elif op == "query_tabular":
+                result = op_query_tabular(**args)
             elif op == "fetch_entity":
                 result = op_fetch_entity(**args)
             elif op == "describe_entity":
