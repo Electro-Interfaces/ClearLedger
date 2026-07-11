@@ -223,6 +223,39 @@ class OneCComClient:
         result = await self._call("metadata_registers", {"name_substring": name_substring})
         return list(result or [])
 
+    async def metadata_documents(self, name_substring: str = "") -> list[str]:
+        """Список Document_<имя> (probe товародвижения) с фильтром по подстроке."""
+        result = await self._call("metadata_documents", {"name_substring": name_substring})
+        return list(result or [])
+
+    async def metadata_accum_registers(self, name_substring: str = "") -> list[str]:
+        """Список AccumulationRegister_<имя> (остатки/партии) с фильтром по подстроке."""
+        result = await self._call("metadata_accum_registers", {"name_substring": name_substring})
+        return list(result or [])
+
+    async def fetch_register_balance(
+        self,
+        register: str,
+        *,
+        dimensions: list[str] | None = None,
+        resources: list[str] | None = None,
+        on_date: str | None = None,
+        top: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Остатки регистра накопления (виртуальная таблица <Регистр>.Остатки).
+        Ресурсы возвращаются как <Ресурс> (Количество/Стоимость/НДС), ссылки — GUID."""
+        args: dict[str, Any] = {"register": register}
+        if dimensions is not None:
+            args["dimensions"] = dimensions
+        if resources is not None:
+            args["resources"] = resources
+        if on_date is not None:
+            args["on_date"] = on_date
+        if top is not None:
+            args["top"] = top
+        result = await self._call("fetch_register_balance", args)
+        return list(result or [])
+
     async def describe_entity(self, entity: str) -> dict[str, list[str]]:
         """Возвращает {dimensions, resources, attributes} объекта метаданных 1С.
         Нужен для устойчивого построения запросов к УчетнойПолитике и другим

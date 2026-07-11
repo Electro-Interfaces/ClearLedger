@@ -149,6 +149,92 @@ def op_metadata_registers(name_substring: str = "") -> list[str]:
     return out
 
 
+def op_metadata_documents(name_substring: str = "") -> list[str]:
+    """Список всех Document_ имён через Метаданные.Документы (probe товародвижения).
+    Опционально фильтрует по подстроке в имени (case-insensitive)."""
+    ib = _require_ib()
+    out: list[str] = []
+    coll = ib.Метаданные.Документы
+    ns = name_substring.lower()
+    for i in range(coll.Количество()):
+        item = coll.Получить(i)
+        nm = _val(item.Имя) or ""
+        if not ns or ns in str(nm).lower():
+            out.append(f"Document_{nm}")
+    return out
+
+
+def op_metadata_accum_registers(name_substring: str = "") -> list[str]:
+    """Список всех AccumulationRegister_ имён через Метаданные.РегистрыНакопления
+    (probe остатков/партий товаров). Опционально фильтрует по подстроке."""
+    ib = _require_ib()
+    out: list[str] = []
+    coll = ib.Метаданные.РегистрыНакопления
+    ns = name_substring.lower()
+    for i in range(coll.Количество()):
+        item = coll.Получить(i)
+        nm = _val(item.Имя) or ""
+        if not ns or ns in str(nm).lower():
+            out.append(f"AccumulationRegister_{nm}")
+    return out
+
+
+def op_fetch_register_balance(
+    register: str,
+    dimensions: list[str] | None = None,
+    resources: list[str] | None = None,
+    on_date: str | None = None,
+    top: int | None = None,
+) -> list[dict[str, Any]]:
+    """Остатки регистра накопления через виртуальную таблицу <Регистр>.Остатки.
+
+    register — OData-имя (AccumulationRegister_ПартииТоваровНаСкладах).
+    dimensions — измерения в выборку (Номенклатура/Склад/ДокументОприходования/…).
+    resources — ресурсы: в выборку берётся <Ресурс>Остаток (Количество→КоличествоОстаток).
+    on_date — ISO 'YYYY-MM-DD[THH:MM:SS]' срез (иначе текущие итоги).
+    Ссылки (Номенклатура/Склад/док-регистратор) конвертируются в GUID через _val.
+    """
+    ib = _require_ib()
+    qualified = _resolve_entity(register)
+    dims = dimensions or []
+    res = resources or ["Количество"]
+    # Безопасные позиционные алиасы f0,f1,… — иначе алиас-колонка (напр. «Количество»)
+    # коллидирует с методом Выборки (Выборка.Количество() = число строк) и _val вернёт
+    # число строк вместо значения ресурса.
+    alias_map: list[tuple[str, str]] = []  # (alias, out_name)
+    parts: list[str] = []
+    for i, d in enumerate(dims):
+        a = f"f{i}"
+        parts.append(f"Т.{d} КАК {a}")
+        alias_map.append((a, d))
+    for j, r in enumerate(res):
+        a = f"f{len(dims) + j}"
+        parts.append(f"Т.{r}Остаток КАК {a}")
+        alias_map.append((a, r))
+    top_clause = f"ПЕРВЫЕ {int(top)} " if top else ""
+
+    period_expr = ""
+    if on_date:
+        import re
+        m = re.match(r"(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}):(\d{2}))?", on_date)
+        if m:
+            y, mo, d = m.group(1), m.group(2), m.group(3)
+            hh, mi, ss = (m.group(4) or "23"), (m.group(5) or "59"), (m.group(6) or "59")
+            period_expr = f"ДАТАВРЕМЯ({y},{mo},{d},{hh},{mi},{ss})"
+
+    text = (
+        f"ВЫБРАТЬ {top_clause}" + ", ".join(parts)
+        + f" ИЗ {qualified}.Остатки({period_expr}) КАК Т"
+    )
+    q = ib.NewObject("Запрос")
+    q.Текст = text
+    sel = q.Выполнить().Выбрать()
+    rows: list[dict[str, Any]] = []
+    while sel.Следующий():
+        rows.append({out: _val(getattr(sel, a)) for a, out in alias_map})
+    return rows
+
+
 # Маппинг имён полей OData → выражения языка запросов 1С.
 # Если поля нет в карте — берём как Т.<поле> (кириллица as-is).
 ODATA_TO_QUERY_FIELDS: dict[str, str] = {
@@ -883,6 +969,12 @@ def main() -> int:
                 result = op_metadata_catalogs()
             elif op == "metadata_registers":
                 result = op_metadata_registers(**args)
+            elif op == "metadata_documents":
+                result = op_metadata_documents(**args)
+            elif op == "metadata_accum_registers":
+                result = op_metadata_accum_registers(**args)
+            elif op == "fetch_register_balance":
+                result = op_fetch_register_balance(**args)
             elif op == "fetch_entity":
                 result = op_fetch_entity(**args)
             elif op == "describe_entity":
