@@ -318,6 +318,37 @@ class CbBarcode(Base):
 
 
 # ---------------------------------------------------------------------------
+# StockOnHand — достоверный остаток товара из регистров ЦБ ЭЛСИ.АЗК (снимок).
+# Заменяет грубую оценку stock_est (закупка − продажи). Источник:
+#   qty/retail_price/barcode — РегистрНакопления.ТоварыНаАЗК.Остатки (розничный зал);
+#   cost_amount             — РегистрНакопления.ПартииТоваровНаСкладах.Остатки (Σ Стоимость).
+# Грейн = склад × номенклатура. Наполняется скриптом pull_cb_stock_dev.py.
+# Отрицательные остатки — норма для розничных АЗС (учёт по средней) → флаг negative.
+# ---------------------------------------------------------------------------
+class StockOnHand(Base):
+    __tablename__ = "stock_on_hand"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    warehouse_code: Mapped[str] = mapped_column(String(20), nullable=False)   # код склада (208, 20800002)
+    warehouse_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    nomenclature_ref: Mapped[str] = mapped_column(String(36), nullable=False)  # GUID номенклатуры ЦБ
+    quantity: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)
+    retail_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)   # ЦенаВРознице
+    cost_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)    # Σ Стоимость партий (себест.)
+    barcode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uq_stock_on_hand", "company_id", "warehouse_code", "nomenclature_ref", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
 # AuditEvent
 # ---------------------------------------------------------------------------
 class AuditEvent(Base):

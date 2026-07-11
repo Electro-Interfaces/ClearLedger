@@ -177,6 +177,34 @@ export const getStoreSales = (
     stations: opts.stations?.length ? opts.stations.join(',') : undefined,
   })
 
+// ── Остатки: достоверный остаток из регистров ЦБ (снимок, не оценка) ──
+export interface StoreStockItem {
+  guid: string; name: string; article: string | null; vat: string | null
+  marked: boolean; weighed: boolean; barcode: string | null
+  qty: number; negative: boolean
+  retail_price: number | null; retail_value: number | null; cost_amount: number | null
+}
+export interface StoreStockWarehouse { code: string; name: string | null; sku: number; retail_value: number }
+export interface StoreStockData {
+  warehouse: string | null
+  warehouses: StoreStockWarehouse[]
+  items: StoreStockItem[]
+  summary: {
+    sku_count: number; positive: number; negative: number
+    retail_value_positive: number; retail_value_all: number; marked_count: number; units_positive: number
+  }
+}
+
+export const getStoreStock = (opts?: {
+  warehouse?: string; q?: string; marked?: SalesMarked; onlyNegative?: boolean
+}) =>
+  get<StoreStockData>('/api/store/stock', {
+    warehouse: opts?.warehouse || undefined,
+    q: opts?.q || undefined,
+    marked: opts?.marked && opts.marked !== 'all' ? opts.marked : undefined,
+    only_negative: opts?.onlyNegative ? 'true' : undefined,
+  })
+
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null

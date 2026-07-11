@@ -93,6 +93,21 @@ async def store_nomenclature(
     )
 
 
+@router.get("/stock")
+async def store_stock(
+    warehouse: str | None = Query(None, description="код склада (по умолч. — с макс. SKU, обычно 208)"),
+    q: str = Query(""),
+    marked: str = Query("all", description="all|marked|plain"),
+    only_negative: bool = Query(False, description="только отрицательные остатки"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Достоверный остаток товара (снимок регистров ЦБ ТоварыНаАЗК+Партии), не оценка."""
+    return await GoodsDashboardService(db, user.company_id).stock_onhand(
+        warehouse=warehouse, q=q, marked=marked, only_negative=only_negative,
+    )
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 

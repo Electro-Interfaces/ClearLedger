@@ -17,13 +17,14 @@ import { StoreOverviewPanel } from './StoreOverviewPanel'
 import { StoreSalesPanel } from './StoreSalesPanel'
 import { StoreNomenclaturePanel } from './StoreNomenclaturePanel'
 import { StoreSkuPanel, type SkuMode } from './StoreSkuPanel'
+import { StoreStockPanel } from './StoreStockPanel'
 import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCateringPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
 import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
 
 // Под-экраны, работающие на реестре SKU (/api/store/skus).
 const SKU_MODES: Record<string, SkuMode> = {
   assortment: 'assortment', pricing: 'pricing',
-  stock: 'stock', gtin: 'marked',
+  gtin: 'marked',
 }
 
 // Под-экраны на отчётных эндпоинтах (/api/store/{report}).
@@ -79,9 +80,10 @@ function ViewScaffold({ view }: { view: StoreView }) {
 
       {view.status === 'planned' && (
         <div className="mt-4 rounded-lg border border-dashed border-amber-400/30 bg-amber-400/5 p-3 text-xs text-amber-200/70 leading-relaxed">
-          ⚠ Данных для этого экрана в текущем канале (ЦБ ЭЛСИ.АЗК · АЗС 208) пока нет — таких
-          документов канал не передаёт. Появятся при подключении источника: регистр штрихкодов,
-          документы перемещений / инвентаризаций / списаний / возвратов, ЭДО и Честный Знак.
+          ⚠ Экран ещё не подключён к данным. Документы движения (перемещения, инвентаризации,
+          списания, переоценка) в ЦБ ЭЛСИ.АЗК <b>есть</b> (probe подтвердил — тысячи записей по 208),
+          коннектор их пока не читает: нужен выделённый fetch + нормализация. См.
+          <code className="mx-1">STORE_MOVEMENT_BLUEPRINT.md</code>.
         </div>
       )}
     </div>
@@ -112,6 +114,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreNomenclaturePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'stock') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreStockPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

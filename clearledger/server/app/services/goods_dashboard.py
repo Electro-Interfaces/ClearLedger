@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DataEntry, CbNomenclature, CbRef, CbBarcode
+from app.models import DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand
 
 # секция meta → категория UI
 _SECTIONS = (("продажа_сопутка", "Сопутка"), ("продажа_общепит", "Общепит"))
@@ -444,6 +444,89 @@ class GoodsDashboardService:
             "total": len(rows),
             "by_type": dict(sorted(by_type.items(), key=lambda x: -x[1])),
             "items": items,
+        }
+
+    # ── Остатки: достоверный остаток из регистров ЦБ (StockOnHand) ──
+    async def stock_onhand(self, *, warehouse: str | None = None, q: str = "",
+                           marked: str = "all", only_negative: bool = False) -> dict:
+        """Достоверный остаток товара (снимок регистров ЦБ), не оценка stock_est.
+
+        warehouse — код склада (по умолчанию склад с наибольшим числом SKU, обычно 208
+        Торговый зал). Возвращает позиции выбранного склада + список складов для селектора.
+        """
+        rows = (await self.session.execute(select(StockOnHand).where(
+            StockOnHand.company_id == self.company_id))).scalars().all()
+        nom = await self._names()
+
+        # склады: сводка (код → имя, SKU, стоимость остатка) для селектора
+        wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "sku": 0, "retail_value": 0.0})
+        for r in rows:
+            w = wh_agg[r.warehouse_code]
+            w["name"] = r.warehouse_name
+            w["sku"] += 1
+            w["retail_value"] += float(r.quantity or 0) * float(r.retail_price or 0)
+        warehouses = [{
+            "code": c, "name": v["name"], "sku": v["sku"],
+            "retail_value": round(v["retail_value"], 2),
+        } for c, v in wh_agg.items()]
+        warehouses.sort(key=lambda x: -x["sku"])
+
+        # склад по умолчанию — с наибольшим числом SKU
+        wh = warehouse or (warehouses[0]["code"] if warehouses else None)
+        ql = (q or "").lower().strip()
+
+        items = []
+        for r in rows:
+            if wh and r.warehouse_code != wh:
+                continue
+            n = nom.get(r.nomenclature_ref)
+            is_marked = bool(n and n.marked)
+            if marked == "marked" and not is_marked:
+                continue
+            if marked == "plain" and is_marked:
+                continue
+            name = n.name if n else r.nomenclature_ref[:8]
+            if ql and not (ql in (name or "").lower() or ql in (r.barcode or "")):
+                continue
+            qty = float(r.quantity or 0)
+            if only_negative and qty >= 0:
+                continue
+            price = float(r.retail_price) if r.retail_price is not None else None
+            cost = float(r.cost_amount) if r.cost_amount is not None else None
+            retail_value = round(qty * price, 2) if price is not None else None
+            items.append({
+                "guid": r.nomenclature_ref,
+                "name": name,
+                "article": (n.article if n else None),
+                "vat": (n.vat if n else None),
+                "marked": is_marked,
+                "weighed": bool(n and n.weighed),
+                "barcode": r.barcode,
+                "qty": round(qty, 3),
+                "negative": qty < 0,
+                "retail_price": round(price, 2) if price is not None else None,
+                "retail_value": retail_value,
+                "cost_amount": round(cost, 2) if cost is not None else None,
+            })
+        items.sort(key=lambda x: (x["retail_value"] is None, -(x["retail_value"] or 0)))
+
+        pos = [i for i in items if i["qty"] > 0]
+        neg = [i for i in items if i["qty"] < 0]
+        return {
+            "warehouse": wh,
+            "warehouses": warehouses,
+            "items": items,
+            "summary": {
+                "sku_count": len(items),
+                "positive": len(pos),
+                "negative": len(neg),
+                # стоимость товара на полке (только положительный остаток) — надёжная метрика;
+                # retail_value_all включает отрицательные позиции (для сверки).
+                "retail_value_positive": round(sum((i["retail_value"] or 0) for i in pos), 2),
+                "retail_value_all": round(sum((i["retail_value"] or 0) for i in items), 2),
+                "marked_count": sum(1 for i in items if i["marked"]),
+                "units_positive": round(sum(i["qty"] for i in pos), 3),
+            },
         }
 
     # ── Рецептуры (ТТК): блюда общепита → ингредиенты ──
