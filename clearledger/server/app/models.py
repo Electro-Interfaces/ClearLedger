@@ -273,6 +273,7 @@ class CbNomenclature(Base):
     weighed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     group_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)  # НоменклатурнаяГруппа GUID
     kind_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)   # ВидНоменклатуры GUID
+    unit: Mapped[str | None] = mapped_column(String(30), nullable=True)       # ЕдиницаИзмерения (шт/кг/л/уп)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -3070,6 +3071,47 @@ class FuelReceiptCost(Base):
             "uq_fuel_receipt_cost", "company_id", "station_id", "ttn",
             "fuel_code", unique=True,
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelOpeningBalance — ВХОДЯЩИЙ ОСТАТОК топлива до начала загруженной истории.
+# Это не ТТН: отдельная учётная партия по АЗС × виду топлива, которая закрывает
+# продажи до первого доступного поступления и участвует в FIFO первой.
+# ---------------------------------------------------------------------------
+class FuelOpeningBalance(Base):
+    __tablename__ = "fuel_opening_balances"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    fuel_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    liters: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
+    cost_per_liter: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="auto")
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_fuel_opening_balance", "company_id", "station_id", "fuel_code",
+            unique=True,
+        ),
+        Index("idx_fuel_opening_balance_fifo", "company_id", "station_id", "fuel_code", "as_of"),
     )
 
 

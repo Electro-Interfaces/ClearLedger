@@ -529,6 +529,7 @@ class GoodsDashboardService:
             "guid": guid, "name": (n.name if n else guid[:8]),
             "article": (n.article if n else None), "vat": (n.vat if n else None),
             "marked": bool(n and n.marked), "weighed": bool(n and n.weighed),
+            "unit": (n.unit if n else None),
             "kind": (kinds.get(n.kind_ref) if (n and n.kind_ref) else None), "category": category,
             "metrics": {
                 "qty": round(qty, 3), "revenue": round(rev, 2), "revenue_net": round(revnet, 2),
@@ -1510,7 +1511,7 @@ class GoodsDashboardService:
             st = stock_map.get(n.external_ref)
             items.append({
                 "guid": n.external_ref, "name": n.name, "article": n.article, "vat": n.vat,
-                "marked": n.marked, "weighed": n.weighed, "kind": kind_name,
+                "marked": n.marked, "weighed": n.weighed, "kind": kind_name, "unit": n.unit,
                 "has_barcode": n.name in bc_names,
                 "revenue": s["revenue"] if s else 0.0, "qty": s["qty"] if s else 0.0,
                 "stock_qty": round(st["qty"], 3) if st else 0.0,

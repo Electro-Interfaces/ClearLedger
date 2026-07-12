@@ -414,7 +414,7 @@ export const getStoreAssortment = (dateFrom: string, dateTo: string, category: P
 
 export interface SkuDetailData {
   guid: string; name: string; article: string | null; vat: string | null
-  marked: boolean; weighed: boolean; kind: string | null; category: string | null
+  marked: boolean; weighed: boolean; unit: string | null; kind: string | null; category: string | null
   metrics: {
     qty: number; revenue: number; revenue_net: number; avg_price: number | null
     avg_cost: number | null; cogs: number | null; margin: number | null
@@ -432,7 +432,7 @@ export const getStoreSkuDetail = (guid: string, dateFrom: string, dateTo: string
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null
-  marked: boolean; weighed: boolean; kind: string; has_barcode: boolean
+  marked: boolean; weighed: boolean; kind: string; unit: string | null; has_barcode: boolean
   revenue: number; qty: number
   stock_qty: number; retail_price: number | null
 }

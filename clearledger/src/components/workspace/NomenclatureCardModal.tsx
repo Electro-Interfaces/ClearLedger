@@ -69,7 +69,7 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
             {data && (
               <div className="flex items-center gap-1.5 mt-1 flex-wrap text-[11px]">
                 {data.kind && <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.kind}</span>}
-                <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.weighed ? 'весовой' : 'штучный'}</span>
+                <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.unit ?? (data.weighed ? 'весовой' : 'штучный')}</span>
                 <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">НДС {data.vat ?? '—'}</span>
                 {data.marked && <span className="px-1.5 py-0.5 rounded border border-emerald-400/40 text-emerald-300/80">ЧЗ</span>}
                 {data.category && <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.category}</span>}
@@ -92,7 +92,7 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                   <Field label="Группа">{data.group ?? '—'}</Field>
                   <Field label="Ставка НДС">{data.vat ?? '—'}</Field>
                   <Field label="Маркировка ЧЗ">{data.marked ? 'да' : 'нет'}</Field>
-                  <Field label="Учёт">{data.weighed ? 'весовой (база: г/мл)' : 'штучный'}</Field>
+                  <Field label="Базовая единица">{data.unit ?? '—'}{data.weighed ? ' · весовой' : ''}</Field>
                   <div className="col-span-2">
                     <Field label="GUID (1С)"><span className="font-mono text-[11px] text-muted-foreground">{data.guid}</span></Field>
                   </div>
