@@ -41,7 +41,7 @@ def _num(v) -> float:
 
 async def main() -> None:
     s = json.loads(SECRETS.read_text(encoding="utf-8"))
-    conn = f'File="{s["tsb_base"]}";Usr="{s["tsb_user"]}";Pwd="{s["tsb_pwd"]}";'
+    conn = s.get("tsb_conn") or f'File="{s["tsb_base"]}";Usr="{s["tsb_user"]}";Pwd="{s["tsb_pwd"]}";'
 
     async with engine.begin() as c:
         await c.run_sync(Base.metadata.create_all)
