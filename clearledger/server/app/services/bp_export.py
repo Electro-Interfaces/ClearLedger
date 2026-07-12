@@ -272,8 +272,29 @@ class BpPackageEmitter:
                 ing["Единица"] = (nom[g].unit or "" if nom.get(g) else "")
             productions.append(it)
 
-        # Порядок контракта: recipe → purchase → retail → production_release → …
-        документы = [*purchases, retail, *productions]
+        # ── gain (оприходование) ──
+        gain_entries = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
+            DataEntry.doc_type_id == "gain"))).scalars().all()
+        gains = []
+        for ge in gain_entries:
+            gsm = (ge.meta or {}).get("Смена") or {}
+            if _day(gsm) != shift_day or str(gsm.get("КодАЗС") or "") != shift_station:
+                continue
+            it = dict((ge.meta or {}).get("Документ") or {})
+            for k in ("_station", "_day"):
+                it.pop(k, None)
+            it["Дата"] = _iso(it.get("Дата"))
+            for ln in it.get("Товары") or []:
+                g = ln.get("Номенклатура")
+                if g:
+                    nsi_nom.add(g)
+                ln["Единица"] = (nom[g].unit or "" if nom.get(g) else "")
+                ln["СтавкаНДС"] = _nds(ln.pop("СтавкаНДС_raw", "")) or _nds(nom[g].vat if nom.get(g) else "")
+            gains.append(it)
+
+        # Порядок контракта: recipe → purchase → retail → production → [return] → inventory → gain → …
+        документы = [*purchases, retail, *productions, *gains]
 
         # ── НСИ ──
         def _s(v) -> str:

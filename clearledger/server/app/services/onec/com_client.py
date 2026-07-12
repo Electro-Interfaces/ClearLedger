@@ -342,6 +342,11 @@ class OneCComClient:
         return list(await self._call("fetch_production", {
             "period_from": period_from, "period_to": period_to, "station": station}) or [])
 
+    async def fetch_gain(self, period_from: str, period_to: str, station: str = "208") -> list[dict[str, Any]]:
+        """ОприходованиеТоваров → пакет-готовые gain [{Тип, ИсточникUUID, Товары[], …}]."""
+        return list(await self._call("fetch_gain", {
+            "period_from": period_from, "period_to": period_to, "station": station}) or [])
+
     async def fetch_doc_lines(
         self,
         doc_type: str,
