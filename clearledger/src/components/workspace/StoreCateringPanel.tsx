@@ -5,11 +5,12 @@
  * свойства блюда в МОДАЛЬНОМ окне: метрики + состав ТТК (себест. на порцию) + динамика.
  * Данные: /api/store/catering (GoodsDashboardService.catering_menu).
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid } from 'recharts'
 import { getStoreCateringMenu, type CateringDish, type MenuClass } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { ExportButton } from './analytics/ExportButton'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
@@ -31,6 +32,7 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo }: { companyId:
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [classFilter, setClassFilter] = useState<MenuClass | null>(null)
   const [openDish, setOpenDish] = useState<CateringDish | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-catering', companyId, dateFrom, dateTo],
@@ -71,13 +73,16 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo }: { companyId:
   )
 
   return (
-    <div className="p-6 space-y-4">
-      <div>
-        <h3 className="text-base font-semibold">Общепит — инжиниринг меню</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          {data.period.from} – {data.period.to}. Блюда по популярности × маржинальности; клик по строке —
-          свойства блюда (состав ТТК и динамика продаж). Фудкост — по ингредиентам × закупочной себестоимости.
-        </p>
+    <div ref={ref} className="p-6 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-base font-semibold">Общепит — инжиниринг меню</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {data.period.from} – {data.period.to}. Блюда по популярности × маржинальности; клик по строке —
+            свойства блюда (состав ТТК и динамика продаж). Фудкост — по ингредиентам × закупочной себестоимости.
+          </p>
+        </div>
+        <ExportButton title="Общепит — меню" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
       </div>
 
       {/* KPI */}

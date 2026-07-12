@@ -5,11 +5,12 @@
  * (переоценки) + динамика продаж + закупки + остаток.
  * Данные: /api/store/pricing, /api/store/sku/{guid} (GoodsDashboardService).
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStorePricing, type PricingSku, type PricingGroup, type PriceCategory } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { SkuDetailModal } from './SkuDetailModal'
+import { ExportButton } from './analytics/ExportButton'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
@@ -30,6 +31,7 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: 
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [q, setQ] = useState('')
   const [openGuid, setOpenGuid] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-pricing', companyId, dateFrom, dateTo, category],
@@ -73,7 +75,7 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: 
   ]
 
   return (
-    <div className="p-6 space-y-4">
+    <div ref={ref} className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-base font-semibold">Цены и маржа</h3>
@@ -82,14 +84,17 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: 
             Клик по товару — история цен, продажи, закупки. Себестоимость: сопутка — закупка, общепит — по ТТК.
           </p>
         </div>
-        {/* Переключатель сегмента */}
-        <div className="inline-flex rounded-md border border-border/50 overflow-hidden text-xs">
-          {SEGMENTS.map((seg) => (
-            <button key={seg.key} onClick={() => setCategory(seg.key)}
-              className={`px-3 py-1.5 transition-colors ${category === seg.key ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent/30'}`}>
-              {seg.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          {/* Переключатель сегмента */}
+          <div className="inline-flex rounded-md border border-border/50 overflow-hidden text-xs">
+            {SEGMENTS.map((seg) => (
+              <button key={seg.key} onClick={() => setCategory(seg.key)}
+                className={`px-3 py-1.5 transition-colors ${category === seg.key ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent/30'}`}>
+                {seg.label}
+              </button>
+            ))}
+          </div>
+          <ExportButton title="Цены и маржа" subtitle={`${data.period.from} — ${data.period.to} · ${SEGMENTS.find((x) => x.key === category)?.label}`} getEl={() => ref.current} />
         </div>
       </div>
 

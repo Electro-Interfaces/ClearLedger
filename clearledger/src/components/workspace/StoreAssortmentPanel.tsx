@@ -4,11 +4,12 @@
  * дефицит / неликвиды / затоварка и action-list по SKU. Клик по товару → модалка.
  * Данные: /api/store/assortment (GoodsDashboardService.assortment_analysis).
  */
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreAssortment, type AssortmentSku, type PriceCategory, type StockStatus } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { SkuDetailModal } from './SkuDetailModal'
+import { ExportButton } from './analytics/ExportButton'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -44,6 +45,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [q, setQ] = useState('')
   const [openGuid, setOpenGuid] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-assortment', companyId, dateFrom, dateTo, category],
@@ -96,7 +98,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
   ]
 
   return (
-    <div className="p-6 space-y-4">
+    <div ref={ref} className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-base font-semibold">Ассортимент — ABC × XYZ</h3>
@@ -105,13 +107,16 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
             на реальном остатке, GMROI. Клик по ячейке матрицы или товару. Неликвиды — только в «Всё вместе».
           </p>
         </div>
-        <div className="inline-flex rounded-md border border-border/50 overflow-hidden text-xs">
-          {SEGMENTS.map((seg) => (
-            <button key={seg.key} onClick={() => { setCategory(seg.key); setCell(null); setStatusF('all') }}
-              className={`px-3 py-1.5 transition-colors ${category === seg.key ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent/30'}`}>
-              {seg.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-md border border-border/50 overflow-hidden text-xs">
+            {SEGMENTS.map((seg) => (
+              <button key={seg.key} onClick={() => { setCategory(seg.key); setCell(null); setStatusF('all') }}
+                className={`px-3 py-1.5 transition-colors ${category === seg.key ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent/30'}`}>
+                {seg.label}
+              </button>
+            ))}
+          </div>
+          <ExportButton title="Ассортимент ABC×XYZ" subtitle={`${data.period.from} — ${data.period.to} · ${SEGMENTS.find((x) => x.key === category)?.label}`} getEl={() => ref.current} />
         </div>
       </div>
 

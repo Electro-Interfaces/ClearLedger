@@ -4,10 +4,12 @@
  * KPI на продажах: выручка/чистая/НДС/средний чек≈/смены/позиции + структура категорий,
  * оплаты (нал/безнал), дневная динамика. Маржа/ABC — следующий блок (FIFO).
  */
+import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from 'recharts'
+import { ExportButton } from './analytics/ExportButton'
 import { Kpi } from './analytics/Kpi'
 import { CHART_SERIES, seriesColor } from './analytics/palette'
 import { getStoreOverview } from '@/services/storeService'
@@ -40,6 +42,7 @@ function ShareBars({ rows }: { rows: { name: string; value: number; percent?: nu
 export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
+  const ref = useRef<HTMLDivElement>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-overview', companyId, dateFrom, dateTo],
     queryFn: () => getStoreOverview(dateFrom, dateTo, { compare: true }),
@@ -53,12 +56,15 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
   const empty = op.shifts_count === 0
 
   return (
-    <div className="p-6 space-y-5 max-w-6xl">
-      <div>
-        <h3 className="text-base font-semibold">Обзор магазина</h3>
-        <p className="text-xs text-muted-foreground">
-          Сопутка + общепит · {data.period.from} – {data.period.to} · {op.shifts_count} смен · {op.stations_count} АЗС
-        </p>
+    <div ref={ref} className="p-6 space-y-5 max-w-6xl">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-base font-semibold">Обзор магазина</h3>
+          <p className="text-xs text-muted-foreground">
+            Сопутка + общепит · {data.period.from} – {data.period.to} · {op.shifts_count} смен · {op.stations_count} АЗС
+          </p>
+        </div>
+        <ExportButton title="Обзор магазина" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
       </div>
 
       {empty ? (

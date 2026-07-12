@@ -7,11 +7,12 @@
  * ставке НДС · дням · оплатам. Фильтры: Сопутка/Общепит/Вместе · Все/Маркир./Обычные · поиск.
  * Данные: /api/store/sales (GoodsDashboardService.sales_analysis).
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { Kpi } from './analytics/Kpi'
 import { seriesColor } from './analytics/palette'
+import { ExportButton } from './analytics/ExportButton'
 import {
   getStoreSales, type SalesGroupBy, type SalesCategory, type SalesMarked,
 } from '@/services/storeService'
@@ -53,6 +54,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const [category, setCategory] = useState<SalesCategory>('all')
   const [marked, setMarked] = useState<SalesMarked>('all')
   const [q, setQ] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-sales', companyId, dateFrom, dateTo, groupBy, category, marked, q],
@@ -63,12 +65,15 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const showSkuCol = groupBy !== 'sku' && !isPayment
 
   return (
-    <div className="p-6 space-y-4">
-      <div>
-        <h3 className="text-base font-semibold">Продажи — анализ по срезам</h3>
-        <p className="text-xs text-muted-foreground">
-          Крутите продажи сопутки/общепита по любой группировке. НДС-разрез — для сверки с учётной политикой.
-        </p>
+    <div ref={ref} className="p-6 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-base font-semibold">Продажи — анализ по срезам</h3>
+          <p className="text-xs text-muted-foreground">
+            Крутите продажи сопутки/общепита по любой группировке. НДС-разрез — для сверки с учётной политикой.
+          </p>
+        </div>
+        <ExportButton title="Продажи магазина" subtitle={`${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
       </div>
 
       {/* группировки */}
