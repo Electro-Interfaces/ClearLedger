@@ -5,17 +5,19 @@
  * GUID смены → связка по (станция, дата).
  * Данные: /api/store/shifts (GoodsDashboardService.shifts_composite).
  */
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreShifts, type ShiftComposite } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ExportButton } from './analytics/ExportButton'
+import { ShiftDetailModal } from './ShiftDetailModal'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
 export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const ref = useRef<HTMLDivElement>(null)
+  const [openKey, setOpenKey] = useState<string | null>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-shifts', companyId, dateFrom, dateTo],
     queryFn: () => getStoreShifts(dateFrom, dateTo),
@@ -77,7 +79,8 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: s
           </thead>
           <tbody>
             {data.shifts.map((sh: ShiftComposite) => (
-              <tr key={sh.shift_key} className="border-t border-border/30 hover:bg-accent/20">
+              <tr key={sh.shift_key} onClick={() => setOpenKey(sh.shift_key)}
+                className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
                 <td className="px-3 py-1.5 whitespace-nowrap">{sh.date}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{sh.station}</td>
                 <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{sh.number ?? '—'}</td>
@@ -105,9 +108,11 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: s
       </div>
 
       <p className="text-[10px] text-muted-foreground/60">
+        Клик по смене — детализация (строки продаж, касса, приходы/инвентаризации/списания дня).
         Приходы/инвентаризации/списания показаны за дату смены (в ЦБ — отдельные документы, GUID смены не несут).
-        Полная смена-детализация (строки операций, касса, оператор) — следующий шаг.
       </p>
+
+      {openKey && <ShiftDetailModal shiftKey={openKey} companyId={companyId} onClose={() => setOpenKey(null)} />}
     </div>
   )
 }

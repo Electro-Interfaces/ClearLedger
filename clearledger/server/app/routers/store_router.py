@@ -327,6 +327,16 @@ async def store_shifts(
     )
 
 
+@router.get("/shift")
+async def store_shift_detail(
+    key: str = Query(..., description="shift_key (GUID смены или 'дата|станция')"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Смена-детализация (модалка): строки продаж + касса + приходы/инвентаризации/списания дня."""
+    return await GoodsDashboardService(db, user.company_id).shift_detail(key)
+
+
 @router.get("/{report}")
 async def store_report(
     report: str,

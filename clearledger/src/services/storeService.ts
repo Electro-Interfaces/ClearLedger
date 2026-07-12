@@ -559,3 +559,27 @@ export const getStoreShifts = (dateFrom: string, dateTo: string, stations?: stri
     date_from: dateFrom, date_to: dateTo,
     stations: stations?.length ? stations.join(',') : undefined,
   })
+
+// ── Смена-детализация (модалка): операции одной смены ──
+export interface ShiftSaleLine { guid: string; name: string; category: string | null; marked: boolean; qty: number; revenue: number }
+export interface ShiftPayment { form: string; amount: number }
+export interface ShiftReceipt { number: string | null; supplier: string; positions: number; amount_net: number }
+export interface ShiftInventory { number: string | null; dev_positions: number; net: number }
+export interface ShiftWriteoff { number: string | null; reason: string | null; positions: number; amount: number }
+export interface ShiftDetailData {
+  found: boolean
+  shift_key?: string
+  shift?: {
+    shift_key: string; date: string; station: string; number: string | null
+    open: string | null; close: string | null
+    revenue: number; soputka: number; obshepit: number; positions: number; returns: number
+  }
+  sales?: ShiftSaleLine[]
+  payments?: ShiftPayment[]
+  receipts?: ShiftReceipt[]
+  inventory?: ShiftInventory[]
+  writeoffs?: ShiftWriteoff[]
+}
+
+export const getStoreShiftDetail = (key: string) =>
+  get<ShiftDetailData>('/api/store/shift', { key })

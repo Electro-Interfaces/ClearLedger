@@ -1869,3 +1869,103 @@ class GoodsDashboardService:
                 "writeoff_amount": round(sum(s["writeoff_amount"] for s in shifts), 2),
             },
         }
+
+    async def shift_detail(self, shift_key: str) -> dict:
+        """Смена-детализация (модалка): операции одной смены — строки продаж
+        (сопутка/общепит по SKU), касса (оплаты), возвраты + документы приходов/
+        инвентаризаций/списаний того же дня (связка по станция+дата)."""
+        target = day = station = None
+        for m in self._select(await self._load(), date(2000, 1, 1), date(2100, 1, 1), None):
+            smena = m.get("Смена") or {}
+            d = _day(smena)
+            st = str(smena.get("КодАЗС") or "—")
+            if str(smena.get("Смена") or f"{d}|{st}") == shift_key:
+                target, day, station = m, d, st
+                break
+        if target is None:
+            return {"found": False, "shift_key": shift_key}
+
+        nom = await self._names()
+        smena = target.get("Смена") or {}
+        sec = target.get("Секции") or {}
+
+        # строки продаж, свёрнутые по SKU
+        agg: dict[str, dict] = defaultdict(lambda: {"name": "", "qty": 0.0, "revenue": 0.0, "category": None, "marked": False})
+        sop_rev = obsh_rev = 0.0
+        for sec_key, catname in _SECTIONS:
+            for ln in (sec.get(sec_key) or {}).get("строки") or []:
+                g = ln.get("Номенклатура") or "—"
+                n = nom.get(g)
+                summ = float(ln.get("Сумма") or 0)
+                a = agg[g]
+                a["name"] = n.name if n else str(g)[:8]
+                a["qty"] += float(ln.get("Количество") or 0)
+                a["revenue"] += summ
+                a["category"] = catname
+                a["marked"] = bool(n and n.marked)
+                if sec_key == "продажа_сопутка":
+                    sop_rev += summ
+                else:
+                    obsh_rev += summ
+        sales = sorted(
+            [{"guid": g, "name": a["name"], "category": a["category"], "marked": a["marked"],
+              "qty": round(a["qty"], 3), "revenue": round(a["revenue"], 2)} for g, a in agg.items()],
+            key=lambda x: -x["revenue"],
+        )
+
+        payments = [
+            {"form": str(o.get("ФормаОплатыКанон") or o.get("ФормаОплаты") or "—"),
+             "amount": round(float(o.get("Сумма") or 0), 2)}
+            for o in ((sec.get("оплаты") or {}).get("строки") or [])
+        ]
+        payments.sort(key=lambda x: -x["amount"])
+        ret = sec.get("возвраты") or {}
+
+        # документы того же дня
+        d0 = date.fromisoformat(day) if day else None
+        receipts: list[dict] = []
+        if d0 is not None:
+            cparty = await self._refs("counterparty")
+            for m in await self._load_purchases(d0, d0, None):
+                dd = m.get("Документ") or {}
+                lines = dd.get("Товары") or []
+                amt = sum(float(l.get("Сумма") or 0) for l in lines)
+                vat = sum(float(l.get("СуммаНДС") or 0) for l in lines)
+                receipts.append({
+                    "number": dd.get("Номер"),
+                    "supplier": cparty.get(dd.get("Контрагент")) or (dd.get("Контрагент") or "—"),
+                    "positions": len(lines), "amount_net": round(amt - vat, 2),
+                })
+
+        inventory = [
+            {"number": r.number, "dev_positions": r.dev_positions, "net": round(float(r.net_amount or 0), 2)}
+            for r in (await self.session.execute(select(CbInventoryDoc).where(
+                CbInventoryDoc.company_id == self.company_id))).scalars().all()
+            if (r.doc_date or "")[:10] == day
+        ]
+        writeoffs = [
+            {"number": r.number, "reason": r.reason, "positions": r.positions,
+             "amount": round(float(r.total_amount or 0), 2)}
+            for r in (await self.session.execute(select(CbMovementDoc).where(
+                CbMovementDoc.company_id == self.company_id,
+                CbMovementDoc.kind == "writeoff"))).scalars().all()
+            if (r.doc_date or "")[:10] == day
+        ]
+
+        return {
+            "found": True,
+            "shift": {
+                "shift_key": shift_key, "date": day, "station": station,
+                "number": smena.get("НомерСмены") or smena.get("Номер"),
+                "open": smena.get("Открытие"), "close": smena.get("Закрытие"),
+                "revenue": round(sop_rev + obsh_rev, 2),
+                "soputka": round(sop_rev, 2), "obshepit": round(obsh_rev, 2),
+                "positions": len(sales),
+                "returns": round(float(ret.get("сумма") or 0), 2),
+            },
+            "sales": sales,
+            "payments": payments,
+            "receipts": receipts,
+            "inventory": inventory,
+            "writeoffs": writeoffs,
+        }
