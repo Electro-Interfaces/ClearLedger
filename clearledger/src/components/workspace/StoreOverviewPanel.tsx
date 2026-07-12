@@ -15,6 +15,7 @@ import { CHART_SERIES, seriesColor } from './analytics/palette'
 import { getStoreOverview, monthOf } from '@/services/storeService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { StorePlanMonitor } from './StorePlanMonitor'
+import { StoreExceptionsWidget } from './StoreExceptionsWidget'
 
 const nf0 = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n)
 
@@ -77,6 +78,9 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
         <>
           {/* План-факт-светофор (директорский монитор, О-1) */}
           <StorePlanMonitor companyId={companyId} period={monthOf(data.period.to)} />
+
+          {/* Виджет-исключения «работа по исключениям» (О-6) */}
+          <StoreExceptionsWidget companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} period={monthOf(data.period.to)} />
 
           {/* KPI-полоса */}
           <div className="grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
