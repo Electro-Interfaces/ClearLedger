@@ -355,6 +355,46 @@ export const getStoreCateringMenu = (dateFrom: string, dateTo: string, stations?
     stations: stations?.length ? stations.join(',') : undefined,
   })
 
+// ── Цены и маржа: сегмент + группы + реестр SKU + детализация товара ──
+export interface PricingSku extends StoreSku { kind: string }
+export interface PricingGroup {
+  group: string; revenue: number; revenue_net: number; qty: number
+  sku_count: number; share: number; margin: number | null; margin_pct: number | null
+}
+export interface PricingData {
+  period: { from: string; to: string }
+  category: string
+  summary: {
+    sku_count: number; sku_costed: number; revenue: number; revenue_net: number
+    cogs: number; margin: number; margin_pct: number | null; markup_pct: number | null; loss_makers: number
+  }
+  by_category: PricingGroup[]
+  by_kind: PricingGroup[]
+  skus: PricingSku[]
+}
+
+export const getStorePricing = (dateFrom: string, dateTo: string, category: PriceCategory = 'all') =>
+  get<PricingData>('/api/store/pricing', { date_from: dateFrom, date_to: dateTo, category })
+
+export type PriceCategory = 'all' | 'soputka' | 'obshepit'
+
+export interface SkuDetailData {
+  guid: string; name: string; article: string | null; vat: string | null
+  marked: boolean; weighed: boolean; kind: string | null; category: string | null
+  metrics: {
+    qty: number; revenue: number; revenue_net: number; avg_price: number | null
+    avg_cost: number | null; cogs: number | null; margin: number | null
+    margin_pct: number | null; markup_pct: number | null; purch_qty: number
+  }
+  daily: { date: string; qty: number; revenue: number }[]
+  purchases: { date: string; supplier: string; qty: number; price_net: number | null; amount_net: number }[]
+  price_history: { date: string | null; old: number; new: number; delta: number; pct: number | null }[]
+  stock: { warehouse: string; qty: number; retail_price: number | null; cost_unit: number | null }[]
+}
+
+export const getStoreSkuDetail = (guid: string, dateFrom: string, dateTo: string) =>
+  get<SkuDetailData>(`/api/store/sku/${encodeURIComponent(guid)}`, { date_from: dateFrom, date_to: dateTo })
+
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null

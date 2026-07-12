@@ -169,6 +169,38 @@ async def store_catering(
     )
 
 
+@router.get("/pricing")
+async def store_pricing(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    category: str = Query("all", description="all|soputka|obshepit"),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Цены и маржа: сегмент (сопутка/общепит/всё) + группы + реестр SKU."""
+    st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
+    return await GoodsDashboardService(db, user.company_id).pricing_analysis(
+        date.fromisoformat(date_from), date.fromisoformat(date_to), category=category, stations=st,
+    )
+
+
+@router.get("/sku/{guid}")
+async def store_sku_detail(
+    guid: str,
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Детализация товара (модалка): метрики + история цен + продажи + закупки + остаток."""
+    st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
+    return await GoodsDashboardService(db, user.company_id).sku_detail(
+        guid, date.fromisoformat(date_from), date.fromisoformat(date_to), st,
+    )
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 

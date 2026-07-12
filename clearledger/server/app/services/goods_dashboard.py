@@ -299,6 +299,196 @@ class GoodsDashboardService:
         return {r.external_ref: r.name for r in (await self.session.execute(select(CbRef).where(
             CbRef.company_id == self.company_id, CbRef.kind == kind))).scalars().all()}
 
+    # ── Цены и маржа: сегмент (сопутка/общепит/всё) + группы + реестр SKU ──
+    async def pricing_analysis(self, date_from: date, date_to: date, *,
+                               category: str = "all", stations: list[str] | None = None) -> dict:
+        """Анализ цен и маржи: сегмент (all|soputka|obshepit), разбивки по категории и
+        виду номенклатуры (какие группы сколько маржи приносят) + реестр SKU. Детализация
+        по товару — sku_detail (модалка)."""
+        data = await self.sku_analytics(date_from, date_to, stations)
+        kinds = await self._refs("nom_kind")
+        nom = await self._names()
+        skus = data["skus"]
+        for s in skus:
+            nn = nom.get(s["guid"])
+            s["kind"] = (kinds.get(nn.kind_ref) or "— вид не указан") if (nn and nn.kind_ref) else "— вид не указан"
+
+        # общепит: себестоимость блюда — по ингредиентам ТТК (напрямую не закупается),
+        # иначе маржа сегмента «Общепит» пустая. Реюз логики catering.
+        avgc = self._avg_cost(await self._load_purchases(date_from, date_to, stations))
+        dishc: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "known": False})
+        for m in self._select(await self._load(), date_from, date_to, stations):
+            for ln in (((m.get("Секции") or {}).get("продажа_общепит")) or {}).get("строки") or []:
+                g = ln.get("Номенклатура")
+                if not g:
+                    continue
+                for ing in ln.get("Ингредиенты") or []:
+                    ig = ing.get("Номенклатура")
+                    if ig in avgc:
+                        dishc[g]["cost"] += float(ing.get("Количество") or 0) * avgc[ig]
+                        dishc[g]["known"] = True
+        for s in skus:
+            if s["category"] == "Общепит" and s["margin"] is None:
+                dc = dishc.get(s["guid"])
+                if dc and dc["known"]:
+                    cogs = round(dc["cost"], 2)
+                    s["cost_net"] = round(dc["cost"] / s["qty"], 4) if s["qty"] else None
+                    s["cogs"] = cogs
+                    s["margin"] = round(s["revenue_net"] - cogs, 2)
+                    s["margin_pct"] = round(100 * s["margin"] / s["revenue_net"], 1) if s["revenue_net"] else None
+                    s["markup_pct"] = round(100 * s["margin"] / cogs, 1) if cogs else None
+
+        catmap = {"soputka": "Сопутка", "obshepit": "Общепит"}
+        if category in catmap:
+            skus = [s for s in skus if s["category"] == catmap[category]]
+
+        def _group(items: list[dict], keyfn) -> list[dict]:
+            agg: dict[str, dict] = defaultdict(lambda: {"rev": 0.0, "net": 0.0, "cogs": 0.0, "margin": 0.0, "mk_net": 0.0, "qty": 0.0, "sku": 0})
+            for s in items:
+                a = agg[keyfn(s)]
+                a["rev"] += s["revenue"]; a["net"] += s["revenue_net"]; a["qty"] += s["qty"]; a["sku"] += 1
+                if s["margin"] is not None:
+                    a["margin"] += s["margin"]; a["cogs"] += s["cogs"]; a["mk_net"] += s["revenue_net"]
+            tot = sum(a["rev"] for a in agg.values()) or 1.0
+            rows = [{
+                "group": g, "revenue": round(a["rev"], 2), "revenue_net": round(a["net"], 2),
+                "qty": round(a["qty"], 3), "sku_count": a["sku"], "share": round(100 * a["rev"] / tot, 1),
+                "margin": round(a["margin"], 2) if a["mk_net"] else None,
+                "margin_pct": round(100 * a["margin"] / a["mk_net"], 1) if a["mk_net"] else None,
+            } for g, a in agg.items()]
+            rows.sort(key=lambda x: -x["revenue"])
+            return rows
+
+        costed = [s for s in skus if s["margin"] is not None]
+        net_costed = sum(s["revenue_net"] for s in costed)
+        margin_costed = sum(s["margin"] for s in costed)
+        cogs_costed = sum(s["cogs"] for s in costed)
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "category": category,
+            "summary": {
+                "sku_count": len(skus), "sku_costed": len(costed),
+                "revenue": round(sum(s["revenue"] for s in skus), 2),
+                "revenue_net": round(sum(s["revenue_net"] for s in skus), 2),
+                "cogs": round(cogs_costed, 2), "margin": round(margin_costed, 2),
+                "margin_pct": round(100 * margin_costed / net_costed, 1) if net_costed else None,
+                "markup_pct": round(100 * margin_costed / cogs_costed, 1) if cogs_costed else None,
+                "loss_makers": sum(1 for s in costed if (s["margin_pct"] or 0) < 0),
+            },
+            "by_category": _group(skus, lambda s: s["category"] or "—"),
+            "by_kind": _group(skus, lambda s: s["kind"]),
+            "skus": sorted(skus, key=lambda s: -s["revenue"]),
+        }
+
+    # ── Детализация товара (модалка): метрики + история цен + продажи + закупки + остаток ──
+    async def sku_detail(self, guid: str, date_from: date, date_to: date,
+                         stations: list[str] | None = None) -> dict:
+        nom = await self._names()
+        n = nom.get(guid)
+        cparty = await self._refs("counterparty")
+        kinds = await self._refs("nom_kind")
+
+        purch_metas = await self._load_purchases(date_from, date_to, stations)
+        avgc = self._avg_cost(purch_metas)  # для себестоимости ингредиентов общепита
+
+        # продажи (сопутка+общепит) — итоги + дневная динамика; для общепита копим
+        # себестоимость по ингредиентам ТТК.
+        daily: dict[str, dict] = defaultdict(lambda: {"qty": 0.0, "rev": 0.0})
+        qty = rev = revnet = 0.0
+        ing_cost = 0.0
+        ing_known = False
+        category = None
+        for m in self._select(await self._load(), date_from, date_to, stations):
+            day = _day(m.get("Смена") or {})
+            for sk, catname in _SECTIONS:
+                for ln in (((m.get("Секции") or {}).get(sk)) or {}).get("строки") or []:
+                    if ln.get("Номенклатура") != guid:
+                        continue
+                    q = float(ln.get("Количество") or 0)
+                    su = float(ln.get("Сумма") or 0)
+                    vt = float(ln.get("СуммаНДС") or 0)
+                    qty += q; rev += su; revnet += su - vt; category = catname
+                    dd = daily[day]; dd["qty"] += q; dd["rev"] += su
+                    for ing in ln.get("Ингредиенты") or []:
+                        ig = ing.get("Номенклатура")
+                        if ig in avgc:
+                            ing_cost += float(ing.get("Количество") or 0) * avgc[ig]
+                            ing_known = True
+
+        # закупки (последние цены/поставщики) — прямая закупка товара
+        purchases = []
+        pq = pc = 0.0
+        for m in purch_metas:
+            d = m.get("Документ") or {}
+            for ln in d.get("Товары") or []:
+                if ln.get("Номенклатура") != guid:
+                    continue
+                q = float(ln.get("Количество") or 0)
+                net = float(ln.get("Сумма") or 0) - float(ln.get("СуммаНДС") or 0)
+                purchases.append({
+                    "date": str(d.get("Дата") or "")[:10],
+                    "supplier": cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "—"),
+                    "qty": round(q, 3), "price_net": round(net / q, 2) if q else None,
+                    "amount_net": round(net, 2),
+                })
+                pq += q; pc += net
+        purchases.sort(key=lambda x: x["date"])
+        # себестоимость: прямая закупка (сопутка) или по ингредиентам (общепит)
+        if pq:
+            avg_cost = pc / pq
+            cogs = avg_cost * qty
+        elif ing_known:
+            cogs = ing_cost
+            avg_cost = (ing_cost / qty) if qty else None
+        else:
+            avg_cost = cogs = None
+        margin = (revnet - cogs) if cogs is not None else None
+
+        # история цен — из переоценок (CbMovementDoc kind=revaluation)
+        revs = (await self.session.execute(select(CbMovementDoc).where(
+            CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.kind == "revaluation"))).scalars().all()
+        history = []
+        for r in revs:
+            for ln in (r.lines or []):
+                if ln.get("ref") == guid:
+                    history.append({"date": r.doc_date, "old": ln.get("old"), "new": ln.get("new"),
+                                    "delta": ln.get("delta"), "pct": ln.get("pct")})
+        history.sort(key=lambda x: (x["date"] or ""))
+
+        # остаток по складам
+        soh = (await self.session.execute(select(StockOnHand).where(
+            StockOnHand.company_id == self.company_id,
+            StockOnHand.nomenclature_ref == guid))).scalars().all()
+        stock = [{
+            "warehouse": r.warehouse_name or r.warehouse_code,
+            "qty": float(r.quantity or 0),
+            "retail_price": float(r.retail_price) if r.retail_price is not None else None,
+            "cost_unit": float(r.cost_unit) if r.cost_unit is not None else None,
+        } for r in soh]
+
+        return {
+            "guid": guid, "name": (n.name if n else guid[:8]),
+            "article": (n.article if n else None), "vat": (n.vat if n else None),
+            "marked": bool(n and n.marked), "weighed": bool(n and n.weighed),
+            "kind": (kinds.get(n.kind_ref) if (n and n.kind_ref) else None), "category": category,
+            "metrics": {
+                "qty": round(qty, 3), "revenue": round(rev, 2), "revenue_net": round(revnet, 2),
+                "avg_price": round(rev / qty, 2) if qty else None,
+                "avg_cost": round(avg_cost, 4) if avg_cost is not None else None,
+                "cogs": round(cogs, 2) if cogs is not None else None,
+                "margin": round(margin, 2) if margin is not None else None,
+                "margin_pct": round(100 * margin / revnet, 1) if margin is not None and revnet else None,
+                "markup_pct": round(100 * margin / cogs, 1) if margin is not None and cogs else None,
+                "purch_qty": round(pq, 3),
+            },
+            "daily": [{"date": d, "qty": round(v["qty"], 2), "revenue": round(v["rev"], 2)}
+                      for d, v in sorted(daily.items())],
+            "purchases": purchases,
+            "price_history": history,
+            "stock": stock,
+        }
+
     def _avg_cost(self, purch_metas: list[dict]) -> dict:
         """Средневзвешенная net-себестоимость по GUID из поступлений."""
         pc: dict[str, dict] = defaultdict(lambda: {"c": 0.0, "q": 0.0})

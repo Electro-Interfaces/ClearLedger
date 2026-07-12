@@ -24,11 +24,12 @@ import { StoreTransferPanel } from './StoreTransferPanel'
 import { StoreRevaluationPanel } from './StoreRevaluationPanel'
 import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
 import { StoreCateringPanel } from './StoreCateringPanel'
+import { StorePricingPanel } from './StorePricingPanel'
 import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
 
 // Под-экраны, работающие на реестре SKU (/api/store/skus).
 const SKU_MODES: Record<string, SkuMode> = {
-  assortment: 'assortment', pricing: 'pricing',
+  assortment: 'assortment',
   gtin: 'marked',
 }
 
@@ -161,6 +162,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreCateringPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'pricing') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StorePricingPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }
