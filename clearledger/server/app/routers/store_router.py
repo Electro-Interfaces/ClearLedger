@@ -354,6 +354,17 @@ async def store_shift_detail(
     return await GoodsDashboardService(db, user.company_id).shift_detail(key)
 
 
+@router.get("/bp-package")
+async def store_bp_package(
+    shift_key: str = Query(..., description="GUID смены или 'дата|станция'"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview пакета «смена→БП» (эмиттер Ledger, Фаза 2 — retail_sale + НСИ + хеш)."""
+    from app.services.bp_export import BpPackageEmitter
+    return await BpPackageEmitter(db, user.company_id).build_shift_package(shift_key)
+
+
 @router.get("/{report}")
 async def store_report(
     report: str,
