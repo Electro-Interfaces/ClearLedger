@@ -73,9 +73,11 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
             <Kpi label="Выручка" value={fmtMoney(f.total_revenue)} delta={t?.revenue?.percent} sub="с НДС" />
             <Kpi label="Без НДС" value={fmtMoney(f.net_revenue)} />
             <Kpi label="НДС" value={fmtMoney(f.vat)} />
-            <Kpi label="Средний чек ≈" value={fmtMoney(f.avg_check_approx)} delta={t?.avg_check?.percent} sub="на смену" />
+            <Kpi label="Выручка/смена" value={fmtMoney(f.avg_check_approx)} delta={t?.avg_check?.percent} sub="не средний чек (ОРП агрегирован)" />
             <Kpi label="Смен" value={nf0(op.shifts_count)} delta={t?.shifts?.percent} />
-            <Kpi label="Позиций" value={nf0(u.total_positions)} sub={`${nf0(u.total_units)} ед.`} />
+            {f.returns > 0
+              ? <Kpi label="Возвраты" value={fmtMoney(f.returns)} sub="в выручке (gross)" />
+              : <Kpi label="Позиций" value={nf0(u.total_positions)} sub={`${nf0(u.total_units)} ед.`} />}
           </div>
 
           {/* Категории + оплаты */}
@@ -85,13 +87,40 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
               <ShareBars rows={u.by_category.map((c) => ({ name: c.category, value: c.revenue, percent: c.percent }))} />
             </div>
             <div className="rounded-lg border border-border/50 bg-card/40 p-4">
-              <div className="text-sm font-medium mb-3">Оплаты</div>
-              <ShareBars rows={[
-                { name: 'Наличные', value: f.payments.cash },
-                { name: 'Безналичные', value: f.payments.card },
-              ]} />
+              <div className="text-sm font-medium mb-3">Способы оплаты</div>
+              <ShareBars rows={(f.payments_detail?.length
+                ? f.payments_detail.slice(0, 8)
+                : [{ name: 'Наличные', value: f.payments.cash }, { name: 'Безналичные', value: f.payments.card }]
+              ).map((p) => ({ name: p.name, value: p.value }))} />
             </div>
           </div>
+
+          {/* Разрез по АЗС (заложен под мультиобъект) */}
+          {data.by_station.length > 1 && (
+            <div className="rounded-lg border border-border/50 bg-card/40 p-4">
+              <div className="text-sm font-medium mb-3">По АЗС</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="text-muted-foreground"><tr>
+                    <th className="text-left font-medium py-1">АЗС</th>
+                    <th className="text-right font-medium">Выручка</th>
+                    <th className="text-right font-medium">Позиций</th>
+                    <th className="text-right font-medium">Смен</th>
+                  </tr></thead>
+                  <tbody>
+                    {data.by_station.map((st) => (
+                      <tr key={st.station} className="border-t border-border/30">
+                        <td className="py-1">{st.station}</td>
+                        <td className="text-right tabular-nums">{fmtMoney(st.revenue)}</td>
+                        <td className="text-right tabular-nums">{nf0(st.positions)}</td>
+                        <td className="text-right tabular-nums">{nf0(st.shifts)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Дневная динамика */}
           <div className="rounded-lg border border-border/50 bg-card/40 p-4">

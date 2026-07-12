@@ -59,7 +59,8 @@ class GoodsDashboardService:
 
     def _kpis(self, metas: list[dict]) -> dict:
         cat = defaultdict(lambda: {"revenue": 0.0, "vat": 0.0, "positions": 0, "units": 0.0})
-        pay = defaultdict(float)      # cash / card
+        pay = defaultdict(float)      # cash / card (сводно)
+        pay_detail = defaultdict(float)  # по фактической форме оплаты (К-8)
         returns_sum = 0.0
         shifts = len(metas)
         for m in metas:
@@ -73,9 +74,10 @@ class GoodsDashboardService:
                 cat[catname]["units"] += sum(float(ln.get("Количество") or 0) for ln in lines)
             returns_sum += float((sec.get("возвраты") or {}).get("сумма") or 0)
             for o in (sec.get("оплаты") or {}).get("строки") or []:
-                kanon = str(o.get("ФормаОплатыКанон") or o.get("ФормаОплаты") or "")
+                kanon = str(o.get("ФормаОплатыКанон") or o.get("ФормаОплаты") or "—")
                 amt = float(o.get("Сумма") or 0)
                 pay["cash" if "Наличн" in kanon else "card"] += amt
+                pay_detail[kanon] += amt
 
         total_rev = sum(c["revenue"] for c in cat.values())
         total_vat = sum(c["vat"] for c in cat.values())
@@ -97,6 +99,8 @@ class GoodsDashboardService:
                 "net_revenue": round(total_rev - total_vat, 2),
                 "avg_check_approx": round(total_rev / shifts, 2) if shifts else 0.0,
                 "payments": {"cash": round(pay.get("cash", 0.0), 2), "card": round(pay.get("card", 0.0), 2)},
+                "payments_detail": [{"name": k, "value": round(v, 2)}
+                                    for k, v in sorted(pay_detail.items(), key=lambda x: -x[1]) if v],
             },
             "units": {
                 "total_positions": total_pos,

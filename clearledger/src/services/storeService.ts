@@ -29,6 +29,7 @@ export interface StoreOverviewData {
     net_revenue: number
     avg_check_approx: number
     payments: { cash: number; card: number }
+    payments_detail: { name: string; value: number }[]
   }
   units: {
     total_positions: number

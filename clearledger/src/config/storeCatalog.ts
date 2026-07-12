@@ -64,7 +64,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'sales', label: 'Продажи', group: 'Аналитика', icon: TrendingUp,
     title: 'Аналитика продаж',
     subtitle: 'Динамика и структура продаж сопутки/общепита. Строится на данных, что коннектор уже читает.',
-    status: 'wip',
+    status: 'ready',
     blocks: [
       { name: 'Выручка и динамика', desc: 'Продажи ₽/шт по периодам, категориям, станциям; тренд; сравнение периодов.' },
       { name: 'Средний чек и структура', desc: 'Средний чек (на ОРП-агрегатах ≈), доля категорий, топ и аутсайдеры SKU.' },
@@ -114,7 +114,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'connector', label: 'Коннектор', group: 'Данные', icon: Plug,
     title: 'Коннектор — чтение из 1С',
     subtitle: 'Read-only приём данных сопутки/общепита из ЦБ ЭЛСИ.АЗК и локальной базы станции. Ничего в 1С не меняем.',
-    status: 'ready',
+    status: 'wip',
     blocks: [
       { name: 'Подключение ЦБ (azs_centre)', desc: 'Прямой Python-COM через vpn-gw, учётка Elsy, read-only. НСИ и документы сети.', source: 'services/onec/com_worker.py' },
       { name: 'Смены ОРП по станции 208', desc: 'ОтчётОРозничныхПродажах: строки, НДС, оплаты, классификация Сопутка/Общепит, ТТК.', source: 'op_fetch_cb_shifts(period, station="208")' },
@@ -140,7 +140,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'nomenclature', label: 'Номенклатура', group: 'Товары', icon: Boxes,
     title: 'Номенклатура (мастер-SKU)',
     subtitle: 'Эталонный справочник товаров: единый SKU на сеть, дедупликация, статусы модерации. Связь с кассой по GUID, КодНС.',
-    status: 'planned',
+    status: 'ready',
     blocks: [
       { name: 'Карточка SKU', desc: 'MasterSkuId, бренд/линейка/упаковка/коэффициент, ставка НДС, единицы, признак весового/маркированного.' },
       { name: 'Дедупликация', desc: 'Слияние дублей, нормализация имён/брендов/объёмов; confidence-score, очереди модерации.' },
@@ -152,7 +152,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'barcodes', label: 'Штрихкоды / EAN', group: 'Товары', icon: Barcode,
     title: 'Штрихкоды и EAN',
     subtitle: 'Штриховые коды и EAN/GTIN как ключ идентификации. Один SKU — несколько ШК.',
-    status: 'planned',
+    status: 'ready',
     blocks: [
       { name: 'Штрихкоды SKU', desc: 'EAN-13/GTIN/DataMatrix-GTIN, привязка к SKU, признак основного.' },
       { name: 'Множественные EAN', desc: 'Один товар — несколько штрихкодов/упаковок; коэффициент упаковки.' },
@@ -163,7 +163,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'categories', label: 'Категории', group: 'Товары', icon: FolderTree,
     title: 'Категории и ассортиментная матрица',
     subtitle: 'Управленческая иерархия категорий + роли (destination/routine/impulse/seasonal) + матрица по станциям.',
-    status: 'planned',
+    status: 'ready',
     blocks: [
       { name: 'Иерархия категорий', desc: 'Расширяемый справочник (табак/напитки/еда/автохимия/общепит…); синхрон со счетами учёта.' },
       { name: 'Роли категорий', desc: 'Роль определяет ширину ассортимента и ценовую стратегию (8-шаговый категорийный менеджмент).' },
@@ -174,7 +174,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'recipes', label: 'Рецептуры (ТТК)', group: 'Товары', icon: ChefHat,
     title: 'Технологические карты (ТТК)',
     subtitle: 'Рецептуры блюд общепита: состав, выход, ингредиенты. Основа расчёта себестоимости и списания сырья.',
-    status: 'planned',
+    status: 'ready',
     blocks: [
       { name: 'Техкарта блюда', desc: 'Выход блюда, ингредиенты (брутто/нетто), % выхода, вид обработки.' },
       { name: 'Разворот на ингредиенты', desc: 'Продано блюдо → списание сырья по ТТК (как топливная комплектация тонна→литр).' },
@@ -185,7 +185,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'suppliers', label: 'Поставщики', group: 'Товары', icon: Truck,
     title: 'Поставщики и предложения',
     subtitle: 'Контрагенты-поставщики, договоры, артикулы поставщика, закупочные цены.',
-    status: 'planned',
+    status: 'ready',
     blocks: [
       { name: 'Поставщики и договоры', desc: 'Контрагенты (переиспуск Counterparty), ИНН, договоры, условия поставок.' },
       { name: 'Артикулы поставщика', desc: 'Связь SKU ↔ артикул поставщика (ключ идентификации артикул+ИНН).' },
@@ -199,7 +199,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'receipts', label: 'Приёмка', group: 'Движение', icon: PackagePlus,
     title: 'Приёмка (поступления)',
     subtitle: 'Приход товара от поставщика: документ, партии, закупочные цены → себестоимость. Отражение в БП (Дт 41.02/19.03 Кт 60).',
-    status: 'planned',
+    status: 'ready',
     blocks: [
       { name: 'Документ поступления', desc: 'Поставщик, договор, строки (SKU, кол-во, закупочная цена, НДС), дата.' },
       { name: 'Партии себестоимости', desc: 'Каждая строка → партия (ProductBatch) с закупочной ценой для FIFO/средней.' },
@@ -295,7 +295,7 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'gtin', label: 'Каталог GTIN', group: 'Честный Знак', icon: ScanLine,
     title: 'Каталог GTIN и регуляторный профиль',
     subtitle: 'Справочник GTIN и товарных групп ЧЗ по SKU. ~1690 маркированных SKU на 208 (табак/стики).',
-    status: 'planned',
+    status: 'ready',
     blocks: [
       { name: 'Каталог GTIN', desc: 'GTIN маркируемых SKU; синхрон с Национальным каталогом ЧЗ; наполнение из УПД/Tariffs/API.' },
       { name: 'Товарные группы ИСМП', desc: 'Группа ЧЗ как справочник (табак, вода, пиво, масла…), не булев флаг — маркировка расширяется.' },
