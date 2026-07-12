@@ -648,15 +648,18 @@ class GoodsDashboardService:
             oos = sq <= 0 and qty > 0
             overstock = dos is not None and dos > 90
             status = "dead" if dead else ("out_of_stock" if oos else ("overstock" if overstock else "ok"))
+            # продажа ниже себестоимости (надёжная себест.) — регуляторный/маржинальный риск (О-3)
+            loss = bool(s["margin_pct"] is not None and s["margin_pct"] < 0 and s.get("cost_reliable"))
             matrix[cell]["count"] += 1; matrix[cell]["revenue"] += s["revenue"]
             rows.append({
                 "guid": g, "name": s["name"], "category": s["category"],
                 "revenue": s["revenue"], "qty": s["qty"], "avg_price": s["avg_price"],
                 "margin": s["margin"], "margin_pct": s["margin_pct"], "marked": s["marked"],
+                "cost_reliable": s.get("cost_reliable", False),
                 "abc": s["abc"], "xyz": xcls, "cv": cv, "abc_xyz": cell,
                 "stock_qty": round(sq, 3), "stock_cost": round(sc, 2), "stock_retail": round(sr, 2),
-                "days_of_supply": dos, "gmroi": gmroi, "status": status,
-                "action": _action(s["abc"], xcls, status),
+                "days_of_supply": dos, "gmroi": gmroi, "status": status, "loss": loss,
+                "action": ("⚠ Ниже себестоимости — проверить цену" if loss else _action(s["abc"], xcls, status)),
             })
 
         # неликвиды: есть остаток, но НЕ продавались в периоде (в sku_analytics их нет).
@@ -684,6 +687,8 @@ class GoodsDashboardService:
         over_r = [r for r in rows if r["status"] == "overstock"]
         tot_margin = sum(r["margin"] for r in costed)
         tot_stock_cost = sum(r["stock_cost"] for r in rows)
+        # GMROI: знаменатель — запас costed-позиций (числитель costed), сопоставимо (К-14)
+        gmroi_stock = sum(r["stock_cost"] for r in costed) or 0.0
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
             "category": category,
@@ -691,9 +696,9 @@ class GoodsDashboardService:
                 "sku_count": len(rows),
                 "stock_cost": round(tot_stock_cost, 2),
                 "stock_retail": round(sum(r["stock_retail"] for r in rows), 2),
-                "gmroi": round(tot_margin / tot_stock_cost, 2) if tot_stock_cost > 0 else None,
+                "gmroi": round(tot_margin / gmroi_stock, 2) if gmroi_stock > 0 else None,
                 "dead_count": len(dead_r), "dead_cost": round(sum(r["stock_cost"] for r in dead_r), 2),
-                "oos_count": len(oos_r),
+                "oos_count": len(oos_r), "loss_count": sum(1 for r in rows if r.get("loss")),
                 "overstock_count": len(over_r), "overstock_cost": round(sum(r["stock_cost"] for r in over_r), 2),
             },
             "abc": data["abc"],

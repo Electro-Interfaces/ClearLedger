@@ -34,7 +34,7 @@ const STATUS_META: Record<StockStatus, { label: string; cls: string } | null> = 
 }
 
 type SortKey = 'revenue' | 'qty' | 'stock_qty' | 'stock_cost' | 'days_of_supply' | 'gmroi'
-type StatusFilter = 'all' | StockStatus
+type StatusFilter = 'all' | StockStatus | 'loss'
 
 export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [category, setCategory] = useState<PriceCategory>('all')
@@ -54,7 +54,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
     const ql = q.toLowerCase().trim()
     const rows = (data?.skus ?? []).filter((s) =>
       (!cell || s.abc_xyz === cell) &&
-      (statusF === 'all' || s.status === statusF) &&
+      (statusF === 'all' || (statusF === 'loss' ? s.loss : s.status === statusF)) &&
       (!ql || s.name.toLowerCase().includes(ql)))
     const dir = sortDir === 'asc' ? 1 : -1
     return [...rows].sort((a, b) => {
@@ -85,12 +85,14 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
     { label: 'GMROI', value: s.gmroi == null ? '—' : nf(s.gmroi, 2), hint: 'маржа / запас' },
     { label: 'Неликвиды', value: nf(s.dead_count), hint: fmtMoney(s.dead_cost), cls: s.dead_count > 0 ? 'text-red-400/90' : '' },
     { label: 'Дефицит', value: nf(s.oos_count), hint: 'нет остатка, есть спрос', cls: s.oos_count > 0 ? 'text-amber-300/90' : '' },
+    { label: 'Ниже себест.', value: nf(s.loss_count), hint: 'продажа в убыток — проверить цену', cls: s.loss_count > 0 ? 'text-red-400/90' : '' },
     { label: 'Затоварка', value: nf(s.overstock_count), hint: fmtMoney(s.overstock_cost), cls: 'text-sky-300/90' },
   ]
 
   const STATUS_CHIPS: { key: StatusFilter; label: string }[] = [
     { key: 'all', label: 'Все' }, { key: 'dead', label: 'Неликвиды' },
-    { key: 'out_of_stock', label: 'Дефицит' }, { key: 'overstock', label: 'Затоварка' },
+    { key: 'out_of_stock', label: 'Дефицит' }, { key: 'loss', label: 'Ниже себест.' },
+    { key: 'overstock', label: 'Затоварка' },
   ]
 
   return (
@@ -113,7 +115,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
         </div>
       </div>
 
-      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-4 lg:grid-cols-7">
         {KPIS.map((k) => (
           <div key={k.label} className="rounded-lg border border-border/50 bg-card/40 p-3">
             <div className="text-[11px] text-muted-foreground">{k.label}</div>
@@ -221,8 +223,9 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{d.days_of_supply != null ? nf(d.days_of_supply, 1) : '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{d.gmroi != null ? nf(d.gmroi, 2) : '—'}</td>
                   <td className="px-3 py-1.5">
+                    {d.loss && <span className="inline-flex items-center rounded-full border border-red-400/50 text-red-300/90 px-1.5 py-0.5 text-[9px] uppercase tracking-wide mr-1.5">убыток</span>}
                     {stM && <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-wide mr-1.5 ${stM.cls}`}>{stM.label}</span>}
-                    <span className="text-muted-foreground">{d.action}</span>
+                    <span className={d.loss ? 'text-red-300/90' : 'text-muted-foreground'}>{d.action}</span>
                   </td>
                 </tr>
               )

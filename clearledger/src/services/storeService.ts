@@ -391,16 +391,17 @@ export interface AssortmentSku {
   guid: string; name: string; category: string | null
   revenue: number; qty: number; avg_price: number
   margin: number | null; margin_pct: number | null; marked: boolean
+  cost_reliable: boolean
   abc: 'A' | 'B' | 'C'; xyz: 'X' | 'Y' | 'Z'; cv: number | null; abc_xyz: string
   stock_qty: number; stock_cost: number; stock_retail: number
-  days_of_supply: number | null; gmroi: number | null; status: StockStatus; action: string
+  days_of_supply: number | null; gmroi: number | null; status: StockStatus; loss: boolean; action: string
 }
 export interface AssortmentData {
   period: { from: string; to: string }
   category: string
   summary: {
     sku_count: number; stock_cost: number; stock_retail: number; gmroi: number | null
-    dead_count: number; dead_cost: number; oos_count: number
+    dead_count: number; dead_cost: number; oos_count: number; loss_count: number
     overstock_count: number; overstock_cost: number
   }
   abc: Record<'A' | 'B' | 'C', { count: number; revenue: number; share: number }>
