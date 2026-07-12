@@ -434,6 +434,7 @@ export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null
   marked: boolean; weighed: boolean; kind: string; has_barcode: boolean
   revenue: number; qty: number
+  stock_qty: number; retail_price: number | null
 }
 export interface StoreNomenclatureData {
   items: StoreNomenclatureItem[]

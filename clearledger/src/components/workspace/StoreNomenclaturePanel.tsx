@@ -89,6 +89,8 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
                   <th className="px-3 py-2 text-left font-medium">Вид</th>
                   <th className="px-3 py-2 text-left font-medium">НДС</th>
                   <th className="px-3 py-2 text-center font-medium">ШК</th>
+                  <th className="px-3 py-2 text-right font-medium">Остаток</th>
+                  <th className="px-3 py-2 text-right font-medium">Цена</th>
                   <th className="px-3 py-2 text-right font-medium">Выручка</th>
                 </tr>
               </thead>
@@ -101,6 +103,8 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
                     <td className="px-3 py-1.5">{i.kind}</td>
                     <td className="px-3 py-1.5">{i.vat ?? '—'}</td>
                     <td className="px-3 py-1.5 text-center">{i.has_barcode ? '✓' : ''}</td>
+                    <td className={`px-3 py-1.5 text-right tabular-nums ${i.stock_qty <= 0 ? 'text-muted-foreground/50' : ''}`}>{i.stock_qty ? nf(i.stock_qty) : '—'}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{i.retail_price != null ? fmtMoney(i.retail_price) : '—'}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{i.revenue ? fmtMoney(i.revenue) : '—'}</td>
                   </tr>
                 ))}

@@ -1473,6 +1473,18 @@ class GoodsDashboardService:
         sk = {s["guid"]: s for s in (await self.sku_analytics(date_from, date_to, stations))["skus"]}
         bc_names = {r[0] for r in (await self.session.execute(select(CbBarcode.owner_name).where(
             CbBarcode.company_id == self.company_id))).all()}
+        # остаток + розн. цена по SKU (цена Торгового зала 208 приоритетна)
+        stock_map: dict[str, dict] = defaultdict(lambda: {"qty": 0.0, "hall": None, "any": None})
+        for r in (await self.session.execute(select(StockOnHand).where(
+                StockOnHand.company_id == self.company_id))).scalars().all():
+            d = stock_map[r.nomenclature_ref]
+            d["qty"] += float(r.quantity or 0)
+            if r.retail_price is not None:
+                p = float(r.retail_price)
+                if d["any"] is None:
+                    d["any"] = p
+                if r.warehouse_code == "208":
+                    d["hall"] = p
         ql = (q or "").lower().strip()
 
         items = []
@@ -1495,11 +1507,14 @@ class GoodsDashboardService:
             if kind != "all" and kind_name != kind:
                 continue
             kinds_seen.add(kind_name)
+            st = stock_map.get(n.external_ref)
             items.append({
                 "guid": n.external_ref, "name": n.name, "article": n.article, "vat": n.vat,
                 "marked": n.marked, "weighed": n.weighed, "kind": kind_name,
                 "has_barcode": n.name in bc_names,
                 "revenue": s["revenue"] if s else 0.0, "qty": s["qty"] if s else 0.0,
+                "stock_qty": round(st["qty"], 3) if st else 0.0,
+                "retail_price": (st["hall"] if st and st["hall"] is not None else (st["any"] if st else None)),
             })
         items.sort(key=lambda x: (-x["revenue"], x["name"]))
         return {
