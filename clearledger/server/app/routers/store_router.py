@@ -360,9 +360,21 @@ async def store_bp_package(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Preview пакета «смена→БП» (эмиттер Ledger, Фаза 2 — retail_sale + НСИ + хеш)."""
+    """Preview пакета «смена→БП» (эмиттер Ledger): все типы документов + НСИ + хеш."""
     from app.services.bp_export import BpPackageEmitter
     return await BpPackageEmitter(db, user.company_id).build_shift_package(shift_key)
+
+
+@router.post("/bp-package/emit")
+async def store_bp_package_emit(
+    shift_key: str = Query(..., description="GUID смены или 'дата|станция'"),
+    directory: str = Query(r"C:\TL_BP_Export", description="каталог выгрузки"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Выгрузить пакет в каталог (Ф3) — файл АЗС{код}_{дата}_смена-{номер}_{uuid}.json."""
+    from app.services.bp_export import BpPackageEmitter
+    return await BpPackageEmitter(db, user.company_id).emit_to_dir(shift_key, directory)
 
 
 @router.get("/{report}")

@@ -13,6 +13,9 @@ CbRef/StockOnHand), считает ХешПакета через bp_canon.
 """
 from __future__ import annotations
 
+import json as _json
+import os as _os
+import re as _re
 import uuid as _uuid
 from datetime import datetime
 
@@ -52,6 +55,16 @@ def _iso(v) -> str:
 
 def _new_packet_uuid() -> str:
     return str(_uuid.uuid4())
+
+
+def package_filename(pkt: dict) -> str:
+    """Имя файла пакета по контракту: АЗС{код}_{ГГГГ-ММ-ДД}_смена-{номер}_{uuid}.json."""
+    sh = pkt.get("Смена") or {}
+    код = str(sh.get("КодАЗС") or 0)
+    код = код.zfill(3) if код.isdigit() else "0"
+    дата = str(sh.get("Открытие") or "")[:10] or "0000-00-00"
+    ном = _re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", str(sh.get("НомерСмены") or "").strip()) or "0"
+    return f"АЗС{код}_{дата}_смена-{ном}_{pkt.get('ИдентификаторПакета')}.json"
 
 
 class BpPackageEmitter:
@@ -442,3 +455,19 @@ class BpPackageEmitter:
         }
         пакет["ХешПакета"] = packet_hash(пакет)
         return пакет
+
+    async def emit_to_dir(self, shift_key: str, directory: str) -> dict:
+        """Собрать пакет и записать JSON-файл в каталог (Ф3). Формат: UTF-8 без
+        BOM, отступ таб (как ЗаписатьJSON приёмника). Возвращает сводку."""
+        пакет = await self.build_shift_package(shift_key)
+        fname = package_filename(пакет)
+        _os.makedirs(directory, exist_ok=True)
+        path = _os.path.join(directory, fname)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            _json.dump(пакет, f, ensure_ascii=False, indent="\t")
+        from collections import Counter
+        return {
+            "file": fname, "path": path, "hash": пакет["ХешПакета"],
+            "documents": dict(Counter(d["Тип"] for d in пакет["Документы"])),
+            "nsi": len(пакет["НСИ"]),
+        }
