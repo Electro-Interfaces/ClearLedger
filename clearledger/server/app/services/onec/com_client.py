@@ -337,6 +337,11 @@ class OneCComClient:
         """Справочник.Склады → [{ref, code, name, kind, deleted}]."""
         return list(await self._call("fetch_warehouses", {}) or [])
 
+    async def fetch_production(self, period_from: str, period_to: str, station: str = "208") -> list[dict[str, Any]]:
+        """ВыпускПродукции → пакет-готовые production_release [{Тип, ИсточникUUID, ВыпускБлюд[], Ингредиенты[], …}]."""
+        return list(await self._call("fetch_production", {
+            "period_from": period_from, "period_to": period_to, "station": station}) or [])
+
     async def fetch_doc_lines(
         self,
         doc_type: str,

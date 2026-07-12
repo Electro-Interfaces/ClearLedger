@@ -1006,6 +1006,61 @@ def op_fetch_barcodes(limit: int | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+def op_fetch_production(period_from: str, period_to: str, station: str = "208") -> list[dict[str, Any]]:
+    """Документ.ВыпускПродукции (общепит) за период по станции → пакет-готовые
+    item'ы production_release (ВыпускБлюд[Товары] + Ингредиенты, связка
+    Идентификатор↔ИдентификаторПродукция). Read-only."""
+    ib = _require_ib()
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        "ВЫБРАТЬ Т.Ссылка КАК Ссылка ИЗ Документ.ВыпускПродукции КАК Т "
+        f"ГДЕ Т.Дата >= ДАТАВРЕМЯ({_dt_lit(period_from)}) И Т.Дата <= ДАТАВРЕМЯ({_dt_lit(period_to, True)}) "
+        f'И Т.Склад.Код = "{station}" И Т.ПометкаУдаления = ЛОЖЬ УПОРЯДОЧИТЬ ПО Т.Дата'
+    )
+    sel = q.Выполнить().Выбрать()
+    out: list[dict[str, Any]] = []
+    while sel.Следующий():
+        o = sel.Ссылка.ПолучитьОбъект()
+        блюда = []
+        for i in range(o.Товары.Количество()):
+            r = o.Товары.Получить(i)
+            блюда.append({
+                "НомерСтроки": i + 1,
+                "Идентификатор": str(_val(r.Идентификатор) or ""),
+                "Номенклатура": _xs(ib, r.Номенклатура),
+                "Количество": float(_val(r.Количество) or 0),
+                "Цена": float(_val(r.Цена) or 0),
+                "Сумма": float(_val(r.Сумма) or 0),
+            })
+        ингр = []
+        for i in range(o.Ингредиенты.Количество()):
+            r = o.Ингредиенты.Получить(i)
+            ингр.append({
+                "НомерСтроки": i + 1,
+                "ИдентификаторПродукция": str(_val(r.ИдентификаторПродукция) or ""),
+                "Номенклатура": _xs(ib, r.Номенклатура),
+                "Количество": float(_val(r.Количество) or 0),
+            })
+        d = str(_val(o.Дата))
+        out.append({
+            "Тип": "production_release",
+            "ИсточникUUID": _xs(ib, o.Ссылка),
+            "Номер": str(_val(o.Номер) or "").strip(),
+            "Дата": str(_val(o.Дата) or ""),
+            "Проведен": bool(_val(o.Проведен)),
+            "ПометкаУдаления": bool(_val(o.ПометкаУдаления)),
+            "Организация": _xs(ib, o.Организация),
+            "Склад": _xs(ib, o.Склад),
+            "ВалютаДокумента": "RUB",
+            "СуммаДокумента": float(_val(o.СуммаДокумента) or 0),
+            "ВыпускБлюд": блюда,
+            "Ингредиенты": ингр,
+            "_station": station,
+            "_day": d[:10],
+        })
+    return out
+
+
 def op_fetch_orgs() -> list[dict[str, Any]]:
     """Справочник.Организации → реквизиты для НСИ-секции пакета (Организация
     ищется приёмником по ИНН, не автосоздаётся). Поля ЭЛСИ.АЗК: ИНН/КПП/
@@ -1099,6 +1154,8 @@ def main() -> int:
                 result = op_fetch_orgs()
             elif op == "fetch_warehouses":
                 result = op_fetch_warehouses()
+            elif op == "fetch_production":
+                result = op_fetch_production(**args)
             elif op == "exit":
                 return 0
             else:

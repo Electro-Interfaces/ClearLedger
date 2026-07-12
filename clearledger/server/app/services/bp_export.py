@@ -246,8 +246,34 @@ class BpPackageEmitter:
                 "Товары": ptovары,
             })
 
-        # Порядок контракта: recipe → purchase → retail → …
-        документы = [*purchases, retail]
+        # ── production_release (выпуск общепита) ──
+        # meta.Документ уже пакет-item; дозаполняем Единица из CbNomenclature.
+        prod_entries = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
+            DataEntry.doc_type_id == "production_release"))).scalars().all()
+        productions = []
+        for pr in prod_entries:
+            prsm = (pr.meta or {}).get("Смена") or {}
+            if _day(prsm) != shift_day or str(prsm.get("КодАЗС") or "") != shift_station:
+                continue
+            it = dict((pr.meta or {}).get("Документ") or {})
+            it.pop("_station", None)
+            it.pop("_day", None)
+            it["Дата"] = _iso(it.get("Дата"))
+            for блюдо in it.get("ВыпускБлюд") or []:
+                g = блюдо.get("Номенклатура")
+                if g:
+                    nsi_nom.add(g)
+                блюдо["Единица"] = (nom[g].unit or "" if nom.get(g) else "")
+            for ing in it.get("Ингредиенты") or []:
+                g = ing.get("Номенклатура")
+                if g:
+                    nsi_nom.add(g)
+                ing["Единица"] = (nom[g].unit or "" if nom.get(g) else "")
+            productions.append(it)
+
+        # Порядок контракта: recipe → purchase → retail → production_release → …
+        документы = [*purchases, retail, *productions]
 
         # ── НСИ ──
         def _s(v) -> str:
