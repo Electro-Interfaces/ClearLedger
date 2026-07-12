@@ -12,14 +12,14 @@ import { fmtMoney } from '@/services/analyticsService'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreWriteoffPanel({ companyId }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
   const [reason, setReason] = useState<string | null>(null)
   const [openDoc, setOpenDoc] = useState<StoreWriteoffDoc | null>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-writeoffs', companyId, warehouse ?? ''],
-    queryFn: () => getStoreWriteoffs({ warehouse }),
+    queryKey: ['store-writeoffs', companyId, warehouse ?? '', dateFrom, dateTo],
+    queryFn: () => getStoreWriteoffs({ warehouse, dateFrom, dateTo }),
   })
 
   const docs = useMemo(

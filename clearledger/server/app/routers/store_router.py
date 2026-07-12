@@ -108,16 +108,21 @@ async def store_stock(
     )
 
 
+def _od(s: str | None):
+    return date.fromisoformat(s) if s else None
+
+
 @router.get("/inventory")
 async def store_inventory(
     warehouse: str | None = Query(None, description="код склада (по умолч. — все склады магазина)"),
     only_dev: bool = Query(False, description="только документы с отклонениями"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр инвентаризаций ЦБ + недостачи/излишки (shrinkage) с drill-down по строкам."""
     return await GoodsDashboardService(db, user.company_id).inventory(
-        warehouse=warehouse, only_dev=only_dev,
+        warehouse=warehouse, only_dev=only_dev, date_from=_od(date_from), date_to=_od(date_to),
     )
 
 
@@ -125,33 +130,38 @@ async def store_inventory(
 async def store_writeoffs(
     warehouse: str | None = Query(None, description="код склада (по умолч. — все склады магазина)"),
     reason: str | None = Query(None, description="фильтр по причине"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр списаний ЦБ (СписаниеТоваров) + причины + топ списанных SKU."""
     return await GoodsDashboardService(db, user.company_id).writeoffs(
-        warehouse=warehouse, reason=reason,
+        warehouse=warehouse, reason=reason, date_from=_od(date_from), date_to=_od(date_to),
     )
 
 
 @router.get("/transfers")
 async def store_transfers(
     direction: str | None = Query(None, description="фильтр по направлению"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр перемещений ЦБ (ПеремещениеТоваров) откуда→куда + направления."""
-    return await GoodsDashboardService(db, user.company_id).transfers(direction=direction)
+    return await GoodsDashboardService(db, user.company_id).transfers(
+        direction=direction, date_from=_od(date_from), date_to=_od(date_to))
 
 
 @router.get("/revaluation")
 async def store_revaluation(
     reason: str | None = Query(None, description="фильтр направления (Подорожание/Удешевление/Смешанная)"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр переоценок ЦБ (ПереоценкаТоваровАЗК): старая→новая цена, Δ%, влияние."""
-    return await GoodsDashboardService(db, user.company_id).revaluation(reason=reason)
+    return await GoodsDashboardService(db, user.company_id).revaluation(
+        reason=reason, date_from=_od(date_from), date_to=_od(date_to))
 
 
 @router.get("/catering")

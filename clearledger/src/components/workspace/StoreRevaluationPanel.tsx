@@ -30,13 +30,13 @@ function MoveList({ title, moves, up }: { title: string; moves: StoreRevalMove[]
   )
 }
 
-export function StoreRevaluationPanel({ companyId }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
   const [reason, setReason] = useState<string | null>(null)
   const [openDoc, setOpenDoc] = useState<StoreRevalDoc | null>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-revaluation', companyId],
-    queryFn: () => getStoreRevaluation(),
+    queryKey: ['store-revaluation', companyId, dateFrom, dateTo],
+    queryFn: () => getStoreRevaluation({ dateFrom, dateTo }),
   })
 
   const docs = useMemo(

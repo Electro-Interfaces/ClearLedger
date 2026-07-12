@@ -1065,14 +1065,23 @@ class GoodsDashboardService:
         }
 
     # ── Инвентаризация: реестр + отклонения факт↔учёт (недостачи/излишки) ──
-    async def inventory(self, *, warehouse: str | None = None, only_dev: bool = False) -> dict:
+    @staticmethod
+    def _by_period(docs: list, date_from: date | None, date_to: date | None) -> list:
+        """Фильтр документов движения по doc_date в периоде (К-17)."""
+        if not (date_from and date_to):
+            return docs
+        a, b = date_from.isoformat(), date_to.isoformat()
+        return [d for d in docs if d.doc_date and a <= d.doc_date <= b]
+
+    async def inventory(self, *, warehouse: str | None = None, only_dev: bool = False,
+                        date_from: date | None = None, date_to: date | None = None) -> dict:
         """Реестр инвентаризаций ЦБ + агрегаты недостач/излишков (shrinkage).
 
         warehouse — код склада (по умолч. все склады магазина). only_dev — только
-        документы с отклонениями. Строки-отклонения (lines) — для drill-down.
+        документы с отклонениями. date_from/date_to — период (К-17). Строки — drill-down.
         """
-        docs = (await self.session.execute(select(CbInventoryDoc).where(
-            CbInventoryDoc.company_id == self.company_id))).scalars().all()
+        docs = self._by_period((await self.session.execute(select(CbInventoryDoc).where(
+            CbInventoryDoc.company_id == self.company_id))).scalars().all(), date_from, date_to)
 
         # склады для селектора
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
@@ -1136,11 +1145,12 @@ class GoodsDashboardService:
         }
 
     # ── Списания: реестр + причины (недостача/брак/…) + топ списанных SKU ──
-    async def writeoffs(self, *, warehouse: str | None = None, reason: str | None = None) -> dict:
+    async def writeoffs(self, *, warehouse: str | None = None, reason: str | None = None,
+                        date_from: date | None = None, date_to: date | None = None) -> dict:
         """Реестр списаний ЦБ (СписаниеТоваров) + разбивка по причинам и топ SKU."""
-        docs = (await self.session.execute(select(CbMovementDoc).where(
+        docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
-            CbMovementDoc.kind == "writeoff"))).scalars().all()
+            CbMovementDoc.kind == "writeoff"))).scalars().all(), date_from, date_to)
 
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
         reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
@@ -1203,15 +1213,16 @@ class GoodsDashboardService:
         }
 
     # ── Перемещения: реестр откуда→куда + направления (внутр/приход/расход) ──
-    async def transfers(self, *, direction: str | None = None) -> dict:
+    async def transfers(self, *, direction: str | None = None,
+                        date_from: date | None = None, date_to: date | None = None) -> dict:
         """Реестр перемещений ЦБ (ПеремещениеТоваров) относительно складов магазина.
 
         Сумма = розн. стоимость перемещённого (Количество × Цена; себестоимость у
         внутренних перемещений не заполнена). direction — фильтр по направлению.
         """
-        docs = (await self.session.execute(select(CbMovementDoc).where(
+        docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
-            CbMovementDoc.kind == "transfer"))).scalars().all()
+            CbMovementDoc.kind == "transfer"))).scalars().all(), date_from, date_to)
 
         dirs_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
         for d in docs:
@@ -1268,12 +1279,13 @@ class GoodsDashboardService:
         }
 
     # ── Переоценка: реестр изменений цен + подорожания/удешевления ──
-    async def revaluation(self, *, reason: str | None = None) -> dict:
+    async def revaluation(self, *, reason: str | None = None,
+                          date_from: date | None = None, date_to: date | None = None) -> dict:
         """Реестр переоценок ЦБ (ПереоценкаТоваровАЗК): старая→новая розн. цена,
         Δ%, влияние на стоимость остатка (Σ Δ×кол). reason — фильтр направления."""
-        docs = (await self.session.execute(select(CbMovementDoc).where(
+        docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
-            CbMovementDoc.kind == "revaluation"))).scalars().all()
+            CbMovementDoc.kind == "revaluation"))).scalars().all(), date_from, date_to)
 
         reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0})
         for d in docs:

@@ -14,14 +14,14 @@ import { fmtMoney } from '@/services/analyticsService'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreInventoryPanel({ companyId }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
   const [onlyDev, setOnlyDev] = useState(false)
   const [openDoc, setOpenDoc] = useState<StoreInventoryDoc | null>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-inventory', companyId, warehouse ?? '', onlyDev],
-    queryFn: () => getStoreInventory({ warehouse, onlyDev }),
+    queryKey: ['store-inventory', companyId, warehouse ?? '', onlyDev, dateFrom, dateTo],
+    queryFn: () => getStoreInventory({ warehouse, onlyDev, dateFrom, dateTo }),
   })
 
   const docs = useMemo(() => data?.docs ?? [], [data])

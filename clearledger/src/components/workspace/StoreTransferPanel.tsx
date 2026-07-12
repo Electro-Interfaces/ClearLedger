@@ -12,13 +12,13 @@ import { fmtMoney } from '@/services/analyticsService'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreTransferPanel({ companyId }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
   const [direction, setDirection] = useState<string | null>(null)
   const [openDoc, setOpenDoc] = useState<StoreTransferDoc | null>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-transfers', companyId],
-    queryFn: () => getStoreTransfers(),
+    queryKey: ['store-transfers', companyId, dateFrom, dateTo],
+    queryFn: () => getStoreTransfers({ dateFrom, dateTo }),
   })
 
   const docs = useMemo(

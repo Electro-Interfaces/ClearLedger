@@ -237,10 +237,11 @@ export interface StoreInventoryData {
   }
 }
 
-export const getStoreInventory = (opts?: { warehouse?: string; onlyDev?: boolean }) =>
+export const getStoreInventory = (opts?: { warehouse?: string; onlyDev?: boolean; dateFrom?: string; dateTo?: string }) =>
   get<StoreInventoryData>('/api/store/inventory', {
     warehouse: opts?.warehouse || undefined,
     only_dev: opts?.onlyDev ? 'true' : undefined,
+    date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
   })
 
 // ── Списания: реестр + причины (недостача/брак/срок/…) + топ SKU ──
@@ -265,10 +266,11 @@ export interface StoreWriteoffData {
   }
 }
 
-export const getStoreWriteoffs = (opts?: { warehouse?: string; reason?: string }) =>
+export const getStoreWriteoffs = (opts?: { warehouse?: string; reason?: string; dateFrom?: string; dateTo?: string }) =>
   get<StoreWriteoffData>('/api/store/writeoffs', {
     warehouse: opts?.warehouse || undefined,
     reason: opts?.reason || undefined,
+    date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
   })
 
 // ── Перемещения: реестр откуда→куда + направления ──
@@ -292,9 +294,10 @@ export interface StoreTransferData {
   }
 }
 
-export const getStoreTransfers = (opts?: { direction?: string }) =>
+export const getStoreTransfers = (opts?: { direction?: string; dateFrom?: string; dateTo?: string }) =>
   get<StoreTransferData>('/api/store/transfers', {
     direction: opts?.direction || undefined,
+    date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
   })
 
 // ── Переоценка: изменения цен (старая→новая, Δ%) + подорожания/удешевления ──
@@ -320,9 +323,10 @@ export interface StoreRevaluationData {
   }
 }
 
-export const getStoreRevaluation = (opts?: { reason?: string }) =>
+export const getStoreRevaluation = (opts?: { reason?: string; dateFrom?: string; dateTo?: string }) =>
   get<StoreRevaluationData>('/api/store/revaluation', {
     reason: opts?.reason || undefined,
+    date_from: opts?.dateFrom || undefined, date_to: opts?.dateTo || undefined,
   })
 
 // ── Общепит: инжиниринг меню (продажи блюд + состав ТТК + динамика) ──
