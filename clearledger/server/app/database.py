@@ -138,6 +138,9 @@ async def create_all() -> None:
             "ALTER TABLE stock_on_hand ADD COLUMN IF NOT EXISTS cost_unit NUMERIC(16,4)",
             # v4.3: единица измерения номенклатуры (карточка товароведа)
             "ALTER TABLE cb_nomenclature ADD COLUMN IF NOT EXISTS unit VARCHAR(30)",
+            # v4.4: полное наименование + основной поставщик (карточка товароведа)
+            "ALTER TABLE cb_nomenclature ADD COLUMN IF NOT EXISTS full_name VARCHAR(700)",
+            "ALTER TABLE cb_nomenclature ADD COLUMN IF NOT EXISTS main_supplier VARCHAR(300)",
             # v4.2: индексы под аналитику магазина (К-27)
             "CREATE INDEX IF NOT EXISTS ix_data_entries_store ON data_entries (company_id, layer, doc_type_id)",
             "CREATE INDEX IF NOT EXISTS ix_stock_on_hand_wh ON stock_on_hand (company_id, warehouse_code)",

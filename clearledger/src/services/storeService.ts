@@ -415,6 +415,7 @@ export const getStoreAssortment = (dateFrom: string, dateTo: string, category: P
 export interface SkuDetailData {
   guid: string; name: string; article: string | null; vat: string | null
   marked: boolean; weighed: boolean; unit: string | null; kind: string | null; category: string | null
+  full_name?: string | null; main_supplier?: string | null
   metrics: {
     qty: number; revenue: number; revenue_net: number; avg_price: number | null
     avg_cost: number | null; cogs: number | null; margin: number | null

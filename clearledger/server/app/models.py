@@ -273,7 +273,9 @@ class CbNomenclature(Base):
     weighed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     group_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)  # НоменклатурнаяГруппа GUID
     kind_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)   # ВидНоменклатуры GUID
-    unit: Mapped[str | None] = mapped_column(String(30), nullable=True)       # ЕдиницаИзмерения (шт/кг/л/уп)
+    unit: Mapped[str | None] = mapped_column(String(30), nullable=True)       # БазоваяЕдиницаИзмерения (шт/г/л)
+    full_name: Mapped[str | None] = mapped_column(String(700), nullable=True) # НаименованиеПолное
+    main_supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)  # ОсновнойПоставщик (имя)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

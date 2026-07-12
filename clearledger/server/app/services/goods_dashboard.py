@@ -529,7 +529,8 @@ class GoodsDashboardService:
             "guid": guid, "name": (n.name if n else guid[:8]),
             "article": (n.article if n else None), "vat": (n.vat if n else None),
             "marked": bool(n and n.marked), "weighed": bool(n and n.weighed),
-            "unit": (n.unit if n else None),
+            "unit": (n.unit if n else None), "full_name": (n.full_name if n else None),
+            "main_supplier": (n.main_supplier if n else None),
             "kind": (kinds.get(n.kind_ref) if (n and n.kind_ref) else None), "category": category,
             "metrics": {
                 "qty": round(qty, 3), "revenue": round(rev, 2), "revenue_net": round(revnet, 2),

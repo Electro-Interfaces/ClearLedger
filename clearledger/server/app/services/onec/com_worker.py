@@ -604,7 +604,9 @@ def op_enrich_nomenclature(refs: list[str]) -> dict[str, dict[str, Any]]:
         "Т.Ссылка КАК Ref, "
         "Т.Наименование КАК Name, "
         "ПРЕДСТАВЛЕНИЕ(Т.БазоваяЕдиницаИзмерения) КАК Unit, "
-        "Т.Артикул КАК Article "
+        "Т.Артикул КАК Article, "
+        "Т.НаименованиеПолное КАК FullName, "
+        "ПРЕДСТАВЛЕНИЕ(Т.ОсновнойПоставщик) КАК Supplier "
         "ИЗ Справочник.Номенклатура КАК Т "
         "ГДЕ Т.Ссылка В (&Refs)"
     )
@@ -619,6 +621,8 @@ def op_enrich_nomenclature(refs: list[str]) -> dict[str, dict[str, Any]]:
             "name": _val(sel.Name),
             "unit": _val(sel.Unit),
             "article": _val(sel.Article),
+            "full_name": _val(sel.FullName),
+            "supplier": _val(sel.Supplier),
             # Плотность пока не тянем — пробуем добавить отдельным запросом
             # с защитой от отсутствия поля.
         }

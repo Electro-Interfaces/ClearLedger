@@ -87,12 +87,16 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
             <div className="grid gap-3.5 md:grid-cols-2">
               <Section icon={Package} title="Паспорт">
                 <div className="grid grid-cols-2 gap-3">
+                  {data.full_name && data.full_name !== data.name && (
+                    <div className="col-span-2"><Field label="Полное наименование">{data.full_name}</Field></div>
+                  )}
                   <Field label="Артикул">{data.article ?? '—'}</Field>
                   <Field label="Вид номенклатуры">{data.kind ?? '—'}</Field>
                   <Field label="Группа">{data.group ?? '—'}</Field>
                   <Field label="Ставка НДС">{data.vat ?? '—'}</Field>
                   <Field label="Маркировка ЧЗ">{data.marked ? 'да' : 'нет'}</Field>
                   <Field label="Базовая единица">{data.unit ?? '—'}{data.weighed ? ' · весовой' : ''}</Field>
+                  {data.main_supplier && <Field label="Основной поставщик">{data.main_supplier}</Field>}
                   <div className="col-span-2">
                     <Field label="GUID (1С)"><span className="font-mono text-[11px] text-muted-foreground">{data.guid}</span></Field>
                   </div>

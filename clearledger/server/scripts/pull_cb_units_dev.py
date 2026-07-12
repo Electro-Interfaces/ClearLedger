@@ -1,7 +1,7 @@
 """
-DEV: подтянуть единицы измерения (ЕдиницаИзмерения) в CbNomenclature из ЦБ
-ЭЛСИ.АЗК через enrich_nomenclature (ПРЕДСТАВЛЕНИЕ единицы), батчами по GUID.
-Коннект — s.get("tsb_conn") (боевая) или File= (локальная копия). Read-only.
+DEV: подтянуть расширенную НСИ (единица + полное наименование + основной
+поставщик) в CbNomenclature из ЦБ ЭЛСИ.АЗК через enrich_nomenclature, батчами
+по GUID. Коннект — s.get("tsb_conn") (боевая) или File= (локальная). Read-only.
 
 Запуск (из server/):  py -3.13 scripts/pull_cb_units_dev.py
 """
@@ -41,31 +41,38 @@ async def main() -> None:
             CbNomenclature.company_id == cid))).scalars().all()
         print(f"номенклатуры к обогащению: {len(refs)}")
 
-        units: dict[str, str] = {}
+        enr: dict[str, dict] = {}
         async with OneCComClient(conn) as client:
             for i in range(0, len(refs), BATCH):
                 chunk = refs[i:i + BATCH]
                 res = await client.enrich_nomenclature(chunk)
                 for ref, d in (res or {}).items():
-                    u = (d or {}).get("unit")
-                    if u:
-                        units[str(ref)] = str(u).strip()
-                print(f"  батч {i // BATCH + 1}: +{len(res or {})} (единиц накоплено {len(units)})")
+                    enr[str(ref)] = d or {}
+                print(f"  батч {i // BATCH + 1}: +{len(res or {})} (накоплено {len(enr)})")
 
-        # апдейт unit пакетно
-        n = 0
+        def _s(v):
+            v = str(v or "").strip()
+            return v or None
+
+        n_u = n_f = n_s = 0
         rows = (await db.execute(select(CbNomenclature).where(
             CbNomenclature.company_id == cid))).scalars().all()
         for r in rows:
-            u = units.get(r.external_ref)
+            d = enr.get(r.external_ref)
+            if not d:
+                continue
+            u, fn, sup = _s(d.get("unit")), _s(d.get("full_name")), _s(d.get("supplier"))
             if u and u != r.unit:
-                r.unit = u
-                n += 1
+                r.unit = u; n_u += 1
+            if fn and fn != r.full_name:
+                r.full_name = fn; n_f += 1
+            if sup and sup != r.main_supplier:
+                r.main_supplier = sup; n_s += 1
         await db.commit()
-        # распределение единиц
         from collections import Counter
-        dist = Counter(units.values())
-        print(f"обновлено unit: {n}; распределение топ-10: {dict(sorted(dist.items(), key=lambda x: -x[1])[:10])}")
+        dist = Counter(_s(d.get("unit")) for d in enr.values() if _s(d.get("unit")))
+        print(f"обновлено: unit {n_u}, full_name {n_f}, supplier {n_s}; "
+              f"единицы топ: {dict(sorted(dist.items(), key=lambda x: -x[1])[:8])}")
 
 
 if __name__ == "__main__":
