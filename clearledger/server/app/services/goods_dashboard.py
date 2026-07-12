@@ -402,6 +402,120 @@ class GoodsDashboardService:
             "summary": {"count": len(rows), "revenue": round(sum(r["revenue"] for r in rows), 2)},
         }
 
+    # ── Общепит — инжиниринг меню (продажи блюд + состав ТТК + динамика) ──
+    async def catering_menu(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
+        """Менеджерская аналитика общепита: по каждому блюду — продажи, фудкост, маржа,
+        класс меню (Звезда/Загадка/Рабочая лошадка/Собака), состав ТТК (ингредиенты с
+        себестоимостью на порцию) и дневная динамика продаж (для раскрытия строки)."""
+        sale_metas = self._select(await self._load(), date_from, date_to, stations)
+        avgc = self._avg_cost(await self._load_purchases(date_from, date_to, stations))
+        nom = await self._names()
+
+        def _dish():
+            return {"qty": 0.0, "rev": 0.0, "revnet": 0.0, "cost": 0.0, "cost_known": False,
+                    "ings": defaultdict(lambda: {"qty": 0.0, "cost": 0.0, "known": False}),
+                    "daily": defaultdict(lambda: {"qty": 0.0, "rev": 0.0})}
+        dishes: dict[str, dict] = defaultdict(_dish)
+        for m in sale_metas:
+            day = _day(m.get("Смена") or {})
+            for ln in ((m.get("Секции") or {}).get("продажа_общепит") or {}).get("строки") or []:
+                g = ln.get("Номенклатура")
+                if not g:
+                    continue
+                q = float(ln.get("Количество") or 0)
+                rev = float(ln.get("Сумма") or 0)
+                revnet = rev - float(ln.get("СуммаНДС") or 0)
+                d = dishes[g]
+                d["qty"] += q; d["rev"] += rev; d["revnet"] += revnet
+                dd = d["daily"][day]; dd["qty"] += q; dd["rev"] += rev
+                for ing in ln.get("Ингредиенты") or []:
+                    ig = ing.get("Номенклатура"); iq = float(ing.get("Количество") or 0)
+                    ii = d["ings"][ig]; ii["qty"] += iq
+                    if ig in avgc:
+                        c = iq * avgc[ig]; ii["cost"] += c; ii["known"] = True
+                        d["cost"] += c; d["cost_known"] = True
+
+        total_rev = sum(x["rev"] for x in dishes.values()) or 1.0
+        total_qty = sum(x["qty"] for x in dishes.values()) or 1.0
+        n_dishes = len(dishes) or 1
+        # классический порог популярности Kasavana–Smith: 70% от равной доли
+        pop_threshold = (100.0 / n_dishes) * 0.7
+        costed_margin = sum((x["revnet"] - x["cost"]) for x in dishes.values() if x["cost_known"])
+        costed_qty = sum(x["qty"] for x in dishes.values() if x["cost_known"]) or 1.0
+        avg_cm = costed_margin / costed_qty  # средняя вклад-маржа на порцию
+
+        matrix: dict[str, dict] = defaultdict(lambda: {"count": 0, "revenue": 0.0})
+        rows = []
+        for g, d in dishes.items():
+            nnn = nom.get(g)
+            qty, rev, revnet = d["qty"], d["rev"], d["revnet"]
+            cost = d["cost"] if d["cost_known"] else None
+            margin = (revnet - cost) if cost is not None else None
+            food_cost = (100 * cost / revnet) if cost is not None and revnet else None
+            margin_pct = (100 * margin / revnet) if margin is not None and revnet else None
+            cm_unit = (margin / qty) if margin is not None and qty else None
+            pop = 100 * qty / total_qty
+            if cost is None:
+                cls = "unknown"
+            else:
+                high_pop = pop >= pop_threshold
+                high_cm = (cm_unit or 0) >= avg_cm
+                cls = ("star" if high_pop and high_cm else
+                       "plowhorse" if high_pop and not high_cm else
+                       "puzzle" if not high_pop and high_cm else "dog")
+            matrix[cls]["count"] += 1; matrix[cls]["revenue"] += rev
+            ings = []
+            for ig, ii in d["ings"].items():
+                inm = nom.get(ig)
+                ings.append({
+                    "ref": ig, "name": (inm.name if inm else str(ig)[:8]),
+                    "marked": bool(inm and inm.marked),
+                    "qty_total": round(ii["qty"], 3),
+                    "qty_per_portion": round(ii["qty"] / qty, 4) if qty else None,
+                    "cost_total": round(ii["cost"], 2) if ii["known"] else None,
+                    "cost_per_portion": round(ii["cost"] / qty, 4) if ii["known"] and qty else None,
+                })
+            ings.sort(key=lambda x: -(x["cost_total"] or 0))
+            daily = [{"date": dt, "qty": round(v["qty"], 2), "revenue": round(v["rev"], 2)}
+                     for dt, v in sorted(d["daily"].items())]
+            rows.append({
+                "guid": g, "name": (nnn.name if nnn else str(g)[:8]),
+                "qty": round(qty, 2), "revenue": round(rev, 2), "revenue_net": round(revnet, 2),
+                "avg_price": round(rev / qty, 2) if qty else 0.0,
+                "cost": round(cost, 2) if cost is not None else None,
+                "cost_per_portion": round(cost / qty, 2) if cost is not None and qty else None,
+                "margin": round(margin, 2) if margin is not None else None,
+                "food_cost_pct": round(food_cost, 1) if food_cost is not None else None,
+                "margin_pct": round(margin_pct, 1) if margin_pct is not None else None,
+                "cm_unit": round(cm_unit, 2) if cm_unit is not None else None,
+                "share": round(100 * rev / total_rev, 1),
+                "popularity_pct": round(pop, 1),
+                "menu_class": cls,
+                "ing_count": len(ings),
+                "ingredients": ings,
+                "daily": daily,
+            })
+        rows.sort(key=lambda x: -x["revenue"])
+
+        tot_cost = sum(r["cost"] for r in rows if r["cost"] is not None)
+        tot_revnet_costed = sum(r["revenue_net"] for r in rows if r["cost"] is not None)
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "summary": {
+                "dishes_count": len(rows),
+                "dishes_costed": sum(1 for r in rows if r["cost"] is not None),
+                "revenue": round(sum(r["revenue"] for r in rows), 2),
+                "revenue_net": round(sum(r["revenue_net"] for r in rows), 2),
+                "portions": round(sum(r["qty"] for r in rows), 2),
+                "cost": round(tot_cost, 2),
+                "margin": round(tot_revnet_costed - tot_cost, 2),
+                "food_cost_pct": round(100 * tot_cost / tot_revnet_costed, 1) if tot_revnet_costed else None,
+                "margin_pct": round(100 * (tot_revnet_costed - tot_cost) / tot_revnet_costed, 1) if tot_revnet_costed else None,
+            },
+            "matrix": {k: {"count": v["count"], "revenue": round(v["revenue"], 2)} for k, v in matrix.items()},
+            "dishes": rows,
+        }
+
     # ── Категории (Сопутка/Общепит) ──
     async def categories(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
         skus = (await self.sku_analytics(date_from, date_to, stations))["skus"]

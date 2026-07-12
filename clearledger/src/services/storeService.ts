@@ -322,6 +322,39 @@ export const getStoreRevaluation = (opts?: { reason?: string }) =>
     reason: opts?.reason || undefined,
   })
 
+// ── Общепит: инжиниринг меню (продажи блюд + состав ТТК + динамика) ──
+export type MenuClass = 'star' | 'plowhorse' | 'puzzle' | 'dog' | 'unknown'
+export interface CateringIngredient {
+  ref: string; name: string; marked: boolean
+  qty_total: number; qty_per_portion: number | null
+  cost_total: number | null; cost_per_portion: number | null
+}
+export interface CateringDaily { date: string; qty: number; revenue: number }
+export interface CateringDish {
+  guid: string; name: string
+  qty: number; revenue: number; revenue_net: number; avg_price: number
+  cost: number | null; cost_per_portion: number | null
+  margin: number | null; food_cost_pct: number | null; margin_pct: number | null; cm_unit: number | null
+  share: number; popularity_pct: number; menu_class: MenuClass
+  ing_count: number; ingredients: CateringIngredient[]; daily: CateringDaily[]
+}
+export interface CateringMenuData {
+  period: { from: string; to: string }
+  summary: {
+    dishes_count: number; dishes_costed: number
+    revenue: number; revenue_net: number; portions: number
+    cost: number; margin: number; food_cost_pct: number | null; margin_pct: number | null
+  }
+  matrix: Partial<Record<MenuClass, { count: number; revenue: number }>>
+  dishes: CateringDish[]
+}
+
+export const getStoreCateringMenu = (dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<CateringMenuData>('/api/store/catering', {
+    date_from: dateFrom, date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
+
 // ── Номенклатура: полный справочник НСИ + фильтры ──
 export interface StoreNomenclatureItem {
   guid: string; name: string; article: string | null; vat: string | null

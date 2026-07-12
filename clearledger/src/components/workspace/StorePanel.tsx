@@ -22,7 +22,8 @@ import { StoreInventoryPanel } from './StoreInventoryPanel'
 import { StoreWriteoffPanel } from './StoreWriteoffPanel'
 import { StoreTransferPanel } from './StoreTransferPanel'
 import { StoreRevaluationPanel } from './StoreRevaluationPanel'
-import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCateringPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
+import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
+import { StoreCateringPanel } from './StoreCateringPanel'
 import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
 
 // Под-экраны, работающие на реестре SKU (/api/store/skus).
@@ -34,7 +35,7 @@ const SKU_MODES: Record<string, SkuMode> = {
 // Под-экраны на отчётных эндпоинтах (/api/store/{report}).
 const REPORT_PANELS: Record<string, typeof StoreReceiptsPanel> = {
   receipts: StoreReceiptsPanel, suppliers: StoreSuppliersPanel,
-  menu: StoreCateringPanel, categories: StoreCategoriesPanel,
+  categories: StoreCategoriesPanel,
   barcodes: StoreBarcodesPanel, recipes: StoreRecipesPanel,
 }
 
@@ -153,6 +154,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreRevaluationPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'menu') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreCateringPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

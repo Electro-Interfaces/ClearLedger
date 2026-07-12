@@ -154,6 +154,21 @@ async def store_revaluation(
     return await GoodsDashboardService(db, user.company_id).revaluation(reason=reason)
 
 
+@router.get("/catering")
+async def store_catering(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Инжиниринг меню общепита: блюда + фудкост/маржа + класс меню + состав ТТК + динамика."""
+    st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
+    return await GoodsDashboardService(db, user.company_id).catering_menu(
+        date.fromisoformat(date_from), date.fromisoformat(date_to), st,
+    )
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 
