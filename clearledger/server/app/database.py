@@ -136,6 +136,9 @@ async def create_all() -> None:
             "ALTER TABLE fuel_stations ADD COLUMN IF NOT EXISTS address VARCHAR(300)",
             # v4.1: удельная себестоимость остатка (ПартииТоваровНаСкладах Стоимость/Количество)
             "ALTER TABLE stock_on_hand ADD COLUMN IF NOT EXISTS cost_unit NUMERIC(16,4)",
+            # v4.2: индексы под аналитику магазина (К-27)
+            "CREATE INDEX IF NOT EXISTS ix_data_entries_store ON data_entries (company_id, layer, doc_type_id)",
+            "CREATE INDEX IF NOT EXISTS ix_stock_on_hand_wh ON stock_on_hand (company_id, warehouse_code)",
             # v3.1: период прогона в логе — для ленты прогонов кокпита канала
             # (строка прогона показывает, за какой период он грузил).
             "ALTER TABLE channel_sync_logs ADD COLUMN IF NOT EXISTS date_from VARCHAR(10)",

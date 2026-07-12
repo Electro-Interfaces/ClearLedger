@@ -34,12 +34,15 @@ class GoodsDashboardService:
         self.company_id = company_id
 
     async def _load(self) -> list[DataEntry]:
-        """Все clean-продажи сопутки/общепита компании (объём мал — фильтр по дате в Python)."""
-        return (await self.session.execute(select(DataEntry).where(
-            DataEntry.company_id == self.company_id,
-            DataEntry.layer == "clean",
-            DataEntry.doc_type_id == "retail_sale_sidegoods",
-        ))).scalars().all()
+        """Все clean-продажи сопутки/общепита компании (объём мал — фильтр по дате в
+        Python). Мемоизация на инстанс — метод зовётся многократно за запрос (К-27)."""
+        if getattr(self, "_sales_cache", None) is None:
+            self._sales_cache = (await self.session.execute(select(DataEntry).where(
+                DataEntry.company_id == self.company_id,
+                DataEntry.layer == "clean",
+                DataEntry.doc_type_id == "retail_sale_sidegoods",
+            ))).scalars().all()
+        return self._sales_cache
 
     def _select(self, rows: list[DataEntry], df: date, dt: date,
                 stations: list[str] | None) -> list[dict]:
@@ -194,14 +197,18 @@ class GoodsDashboardService:
     # ── SKU-аналитика: реестр товаров с маржой + ABC (Ассортимент/Цены/Номенклатура) ──
 
     async def _load_purchases(self, df: date, dt: date, stations: list[str] | None) -> list[dict]:
-        rows = (await self.session.execute(select(DataEntry).where(
-            DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
-            DataEntry.doc_type_id == "purchase"))).scalars().all()
-        return self._select(rows, df, dt, stations)
+        if getattr(self, "_purch_cache", None) is None:  # мемоизация сырых строк (К-27)
+            self._purch_cache = (await self.session.execute(select(DataEntry).where(
+                DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
+                DataEntry.doc_type_id == "purchase"))).scalars().all()
+        return self._select(self._purch_cache, df, dt, stations)
 
     async def _names(self) -> dict:
-        return {n.external_ref: n for n in (await self.session.execute(select(CbNomenclature).where(
+        if getattr(self, "_names_cache", None) is not None:
+            return self._names_cache
+        self._names_cache = {n.external_ref: n for n in (await self.session.execute(select(CbNomenclature).where(
             CbNomenclature.company_id == self.company_id))).scalars().all()}
+        return self._names_cache
 
     async def _cost_unit_map(self) -> dict[str, tuple[float, str, float]]:
         """Удельная себестоимость (закуп. NET, без НДС) за единицу закупки по GUID:
