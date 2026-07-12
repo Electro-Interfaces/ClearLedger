@@ -426,6 +426,36 @@ class CbMovementDoc(Base):
 
 
 # ---------------------------------------------------------------------------
+# StorePlan — план продаж магазина (слой политик, О-1 план-факт-светофор).
+# Ручной ввод руководителя в UI (дефолт по плану модернизации; альтернативы —
+# импорт из БП / экстраполяция — задел на будущее). Гранулярность: период (месяц
+# YYYY-MM) × разрез (scope_kind: total|category|station) × ключ (scope_key: имя
+# категории / код АЗС / '*') × метрика (metric: revenue|margin|qty). Факт-сторона
+# считается из продаж на лету; здесь хранится только план. Уникальность —
+# на (company, period, scope_kind, scope_key, metric).
+# ---------------------------------------------------------------------------
+class StorePlan(Base):
+    __tablename__ = "store_plan"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    period_ym: Mapped[str] = mapped_column(String(7), nullable=False)          # 'YYYY-MM'
+    scope_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="total")  # total|category|station
+    scope_key: Mapped[str] = mapped_column(String(200), nullable=False, default="*")      # имя категории / код АЗС / '*'
+    metric: Mapped[str] = mapped_column(String(20), nullable=False, default="revenue")    # revenue|margin|qty
+    plan_value: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uq_store_plan", "company_id", "period_ym", "scope_kind", "scope_key", "metric", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
 # AuditEvent
 # ---------------------------------------------------------------------------
 class AuditEvent(Base):

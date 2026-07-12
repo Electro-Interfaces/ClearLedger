@@ -10,6 +10,7 @@ KPI на имеющихся данных (продажи): выручка (вс�
 
 Маржа/себестоимость (нужен FIFO-матч с поступлениями) — отдельным блоком, не здесь.
 """
+import calendar
 import uuid
 from collections import defaultdict
 from datetime import date, timedelta
@@ -17,7 +18,10 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand, CbInventoryDoc, CbMovementDoc
+from app.models import (
+    DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand,
+    CbInventoryDoc, CbMovementDoc, StorePlan,
+)
 
 # секция meta → категория UI
 _SECTIONS = (("продажа_сопутка", "Сопутка"), ("продажа_общепит", "Общепит"))
@@ -1533,4 +1537,106 @@ class GoodsDashboardService:
                 "shifts": shifts,
                 "groups_count": len(groups),
             },
+        }
+
+    # ── Слой политик: план продаж + план-факт-светофор (О-1, слой управляемости) ──
+
+    @staticmethod
+    def _month_range(period_ym: str) -> tuple[date, date]:
+        """'YYYY-MM' → (первый день, последний день месяца)."""
+        y, m = int(period_ym[:4]), int(period_ym[5:7])
+        return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
+
+    async def get_plans(self, period_ym: str) -> dict:
+        """План продаж на месяц (сырые строки для формы редактирования)."""
+        rows = (await self.session.execute(select(StorePlan).where(
+            StorePlan.company_id == self.company_id,
+            StorePlan.period_ym == period_ym,
+        ))).scalars().all()
+        return {
+            "period": period_ym,
+            "plans": [{
+                "scope_kind": r.scope_kind, "scope_key": r.scope_key,
+                "metric": r.metric, "plan_value": float(r.plan_value),
+            } for r in rows],
+        }
+
+    async def save_plans(self, period_ym: str, items: list[dict]) -> dict:
+        """Upsert плана (ручной ввод руководителя). Значение ≤0 удаляет строку."""
+        existing = {
+            (r.scope_kind, r.scope_key, r.metric): r
+            for r in (await self.session.execute(select(StorePlan).where(
+                StorePlan.company_id == self.company_id,
+                StorePlan.period_ym == period_ym,
+            ))).scalars().all()
+        }
+        for it in items or []:
+            sk = str(it.get("scope_kind") or "total")
+            key = str(it.get("scope_key") or "*")
+            metric = str(it.get("metric") or "revenue")
+            val = float(it.get("plan_value") or 0)
+            row = existing.get((sk, key, metric))
+            if val <= 0:
+                if row is not None:
+                    await self.session.delete(row)
+                continue
+            if row is not None:
+                row.plan_value = val
+            else:
+                self.session.add(StorePlan(
+                    company_id=self.company_id, period_ym=period_ym,
+                    scope_kind=sk, scope_key=key, metric=metric, plan_value=val,
+                ))
+        await self.session.commit()
+        return await self.get_plans(period_ym)
+
+    async def plan_facts(self, period_ym: str) -> dict:
+        """План-факт-светофор за месяц: карты факт/план/%/🟢🟡🔴 + спарклайн.
+        Факт считается из продаж на лету; план — ручной StorePlan. ППГ/тренд —
+        задел (включится с накоплением истории, сейчас данные ≈ 1 месяц)."""
+        mstart, mend = self._month_range(period_ym)
+        metas = self._select(await self._load(), mstart, mend, None)
+        kpis = self._kpis(metas)
+        fin, un = kpis["financial"], kpis["units"]
+        by_cat = {c["category"]: c["revenue"] for c in un["by_category"]}
+        by_station = self._by_station(metas)
+        daily = self._charts(metas, mstart, mend)["daily"]
+
+        pmap = {
+            (p["scope_kind"], p["scope_key"], p["metric"]): p["plan_value"]
+            for p in (await self.get_plans(period_ym))["plans"]
+        }
+
+        def card(scope_kind: str, scope_key: str, label: str, metric: str, fact: float) -> dict:
+            plan = pmap.get((scope_kind, scope_key, metric))
+            pct = round(100 * fact / plan, 1) if plan else None
+            traffic = None
+            if plan:
+                traffic = "green" if pct >= 100 else ("amber" if pct >= 80 else "red")
+            return {
+                "scope_kind": scope_kind, "scope_key": scope_key, "label": label,
+                "metric": metric, "fact": round(fact, 2),
+                "plan": round(plan, 2) if plan else None,
+                "pct": pct, "traffic": traffic,
+                "delta": round(fact - plan, 2) if plan else None,
+            }
+
+        total = card("total", "*", "Выручка всего", "revenue", fin["total_revenue"])
+        total["sparkline"] = [{"date": d["date"], "value": d["revenue"]} for d in daily]
+        units = card("total", "*", "Позиций продано", "qty", un["total_units"])
+        cat_cards = [card("category", name, name, "revenue", rev) for name, rev in by_cat.items()]
+        station_cards = [
+            card("station", s["station"], f"АЗС {s['station']}", "revenue", s["revenue"])
+            for s in by_station
+        ]
+        all_cards = [total, units, *cat_cards, *station_cards]
+        planned = sum(1 for c in all_cards if c["plan"] is not None)
+        return {
+            "period": {"ym": period_ym, "from": mstart.isoformat(), "to": mend.isoformat()},
+            "total": total,
+            "units": units,
+            "by_category": cat_cards,
+            "by_station": station_cards,
+            "has_plan": planned > 0,
+            "planned_count": planned,
         }

@@ -9,6 +9,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -229,6 +230,53 @@ async def store_sku_detail(
 
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
+
+
+# ── Слой политик: план продаж + план-факт-светофор (О-1) ──
+# Регистрируются ДО catch-all /{report}, иначе /plan перехватится как отчёт.
+
+class _PlanItem(BaseModel):
+    scope_kind: str = "total"       # total | category | station
+    scope_key: str = "*"            # имя категории / код АЗС / '*'
+    metric: str = "revenue"         # revenue | qty
+    plan_value: float = 0
+
+
+class _PlanSave(BaseModel):
+    period: str                     # 'YYYY-MM'
+    items: list[_PlanItem] = []
+
+
+@router.get("/plan")
+async def store_get_plan(
+    period: str = Query(..., description="Месяц плана 'YYYY-MM'"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """План продаж магазина на месяц (сырьё для формы редактирования)."""
+    return await GoodsDashboardService(db, user.company_id).get_plans(period)
+
+
+@router.put("/plan")
+async def store_save_plan(
+    body: _PlanSave,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сохранить план (ручной ввод руководителя). Значение ≤0 удаляет строку."""
+    return await GoodsDashboardService(db, user.company_id).save_plans(
+        body.period, [i.model_dump() for i in body.items],
+    )
+
+
+@router.get("/plan-facts")
+async def store_plan_facts(
+    period: str = Query(..., description="Месяц 'YYYY-MM'"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """План-факт-светофор за месяц: карты факт/план/%/🟢🟡🔴 + спарклайн."""
+    return await GoodsDashboardService(db, user.company_id).plan_facts(period)
 
 
 @router.get("/{report}")

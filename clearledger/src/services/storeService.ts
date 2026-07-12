@@ -2,7 +2,7 @@
  * Клиент аналитики раздела «Магазин» (сопутка/общепит).
  * Пока — «Обзор магазина» (/api/store/overview → GoodsDashboardService).
  */
-import { get } from './apiClient'
+import { get, put } from './apiClient'
 
 export interface StoreCategory {
   category: string
@@ -455,3 +455,50 @@ export const getStoreNomenclature = (
     q: opts.q || undefined,
     stations: opts.stations?.length ? opts.stations.join(',') : undefined,
   })
+
+// ── Слой политик: план продаж + план-факт-светофор (О-1) ──
+export type PlanScopeKind = 'total' | 'category' | 'station'
+export type PlanMetric = 'revenue' | 'qty'
+export type PlanTraffic = 'green' | 'amber' | 'red'
+
+export interface PlanRow {
+  scope_kind: PlanScopeKind
+  scope_key: string
+  metric: PlanMetric
+  plan_value: number
+}
+export interface StorePlanData { period: string; plans: PlanRow[] }
+
+export interface PlanFactCard {
+  scope_kind: PlanScopeKind
+  scope_key: string
+  label: string
+  metric: PlanMetric
+  fact: number
+  plan: number | null
+  pct: number | null
+  traffic: PlanTraffic | null
+  delta: number | null
+  sparkline?: { date: string; value: number }[]
+}
+export interface PlanFactsData {
+  period: { ym: string; from: string; to: string }
+  total: PlanFactCard
+  units: PlanFactCard
+  by_category: PlanFactCard[]
+  by_station: PlanFactCard[]
+  has_plan: boolean
+  planned_count: number
+}
+
+/** Месяц 'YYYY-MM' из ISO-даты (для привязки монитора к периоду фильтра). */
+export const monthOf = (iso: string): string => (iso || '').slice(0, 7)
+
+export const getStorePlanFacts = (period: string) =>
+  get<PlanFactsData>('/api/store/plan-facts', { period })
+
+export const getStorePlan = (period: string) =>
+  get<StorePlanData>('/api/store/plan', { period })
+
+export const saveStorePlan = (period: string, items: PlanRow[]) =>
+  put<StorePlanData>('/api/store/plan', { period, items })

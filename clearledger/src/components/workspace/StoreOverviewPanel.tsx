@@ -12,8 +12,9 @@ import {
 import { ExportButton } from './analytics/ExportButton'
 import { Kpi } from './analytics/Kpi'
 import { CHART_SERIES, seriesColor } from './analytics/palette'
-import { getStoreOverview } from '@/services/storeService'
+import { getStoreOverview, monthOf } from '@/services/storeService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
+import { StorePlanMonitor } from './StorePlanMonitor'
 
 const nf0 = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n)
 
@@ -74,6 +75,9 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
         </div>
       ) : (
         <>
+          {/* План-факт-светофор (директорский монитор, О-1) */}
+          <StorePlanMonitor companyId={companyId} period={monthOf(data.period.to)} />
+
           {/* KPI-полоса */}
           <div className="grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             <Kpi label="Выручка" value={fmtMoney(f.total_revenue)} delta={t?.revenue?.percent} sub="с НДС" />
