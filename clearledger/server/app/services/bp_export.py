@@ -19,7 +19,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DataEntry, CbNomenclature, StockOnHand
+from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef
 from app.services.bp_canon import packet_hash
 from app.services.goods_dashboard import _day
 
@@ -52,17 +52,6 @@ def _new_packet_uuid() -> str:
     return str(_uuid.uuid4())
 
 
-# Реквизиты известных организаций ЦБ (Организация не автосоздаётся, ищется по ИНН).
-# TODO-Ф1: заменить пулом Catalog.Организации из ЦБ.
-ORG_REQ = {
-    # gig ГАЗИНВЕСТГРУПП
-    "8cfc4701-63e6-11f1-bdff-0050568cc25a": {
-        "Наименование": 'ООО "ГАЗИНВЕСТГРУПП"', "НаименованиеПолное": 'ООО "ГАЗИНВЕСТГРУПП"',
-        "ИНН": "7839440090", "КПП": "780401001", "ОГРН": "", "ОКПО": "", "ЮрФизЛицо": "ЮрЛицо",
-    },
-}
-
-
 class BpPackageEmitter:
     def __init__(self, session: AsyncSession, company_id):
         self.session = session
@@ -73,15 +62,10 @@ class BpPackageEmitter:
             CbNomenclature.company_id == self.company_id))).scalars().all()
         return {n.external_ref: n for n in rows}
 
-    async def _wh_map(self) -> dict[str, dict]:
-        """warehouse_code / GUID → {name, code}. Смена.Склад — GUID, а StockOnHand
-        хранит код → имя. Склад в НСИ идёт по UUID из Смена/документов, имя/код — из склада."""
-        out: dict[str, dict] = {}
-        for s in (await self.session.execute(select(StockOnHand).where(
-                StockOnHand.company_id == self.company_id))).scalars().all():
-            out.setdefault(s.warehouse_code, {"Наименование": s.warehouse_name or s.warehouse_code,
-                                              "Код": s.warehouse_code})
-        return out
+    async def _refs(self, kind: str) -> dict[str, CbRef]:
+        rows = (await self.session.execute(select(CbRef).where(
+            CbRef.company_id == self.company_id, CbRef.kind == kind))).scalars().all()
+        return {r.external_ref: r for r in rows}
 
     async def build_shift_package(self, shift_key: str) -> dict:
         """Собрать пакет для одной смены (retail_sale + НСИ). shift_key = GUID смены."""
@@ -102,6 +86,9 @@ class BpPackageEmitter:
         meta = target.meta or {}
         sm = meta.get("Смена") or {}
         nom = await self._nom_map()
+        orgs = await self._refs("organization")
+        whs = await self._refs("warehouse")
+        kinds = await self._refs("nom_kind")
 
         # кэш UUID для НСИ
         nsi_nom: set[str] = set()
@@ -195,37 +182,41 @@ class BpPackageEmitter:
         документы = [retail]  # TODO-Ф1: recipe/purchase/production_release/… перед/после
 
         # ── НСИ ──
+        def _s(v) -> str:
+            return str(v or "").strip()   # ЦБ хранит ИНН/Код fixed-width → обрезать
+
         нси = []
-        wh_info = await self._wh_map()
         for uid in sorted(nsi_org):
-            req = ORG_REQ.get(uid, {})
+            r = orgs.get(uid)
+            ex = (r.extra or {}) if r else {}
             нси.append({
                 "Тип": "Организация", "ИсточникUUID": uid,
-                "Наименование": req.get("Наименование", ""), "НаименованиеПолное": req.get("НаименованиеПолное", ""),
-                "ИНН": req.get("ИНН", ""), "КПП": req.get("КПП", ""), "ОГРН": req.get("ОГРН", ""),
-                "ОКПО": req.get("ОКПО", ""), "ЮрФизЛицо": req.get("ЮрФизЛицо", "ЮрЛицо"),
-                "ПометкаУдаления": False,
+                "Наименование": _s(r.name if r else ""), "НаименованиеПолное": _s(ex.get("full_name")) or _s(r.name if r else ""),
+                "ИНН": _s(ex.get("inn")), "КПП": _s(ex.get("kpp")), "ОГРН": _s(ex.get("ogrn")),
+                "ОКПО": _s(ex.get("okpo")), "ЮрФизЛицо": _s(ex.get("jur_fiz")) or "ЮрЛицо",
+                "ПометкаУдаления": bool(ex.get("deleted")),
             })
         for uid in sorted(nsi_wh):
-            info = wh_info.get(str(код), {"Наименование": "", "Код": str(код)})
+            r = whs.get(uid)
+            ex = (r.extra or {}) if r else {}
             нси.append({
                 "Тип": "Склад", "ИсточникUUID": uid,
-                "Наименование": info["Наименование"], "Код": info["Код"],
-                "ВидСклада": "АЗК",  # TODO-Ф1: тянуть из ЦБ
-                "ПометкаУдаления": False,
+                "Наименование": _s(r.name if r else ""), "Код": _s(ex.get("code")),
+                "ВидСклада": _s(ex.get("kind_name")) or "АЗК",
+                "ПометкаУдаления": bool(ex.get("deleted")),
             })
         for g in sorted(nsi_nom):
             nn = nom.get(g)
-            вид = ""  # kind_ref→name; TODO: резолв через CbRef
-            класс = "Сопутка"
+            вид = _s(kinds[nn.kind_ref].name) if (nn and nn.kind_ref and nn.kind_ref in kinds) else ""
+            класс = "Общепит" if вид == "Набор - комплект" else "Сопутка"
             нси.append({
                 "Тип": "Номенклатура", "ИсточникUUID": g,
-                "КодЦБ": "",  # TODO-Ф1: не тянули Код номенклатуры
-                "Наименование": (nn.name if nn else ""),
-                "НаименованиеПолное": (nn.full_name or nn.name if nn else ""),
-                "Артикул": (nn.article or "" if nn else ""),
+                "КодЦБ": _s(nn.code if nn else ""),
+                "Наименование": _s(nn.name if nn else ""),
+                "НаименованиеПолное": _s(nn.full_name if nn else "") or _s(nn.name if nn else ""),
+                "Артикул": _s(nn.article if nn else ""),
                 "СтавкаНДС": _nds(nn.vat if nn else ""),
-                "Единица": (nn.unit or "" if nn else ""),
+                "Единица": _s(nn.unit if nn else ""),
                 "ВидНоменклатуры": вид,
                 "КлассSKU": класс,
                 "ШтрихКоды": [],

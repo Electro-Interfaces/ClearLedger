@@ -329,6 +329,14 @@ class OneCComClient:
         result = await self._call("fetch_barcodes", {"limit": limit} if limit is not None else {})
         return list(result or [])
 
+    async def fetch_orgs(self) -> list[dict[str, Any]]:
+        """Справочник.Организации → [{ref, name, full_name, inn, kpp, ogrn, okpo, jur_fiz, deleted}]."""
+        return list(await self._call("fetch_orgs", {}) or [])
+
+    async def fetch_warehouses(self) -> list[dict[str, Any]]:
+        """Справочник.Склады → [{ref, code, name, kind, deleted}]."""
+        return list(await self._call("fetch_warehouses", {}) or [])
+
     async def fetch_doc_lines(
         self,
         doc_type: str,

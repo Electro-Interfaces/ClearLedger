@@ -606,6 +606,7 @@ def op_enrich_nomenclature(refs: list[str]) -> dict[str, dict[str, Any]]:
         "ПРЕДСТАВЛЕНИЕ(Т.БазоваяЕдиницаИзмерения) КАК Unit, "
         "Т.Артикул КАК Article, "
         "Т.НаименованиеПолное КАК FullName, "
+        "Т.Код КАК Code, "
         "ПРЕДСТАВЛЕНИЕ(Т.ОсновнойПоставщик) КАК Supplier "
         "ИЗ Справочник.Номенклатура КАК Т "
         "ГДЕ Т.Ссылка В (&Refs)"
@@ -622,6 +623,7 @@ def op_enrich_nomenclature(refs: list[str]) -> dict[str, dict[str, Any]]:
             "unit": _val(sel.Unit),
             "article": _val(sel.Article),
             "full_name": _val(sel.FullName),
+            "code": _val(sel.Code),
             "supplier": _val(sel.Supplier),
             # Плотность пока не тянем — пробуем добавить отдельным запросом
             # с защитой от отсутствия поля.
@@ -1004,6 +1006,49 @@ def op_fetch_barcodes(limit: int | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+def op_fetch_orgs() -> list[dict[str, Any]]:
+    """Справочник.Организации → реквизиты для НСИ-секции пакета (Организация
+    ищется приёмником по ИНН, не автосоздаётся). Поля ЭЛСИ.АЗК: ИНН/КПП/
+    НаименованиеПолное/ОГРН/КодПоОКПО/ЮрФизЛицо."""
+    ib = _require_ib()
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        "ВЫБРАТЬ Т.Ссылка КАК Ref, Т.Наименование КАК Name, Т.НаименованиеПолное КАК FullName, "
+        "Т.ИНН КАК ИНН, Т.КПП КАК КПП, Т.ОГРН КАК ОГРН, Т.КодПоОКПО КАК ОКПО, "
+        "ПРЕДСТАВЛЕНИЕ(Т.ЮрФизЛицо) КАК ЮрФизЛицо, Т.ПометкаУдаления КАК Del "
+        "ИЗ Справочник.Организации КАК Т"
+    )
+    sel = q.Выполнить().Выбрать()
+    rows: list[dict[str, Any]] = []
+    while sel.Следующий():
+        rows.append({
+            "ref": _xs(ib, sel.Ref), "name": _val(sel.Name), "full_name": _val(sel.FullName),
+            "inn": _val(sel.ИНН), "kpp": _val(sel.КПП), "ogrn": _val(sel.ОГРН),
+            "okpo": _val(sel.ОКПО), "jur_fiz": _val(sel.ЮрФизЛицо), "deleted": bool(_val(sel.Del)),
+        })
+    return rows
+
+
+def op_fetch_warehouses() -> list[dict[str, Any]]:
+    """Справочник.Склады → код/имя/ВидСклада для НСИ-секции пакета (Склад
+    ищется приёмником по UUID/номеру АЗС, не автосоздаётся)."""
+    ib = _require_ib()
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        "ВЫБРАТЬ Т.Ссылка КАК Ref, Т.Код КАК Code, Т.Наименование КАК Name, "
+        "ПРЕДСТАВЛЕНИЕ(Т.ВидСклада) КАК ВидСклада, Т.ПометкаУдаления КАК Del "
+        "ИЗ Справочник.Склады КАК Т"
+    )
+    sel = q.Выполнить().Выбрать()
+    rows: list[dict[str, Any]] = []
+    while sel.Следующий():
+        rows.append({
+            "ref": _xs(ib, sel.Ref), "code": str(_val(sel.Code) or "").strip(),
+            "name": _val(sel.Name), "kind": _val(sel.ВидСклада), "deleted": bool(_val(sel.Del)),
+        })
+    return rows
+
+
 def main() -> int:
     while True:
         line = sys.stdin.readline()
@@ -1050,6 +1095,10 @@ def main() -> int:
                 result = op_enrich_nomenclature(**args)
             elif op == "fetch_barcodes":
                 result = op_fetch_barcodes(**args)
+            elif op == "fetch_orgs":
+                result = op_fetch_orgs()
+            elif op == "fetch_warehouses":
+                result = op_fetch_warehouses()
             elif op == "exit":
                 return 0
             else:

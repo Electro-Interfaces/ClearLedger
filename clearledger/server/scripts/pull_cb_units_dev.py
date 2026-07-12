@@ -54,21 +54,24 @@ async def main() -> None:
             v = str(v or "").strip()
             return v or None
 
-        n_u = n_f = n_s = 0
+        n_u = n_f = n_s = n_c = 0
         rows = (await db.execute(select(CbNomenclature).where(
             CbNomenclature.company_id == cid))).scalars().all()
         for r in rows:
             d = enr.get(r.external_ref)
             if not d:
                 continue
-            u, fn, sup = _s(d.get("unit")), _s(d.get("full_name")), _s(d.get("supplier"))
+            u, fn, sup, code = _s(d.get("unit")), _s(d.get("full_name")), _s(d.get("supplier")), _s(d.get("code"))
             if u and u != r.unit:
                 r.unit = u; n_u += 1
             if fn and fn != r.full_name:
                 r.full_name = fn; n_f += 1
             if sup and sup != r.main_supplier:
                 r.main_supplier = sup; n_s += 1
+            if code and code != r.code:
+                r.code = code; n_c += 1
         await db.commit()
+        print(f"обновлено code: {n_c}")
         from collections import Counter
         dist = Counter(_s(d.get("unit")) for d in enr.values() if _s(d.get("unit")))
         print(f"обновлено: unit {n_u}, full_name {n_f}, supplier {n_s}; "

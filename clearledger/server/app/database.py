@@ -141,6 +141,9 @@ async def create_all() -> None:
             # v4.4: полное наименование + основной поставщик (карточка товароведа)
             "ALTER TABLE cb_nomenclature ADD COLUMN IF NOT EXISTS full_name VARCHAR(700)",
             "ALTER TABLE cb_nomenclature ADD COLUMN IF NOT EXISTS main_supplier VARCHAR(300)",
+            # v4.5: НСИ-реквизиты для эмиттера пакета БП (КодЦБ + orgs/warehouses)
+            "ALTER TABLE cb_nomenclature ADD COLUMN IF NOT EXISTS code VARCHAR(40)",
+            "ALTER TABLE cb_ref ADD COLUMN IF NOT EXISTS extra JSONB",
             # v4.2: индексы под аналитику магазина (К-27)
             "CREATE INDEX IF NOT EXISTS ix_data_entries_store ON data_entries (company_id, layer, doc_type_id)",
             "CREATE INDEX IF NOT EXISTS ix_stock_on_hand_wh ON stock_on_hand (company_id, warehouse_code)",

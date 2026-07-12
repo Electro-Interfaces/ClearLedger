@@ -276,6 +276,7 @@ class CbNomenclature(Base):
     unit: Mapped[str | None] = mapped_column(String(30), nullable=True)       # БазоваяЕдиницаИзмерения (шт/г/л)
     full_name: Mapped[str | None] = mapped_column(String(700), nullable=True) # НаименованиеПолное
     main_supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)  # ОсновнойПоставщик (имя)
+    code: Mapped[str | None] = mapped_column(String(40), nullable=True)       # Код ЦБ (КодЦБ пакета, soft-match приёмника)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -294,9 +295,12 @@ class CbRef(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
-    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # counterparty | nom_group
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # counterparty | nom_group | nom_kind | organization | warehouse
     external_ref: Mapped[str] = mapped_column(String(36), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    # реквизиты для НСИ-секции пакета БП: organization → {full_name,inn,kpp,ogrn,okpo,jur_fiz};
+    # warehouse → {code, kind_name}. Для остальных kind — NULL.
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (Index("uq_cb_ref_ck", "company_id", "kind", "external_ref", unique=True),)
 
