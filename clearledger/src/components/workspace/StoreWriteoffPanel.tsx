@@ -38,7 +38,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
   const KPIS: { label: string; value: string; hint?: string; cls?: string }[] = [
     { label: 'Списаний', value: nf(docs.length), hint: `${data.summary.period_from ?? ''} – ${data.summary.period_to ?? ''}` },
     { label: 'Сумма списаний', value: money(tot), cls: 'text-red-400/90' },
-    { label: 'Из недостач (инв.)', value: money(invAmt), hint: 'по инвентаризации' },
+    { label: 'Из недостач (инв.)', value: money(invAmt), hint: '= недостачи с экрана Инвентаризация (не суммировать)' },
     { label: 'Прочие причины', value: money(tot - invAmt), hint: 'брак/срок/приказ' },
   ]
 

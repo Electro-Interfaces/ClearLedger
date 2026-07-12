@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   getStoreReport,
   type StoreReceiptsData, type StoreSuppliersData,
-  type StoreCateringData, type StoreCategoriesData,
+  type StoreCategoriesData,
   type StoreBarcodesData, type StoreRecipesData,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
@@ -88,28 +88,6 @@ export function StoreSuppliersPanel(p: PanelProps) {
         <Table
           head={[{ label: 'Поставщик' }, { label: 'Закупки (нетто)', num: true }, { label: 'Документов', num: true }, { label: 'SKU', num: true }]}
           rows={d.suppliers.map((r) => [r.name, fmtMoney(r.amount_net), nf(r.docs), nf(r.sku_count)])}
-        />
-      </Shell>
-    )
-  })
-}
-
-export function StoreCateringPanel(p: PanelProps) {
-  const q = useReport<StoreCateringData>('catering', p)
-  return wrap(q, () => {
-    const d = q.data!
-    return (
-      <Shell title="Общепит — меню и фудкост"
-        sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} блюд · выручка ${fmtMoney(d.summary.revenue)}. Фудкост — по ТТК (ингредиенты × закупочная себестоимость).`}>
-        <Table
-          head={[{ label: 'Блюдо' }, { label: 'Продано', num: true }, { label: 'Выручка', num: true }, { label: 'Себест. ингр.', num: true }, { label: 'Фудкост %', num: true }]}
-          rows={d.dishes.map((r) => [
-            r.name, nf(r.qty), fmtMoney(r.revenue),
-            r.cost != null ? fmtMoney(r.cost) : '—',
-            r.food_cost_pct != null
-              ? <span className={r.food_cost_pct > 40 ? 'text-amber-300/90' : ''}>{r.food_cost_pct}%</span>
-              : '—',
-          ])}
         />
       </Shell>
     )
