@@ -69,9 +69,12 @@ async def main() -> None:
         )
     print(f"получено: ТоварыНаАЗК {len(azk)}, партий {len(parts)}, складов {len(wh)}")
 
-    # агрегация остатка по (склад, номенклатура): qty=Σкол, value=Σ(кол×цена)
+    # агрегация остатка по (склад, номенклатура). qty=Σкол (нетто, м.б. <0 из-за
+    # пересорта). Цена — АКТИВНАЯ: средневзвешенная ТОЛЬКО по строкам с
+    # положительным остатком. Иначе старые ценовые строки регистра с
+    # отрицательным кол-вом (пересорт) искажают среднюю (напр. сигареты 1212 вместо 288).
     onhand: dict[tuple[str, str], dict] = defaultdict(
-        lambda: {"qty": 0.0, "value": 0.0, "barcode": None})
+        lambda: {"qty": 0.0, "pos_value": 0.0, "pos_qty": 0.0, "barcode": None})
     for r in azk:
         nom = str(r.get("Номенклатура") or "")
         whg = str(r.get("Склад") or "")
@@ -80,8 +83,11 @@ async def main() -> None:
         code = wh.get(whg, ("?", ""))[0]
         o = onhand[(code, nom)]
         qty = _num(r.get("Количество"))
+        price_r = _num(r.get("ЦенаВРознице"))
         o["qty"] += qty
-        o["value"] += qty * _num(r.get("ЦенаВРознице"))
+        if qty > 0:                       # цена только по активным (положительным) строкам
+            o["pos_value"] += qty * price_r
+            o["pos_qty"] += qty
         if not o["barcode"] and r.get("ШтрихКод"):
             o["barcode"] = str(r.get("ШтрихКод"))
 
@@ -106,8 +112,8 @@ async def main() -> None:
         n = 0
         for (code, nom), o in onhand.items():
             qty = o["qty"]
-            # средняя розн. цена (взвеш.) — чтобы qty×price = корректная стоимость остатка
-            price = (o["value"] / qty) if qty else None
+            # активная розн. цена = средневзвеш. по положительным строкам (не по нетто)
+            price = (o["pos_value"] / o["pos_qty"]) if o["pos_qty"] else None
             cu = cost_unit.get((code, nom))
             db.add(StockOnHand(
                 company_id=cid, warehouse_code=code,
