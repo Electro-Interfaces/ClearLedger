@@ -19,9 +19,11 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef
+from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef, CbInventoryDoc, CbMovementDoc
 from app.services.bp_canon import packet_hash
 from app.services.goods_dashboard import _day
+
+_WH_208 = {"208", "20800002"}   # склады станции 208 (Торговый зал + Склад)
 
 # СтавкаНДС ЦБ («22%») → каноническое имя контракта («НДС22»). §4.
 _NDS_MAP = {
@@ -293,8 +295,88 @@ class BpPackageEmitter:
                 ln["СтавкаНДС"] = _nds(ln.pop("СтавкаНДС_raw", "")) or _nds(nom[g].vat if nom.get(g) else "")
             gains.append(it)
 
-        # Порядок контракта: recipe → purchase → retail → production → [return] → inventory → gain → …
-        документы = [*purchases, retail, *productions, *gains]
+        # ── inventory / writeoff / transfer (движение того же дня) ──
+        # строим из Cb*Doc (склады 208); поля пакета деривируем из строк аналитики.
+        dl = shift_day + "%"
+        code2guid = {str((r.extra or {}).get("code") or ""): r.external_ref for r in whs.values()}
+        inventories = []
+        for r in (await self.session.execute(select(CbInventoryDoc).where(
+                CbInventoryDoc.company_id == self.company_id,
+                CbInventoryDoc.doc_date.like(dl),
+                CbInventoryDoc.warehouse_code.in_(_WH_208)))).scalars().all():
+            строки = []
+            for i, ln in enumerate(r.lines or [], 1):
+                g = ln.get("ref")
+                if g:
+                    nsi_nom.add(g)
+                fact = float(ln.get("fact") or 0)
+                uchet = float(ln.get("uchet") or 0)
+                dev = float(ln.get("dev") or 0)
+                amt_dev = float(ln.get("amount_dev") or 0)
+                цена = round(amt_dev / dev, 4) if dev else 0.0   # Цена = стоим.откл / кол-во откл
+                строки.append({
+                    "НомерСтроки": i, "Номенклатура": g,
+                    "Единица": (nom[g].unit or "" if nom.get(g) else ""),
+                    "Количество": round(fact, 3), "КоличествоУчет": round(uchet, 3),
+                    "Цена": цена, "Сумма": round(fact * цена, 2), "СуммаУчет": round(uchet * цена, 2),
+                })
+            inventories.append({
+                "Тип": "inventory", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
+                "Дата": _iso(r.doc_date), "Проведен": True, "ПометкаУдаления": False,
+                "Организация": org_uuid, "Склад": wh_uuid, "Комментарий": r.comment or "",
+                "ДатаЗаполнения": "", "Товары": строки,
+                "СуммаДокумента": round(sum(s["Сумма"] for s in строки), 2),
+            })
+
+        writeoffs = []
+        transfers = []
+        for r in (await self.session.execute(select(CbMovementDoc).where(
+                CbMovementDoc.company_id == self.company_id,
+                CbMovementDoc.doc_date.like(dl),
+                CbMovementDoc.warehouse_code.in_(_WH_208)))).scalars().all():
+            строки = []
+            for i, ln in enumerate(r.lines or [], 1):
+                g = ln.get("ref")
+                if g:
+                    nsi_nom.add(g)
+                строки.append({
+                    "НомерСтроки": i, "Номенклатура": g,
+                    "Единица": (nom[g].unit or "" if nom.get(g) else ""),
+                    "Количество": round(float(ln.get("qty") or 0), 3),
+                    "Цена": round(float(ln.get("price") or 0), 2),
+                    "_amount": round(float(ln.get("amount") or 0), 2),
+                })
+            if r.kind == "writeoff":
+                for s in строки:
+                    s["Сумма"] = s.pop("_amount")
+                writeoffs.append({
+                    "Тип": "writeoff", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
+                    "Дата": _iso(r.doc_date), "Проведен": True, "ПометкаУдаления": False,
+                    "Организация": org_uuid, "Склад": wh_uuid, "Подразделение": "",
+                    "ИнвентаризацияUUID": "", "СуммаДокумента": round(float(r.total_amount or 0), 2),
+                    "НДСвСтоимостиТоваров": "", "ВалютаДокумента": "RUB", "Товары": строки,
+                })
+            elif r.kind == "transfer":
+                for s in строки:
+                    s["Себестоимость"] = s.pop("_amount")   # TODO: реальная себест. (сейчас = стоимость строки)
+                отпр = code2guid.get(str(r.warehouse_code or ""), wh_uuid)
+                получ = code2guid.get(str(r.warehouse_to_code or ""), "")
+                if получ:
+                    nsi_wh.add(получ)
+                if отпр:
+                    nsi_wh.add(отпр)
+                transfers.append({
+                    "Тип": "transfer", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
+                    "Дата": _iso(r.doc_date), "Проведен": True, "ПометкаУдаления": False,
+                    "Организация": org_uuid,
+                    "СкладОтправитель": отпр, "СкладПолучатель": получ,
+                    "Подразделение": "", "ВидОперации": "ТоварыПродукция",
+                    "Направление": "Исходящее", "Товары": строки,
+                    "СуммаДокумента": round(float(r.total_amount or 0), 2),
+                })
+
+        # Порядок контракта: recipe → purchase → retail → production → [return] → inventory → gain → writeoff → transfer
+        документы = [*purchases, retail, *productions, *inventories, *gains, *writeoffs, *transfers]
 
         # ── НСИ ──
         def _s(v) -> str:
