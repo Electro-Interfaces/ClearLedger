@@ -157,9 +157,12 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: 
                 <td className="px-3 py-1.5 text-muted-foreground">{d.category ?? '—'}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{nf(d.qty)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(d.revenue)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{d.cost_net != null ? fmtMoney(d.cost_net) : '—'}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                  {d.cost_net != null ? fmtMoney(d.cost_net) : '—'}
+                  {d.margin != null && !d.cost_reliable && <span className="ml-1 text-amber-400/70" title="себестоимость ненадёжна (весовой/блочный товар или малый объём закупки) — маржа ориентировочна, не учтена в групповой">⚠</span>}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{d.margin != null ? fmtMoney(d.margin) : '—'}</td>
-                <td className={`px-3 py-1.5 text-right tabular-nums ${marginCls(d.margin_pct)}`}>{pctStr(d.margin_pct)}</td>
+                <td className={`px-3 py-1.5 text-right tabular-nums ${d.cost_reliable ? marginCls(d.margin_pct) : 'text-muted-foreground/50'}`}>{pctStr(d.margin_pct)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{pctStr(d.markup_pct)}</td>
                 <td className="px-3 py-1.5 text-center">{d.abc}</td>
               </tr>

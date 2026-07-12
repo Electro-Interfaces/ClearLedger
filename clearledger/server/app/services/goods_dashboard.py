@@ -199,6 +199,32 @@ class GoodsDashboardService:
         return {n.external_ref: n for n in (await self.session.execute(select(CbNomenclature).where(
             CbNomenclature.company_id == self.company_id))).scalars().all()}
 
+    async def _cost_unit_map(self) -> dict[str, tuple[float, str, float]]:
+        """Удельная себестоимость (закуп. NET, без НДС) за единицу закупки по GUID:
+        {ref: (unit_cost_net, source, purch_qty_all)}.
+
+        База — средняя закупка net за ВСЁ время (Σ(Сумма−СуммаНДС)/ΣКоличество из ПТУ;
+        ⚠ проверено: Сумма ПТУ включает НДС → net корректен, К-1). Даёт корректную маржу
+        (табак ~6%) и убирает margin=None узкого окна. Партийную StockOnHand.cost_unit НЕ
+        используем для маржи продаж: на розничных АЗС партийный регистр отрицательно-
+        смешанный (пересорт) → удельная себест. по нему ненадёжна. Кеш в инстансе (К-27)."""
+        if getattr(self, "_ccache", None) is not None:
+            return self._ccache
+        agg: dict[str, list] = defaultdict(lambda: [0.0, 0.0])
+        for m in await self._load_purchases(date(2000, 1, 1), date(2100, 1, 1), None):
+            for ln in (m.get("Документ") or {}).get("Товары") or []:
+                g = ln.get("Номенклатура")
+                if not g:
+                    continue
+                agg[g][0] += float(ln.get("Сумма") or 0) - float(ln.get("СуммаНДС") or 0)
+                agg[g][1] += float(ln.get("Количество") or 0)
+        cm: dict[str, tuple[float, str, float]] = {}
+        for g, v in agg.items():
+            if v[1] and (v[0] / v[1]) > 0:
+                cm[g] = (v[0] / v[1], "purchase", v[1])
+        self._ccache = cm
+        return cm
+
     async def sku_analytics(self, date_from: date, date_to: date,
                             stations: list[str] | None = None) -> dict:
         sale_metas = self._select(await self._load(), date_from, date_to, stations)
@@ -232,13 +258,22 @@ class GoodsDashboardService:
                 purch[g]["cost_net"] += summ - vat        # закупка net (Сумма включает НДС)
                 purch[g]["qty"] += float(ln.get("Количество") or 0)
 
+        cost_map = await self._cost_unit_map()  # единая себест.: партии→закупка (К-2)
         rows = []
         for g, s in sku.items():
             n = nom.get(g)
             p = purch.get(g)
-            avg_cost = (p["cost_net"] / p["qty"]) if p and p["qty"] else None
+            pq = p["qty"] if p else 0.0
+            cu = cost_map.get(g)
+            avg_cost = cu[0] if cu else None
+            cost_source = cu[1] if cu else None
+            purch_all = cu[2] if cu else 0.0
+            is_weighed = bool(n and n.weighed)
             cogs = (avg_cost * s["qty"]) if avg_cost is not None else None
             margin = (s["revenue_net"] - cogs) if cogs is not None else None
+            # достоверность себест.: надёжна, если закупали объёмом ≥ половины проданного и
+            # товар не весовой (у весовых/блочных единицы закупки≠продажи → выброс, К-3/К-4)
+            cost_reliable = (avg_cost is not None and not is_weighed and purch_all >= 0.5 * s["qty"])
             rows.append({
                 "guid": g,
                 "name": (n.name if n else g[:8]),
@@ -252,12 +287,14 @@ class GoodsDashboardService:
                 "qty": round(s["qty"], 3),
                 "avg_price": round(s["revenue"] / s["qty"], 2) if s["qty"] else 0.0,
                 "cost_net": round(avg_cost, 4) if avg_cost is not None else None,
+                "cost_source": cost_source,
+                "cost_reliable": cost_reliable,
                 "cogs": round(cogs, 2) if cogs is not None else None,
                 "margin": round(margin, 2) if margin is not None else None,
                 "margin_pct": round(100 * margin / s["revenue_net"], 1) if margin is not None and s["revenue_net"] else None,
                 "markup_pct": round(100 * margin / cogs, 1) if margin is not None and cogs else None,
-                "purch_qty": round(p["qty"], 3) if p else 0.0,
-                "stock_est": round((p["qty"] if p else 0.0) - s["qty"], 3),
+                "purch_qty": round(pq, 3),
+                "stock_est": round(pq - s["qty"], 3),
             })
 
         # ABC по выручке (накопительная доля)
@@ -337,6 +374,8 @@ class GoodsDashboardService:
                     s["margin"] = round(s["revenue_net"] - cogs, 2)
                     s["margin_pct"] = round(100 * s["margin"] / s["revenue_net"], 1) if s["revenue_net"] else None
                     s["markup_pct"] = round(100 * s["margin"] / cogs, 1) if cogs else None
+                    s["cost_source"] = "recipe"
+                    s["cost_reliable"] = True  # покрытие ТТК уточняется в catering (К-5)
 
         catmap = {"soputka": "Сопутка", "obshepit": "Общепит"}
         if category in catmap:
@@ -347,7 +386,7 @@ class GoodsDashboardService:
             for s in items:
                 a = agg[keyfn(s)]
                 a["rev"] += s["revenue"]; a["net"] += s["revenue_net"]; a["qty"] += s["qty"]; a["sku"] += 1
-                if s["margin"] is not None:
+                if s["margin"] is not None and s.get("cost_reliable"):  # групповая маржа — только надёжные (К-3)
                     a["margin"] += s["margin"]; a["cogs"] += s["cogs"]; a["mk_net"] += s["revenue_net"]
             tot = sum(a["rev"] for a in agg.values()) or 1.0
             rows = [{
@@ -359,7 +398,7 @@ class GoodsDashboardService:
             rows.sort(key=lambda x: -x["revenue"])
             return rows
 
-        costed = [s for s in skus if s["margin"] is not None]
+        costed = [s for s in skus if s["margin"] is not None and s.get("cost_reliable")]
         net_costed = sum(s["revenue_net"] for s in costed)
         margin_costed = sum(s["margin"] for s in costed)
         cogs_costed = sum(s["cogs"] for s in costed)

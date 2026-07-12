@@ -67,6 +67,8 @@ export interface StoreSku {
   qty: number
   avg_price: number
   cost_net: number | null
+  cost_source: string | null
+  cost_reliable: boolean
   cogs: number | null
   margin: number | null
   margin_pct: number | null
