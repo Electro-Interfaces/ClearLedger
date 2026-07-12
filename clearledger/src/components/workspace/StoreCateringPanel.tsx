@@ -147,7 +147,11 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo }: { companyId:
                   <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(d.revenue)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{pctStr(d.share)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(d.avg_price)}</td>
-                  <td className={`px-3 py-1.5 text-right tabular-nums ${d.food_cost_pct != null && d.food_cost_pct > 40 ? 'text-amber-300/90' : ''}`}>{pctStr(d.food_cost_pct)}</td>
+                  <td className={`px-3 py-1.5 text-right tabular-nums ${d.food_cost_pct != null && d.food_cost_pct > 40 ? 'text-amber-300/90' : ''}`}>
+                    {pctStr(d.food_cost_pct)}
+                    {d.coverage < 100 && d.food_cost_pct != null && <span className="ml-1 text-[10px] text-muted-foreground/60" title={`себестоимость по ${d.coverage}% состава ТТК — часть ингредиентов без закупочной цены`}>({d.coverage}%)</span>}
+                    {d.food_cost_pct == null && d.menu_class === 'unknown' && <span className="ml-1 text-[10px] text-muted-foreground/50" title={`покрытие ТТК ${d.coverage}% (<60%) — себестоимость не рассчитана`}>❔{d.coverage}%</span>}
+                  </td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${d.margin_pct != null && d.margin_pct < 30 ? 'text-red-400/70' : 'text-emerald-300/70'}`}>{pctStr(d.margin_pct)}</td>
                 </tr>
               )
@@ -206,7 +210,10 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
           <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
             {/* Состав порции (ТТК) */}
             <div>
-              <div className="text-xs font-medium mb-1.5">Состав порции (ТТК) · {d.ing_count} ингр.</div>
+              <div className="text-xs font-medium mb-1.5">
+                Состав порции (ТТК) · {d.ing_count} ингр.
+                <span className={`ml-1 font-normal ${d.coverage < 60 ? 'text-amber-300/80' : 'text-muted-foreground/60'}`} title="доля ингредиентов с известной закупочной себестоимостью">· покрытие {d.coverage}%</span>
+              </div>
               <div className="rounded-md border border-border/40 overflow-hidden">
                 <table className="w-full text-xs">
                   <thead className="bg-muted/20 text-muted-foreground">

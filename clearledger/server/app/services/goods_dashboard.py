@@ -351,9 +351,9 @@ class GoodsDashboardService:
             s["kind"] = (kinds.get(nn.kind_ref) or "— вид не указан") if (nn and nn.kind_ref) else "— вид не указан"
 
         # общепит: себестоимость блюда — по ингредиентам ТТК (напрямую не закупается),
-        # иначе маржа сегмента «Общепит» пустая. Реюз логики catering.
-        avgc = self._avg_cost(await self._load_purchases(date_from, date_to, stations))
-        dishc: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "known": False})
+        # иначе маржа сегмента «Общепит» пустая. Реюз логики catering, покрытие ≥90% (К-5).
+        avgc = {g: c[0] for g, c in (await self._cost_unit_map()).items()}
+        dishc: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "ings": set(), "known": set()})
         for m in self._select(await self._load(), date_from, date_to, stations):
             for ln in (((m.get("Секции") or {}).get("продажа_общепит")) or {}).get("строки") or []:
                 g = ln.get("Номенклатура")
@@ -361,13 +361,17 @@ class GoodsDashboardService:
                     continue
                 for ing in ln.get("Ингредиенты") or []:
                     ig = ing.get("Номенклатура")
+                    if not ig:
+                        continue
+                    dishc[g]["ings"].add(ig)
                     if ig in avgc:
                         dishc[g]["cost"] += float(ing.get("Количество") or 0) * avgc[ig]
-                        dishc[g]["known"] = True
+                        dishc[g]["known"].add(ig)
         for s in skus:
             if s["category"] == "Общепит" and s["margin"] is None:
                 dc = dishc.get(s["guid"])
-                if dc and dc["known"]:
+                coverage = (len(dc["known"]) / len(dc["ings"])) if (dc and dc["ings"]) else 0.0
+                if dc and coverage >= 0.6:
                     cogs = round(dc["cost"], 2)
                     s["cost_net"] = round(dc["cost"] / s["qty"], 4) if s["qty"] else None
                     s["cogs"] = cogs
@@ -375,7 +379,7 @@ class GoodsDashboardService:
                     s["margin_pct"] = round(100 * s["margin"] / s["revenue_net"], 1) if s["revenue_net"] else None
                     s["markup_pct"] = round(100 * s["margin"] / cogs, 1) if cogs else None
                     s["cost_source"] = "recipe"
-                    s["cost_reliable"] = True  # покрытие ТТК уточняется в catering (К-5)
+                    s["cost_reliable"] = True
 
         catmap = {"soputka": "Сопутка", "obshepit": "Общепит"}
         if category in catmap:
@@ -795,7 +799,7 @@ class GoodsDashboardService:
         класс меню (Звезда/Загадка/Рабочая лошадка/Собака), состав ТТК (ингредиенты с
         себестоимостью на порцию) и дневная динамика продаж (для раскрытия строки)."""
         sale_metas = self._select(await self._load(), date_from, date_to, stations)
-        avgc = self._avg_cost(await self._load_purchases(date_from, date_to, stations))
+        avgc = {g: c[0] for g, c in (await self._cost_unit_map()).items()}  # закуп-net all-time
         nom = await self._names()
 
         def _dish():
@@ -822,13 +826,20 @@ class GoodsDashboardService:
                         c = iq * avgc[ig]; ii["cost"] += c; ii["known"] = True
                         d["cost"] += c; d["cost_known"] = True
 
+        # покрытие ТТК: доля ингредиентов с известной себест. Costed только при ≥90%,
+        # иначе food-cost занижен, класс меню неверен (К-5).
+        for d in dishes.values():
+            tot_ing = len(d["ings"])
+            d["coverage"] = (sum(1 for ii in d["ings"].values() if ii["known"]) / tot_ing) if tot_ing else 0.0
+            d["covered"] = tot_ing > 0 and d["coverage"] >= 0.6
+
         total_rev = sum(x["rev"] for x in dishes.values()) or 1.0
         total_qty = sum(x["qty"] for x in dishes.values()) or 1.0
         n_dishes = len(dishes) or 1
         # классический порог популярности Kasavana–Smith: 70% от равной доли
         pop_threshold = (100.0 / n_dishes) * 0.7
-        costed_margin = sum((x["revnet"] - x["cost"]) for x in dishes.values() if x["cost_known"])
-        costed_qty = sum(x["qty"] for x in dishes.values() if x["cost_known"]) or 1.0
+        costed_margin = sum((x["revnet"] - x["cost"]) for x in dishes.values() if x["covered"])
+        costed_qty = sum(x["qty"] for x in dishes.values() if x["covered"]) or 1.0
         avg_cm = costed_margin / costed_qty  # средняя вклад-маржа на порцию
 
         matrix: dict[str, dict] = defaultdict(lambda: {"count": 0, "revenue": 0.0})
@@ -836,7 +847,7 @@ class GoodsDashboardService:
         for g, d in dishes.items():
             nnn = nom.get(g)
             qty, rev, revnet = d["qty"], d["rev"], d["revnet"]
-            cost = d["cost"] if d["cost_known"] else None
+            cost = d["cost"] if d["covered"] else None
             margin = (revnet - cost) if cost is not None else None
             food_cost = (100 * cost / revnet) if cost is not None and revnet else None
             margin_pct = (100 * margin / revnet) if margin is not None and revnet else None
@@ -878,6 +889,7 @@ class GoodsDashboardService:
                 "share": round(100 * rev / total_rev, 1),
                 "popularity_pct": round(pop, 1),
                 "menu_class": cls,
+                "coverage": round(100 * d["coverage"]),
                 "ing_count": len(ings),
                 "ingredients": ings,
                 "daily": daily,

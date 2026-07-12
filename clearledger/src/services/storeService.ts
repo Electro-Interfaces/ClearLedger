@@ -338,7 +338,7 @@ export interface CateringDish {
   cost: number | null; cost_per_portion: number | null
   margin: number | null; food_cost_pct: number | null; margin_pct: number | null; cm_unit: number | null
   share: number; popularity_pct: number; menu_class: MenuClass
-  ing_count: number; ingredients: CateringIngredient[]; daily: CateringDaily[]
+  coverage: number; ing_count: number; ingredients: CateringIngredient[]; daily: CateringDaily[]
 }
 export interface CateringMenuData {
   period: { from: string; to: string }
