@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand,
-    CbInventoryDoc, CbMovementDoc, StorePlan,
+    CbInventoryDoc, CbMovementDoc, StorePlan, TobaccoMrc,
 )
 
 # секция meta → категория UI
@@ -1639,4 +1639,142 @@ class GoodsDashboardService:
             "by_station": station_cards,
             "has_plan": planned > 0,
             "planned_count": planned,
+        }
+
+    # ── Слой политик: МРЦ табака — регуляторный контроль «продажа выше МРЦ» (О-3) ──
+
+    async def _barcode_ref_map(self) -> dict[str, str]:
+        """Штрихкод (GTIN) → GUID номенклатуры (для матча CSV МРЦ).
+        В регистре ЦБ owner_ref не заполнен → мост через owner_name → имя
+        номенклатуры (owner_ref, если появится, имеет приоритет)."""
+        names = await self._names()
+        name_to_ref: dict[str, str] = {}
+        for ref, n in names.items():
+            if n.name:
+                name_to_ref.setdefault(n.name.strip().lower(), ref)
+        rows = (await self.session.execute(select(CbBarcode).where(
+            CbBarcode.company_id == self.company_id))).scalars().all()
+        m: dict[str, str] = {}
+        for b in rows:
+            if not b.barcode:
+                continue
+            ref = b.owner_ref or name_to_ref.get((b.owner_name or "").strip().lower())
+            if ref:
+                m.setdefault(b.barcode.strip(), ref)
+        return m
+
+    async def import_mrc(self, rows: list[dict]) -> dict:
+        """Импорт справочника МРЦ (ручной CSV). Строка: {barcode?|article?, name?, mrc}.
+        Резолв в nomenclature_ref: штрихкод → артикул; нерезолвленные возвращаются."""
+        bc_map = await self._barcode_ref_map()
+        names = await self._names()
+        art_map = {n.article.strip(): n.external_ref for n in names.values() if n.article}
+        name_map = {n.name.strip().lower(): n.external_ref for n in names.values() if n.name}
+        existing = {
+            r.nomenclature_ref: r
+            for r in (await self.session.execute(select(TobaccoMrc).where(
+                TobaccoMrc.company_id == self.company_id))).scalars().all()
+        }
+        touched: dict[str, TobaccoMrc] = {}
+        imported = 0
+        unresolved: list[dict] = []
+        for r in rows or []:
+            raw = str(r.get("mrc") if r.get("mrc") is not None else "").replace(",", ".").replace(" ", "")
+            try:
+                mrc = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if mrc <= 0:
+                continue
+            bc = str(r.get("barcode") or "").strip()
+            art = str(r.get("article") or "").strip()
+            nm = str(r.get("name") or "").strip()
+            ref = matched_bc = None
+            if bc and bc in bc_map:
+                ref, matched_bc = bc_map[bc], bc
+            elif art and art in art_map:
+                ref = art_map[art]
+            elif nm and nm.strip().lower() in name_map:
+                ref = name_map[nm.strip().lower()]
+            if not ref:
+                unresolved.append({"barcode": bc, "article": art, "name": nm, "mrc": mrc})
+                continue
+            row = touched.get(ref) or existing.get(ref)
+            if row is not None:
+                row.mrc = mrc
+                if nm:
+                    row.name = nm
+                if matched_bc:
+                    row.barcode = matched_bc
+            else:
+                n = names.get(ref)
+                row = TobaccoMrc(
+                    company_id=self.company_id, nomenclature_ref=ref,
+                    name=nm or (n.name if n else None), barcode=matched_bc, mrc=mrc,
+                )
+                self.session.add(row)
+                touched[ref] = row
+            imported += 1
+        await self.session.commit()
+        return {"imported": imported, "unresolved_count": len(unresolved), "unresolved": unresolved[:200]}
+
+    async def mrc_control(self) -> dict:
+        """Контроль МРЦ: розничная цена vs МРЦ (нарушение = продажа выше МРЦ) +
+        табак без заданной МРЦ (пробел справочника)."""
+        mrc_rows = (await self.session.execute(select(TobaccoMrc).where(
+            TobaccoMrc.company_id == self.company_id))).scalars().all()
+        mrc_map = {r.nomenclature_ref: r for r in mrc_rows}
+        names = await self._names()
+
+        # розничная цена = ЦенаВРознице (StockOnHand); при нескольких складах — макс.
+        soh = (await self.session.execute(select(StockOnHand).where(
+            StockOnHand.company_id == self.company_id))).scalars().all()
+        price_map: dict[str, float] = {}
+        for s in soh:
+            if s.retail_price is not None:
+                p = float(s.retail_price)
+                if p > price_map.get(s.nomenclature_ref, 0):
+                    price_map[s.nomenclature_ref] = p
+
+        items = []
+        violations = missing_price = 0
+        for ref, m in mrc_map.items():
+            n = names.get(ref)
+            price = price_map.get(ref)
+            over = price is not None and price > float(m.mrc) + 0.001
+            if over:
+                violations += 1
+            if price is None:
+                missing_price += 1
+            items.append({
+                "ref": ref, "name": (n.name if n else m.name) or ref[:8],
+                "barcode": m.barcode, "mrc": round(float(m.mrc), 2),
+                "retail_price": round(price, 2) if price is not None else None,
+                "over": over,
+                "diff": round(price - float(m.mrc), 2) if price is not None else None,
+            })
+        # нарушения вперёд, затем по величине превышения
+        items.sort(key=lambda x: (not x["over"], -(x["diff"] if x["diff"] is not None else -1e9)))
+
+        # пробел справочника: табак без МРЦ. Вид в ЦБ 208 не различает табак
+        # (5 общих видов) → детекция по имени (сигарет/табак/tobacco), marked усиливает.
+        kinds = await self._refs("nom_kind")
+        missing_mrc = 0
+        for ref, n in names.items():
+            if ref in mrc_map:
+                continue
+            hay = f"{n.name or ''} {kinds.get(n.kind_ref) or '' if n.kind_ref else ''}".lower()
+            is_tobacco = ("сигар" in hay or "табак" in hay or "tobacco" in hay
+                          or ("сигарил" in hay) or ("папирос" in hay))
+            if is_tobacco:
+                missing_mrc += 1
+
+        return {
+            "items": items[:1000],
+            "summary": {
+                "controlled": len(items),
+                "violations": violations,
+                "missing_price": missing_price,
+                "missing_mrc": missing_mrc,
+            },
         }

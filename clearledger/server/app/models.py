@@ -456,6 +456,34 @@ class StorePlan(Base):
 
 
 # ---------------------------------------------------------------------------
+# TobaccoMrc — справочник максимальных розничных цен (МРЦ) табака (О-3,
+# регуляторный контроль: продажа выше МРЦ = нарушение). Источник — ручной
+# CSV-импорт (дефолт по плану; ключ CSV — штрихкод GTIN → nomenclature_ref
+# через CbBarcode, fallback артикул/имя). Далее — ЧЗ-фид. Одна строка =
+# текущая МРЦ на SKU; valid_from — задел под историю.
+# ---------------------------------------------------------------------------
+class TobaccoMrc(Base):
+    __tablename__ = "tobacco_mrc"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
+    )
+    nomenclature_ref: Mapped[str] = mapped_column(String(36), nullable=False)  # GUID номенклатуры ЦБ
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)       # имя из CSV (для сверки)
+    barcode: Mapped[str | None] = mapped_column(String(64), nullable=True)     # GTIN, по которому смэтчили
+    mrc: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False)         # максимальная розничная цена
+    valid_from: Mapped[str | None] = mapped_column(String(20), nullable=True)  # ISO дата (задел под историю)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uq_tobacco_mrc", "company_id", "nomenclature_ref", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
 # AuditEvent
 # ---------------------------------------------------------------------------
 class AuditEvent(Base):

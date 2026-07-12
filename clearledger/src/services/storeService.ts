@@ -2,7 +2,7 @@
  * Клиент аналитики раздела «Магазин» (сопутка/общепит).
  * Пока — «Обзор магазина» (/api/store/overview → GoodsDashboardService).
  */
-import { get, put } from './apiClient'
+import { get, put, post } from './apiClient'
 
 export interface StoreCategory {
   category: string
@@ -502,3 +502,25 @@ export const getStorePlan = (period: string) =>
 
 export const saveStorePlan = (period: string, items: PlanRow[]) =>
   put<StorePlanData>('/api/store/plan', { period, items })
+
+// ── МРЦ табака: регуляторный контроль «продажа выше МРЦ» (О-3) ──
+export interface MrcItem {
+  ref: string
+  name: string
+  barcode: string | null
+  mrc: number
+  retail_price: number | null
+  over: boolean
+  diff: number | null
+}
+export interface MrcData {
+  items: MrcItem[]
+  summary: { controlled: number; violations: number; missing_price: number; missing_mrc: number }
+}
+export interface MrcImportRow { barcode?: string; article?: string; name?: string; mrc: number | string }
+export interface MrcImportResult { imported: number; unresolved_count: number; unresolved: MrcImportRow[] }
+
+export const getStoreMrc = () => get<MrcData>('/api/store/mrc')
+
+export const importStoreMrc = (rows: MrcImportRow[]) =>
+  post<MrcImportResult>('/api/store/mrc/import', { rows })

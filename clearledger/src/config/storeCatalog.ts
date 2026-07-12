@@ -23,7 +23,7 @@ import {
   Plug, FileOutput,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
-  QrCode, ScanLine, PackageMinus,
+  QrCode, ScanLine, PackageMinus, ShieldAlert,
 } from 'lucide-react'
 
 export type StoreStatus = 'ready' | 'wip' | 'planned'
@@ -94,6 +94,18 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Маржа и наценка по SKU', desc: 'Реестр товаров: цена / себестоимость / маржа % / наценка % / ABC; убыточные и низкомаржинальные подсвечены. Себест: сопутка — закупка, общепит — по ТТК.' },
       { name: 'Детализация товара (модалка)', desc: 'Клик по товару → метрики, история цен (переоценки: была→стала, Δ%), динамика продаж, закупки (поставщик/цена), остаток.', source: 'goods_dashboard.sku_detail · /api/store/sku/{guid}' },
       { name: 'Разброс цен / KVI (планируется)', desc: 'min/max/median цены SKU по сети; KVI-индекс, ценовые коридоры — доп. данные (мониторинг конкурентов).', source: 'planned' },
+    ],
+  },
+  {
+    key: 'mrc', label: 'МРЦ табака', group: 'Аналитика', icon: ShieldAlert,
+    title: 'МРЦ табака — регуляторный контроль',
+    subtitle: 'Контроль максимальной розничной цены (МРЦ) табачной продукции: продажа выше МРЦ — нарушение (ст. 13 ФЗ-15, штрафы). Справочник МРЦ грузится CSV (штрихкод/артикул → SKU), сравнение с ценой в рознице. Позже — фид «Честный знак».',
+    status: 'ready',
+    blocks: [
+      { name: 'Контроль нарушений', desc: 'Розничная цена vs МРЦ по каждому табачному SKU; нарушения (цена > МРЦ) — вперёд, с величиной превышения.', source: 'goods_dashboard.mrc_control · /api/store/mrc' },
+      { name: 'Импорт справочника', desc: 'Загрузка CSV с МРЦ: матч по штрихкоду (GTIN) → артикулу → имени; отчёт о нерезолвленных строках.', source: '/api/store/mrc/import' },
+      { name: 'Пробелы справочника', desc: 'Табачные SKU (детекция по имени сигарет/табак) без заданной МРЦ — что дозагрузить.' },
+      { name: 'Фид ЧЗ (планируется)', desc: 'Автоматическое получение МРЦ из «Честного знака» вместо ручного CSV.', source: 'planned' },
     ],
   },
   {

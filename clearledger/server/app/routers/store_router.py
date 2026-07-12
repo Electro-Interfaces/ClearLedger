@@ -279,6 +279,40 @@ async def store_plan_facts(
     return await GoodsDashboardService(db, user.company_id).plan_facts(period)
 
 
+# ── МРЦ табака: регуляторный контроль «продажа выше МРЦ» (О-3) ──
+
+class _MrcRow(BaseModel):
+    barcode: str | None = None
+    article: str | None = None
+    name: str | None = None
+    mrc: float | str | None = None
+
+
+class _MrcImport(BaseModel):
+    rows: list[_MrcRow] = []
+
+
+@router.get("/mrc")
+async def store_mrc(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Контроль МРЦ табака: розница vs МРЦ (нарушения) + табак без МРЦ."""
+    return await GoodsDashboardService(db, user.company_id).mrc_control()
+
+
+@router.post("/mrc/import")
+async def store_mrc_import(
+    body: _MrcImport,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Импорт справочника МРЦ (CSV → строки). Матч по штрихкоду/артикулу."""
+    return await GoodsDashboardService(db, user.company_id).import_mrc(
+        [r.model_dump() for r in body.rows],
+    )
+
+
 @router.get("/{report}")
 async def store_report(
     report: str,
