@@ -185,6 +185,22 @@ async def store_pricing(
     )
 
 
+@router.get("/assortment")
+async def store_assortment(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    category: str = Query("all", description="all|soputka|obshepit"),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ассортимент: ABC×XYZ + оборачиваемость/запасы + GMROI + дефицит/неликвиды + action-list."""
+    st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
+    return await GoodsDashboardService(db, user.company_id).assortment_analysis(
+        date.fromisoformat(date_from), date.fromisoformat(date_to), category=category, stations=st,
+    )
+
+
 @router.get("/sku/{guid}")
 async def store_sku_detail(
     guid: str,

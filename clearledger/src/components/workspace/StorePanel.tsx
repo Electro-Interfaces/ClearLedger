@@ -25,11 +25,11 @@ import { StoreRevaluationPanel } from './StoreRevaluationPanel'
 import { StoreReceiptsPanel, StoreSuppliersPanel, StoreCategoriesPanel, StoreBarcodesPanel, StoreRecipesPanel } from './StoreReportPanels'
 import { StoreCateringPanel } from './StoreCateringPanel'
 import { StorePricingPanel } from './StorePricingPanel'
+import { StoreAssortmentPanel } from './StoreAssortmentPanel'
 import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
 
 // Под-экраны, работающие на реестре SKU (/api/store/skus).
 const SKU_MODES: Record<string, SkuMode> = {
-  assortment: 'assortment',
   gtin: 'marked',
 }
 
@@ -169,6 +169,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StorePricingPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'assortment') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreAssortmentPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

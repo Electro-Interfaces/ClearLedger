@@ -489,6 +489,148 @@ class GoodsDashboardService:
             "stock": stock,
         }
 
+    # ── Ассортимент: ABC×XYZ + оборачиваемость/запасы (реальный остаток) + GMROI ──
+    async def assortment_analysis(self, date_from: date, date_to: date, *,
+                                  category: str = "all", stations: list[str] | None = None) -> dict:
+        """Управление ассортиментом: матрица ABC (вклад в выручку) × XYZ (стабильность
+        спроса, CV дневных продаж), оборачиваемость (дни запаса на реальном остатке),
+        GMROI, дефицит/неликвиды и action-list по SKU."""
+        data = await self.sku_analytics(date_from, date_to, stations)
+        skus = data["skus"]
+        nom = await self._names()
+        catmap = {"soputka": "Сопутка", "obshepit": "Общепит"}
+        STORE = {"208", "20800002"}
+
+        # реальный остаток из StockOnHand (склады магазина)
+        soh = (await self.session.execute(select(StockOnHand).where(
+            StockOnHand.company_id == self.company_id))).scalars().all()
+        stk: dict[str, dict] = defaultdict(lambda: {"qty": 0.0, "cost": 0.0, "retail": 0.0})
+        for r in soh:
+            if (r.warehouse_code or "") in STORE:
+                q = float(r.quantity or 0)
+                a = stk[r.nomenclature_ref]; a["qty"] += q
+                if r.cost_unit is not None:
+                    a["cost"] += q * float(r.cost_unit)
+                if r.retail_price is not None:
+                    a["retail"] += q * float(r.retail_price)
+
+        # продажи по SKU по НЕДЕЛЬНЫМ корзинам — для XYZ (CV) сглаживают дневной шум;
+        # + общий объём для оборачиваемости.
+        period_days = (date_to - date_from).days + 1
+        n_weeks = max(1, (period_days + 6) // 7)
+        wsales: dict[str, list] = defaultdict(lambda: [0.0] * n_weeks)
+        ingredient_refs: set = set()  # ингредиенты ТТК — не считать неликвидом (расходуются)
+        for m in self._select(await self._load(), date_from, date_to, stations):
+            day = _day(m.get("Смена") or {})
+            try:
+                wk = min(n_weeks - 1, max(0, (date.fromisoformat(day) - date_from).days // 7))
+            except ValueError:
+                wk = 0
+            for sk, _ in _SECTIONS:
+                for ln in (((m.get("Секции") or {}).get(sk)) or {}).get("строки") or []:
+                    g = ln.get("Номенклатура")
+                    if g:
+                        wsales[g][wk] += float(ln.get("Количество") or 0)
+                    if sk == "продажа_общепит":
+                        for ing in ln.get("Ингредиенты") or []:
+                            if ing.get("Номенклатура"):
+                                ingredient_refs.add(ing.get("Номенклатура"))
+
+        def _xyz(g: str, qty_total: float):
+            if qty_total <= 0 or n_weeks < 2:
+                return ("X" if qty_total > 0 else "Z"), None
+            vals = wsales.get(g, [0.0] * n_weeks)
+            mean = sum(vals) / n_weeks
+            if mean <= 0:
+                return "Z", None
+            cv = ((sum((v - mean) ** 2 for v in vals) / n_weeks) ** 0.5) / mean
+            return ("X" if cv <= 0.5 else "Y" if cv <= 1.0 else "Z"), round(cv, 2)
+
+        def _action(abc: str, xyz: str, status: str) -> str:
+            if status == "dead":
+                return "Неликвид — распродать / вывести"
+            if status == "out_of_stock":
+                return "Нет на остатке — пополнить" + (" срочно" if abc in ("A", "B") else "")
+            if status == "overstock":
+                return "Затоварка — снизить закупку"
+            if abc == "A" and xyz == "X":
+                return "Ядро ассортимента — не допускать дефицит"
+            if abc == "A":
+                return "Важный — держать, страховой запас"
+            if abc == "C" and xyz == "Z":
+                return "Кандидат на вывод"
+            return "Держать"
+
+        matrix: dict[str, dict] = defaultdict(lambda: {"count": 0, "revenue": 0.0})
+        rows = []
+        for s in skus:
+            if category in catmap and s["category"] != catmap[category]:
+                continue
+            g = s["guid"]; qty = s["qty"]
+            st = stk.get(g, {"qty": 0.0, "cost": 0.0, "retail": 0.0})
+            sq, sc, sr = st["qty"], st["cost"], st["retail"]
+            xcls, cv = _xyz(g, qty)
+            cell = f'{s["abc"]}{xcls}'
+            avg_daily = qty / period_days if period_days else 0
+            dos = round(sq / avg_daily, 1) if avg_daily > 0 and sq > 0 else None
+            gmroi = round(s["margin"] / sc, 2) if s["margin"] is not None and sc > 0 else None
+            dead = sq > 0 and qty <= 0
+            oos = sq <= 0 and qty > 0
+            overstock = dos is not None and dos > 90
+            status = "dead" if dead else ("out_of_stock" if oos else ("overstock" if overstock else "ok"))
+            matrix[cell]["count"] += 1; matrix[cell]["revenue"] += s["revenue"]
+            rows.append({
+                "guid": g, "name": s["name"], "category": s["category"],
+                "revenue": s["revenue"], "qty": s["qty"], "avg_price": s["avg_price"],
+                "margin": s["margin"], "margin_pct": s["margin_pct"], "marked": s["marked"],
+                "abc": s["abc"], "xyz": xcls, "cv": cv, "abc_xyz": cell,
+                "stock_qty": round(sq, 3), "stock_cost": round(sc, 2), "stock_retail": round(sr, 2),
+                "days_of_supply": dos, "gmroi": gmroi, "status": status,
+                "action": _action(s["abc"], xcls, status),
+            })
+
+        # неликвиды: есть остаток, но НЕ продавались в периоде (в sku_analytics их нет).
+        # Категория неизвестна → только в общем срезе (category='all').
+        if category == "all":
+            sold = {s["guid"] for s in skus}
+            for ref, st in stk.items():
+                if st["qty"] > 0 and ref not in sold and ref not in ingredient_refs:
+                    nn = nom.get(ref)
+                    matrix["CZ"]["count"] += 1
+                    rows.append({
+                        "guid": ref, "name": (nn.name if nn else ref[:8]), "category": None,
+                        "revenue": 0.0, "qty": 0.0, "avg_price": 0.0, "margin": None, "margin_pct": None,
+                        "marked": bool(nn and nn.marked), "abc": "C", "xyz": "Z", "cv": None, "abc_xyz": "CZ",
+                        "stock_qty": round(st["qty"], 3), "stock_cost": round(st["cost"], 2),
+                        "stock_retail": round(st["retail"], 2),
+                        "days_of_supply": None, "gmroi": None, "status": "dead",
+                        "action": "Неликвид — распродать / вывести",
+                    })
+        rows.sort(key=lambda x: (-x["revenue"], -x["stock_cost"]))
+
+        costed = [r for r in rows if r["margin"] is not None]
+        dead_r = [r for r in rows if r["status"] == "dead"]
+        oos_r = [r for r in rows if r["status"] == "out_of_stock"]
+        over_r = [r for r in rows if r["status"] == "overstock"]
+        tot_margin = sum(r["margin"] for r in costed)
+        tot_stock_cost = sum(r["stock_cost"] for r in rows)
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "category": category,
+            "summary": {
+                "sku_count": len(rows),
+                "stock_cost": round(tot_stock_cost, 2),
+                "stock_retail": round(sum(r["stock_retail"] for r in rows), 2),
+                "gmroi": round(tot_margin / tot_stock_cost, 2) if tot_stock_cost > 0 else None,
+                "dead_count": len(dead_r), "dead_cost": round(sum(r["stock_cost"] for r in dead_r), 2),
+                "oos_count": len(oos_r),
+                "overstock_count": len(over_r), "overstock_cost": round(sum(r["stock_cost"] for r in over_r), 2),
+            },
+            "abc": data["abc"],
+            "matrix": {k: {"count": v["count"], "revenue": round(v["revenue"], 2)} for k, v in matrix.items()},
+            "skus": rows,
+        }
+
     def _avg_cost(self, purch_metas: list[dict]) -> dict:
         """Средневзвешенная net-себестоимость по GUID из поступлений."""
         pc: dict[str, dict] = defaultdict(lambda: {"c": 0.0, "q": 0.0})

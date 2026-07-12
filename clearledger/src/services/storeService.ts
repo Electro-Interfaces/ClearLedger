@@ -378,6 +378,32 @@ export const getStorePricing = (dateFrom: string, dateTo: string, category: Pric
 
 export type PriceCategory = 'all' | 'soputka' | 'obshepit'
 
+// ── Ассортимент: ABC×XYZ + оборачиваемость/запасы + GMROI + action-list ──
+export type StockStatus = 'ok' | 'dead' | 'out_of_stock' | 'overstock'
+export interface AssortmentSku {
+  guid: string; name: string; category: string | null
+  revenue: number; qty: number; avg_price: number
+  margin: number | null; margin_pct: number | null; marked: boolean
+  abc: 'A' | 'B' | 'C'; xyz: 'X' | 'Y' | 'Z'; cv: number | null; abc_xyz: string
+  stock_qty: number; stock_cost: number; stock_retail: number
+  days_of_supply: number | null; gmroi: number | null; status: StockStatus; action: string
+}
+export interface AssortmentData {
+  period: { from: string; to: string }
+  category: string
+  summary: {
+    sku_count: number; stock_cost: number; stock_retail: number; gmroi: number | null
+    dead_count: number; dead_cost: number; oos_count: number
+    overstock_count: number; overstock_cost: number
+  }
+  abc: Record<'A' | 'B' | 'C', { count: number; revenue: number; share: number }>
+  matrix: Record<string, { count: number; revenue: number }>
+  skus: AssortmentSku[]
+}
+
+export const getStoreAssortment = (dateFrom: string, dateTo: string, category: PriceCategory = 'all') =>
+  get<AssortmentData>('/api/store/assortment', { date_from: dateFrom, date_to: dateTo, category })
+
 export interface SkuDetailData {
   guid: string; name: string; article: string | null; vat: string | null
   marked: boolean; weighed: boolean; kind: string | null; category: string | null
