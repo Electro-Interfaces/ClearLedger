@@ -130,11 +130,11 @@ export interface StoreCategoriesData {
 export interface StoreBarcodesData {
   total: number
   by_type: Record<string, number>
-  items: { barcode: string; owner_name: string; type: string | null; main: boolean }[]
+  items: { barcode: string; owner_name: string; type: string | null; main: boolean; owner_guid: string | null }[]
 }
 export interface StoreRecipesData {
   period: { from: string; to: string }
-  recipes: { name: string; ingredients: { name: string; qty: number }[]; ing_count: number }[]
+  recipes: { guid: string; name: string; ingredients: { name: string; qty: number }[]; ing_count: number }[]
   summary: { count: number }
 }
 

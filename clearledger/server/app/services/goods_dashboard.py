@@ -1048,7 +1048,10 @@ class GoodsDashboardService:
         by_type: dict[str, int] = defaultdict(int)
         for r in rows:
             by_type[r.btype or "—"] += 1
-        items = [{"barcode": r.barcode, "owner_name": r.owner_name, "type": r.btype, "main": r.main} for r in rows]
+        # резолв владельца в GUID (owner_ref в регистре ЦБ пуст → по имени) для карточки
+        name2ref = {n.name: n.external_ref for n in (await self._names()).values() if n.name}
+        items = [{"barcode": r.barcode, "owner_name": r.owner_name, "type": r.btype, "main": r.main,
+                  "owner_guid": r.owner_ref or name2ref.get(r.owner_name)} for r in rows]
         items.sort(key=lambda x: x["owner_name"])
         return {
             "total": len(rows),
@@ -1457,7 +1460,7 @@ class GoodsDashboardService:
                     ings.append({"name": (n.name if n else str(ig)[:8]), "qty": round(float(ing.get("Количество") or 0), 3)})
                 if ings:
                     dn = nom.get(g)
-                    dishes[g] = {"name": (dn.name if dn else str(g)[:8]), "ingredients": ings, "ing_count": len(ings)}
+                    dishes[g] = {"guid": g, "name": (dn.name if dn else str(g)[:8]), "ingredients": ings, "ing_count": len(ings)}
         rows = sorted(dishes.values(), key=lambda x: x["name"])
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
