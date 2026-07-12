@@ -35,6 +35,8 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: s
     { label: 'Приходы (нетто)', value: money(s.receipts_amount), hint: 'ПТУ за период' },
     { label: 'Инвент. док', value: nf(s.inventory_docs) },
     { label: 'Списания', value: money(s.writeoff_amount), cls: s.writeoff_amount > 0 ? 'text-red-400/80' : '' },
+    { label: 'Перемещения', value: nf(s.transfer_docs) },
+    { label: 'Переоценки', value: nf(s.reval_docs) },
   ]
 
   return (
@@ -50,7 +52,7 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: s
         <ExportButton title="Смены магазина" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
       </div>
 
-      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-4 lg:grid-cols-8">
         {KPIS.map((k) => (
           <div key={k.label} className="rounded-lg border border-border/50 bg-card/40 p-3">
             <div className="text-[11px] text-muted-foreground">{k.label}</div>
@@ -75,6 +77,8 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: s
               <th className="px-3 py-2 font-medium text-right">Приходы</th>
               <th className="px-3 py-2 font-medium text-center">Инв.</th>
               <th className="px-3 py-2 font-medium text-right">Списания</th>
+              <th className="px-3 py-2 font-medium text-center">Перем.</th>
+              <th className="px-3 py-2 font-medium text-center">Переоц.</th>
             </tr>
           </thead>
           <tbody>
@@ -99,6 +103,12 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: s
                 </td>
                 <td className={`px-3 py-1.5 text-right tabular-nums ${sh.writeoff_amount > 0 ? 'text-red-400/80' : 'text-muted-foreground/50'}`}>
                   {sh.writeoff_amount > 0 ? <span title={`${sh.writeoff_count} документ(ов)`}>{money(sh.writeoff_amount)}</span> : '—'}
+                </td>
+                <td className="px-3 py-1.5 text-center tabular-nums">
+                  {sh.transfer_count > 0 ? <span title={`перемещения на ${fmtMoney(sh.transfer_amount)}`}>{sh.transfer_count}</span> : <span className="text-muted-foreground/50">—</span>}
+                </td>
+                <td className="px-3 py-1.5 text-center tabular-nums">
+                  {sh.reval_count > 0 ? <span className="text-amber-300/80">{sh.reval_count}</span> : <span className="text-muted-foreground/50">—</span>}
                 </td>
               </tr>
             ))}

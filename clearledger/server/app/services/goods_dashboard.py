@@ -1914,15 +1914,23 @@ class GoodsDashboardService:
                 inv_by_day[day]["count"] += 1
                 inv_by_day[day]["net"] += float(r.net_amount or 0)
 
-        # списания по дате
+        # списания / перемещения / переоценки по дате (все движения одним запросом)
         wo_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
+        tr_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
+        rv_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0})
         for r in (await self.session.execute(select(CbMovementDoc).where(
-                CbMovementDoc.company_id == self.company_id,
-                CbMovementDoc.kind == "writeoff"))).scalars().all():
+                CbMovementDoc.company_id == self.company_id))).scalars().all():
             day = (r.doc_date or "")[:10]
-            if d0 <= day <= d1:
+            if not (d0 <= day <= d1):
+                continue
+            if r.kind == "writeoff":
                 wo_by_day[day]["count"] += 1
                 wo_by_day[day]["amount"] += float(r.total_amount or 0)
+            elif r.kind == "transfer":
+                tr_by_day[day]["count"] += 1
+                tr_by_day[day]["amount"] += float(r.total_amount or 0)
+            elif r.kind == "revaluation":
+                rv_by_day[day]["count"] += 1
 
         shifts = []
         for m in metas:
@@ -1935,6 +1943,7 @@ class GoodsDashboardService:
             sop_rev = float(sop.get("сумма") or 0)
             obsh_rev = float(obsh.get("сумма") or 0)
             rec, inv, wo = rec_by_day.get(day, {}), inv_by_day.get(day, {}), wo_by_day.get(day, {})
+            tr, rv = tr_by_day.get(day, {}), rv_by_day.get(day, {})
             shifts.append({
                 "shift_key": str(smena.get("Смена") or f"{day}|{station}"),
                 "date": day, "station": station,
@@ -1950,6 +1959,9 @@ class GoodsDashboardService:
                 "inventory_net": round(inv.get("net", 0.0), 2),
                 "writeoff_amount": round(wo.get("amount", 0.0), 2),
                 "writeoff_count": wo.get("count", 0),
+                "transfer_count": tr.get("count", 0),
+                "transfer_amount": round(tr.get("amount", 0.0), 2),
+                "reval_count": rv.get("count", 0),
             })
         shifts.sort(key=lambda x: x["date"])
         return {
@@ -1962,6 +1974,8 @@ class GoodsDashboardService:
                 "receipts_amount": round(sum(s["receipts_amount"] for s in shifts), 2),
                 "inventory_docs": sum(s["inventory_count"] for s in shifts),
                 "writeoff_amount": round(sum(s["writeoff_amount"] for s in shifts), 2),
+                "transfer_docs": sum(s["transfer_count"] for s in shifts),
+                "reval_docs": sum(s["reval_count"] for s in shifts),
             },
         }
 
@@ -2016,36 +2030,56 @@ class GoodsDashboardService:
         payments.sort(key=lambda x: -x["amount"])
         ret = sec.get("возвраты") or {}
 
-        # документы того же дня
+        # документы того же дня (полный состав смены + строки для раскрытия)
         d0 = date.fromisoformat(day) if day else None
         receipts: list[dict] = []
         if d0 is not None:
             cparty = await self._refs("counterparty")
             for m in await self._load_purchases(d0, d0, None):
                 dd = m.get("Документ") or {}
-                lines = dd.get("Товары") or []
-                amt = sum(float(l.get("Сумма") or 0) for l in lines)
-                vat = sum(float(l.get("СуммаНДС") or 0) for l in lines)
+                lns = dd.get("Товары") or []
+                amt = sum(float(l.get("Сумма") or 0) for l in lns)
+                vat = sum(float(l.get("СуммаНДС") or 0) for l in lns)
                 receipts.append({
                     "number": dd.get("Номер"),
                     "supplier": cparty.get(dd.get("Контрагент")) or (dd.get("Контрагент") or "—"),
-                    "positions": len(lines), "amount_net": round(amt - vat, 2),
+                    "positions": len(lns), "amount_net": round(amt - vat, 2),
+                    "lines": [{
+                        "name": (nom[l["Номенклатура"]].name if nom.get(l.get("Номенклатура")) else "—"),
+                        "qty": round(float(l.get("Количество") or 0), 3),
+                        "price": round(float(l.get("Цена") or 0), 2),
+                        "amount": round(float(l.get("Сумма") or 0), 2),
+                    } for l in lns],
                 })
 
-        inventory = [
-            {"number": r.number, "dev_positions": r.dev_positions, "net": round(float(r.net_amount or 0), 2)}
-            for r in (await self.session.execute(select(CbInventoryDoc).where(
-                CbInventoryDoc.company_id == self.company_id))).scalars().all()
-            if (r.doc_date or "")[:10] == day
-        ]
-        writeoffs = [
-            {"number": r.number, "reason": r.reason, "positions": r.positions,
-             "amount": round(float(r.total_amount or 0), 2)}
-            for r in (await self.session.execute(select(CbMovementDoc).where(
-                CbMovementDoc.company_id == self.company_id,
-                CbMovementDoc.kind == "writeoff"))).scalars().all()
-            if (r.doc_date or "")[:10] == day
-        ]
+        dl = (day or "") + "%"
+        inv_docs = (await self.session.execute(select(CbInventoryDoc).where(
+            CbInventoryDoc.company_id == self.company_id,
+            CbInventoryDoc.doc_date.like(dl)))).scalars().all()
+        inventory = [{
+            "number": r.number, "dev_positions": r.dev_positions, "net": round(float(r.net_amount or 0), 2),
+            "lines": [{"name": ln.get("name"), "fact": ln.get("fact"), "uchet": ln.get("uchet"),
+                       "dev": ln.get("dev"), "amount": ln.get("amount_dev")} for ln in (r.lines or [])],
+        } for r in inv_docs]
+
+        mv = (await self.session.execute(select(CbMovementDoc).where(
+            CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.doc_date.like(dl)))).scalars().all()
+
+        def _mv_lines(r):
+            return [{"name": ln.get("name"), "qty": ln.get("qty"), "amount": ln.get("amount"),
+                     "price": ln.get("price"), "old": ln.get("old"), "new": ln.get("new"),
+                     "pct": ln.get("pct")} for ln in (r.lines or [])]
+
+        writeoffs = [{"number": r.number, "reason": r.reason, "positions": r.positions,
+                      "amount": round(float(r.total_amount or 0), 2), "lines": _mv_lines(r)}
+                     for r in mv if r.kind == "writeoff"]
+        transfers = [{"number": r.number, "to": r.warehouse_to_name or r.warehouse_to_code,
+                      "positions": r.positions, "amount": round(float(r.total_amount or 0), 2),
+                      "lines": _mv_lines(r)}
+                     for r in mv if r.kind == "transfer"]
+        revaluations = [{"number": r.number, "positions": r.positions, "lines": _mv_lines(r)}
+                        for r in mv if r.kind == "revaluation"]
 
         return {
             "found": True,
@@ -2063,4 +2097,6 @@ class GoodsDashboardService:
             "receipts": receipts,
             "inventory": inventory,
             "writeoffs": writeoffs,
+            "transfers": transfers,
+            "revaluations": revaluations,
         }

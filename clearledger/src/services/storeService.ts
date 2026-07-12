@@ -546,6 +546,9 @@ export interface ShiftComposite {
   inventory_net: number
   writeoff_amount: number
   writeoff_count: number
+  transfer_count: number
+  transfer_amount: number
+  reval_count: number
 }
 export interface ShiftsData {
   period: { from: string; to: string }
@@ -553,6 +556,7 @@ export interface ShiftsData {
   summary: {
     count: number; revenue: number; returns: number
     receipts_amount: number; inventory_docs: number; writeoff_amount: number
+    transfer_docs: number; reval_docs: number
   }
 }
 
@@ -565,9 +569,15 @@ export const getStoreShifts = (dateFrom: string, dateTo: string, stations?: stri
 // ── Смена-детализация (модалка): операции одной смены ──
 export interface ShiftSaleLine { guid: string; name: string; category: string | null; marked: boolean; qty: number; revenue: number }
 export interface ShiftPayment { form: string; amount: number }
-export interface ShiftReceipt { number: string | null; supplier: string; positions: number; amount_net: number }
-export interface ShiftInventory { number: string | null; dev_positions: number; net: number }
-export interface ShiftWriteoff { number: string | null; reason: string | null; positions: number; amount: number }
+export interface ShiftDocLine {
+  name: string | null; qty?: number | null; price?: number | null; amount?: number | null
+  fact?: number | null; uchet?: number | null; dev?: number | null; old?: number | null; new?: number | null; pct?: number | null
+}
+export interface ShiftReceipt { number: string | null; supplier: string; positions: number; amount_net: number; lines: ShiftDocLine[] }
+export interface ShiftInventory { number: string | null; dev_positions: number; net: number; lines: ShiftDocLine[] }
+export interface ShiftWriteoff { number: string | null; reason: string | null; positions: number; amount: number; lines: ShiftDocLine[] }
+export interface ShiftTransfer { number: string | null; to: string | null; positions: number; amount: number; lines: ShiftDocLine[] }
+export interface ShiftReval { number: string | null; positions: number; lines: ShiftDocLine[] }
 export interface ShiftDetailData {
   found: boolean
   shift_key?: string
@@ -581,6 +591,8 @@ export interface ShiftDetailData {
   receipts?: ShiftReceipt[]
   inventory?: ShiftInventory[]
   writeoffs?: ShiftWriteoff[]
+  transfers?: ShiftTransfer[]
+  revaluations?: ShiftReval[]
 }
 
 export const getStoreShiftDetail = (key: string) =>
