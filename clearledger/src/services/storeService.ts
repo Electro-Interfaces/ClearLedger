@@ -583,3 +583,21 @@ export interface ShiftDetailData {
 
 export const getStoreShiftDetail = (key: string) =>
   get<ShiftDetailData>('/api/store/shift', { key })
+
+// ── Полная карточка номенклатуры (товаровед): sku_detail + паспорт/ШК/движение/ТТК/МРЦ ──
+export interface SkuBarcode { barcode: string; type: string | null; main: boolean }
+export interface SkuMovementRow {
+  kind: 'writeoff' | 'transfer' | 'inventory'
+  date: string | null; number: string | null
+  qty: number | null; amount: number | null; reason: string | null
+}
+export interface SkuCardData extends SkuDetailData {
+  group: string | null
+  barcodes: SkuBarcode[]
+  mrc: { mrc: number; retail_price: number | null; over: boolean } | null
+  recipe: { name: string; qty: number }[]
+  movement: SkuMovementRow[]
+}
+
+export const getStoreSkuCard = (guid: string, dateFrom: string, dateTo: string) =>
+  get<SkuCardData>(`/api/store/sku-card/${encodeURIComponent(guid)}`, { date_from: dateFrom, date_to: dateTo })

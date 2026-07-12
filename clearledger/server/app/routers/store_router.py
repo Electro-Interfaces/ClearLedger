@@ -228,6 +228,23 @@ async def store_sku_detail(
     )
 
 
+@router.get("/sku-card/{guid}")
+async def store_sku_card(
+    guid: str,
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Полная карточка номенклатуры (товаровед): паспорт + ШК + цена/остаток +
+    продажи + поставщики + движение + рецептура ТТК + МРЦ."""
+    st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
+    return await GoodsDashboardService(db, user.company_id).sku_card(
+        guid, date.fromisoformat(date_from), date.fromisoformat(date_to), st,
+    )
+
+
 def _stations(stations: str | None) -> list[str] | None:
     return [s.strip() for s in stations.split(",") if s.strip()] if stations else None
 

@@ -547,6 +547,81 @@ class GoodsDashboardService:
             "stock": stock,
         }
 
+    async def sku_card(self, guid: str, date_from: date, date_to: date,
+                       stations: list[str] | None = None) -> dict:
+        """Полная карточка номенклатуры для товароведа: паспорт НСИ + штрихкоды +
+        цена/остаток + продажи + поставщики + движение + рецептура ТТК + МРЦ.
+        = sku_detail (метрики/продажи/закупки/цены/остаток) + тяжёлые расширения
+        (движение по SKU, все ШК), считается только при открытии карточки."""
+        base = await self.sku_detail(guid, date_from, date_to, stations)
+        nom = await self._names()
+        n = nom.get(guid)
+        groups = await self._refs("nom_group")
+
+        base["group"] = (groups.get(n.group_ref) if (n and n.group_ref) else None)
+
+        # штрихкоды (в регистре ЦБ owner_ref пуст → матч по owner_name)
+        barcodes: list[dict] = []
+        if n and n.name:
+            for b in (await self.session.execute(select(CbBarcode).where(
+                    CbBarcode.company_id == self.company_id,
+                    CbBarcode.owner_name == n.name))).scalars().all():
+                barcodes.append({"barcode": b.barcode, "type": b.btype, "main": bool(b.main)})
+        # основной — вперёд, затем EAN13, EAN8, ручные
+        _ord = {"EAN13": 0, "EAN8": 1}
+        barcodes.sort(key=lambda x: (not x["main"], _ord.get(x["type"] or "", 9), x["barcode"] or ""))
+        base["barcodes"] = barcodes
+
+        # МРЦ табака (если задана) + факт нарушения по текущей рознице
+        mrc_row = (await self.session.execute(select(TobaccoMrc).where(
+            TobaccoMrc.company_id == self.company_id,
+            TobaccoMrc.nomenclature_ref == guid))).scalar_one_or_none()
+        price_now = max((s["retail_price"] for s in base["stock"] if s["retail_price"] is not None), default=None)
+        base["mrc"] = None
+        if mrc_row:
+            base["mrc"] = {
+                "mrc": round(float(mrc_row.mrc), 2), "retail_price": price_now,
+                "over": price_now is not None and price_now > float(mrc_row.mrc) + 0.001,
+            }
+
+        # рецептура ТТК (если блюдо) — ингредиенты из строк продаж общепита
+        recipe: list[dict] = []
+        for m in self._select(await self._load(), date_from, date_to, stations):
+            for ln in ((m.get("Секции") or {}).get("продажа_общепит") or {}).get("строки") or []:
+                if ln.get("Номенклатура") == guid and (ln.get("Ингредиенты") or []):
+                    for ing in ln["Ингредиенты"]:
+                        ig = nom.get(ing.get("Номенклатура"))
+                        recipe.append({"name": (ig.name if ig else str(ing.get("Номенклатура"))[:8]),
+                                       "qty": round(float(ing.get("Количество") or 0), 3)})
+                    break
+            if recipe:
+                break
+        base["recipe"] = recipe
+
+        # движение по SKU (инвентаризации/списания/перемещения) — до 40 последних
+        movement: list[dict] = []
+        for kind in ("writeoff", "transfer"):
+            for r in (await self.session.execute(select(CbMovementDoc).where(
+                    CbMovementDoc.company_id == self.company_id,
+                    CbMovementDoc.kind == kind))).scalars().all():
+                for ln in (r.lines or []):
+                    if ln.get("ref") == guid:
+                        movement.append({"kind": kind, "date": r.doc_date, "number": r.number,
+                                         "qty": ln.get("qty"), "amount": ln.get("amount"),
+                                         "reason": r.reason})
+                        break
+        for r in (await self.session.execute(select(CbInventoryDoc).where(
+                CbInventoryDoc.company_id == self.company_id))).scalars().all():
+            for ln in (r.lines or []):
+                if ln.get("ref") == guid:
+                    movement.append({"kind": "inventory", "date": r.doc_date, "number": r.number,
+                                     "qty": ln.get("dev"), "amount": ln.get("amount_dev"),
+                                     "reason": "отклонение факт−учёт"})
+                    break
+        movement.sort(key=lambda x: (x["date"] or ""), reverse=True)
+        base["movement"] = movement[:40]
+        return base
+
     # ── Ассортимент: ABC×XYZ + оборачиваемость/запасы (реальный остаток) + GMROI ──
     async def assortment_analysis(self, date_from: date, date_to: date, *,
                                   category: str = "all", stations: list[str] | None = None) -> dict:

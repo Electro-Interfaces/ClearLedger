@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getStoreNomenclature, type SalesMarked } from '@/services/storeService'
 import { Kpi } from './analytics/Kpi'
 import { fmtMoney } from '@/services/analyticsService'
+import { NomenclatureCardModal } from './NomenclatureCardModal'
 
 const nf = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n)
 
@@ -40,6 +41,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
   const [weighed, setWeighed] = useState<'all' | 'weighed'>('all')
   const [hasSales, setHasSales] = useState<'all' | 'yes' | 'no'>('all')
   const [q, setQ] = useState('')
+  const [openGuid, setOpenGuid] = useState<string | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-nom', companyId, dateFrom, dateTo, kind, marked, weighed, hasSales, q],
@@ -50,7 +52,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
     <div className="p-6 space-y-4">
       <div>
         <h3 className="text-base font-semibold">Номенклатура — справочник товаров</h3>
-        <p className="text-xs text-muted-foreground">Мастер-НСИ из ЦБ ЭЛСИ.АЗК, обогащён продажами и штрихкодами за период.</p>
+        <p className="text-xs text-muted-foreground">Мастер-НСИ из ЦБ ЭЛСИ.АЗК. Клик по строке — полная карточка товара: паспорт, штрихкоды, цена/остаток, продажи, поставки, движение, ТТК, МРЦ.</p>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -92,7 +94,8 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
               </thead>
               <tbody>
                 {data.items.slice(0, 400).map((i) => (
-                  <tr key={i.guid} className="border-t border-border/30 hover:bg-accent/20">
+                  <tr key={i.guid} onClick={() => setOpenGuid(i.guid)}
+                    className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
                     <td className="px-3 py-1.5">{i.marked && <span title="маркированный">🔖 </span>}{i.name}</td>
                     <td className="px-3 py-1.5">{i.article ?? '—'}</td>
                     <td className="px-3 py-1.5">{i.kind}</td>
@@ -113,6 +116,10 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
             )}
           </div>
         </>
+      )}
+
+      {openGuid && (
+        <NomenclatureCardModal guid={openGuid} companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} onClose={() => setOpenGuid(null)} />
       )}
     </div>
   )
