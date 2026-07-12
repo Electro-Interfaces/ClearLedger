@@ -514,36 +514,52 @@ class GoodsDashboardService:
                 if r.retail_price is not None:
                     a["retail"] += q * float(r.retail_price)
 
-        # продажи по SKU по НЕДЕЛЬНЫМ корзинам — для XYZ (CV) сглаживают дневной шум;
-        # + общий объём для оборачиваемости.
-        period_days = (date_to - date_from).days + 1
-        n_weeks = max(1, (period_days + 6) // 7)
-        wsales: dict[str, list] = defaultdict(lambda: [0.0] * n_weeks)
+        # продажи по SKU по дням → недельные корзины ПО ФАКТИЧЕСКОМУ окну данных.
+        # ⚠ период может быть шире данных (данные только апрель) — пустые недели
+        # вне окна ломают XYZ (всё → Z) и оборачиваемость (всё → затоварка). Берём
+        # реальный диапазон дат продаж (span), а не запрошенный период.
+        dsku: dict[str, dict] = defaultdict(lambda: defaultdict(float))
+        sale_dates: set = set()
         ingredient_refs: set = set()  # ингредиенты ТТК — не считать неликвидом (расходуются)
         for m in self._select(await self._load(), date_from, date_to, stations):
             day = _day(m.get("Смена") or {})
-            try:
-                wk = min(n_weeks - 1, max(0, (date.fromisoformat(day) - date_from).days // 7))
-            except ValueError:
-                wk = 0
+            if not day:
+                continue
+            sale_dates.add(day)
             for sk, _ in _SECTIONS:
                 for ln in (((m.get("Секции") or {}).get(sk)) or {}).get("строки") or []:
                     g = ln.get("Номенклатура")
                     if g:
-                        wsales[g][wk] += float(ln.get("Количество") or 0)
+                        dsku[g][day] += float(ln.get("Количество") or 0)
                     if sk == "продажа_общепит":
                         for ing in ln.get("Ингредиенты") or []:
                             if ing.get("Номенклатура"):
                                 ingredient_refs.add(ing.get("Номенклатура"))
+        if sale_dates:
+            d0 = date.fromisoformat(min(sale_dates))
+            span_days = (date.fromisoformat(max(sale_dates)) - d0).days + 1
+        else:
+            d0, span_days = date_from, (date_to - date_from).days + 1
+        n_weeks = max(1, (span_days + 6) // 7)
+
+        def _week(dayiso: str) -> int:
+            try:
+                return min(n_weeks - 1, max(0, (date.fromisoformat(dayiso) - d0).days // 7))
+            except ValueError:
+                return 0
 
         def _xyz(g: str, qty_total: float):
-            if qty_total <= 0 or n_weeks < 2:
-                return ("X" if qty_total > 0 else "Z"), None
-            vals = wsales.get(g, [0.0] * n_weeks)
-            mean = sum(vals) / n_weeks
+            if qty_total <= 0:
+                return "Z", None
+            if n_weeks < 2:
+                return "X", None  # одно активное окно — считаем стабильным
+            buckets = [0.0] * n_weeks
+            for dd, qv in dsku.get(g, {}).items():
+                buckets[_week(dd)] += qv
+            mean = sum(buckets) / n_weeks
             if mean <= 0:
                 return "Z", None
-            cv = ((sum((v - mean) ** 2 for v in vals) / n_weeks) ** 0.5) / mean
+            cv = ((sum((v - mean) ** 2 for v in buckets) / n_weeks) ** 0.5) / mean
             return ("X" if cv <= 0.5 else "Y" if cv <= 1.0 else "Z"), round(cv, 2)
 
         def _action(abc: str, xyz: str, status: str) -> str:
@@ -571,7 +587,7 @@ class GoodsDashboardService:
             sq, sc, sr = st["qty"], st["cost"], st["retail"]
             xcls, cv = _xyz(g, qty)
             cell = f'{s["abc"]}{xcls}'
-            avg_daily = qty / period_days if period_days else 0
+            avg_daily = qty / span_days if span_days else 0  # по окну данных, не периоду
             dos = round(sq / avg_daily, 1) if avg_daily > 0 and sq > 0 else None
             gmroi = round(s["margin"] / sc, 2) if s["margin"] is not None and sc > 0 else None
             dead = sq > 0 and qty <= 0
