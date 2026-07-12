@@ -524,3 +524,38 @@ export const getStoreMrc = () => get<MrcData>('/api/store/mrc')
 
 export const importStoreMrc = (rows: MrcImportRow[]) =>
   post<MrcImportResult>('/api/store/mrc/import', { rows })
+
+// ── Смены как составной документ: роллап операций на смену (архитектура) ──
+export interface ShiftComposite {
+  shift_key: string
+  date: string
+  station: string
+  number: string | null
+  open: string | null
+  close: string | null
+  revenue: number
+  soputka: number
+  obshepit: number
+  positions: number
+  returns: number
+  receipts_amount: number
+  receipts_count: number
+  inventory_count: number
+  inventory_net: number
+  writeoff_amount: number
+  writeoff_count: number
+}
+export interface ShiftsData {
+  period: { from: string; to: string }
+  shifts: ShiftComposite[]
+  summary: {
+    count: number; revenue: number; returns: number
+    receipts_amount: number; inventory_docs: number; writeoff_amount: number
+  }
+}
+
+export const getStoreShifts = (dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<ShiftsData>('/api/store/shifts', {
+    date_from: dateFrom, date_to: dateTo,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })

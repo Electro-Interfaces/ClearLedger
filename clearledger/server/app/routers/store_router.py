@@ -313,6 +313,20 @@ async def store_mrc_import(
     )
 
 
+@router.get("/shifts")
+async def store_shifts(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Смены как составной документ: продажи + приходы/инвентаризации/списания/возвраты за смену."""
+    return await GoodsDashboardService(db, user.company_id).shifts_composite(
+        date.fromisoformat(date_from), date.fromisoformat(date_to), _stations(stations),
+    )
+
+
 @router.get("/{report}")
 async def store_report(
     report: str,

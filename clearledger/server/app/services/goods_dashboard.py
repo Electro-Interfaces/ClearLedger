@@ -1787,3 +1787,85 @@ class GoodsDashboardService:
                 "missing_mrc": missing_mrc,
             },
         }
+
+    # ── Смена как составной документ: роллап операций на смену (архитектура МАГа) ──
+
+    async def shifts_composite(self, date_from: date, date_to: date,
+                               stations: list[str] | None = None) -> dict:
+        """Смена = организующая единица: за каждую смену — продажи (сопутка/
+        общепит) + возвраты + роллап приходов/инвентаризаций/списаний того же
+        дня. Приходы/инвентаризации в ЦБ не несут GUID смены → связка по
+        (станция, дата). Первый шаг к смене-umbrella над всеми операциями."""
+        d0, d1 = date_from.isoformat(), date_to.isoformat()
+        metas = self._select(await self._load(), date_from, date_to, stations)
+
+        # приходы (ПТУ) по дате
+        rec_by_day: dict[str, dict] = defaultdict(lambda: {"amount_net": 0.0, "count": 0})
+        for m in await self._load_purchases(date_from, date_to, stations):
+            d = m.get("Документ") or {}
+            day = str(d.get("Дата") or "")[:10]
+            lines = d.get("Товары") or []
+            amt = sum(float(l.get("Сумма") or 0) for l in lines)
+            vat = sum(float(l.get("СуммаНДС") or 0) for l in lines)
+            rec_by_day[day]["amount_net"] += amt - vat
+            rec_by_day[day]["count"] += 1
+
+        # инвентаризации по дате
+        inv_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "net": 0.0})
+        for r in (await self.session.execute(select(CbInventoryDoc).where(
+                CbInventoryDoc.company_id == self.company_id))).scalars().all():
+            day = (r.doc_date or "")[:10]
+            if d0 <= day <= d1:
+                inv_by_day[day]["count"] += 1
+                inv_by_day[day]["net"] += float(r.net_amount or 0)
+
+        # списания по дате
+        wo_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
+        for r in (await self.session.execute(select(CbMovementDoc).where(
+                CbMovementDoc.company_id == self.company_id,
+                CbMovementDoc.kind == "writeoff"))).scalars().all():
+            day = (r.doc_date or "")[:10]
+            if d0 <= day <= d1:
+                wo_by_day[day]["count"] += 1
+                wo_by_day[day]["amount"] += float(r.total_amount or 0)
+
+        shifts = []
+        for m in metas:
+            smena = m.get("Смена") or {}
+            day = _day(smena)
+            station = str(smena.get("КодАЗС") or "—")
+            sec = m.get("Секции") or {}
+            sop = sec.get("продажа_сопутка") or {}
+            obsh = sec.get("продажа_общепит") or {}
+            sop_rev = float(sop.get("сумма") or 0)
+            obsh_rev = float(obsh.get("сумма") or 0)
+            rec, inv, wo = rec_by_day.get(day, {}), inv_by_day.get(day, {}), wo_by_day.get(day, {})
+            shifts.append({
+                "shift_key": str(smena.get("Смена") or f"{day}|{station}"),
+                "date": day, "station": station,
+                "number": smena.get("НомерСмены") or smena.get("Номер"),
+                "open": smena.get("Открытие"), "close": smena.get("Закрытие"),
+                "revenue": round(sop_rev + obsh_rev, 2),
+                "soputka": round(sop_rev, 2), "obshepit": round(obsh_rev, 2),
+                "positions": len(sop.get("строки") or []) + len(obsh.get("строки") or []),
+                "returns": round(float((sec.get("возвраты") or {}).get("сумма") or 0), 2),
+                "receipts_amount": round(rec.get("amount_net", 0.0), 2),
+                "receipts_count": rec.get("count", 0),
+                "inventory_count": inv.get("count", 0),
+                "inventory_net": round(inv.get("net", 0.0), 2),
+                "writeoff_amount": round(wo.get("amount", 0.0), 2),
+                "writeoff_count": wo.get("count", 0),
+            })
+        shifts.sort(key=lambda x: x["date"])
+        return {
+            "period": {"from": d0, "to": d1},
+            "shifts": shifts,
+            "summary": {
+                "count": len(shifts),
+                "revenue": round(sum(s["revenue"] for s in shifts), 2),
+                "returns": round(sum(s["returns"] for s in shifts), 2),
+                "receipts_amount": round(sum(s["receipts_amount"] for s in shifts), 2),
+                "inventory_docs": sum(s["inventory_count"] for s in shifts),
+                "writeoff_amount": round(sum(s["writeoff_amount"] for s in shifts), 2),
+            },
+        }

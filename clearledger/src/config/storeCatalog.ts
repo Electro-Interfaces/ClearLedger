@@ -23,7 +23,7 @@ import {
   Plug, FileOutput,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
-  QrCode, ScanLine, PackageMinus, ShieldAlert,
+  QrCode, ScanLine, PackageMinus, ShieldAlert, CalendarClock,
 } from 'lucide-react'
 
 export type StoreStatus = 'ready' | 'wip' | 'planned'
@@ -48,6 +48,18 @@ export interface StoreView {
 
 export const STORE_VIEWS: StoreView[] = [
   /* ───────────────────── АНАЛИТИКА (управление ассортиментом) ───────────────────── */
+  {
+    key: 'shifts', label: 'Смены', group: 'Аналитика', icon: CalendarClock,
+    title: 'Смены — составной документ',
+    subtitle: 'Смена как организующая единица товароучёта: на неё роллапятся продажи (сопутка/общепит), возвраты, приходы, инвентаризации, списания. Приходы/инвентаризации в ЦБ — отдельные документы, связаны с сменой по дате и станции. Данные 208: 29 смен за апрель.',
+    status: 'ready',
+    blocks: [
+      { name: 'Реестр смен', desc: 'По каждой смене: дата · АЗС · № · выручка (сопутка/общепит) · позиции · возвраты · приходы дня · инвентаризации · списания.', source: 'goods_dashboard.shifts_composite · /api/store/shifts' },
+      { name: 'Роллап операций', desc: 'Приходы (ПТУ), инвентаризации, списания за дату смены — связка по (станция, дата), т.к. документы ЦБ не несут GUID смены.' },
+      { name: 'Смена-детализация (планируется)', desc: 'Строки операций смены, касса, оператор, открытие/закрытие — как в сменном дашборде топлива.', source: 'planned' },
+      { name: 'Топология АЗС (планируется)', desc: 'Признак магазин/общепит по станции — не таскать в аналитику станции без товароучёта.', source: 'planned' },
+    ],
+  },
   {
     key: 'overview', label: 'Обзор', group: 'Аналитика', icon: LayoutDashboard,
     title: 'Обзор магазина',
