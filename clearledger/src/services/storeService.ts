@@ -146,7 +146,7 @@ export const getStoreReport = <T>(report: string, dateFrom: string, dateTo: stri
   })
 
 // ── Продажи: гибкая группировка (инструмент менеджера) ──
-export type SalesGroupBy = 'sku' | 'category' | 'kind' | 'marking' | 'vat' | 'day' | 'payment'
+export type SalesGroupBy = 'sku' | 'category' | 'kind' | 'marking' | 'vat' | 'day' | 'shift' | 'payment'
 export type SalesCategory = 'all' | 'soputka' | 'obshepit'
 export type SalesMarked = 'all' | 'marked' | 'plain'
 

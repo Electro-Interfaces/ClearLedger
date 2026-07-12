@@ -1464,7 +1464,10 @@ class GoodsDashboardService:
                     a["label"] = kanon
         else:
             for m in sale_metas:
-                day = _day(m.get("Смена") or {})
+                smena = m.get("Смена") or {}
+                day = _day(smena)
+                station = str(smena.get("КодАЗС") or "—")
+                shift_key = str(smena.get("Смена") or f"{day}|{station}")
                 sec = m.get("Секции") or {}
                 for sec_key, catname in _SECTIONS:
                     if category == "soputka" and sec_key != "продажа_сопутка":
@@ -1499,6 +1502,9 @@ class GoodsDashboardService:
                             label = key
                         elif group_by == "day":
                             key = label = day
+                        elif group_by == "shift":
+                            key = shift_key
+                            label = f"{day} · АЗС {station}"
                         else:  # sku
                             key = g or "—"
                             label = (n.name if n else str(g)[:8])
@@ -1518,7 +1524,10 @@ class GoodsDashboardService:
             "qty": round(a["qty"], 3), "sku_count": len(a["skus"]),
             "share": round(100 * a["rev"] / total, 1),
         } for k, a in agg.items()]
-        groups.sort(key=lambda x: (x["key"] if group_by == "day" else -x["revenue"]))
+        if group_by in ("day", "shift"):
+            groups.sort(key=lambda x: x["label"])   # хронологически
+        else:
+            groups.sort(key=lambda x: -x["revenue"])
 
         all_skus: set = set()
         for a in agg.values():

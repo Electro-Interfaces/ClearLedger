@@ -27,6 +27,7 @@ const GROUP_TABS: { key: SalesGroupBy; label: string }[] = [
   { key: 'marking', label: 'Честный Знак' },
   { key: 'vat', label: 'Ставка НДС' },
   { key: 'day', label: 'По дням' },
+  { key: 'shift', label: 'По сменам' },
   { key: 'payment', label: 'Оплаты' },
 ]
 const CAT_TABS: { key: SalesCategory; label: string }[] = [
