@@ -1973,6 +1973,7 @@ class GoodsDashboardService:
                 "returns": round(sum(s["returns"] for s in shifts), 2),
                 "receipts_amount": round(sum(s["receipts_amount"] for s in shifts), 2),
                 "inventory_docs": sum(s["inventory_count"] for s in shifts),
+                "inventory_net": round(sum(s["inventory_net"] for s in shifts), 2),
                 "writeoff_amount": round(sum(s["writeoff_amount"] for s in shifts), 2),
                 "transfer_docs": sum(s["transfer_count"] for s in shifts),
                 "reval_docs": sum(s["reval_count"] for s in shifts),

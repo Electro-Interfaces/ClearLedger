@@ -16,6 +16,7 @@ import { getStoreOverview, monthOf } from '@/services/storeService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { StorePlanMonitor } from './StorePlanMonitor'
 import { StoreExceptionsWidget } from './StoreExceptionsWidget'
+import { StoreMovementSummary } from './StoreMovementSummary'
 
 const nf0 = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n)
 
@@ -81,6 +82,9 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
 
           {/* Виджет-исключения «работа по исключениям» (О-6) */}
           <StoreExceptionsWidget companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} period={monthOf(data.period.to)} />
+
+          {/* Движение и потери (учёт документов движения в разделе) */}
+          <StoreMovementSummary companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
 
           {/* KPI-полоса */}
           <div className="grid gap-2.5 sm:grid-cols-3 lg:grid-cols-6">

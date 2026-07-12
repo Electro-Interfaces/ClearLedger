@@ -555,7 +555,7 @@ export interface ShiftsData {
   shifts: ShiftComposite[]
   summary: {
     count: number; revenue: number; returns: number
-    receipts_amount: number; inventory_docs: number; writeoff_amount: number
+    receipts_amount: number; inventory_docs: number; inventory_net: number; writeoff_amount: number
     transfer_docs: number; reval_docs: number
   }
 }
