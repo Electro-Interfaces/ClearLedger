@@ -94,6 +94,8 @@ class BpPackageEmitter:
         nsi_nom: set[str] = set()
         nsi_org: set[str] = set()
         nsi_wh: set[str] = set()
+        nsi_contr: set[str] = set()
+        contr_names: dict[str, str] = {}
 
         org_uuid = str(sm.get("Организация") or "")
         wh_uuid = str(sm.get("Склад") or "")
@@ -179,7 +181,73 @@ class BpPackageEmitter:
             "Оплаты": оплаты,
         }
 
-        документы = [retail]  # TODO-Ф1: recipe/purchase/production_release/… перед/после
+        # ── purchase (приходы смены) ──
+        # приход-DataEntry линкуется к смене через meta.Смена; per-line СтавкаНДС/
+        # Единица деривируем из CbNomenclature (в meta прихода их нет).
+        purch_entries = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
+            DataEntry.doc_type_id == "purchase"))).scalars().all()
+        purchases = []
+        cparty_ref = await self._refs("counterparty")
+        shift_day = _day(sm)
+        shift_station = str(sm.get("КодАЗС") or "")
+        for pe in purch_entries:
+            psm = (pe.meta or {}).get("Смена") or {}
+            # приход не несёт GUID смены → линк по (дата открытия, станция)
+            if _day(psm) != shift_day or str(psm.get("КодАЗС") or "") != shift_station:
+                continue
+            pdoc = (pe.meta or {}).get("Документ") or {}
+            контр = str(pdoc.get("Контрагент") or "")
+            if контр:
+                nsi_contr.add(контр)
+                if контр in cparty_ref:
+                    contr_names[контр] = cparty_ref[контр].name
+            ptovары = []
+            psum = pnds = 0.0
+            for i, ln in enumerate(pdoc.get("Товары") or [], 1):
+                g = ln.get("Номенклатура")
+                if g:
+                    nsi_nom.add(g)
+                nn = nom.get(g)
+                summ = float(ln.get("Сумма") or 0)
+                nds = float(ln.get("СуммаНДС") or 0)
+                psum += summ
+                pnds += nds
+                ptovары.append({
+                    "НомерСтроки": ln.get("НомерСтроки") or i,
+                    "Номенклатура": g,
+                    "Количество": float(ln.get("Количество") or 0),
+                    "Единица": (nn.unit or "" if nn else ""),
+                    "Цена": float(ln.get("Цена") or 0),
+                    "Сумма": round(summ, 2),
+                    "СтавкаНДС": _nds(nn.vat if nn else ""),   # дерив. из карточки
+                    "СуммаНДС": round(nds, 2),
+                })
+            purchases.append({
+                "Тип": "purchase",
+                "ИсточникUUID": str(pdoc.get("ИсточникUUID") or ""),
+                "Номер": str(pdoc.get("Номер") or "").strip(),
+                "Дата": _iso(pdoc.get("Дата")),
+                "Проведен": True,
+                "ПометкаУдаления": False,
+                "Организация": org_uuid,
+                "Контрагент": контр,
+                "ДоговорКонтрагента": "",   # TODO-Ф1: не тянули договор
+                "Склад": wh_uuid,
+                "ВидОперации": "ОтПоставщика",   # фильтр пула = только ОтПоставщика
+                "СуммаДокумента": round(psum, 2),
+                "ВалютаДокумента": "RUB",
+                "СуммаВключаетНДС": True,
+                "НДСНеВыделять": False,
+                "НДСВключенВСтоимость": False,
+                "НомерВходящегоДокумента": "",   # TODO-Ф1
+                "ДатаВходящегоДокумента": "",
+                "СуммаНДС": round(pnds, 2),
+                "Товары": ptovары,
+            })
+
+        # Порядок контракта: recipe → purchase → retail → …
+        документы = [*purchases, retail]
 
         # ── НСИ ──
         def _s(v) -> str:
@@ -204,6 +272,16 @@ class BpPackageEmitter:
                 "Наименование": _s(r.name if r else ""), "Код": _s(ex.get("code")),
                 "ВидСклада": _s(ex.get("kind_name")) or "АЗК",
                 "ПометкаУдаления": bool(ex.get("deleted")),
+            })
+        for uid in sorted(nsi_contr):
+            # Контрагент автосоздаётся приёмником по Наименованию (ИНН/КПП опц.).
+            # TODO-Ф1: ИНН/КПП/ВидКонтрагента из Catalog.Контрагенты.
+            nm = _s(contr_names.get(uid, ""))
+            нси.append({
+                "Тип": "Контрагент", "ИсточникUUID": uid,
+                "Наименование": nm, "НаименованиеПолное": nm,
+                "ИНН": "", "КПП": "", "ВидКонтрагента": "ЮрЛицо",
+                "ПометкаУдаления": False,
             })
         for g in sorted(nsi_nom):
             nn = nom.get(g)
