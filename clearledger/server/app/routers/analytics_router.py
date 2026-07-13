@@ -221,6 +221,52 @@ async def get_charge_slice(
     return await svc.charge_sessions_slice(f, bucket=bucket, group_by=group_by, metric=metric, top_n=top_n)
 
 
+@router.get("/charge-sessions/new-clients")
+async def get_charge_new_clients(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    bucket: str = Query("month", pattern="^(day|week|decade|month|quarter)$"),
+    stations: str | None = None,
+    regions: str | None = None,
+    dim: str | None = None,
+    dim_val: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """НОВЫЕ клиенты по интервалам нарезки периода: впервые зарядились в интервале
+    (первая сессия за всю историю). Активные/новые/вернувшиеся + вклад новых
+    (сессии/кВт·ч/выручка/доля). Клиент = организация (ЮЛ) или телефон (ФЛ)."""
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    from app.services.charge_clients import new_clients_slice
+    return await new_clients_slice(
+        db, f.company_id, f.date_from, f.date_to, bucket,
+        station_codes=_csv(stations), regions=_csv(regions), dim=dim, dim_val=dim_val)
+
+
+@router.get("/charge-sessions/new-clients/list")
+async def get_charge_new_clients_list(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = None,
+    regions: str | None = None,
+    dim: str | None = None,
+    dim_val: str | None = None,
+    limit: int = Query(500, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Список конкретных НОВЫХ клиентов интервала: кто (ЮЛ-имя / телефон ФЛ),
+    когда впервые, сессий/кВт·ч/выручка в интервале, станций охвачено."""
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    from app.services.charge_clients import new_clients_list
+    return await new_clients_list(
+        db, f.company_id, f.date_from, f.date_to,
+        station_codes=_csv(stations), regions=_csv(regions), dim=dim, dim_val=dim_val,
+        limit=limit)
+
+
 @router.get("/charge-sessions/compare")
 async def get_charge_sessions_compare(
     company_id: str,
@@ -307,6 +353,24 @@ async def get_stations_model(
     from app.services.stations_model_service import stations_model
     cid = await assert_company_module(company_id, current_user, db, "management")
     return await stations_model(db, cid)
+
+
+@router.get("/fuel/model")
+async def get_fuel_model(
+    company_id: str,
+    dataset: str = "shifts",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Модель данных топливного контура (ГИГ) для «Нормализации» — контракт charge_model.
+    dataset: shifts (смены STS + наливы) | receipts (ТТН) | sidegoods (сопутка/общепит ЦБ)."""
+    from app.services import fuel_model_service as fms
+    cid = await assert_company_module(company_id, current_user, db, "management")
+    fn = {"shifts": fms.fuel_shifts_model, "receipts": fms.fuel_receipts_model,
+          "sidegoods": fms.sidegoods_model}.get(dataset)
+    if fn is None:
+        raise HTTPException(400, f"Неизвестный dataset: {dataset}")
+    return await fn(db, cid)
 
 
 @router.get("/stations/linkage")

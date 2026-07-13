@@ -548,6 +548,66 @@ export async function getChargeSlice(p: PeriodParams & {
   })
 }
 
+/** Когорты: НОВЫЕ клиенты по интервалам нарезки периода (впервые за всю историю). */
+export interface ChargeNewClientsInterval {
+  key: string
+  from: string
+  to: string
+  label: string
+  partial: boolean
+  activeClients: number
+  newClients: number
+  returningClients: number
+  newSharePct: number | null
+  newSessions: number
+  newKwh: number
+  newRevenue: number
+  totalRevenue: number
+  newRevenueSharePct: number | null
+}
+
+export interface ChargeNewClientsResponse {
+  period: { from: string; to: string }
+  bucket: string
+  intervals: ChargeNewClientsInterval[]
+  historyFrom: string | null
+  totals: { newClients: number; activeClients: number; newRevenue: number }
+}
+
+export interface ChargeNewClientRow {
+  key: string
+  userType: string | null
+  clientName: string | null
+  userId: string | null
+  firstAt: string | null
+  sessions: number
+  kwh: number
+  revenue: number
+  stations: number
+}
+
+export interface ChargeNewClientsListResponse {
+  period: { from: string; to: string }
+  count: number
+  clients: ChargeNewClientRow[]
+}
+
+export async function getChargeNewClients(p: PeriodParams & { bucket: ChargeBucket }): Promise<ChargeNewClientsResponse> {
+  return get<ChargeNewClientsResponse>('/api/analytics/charge-sessions/new-clients', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    bucket: p.bucket,
+    ...narrowParams(p),
+  })
+}
+
+export async function getChargeNewClientsList(p: PeriodParams & { limit?: number }): Promise<ChargeNewClientsListResponse> {
+  return get<ChargeNewClientsListResponse>('/api/analytics/charge-sessions/new-clients/list', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.limit ? { limit: String(p.limit) } : {}),
+    ...narrowParams(p),
+  })
+}
+
 export async function getPaymentMix(p: PeriodParams): Promise<PaymentMixResponse> {
   return get<PaymentMixResponse>('/api/analytics/payment-mix', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,

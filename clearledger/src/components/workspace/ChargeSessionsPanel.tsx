@@ -5,7 +5,7 @@
  */
 
 import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -23,9 +23,11 @@ import { ExportButton } from './analytics/ExportButton'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
+  getChargeNewClients, getChargeNewClientsList,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
   type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket,
   type ChargeSeriesBy, type ChargeTimeseriesResponse, type ChargeSliceResponse, type ChargeSessionsResponse,
+  type ChargeNewClientsInterval,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -757,6 +759,9 @@ function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; date
       </div>
       {isLoading ? <Loading /> : !hasData || error ? <Empty text="Нет данных за период" />
         : <SliceView data={data} metric={p.metric} companyId={companyId} dateFrom={period.from} dateTo={period.to} bucket={p.bucket} narrow={n} />}
+      {hasData && !error && (
+        <NewClientsBlock companyId={companyId} dateFrom={period.from} dateTo={period.to} bucket={p.bucket} narrow={n} />
+      )}
     </div>
   )
 }
@@ -1088,6 +1093,238 @@ function RowDetailModal({ open, onClose, companyId, dateFrom, dateTo, bucket, me
   )
 }
 
+/* ── Когорты: НОВЫЕ клиенты (впервые за всю историю наблюдений) ─────────────── */
+
+const fmtRub0 = (v: number) => nf0.format(Math.round(v)) + ' ₽'
+
+/** Маркер ленивого листа Excel: экспортёр дотянет СПИСОК новых клиентов периода
+ * с сервера и добавит лист «Новые {label}» (см. chargeExport: data-export-newclients). */
+function NewClientsExportMarker({ companyId, from, to, label, narrow }: {
+  companyId: string; from: string; to: string; label: string; narrow: Narrow
+}) {
+  return (
+    <span hidden aria-hidden data-export-newclients={JSON.stringify({
+      companyId, from, to, label,
+      stations: narrow.stations, regions: narrow.regions, dim: narrow.dim, dimVal: narrow.dimVal,
+    })} />
+  )
+}
+
+/** Модалка: конкретные новые клиенты интервала (кто, когда впервые, вклад). */
+function NewClientsListModal({ companyId, interval, narrow, onClose }: {
+  companyId: string
+  interval: { from: string; to: string; label: string } | null
+  narrow: Narrow
+  onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const { data, isLoading } = useQuery({
+    queryKey: ['charge-new-clients-list', companyId, interval?.from, interval?.to, narrow.key],
+    queryFn: () => getChargeNewClientsList({
+      companyId, dateFrom: interval!.from, dateTo: interval!.to, limit: 1000,
+      stations: narrow.stations, regions: narrow.regions, dim: narrow.dim, dimVal: narrow.dimVal,
+    }),
+    enabled: !!interval,
+  })
+  const rows = useMemo(() => {
+    const all = data?.clients ?? []
+    const t = q.trim().toLowerCase()
+    if (!t) return all
+    return all.filter((c) =>
+      (c.clientName || '').toLowerCase().includes(t) || (c.userId || '').toLowerCase().includes(t))
+  }, [data, q])
+  const exCols = ['Клиент', 'Тип', 'Первая сессия', 'Сессий', 'кВт·ч', 'Выручка, ₽', 'ЭЗС']
+  const exData = rows.map((c) => [c.clientName || c.userId || c.key, c.userType, c.firstAt, c.sessions, c.kwh, c.revenue, c.stations] as (string | number | null)[])
+  return (
+    <Dialog open={!!interval} onOpenChange={(v) => { if (!v) { setQ(''); onClose() } }}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="pr-6">Новые клиенты · {interval?.label}</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          Клиенты, впервые зарядившиеся в этом интервале (не встречались за всю историю наблюдений ранее).
+          {data && <> Всего <b className="text-foreground">{nf0.format(data.count)}</b>{data.count > (data.clients?.length ?? 0) && <> · показаны первые {data.clients.length} по выручке</>}.</>}
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="Поиск: организация или телефон"
+            className="h-8 w-[260px] rounded-md border border-input bg-transparent px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+          />
+          <Button variant="outline" size="sm" className="h-8 text-xs" disabled={!data?.clients?.length}
+            onClick={() => data && import('@/services/chargeExport').then((m) =>
+              m.exportNewClientsXlsx(interval?.label ?? '', data.count, rows))}>
+            Скачать xlsx{q.trim() ? ' (найденные)' : ''}
+          </Button>
+        </div>
+        {isLoading ? <Loading /> : (
+          <div className="max-h-[52vh] overflow-auto rounded-md border border-border/40">
+            <table className="w-full text-xs" {...exportRows(`Новые клиенты ${interval?.label ?? ''}`, exCols, exData)}>
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b bg-muted/40 text-muted-foreground">
+                  <th className="p-2 text-left font-medium">Клиент</th>
+                  <th className="p-2 text-left font-medium">Тип</th>
+                  <th className="p-2 text-left font-medium">Первая сессия</th>
+                  <th className="p-2 text-right font-medium">Сессий</th>
+                  <th className="p-2 text-right font-medium">кВт·ч</th>
+                  <th className="p-2 text-right font-medium">Выручка</th>
+                  <th className="p-2 text-right font-medium">ЭЗС</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((c) => (
+                  <tr key={c.key} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-medium">{c.clientName || c.userId || c.key}</td>
+                    <td className="p-2 text-muted-foreground">{c.userType || '—'}</td>
+                    <td className="p-2 font-mono text-muted-foreground">{c.firstAt || '—'}</td>
+                    <td className="p-2 text-right font-mono">{nf0.format(c.sessions)}</td>
+                    <td className="p-2 text-right font-mono">{nf1.format(c.kwh)}</td>
+                    <td className="p-2 text-right font-mono">{fmtRub0(c.revenue)}</td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">{c.stations}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Блок «Новые клиенты по интервалам» (нарезка периода). Клик по строке — список. */
+function NewClientsBlock({ companyId, dateFrom, dateTo, bucket, narrow }: {
+  companyId: string; dateFrom: string; dateTo: string; bucket: ChargeBucket; narrow: Narrow
+}) {
+  const [sel, setSel] = useState<{ from: string; to: string; label: string } | null>(null)
+  const { data, isLoading } = useQuery({
+    queryKey: ['charge-new-clients', companyId, dateFrom, dateTo, bucket, narrow.key],
+    queryFn: () => getChargeNewClients({
+      companyId, dateFrom, dateTo, bucket,
+      stations: narrow.stations, regions: narrow.regions, dim: narrow.dim, dimVal: narrow.dimVal,
+    }),
+    enabled: !!dateFrom && !!dateTo,
+  })
+  if (isLoading || !data || data.intervals.length === 0) return null
+  const iv = data.intervals
+  const histNote = data.historyFrom && data.historyFrom >= dateFrom
+  const exCols = ['Интервал', 'Активных клиентов', 'Новых', 'Доля новых, %', 'Вернувшихся', 'Сессии новых', 'кВт·ч новых', 'Выручка новых, ₽', 'Доля выручки новых, %']
+  const exData = iv.map((r) => [r.label, r.activeClients, r.newClients, r.newSharePct, r.returningClients, r.newSessions, r.newKwh, r.newRevenue, r.newRevenueSharePct] as (string | number | null)[])
+  const dim = (r: ChargeNewClientsInterval) => (r.partial ? 'text-muted-foreground/40' : '')
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-1.5">
+          <span className="text-[11px] font-medium">Новые клиенты по интервалам</span>
+          <span className="text-[11px] text-muted-foreground">
+            впервые за всю историю наблюдений · клик по строке — конкретные клиенты
+          </span>
+          <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
+            за период: новых {nf0.format(data.totals.newClients)} · выручка новых {fmtRub0(data.totals.newRevenue)}
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs" {...exportRows('Новые клиенты', exCols, exData)}>
+            <thead>
+              <tr className="border-b bg-muted/40 text-muted-foreground">
+                <th className="p-2 text-left font-medium">Интервал</th>
+                <th className="p-2 text-right font-medium">Активных</th>
+                <th className="p-2 text-right font-medium">Новых</th>
+                <th className="p-2 text-right font-medium">Доля новых</th>
+                <th className="p-2 text-right font-medium">Вернувшихся</th>
+                <th className="p-2 text-right font-medium">Сессии новых</th>
+                <th className="p-2 text-right font-medium">кВт·ч новых</th>
+                <th className="p-2 text-right font-medium">Выручка новых</th>
+                <th className="p-2 text-right font-medium">Доля выручки</th>
+              </tr>
+            </thead>
+            <tbody>
+              {iv.map((r) => (
+                <tr key={r.key} className="cursor-pointer border-b border-border/30 hover:bg-muted/30"
+                  onClick={() => setSel({ from: r.from, to: r.to, label: r.label })}>
+                  <td className={`p-2 font-medium whitespace-nowrap ${dim(r)}`}>{r.label}{r.partial ? ' *' : ''}</td>
+                  <td className={`p-2 text-right font-mono ${dim(r)}`}>{nf0.format(r.activeClients)}</td>
+                  <td className={`p-2 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400 ${r.partial ? 'opacity-40' : ''}`}>{nf0.format(r.newClients)}</td>
+                  <td className={`p-2 text-right font-mono ${dim(r)}`}>{r.newSharePct != null ? `${r.newSharePct}%` : '—'}</td>
+                  <td className={`p-2 text-right font-mono ${dim(r)}`}>{nf0.format(r.returningClients)}</td>
+                  <td className={`p-2 text-right font-mono ${dim(r)}`}>{nf0.format(r.newSessions)}</td>
+                  <td className={`p-2 text-right font-mono ${dim(r)}`}>{nf1.format(r.newKwh)}</td>
+                  <td className={`p-2 text-right font-mono ${dim(r)}`}>{fmtRub0(r.newRevenue)}</td>
+                  <td className={`p-2 text-right font-mono ${dim(r)}`}>{r.newRevenueSharePct != null ? `${r.newRevenueSharePct}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="px-3 py-1.5 text-[11px] text-muted-foreground/70">
+          * — неполный интервал (выходит за границы периода).
+          {histNote && <> История наблюдений начинается {data.historyFrom} — в первом интервале «новыми» выглядят и давние клиенты.</>}
+          {' '}Клиент = организация (ЮЛ) или телефон (ФЛ); учитываются выбранные фильтры (станции/регион/тип клиента).
+          {' '}В Excel-экспорт попадают и списки конкретных клиентов (лист на интервал).
+        </p>
+        {/* ленивые листы Excel: списки клиентов по завершённым интервалам (cap 12, чтобы day-нарезка не плодила сотни листов) */}
+        {iv.filter((r) => !r.partial && r.newClients > 0).slice(-12).map((r) => (
+          <NewClientsExportMarker key={`ex-${r.key}`} companyId={companyId}
+            from={r.from} to={r.to} label={r.label} narrow={narrow} />
+        ))}
+      </CardContent>
+      <NewClientsListModal companyId={companyId} interval={sel} narrow={narrow} onClose={() => setSel(null)} />
+    </Card>
+  )
+}
+
+/** Новые клиенты для произвольных периодов сравнения: карточка на период.
+ * Счётчики также уходят в Excel-экспорт (скрытая таблица «Новые клиенты»). */
+function NewClientsManualBlock({ companyId, periods, narrow }: {
+  companyId: string; periods: Period[]; narrow: Narrow
+}) {
+  const [sel, setSel] = useState<{ from: string; to: string; label: string } | null>(null)
+  const results = useQueries({
+    queries: periods.map((per) => ({
+      queryKey: ['charge-new-clients-list', companyId, per.from, per.to, narrow.key, 'card'],
+      queryFn: () => getChargeNewClientsList({
+        companyId, dateFrom: per.from, dateTo: per.to, limit: 1,
+        stations: narrow.stations, regions: narrow.regions, dim: narrow.dim, dimVal: narrow.dimVal,
+      }),
+      enabled: !!per.from && !!per.to,
+    })),
+  })
+  const exData = periods.map((per, i) => [
+    `Период ${i + 1}`, per.from, per.to, results[i]?.data?.count ?? null,
+  ] as (string | number | null)[])
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-center gap-2 border-b bg-muted/20 px-3 py-1.5">
+          <span className="text-[11px] font-medium">Новые клиенты по периодам</span>
+          <span className="text-[11px] text-muted-foreground">впервые за всю историю · клик — конкретные клиенты</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 p-3 md:grid-cols-4">
+          {periods.map((per, i) => (
+            <button key={`${per.from}-${per.to}`} type="button"
+              onClick={() => setSel({ from: per.from, to: per.to, label: `${per.from} — ${per.to}` })}
+              className="rounded-lg border bg-muted/20 p-3 text-left transition-colors hover:bg-muted/40">
+              <div className="text-[11px] text-muted-foreground">Период {i + 1} · {per.from.slice(5)}—{per.to.slice(5)}</div>
+              <div className="mt-1 text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                {results[i]?.isLoading ? '…' : nf0.format(results[i]?.data?.count ?? 0)}
+              </div>
+              <div className="text-[11px] text-muted-foreground">новых клиентов</div>
+            </button>
+          ))}
+        </div>
+        <ExportOnlyTable name="Новые клиенты"
+          columns={['Период', 'С', 'По', 'Новых клиентов']} rows={exData} />
+        {/* ленивые листы Excel: список клиентов на каждый сравниваемый период */}
+        {periods.map((per, i) => (
+          <NewClientsExportMarker key={`ex-${per.from}-${per.to}`} companyId={companyId}
+            from={per.from} to={per.to} label={`П${i + 1} ${per.from.slice(5)}—${per.to.slice(5)}`} narrow={narrow} />
+        ))}
+      </CardContent>
+      <NewClientsListModal companyId={companyId} interval={sel} narrow={narrow} onClose={() => setSel(null)} />
+    </Card>
+  )
+}
+
 const MANUAL_DEFAULTS = { metric: 'amount' as ChargeMetric, groupBy: 'station' as ChargeSeriesBy, periods: null as Period[] | null }
 
 /** Произвольные периоды (2–4) по выбранному разрезу и метрике. */
@@ -1125,6 +1362,7 @@ function ManualCompare({ companyId, dateFrom, dateTo }: { companyId: string; dat
             <ComparisonTable
               columns={data.periods.map((per, i) => ({ label: `П${i + 1}`, hint: `${per.from.slice(5)}—${per.to.slice(5)}` }))}
               lines={data.lines} metric={p.metric} firstCol={GROUP_LABELS[data.group_by] ?? 'Разрез'} />
+            <NewClientsManualBlock companyId={companyId} periods={periods} narrow={n} />
           </div>
         )}
     </div>

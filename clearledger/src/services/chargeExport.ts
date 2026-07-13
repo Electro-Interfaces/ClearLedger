@@ -9,7 +9,10 @@
 
 import { toPng } from 'html-to-image'
 import { saveAs } from 'file-saver'
-import { getChargePivot, getChargeSessionRows, type ChargePivotDim, type ChargeMetric, type ChargeSessionRow } from './analyticsService'
+import {
+  getChargePivot, getChargeSessionRows, getChargeNewClientsList,
+  type ChargePivotDim, type ChargeMetric, type ChargeSessionRow, type ChargeNewClientRow,
+} from './analyticsService'
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
@@ -115,6 +118,41 @@ export async function exportChargeExcel(el: HTMLElement, title: string, subtitle
     if (t.columns.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: t.columns.length } }
   })
 
+  // Ленивые листы: списки КОНКРЕТНЫХ новых клиентов по периодам. Данных нет в DOM
+  // (они на сервере) — компонент оставляет маркеры [data-export-newclients] с
+  // параметрами запроса, экспортёр дотягивает список и строит лист на период.
+  const lazySpecs = Array.from(el.querySelectorAll<HTMLElement>('[data-export-newclients]'))
+  for (const le of lazySpecs) {
+    try {
+      const spec = JSON.parse(le.getAttribute('data-export-newclients') ?? '') as {
+        companyId: string; from: string; to: string; label: string
+        stations?: string[]; regions?: string[]; dim?: string; dimVal?: string
+      }
+      const res = await getChargeNewClientsList({
+        companyId: spec.companyId, dateFrom: spec.from, dateTo: spec.to, limit: 1000,
+        stations: spec.stations, regions: spec.regions, dim: spec.dim, dimVal: spec.dimVal,
+      })
+      if (!res.clients.length) continue
+      const ws = wb.addWorksheet(safeSheet(`Новые ${spec.label}`, used))
+      ws.addRow([`Новые клиенты · ${spec.label} (${spec.from} — ${spec.to})`]).font = { bold: true, size: 13 }
+      ws.addRow([`Всего ${res.count}${res.count > res.clients.length ? ` · в листе первые ${res.clients.length} по выручке` : ''}`])
+        .font = { italic: true, color: { argb: 'FF888888' } }
+      ws.addRow([])
+      const head = ws.addRow(['Клиент', 'Тип', 'Первая сессия', 'Сессий', 'кВт·ч', 'Выручка, ₽', 'ЭЗС'])
+      head.font = { bold: true }
+      head.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } } })
+      res.clients.forEach((c: ChargeNewClientRow) => {
+        const row = ws.addRow([c.clientName || c.userId || c.key, c.userType ?? '', c.firstAt ?? '', c.sessions, c.kwh, c.revenue, c.stations])
+        row.eachCell((cell) => {
+          if (typeof cell.value === 'number') { cell.numFmt = '#,##0.##'; cell.alignment = { horizontal: 'right' } }
+        })
+      })
+      ws.columns = [{ width: 30 }, { width: 6 }, { width: 18 }, { width: 9 }, { width: 10 }, { width: 12 }, { width: 6 }]
+      ws.views = [{ state: 'frozen', ySplit: 4 }]
+      ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 7 } }
+    } catch { /* пропуск листа */ }
+  }
+
   const charts = findCharts(el)
   if (charts.length) {
     const ws = wb.addWorksheet(safeSheet('Графики', used))
@@ -132,6 +170,32 @@ export async function exportChargeExcel(el: HTMLElement, title: string, subtitle
 
   const buf = await wb.xlsx.writeBuffer()
   saveAs(new Blob([buf], { type: XLSX_MIME }), `${fileBase(title)}.xlsx`)
+}
+
+/** Точечная выгрузка списка новых клиентов (кнопка в модалке): один лист. */
+export async function exportNewClientsXlsx(
+  label: string, count: number, clients: ChargeNewClientRow[],
+): Promise<void> {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet('Новые клиенты')
+  ws.addRow([`Новые клиенты · ${label}`]).font = { bold: true, size: 13 }
+  ws.addRow([`Всего ${count}${count > clients.length ? ` · в листе первые ${clients.length} по выручке` : ''}`])
+    .font = { italic: true, color: { argb: 'FF888888' } }
+  ws.addRow([])
+  const head = ws.addRow(['Клиент', 'Тип', 'Первая сессия', 'Сессий', 'кВт·ч', 'Выручка, ₽', 'ЭЗС'])
+  head.font = { bold: true }
+  clients.forEach((c) => {
+    const row = ws.addRow([c.clientName || c.userId || c.key, c.userType ?? '', c.firstAt ?? '', c.sessions, c.kwh, c.revenue, c.stations])
+    row.eachCell((cell) => {
+      if (typeof cell.value === 'number') { cell.numFmt = '#,##0.##'; cell.alignment = { horizontal: 'right' } }
+    })
+  })
+  ws.columns = [{ width: 30 }, { width: 6 }, { width: 18 }, { width: 9 }, { width: 10 }, { width: 12 }, { width: 6 }]
+  ws.views = [{ state: 'frozen', ySplit: 4 }]
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 7 } }
+  const buf = await wb.xlsx.writeBuffer()
+  saveAs(new Blob([buf], { type: XLSX_MIME }), `${fileBase(`Новые клиенты · ${label}`)}.xlsx`)
 }
 
 export async function exportChargePdf(el: HTMLElement, title: string): Promise<void> {
