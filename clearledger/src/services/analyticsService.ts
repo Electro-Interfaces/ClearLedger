@@ -34,21 +34,90 @@ export interface PnLResponse {
 
 export interface FuelBalanceLine {
   label: string
+  station_code: number | null
+  fuel_code: number | null
   balance_start_liters: number
   receipts_liters: number
   sales_liters: number
   balance_end_liters: number
+  variance_liters: number
+  variance_pct: number
   loss_liters: number
   loss_pct: number
   tanks_count: number
+  records_count: number
+  continuity_breaks: number
+}
+
+export interface FuelBalanceTank {
+  station_id: string
+  station_code: number | null
+  station_name: string
+  tank_number: number
+  fuel_code: number | null
+  fuel_name: string
+  fuel_changed: boolean
+  first_shift: number
+  last_shift: number
+  first_closed_at: string | null
+  last_closed_at: string | null
+  balance_start_liters: number
+  receipts_liters: number
+  sales_liters: number
+  balance_end_liters: number
+  variance_liters: number
+  variance_pct: number
+  shift_variance_liters: number
+  continuity_gap_liters: number
+  continuity_breaks: number
+  records_count: number
+}
+
+export interface FuelBalanceIssue {
+  type: 'continuity_gap' | 'fuel_change'
+  station_id: string
+  station_code: number | null
+  station_name: string
+  tank_number: number
+  fuel_name: string
+  previous_shift: number
+  current_shift: number
+  previous_closed_at: string | null
+  current_closed_at: string | null
+  previous_end_liters: number
+  current_start_liters: number
+  gap_liters: number
 }
 
 export interface FuelBalanceResponse {
   period: { from: string; to: string }
   group_by: 'station' | 'fuel' | 'station_fuel'
+  dimensions: {
+    stations: { code: number; name: string }[]
+    fuels: { code: number; name: string }[]
+  }
+  method: {
+    formula: string
+    variance_sign: string
+    natural_loss_applied: boolean
+    adjustments_applied: boolean
+    continuity_tolerance_liters: number
+  }
   lines: FuelBalanceLine[]
+  tanks: FuelBalanceTank[]
+  issues: FuelBalanceIssue[]
   totals: FuelBalanceLine
   shifts_count: number
+  integrity: {
+    unique_tanks: number
+    records_count: number
+    continuity_checks: number
+    continuity_breaks: number
+    continuity_gap_liters: number
+    fuel_changes: number
+    issues_total: number
+    issues_truncated: boolean
+  }
 }
 
 export interface SalesChannelLine {
@@ -396,11 +465,17 @@ export async function getPnL(p: PeriodParams & { groupBy?: 'station' | 'fuel' | 
   })
 }
 
-export async function getFuelBalance(p: PeriodParams & { groupBy?: 'station' | 'fuel' | 'station_fuel' }): Promise<FuelBalanceResponse> {
+export async function getFuelBalance(p: PeriodParams & {
+  groupBy?: 'station' | 'fuel' | 'station_fuel'
+  stationCodes?: number[]
+  fuelCodes?: number[]
+}): Promise<FuelBalanceResponse> {
   return get<FuelBalanceResponse>('/api/analytics/fuel-balance', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     group_by: p.groupBy ?? 'station',
     ...(p.stationId ? { station_id: p.stationId } : {}),
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
   })
 }
 

@@ -41,6 +41,7 @@ from app.models import (
     Period,
 )
 from app.services.mapping import normalize_default
+from app.services.fuel_balance import build_fuel_balance
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -395,97 +396,75 @@ class AnalyticsService:
 
     # ─── management: топливный баланс ─────────────────────────────────
 
-    async def fuel_balance(self, f: PeriodFilter, group_by: str = "station") -> dict[str, Any]:
-        """Топливный баланс сети АЗС по резервуарам (FuelTank):
-          недостача_смены = (остаток_нач + приход_ТТН − реализация) − остаток_факт
-          сумма по сменам/резервуарам за период = потери учёта/хранения.
-        group_by = station | fuel | station_fuel.
-        """
-        shifts = await self._load_shifts(f)
-        shift_station = {s.id: s.station_id for s in shifts}
-        shift_ids = [s.id for s in shifts]
-
-        station_ids = {s.station_id for s in shifts if s.station_id}
+    async def fuel_balance(
+        self,
+        f: PeriodFilter,
+        group_by: str = "station",
+        station_codes: list[int] | None = None,
+        fuel_codes: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Периодный баланс: первый остаток + обороты − последний остаток."""
+        all_shifts = await self._load_shifts(f)
+        station_ids = {shift.station_id for shift in all_shifts if shift.station_id}
         stations_map: dict[uuid.UUID, FuelStation] = {}
         if station_ids:
-            for st in (await self.session.execute(
+            for station in (await self.session.execute(
                 select(FuelStation).where(FuelStation.id.in_(station_ids))
             )).scalars().all():
-                stations_map[st.id] = st
+                stations_map[station.id] = station
 
-        tanks: list[FuelTank] = []
-        if shift_ids:
-            tanks = list((await self.session.execute(
-                select(FuelTank).where(FuelTank.shift_id.in_(shift_ids))
-            )).scalars().all())
-
-        agg: dict[str, dict[str, Any]] = defaultdict(
-            lambda: {"label": "", "start": 0.0, "receipts": 0.0, "sales": 0.0, "end": 0.0, "loss": 0.0, "tanks": 0}
-        )
-        for t in tanks:
-            st = stations_map.get(shift_station.get(t.shift_id)) if t.shift_id else None
-            station_name = st.name if st else "АЗС без привязки"
-            fuel = (t.fuel_type or (str(t.fuel_code) if t.fuel_code is not None else "—")).strip() or "—"
-            if group_by == "fuel":
-                key = label = fuel
-            elif group_by == "station_fuel":
-                key = f"{station_name}|{fuel}"
-                label = f"{station_name} · {fuel}"
-            else:
-                key = label = station_name
-
-            vs = float(t.volume_start or 0.0)
-            ve = float(t.volume_end or 0.0)
-            vr = float(t.volume_received or 0.0)
-            sl = float(t.sales or 0.0)
-
-            g = agg[key]
-            g["label"] = label
-            g["start"] += vs
-            g["receipts"] += vr
-            g["sales"] += sl
-            g["end"] += ve
-            g["loss"] += (vs + vr - sl) - ve  # недостача(+)/излишек(−) смены
-            g["tanks"] += 1
-
-        def _line(g: dict[str, Any]) -> dict[str, Any]:
-            throughput = g["start"] + g["receipts"]
-            loss = g["loss"]
-            return {
-                "label": g["label"],
-                "balance_start_liters": round(g["start"], 1),
-                "receipts_liters": round(g["receipts"], 1),
-                "sales_liters": round(g["sales"], 1),
-                "balance_end_liters": round(g["end"], 1),
-                "loss_liters": round(loss, 1),
-                "loss_pct": round(loss / throughput * 100, 3) if throughput else 0.0,
-                "tanks_count": g["tanks"],
-            }
-
-        lines = sorted((_line(g) for g in agg.values()), key=lambda x: -abs(x["loss_liters"]))
-
-        tot = {"start": 0.0, "receipts": 0.0, "sales": 0.0, "end": 0.0, "loss": 0.0, "tanks": 0}
-        for g in agg.values():
-            for k in ("start", "receipts", "sales", "end", "loss", "tanks"):
-                tot[k] += g[k]
-        tot_through = tot["start"] + tot["receipts"]
-        totals = {
-            "label": "Итого",
-            "balance_start_liters": round(tot["start"], 1),
-            "receipts_liters": round(tot["receipts"], 1),
-            "sales_liters": round(tot["sales"], 1),
-            "balance_end_liters": round(tot["end"], 1),
-            "loss_liters": round(tot["loss"], 1),
-            "loss_pct": round(tot["loss"] / tot_through * 100, 3) if tot_through else 0.0,
-            "tanks_count": tot["tanks"],
+        all_shift_ids = [shift.id for shift in all_shifts]
+        all_tanks = list((await self.session.execute(
+            select(FuelTank).where(FuelTank.shift_id.in_(all_shift_ids))
+        )).scalars().all()) if all_shift_ids else []
+        fuels_by_code: dict[int, str] = {}
+        for tank in all_tanks:
+            if tank.fuel_code is None:
+                continue
+            code = int(tank.fuel_code)
+            fuels_by_code.setdefault(code, (tank.fuel_type or f"Код {code}").strip())
+        dimensions = {
+            "stations": sorted((
+                {"code": int(station.code), "name": station.name}
+                for station in stations_map.values()
+            ), key=lambda row: row["code"]),
+            "fuels": [
+                {"code": code, "name": fuels_by_code[code]}
+                for code in sorted(fuels_by_code)
+            ],
         }
 
+        allowed_station_ids = None
+        if station_codes:
+            selected = set(station_codes)
+            allowed_station_ids = {
+                station_id for station_id, station in stations_map.items()
+                if int(station.code) in selected
+            }
+        shifts = [
+            shift for shift in all_shifts
+            if allowed_station_ids is None or shift.station_id in allowed_station_ids
+        ]
+        shift_ids = {shift.id for shift in shifts}
+        selected_fuels = set(fuel_codes or [])
+        tanks = [
+            tank for tank in all_tanks
+            if tank.shift_id in shift_ids
+            and (not selected_fuels or tank.fuel_code in selected_fuels)
+        ]
+        result = build_fuel_balance(shifts, tanks, stations_map, group_by)
         return {
             "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
             "group_by": group_by,
-            "lines": lines,
-            "totals": totals,
-            "shifts_count": len(shifts),
+            "dimensions": dimensions,
+            "method": {
+                "formula": "Первый остаток + поступления − реализация − последний остаток",
+                "variance_sign": "Плюс — недостача, минус — излишек",
+                "natural_loss_applied": False,
+                "adjustments_applied": False,
+                "continuity_tolerance_liters": 1.0,
+            },
+            **result,
         }
 
     # ─── management: каналы продаж ────────────────────────────────────

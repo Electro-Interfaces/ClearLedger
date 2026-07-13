@@ -13,6 +13,7 @@ import { ChargeSalesRouter } from './ChargeSalesRouter'
 import { FuelOverviewPanel } from './FuelOverviewPanel'
 import { FuelTransactionsPanel } from './FuelTransactionsPanel'
 import { FuelMapPanel } from './FuelMapPanel'
+import { FuelBalancePanel } from './FuelBalancePanel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -25,7 +26,7 @@ import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { useFilters } from '@/contexts/FilterContext'
 import {
   getPnL, getCashFlow, getPayablesReceivables,
-  getVat, getProfit, getFuelBalance,
+  getVat, getProfit,
   fmtMoney, fmtMoneyShort, fmtLiters, fmtPct,
 } from '@/services/analyticsService'
 import { BalanceVitrine } from '@/components/balance/BalanceVitrine'
@@ -140,7 +141,7 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
       {activeTab === 'transactions' && <FuelTransactionsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
       {activeTab === 'margin' && <MgmtMargin companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
       {activeTab === 'purchases' && <ReceiptsSection />}
-      {activeTab === 'tanks' && <MgmtBalance companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'tanks' && <FuelBalancePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
     </div>
   )
 }
@@ -353,78 +354,6 @@ function MgmtMargin({ companyId, dateFrom, dateTo }: { companyId: string; dateFr
         <CardContent className="pt-4 text-xs text-muted-foreground">
           Маржа = выручка без НДС − себестоимость (COGS из проводок 90.02). «₽/литр» — валовая маржа на литр
           проданного топлива. Динамика закупочных цен — на вкладке «Поступления» и в разделе «1С → Цены».
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-/* ── Топливный баланс (приход/реализация/остатки → недостача) ── */
-
-function MgmtBalance({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['analytics-fuelbalance', companyId, dateFrom, dateTo, 'station_fuel'],
-    queryFn: () => getFuelBalance({ companyId, dateFrom, dateTo, groupBy: 'station_fuel' }),
-  })
-  if (isLoading) return <LoadingState />
-  if (error) return <ErrorState message={String(error)} />
-  if (!data || data.lines.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет данных по резервуарам за период</div>
-  const t = data.totals
-  const lossCls = (l: number) => (Math.abs(l) < 1 ? 'text-muted-foreground' : l > 0 ? 'text-red-400' : 'text-amber-400')
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Приход (слив ТТН)" value={fmtLiters(t.receipts_liters)} accent="info" />
-        <KpiCard label="Реализация (ТРК)" value={fmtLiters(t.sales_liters)} />
-        <KpiCard label="Недостача / излишек" value={fmtLiters(t.loss_liters)}
-          accent={Math.abs(t.loss_liters) < 1 ? 'success' : t.loss_liters > 0 ? 'danger' : 'warning'}
-          hint={`${fmtPct(t.loss_pct)} от оборота`} />
-        <KpiCard label="Резервуаров / смен" value={`${t.tanks_count} / ${data.shifts_count}`} />
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b bg-muted/40 text-muted-foreground">
-                <th className="text-left p-2 font-medium">Станция · топливо</th>
-                <th className="text-right p-2 font-medium">Остаток нач.</th>
-                <th className="text-right p-2 font-medium">Приход</th>
-                <th className="text-right p-2 font-medium">Реализация</th>
-                <th className="text-right p-2 font-medium">Остаток кон.</th>
-                <th className="text-right p-2 font-medium">Недостача</th>
-                <th className="text-right p-2 font-medium">%</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.lines.map((l) => (
-                <tr key={l.label} className="border-b border-border/30 hover:bg-muted/30">
-                  <td className="p-2 font-medium truncate max-w-[240px]">{l.label}</td>
-                  <td className="p-2 text-right font-mono text-muted-foreground">{fmtLiters(l.balance_start_liters)}</td>
-                  <td className="p-2 text-right font-mono text-blue-400">{fmtLiters(l.receipts_liters)}</td>
-                  <td className="p-2 text-right font-mono">{fmtLiters(l.sales_liters)}</td>
-                  <td className="p-2 text-right font-mono text-muted-foreground">{fmtLiters(l.balance_end_liters)}</td>
-                  <td className={`p-2 text-right font-mono ${lossCls(l.loss_liters)}`}>{fmtLiters(l.loss_liters)}</td>
-                  <td className={`p-2 text-right font-mono ${lossCls(l.loss_liters)}`}>{fmtPct(l.loss_pct)}</td>
-                </tr>
-              ))}
-              <tr className="bg-muted/60 font-medium">
-                <td className="p-2">Итого</td>
-                <td className="p-2 text-right font-mono">{fmtLiters(t.balance_start_liters)}</td>
-                <td className="p-2 text-right font-mono">{fmtLiters(t.receipts_liters)}</td>
-                <td className="p-2 text-right font-mono">{fmtLiters(t.sales_liters)}</td>
-                <td className="p-2 text-right font-mono">{fmtLiters(t.balance_end_liters)}</td>
-                <td className={`p-2 text-right font-mono ${lossCls(t.loss_liters)}`}>{fmtLiters(t.loss_liters)}</td>
-                <td className={`p-2 text-right font-mono ${lossCls(t.loss_liters)}`}>{fmtPct(t.loss_pct)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardContent className="pt-4 text-xs text-muted-foreground">
-          Баланс по резервуарам за период: <span className="text-foreground">Остаток нач + Приход(ТТН слив) − Реализация(ТРК) − Остаток факт = Недостача</span>.
-          Положительное значение — потеря (усушка/недолив/недостача), отрицательное — излишек. Норма естественной убыли пока
-          не вычитается (нужен справочник НСИ) — расхождение показано «как есть».
         </CardContent>
       </Card>
     </div>

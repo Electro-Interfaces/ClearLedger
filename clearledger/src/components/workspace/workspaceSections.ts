@@ -28,7 +28,7 @@ export const MGMT_MENU: CentralMenuItem[] = [
   { key: 'transactions', label: 'Операции' },
   { key: 'margin',       label: 'Маржа и цены' },
   { key: 'purchases',    label: 'Поступления' },
-  { key: 'tanks',        label: 'Топливный баланс' },
+  { key: 'tanks',        label: 'Контроль баланса' },
 ]
 
 // Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).

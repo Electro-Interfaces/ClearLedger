@@ -48,6 +48,20 @@ def _csv(s: str | None) -> list[str] | None:
     return items or None
 
 
+def _csv_ints(s: str | None, field: str) -> list[int] | None:
+    """Comma-separated query → список целых кодов."""
+    values = _csv(s)
+    if values is None:
+        return None
+    try:
+        return [int(value) for value in values]
+    except ValueError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {field}: {s}",
+        ) from exc
+
+
 def _parse_periods(s: str) -> list[tuple[date, date]]:
     """periods=from:to,from:to,... → список (from,to). 2–4 диапазона, иначе 400."""
     out: list[tuple[date, date]] = []
@@ -103,13 +117,20 @@ async def get_fuel_balance(
     date_to: str,
     group_by: str = Query("station", pattern="^(station|fuel|station_fuel)$"),
     station_id: str | None = None,
+    station_codes: str | None = None,
+    fuel_codes: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Топливный баланс: приход(ТТН) − реализация ± остатки = недостача. group_by=station|fuel|station_fuel."""
     f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
     svc = AnalyticsService(db)
-    return await svc.fuel_balance(f, group_by=group_by)
+    return await svc.fuel_balance(
+        f,
+        group_by=group_by,
+        station_codes=_csv_ints(station_codes, "station_codes"),
+        fuel_codes=_csv_ints(fuel_codes, "fuel_codes"),
+    )
 
 
 @router.get("/sales-channels")
