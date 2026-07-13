@@ -454,6 +454,19 @@ async def create_all() -> None:
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS basis VARCHAR(100)"
         ))
 
+        # v2.9: bp-export — Проведен/ПометкаУдаления документов ЦБ (аудит 13.07):
+        # инвентаризации полными строками (+ДатаЗаполнения), списания со ссылкой
+        # на инвентаризацию-основание. Данные наполняет пул с боевой ЦБ (dev→prod).
+        for stmt in (
+            "ALTER TABLE cb_inventory_doc ADD COLUMN IF NOT EXISTS posted BOOLEAN NOT NULL DEFAULT true",
+            "ALTER TABLE cb_inventory_doc ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE cb_inventory_doc ADD COLUMN IF NOT EXISTS fill_date VARCHAR(30)",
+            "ALTER TABLE cb_movement_doc ADD COLUMN IF NOT EXISTS posted BOOLEAN NOT NULL DEFAULT true",
+            "ALTER TABLE cb_movement_doc ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT false",
+            "ALTER TABLE cb_movement_doc ADD COLUMN IF NOT EXISTS inventory_ref VARCHAR(36)",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""
