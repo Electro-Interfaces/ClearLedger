@@ -61,6 +61,14 @@ export const MODULE_COMPONENTS: ModuleComponent[] = [
   },
   // ── Бухгалтерский · СТАНДАРТНЫЕ (подготовка к 1С — общепринятое) ──
   {
+    id: 'acc_std_export', moduleId: 'accounting', kind: 'standard',
+    label: 'Выгрузка в БП',
+    description: 'Ledger — продюсер JSON-пакетов «смена→БП ГИГ» (замена TL_ЭкспортБП): превью состава документов/НСИ, хеш, скачать JSON или выгрузить в каталог, откуда грузит TL_СопуткаСервис. Приёмник TradeLedger.cfe не меняется.',
+    profiles: ['fuel'], status: 'active',
+    menuItems: [{ key: 'export', label: 'Выгрузка в БП' }],
+    builderKinds: ['recipe', 'purchase', 'retail_sale_sidegoods', 'production_release', 'inventory', 'gain', 'writeoff', 'transfer'],
+  },
+  {
     id: 'acc_std_recon1c', moduleId: 'accounting', kind: 'standard',
     label: 'Сверка с 1С',
     description: 'Готовность к загрузке и разница приложение↔1С: воронка выгрузки пакетов, сверка сумм с проведёнными документами 1С, расхождения.',

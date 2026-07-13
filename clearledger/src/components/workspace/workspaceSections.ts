@@ -62,12 +62,9 @@ export const FIN_MENU: CentralMenuItem[] = [
   { key: 'payables',    label: 'Кредиторка' },
 ]
 
-export const ACC_MENU: CentralMenuItem[] = [
-  { key: 'overview',  label: 'Обзор' },
-  { key: 'documents', label: 'Документы 1С' },
-  { key: 'export',    label: 'Очередь выгрузки' },
-  { key: 'periods',   label: 'Периоды' },
-]
+// Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
+// (getModuleComponentDefs('accounting')) в useWorkspaceSections — статичного ACC_MENU
+// нет. Реальные пункты: Дашборды · Поступления · Смены · Выгрузка в БП · Сверка · Маржа.
 
 export const TAX_MENU: CentralMenuItem[] = [
   { key: 'vat',        label: 'НДС' },
