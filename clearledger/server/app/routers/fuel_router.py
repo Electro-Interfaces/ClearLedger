@@ -55,18 +55,18 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db, async_session_factory
 from app.models import (
     FuelStation, FuelShift, FuelTank, FuelPump, FuelCashMovement,
-    FuelReceipt, FuelReceiptOverride, FuelReceiptCost, FuelPurchaseBatch,
+    FuelReceipt, FuelReceiptOverride, FuelReceiptCost, FuelOpeningBalance, FuelPurchaseBatch,
     FuelExportDoc, FuelShiftSale, FuelShiftSaleOverride, FuelShiftCorrectionNote,
     FuelTransaction, ExportPacket, User, DataEntry,
 )
 from app.services.fuel_documents import build_shift_documents, build_ttn_documents
 from app.services.fuel_costing import FuelCostingService
 from app.services.fuel_dashboard import FuelDashboardService
-from app.services.fuel_mappings import MappingContext, load_mapping_context
+from app.services.fuel_mappings import MappingContext, build_sales_agg, load_mapping_context
 from app.services.sts_client import (
     sts_get_shifts, sts_get_shift_report, sts_get_receipts,
     sts_test_connection,
@@ -681,26 +681,9 @@ async def ingest_fuel_shifts(
         # sales — раскладка по КАНАЛУ ОПЛАТЫ × виду топлива через маппинг
         # приложения (PaymentMapping/PaymentChannel). Эталон — TradeLedger.cfe:
         # канал определяется по pay_type.name (подстрока), НЕ по pay_type.id.
-        sales_data = report.get("sales", [])
-        chan_agg: dict[tuple[str, int], dict] = {}
-        for sale in sales_data:
-            pay_name = sale.get("pay_type", {}).get("name", "")
-            channel, warehouse = ctx.resolve_channel(pay_name)
-            if not channel:      # не замаплено (→ctx.unmapped) или явный игнор (купон/прокачка)
-                continue
-            for f in sale.get("fuel", []):
-                rel = f.get("release", {})
-                try:
-                    code = int(f.get("service", {}).get("service_code"))
-                except (TypeError, ValueError):
-                    continue
-                agg = chan_agg.setdefault(
-                    (channel, code),
-                    {"liters": 0.0, "amount": 0.0, "discount": 0.0, "warehouse": warehouse},
-                )
-                agg["liters"] += float(rel.get("volume", 0) or 0)
-                agg["amount"] += float(rel.get("cost", 0) or 0)
-                agg["discount"] += float(rel.get("discount", 0) or 0)
+        # Общая логика с пересборкой (renormalize_shift_sales) + репейр обрезки
+        # cost=1млн sales-блока STS — build_sales_agg.
+        chan_agg = build_sales_agg(report, ctx)
 
         # legacy-агрегаты FuelShift (обратная совместимость UI): нал / карта / прочее
         cash = sum(a["amount"] for (ch, _), a in chan_agg.items() if ch == "retail_cash")
@@ -1824,6 +1807,78 @@ async def costing_margin(
     return await svc.compute(date.fromisoformat(date_from), date.fromisoformat(date_to), group_by)
 
 
+@router.get("/costing/decision-dashboard")
+async def costing_decision_dashboard(
+    company_id: str = Query(...),
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """FIFO-маржа и ценовые разрезы для управленческих решений."""
+    cid = await assert_company_member(company_id, user, db)
+    period_from = date.fromisoformat(date_from)
+    period_to = date.fromisoformat(date_to)
+    if period_from > period_to:
+        raise HTTPException(422, "Начало периода позже окончания")
+    svc = FuelCostingService(db, cid)
+    return await svc.decision_dashboard(period_from, period_to)
+
+
+@router.get("/costing/opening-balances")
+async def costing_opening_balances(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Входящие остатки по АЗС × топливо перед началом загруженной истории."""
+    cid = await _company_id(user, db)
+    rows = (await db.execute(select(FuelOpeningBalance).where(
+        FuelOpeningBalance.company_id == cid
+    ).order_by(FuelOpeningBalance.as_of, FuelOpeningBalance.station_id,
+               FuelOpeningBalance.fuel_code))).scalars().all()
+    stations = {station.id: station for station in (await db.execute(select(FuelStation).where(
+        FuelStation.company_id == cid))).scalars().all()}
+    ctx = await load_mapping_context(db, cid)
+    result = []
+    for row in rows:
+        station = stations.get(row.station_id)
+        fuel = ctx.fuel(row.fuel_code)
+        result.append({
+            "id": str(row.id),
+            "station_id": str(row.station_id),
+            "station_code": station.code if station else None,
+            "station_name": station.name if station else str(row.station_id),
+            "fuel_code": row.fuel_code,
+            "fuel_name": (fuel.fuel_name if fuel else None) or f"Код {row.fuel_code}",
+            "as_of": row.as_of.isoformat(),
+            "liters": float(row.liters or 0),
+            "cost_per_liter": float(row.cost_per_liter or 0),
+            "value": round(float(row.liters or 0) * float(row.cost_per_liter or 0), 2),
+            "source": row.source,
+            "note": row.note,
+        })
+    return {
+        "rows": result,
+        "totals": {
+            "count": len(result),
+            "liters": round(sum(row["liters"] for row in result), 3),
+            "value": round(sum(row["value"] for row in result), 2),
+        },
+    }
+
+
+@router.post("/costing/opening-balances/auto")
+async def recalculate_costing_opening_balances(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Пересчитать минимальные входящие остатки по загруженной истории FIFO."""
+    cid = await _company_id(user, db)
+    result = await FuelCostingService(db, cid).recalculate_opening_balances()
+    await db.commit()
+    return {"ok": True, **result}
+
+
 @router.get("/receipts/{receipt_id}/costing")
 async def receipt_costing(
     receipt_id: str,
@@ -1963,10 +2018,15 @@ async def allocate_purchase_batch(
     if not station_uuids:
         raise HTTPException(422, "Не выбраны АЗС для распределения")
 
-    receipts = (await db.execute(select(FuelReceipt).where(
+    receipt_filters = [
         FuelReceipt.company_id == cid,
         FuelReceipt.station_id.in_(station_uuids),
         FuelReceipt.fuel_code == b.fuel_code,
+    ]
+    if b.purchase_date is not None:
+        receipt_filters.append(FuelReceipt.received_at >= b.purchase_date)
+    receipts = (await db.execute(select(FuelReceipt).where(
+        *receipt_filters,
     ).order_by(FuelReceipt.received_at))).scalars().all()
 
     remaining = float(b.total_liters or 0)
@@ -1978,6 +2038,8 @@ async def allocate_purchase_batch(
         liters = float(r.doc_volume_liters or 0)
         if liters <= 0:
             continue
+        if liters - remaining > 1e-6:
+            break
         fkey = _receipt_fuel_key(r.fuel_code)
         cost = (await db.execute(select(FuelReceiptCost).where(
             FuelReceiptCost.company_id == cid,
@@ -1985,6 +2047,10 @@ async def allocate_purchase_batch(
             FuelReceiptCost.ttn == r.ttn,
             FuelReceiptCost.fuel_code == fkey,
         ).limit(1))).scalar_one_or_none()
+        if cost is not None and not (
+            cost.source == "purchase_batch" and cost.purchase_batch_id == b.id
+        ):
+            continue
         if cost is None:
             cost = FuelReceiptCost(company_id=cid, station_id=r.station_id, ttn=r.ttn, fuel_code=fkey)
             db.add(cost)
@@ -1999,7 +2065,7 @@ async def allocate_purchase_batch(
         covered += 1
 
     b.allocated_liters = allocated
-    b.status = "allocated"
+    b.status = "allocated" if remaining <= 1e-6 else "partial"
     await db.commit()
     return {
         "ok": True,
@@ -2349,6 +2415,21 @@ async def transactions_overview(
         "by_payment": [{"name": r.pay_type_name or "—", "count": int(r.n),
                         "liters": round(float(r.l), 2), "amount": round(float(r.a), 2)} for r in pm],
     }
+
+
+@router.get("/sales-channels")
+async def sales_channels(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    pay_types: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Каналы продаж: связанные разрезы АЗС × оплата × топливо × день."""
+    cid = await _company_id(user, db)
+    return await FuelDashboardService(db, cid).sales_channels(
+        date.fromisoformat(date_from), date.fromisoformat(date_to),
+        _csv_ints(station_codes), _csv_ints(fuel_codes), _csv_strs(pay_types),
+    )
 
 
 @router.post("/stations/sync-geo")

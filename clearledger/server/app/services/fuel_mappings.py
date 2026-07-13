@@ -59,6 +59,76 @@ class MappingContext:
             return None
 
 
+# Значение-обрезка поля cost в sales-блоке STS (аудит L2 13.07.2026): на крупных
+# сменах строка канала капится ровно на 1 000 000.00 при честных литрах
+# (208/7041 СберБанк АИ-92: cost=1млн, наливы того же канала = 1 695 506,11).
+STS_COST_CAP = 1_000_000.00
+# Дубли-аналитика sales-блока: НЕ входят в psm.total (пробы 13.07.2026 — продажи
+# по дисконтным картам уже включены в Наличные/СберБанк). Исключаются из сверки
+# с psm при репейре обрезки. См. memory sts-pay-types-semantics.
+_DUP_ANALYTIC_PAY = ("дисконт", "кред.рубл")
+
+
+def build_sales_agg(raw_report: dict | None, ctx: "MappingContext") -> dict[tuple[str, int], dict]:
+    """sales-блок STS-смены → {(канал, код топлива): {liters, amount, discount, warehouse}}.
+
+    Единая логика ingest (fuel_router) и пересборки (renormalize_shift_sales):
+    resolve_channel по имени вида оплаты; игноры/незамапленные пропускаются.
+
+    Репейр обрезки STS_COST_CAP: если по топливу ровно одна строка с
+    cost=1 000 000.00 и Σ sales топлива (без дублей-аналитики) меньше psm.total
+    этого топлива — недостающая сумма доначисляется этой строке (Σ строк смены
+    сходится с psm; сверено с наливами: 1 695 673 расч. vs 1 695 506 факт, ±скидки).
+    """
+    raw = raw_report or {}
+
+    # psm.total по топливу — эталон суммы топлива в смене
+    psm_by_fuel: dict[int, float] = {}
+    for t in (raw.get("psm") or {}).get("total") or []:
+        try:
+            code = int((t.get("service") or {}).get("service_code"))
+        except (TypeError, ValueError):
+            continue
+        psm_by_fuel[code] = psm_by_fuel.get(code, 0.0) + float((t.get("release") or {}).get("amount", 0) or 0)
+
+    agg: dict[tuple[str, int], dict] = {}
+    sales_by_fuel: dict[int, float] = {}  # Σ по топливу всех строк, входящих в psm
+    capped: dict[int, list[dict]] = {}    # топливо → строки agg с обрезкой
+
+    for sale in raw.get("sales") or []:
+        pay_name = (sale.get("pay_type") or {}).get("name", "")
+        is_dup = any(p in (pay_name or "").lower() for p in _DUP_ANALYTIC_PAY)
+        channel, warehouse = ctx.resolve_channel(pay_name)
+        for f in sale.get("fuel") or []:
+            rel = f.get("release") or {}
+            try:
+                code = int((f.get("service") or {}).get("service_code"))
+            except (TypeError, ValueError):
+                continue
+            cost = float(rel.get("cost", 0) or 0)
+            if not is_dup:  # дубли-аналитика не входят в psm.total
+                sales_by_fuel[code] = sales_by_fuel.get(code, 0.0) + cost
+            if not channel:
+                continue
+            a = agg.setdefault((channel, code),
+                               {"liters": 0.0, "amount": 0.0, "discount": 0.0, "warehouse": warehouse})
+            a["liters"] += float(rel.get("volume", 0) or 0)
+            a["amount"] += cost
+            a["discount"] += float(rel.get("discount", 0) or 0)
+            if cost == STS_COST_CAP:
+                capped.setdefault(code, []).append(a)
+
+    # Репейр: ровно одна обрезанная строка топлива + недобор против psm → доначислить
+    for code, rows in capped.items():
+        if len(rows) != 1:
+            continue
+        gap = round(psm_by_fuel.get(code, 0.0) - sales_by_fuel.get(code, 0.0), 2)
+        if gap > 0.02:
+            rows[0]["amount"] = round(rows[0]["amount"] + gap, 2)
+
+    return agg
+
+
 async def load_mapping_context(db: AsyncSession, company_id: uuid.UUID) -> MappingContext:
     """Загрузить маппинги оплат/каналов/топлива компании одним проходом."""
     pms = (

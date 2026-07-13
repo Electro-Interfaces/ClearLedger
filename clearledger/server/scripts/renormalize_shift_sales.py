@@ -24,7 +24,7 @@ from sqlalchemy import delete, select  # noqa: E402
 
 from app.database import async_session_factory  # noqa: E402
 from app.models import Company, FuelShift, FuelShiftSale  # noqa: E402
-from app.services.fuel_mappings import load_mapping_context  # noqa: E402
+from app.services.fuel_mappings import build_sales_agg, load_mapping_context  # noqa: E402
 
 COMPANY = "gig"
 NEW_PATTERNS = ("кредит", "кред.рубл", "монополи")
@@ -36,28 +36,6 @@ def _needs(raw: dict | None) -> bool:
         if any(pat in name for pat in NEW_PATTERNS):
             return True
     return False
-
-
-def _rebuild_rows(raw: dict | None, ctx) -> dict[tuple[str, int], dict]:
-    """sales-блок → {(канал, код топлива): {liters, amount, discount, warehouse}} — как ingest."""
-    agg: dict[tuple[str, int], dict] = {}
-    for sale in (raw or {}).get("sales") or []:
-        pay_name = (sale.get("pay_type") or {}).get("name", "")
-        channel, warehouse = ctx.resolve_channel(pay_name)
-        if not channel:
-            continue
-        for f in sale.get("fuel") or []:
-            rel = f.get("release") or {}
-            try:
-                code = int((f.get("service") or {}).get("service_code"))
-            except (TypeError, ValueError):
-                continue
-            a = agg.setdefault((channel, code),
-                               {"liters": 0.0, "amount": 0.0, "discount": 0.0, "warehouse": warehouse})
-            a["liters"] += float(rel.get("volume", 0) or 0)
-            a["amount"] += float(rel.get("cost", 0) or 0)
-            a["discount"] += float(rel.get("discount", 0) or 0)
-    return agg
 
 
 async def main() -> None:
@@ -72,7 +50,7 @@ async def main() -> None:
         for s in shifts:
             if not rebuild_all and not _needs(s.raw_report):
                 continue
-            agg = _rebuild_rows(s.raw_report, ctx)
+            agg = build_sales_agg(s.raw_report, ctx)
             await db.execute(delete(FuelShiftSale).where(FuelShiftSale.shift_id == s.id))
             for (channel, code), a in agg.items():
                 db.add(FuelShiftSale(
