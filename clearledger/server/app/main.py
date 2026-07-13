@@ -27,6 +27,7 @@ from app.routers import (
     fuel_router,
     fuel_mappings_router,
     online_orders_router,
+    online_reconciliation_router,
     invitations_router,
     export_packets_router,
     intake_router,
@@ -157,6 +158,7 @@ app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(fuel_mappings_router.router, prefix=API_PREFIX)
 app.include_router(online_orders_router.router, prefix=API_PREFIX)
+app.include_router(online_reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(ops_router.router, prefix=API_PREFIX)  # управленческий кокпит ЭЗС
 app.include_router(source_types_router.router, prefix=API_PREFIX)
 app.include_router(sources_router.router, prefix=API_PREFIX)

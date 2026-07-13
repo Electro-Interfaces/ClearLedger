@@ -3,9 +3,8 @@
  * `display:none`) — возврат к ним без переформатирования. Текущая (не
  * закреплённая) страница показывается живьём и размонтируется при уходе.
  *
- * Ключ keep-alive инстанса — pathname (одна страница на pathname): смена
- * mode/sub рабочего стола идёт через search-параметры и НЕ размонтирует
- * инстанс. Идентификатор закладки при этом — полный URL (см. TabsContext).
+ * Ключ keep-alive инстанса — полный URL (pathname + search), поэтому два
+ * закреплённых вида одного маршрута сохраняют независимое состояние.
  *
  * Скрытые вкладки изолированы снимком роутер-контекста (`UNSAFE_RouteContext`
  * + `UNSAFE_LocationContext`), чтобы их `useParams`/`useSearchParams` не
@@ -39,30 +38,30 @@ export function KeepAliveOutlet() {
   const { tabs } = useTabs()
 
   const pathname = location.pathname
+  const activeKey = pathname + location.search
   const resolved = resolveTab(pathname)
 
-  // Снимки смонтированных страниц по pathname (активная рендерится живьём).
+  // Снимки смонтированных экранов по полному URL (активный рендерится живьём).
   const [mounted, setMounted] = useState<Map<string, Entry>>(() => new Map())
 
-  // Pathname'ы закреплённых вкладок — их держим живыми.
-  const pinnedPaths = tabs.map((t) => t.pathname)
-  const keepKey = pinnedPaths.join('|')
+  const pinnedKeys = tabs.map((tab) => tab.key)
+  const keepKey = pinnedKeys.join('|')
 
-  // Снимок делаем один раз на активацию pathname (замыкание держит outlet/контексты этого рендера).
+  // Снимок делаем один раз на активацию полного URL.
   useEffect(() => {
     if (!resolved) return
     setMounted((prev) => {
       const next = new Map(prev)
-      next.set(pathname, { outlet, routeCtx, locationCtx, workspace: resolved.workspace })
+      next.set(activeKey, { outlet, routeCtx, locationCtx, workspace: resolved.workspace })
       return next
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname])
+  }, [activeKey])
 
   // Держим живыми только закреплённые + текущую; остальные размонтируем.
   useEffect(() => {
     const keep = new Set(keepKey ? keepKey.split('|') : [])
-    keep.add(pathname)
+    keep.add(activeKey)
     setMounted((prev) => {
       let changed = false
       const next = new Map(prev)
@@ -71,7 +70,7 @@ export function KeepAliveOutlet() {
       }
       return changed ? next : prev
     })
-  }, [keepKey, pathname])
+  }, [activeKey, keepKey])
 
   // Нетабуемый путь (напр. 404) — рендерим напрямую, без keep-alive.
   if (!resolved) {
@@ -79,14 +78,14 @@ export function KeepAliveOutlet() {
   }
 
   // Рендерим: закреплённые (смонтированные) + текущую; активная — живьём.
-  const keepSet = new Set(pinnedPaths)
+  const keepSet = new Set(pinnedKeys)
   const keys = [...mounted.keys()].filter((k) => keepSet.has(k))
-  if (!keys.includes(pathname)) keys.push(pathname)
+  if (!keys.includes(activeKey)) keys.push(activeKey)
 
   return (
     <div className="relative flex-1 min-h-0">
       {keys.map((k) => {
-        const active = k === pathname
+        const active = k === activeKey
         const entry: Entry = active
           ? { outlet, routeCtx, locationCtx, workspace: resolved.workspace }
           : mounted.get(k)!

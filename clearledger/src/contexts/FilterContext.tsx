@@ -13,6 +13,7 @@ import {
 } from 'react'
 import { nanoid } from 'nanoid'
 import { useCompany } from './CompanyContext'
+import { clearFilterSelections, sameFilterState } from './filterState'
 
 /** Период дат [from, to] в ISO (YYYY-MM-DD). */
 export interface Period {
@@ -62,11 +63,11 @@ interface FilterContextType extends FilterState {
   /** История применённых наборов (новейшие первыми). */
   history: FilterState[]
   /** Зафиксировать текущий набор в историю (idempotent к последнему). */
-  commitToHistory: () => void
+  commitToHistory: (state?: FilterState) => void
   /** Предустановленные наборы пользователя. */
   presets: NamedPreset[]
   /** Сохранить текущий набор как именованный пресет. */
-  savePreset: (name: string) => void
+  savePreset: (name: string, state?: FilterState) => void
   /** Удалить пресет. */
   deletePreset: (id: string) => void
 
@@ -79,22 +80,6 @@ function defaultPeriod(): Period {
   const d = new Date()
   const first = new Date(d.getFullYear(), d.getMonth(), 1)
   return { from: first.toISOString().slice(0, 10), to: d.toISOString().slice(0, 10) }
-}
-
-function sameStrSet(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false
-  const s = new Set(a)
-  return b.every((x) => s.has(x))
-}
-
-/** Равенство наборов фильтра — для дедупликации истории. */
-function sameState(a: FilterState, b: FilterState): boolean {
-  return a.period.from === b.period.from && a.period.to === b.period.to
-    && a.stationCode === b.stationCode
-    && sameStrSet(a.locationIds, b.locationIds)
-    && sameStrSet(a.regionIds, b.regionIds)
-    && sameStrSet(a.stationCodes, b.stationCodes)
-    && sameStrSet(a.docTypeIds, b.docTypeIds)
 }
 
 const HISTORY_LIMIT = 12
@@ -204,22 +189,23 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     setState(coerceState(s))
   }, [])
 
-  const commitToHistory = useCallback(() => {
+  const commitToHistory = useCallback((nextState?: FilterState) => {
     setState((cur) => {
+      const snapshot = coerceState(nextState ?? cur)
       setHistory((prev) => {
-        if (prev.length > 0 && sameState(prev[0], cur)) return prev
-        const deduped = prev.filter((h) => !sameState(h, cur))
-        return [cur, ...deduped].slice(0, HISTORY_LIMIT)
+        if (prev.length > 0 && sameFilterState(prev[0], snapshot)) return prev
+        const deduped = prev.filter((h) => !sameFilterState(h, snapshot))
+        return [snapshot, ...deduped].slice(0, HISTORY_LIMIT)
       })
       return cur
     })
   }, [])
 
-  const savePreset = useCallback((name: string) => {
+  const savePreset = useCallback((name: string, nextState?: FilterState) => {
     const trimmed = name.trim()
     if (!trimmed) return
     setState((cur) => {
-      setPresets((prev) => [...prev, { id: nanoid(), name: trimmed, state: cur }])
+      setPresets((prev) => [...prev, { id: nanoid(), name: trimmed, state: coerceState(nextState ?? cur) }])
       return cur
     })
   }, [])
@@ -281,8 +267,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const clearAll = useCallback(() => {
-    // Сброс выборок (точки/регионы/станции/типы); период сохраняем.
-    setState((prev) => ({ ...prev, locationIds: [], regionIds: [], stationCodes: [], docTypeIds: [] }))
+    setState(clearFilterSelections)
   }, [])
 
   const filterByLocation = useCallback(

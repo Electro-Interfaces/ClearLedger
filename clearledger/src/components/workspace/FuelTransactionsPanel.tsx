@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { FuelBadge } from '@/components/common/FuelBadge'
+import { cn } from '@/lib/utils'
 import { fmtMoney, fmtLiters } from '@/services/analyticsService'
 import {
   getFuelTxRows, getFuelTxFilters, getFuelTxOverview, syncFuelTransactions, getFuelTxSyncStatus,
@@ -42,7 +43,7 @@ function SortHead({ label, k, sort, order, onSort, right }: {
   const active = sort === k
   const Icon = !active ? ArrowUpDown : order === 'asc' ? ArrowUp : ArrowDown
   return (
-    <th className={`p-2 font-medium ${right ? 'text-right' : 'text-left'}`}>
+    <th className={`px-3 py-2.5 font-medium ${right ? 'text-right' : 'text-left'}`}>
       <button type="button" onClick={() => onSort(k)}
         className={`group inline-flex items-center gap-1 ${right ? 'flex-row-reverse' : ''} ${active ? 'text-primary' : 'hover:text-foreground'}`}>
         <Icon className={`h-3 w-3 ${active ? 'text-primary' : 'opacity-30 group-hover:opacity-70'}`} />{label}
@@ -51,24 +52,86 @@ function SortHead({ label, k, sort, order, onSort, right }: {
   )
 }
 
-/** Кликабельная KPI-плитка (вид топлива / способ оплаты) — фильтрует список. */
-function KpiTile({ title, badge, count, volume, amount, selected, onClick }: {
-  title?: string; badge?: ReactNode; count: number; volume: number; amount: number; selected: boolean; onClick: () => void
+type BreakdownRow = {
+  key: string
+  label: ReactNode
+  count: number
+  liters: number
+  amount: number
+  selected: boolean
+  selectable: boolean
+  onSelect: () => void
+}
+
+function BreakdownTable({ title, nameColumn, rows }: {
+  title: string
+  nameColumn: string
+  rows: BreakdownRow[]
 }) {
+  const selectedCount = rows.filter((row) => row.selected).length
+
   return (
-    <button type="button" onClick={onClick}
-      className={`rounded-lg border p-2.5 text-left transition-all ${selected ? 'border-primary border-2 bg-primary/5 shadow-sm' : 'border-border bg-card hover:bg-muted/40'}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          {badge ?? <span className="block truncate text-xs font-medium text-foreground">{title}</span>}
-          <div className="mt-1 flex items-center gap-1"><Activity className="h-3 w-3 text-muted-foreground" /><span className="text-xs tabular-nums text-foreground/80">{nf0.format(count)}</span></div>
+    <section className="min-w-0 basis-[520px] flex-1 bg-card" aria-label={title}>
+      <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">Нажмите строку, чтобы отфильтровать реестр</p>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-[11px] font-semibold tabular-nums">{fmtLiters(volume)}</div>
-          <div className="text-[11px] font-semibold tabular-nums">{fmtMoney(amount)} ₽</div>
-        </div>
+        <span className={cn(
+          'shrink-0 rounded-md border px-2 py-1 text-xs tabular-nums',
+          selectedCount ? 'border-primary/45 bg-primary/10 font-medium text-primary' : 'border-border bg-muted/35 text-muted-foreground',
+        )}>
+          {selectedCount ? `Выбрано: ${selectedCount}` : `${rows.length} поз.`}
+        </span>
       </div>
-    </button>
+      <div className="max-h-[330px] overflow-auto">
+        <table className="w-full min-w-[470px] text-[13px]">
+          <caption className="sr-only">{title}: количество наливов, объём и выручка</caption>
+          <thead className="sticky top-0 z-10 bg-card">
+            <tr className="border-b bg-muted/35 text-xs text-muted-foreground">
+              <th className="px-4 py-2.5 text-left font-medium">{nameColumn}</th>
+              <th className="px-3 py-2.5 text-right font-medium">Наливы</th>
+              <th className="px-3 py-2.5 text-right font-medium">Объём</th>
+              <th className="px-4 py-2.5 text-right font-medium">Выручка</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.key}
+                tabIndex={row.selectable ? 0 : undefined}
+                aria-selected={row.selected}
+                onClick={row.selectable ? row.onSelect : undefined}
+                onKeyDown={(event) => {
+                  if (!row.selectable || (event.key !== 'Enter' && event.key !== ' ')) return
+                  event.preventDefault()
+                  row.onSelect()
+                }}
+                className={cn(
+                  'border-b border-border/45 transition-colors',
+                  row.selectable && 'cursor-pointer hover:bg-muted/45',
+                  row.selected && 'bg-primary/10 hover:bg-primary/15',
+                )}
+              >
+                <td className="max-w-[220px] truncate px-4 py-2.5 font-medium">{row.label}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{nf0.format(row.count)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{fmtLiters(row.liters)}</td>
+                <td className="px-4 py-2.5 text-right font-medium tabular-nums">{fmtMoney(row.amount)} ₽</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function SummaryMetric({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className={cn('min-w-[160px] flex-1 px-4 py-3.5', className)}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-base font-semibold tabular-nums text-foreground">{value}</div>
+    </div>
   )
 }
 
@@ -131,7 +194,7 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
     search: search || undefined, sort, order,
   }), [dateFrom, dateTo, stationCode, fuelCodes, payTypes, search, sort, order])
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isPlaceholderData } = useQuery({
     queryKey: ['fuel-tx-rows', params, page],
     queryFn: () => getFuelTxRows({ ...params, limit: PAGE, offset: page * PAGE }),
     placeholderData: keepPreviousData,
@@ -141,8 +204,18 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
     if (k === sort) setOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
     else { setSort(k); setOrder('desc') }
   }
-  const toggleFuel = (c: number) => setFuelCodes((s) => { const n = new Set(s); n.has(c) ? n.delete(c) : n.add(c); return n })
-  const togglePay = (p: string) => setPayTypes((s) => { const n = new Set(s); n.has(p) ? n.delete(p) : n.add(p); return n })
+  const toggleFuel = (c: number) => setFuelCodes((s) => {
+    const n = new Set(s)
+    if (n.has(c)) n.delete(c)
+    else n.add(c)
+    return n
+  })
+  const togglePay = (p: string) => setPayTypes((s) => {
+    const n = new Set(s)
+    if (n.has(p)) n.delete(p)
+    else n.add(p)
+    return n
+  })
   const resetKpi = () => { setFuelCodes(new Set()); setPayTypes(new Set()) }
   const resetAll = () => { setStation(ALL); resetKpi(); setSearchInput(''); setSearch('') }
   const hasFilters = station !== ALL || fuelCodes.size > 0 || payTypes.size > 0 || !!search
@@ -154,6 +227,9 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
   const pages = Math.max(1, Math.ceil(total / PAGE))
   const from = total === 0 ? 0 : page * PAGE + 1
   const to = Math.min(total, (page + 1) * PAGE)
+  const activeFilterCount = (station !== ALL ? 1 : 0) + fuelCodes.size + payTypes.size + (search ? 1 : 0)
+  const hasFreshFilterTotals = hasFilters && !!totals && !isPlaceholderData
+  const summary = hasFreshFilterTotals ? totals : ov?.kpi
 
   async function exportXlsx() {
     setExporting(true)
@@ -181,88 +257,130 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
   }
 
   return (
-    <div className="space-y-3 p-4">
-      {/* шапка */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold">Операции</h2>
+    <div className="space-y-4 p-4 lg:p-5">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">Операции</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Реестр наливов STS: отберите нужный разрез и откройте операцию для деталей.</p>
           {syncing && syncStatus.data && (
-            <span className="text-xs text-muted-foreground">{syncStatus.data.message} · {nf0.format(syncStatus.data.loaded)}</span>
+            <p className="mt-1 text-xs text-primary">{syncStatus.data.message} · загружено {nf0.format(syncStatus.data.loaded)}</p>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8" onClick={loadTx} disabled={syncing} title="Загрузить наливы из STS за период раздела">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="h-9" onClick={loadTx} disabled={syncing} title="Загрузить наливы из STS за период раздела">
             {syncing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Загрузить наливы
           </Button>
-          <Button variant="outline" size="sm" className="h-8" onClick={exportXlsx} disabled={exporting || total === 0}>
+          <Button variant="outline" size="sm" className="h-9" onClick={exportXlsx} disabled={exporting || total === 0}>
             {exporting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}Экспорт{total > 50000 ? ' (до 50к)' : ''}
           </Button>
         </div>
-      </div>
+      </header>
 
-      {/* фильтры: АЗС + поиск карты + сброс */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Select value={station} onValueChange={setStation}>
-          <SelectTrigger className="h-8 w-[160px] text-xs"><SelectValue placeholder="АЗС" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Все АЗС</SelectItem>
-            {(filtersQ.data?.stations ?? []).map((s) => <SelectItem key={s.code} value={String(s.code)}>{s.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Номер карты…" className="h-8 w-[170px] pl-7 text-xs" />
-        </div>
-        {hasFilters && <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={resetAll}><X className="mr-1 h-3.5 w-3.5" />Сбросить</Button>}
-        <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">{isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin" />}</div>
-      </div>
-
-      {/* KPI по видам топлива */}
-      {ov && ov.by_fuel.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="px-1 text-xs font-medium text-foreground/80">Виды топлива <span className="text-muted-foreground">— клик фильтрует список</span></div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {ov.by_fuel.map((f) => (
-              <KpiTile key={f.fuel_code ?? f.fuel_name} badge={<FuelBadge fuel={f.fuel_name} />}
-                count={f.count} volume={f.liters} amount={f.amount}
-                selected={f.fuel_code != null && fuelCodes.has(f.fuel_code)}
-                onClick={() => f.fuel_code != null && toggleFuel(f.fuel_code)} />
-            ))}
+      <Card className="overflow-hidden border-border/80 bg-card/80">
+        <CardContent className="flex flex-wrap items-center gap-2 p-3">
+          <div className="mr-1 flex items-center gap-2 text-sm font-medium text-foreground">
+            <span>Фильтры</span>
+            <span className={cn(
+              'rounded-md px-2 py-0.5 text-xs font-normal',
+              activeFilterCount ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+            )}>
+              {activeFilterCount ? `Активно: ${activeFilterCount}` : 'Все операции'}
+            </span>
           </div>
-        </div>
-      )}
-
-      {/* KPI по способам оплаты */}
-      {ov && ov.by_payment.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="px-1 text-xs font-medium text-foreground/80">Способы оплаты <span className="text-muted-foreground">— клик фильтрует список</span></div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {ov.by_payment.map((p) => (
-              <KpiTile key={p.name} title={p.name} count={p.count} volume={p.liters} amount={p.amount}
-                selected={payTypes.has(p.name)} onClick={() => togglePay(p.name)} />
-            ))}
+          <Select value={station} onValueChange={setStation}>
+            <SelectTrigger className="h-9 w-[180px] text-sm"><SelectValue placeholder="АЗС" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Все АЗС</SelectItem>
+              {(filtersQ.data?.stations ?? []).map((s) => <SelectItem key={s.code} value={String(s.code)}>{s.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Номер карты" className="h-9 w-[190px] pl-8 text-sm" />
           </div>
-        </div>
-      )}
+          {hasFilters && <Button variant="ghost" size="sm" className="h-9 px-2.5 text-sm" onClick={resetAll}><X className="mr-1.5 h-4 w-4" />Сбросить</Button>}
+          <div className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+            {isFetching && <><Loader2 className="h-3.5 w-3.5 animate-spin" />Обновление</>}
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* Итого */}
-      {ov && (
-        <Card className={`${(fuelCodes.size || payTypes.size) ? 'cursor-pointer border-primary/50' : ''}`} onClick={(fuelCodes.size || payTypes.size) ? resetKpi : undefined}>
-          <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-2 py-3">
-            <div className="flex items-center gap-2"><span className="text-sm font-semibold">Итого за период</span>
-              {(fuelCodes.size || payTypes.size) ? <span className="text-[11px] text-primary">(сброс фильтра)</span> : null}</div>
-            <div className="flex items-center gap-1.5 text-sm"><Activity className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-muted-foreground">Наливов</span><b className="tabular-nums">{nf0.format(ov.kpi.count)}</b></div>
-            <div className="text-sm"><span className="text-muted-foreground">Объём </span><b className="tabular-nums">{fmtLiters(ov.kpi.liters)}</b></div>
-            <div className="text-sm"><span className="text-muted-foreground">Выручка </span><b className="tabular-nums">{fmtMoney(ov.kpi.amount)} ₽</b></div>
-            {totals && (fuelCodes.size || payTypes.size || search || station !== ALL) ? (
-              <div className="ml-auto text-xs text-muted-foreground">по фильтру: {nf0.format(totals.count)} · {fmtLiters(totals.liters)} · {fmtMoney(totals.amount)} ₽</div>
-            ) : null}
+      {summary && (
+        <Card className="overflow-hidden">
+          <CardContent className="flex flex-wrap p-0">
+            <div className="basis-[230px] grow border-b border-border/70 px-4 py-3.5">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground"><Activity className="h-4 w-4 text-primary" />{hasFreshFilterTotals ? 'Текущая выборка' : hasFilters ? 'Обновляем выборку' : 'За выбранный период'}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {hasFreshFilterTotals ? 'Показатели пересчитаны по активным фильтрам.' : hasFilters ? 'Загружаем показатели по новому отбору.' : 'Все операции в границах периода и рабочей области.'}
+              </p>
+            </div>
+            <SummaryMetric label="Наливы" value={nf0.format(summary.count)} className="border-b border-border/70" />
+            <SummaryMetric label="Объём" value={fmtLiters(summary.liters)} className="border-b border-border/70" />
+            <SummaryMetric label="Выручка" value={`${fmtMoney(summary.amount)} ₽`} />
           </CardContent>
         </Card>
       )}
 
-      {/* таблица */}
-      <Card>
+      {ov && (ov.by_fuel.length > 0 || ov.by_payment.length > 0) && (
+        <section aria-labelledby="operation-breakdown-heading">
+          <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h3 id="operation-breakdown-heading" className="text-sm font-semibold text-foreground">Структура операций</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">Сравнивайте показатели по колонкам; выбранные строки добавляют фильтр к реестру.</p>
+            </div>
+            {(fuelCodes.size || payTypes.size) > 0 && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={resetKpi}><X className="mr-1.5 h-3.5 w-3.5" />Снять фильтры разрезов</Button>
+            )}
+          </div>
+          <Card className="overflow-hidden">
+            <CardContent className="flex flex-wrap gap-px bg-border p-0">
+              {ov.by_fuel.length > 0 && (
+                <BreakdownTable
+                  title="Виды топлива"
+                  nameColumn="Топливо"
+                  rows={ov.by_fuel.map((f) => ({
+                    key: `fuel-${f.fuel_code ?? f.fuel_name}`,
+                    label: <FuelBadge fuel={f.fuel_name} />,
+                    count: f.count,
+                    liters: f.liters,
+                    amount: f.amount,
+                    selected: f.fuel_code != null && fuelCodes.has(f.fuel_code),
+                    selectable: f.fuel_code != null,
+                    onSelect: () => f.fuel_code != null && toggleFuel(f.fuel_code),
+                  }))}
+                />
+              )}
+              {ov.by_payment.length > 0 && (
+                <BreakdownTable
+                  title="Способы оплаты"
+                  nameColumn="Способ оплаты"
+                  rows={ov.by_payment.map((p) => ({
+                    key: `payment-${p.name}`,
+                    label: p.name,
+                    count: p.count,
+                    liters: p.liters,
+                    amount: p.amount,
+                    selected: payTypes.has(p.name),
+                    selectable: true,
+                    onSelect: () => togglePay(p.name),
+                  }))}
+                />
+              )}
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
+      <section aria-labelledby="operation-list-heading">
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h3 id="operation-list-heading" className="text-sm font-semibold text-foreground">Реестр операций</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {total === 0 ? 'Нет строк по текущему отбору.' : `Показано ${nf0.format(from)}–${nf0.format(to)} из ${nf0.format(total)} операций.`}
+            </p>
+          </div>
+        </div>
+        <Card>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -270,9 +388,9 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
             <div className="p-8 text-center text-sm text-muted-foreground">Нет операций по фильтру за период</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full min-w-[900px] text-[13px]">
                 <thead>
-                  <tr className="border-b bg-muted/40 text-muted-foreground">
+                  <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
                     <SortHead label="Дата/время" k="dt" sort={sort} order={order} onSort={onSort} />
                     <SortHead label="АЗС" k="station" sort={sort} order={order} onSort={onSort} />
                     <SortHead label="Топливо" k="fuel" sort={sort} order={order} onSort={onSort} />
@@ -285,15 +403,15 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className="cursor-pointer border-b border-border/30 hover:bg-muted/30" onClick={() => setDetail(r)}>
-                      <td className="whitespace-nowrap p-2 font-mono text-muted-foreground">{fmtDt(r.dt)}</td>
-                      <td className="max-w-[160px] truncate p-2">{r.station_name}</td>
-                      <td className="p-2">{r.fuel_name ? <FuelBadge fuel={r.fuel_name} /> : '—'}</td>
-                      <td className="max-w-[140px] truncate p-2">{r.pay_type_name ?? '—'}</td>
-                      <td className="p-2 font-mono text-muted-foreground">{cleanCard(r.card)}</td>
-                      <td className="p-2 text-right font-mono">{nf2.format(r.liters)}</td>
-                      <td className="p-2 text-right font-mono text-muted-foreground">{r.price != null ? nf2.format(r.price) : '—'}</td>
-                      <td className="p-2 text-right font-mono">{fmtMoney(r.amount)}</td>
+                    <tr key={r.id} className="cursor-pointer border-b border-border/40 transition-colors hover:bg-muted/35" onClick={() => setDetail(r)}>
+                      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-muted-foreground">{fmtDt(r.dt)}</td>
+                      <td className="max-w-[180px] truncate px-3 py-2.5 font-medium">{r.station_name}</td>
+                      <td className="px-3 py-2.5">{r.fuel_name ? <FuelBadge fuel={r.fuel_name} /> : '—'}</td>
+                      <td className="max-w-[160px] truncate px-3 py-2.5">{r.pay_type_name ?? '—'}</td>
+                      <td className="px-3 py-2.5 font-mono text-muted-foreground">{cleanCard(r.card)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums">{nf2.format(r.liters)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-muted-foreground">{r.price != null ? nf2.format(r.price) : '—'}</td>
+                      <td className="px-3 py-2.5 text-right font-mono font-medium tabular-nums">{fmtMoney(r.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -301,7 +419,8 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
             </div>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </section>
 
       {/* пагинация */}
       {total > 0 && (

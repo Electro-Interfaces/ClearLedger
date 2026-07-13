@@ -85,26 +85,17 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
       { key: 'overdueDays', label: 'Порог просрочки, дней' },
     ],
   },
-  // ── Финансовый ──
+  // ── Управленческий (fuel) ──
   {
-    id: 'fin_energy', label: 'Финансовый учёт', section: 'Финансовый',
-    description: 'Денежные потоки, дебиторка/кредиторка, платёжный календарь по сети ЭЗС.',
-    profiles: ['energy'], status: 'demo',
+    id: 'ops_contracts', label: 'Договоры и аренда', section: 'Управленческий',
+    description: 'Хозяйственные отношения компании: реестр договоров (аренда земли и площадок АЗС, поставщики, обслуживание), сроки, платёжная дисциплина.',
+    profiles: ['fuel'], status: 'planned',
     params: [
-      { key: 'currency', label: 'Валюта' },
-      { key: 'calendarHorizon', label: 'Горизонт платёжного календаря' },
+      { key: 'overdueDays', label: 'Порог просрочки, дней' },
     ],
   },
-  {
-    id: 'financial', label: 'Финансовый учёт', section: 'Финансовый',
-    description: 'Денежные потоки, дебиторская/кредиторская задолженность, платёжный календарь.',
-    profiles: ['fuel'], status: 'active',
-    params: [
-      { key: 'chart', label: 'План счетов' },
-      { key: 'periodization', label: 'Периодизация' },
-      { key: 'currency', label: 'Валюта' },
-    ],
-  },
+  // «Финансовый» и «Налоговый» сняты с витрины 13.07.2026 (пустые заготовки) —
+  // карточки модулей удалены из каталога вместе с разделами (workspaceSections.ts).
   // ── Бухгалтерский ──
   {
     id: 'acc_energy', label: 'Бухгалтерский учёт', section: 'Бухгалтерский',
@@ -122,25 +113,6 @@ export const WORKSPACE_MODULES: WorkspaceModuleDef[] = [
     params: [
       { key: 'base', label: 'База 1С' },
       { key: 'postingTemplates', label: 'Шаблоны проводок' },
-    ],
-  },
-  // ── Налоговый ──
-  {
-    id: 'tax_energy', label: 'Налоговый учёт', section: 'Налоговый',
-    description: 'НДС (22%), налог на прибыль (25%) по сети ЭЗС.',
-    profiles: ['energy'], status: 'demo',
-    params: [
-      { key: 'vatRate', label: 'Ставка НДС, %' },
-      { key: 'profitRate', label: 'Ставка налога на прибыль, %' },
-    ],
-  },
-  {
-    id: 'tax', label: 'Налоговый учёт', section: 'Налоговый',
-    description: 'НДС, налог на прибыль, контроль соответствия.',
-    profiles: ['fuel'], status: 'active',
-    params: [
-      { key: 'vatRate', label: 'Ставка НДС, %' },
-      { key: 'regime', label: 'Налоговый режим' },
     ],
   },
   // Примечание: разрезы учёта (= разрезы сверки) — ОТДЕЛЬНЫЙ уровень (входной контур),

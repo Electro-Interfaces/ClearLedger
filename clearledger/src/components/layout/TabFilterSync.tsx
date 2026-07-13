@@ -43,42 +43,64 @@ function getOne(companyId: string, tabKey: string): FilterState | null {
   return all[tabKey] ?? null
 }
 
+function deleteOne(companyId: string, tabKey: string): void {
+  try {
+    const all = loadAll(companyId)
+    delete all[tabKey]
+    localStorage.setItem(storeKey(companyId), JSON.stringify(all))
+  } catch {
+    // тихо игнорируем
+  }
+}
+
 export function TabFilterSync() {
   const location = useLocation()
   const activeKey = location.pathname + location.search
   const { state, applyState } = useFilters()
   const { companyId } = useCompany()
   const { isPinned } = useTabs()
+  const activePinned = isPinned(activeKey)
 
-  // Свежие ссылки — чтобы эффект перехода не зависел от state/isPinned в deps.
   const stateRef = useRef(state)
-  stateRef.current = state
-  const isPinnedRef = useRef(isPinned)
-  isPinnedRef.current = isPinned
-  const keyRef = useRef(activeKey)
+  const routeRef = useRef<{ companyId: string; key: string; pinned: boolean } | null>(null)
 
   useEffect(() => {
-    const prevKey = keyRef.current
-    if (prevKey === activeKey) return
+    stateRef.current = state
+  }, [state])
 
-    // Уход с закреплённой закладки → сохранить её текущий фильтр.
-    if (isPinnedRef.current(prevKey)) saveOne(companyId, prevKey, stateRef.current)
+  useEffect(() => {
+    if (!companyId || companyId === '_') return
+    const previous = routeRef.current
+    const companyChanged = !!previous && previous.companyId !== companyId
+    const keyChanged = !!previous && previous.key !== activeKey
 
-    // Переход на закреплённую закладку → восстановить её фильтр (если сохранён).
-    if (isPinnedRef.current(activeKey)) {
-      const snap = getOne(companyId, activeKey)
-      if (snap) applyState(snap)
+    if (previous && !companyChanged && keyChanged && previous.pinned) {
+      saveOne(previous.companyId, previous.key, stateRef.current)
     }
 
-    keyRef.current = activeKey
-  }, [activeKey, companyId, applyState])
+    if (!previous || companyChanged || keyChanged) {
+      if (activePinned) {
+        const snap = getOne(companyId, activeKey)
+        if (snap) applyState(snap)
+        else saveOne(companyId, activeKey, stateRef.current)
+      }
+    } else if (!previous.pinned && activePinned) {
+      saveOne(companyId, activeKey, stateRef.current)
+    } else if (previous.pinned && !activePinned) {
+      deleteOne(companyId, activeKey)
+    }
 
-  // Размонтирование / смена компании — сохранить фильтр текущей закладки.
+    routeRef.current = { companyId, key: activeKey, pinned: activePinned }
+  }, [activeKey, activePinned, companyId, applyState])
+
   useEffect(() => {
     return () => {
-      if (isPinnedRef.current(keyRef.current)) saveOne(companyId, keyRef.current, stateRef.current)
+      const current = routeRef.current
+      if (current?.pinned && current.companyId !== '_') {
+        saveOne(current.companyId, current.key, stateRef.current)
+      }
     }
-  }, [companyId])
+  }, [])
 
   return null
 }

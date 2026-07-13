@@ -25,7 +25,7 @@ const todayStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function PurchaseBatchesPanel() {
+export function PurchaseBatchesPanel({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient()
   const { data: batches } = useQuery({ queryKey: ['purchase-batches'], queryFn: getPurchaseBatches })
   const { data: stations } = useQuery({ queryKey: ['fuel-stations-ref'], queryFn: getFuelStations })
@@ -46,6 +46,7 @@ export function PurchaseBatchesPanel() {
     await qc.invalidateQueries({ queryKey: ['fuel-receipts-journal'] })
     await qc.invalidateQueries({ queryKey: ['fuel-receipts-by-station'] })
     await qc.invalidateQueries({ queryKey: ['costing-margin'] })
+    await qc.invalidateQueries({ queryKey: ['margin-decision-dashboard'] })
   }
 
   const toggleStation = (id: string) =>
@@ -103,7 +104,7 @@ export function PurchaseBatchesPanel() {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className={embedded ? 'space-y-4 pt-1' : 'p-4 space-y-4'}>
       {/* Форма создания */}
       <Card>
         <CardContent className="pt-4">
@@ -200,8 +201,8 @@ export function PurchaseBatchesPanel() {
                       <td className="px-3 text-right tabular-nums">{b.cost_per_liter.toFixed(2)}</td>
                       <td className="px-3 text-right tabular-nums">{fmt(b.allocated_liters)}</td>
                       <td className="px-3">
-                        <Badge variant="outline" className={b.status === 'allocated' ? 'border-emerald-400/50 text-emerald-300/80' : 'border-zinc-600 text-zinc-400'}>
-                          {b.status === 'allocated' ? 'распределена' : 'черновик'}
+                        <Badge variant="outline" className={b.status === 'allocated' ? 'border-emerald-400/50 text-emerald-700 dark:text-emerald-300/80' : b.status === 'partial' ? 'border-amber-400/50 text-amber-700 dark:text-amber-300/80' : 'border-zinc-600 text-zinc-500'}>
+                          {b.status === 'allocated' ? 'распределена' : b.status === 'partial' ? 'частично' : 'черновик'}
                         </Badge>
                       </td>
                       <td className="pl-3 text-right">

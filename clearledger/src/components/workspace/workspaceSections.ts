@@ -1,14 +1,16 @@
 /**
  * Единый источник разделов рабочей области и их под-разделов.
  *
- * Разделы = виды учёта (Управленческий/Финансовый/Бухгалтерский/Налоговый) + «Выгрузка».
+ * Разделы = виды учёта (Управленческий/Бухгалтерский/…) + «Выгрузка».
+ * «Финансовый» и «Налоговый» сняты с витрины 13.07.2026 (пустые заготовки) —
+ * панели и типы CoreMode сохранены, вернуть = добавить записи в массив ниже.
  * Под-разделы вычисляются с учётом профиля компании и подключённых модулей —
  * ими пользуются и вертикальное меню-гармошка (`WorkspaceModeSidebar`), и сами
  * панели (`AccountingPanels`), чтобы меню и контент были синхронны.
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, Landmark, BookOpen, Receipt, FileOutput, ShoppingCart } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import type { CentralMenuItem } from './CentralPanelLayout'
@@ -25,6 +27,7 @@ export const MGMT_MENU: CentralMenuItem[] = [
   { key: 'overview',     label: 'Обзор' },
   { key: 'map',          label: 'Карта' },
   { key: 'channels',     label: 'Каналы продаж' },
+  { key: 'online-orders', label: 'Онлайн-заказы' },
   { key: 'transactions', label: 'Операции' },
   { key: 'margin',       label: 'Маржа и цены' },
   { key: 'purchases',    label: 'Поступления' },
@@ -55,22 +58,9 @@ export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
 ]
 export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
 
-export const FIN_MENU: CentralMenuItem[] = [
-  { key: 'overview',    label: 'Обзор' },
-  { key: 'cashflow',    label: 'Денежный поток' },
-  { key: 'receivables', label: 'Дебиторка' },
-  { key: 'payables',    label: 'Кредиторка' },
-]
-
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
 // (getModuleComponentDefs('accounting')) в useWorkspaceSections — статичного ACC_MENU
 // нет. Реальные пункты: Дашборды · Поступления · Смены · Выгрузка в БП · Сверка · Маржа.
-
-export const TAX_MENU: CentralMenuItem[] = [
-  { key: 'vat',        label: 'НДС' },
-  { key: 'profit',     label: 'Налог на прибыль' },
-  { key: 'compliance', label: 'Соответствие' },
-]
 
 // «Магазин» (mode=store) — товароучёт сопутки/общепита: полная целевая карта
 // (коннектор, аналитика, товары/НСИ, движение, Честный Знак, выгрузка в БП).
@@ -107,11 +97,14 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
     ...(isEnergy ? CHARGE_SESSIONS_MENU : []),
   ]
+  // «Управленческий» у ГИГ (fuel) = хозяйственные отношения компании (договоры/аренда),
+  // не баланс (концепт МАГа 13.07.2026): контроль топлива уже живёт в «Продажах»,
+  // «Баланс АЗС» из этого раздела убран. У energy — энергозакупка/аренда/баланс ЭЗС.
   const energyOps = ENERGY_MGMT.filter((m) => on(m.key))
   const opsItems: CentralMenuItem[] = [
     // Кокпит решений (energy) — ядро раздела, не отключаемый модуль: обзор ситуации
-    // (светофор проблем + рабочие списки), пообъектный энергобаланс (вход по счетам
-    // vs отпуск по сессиям vs собственные нужды) и полнота данных за период.
+    // (светофор проблем + рабочие списки) и пообъектный энергобаланс
+    // (вход по счетам vs отпуск по сессиям vs собственные нужды станции).
     ...(isEnergy && energyOps.length > 0
       ? [
           { key: 'ops_overview', label: 'Обзор' },
@@ -120,13 +113,12 @@ export function useWorkspaceSections(): WorkspaceSection[] {
         ]
       : []),
     ...energyOps,
-    ...(balMod && on(balMod.id) ? [{ key: 'balance', label: balMod.navLabel }] : []),
+    ...(!isEnergy && on('ops_contracts') ? [{ key: 'contracts', label: 'Договоры и аренда' }] : []),
+    ...(balMod && on(balMod.id) && isEnergy ? [{ key: 'balance', label: balMod.navLabel }] : []),
   ]
 
   const storeOn = on('store_module')
-  const finOn = isEnergy ? on('fin_energy') : on('financial')
   const accOn = isEnergy ? on('acc_energy') : on('accounting')
-  const taxOn = isEnergy ? on('tax_energy') : on('tax')
 
   // Бухгалтерский (fuel) — меню собирается из включённых компонентов модуля под компанию.
   // energy остаётся цельной витриной (у acc_energy нет компонентов в реестре).
@@ -138,15 +130,17 @@ export function useWorkspaceSections(): WorkspaceSection[] {
       )
     : []
 
-  return [
-    { mode: 'management', label: 'Продажи',        icon: BarChart3,  items: mgmtItems, connected: mgmtItems.length > 0 },
-    { mode: 'operations', label: 'Управленческий', icon: Gauge,      items: opsItems, connected: opsItems.length > 0 },
-    { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn },
-    { mode: 'financial',  label: 'Финансовый',     icon: Landmark,   items: !isEnergy && finOn ? FIN_MENU : [], connected: finOn },
-    { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,   items: accItems, connected: accOn },
-    { mode: 'tax',        label: 'Налоговый',      icon: Receipt,    items: !isEnergy && taxOn ? TAX_MENU : [], connected: taxOn },
-    { mode: 'export',     label: 'Выгрузка',       icon: FileOutput, items: [], connected: true },
-  ]
+  const sales: WorkspaceSection = { mode: 'management', label: 'Продажи',        icon: BarChart3,    items: mgmtItems, connected: mgmtItems.length > 0 }
+  const ops: WorkspaceSection   = { mode: 'operations', label: 'Управленческий', icon: Gauge,        items: opsItems, connected: opsItems.length > 0 }
+  const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
+  const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
+  const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
+
+  // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
+  // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
+  return isEnergy
+    ? [sales, ops, store, acc, exp]
+    : [sales, store, ops, acc, exp]
 }
 
 /** Убрать дубли пунктов меню по ключу (на случай пересечения menuItems компонентов). */

@@ -7,21 +7,28 @@
  * в `components/layout/KeepAliveOutlet.tsx`).
  *
  * Ключ закладки = полный URL (pathname + search), поэтому под-виды рабочего
- * стола («Рабочий стол · Финансовый · Дебиторка», mode/sub в URL) — это разные
+ * стола («Дебиторка», «Операции», mode/sub в URL) — это разные
  * закладки. Активная вкладка выводится из текущего URL.
  *
  * Персист per-company в localStorage (модель `FilterContext`).
  */
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useState,
+  createContext, useCallback, useContext, useMemo, useState,
   type ReactNode,
 } from 'react'
 import { useCompany } from './CompanyContext'
 import { getItem, setItem } from '@/services/storage'
-import type { ViewDescriptor } from '@/config/tabRegistry'
+import { describeView, type ViewDescriptor } from '@/config/tabRegistry'
 
 const HOME = '/'
+const MAX_TABS = 12
 const storageKey = (companyId: string) => `tl-tabs-${companyId}`
+const HOME_TAB: TabDescriptor = {
+  key: HOME,
+  pathname: HOME,
+  title: 'Рабочий стол',
+  closable: false,
+}
 
 export interface TabDescriptor {
   key: string        // полный URL (pathname + search)
@@ -33,7 +40,7 @@ export interface TabDescriptor {
 interface TabsContextType {
   tabs: TabDescriptor[]
   /** Закрепить текущий вид во вкладку (idempotent). */
-  pinTab: (view: ViewDescriptor) => void
+  pinTab: (view: ViewDescriptor) => 'pinned' | 'exists' | 'limit'
   /** Открепить/закрыть вкладку; возвращает URL соседа для перехода. */
   closeTab: (key: string) => string
   /** Закреплён ли вид с таким ключом. */
@@ -43,44 +50,50 @@ interface TabsContextType {
 const TabsContext = createContext<TabsContextType | null>(null)
 
 function loadTabs(companyId: string): TabDescriptor[] {
-  // Защита от старого/повреждённого формата (раньше хранился объект {keys:[...]}).
+  if (!companyId || companyId === '_') return [HOME_TAB]
   const raw = getItem<unknown>(storageKey(companyId), [])
   const persisted = Array.isArray(raw) ? (raw as Partial<TabDescriptor>[]) : []
-  const list: TabDescriptor[] = []
+  const list: TabDescriptor[] = [HOME_TAB]
+  const seen = new Set([HOME])
   for (const t of persisted) {
-    if (!t || typeof t.key !== 'string') continue
-    list.push({ key: t.key, pathname: t.pathname ?? t.key, title: t.title ?? t.key, closable: true })
+    if (!t || typeof t.key !== 'string' || t.key === HOME || seen.has(t.key)) continue
+    const pathname = typeof t.pathname === 'string' ? t.pathname : t.key.split('?')[0]
+    const search = t.key.startsWith(pathname) ? t.key.slice(pathname.length) : ''
+    const view = describeView(pathname, search)
+    if (!view) continue
+    seen.add(view.key)
+    list.push({ ...view, closable: true })
+    if (list.length >= MAX_TABS) break
   }
   return list
 }
 
+function persistTabs(companyId: string, tabs: TabDescriptor[]) {
+  if (!companyId || companyId === '_') return
+  setItem(storageKey(companyId), tabs)
+}
+
 export function TabsProvider({ children }: { children: ReactNode }) {
   const { companyId } = useCompany()
-  const [tabs, setTabs] = useState<TabDescriptor[]>(() => loadTabs(companyId))
-
-  // Смена компании → загрузить её набор закладок.
-  useEffect(() => { setTabs(loadTabs(companyId)) }, [companyId])
-
-  // Персист всех закреплённых вкладок.
-  useEffect(() => {
-    setItem(storageKey(companyId), tabs)
-  }, [companyId, tabs])
+  const [tabs, setTabs] = useState(() => loadTabs(companyId))
 
   const pinTab = useCallback((view: ViewDescriptor) => {
-    setTabs((prev) => {
-      if (prev.some((t) => t.key === view.key)) return prev
-      return [...prev, { key: view.key, pathname: view.pathname, title: view.title, closable: true }]
-    })
-  }, [])
+    if (tabs.some((tab) => tab.key === view.key)) return 'exists'
+    if (tabs.length >= MAX_TABS) return 'limit'
+    const next = [...tabs, { ...view, closable: view.key !== HOME }]
+    setTabs(next)
+    persistTabs(companyId, next)
+    return 'pinned'
+  }, [companyId, tabs])
 
   const closeTab = useCallback((key: string): string => {
     const idx = tabs.findIndex((t) => t.key === key)
-    if (idx < 0) return HOME
+    if (idx < 0 || key === HOME) return HOME
     const next = tabs.filter((t) => t.key !== key)
     setTabs(next)
-    // Сосед справа/слева, иначе — на рабочий стол.
+    persistTabs(companyId, next)
     return (next[idx] ?? next[idx - 1] ?? { key: HOME }).key
-  }, [tabs])
+  }, [companyId, tabs])
 
   const isPinned = useCallback((key: string) => tabs.some((t) => t.key === key), [tabs])
 

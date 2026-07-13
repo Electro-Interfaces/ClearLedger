@@ -1,7 +1,12 @@
 """Нормализация справочника станций ЭЗС (energy): L1 RAW (Excel) → L2 CLEAN.
 
 Оркестратор канала (source_type='stations_excel'):
-  parse_stations_xlsx(content) → сырой паспорт станций (L1, лист «Станции»)
+  parse_stations_xlsx(content) → сырой паспорт станций (L1); формат определяется
+  автоматически:
+    • полный справочник HubEx — лист «Станции», 36 колонок (ID станции/Название/…);
+    • компактная выгрузка CPO — лист «Stations», 9 колонок (Номер/Название/
+      OCPP ID/Местоположение/Протокол/Производитель/Коннекторы/Статус/Владелец) —
+      несёт ОПЕРАТИВНЫЕ статусы и OCPP ID, обновляет только присутствующие поля.
   ingest_stations(db, company, rows, channel_id, mode) → нормализация + UPSERT в ServiceLocation
 
 Объект-станция = ServiceLocation (type='charge_station'). Паспорт разложен в
@@ -81,6 +86,8 @@ def _oper_status(status_dev) -> str:
         return "unknown"
     if "выведен" in s or "демонтир" in s or "демонтаж" in s:
         return "decommissioned"  # выведена из эксплуатации — не в сети
+    if "отключ" in s:            # CPO «Отключена» — станция намеренно выключена
+        return "not_working"
     if "ремонт" in s:
         return "on_repair"
     if "обслуж" in s or "maintenance" in s:
@@ -97,10 +104,48 @@ def _loc_id(company_id, ext_id: str) -> str:
     return "ezs-" + hashlib.md5(f"{company_id}|{ext_id}".encode()).hexdigest()[:20]
 
 
+def _parse_compact(ws) -> list[dict[str, Any]]:
+    """Компактная выгрузка CPO (лист «Stations», 9 колонок) → строки с меткой compact.
+
+    Ключи: «Номер» = station_number (конформная размерность), OCPP ID уникален.
+    Регион вытаскиваем из первого сегмента «Местоположения» (для новых станций)."""
+    def g(r, i):
+        return r[i] if len(r) > i else None
+
+    rows: list[dict[str, Any]] = []
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        if not r:
+            continue
+        num, name, ocpp = _s(g(r, 0), 60), _s(g(r, 1), 255), _s(g(r, 2), 120)
+        if not (num or ocpp):
+            continue
+        addr = _s(g(r, 3), 500)
+        rows.append({
+            "compact": True,
+            "number": num, "name": name, "ocpp_id": ocpp,
+            "address": addr,
+            "region": (addr.split(",")[0].strip() if addr else None),
+            "ocpp_protocol": _s(g(r, 4), 40),
+            "brand": _s(g(r, 5), 120),
+            "connector_types": _s(g(r, 6), 200),
+            "status_dev": _s(g(r, 7), 60),
+            "owner": _s(g(r, 8), 200),
+            "is_test": "тест" in f"{name or ''} {num or ''}".lower(),
+        })
+    return rows
+
+
 def parse_stations_xlsx(content: bytes) -> list[dict[str, Any]]:
-    """Excel «Справочник станций ЭЗС» (лист «Станции») → список сырого паспорта (L1)."""
+    """Excel справочника станций → список сырого паспорта (L1). Формат — автоматически:
+    компактная выгрузка CPO (заголовок «Номер|Название|OCPP ID…») либо полный
+    справочник HubEx (лист «Станции», 36 колонок)."""
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    for cand in wb.worksheets:
+        head = next(cand.iter_rows(values_only=True, max_row=1), ()) or ()
+        low = [str(h).strip().lower() if h is not None else "" for h in head]
+        if len(low) >= 3 and low[0] == "номер" and "ocpp" in low[2]:
+            return _parse_compact(cand)
     ws = wb["Станции"] if "Станции" in wb.sheetnames else wb[wb.sheetnames[-1]]
 
     def g(r, i):
@@ -164,12 +209,8 @@ async def _bump(db: AsyncSession, log_id, done: int, total: int, created: int, u
     await db.commit()
 
 
-async def ingest_stations(
-    db: AsyncSession, company_id, rows: list[dict[str, Any]], channel_id=None,
-    mode: str = "append", log_id=None,
-) -> dict[str, Any]:
-    """L1 паспорт → нормализация (регион canon + region_id, статусы) → UPSERT в ServiceLocation."""
-    # Кэш регионов компании: canon-name → region_id (get-or-create).
+async def _make_region_resolver(db: AsyncSession, company_id):
+    """Кэш регионов компании: canon-name → region_id (get-or-create)."""
     region_cache: dict[str, _uuid.UUID] = {}
     for nm, rid in (await db.execute(
         select(Region.name, Region.id).where(Region.company_id == company_id))).all():
@@ -187,6 +228,144 @@ async def ingest_stations(
             rid = reg.id
             region_cache[canon] = rid
         return rid
+
+    return _region_id
+
+
+async def _ingest_compact(
+    db: AsyncSession, company_id, rows: list[dict[str, Any]],
+    mode: str = "append", log_id=None,
+) -> dict[str, Any]:
+    """Компактная CPO-выгрузка → обновление ТОЛЬКО присутствующих в ней полей
+    (операционный статус, OCPP ID/протокол, производитель) у существующих объектов
+    + создание отсутствующих станций (в т.ч. партнёрских, владелец «СНК»).
+    Паспортные поля полного справочника (координаты/мощность/владелец-ID…) не трогаем.
+
+      append  — существующие объекты не трогаем, добавляем только новые станции;
+      replace — обновить существующие + добавить новые (выгрузка = источник истины
+                по оперативному статусу сети).
+    """
+    _region_id = await _make_region_resolver(db, company_id)
+
+    existing = (await db.execute(select(ServiceLocation).where(
+        ServiceLocation.company_id == company_id, ServiceLocation.type == "ev_charging"))).scalars().all()
+    by_num: dict[str, ServiceLocation] = {}
+    by_key: dict[str, ServiceLocation] = {}   # ocppId/stationId/ext_id/serial/code → объект
+    for loc in existing:
+        md = loc.extra_metadata or {}
+        for k in (md.get("ocppId"), md.get("stationId"), md.get("ext_id")):
+            if k is not None and str(k).strip():
+                by_key.setdefault(str(k).strip(), loc)
+        if loc.is_test:
+            continue   # тест-объекты — только по точному ключу, не по serial/№
+        for k in (loc.serial_number, loc.code):
+            if k is not None and str(k).strip():
+                by_key.setdefault(str(k).strip(), loc)
+        num = loc.station_number or md.get("number")
+        if num is not None and str(num).strip():
+            by_num.setdefault(str(num).strip(), loc)
+
+    created = updated = skipped = errors = 0
+    touched: set[str] = set()   # дубли № внутри файла → один объект, обновляем раз
+    total = len(rows)
+    await _bump(db, log_id, 0, total, 0, 0)
+
+    for idx, row in enumerate(rows):
+        try:
+            num, ocpp = row.get("number"), row.get("ocpp_id")
+            # тест-строки резолвим только по точному ключу (не сливать по № с боевыми)
+            loc = (by_key.get(ocpp) if ocpp else None) if row.get("is_test") else (
+                (by_num.get(num) if num else None) or (by_key.get(ocpp) if ocpp else None))
+            oper = _oper_status(row.get("status_dev"))
+            md_extra = {k: v for k, v in {
+                "ocppId": ocpp,
+                "statusDev": row.get("status_dev"),
+                "ownerCpo": row.get("owner"),
+            }.items() if v}
+            if loc is not None:
+                if loc.id in touched or mode == "append":
+                    skipped += 1
+                    continue
+                loc.operational_status = oper
+                if oper == "decommissioned":
+                    loc.status = "closed"
+                for fld in ("ocpp_protocol", "brand", "connector_types"):
+                    if row.get(fld):
+                        setattr(loc, fld, row[fld])
+                # поля полного паспорта не затираем — дозаполняем только пустые
+                if not loc.owner and row.get("owner"):
+                    loc.owner = row["owner"]
+                if not loc.address and row.get("address"):
+                    loc.address = row["address"]
+                if not loc.name and row.get("name"):
+                    loc.name = row["name"]
+                if not loc.station_number and num:
+                    loc.station_number = num
+                if loc.region_id is None:
+                    loc.region_id = await _region_id(row.get("region"))
+                md = {**(loc.extra_metadata or {}), **md_extra}
+                if num:
+                    md.setdefault("number", num)
+                fs = canon_region(row.get("region")) or row.get("region")
+                if fs:
+                    md.setdefault("federalSubject", fs)
+                loc.extra_metadata = md
+                touched.add(loc.id)
+                updated += 1
+            else:
+                canon = canon_region(row.get("region"))
+                loc = ServiceLocation(
+                    id=_loc_id(company_id, f"ocpp:{ocpp or num}"),
+                    company_id=company_id, type="ev_charging",
+                    code=num or ocpp,
+                    name=row.get("name") or (f"ЭЗС №{num}" if num else ocpp),
+                    station_number=num,
+                    address=row.get("address"),
+                    # тест-строкам регион не резолвим — их мусорные адреса («Большой»,
+                    # «мм») иначе плодят фиктивные регионы в справочнике
+                    region_id=None if row.get("is_test") else await _region_id(row.get("region")),
+                    ocpp_protocol=row.get("ocpp_protocol"),
+                    brand=row.get("brand"),
+                    connector_types=row.get("connector_types"),
+                    owner=row.get("owner"),
+                    status="closed" if oper == "decommissioned" else "active",
+                    operational_status=oper,
+                    is_test=bool(row.get("is_test")),
+                    source_bindings=[],
+                    extra_metadata={"number": num, "source": "stations_compact",
+                                    "regionRaw": row.get("region"),
+                                    "federalSubject": canon or row.get("region"),
+                                    **md_extra},
+                )
+                db.add(loc)
+                # дубль № внутри файла должен резолвиться на созданный объект
+                if num:
+                    by_num.setdefault(num, loc)
+                if ocpp:
+                    by_key.setdefault(ocpp, loc)
+                touched.add(loc.id)
+                created += 1
+            if (idx + 1) % 200 == 0:
+                await db.flush()
+                await _bump(db, log_id, idx + 1, total, created, updated)
+        except Exception:  # noqa: BLE001
+            errors += 1
+
+    await db.flush()
+    await _bump(db, log_id, total, total, created, updated)
+    return {"status": "success", "mode": mode, "created": created, "updated": updated,
+            "skipped": skipped, "errors": errors,
+            "message": f"CPO-выгрузка: обновлено {updated}, добавлено {created}, пропущено {skipped}"}
+
+
+async def ingest_stations(
+    db: AsyncSession, company_id, rows: list[dict[str, Any]], channel_id=None,
+    mode: str = "append", log_id=None,
+) -> dict[str, Any]:
+    """L1 паспорт → нормализация (регион canon + region_id, статусы) → UPSERT в ServiceLocation."""
+    if rows and rows[0].get("compact"):
+        return await _ingest_compact(db, company_id, rows, mode=mode, log_id=log_id)
+    _region_id = await _make_region_resolver(db, company_id)
 
     # Индексы СУЩЕСТВУЮЩИХ объектов ЭЗС — резолвим НА них (конформная размерность,
     # не плодим дубли). Ключи разных импортёров: stationId (HubEx) → серийный (code)
@@ -347,24 +526,7 @@ async def ensure_stations_from_sessions(db: AsyncSession, company_id) -> dict[st
     ).where(ChargeSession.company_id == company_id, ChargeSession.station_code.is_not(None))
      .group_by(ChargeSession.station_code))).all()
 
-    # Кэш регионов компании: canon-name → region_id (get-or-create) — как в ingest_stations.
-    region_cache: dict[str, _uuid.UUID] = {}
-    for nm, rid in (await db.execute(
-        select(Region.name, Region.id).where(Region.company_id == company_id))).all():
-        region_cache[nm] = rid
-
-    async def _region_id(raw):
-        canon = canon_region(raw)
-        if not canon:
-            return None
-        rid = region_cache.get(canon)
-        if rid is None:
-            reg = Region(company_id=company_id, name=canon, federal_subject=_s(raw, 200))
-            db.add(reg)
-            await db.flush()
-            rid = reg.id
-            region_cache[canon] = rid
-        return rid
+    _region_id = await _make_region_resolver(db, company_id)
 
     created = 0
     codes: list[str] = []

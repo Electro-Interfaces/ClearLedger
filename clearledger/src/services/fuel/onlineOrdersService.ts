@@ -2,12 +2,14 @@
  * Онлайн-заказы агрегаторов (MSTO) — журнал канала «Онлайн-заказы».
  * Загруженные заказы из БД (online_orders), с резолвом станции и канона топлива.
  */
-import { get } from '@/services/apiClient'
+import { get, post } from '@/services/apiClient'
 
 export interface LoadedOnlineOrder {
   id: string
   external_id: string
   station_id: string | null
+  station_code: number | null
+  station_name: string | null
   service_point_id: number | null
   service_point_name: string | null
   post_number: number | null
@@ -23,8 +25,41 @@ export interface LoadedOnlineOrder {
   created_at: string | null
 }
 
-export const getLoadedOnlineOrders = () =>
-  get<LoadedOnlineOrder[]>('/api/online-orders')
+export interface OnlineOrdersQuery {
+  companyId?: string
+  dateFrom?: string
+  dateTo?: string
+  stationCode?: string
+  limit?: number
+}
+
+export const getLoadedOnlineOrders = (query: OnlineOrdersQuery = {}) =>
+  get<LoadedOnlineOrder[]>('/api/online-orders', {
+    company_id: query.companyId,
+    date_from: query.dateFrom,
+    date_to: query.dateTo,
+    station_code: query.stationCode && query.stationCode !== 'all' ? query.stationCode : undefined,
+    limit: query.limit ?? 5000,
+  })
+
+export interface OnlineOrdersRefreshResult {
+  created: number
+  updated?: number
+  fetched: number
+  warning?: string
+  mode?: 'full' | 'incremental'
+  date_from?: string
+  date_to?: string
+}
+
+export const refreshOnlineOrders = (query: OnlineOrdersQuery = {}) => {
+  const qs = new URLSearchParams()
+  if (query.companyId) qs.set('company_id', query.companyId)
+  if (query.dateFrom) qs.set('date_from', query.dateFrom)
+  if (query.dateTo) qs.set('date_to', query.dateTo)
+  if (query.stationCode && query.stationCode !== 'all') qs.set('station_code', query.stationCode)
+  return post<OnlineOrdersRefreshResult>(`/api/online-orders/refresh${qs.size ? `?${qs}` : ''}`)
+}
 
 /** Результат проверки доступности данных MSTO (без сохранения). */
 export interface OnlineOrdersCheck {

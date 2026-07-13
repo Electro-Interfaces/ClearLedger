@@ -9,7 +9,7 @@ import { WorkspaceFilterBar } from './WorkspaceFilterBar'
 
 export function WorkspaceToolbar() {
   return (
-    <div className="flex items-center px-3 py-1.5 border-b border-border/50 bg-background flex-shrink-0">
+    <div className="flex shrink-0 items-center border-b border-border/60 bg-background px-2 py-1.5">
       <WorkspaceFilterBar />
     </div>
   )

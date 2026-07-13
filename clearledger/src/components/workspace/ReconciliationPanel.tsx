@@ -16,12 +16,15 @@ import {
   ENERGY_CUTS, ENERGY_CHANNELS, ENERGY_SOURCES, PIPE_STATUS_META,
   energyCut, channelsForCut, energySource,
 } from '@/config/energyPipeline'
-import { getSettings } from '@/services/settingsService'
 import { getStsStationsFromLocations } from '@/services/locationService'
 import { useLocations } from '@/hooks/useLocations'
-import { executeMstoReconciliation } from '@/services/mstoReconciliation'
-import { MSTOReconciliationResults } from '@/components/reconciliation/MSTOReconciliationResults'
-import type { MSTOReconciliationResult, StationInfo } from '@/types/mstoReconciliation'
+import { OnlineReconciliationWorkspace } from '@/components/reconciliation/OnlineReconciliationWorkspace'
+import {
+  getOnlineReconciliation,
+  runOnlineReconciliation,
+  type OnlineReconParams,
+  type OnlineReconWorkspace,
+} from '@/services/onlineReconciliationService'
 import { GitCompare, Play, Loader2, Settings2, CheckCircle2, AlertTriangle, Plug } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -221,13 +224,16 @@ interface ReconcileParams {
 }
 
 function useReconcileParams(): [ReconcileParams, React.Dispatch<React.SetStateAction<ReconcileParams>>] {
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-  return useState<ReconcileParams>({
-    dateFrom: format(weekAgo, 'yyyy-MM-dd'),
-    dateTo: format(new Date(), 'yyyy-MM-dd'),
-    allStations: true,
-    selectedStations: [],
-    allShifts: false,
+  return useState<ReconcileParams>(() => {
+    const today = new Date()
+    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+    return {
+      dateFrom: format(weekAgo, 'yyyy-MM-dd'),
+      dateTo: format(today, 'yyyy-MM-dd'),
+      allStations: true,
+      selectedStations: [],
+      allShifts: false,
+    }
   })
 }
 
@@ -451,39 +457,36 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading, c
 function OnlineOrdersView() {
   const [params, setParams] = useReconcileParams()
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<MSTOReconciliationResult | null>(null)
-  const settings = getSettings()
-  const stsStations = getStsStationsFromLocations()
+  const [result, setResult] = useState<OnlineReconWorkspace | null>(null)
+  const { companyId } = useCompany()
   const { setLastReconcileResult } = useWorkspace()
+
+  function requestParams(): OnlineReconParams {
+    return {
+      companyId,
+      dateFrom: params.dateFrom,
+      dateTo: params.dateTo,
+      stationCodes: params.allStations ? [] : params.selectedStations,
+      includeEmptyShifts: params.allShifts,
+    }
+  }
+
+  async function reload() {
+    const res = await getOnlineReconciliation(requestParams())
+    setResult(res)
+    setLastReconcileResult(res)
+  }
 
   async function handleRun() {
     setLoading(true)
     try {
-      const stationCodes = params.allStations
-        ? stsStations.map((s) => s.code)
-        : params.selectedStations
-      // Минимальная StationInfo из точек обслуживания (MSTO-маппинг — из транзакций)
-      const stations: StationInfo[] = stsStations
-        .filter((s) => params.allStations || stationCodes.includes(s.code))
-        .map((s) => ({
-          code: String(s.code),
-          name: s.name,
-          stsStationId: s.code,
-        }))
-      const res = await executeMstoReconciliation({
-        dateFrom: params.dateFrom,
-        dateTo: params.dateTo,
-        stationIds: stationCodes,
-        showAllShifts: params.allShifts,
-        stations,
-        systemId: settings.stsSystemCode,
-      })
+      const res = await runOnlineReconciliation(requestParams())
       setResult(res)
       setLastReconcileResult(res)
-      if (res.summary.hasErrors) {
-        toast.error(`Расхождения: ${res.summary.onlyMsto + res.summary.mismatch}`)
+      if (res.unresolved_count) {
+        toast.warning(`Требуют разбора: ${res.unresolved_count}`)
       } else {
-        toast.success(`Сверка завершена. Совпадений: ${res.summary.matched}`)
+        toast.success('Три источника сошлись')
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Ошибка сверки')
@@ -504,7 +507,7 @@ function OnlineOrdersView() {
       />
       {result && (
         <div className="pt-4">
-          <MSTOReconciliationResults result={result} onNewReconciliation={() => setResult(null)} />
+          <OnlineReconciliationWorkspace data={result} params={requestParams()} onReload={reload} />
         </div>
       )}
     </div>

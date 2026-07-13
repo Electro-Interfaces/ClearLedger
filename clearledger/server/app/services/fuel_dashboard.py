@@ -125,6 +125,131 @@ class FuelDashboardService:
             result["trends"] = self._trends(kpis, c_kpis)
         return result
 
+    async def sales_channels(self, date_from: date, date_to: date,
+                             station_codes: list[int] | None = None,
+                             fuel_codes: list[int] | None = None,
+                             pay_types: list[str] | None = None) -> dict:
+        """Связанные разрезы продаж по операциям STS для менеджерской аналитики."""
+        T = FuelTransaction
+        conds = [
+            T.company_id == self.company_id,
+            T.dt >= datetime(date_from.year, date_from.month, date_from.day),
+            T.dt <= datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59),
+        ]
+        if station_codes:
+            conds.append(T.station_code.in_(station_codes))
+        if fuel_codes:
+            conds.append(T.fuel_code.in_(fuel_codes))
+        if pay_types:
+            conds.append(T.pay_type_name.in_(pay_types))
+
+        totals = (await self.session.execute(select(
+            func.count().label("n"),
+            func.coalesce(func.sum(T.liters), 0).label("liters"),
+            func.coalesce(func.sum(T.amount), 0).label("amount"),
+            func.count(func.distinct(T.station_code)).label("stations"),
+        ).where(*conds))).one()
+        total_count = int(totals.n)
+        total_liters = float(totals.liters)
+        total_amount = float(totals.amount)
+
+        station_names = {
+            int(row.code): row.name or f"АЗС {row.code}"
+            for row in (await self.session.execute(select(FuelStation).where(
+                FuelStation.company_id == self.company_id
+            ))).scalars().all()
+        }
+
+        def metrics(count: int, liters: float, amount: float, share_base: float) -> dict:
+            return {
+                "count": count,
+                "liters": round(liters, 2),
+                "amount": round(amount, 2),
+                "share": round(100 * amount / share_base, 2) if share_base else 0.0,
+                "avg_check": round(amount / count, 2) if count else 0.0,
+                "avg_fill": round(liters / count, 2) if count else 0.0,
+                "avg_price": round(amount / liters, 2) if liters else 0.0,
+            }
+
+        station_rows = (await self.session.execute(select(
+            T.station_code.label("key"), func.count().label("n"),
+            func.coalesce(func.sum(T.liters), 0).label("liters"),
+            func.coalesce(func.sum(T.amount), 0).label("amount"),
+        ).where(*conds).group_by(T.station_code)
+            .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+        by_station = [{
+            "code": int(row.key),
+            "name": station_names.get(int(row.key), f"АЗС {row.key}"),
+            **metrics(int(row.n), float(row.liters), float(row.amount), total_amount),
+        } for row in station_rows]
+
+        payment_rows = (await self.session.execute(select(
+            T.pay_type_name.label("key"), func.count().label("n"),
+            func.coalesce(func.sum(T.liters), 0).label("liters"),
+            func.coalesce(func.sum(T.amount), 0).label("amount"),
+        ).where(*conds).group_by(T.pay_type_name)
+            .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+        by_payment = [{
+            "name": row.key or "—",
+            **metrics(int(row.n), float(row.liters), float(row.amount), total_amount),
+        } for row in payment_rows]
+
+        fuel_rows = (await self.session.execute(select(
+            T.fuel_code.label("code"), T.fuel_name.label("name"), func.count().label("n"),
+            func.coalesce(func.sum(T.liters), 0).label("liters"),
+            func.coalesce(func.sum(T.amount), 0).label("amount"),
+        ).where(*conds).group_by(T.fuel_code, T.fuel_name)
+            .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+        by_fuel = [{
+            "code": int(row.code) if row.code is not None else None,
+            "name": row.name or "—",
+            **metrics(int(row.n), float(row.liters), float(row.amount), total_amount),
+        } for row in fuel_rows]
+
+        day_expr = func.date(func.timezone("Europe/Moscow", T.dt))
+        daily_rows = (await self.session.execute(select(
+            day_expr.label("day"), func.count().label("n"),
+            func.coalesce(func.sum(T.liters), 0).label("liters"),
+            func.coalesce(func.sum(T.amount), 0).label("amount"),
+        ).where(*conds).group_by(day_expr).order_by(day_expr))).all()
+        daily = [{
+            "date": row.day.isoformat(),
+            "count": int(row.n),
+            "liters": round(float(row.liters), 2),
+            "amount": round(float(row.amount), 2),
+        } for row in daily_rows]
+
+        matrix_rows = (await self.session.execute(select(
+            T.station_code.label("station_code"), T.pay_type_name.label("payment"),
+            func.count().label("n"),
+            func.coalesce(func.sum(T.liters), 0).label("liters"),
+            func.coalesce(func.sum(T.amount), 0).label("amount"),
+        ).where(*conds).group_by(T.station_code, T.pay_type_name)
+            .order_by(T.station_code, func.coalesce(func.sum(T.amount), 0).desc()))).all()
+        station_amounts = {row["code"]: row["amount"] for row in by_station}
+        station_payment = [{
+            "station_code": int(row.station_code),
+            "station_name": station_names.get(int(row.station_code), f"АЗС {row.station_code}"),
+            "payment": row.payment or "—",
+            **metrics(
+                int(row.n), float(row.liters), float(row.amount),
+                station_amounts.get(int(row.station_code), 0.0),
+            ),
+        } for row in matrix_rows]
+
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "totals": {
+                **metrics(total_count, total_liters, total_amount, total_amount),
+                "stations": int(totals.stations),
+            },
+            "by_station": by_station,
+            "by_payment": by_payment,
+            "by_fuel": by_fuel,
+            "daily": daily,
+            "station_payment": station_payment,
+        }
+
     def _kpis(self, shifts, sales, cash, receipts, fuel_name) -> dict:
         fuel_agg = defaultdict(lambda: {"volume": 0.0, "revenue": 0.0})
         pay_agg: dict[str, dict[int, dict]] = defaultdict(lambda: defaultdict(lambda: {"volume": 0.0, "revenue": 0.0}))

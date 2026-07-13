@@ -246,9 +246,39 @@ export const setReceiptCost = (receiptId: string, edit: ReceiptCostEdit) =>
 export const deleteReceiptCost = (receiptId: string) =>
   del(`/api/fuel/receipts/${receiptId}/cost`)
 
-/** Показатели партии по FIFO (списано/остаток/маржа). */
+export interface ReceiptCostingChannel {
+  channel: string
+  liters: number
+  share_pct: number
+  allocations_count: number
+  avg_sale_price: number
+  revenue: number
+  revenue_net: number
+  cogs: number
+  margin: number
+  margin_pct: number
+}
+
+export interface ReceiptCostingMicroLot {
+  id: string
+  opened_at: string | null
+  shift_id: string
+  shift_number: number | null
+  channel: string
+  liters: number
+  avg_sale_price: number
+  revenue: number
+  revenue_net: number
+  cogs: number
+  margin: number
+  margin_pct: number
+}
+
+/** Показатели партии по FIFO: итоги, каналы оплаты и микропартии продаж. */
 export interface ReceiptCosting {
   has_cost: boolean
+  allocation_method?: 'shift_channel_pro_rata'
+  allocation_method_label?: string
   cost_per_liter?: number
   total_liters?: number
   consumed_liters?: number
@@ -256,7 +286,11 @@ export interface ReceiptCosting {
   avg_sale_price?: number
   cogs_consumed?: number
   revenue_consumed?: number
+  revenue_net_consumed?: number
   margin_consumed?: number
+  margin_pct?: number
+  channels?: ReceiptCostingChannel[]
+  micro_lots?: ReceiptCostingMicroLot[]
 }
 export const getReceiptCosting = (receiptId: string) =>
   get<ReceiptCosting>(`/api/fuel/receipts/${receiptId}/costing`)
@@ -273,19 +307,87 @@ export interface CostingMarginLine {
   margin: number
   margin_per_liter: number
   avg_cost_per_liter: number
+  avg_sale_price: number
+  avg_sale_price_net: number
+  margin_pct: number
+  coverage_pct: number
+}
+export interface CostingMarginTotals {
+  liters: number
+  liters_costed: number
+  liters_uncosted: number
+  revenue: number
+  revenue_net: number
+  cogs: number
+  margin: number
+  margin_per_liter: number
+  avg_cost_per_liter: number
+  avg_sale_price: number
+  avg_sale_price_net: number
+  margin_pct: number
+  coverage_pct: number
 }
 export interface CostingMargin {
   period: { from: string; to: string }
   group_by: string
   lines: CostingMarginLine[]
-  totals: {
-    liters: number; liters_costed: number; liters_uncosted: number
-    revenue: number; revenue_net: number; cogs: number; margin: number
-  }
+  totals: CostingMarginTotals
 }
 /** group_by: fuel | payment | station | month | fuel_payment */
 export const getCostingMargin = (dateFrom: string, dateTo: string, groupBy = 'fuel') =>
   get<CostingMargin>('/api/fuel/costing/margin', { date_from: dateFrom, date_to: dateTo, group_by: groupBy })
+
+export interface MarginDecisionDashboard {
+  period: { from: string; to: string }
+  previous_period: { from: string; to: string }
+  fuel: CostingMargin
+  station: CostingMargin
+  station_fuel: CostingMargin
+  month: CostingMargin
+  previous: CostingMargin
+  readiness: {
+    positive_receipts: number
+    costed_receipts: number
+    uncosted_receipts: number
+    nonpositive_receipts: number
+    opening_balances: number
+    opening_balance_liters: number
+    opening_balance_value: number
+  }
+}
+
+export const getMarginDecisionDashboard = (companyId: string, dateFrom: string, dateTo: string) =>
+  get<MarginDecisionDashboard>('/api/fuel/costing/decision-dashboard', {
+    company_id: companyId,
+    date_from: dateFrom,
+    date_to: dateTo,
+  })
+
+export interface FuelOpeningBalance {
+  id: string
+  station_id: string
+  station_code: number | null
+  station_name: string
+  fuel_code: number
+  fuel_name: string
+  as_of: string
+  liters: number
+  cost_per_liter: number
+  value: number
+  source: 'auto' | 'manual'
+  note: string | null
+}
+
+export interface FuelOpeningBalancesResponse {
+  rows: FuelOpeningBalance[]
+  totals: { count: number; liters: number; value: number }
+}
+
+export const getFuelOpeningBalances = () =>
+  get<FuelOpeningBalancesResponse>('/api/fuel/costing/opening-balances')
+
+export const recalculateFuelOpeningBalances = () =>
+  post<{ ok: boolean; count: number; liters: number; value: number }>('/api/fuel/costing/opening-balances/auto')
 
 // ─── Станции (для выбора АЗС в закупочной партии) ───
 export interface FuelStationRef {
@@ -438,6 +540,44 @@ export interface FuelTxOverview {
 export const getFuelTxOverview = (dateFrom: string, dateTo: string, stationCode?: number) =>
   get<FuelTxOverview>('/api/fuel/transactions/overview', { date_from: dateFrom, date_to: dateTo, station_code: stationCode })
 export const getFuelTxCount = () => get<{ transactions: number }>('/api/fuel/transactions/count')
+
+export interface SalesChannelMetrics {
+  count: number
+  liters: number
+  amount: number
+  share: number
+  avg_check: number
+  avg_fill: number
+  avg_price: number
+}
+export interface SalesChannelsAnalytics {
+  period: { from: string; to: string }
+  totals: SalesChannelMetrics & { stations: number }
+  by_station: (SalesChannelMetrics & { code: number; name: string })[]
+  by_payment: (SalesChannelMetrics & { name: string })[]
+  by_fuel: (SalesChannelMetrics & { code: number | null; name: string })[]
+  daily: { date: string; count: number; liters: number; amount: number }[]
+  station_payment: (SalesChannelMetrics & {
+    station_code: number
+    station_name: string
+    payment: string
+  })[]
+}
+export interface SalesChannelsParams {
+  dateFrom: string
+  dateTo: string
+  stationCodes?: number[]
+  fuelCodes?: number[]
+  payTypes?: string[]
+}
+export const getSalesChannelsAnalytics = (p: SalesChannelsParams) =>
+  get<SalesChannelsAnalytics>('/api/fuel/sales-channels', {
+    date_from: p.dateFrom,
+    date_to: p.dateTo,
+    station_codes: p.stationCodes?.length ? p.stationCodes.join(',') : undefined,
+    fuel_codes: p.fuelCodes?.length ? p.fuelCodes.join(',') : undefined,
+    pay_types: p.payTypes?.length ? p.payTypes.join(',') : undefined,
+  })
 
 // Загрузка наливов из STS (фон) + статус прогона
 export interface FuelTxSyncStatus { running: boolean; stations_done: number; stations_total: number; loaded: number; message: string }

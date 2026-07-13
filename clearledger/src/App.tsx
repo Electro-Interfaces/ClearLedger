@@ -89,22 +89,29 @@ function Providers() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <CompanyProvider>
-            <TabsProvider>
-              <FilterProvider>
-                <SupportProvider>
-                  <TooltipProvider>
-                    <TabFilterSync />
-                    <OneCAutoSync />
-                    <Outlet />
-                    <Toaster position="bottom-right" richColors closeButton />
-                  </TooltipProvider>
-                </SupportProvider>
-              </FilterProvider>
-            </TabsProvider>
+            <CompanyScopedProviders />
           </CompanyProvider>
         </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>
+  )
+}
+
+function CompanyScopedProviders() {
+  const { companyId } = useCompany()
+  return (
+    <TabsProvider key={companyId}>
+      <FilterProvider>
+        <SupportProvider>
+          <TooltipProvider>
+            <TabFilterSync />
+            <OneCAutoSync />
+            <Outlet />
+            <Toaster position="bottom-right" richColors closeButton />
+          </TooltipProvider>
+        </SupportProvider>
+      </FilterProvider>
+    </TabsProvider>
   )
 }
 

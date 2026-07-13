@@ -13,6 +13,9 @@ import { ChargeSalesRouter } from './ChargeSalesRouter'
 import { FuelOverviewPanel } from './FuelOverviewPanel'
 import { FuelTransactionsPanel } from './FuelTransactionsPanel'
 import { FuelMapPanel } from './FuelMapPanel'
+import { MarginDecisionPanel } from './MarginDecisionPanel'
+import { OnlineOrdersPanel } from './OnlineOrdersPanel'
+import { SalesChannelsPanel } from './SalesChannelsPanel'
 import { FuelBalancePanel } from './FuelBalancePanel'
 import { BpExportPanel } from './BpExportPanel'
 import { AccountingStreamsPanel } from './AccountingStreamsPanel'
@@ -49,7 +52,7 @@ import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
 import { SyncWith1CPanel } from '@/components/fuel/SyncWith1CPanel'
 import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
 import {
-  getLoadedShifts, getCostingMargin, getShiftDashboard, type LoadedShift,
+  getLoadedShifts, getCostingMargin, type LoadedShift,
 } from '@/services/fuel/fuelMappingService'
 
 /* ── общие виджеты ── */
@@ -113,7 +116,7 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   const menu = sections.find((s) => s.mode === mode)?.items ?? []
   const menuKeys = menu.map((m) => m.key)
   const [tab] = useWorkspaceSubView(menuKeys[0] ?? 'overview')
-  const { period } = useFilters()
+  const { period, stationCode } = useFilters()
   const { companyId, company } = useCompany()
   const activeTab = menuKeys.includes(tab) ? tab : (menuKeys[0] ?? 'balance')
 
@@ -125,6 +128,21 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
     )
   }
 
+  // ГИГ (fuel): «Договоры и аренда» — хозяйственный контур управленческого раздела
+  if (activeTab === 'contracts') {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="max-w-md text-center">
+          <p className="text-sm font-medium text-foreground/80 mb-2">Договоры и аренда — в разработке</p>
+          <p className="text-sm text-muted-foreground">
+            Хозяйственные отношения компании: реестр договоров (аренда земли и площадок АЗС,
+            поставщики, обслуживание), сроки и платёжная дисциплина. Появится после загрузки
+            реестра договоров.
+          </p>
+        </div>
+      </div>
+    )
+  }
   // Кокпит решений (energy): обзор ситуации + пообъектный энергобаланс (факт)
   if (activeTab === 'ops_overview') {
     return <div className="h-full overflow-y-auto"><OpsOverviewVitrine /></div>
@@ -151,9 +169,10 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
       {activeTab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
       {activeTab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
       {activeTab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
-      {activeTab === 'channels' && <MgmtChannels companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'channels' && <SalesChannelsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'online-orders' && <OnlineOrdersPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stationCode={stationCode} />}
       {activeTab === 'transactions' && <FuelTransactionsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-      {activeTab === 'margin' && <MgmtMargin companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+      {activeTab === 'margin' && <MarginDecisionPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
       {activeTab === 'purchases' && <ReceiptsSection />}
       {activeTab === 'tanks' && <FuelBalancePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
     </div>
@@ -216,98 +235,6 @@ function MgmtPnLTable({ companyId, dateFrom, dateTo, groupBy }: { companyId: str
               </tr>
             </tbody>
           </table>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
-/* ── Каналы продаж (полный разрез по видам оплаты — из сырых отчётов STS) ── */
-
-// Таблица разреза продаж: все строки (виды оплаты / топлива), Наливы·Выручка·Объём·Доля·₽л·Итого.
-// Наливы (count) — из пооперационных транзакций; при отсутствии колонка скрыта.
-function ChannelBreakTable({ title, nameCol, rows }: {
-  title: string; nameCol: string; rows: { name: string; revenue: number; volume: number; count?: number }[]
-}) {
-  const totRev = rows.reduce((s, r) => s + r.revenue, 0)
-  const totVol = rows.reduce((s, r) => s + r.volume, 0)
-  const hasCount = rows.some((r) => r.count != null)
-  const totCnt = rows.reduce((s, r) => s + (r.count ?? 0), 0)
-  const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-  return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">{title} ({rows.length})</div>
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b bg-muted/20 text-muted-foreground">
-              <th className="text-left p-2 font-medium">{nameCol}</th>
-              {hasCount && <th className="text-right p-2 font-medium">Наливы</th>}
-              <th className="text-right p-2 font-medium">Выручка</th>
-              <th className="text-right p-2 font-medium">Объём, л</th>
-              <th className="text-right p-2 font-medium">Доля</th>
-              <th className="text-right p-2 font-medium">₽/л</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.name} className="border-b border-border/30 hover:bg-muted/30">
-                <td className="p-2 font-medium truncate max-w-[180px]">{r.name}</td>
-                {hasCount && <td className="p-2 text-right font-mono tabular-nums text-muted-foreground">{r.count != null ? nf0.format(r.count) : '—'}</td>}
-                <td className="p-2 text-right font-mono">{fmtMoney(r.revenue)}</td>
-                <td className="p-2 text-right font-mono text-muted-foreground">{fmtLiters(r.volume)}</td>
-                <td className="p-2 text-right font-mono">{totRev ? (r.revenue / totRev * 100).toFixed(1) : '0.0'}%</td>
-                <td className="p-2 text-right font-mono text-muted-foreground">{r.volume ? fmtMoney(r.revenue / r.volume) : '—'}</td>
-              </tr>
-            ))}
-            <tr className="bg-muted/60 font-medium">
-              <td className="p-2">Итого</td>
-              {hasCount && <td className="p-2 text-right font-mono">{nf0.format(totCnt)}</td>}
-              <td className="p-2 text-right font-mono">{fmtMoney(totRev)}</td>
-              <td className="p-2 text-right font-mono">{fmtLiters(totVol)}</td>
-              <td className="p-2 text-right font-mono">100%</td>
-              <td className="p-2 text-right font-mono">{totVol ? fmtMoney(totRev / totVol) : '—'}</td>
-            </tr>
-          </tbody>
-        </table>
-      </CardContent>
-    </Card>
-  )
-}
-
-function MgmtChannels({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  // Полный разрез из сырых отчётов STS (все виды оплаты как есть) — как в эталонной
-  // системе. Комиссий в ленте STS нет, поэтому фиктивных ставок/«чистой выручки» здесь больше нет.
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['fuel-channels', companyId, dateFrom, dateTo],
-    queryFn: () => getShiftDashboard(dateFrom, dateTo),
-  })
-  if (isLoading) return <LoadingState />
-  if (error) return <ErrorState message={String(error)} />
-  const pays = (data?.payment_methods ?? []).slice().sort((a, b) => b.revenue - a.revenue)
-  const fuels = (data?.fuel_types_raw ?? []).slice().sort((a, b) => b.revenue - a.revenue)
-  if (pays.length === 0) return <div className="p-6 text-sm text-muted-foreground text-center">Нет продаж по каналам за период</div>
-
-  const totRev = pays.reduce((s, r) => s + r.revenue, 0)
-  const totVol = pays.reduce((s, r) => s + r.volume, 0)
-  const totCnt = pays.reduce((s, r) => s + (r.count ?? 0), 0)
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Оборот (все оплаты)" value={fmtMoneyShort(totRev) + ' ₽'} hint={`${data?.operational.shifts_count ?? 0} смен`} />
-        <KpiCard label="Наливов" value={totCnt ? totCnt.toLocaleString('ru-RU') : '—'} accent="info" hint="операций отпуска" />
-        <KpiCard label="Объём" value={fmtLiters(totVol)} />
-        <KpiCard label="Видов оплаты" value={String(pays.length)} />
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <ChannelBreakTable title="Способы оплаты" nameCol="Вид" rows={pays} />
-        <ChannelBreakTable title="Виды топлива" nameCol="Топливо" rows={fuels.map((f) => ({ name: f.name, revenue: f.revenue, volume: f.volume, count: f.count }))} />
-      </div>
-      <Card>
-        <CardContent className="pt-4 text-xs text-muted-foreground">
-          Разрез — по сырым отчётам STS: каждый вид оплаты как есть (вкл. Купон/Прокачку/Тех.отпуск), ничего не свёрнуто и не отброшено.
-          Комиссий эквайринга/агрегаторов в ленте STS нет — они появятся после подключения эквайринг-реестра (Сбербанк) с реальными ставками по договорам.
         </CardContent>
       </Card>
     </div>

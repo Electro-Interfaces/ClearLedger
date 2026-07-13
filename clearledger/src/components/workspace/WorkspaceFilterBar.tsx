@@ -1,14 +1,13 @@
-/**
- * Свёрнутый основной фильтр рабочей области — строка со сводкой параметров.
- * Клик открывает модалку полной настройки (`WorkspaceFilterModal`).
- * Показывает установленные значения: период · станция · точки · регионы · типы.
- */
-
 import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { SlidersHorizontal, RefreshCw, X } from 'lucide-react'
+import {
+  CalendarDays, Database, FileText, MapPinned, RefreshCw, RotateCcw,
+  SlidersHorizontal, type LucideIcon,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { useFilters } from '@/contexts/FilterContext'
+import { activeFilterCount } from '@/contexts/filterState'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useLocations } from '@/hooks/useLocations'
 import { useShifts } from '@/hooks/useFuel'
@@ -18,29 +17,47 @@ import { ViewHistoryMenu } from './ViewHistoryMenu'
 import { cn } from '@/lib/utils'
 
 function fmtShort(iso: string): string {
-  // YYYY-MM-DD → DD.MM (без внешних зависимостей)
   const [, m, d] = iso.split('-')
   return d && m ? `${d}.${m}` : iso
 }
 
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function SummaryControl({
+  icon: Icon,
+  label,
+  value,
+  active = false,
+  onClick,
+}: {
+  icon: LucideIcon
+  label: string
+  value: string
+  active?: boolean
+  onClick: () => void
+}) {
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-label={`${label}: ${value}`}
       className={cn(
-        'shrink-0 px-2 py-0.5 rounded text-xs transition-colors',
+        'group flex h-9 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left transition-colors',
         active
-          ? 'bg-primary/15 text-primary font-medium'
-          : 'text-muted-foreground hover:text-foreground hover:bg-accent/50',
+          ? 'bg-primary/10 text-primary hover:bg-primary/15'
+          : 'text-foreground hover:bg-muted/70',
       )}
     >
-      {label}
+      <Icon className="size-4 shrink-0 opacity-75" aria-hidden="true" />
+      <span className="min-w-0">
+        <span className="block text-[10px] leading-3 text-muted-foreground">{label}</span>
+        <span className="block max-w-40 truncate text-xs font-medium leading-4">{value}</span>
+      </span>
     </button>
   )
 }
 
 export function WorkspaceFilterBar() {
-  const { period, stationCode, locationIds, regionIds, stationCodes, docTypeIds, clearAll, commitToHistory } = useFilters()
+  const filters = useFilters()
+  const { period, stationCode, locationIds, regionIds, stationCodes, docTypeIds, clearAll } = filters
   const { company } = useCompany()
   const isEnergy = company.profileId === 'energy'
   const locations = useLocations()
@@ -49,22 +66,23 @@ export function WorkspaceFilterBar() {
   const [open, setOpen] = useState(false)
 
   const { isFetching } = useShifts(stationCode === 'all' ? undefined : Number(stationCode))
+  const count = activeFilterCount(filters.state)
 
-  const stationLabel = useMemo(() => {
-    if (isEnergy || stationCode === 'all') return 'Все станции'
-    return stations.find((s) => String(s.code) === stationCode)?.name ?? `Станция ${stationCode}`
-  }, [isEnergy, stationCode, stations])
-
-  const locationLabel = useMemo(() => {
-    if (locationIds.length === 0) return 'Все точки'
+  const scopeLabel = useMemo(() => {
+    if (isEnergy && stationCodes.length > 0) return stationCodes.length === 1 ? '1 ЭЗС' : `ЭЗС: ${stationCodes.length}`
     if (locationIds.length === 1) return locations.find((l) => l.id === locationIds[0])?.name ?? '1 точка'
-    return `Точек: ${locationIds.length}`
-  }, [locationIds, locations])
+    if (locationIds.length > 1) return `Точек: ${locationIds.length}`
+    if (regionIds.length === 1) return regionIds[0]
+    if (regionIds.length > 1) return `Регионов: ${regionIds.length}`
+    return 'Вся сеть'
+  }, [isEnergy, locationIds, locations, regionIds, stationCodes.length])
 
-  const regionLabel = regionIds.length === 0 ? 'Все регионы' : regionIds.length === 1 ? regionIds[0] : `Регионов: ${regionIds.length}`
-  const docLabel = docTypeIds.length === 0 ? 'Все типы' : `Типов: ${docTypeIds.length}`
-  const eszLabel = stationCodes.length === 0 ? 'Все ЭЗС' : `ЭЗС: ${stationCodes.length}`
-  const activeCount = locationIds.length + regionIds.length + stationCodes.length + docTypeIds.length
+  const sourceLabel = useMemo(() => {
+    if (stationCode === 'all') return 'Все станции STS'
+    return stations.find((s) => String(s.code) === stationCode)?.name ?? `Станция ${stationCode}`
+  }, [stationCode, stations])
+
+  const docLabel = docTypeIds.length === 0 ? 'Все типы данных' : `Типов: ${docTypeIds.length}`
 
   function handleRefresh() {
     queryClient.invalidateQueries({ queryKey: ['sts-shifts'] })
@@ -73,72 +91,81 @@ export function WorkspaceFilterBar() {
   }
 
   return (
-    <div className="flex items-center gap-1.5 min-w-0">
-      {/* Кнопка «настроить» + свёрнутая сводка (вся строка открывает модалку) */}
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
       <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0"
+        variant="outline"
+        size="sm"
+        className="h-9 rounded-lg px-2.5"
         onClick={() => setOpen(true)}
-        title="Настроить фильтр рабочей области"
+        aria-label={count > 0 ? `Настроить фильтры, активно: ${count}` : 'Настроить фильтры'}
       >
-        <SlidersHorizontal className="h-3.5 w-3.5" />
+        <SlidersHorizontal data-icon="inline-start" />
+        <span className="hidden sm:inline">Фильтры</span>
+        {count > 0 ? <Badge className="min-w-5 px-1.5">{count}</Badge> : null}
       </Button>
 
-      <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto scrollbar-hide">
-        <Chip label={`${fmtShort(period.from)} – ${fmtShort(period.to)}`} active onClick={() => setOpen(true)} />
-        <span className="text-border/60">·</span>
+      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-hide">
+        <SummaryControl
+          icon={CalendarDays}
+          label="Период"
+          value={`${fmtShort(period.from)}–${fmtShort(period.to)}`}
+          active
+          onClick={() => setOpen(true)}
+        />
+        <SummaryControl
+          icon={MapPinned}
+          label="Область учёта"
+          value={scopeLabel}
+          active={locationIds.length + regionIds.length + stationCodes.length > 0}
+          onClick={() => setOpen(true)}
+        />
+        <SummaryControl
+          icon={FileText}
+          label="Данные"
+          value={docLabel}
+          active={docTypeIds.length > 0}
+          onClick={() => setOpen(true)}
+        />
         {!isEnergy ? (
-          <>
-            <Chip label={stationLabel} active={stationCode !== 'all'} onClick={() => setOpen(true)} />
-            <span className="text-border/60">·</span>
-            <Chip label={locationLabel} active={locationIds.length > 0} onClick={() => setOpen(true)} />
-          </>
-        ) : (
-          <Chip label={eszLabel} active={stationCodes.length > 0} onClick={() => setOpen(true)} />
-        )}
-        <span className="text-border/60">·</span>
-        <Chip label={regionLabel} active={regionIds.length > 0} onClick={() => setOpen(true)} />
-        <span className="text-border/60">·</span>
-        <Chip label={docLabel} active={docTypeIds.length > 0} onClick={() => setOpen(true)} />
+          <SummaryControl
+            icon={Database}
+            label="Источник STS"
+            value={sourceLabel}
+            active={stationCode !== 'all'}
+            onClick={() => setOpen(true)}
+          />
+        ) : null}
       </div>
 
-      {activeCount > 0 && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground shrink-0"
-          onClick={clearAll}
-          title="Сбросить выборки (период сохраняется)"
-        >
-          <X className="h-3.5 w-3.5" />
-          {activeCount}
-        </Button>
-      )}
-
-      <div className="ml-auto flex items-center gap-1 shrink-0">
-        <ViewHistoryMenu />
-        {!isEnergy && (
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {count > 0 ? (
           <Button
             variant="ghost"
-            size="icon"
-            className="h-7 w-7"
+            size="sm"
+            className="h-9 rounded-lg px-2.5 text-muted-foreground"
+            onClick={clearAll}
+            aria-label="Сбросить все ограничения, период сохранить"
+          >
+            <RotateCcw data-icon="inline-start" />
+            <span className="hidden xl:inline">Сбросить</span>
+          </Button>
+        ) : null}
+        <ViewHistoryMenu />
+        {!isEnergy ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-9 rounded-lg"
             onClick={handleRefresh}
             disabled={isFetching}
-            title="Обновить данные STS"
+            aria-label="Обновить данные STS"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin')} />
+            <RefreshCw className={cn(isFetching && 'animate-spin')} />
           </Button>
-        )}
+        ) : null}
       </div>
 
-      <WorkspaceFilterModal
-        open={open}
-        onOpenChange={(v) => {
-          if (!v) commitToHistory() // закрытие модалки = применение набора → в историю
-          setOpen(v)
-        }}
-      />
+      <WorkspaceFilterModal key={open ? 'open' : 'closed'} open={open} onOpenChange={setOpen} />
     </div>
   )
 }

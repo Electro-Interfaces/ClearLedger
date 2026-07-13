@@ -409,8 +409,6 @@ def convert_transaction_params(query: dict[str, Any]) -> dict[str, Any]:
         results = results if isinstance(results, list) else str(results).split(",")
         q["operationResult"] = ",".join(results)
         q.pop("operationResults", None)
-    if q.get("operationResult") == "sw":
-        q["operationResult"] = "success,wait"
     if q.get("servicePointIds") and not q.get("servicePointId"):
         spids = q["servicePointIds"]
         q["servicePointId"] = ",".join(spids) if isinstance(spids, list) else str(spids)

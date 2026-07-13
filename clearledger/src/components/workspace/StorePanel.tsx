@@ -102,7 +102,23 @@ function ViewScaffold({ view }: { view: StoreView }) {
 export function StorePanel() {
   const [sub] = useWorkspaceSubView(STORE_DEFAULT_KEY, STORE_KEYS)
   const { period } = useFilters()
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+
+  // Магазин (сопутка/общепит) — витрина топливного профиля (ГИГ). У energy-компаний
+  // (РусГидро) магазина нет — раздел появится после подключения интернет-магазина.
+  if (company.profileId !== 'fuel') {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="max-w-md text-center">
+          <p className="text-sm font-medium text-foreground/80 mb-2">Раздел в разработке</p>
+          <p className="text-sm text-muted-foreground">
+            «Магазин» для {company.shortName || company.name} появится после подключения
+            интернет-магазина.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   // «Обзор» — executive-дашборд; SKU-экраны — реестр товаров; прочие — scaffold.
   if (sub === 'overview') {

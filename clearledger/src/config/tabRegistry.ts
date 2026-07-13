@@ -75,17 +75,18 @@ export interface ViewDescriptor {
 }
 
 /**
- * Описать ТЕКУЩИЙ вид для закрепления во вкладку. Для «Рабочего стола» включает
- * режим/под-раздел из URL («Рабочий стол · Финансовый · Дебиторка»).
+ * Описать ТЕКУЩИЙ вид для закрепления во вкладку. Для «Рабочего стола» берёт
+ * короткое имя активного пункта меню («Операции», «Карта», «Дебиторка»).
  * null — вид не закрепляется (напр. 404).
  */
 export function describeView(pathname: string, search: string): ViewDescriptor | null {
   if (pathname === '/') {
     const sp = new URLSearchParams(search)
     const modeRaw = sp.get('mode')
+    const sub = sp.get('sub')
     // Плоский рабочий стол без режима — просто «Рабочий стол».
-    const title = modeRaw
-      ? workspaceTitle(isCoreMode(modeRaw) ? modeRaw : 'management', sp.get('sub'))
+    const title = modeRaw || sub
+      ? workspaceTitle(isCoreMode(modeRaw) ? modeRaw : 'management', sub)
       : 'Рабочий стол'
     return { key: pathname + search, pathname, title }
   }

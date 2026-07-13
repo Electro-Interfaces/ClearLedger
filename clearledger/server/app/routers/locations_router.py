@@ -13,10 +13,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_member, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
-from app.models import AuditEvent, ServiceLocation, User
+from app.models import AuditEvent, Company, ServiceLocation, User
 from app.services import hubex_service
 
 OP_STATUSES = {"working", "not_working", "on_repair", "maintenance", "unknown"}
@@ -107,6 +107,18 @@ def _out(l: ServiceLocation) -> LocationOut:
 async def list_locations(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
     res = await db.execute(
         select(ServiceLocation).where(ServiceLocation.company_id == cid)
+        .order_by(ServiceLocation.code)
+    )
+    return [_out(l) for l in res.scalars().all()]
+
+
+@router.get("/export", response_model=list[LocationOut])
+async def export_locations(
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(
+        select(ServiceLocation).where(ServiceLocation.company_id == company.id)
         .order_by(ServiceLocation.code)
     )
     return [_out(l) for l in res.scalars().all()]

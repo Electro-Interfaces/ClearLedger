@@ -18,7 +18,7 @@ function fmtShort(iso: string): string {
 
 function snapLabel(snap: ViewSnapshot): string {
   const mode = isCoreMode(snap.mode) ? snap.mode : 'management'
-  const title = workspaceTitle(mode, snap.sub || undefined).replace('Рабочий стол · ', '')
+  const title = workspaceTitle(mode, snap.sub || undefined)
   return `${title} · ${fmtShort(snap.section.period.from)}–${fmtShort(snap.section.period.to)}`
 }
 
@@ -37,15 +37,16 @@ export function ViewHistoryMenu() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="История видов">
-          <Bookmark className="h-3.5 w-3.5" />
+        <Button variant="ghost" size="sm" className="h-9 shrink-0 rounded-lg px-2.5" aria-label="Сохранённые виды">
+          <Bookmark data-icon="inline-start" />
+          <span className="hidden lg:inline">Виды</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[320px] p-2">
         <div className="flex items-center justify-between mb-2 px-1">
           <span className="text-xs font-medium text-muted-foreground">История видов</span>
           <Button variant="outline" size="sm" className="h-7 text-xs px-2 gap-1" onClick={saveCurrentView}>
-            <Plus className="h-3.5 w-3.5" />Сохранить вид
+            <Plus data-icon="inline-start" />Сохранить вид
           </Button>
         </div>
         {history.length === 0 ? (
@@ -69,7 +70,7 @@ export function ViewHistoryMenu() {
                   onClick={() => deleteView(snap.id)}
                   title="Удалить"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X />
                 </Button>
               </div>
             ))}

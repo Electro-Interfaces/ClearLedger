@@ -372,6 +372,13 @@ export async function getStationsModel(companyId: string): Promise<ChargeModelRe
   return get<ChargeModelResponse>('/api/analytics/stations/model', { company_id: companyId })
 }
 
+/** Модели данных топливного контура (ГИГ) для «Нормализации» — тот же контракт.
+ *  dataset: shifts (смены STS + наливы) | receipts (ТТН) | sidegoods (сопутка/общепит ЦБ). */
+export type FuelModelDataset = 'shifts' | 'receipts' | 'sidegoods'
+export async function getFuelModel(companyId: string, dataset: FuelModelDataset): Promise<ChargeModelResponse> {
+  return get<ChargeModelResponse>('/api/analytics/fuel/model', { company_id: companyId, dataset })
+}
+
 // ─── связь каналов по станции (конформная размерность) ───
 export interface StationsLinkageChannel {
   name: string; template: string; key: string; materialized: boolean

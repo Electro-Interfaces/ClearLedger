@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { useFuelName } from '@/hooks/useFuelName'
+import { ReceiptFifoSales } from '@/components/fuel/ReceiptFifoSales'
 import {
   patchReceipt, resetReceiptOverride, setReceiptCost, deleteReceiptCost,
   getReceiptCosting, type LoadedReceipt,
@@ -101,6 +102,7 @@ export function ReceiptDetailsModal({ receipt, open, onClose }: {
     await qc.invalidateQueries({ queryKey: ['fuel-receipts-by-station'] })
     await qc.invalidateQueries({ queryKey: ['receipt-costing', receipt?.id] })
     await qc.invalidateQueries({ queryKey: ['costing-margin'] })
+    await qc.invalidateQueries({ queryKey: ['margin-decision-dashboard'] })
   }
   const saveCost = async () => {
     if (!receipt || costPrice.trim() === '') return
@@ -159,7 +161,7 @@ export function ReceiptDetailsModal({ receipt, open, onClose }: {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-4xl max-h-[90vh] overflow-y-auto bg-card border-border">
+      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-6xl max-h-[90vh] overflow-y-auto bg-card border-border">
         <DialogHeader className="pb-2">
           <DialogTitle className="text-lg font-semibold">Детали поступления</DialogTitle>
           <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
@@ -341,14 +343,6 @@ export function ReceiptDetailsModal({ receipt, open, onClose }: {
                 = {receipt.cost_per_liter.toFixed(4)} ₽/л (нормализовано для FIFO-маржи)
               </p>
             )}
-            {costing.data?.has_cost && (
-              <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
-                <div className="flex justify-between rounded bg-card px-2 py-1"><span className="text-muted-foreground">Списано</span><span>{costing.data.consumed_liters?.toFixed(0)} л</span></div>
-                <div className="flex justify-between rounded bg-card px-2 py-1"><span className="text-muted-foreground">Остаток</span><span>{costing.data.remaining_liters?.toFixed(0)} л</span></div>
-                <div className="flex justify-between rounded bg-card px-2 py-1"><span className="text-muted-foreground">Ср. цена реализ.</span><span>{costing.data.avg_sale_price?.toFixed(2)} ₽/л</span></div>
-                <div className="flex justify-between rounded bg-card px-2 py-1"><span className="text-muted-foreground">Маржа партии</span><span className={cn((costing.data.margin_consumed ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-500')}>{costing.data.margin_consumed?.toFixed(0)} ₽</span></div>
-              </div>
-            )}
             <div className="mt-2 flex items-center gap-2">
               <Button size="sm" onClick={saveCost} disabled={saving || costPrice.trim() === ''} className="gap-1">
                 <Save className="h-3.5 w-3.5" /> Сохранить
@@ -360,6 +354,7 @@ export function ReceiptDetailsModal({ receipt, open, onClose }: {
           </div>
           </div>{/* /правая колонка (корректировка + себестоимость) */}
           </div>{/* /grid 2 колонки */}
+          {receipt.has_cost && <ReceiptFifoSales key={receipt.id} costing={costing.data} loading={costing.isLoading} />}
         </div>
       </DialogContent>
     </Dialog>

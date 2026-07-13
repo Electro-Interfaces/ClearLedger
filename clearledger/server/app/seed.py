@@ -27,11 +27,21 @@ from app.models import (
     PostingTemplate,
     Source,
     SourceCredentials,
+    ServiceLocation,
     User,
     UserCompany,
 )
 
 logger = logging.getLogger("clearledger.seed")
+
+GIG_MSTO_STATION_IDS = {
+    "1": 212,
+    "2": 238,
+    "3": 245,
+    "4": 251,
+    "5": 253,
+    "6": 268,
+}
 
 # Компании — данные совпадают с config/companies.ts (defaultCompanies).
 # Активные направления GIG Ledger: gig (ООО ГИГ / ГазИнвестГрупп) и rushydro.
@@ -139,6 +149,21 @@ async def _seed_gig_msto_source(db: AsyncSession) -> None:
             connection_config={"base_url": "http://46.229.214.21:3000", "login": "tf-integration"},
         ))
         logger.info("ГИГ: источник «MSTO Онлайн-заказы»")
+
+    # Внешние коды перенесены из рабочего монитора TradeFrame. Храним их в
+    # паспорте точки, чтобы выбор АЗС всегда ограничивал запрос MSTO по ID.
+    locations = (await db.execute(
+        select(ServiceLocation).where(
+            ServiceLocation.company_id == gig.id,
+            ServiceLocation.code.in_(GIG_MSTO_STATION_IDS),
+        )
+    )).scalars().all()
+    for location in locations:
+        msto_id = GIG_MSTO_STATION_IDS[location.code]
+        metadata = dict(location.extra_metadata or {})
+        if metadata.get("mstoServicePointId") != msto_id:
+            metadata["mstoServicePointId"] = msto_id
+            location.extra_metadata = metadata
 
     # Legacy: онлайн-заказы — это ИСТОЧНИК, а не канал. Удаляем отдельный канал,
     # если он был заведён ранее (потоки удалятся каскадом).

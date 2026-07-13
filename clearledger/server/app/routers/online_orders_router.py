@@ -6,15 +6,17 @@
 (MSTO sessionId). Журнал отдаётся на вкладку «Данные» канала.
 """
 
+import asyncio
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import OnlineOrder, User, FuelStation, FuelMapping, ServiceLocation
 from app.services import reconciliation_proxy
@@ -84,7 +86,7 @@ async def _build_resolvers(
             for k in MSTO_SP_KEYS:
                 if cfg.get(k):
                     spids.add(cfg[k])
-        meta = loc.meta or {}
+        meta = loc.extra_metadata or {}
         if meta.get("mstoServicePointId"):
             spids.add(meta["mstoServicePointId"])
         for v in (meta.get("mstoServicePointIds") or []):
@@ -103,6 +105,34 @@ async def _build_resolvers(
         if f.fuel_name:
             fuel_to_code[_norm_fuel(f.fuel_name)] = f.service_code
     return sp_to_station, fuel_to_code
+
+
+def _location_service_point_ids(location: ServiceLocation) -> set[int]:
+    values: set[Any] = set()
+    for binding in location.source_bindings or []:
+        config = (binding or {}).get("config") or {}
+        for key in MSTO_SP_KEYS:
+            if config.get(key) is not None:
+                values.add(config[key])
+    metadata = location.extra_metadata or {}
+    if metadata.get("mstoServicePointId") is not None:
+        values.add(metadata["mstoServicePointId"])
+    values.update(metadata.get("mstoServicePointIds") or [])
+    return {parsed for value in values if (parsed := _int(value)) is not None}
+
+
+async def _company_service_point_ids(
+    db: AsyncSession, company_id: uuid.UUID, station_code: str | None = None,
+) -> list[int]:
+    query = (
+        select(ServiceLocation).where(
+            ServiceLocation.company_id == company_id,
+        )
+    )
+    if station_code:
+        query = query.where(ServiceLocation.code == station_code)
+    locations = (await db.execute(query)).scalars().all()
+    return sorted({spid for location in locations for spid in _location_service_point_ids(location)})
 
 
 def _normalize(tx: dict[str, Any], company_id: uuid.UUID,
@@ -138,24 +168,62 @@ async def ingest_online_orders(
     service_point_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     """Загрузить онлайн-заказы MSTO за период в online_orders (идемпотентно по external_id)."""
-    query: dict[str, Any] = {"operationResult": "sw"}  # success + wait
+    if service_point_ids is None:
+        service_point_ids = await _company_service_point_ids(db, company_id)
+    if not service_point_ids:
+        return {
+            "created": 0,
+            "updated": 0,
+            "fetched": 0,
+            "warning": "Для компании не заданы servicePointId MSTO",
+        }
+    query: dict[str, Any] = {}
     if date_from:
         query["dateFrom"] = date_from
     if date_to:
         query["dateTo"] = date_to
-    if service_point_ids:
-        query["servicePointIds"] = [str(s) for s in service_point_ids]
-
     conn = await reconciliation_proxy.msto_conn_for_company(db, company_id)
-    data = await reconciliation_proxy.msto_transactions(query, conn=conn)
-    if isinstance(data, dict):
-        models = data.get("models") or []
-    elif isinstance(data, list):
-        models = data
+    if service_point_ids:
+        async def load_point(service_point_id: int) -> list[dict[str, Any]]:
+            page = 0
+            size = 2000
+            result: list[dict[str, Any]] = []
+            while True:
+                point_query = {
+                    **query,
+                    "servicePointIds": [str(service_point_id)],
+                    "page": page,
+                    "size": size,
+                }
+                data = await reconciliation_proxy.msto_transactions(point_query, conn=conn)
+                point_models = data.get("models") if isinstance(data, dict) else data
+                models = point_models if isinstance(point_models, list) else []
+                for tx in models:
+                    tx["servicePointId"] = service_point_id
+                result.extend(models)
+                total = _int(data.get("totalCount")) if isinstance(data, dict) else None
+                if not models or len(result) >= (total or len(result)) or len(models) < size:
+                    break
+                page += 1
+            return result
+
+        point_results = await asyncio.gather(
+            *(load_point(service_point_id) for service_point_id in service_point_ids),
+            return_exceptions=True,
+        )
+        successful = [result for result in point_results if isinstance(result, list)]
+        if not successful:
+            first_error = next((result for result in point_results if isinstance(result, Exception)), None)
+            if first_error:
+                raise first_error
+        models = [tx for result in successful for tx in result]
     else:
-        models = []
+        data = await reconciliation_proxy.msto_transactions(query, conn=conn)
+        models = data.get("models") if isinstance(data, dict) else data
+        models = models if isinstance(models, list) else []
     sp_to_station, fuel_to_code = await _build_resolvers(db, company_id)
-    rows = [r for r in (_normalize(tx, company_id, sp_to_station, fuel_to_code) for tx in models) if r]
+    normalized = [r for r in (_normalize(tx, company_id, sp_to_station, fuel_to_code) for tx in models) if r]
+    rows = list({r["external_id"]: r for r in normalized}.values())
     if not rows:
         return {"created": 0, "skipped": 0, "fetched": 0}
 
@@ -168,22 +236,43 @@ async def ingest_online_orders(
         )
     )).scalars().all())
 
-    created = 0
-    for r in rows:
-        if r["external_id"] in existing:
-            continue
-        db.add(OnlineOrder(**r))
-        existing.add(r["external_id"])
-        created += 1
+    for offset in range(0, len(rows), 500):
+        stmt = insert(OnlineOrder).values(rows[offset:offset + 500])
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[OnlineOrder.company_id, OnlineOrder.external_id],
+            set_={
+                "station_id": stmt.excluded.station_id,
+                "service_point_id": stmt.excluded.service_point_id,
+                "service_point_name": stmt.excluded.service_point_name,
+                "post_number": stmt.excluded.post_number,
+                "aggregator": stmt.excluded.aggregator,
+                "fuel_name": stmt.excluded.fuel_name,
+                "fuel_code": stmt.excluded.fuel_code,
+                "order_date": stmt.excluded.order_date,
+                "ordered_sum": stmt.excluded.ordered_sum,
+                "ordered_volume": stmt.excluded.ordered_volume,
+                "actual_sum": stmt.excluded.actual_sum,
+                "actual_volume": stmt.excluded.actual_volume,
+                "operation_result": stmt.excluded.operation_result,
+                "raw_data": stmt.excluded.raw_data,
+                "updated_at": func.now(),
+            },
+        )
+        await db.execute(stmt)
+    created = len(ext_ids - existing)
     await db.flush()
-    return {"created": created, "skipped": len(rows) - created, "fetched": len(rows)}
+    return {"created": created, "updated": len(rows) - created, "fetched": len(rows)}
 
 
-def _to_response(o: OnlineOrder) -> dict[str, Any]:
+def _to_response(
+    o: OnlineOrder, station_code: int | None = None, station_name: str | None = None,
+) -> dict[str, Any]:
     return {
         "id": str(o.id),
         "external_id": o.external_id,
         "station_id": str(o.station_id) if o.station_id else None,
+        "station_code": station_code,
+        "station_name": station_name,
         "service_point_id": o.service_point_id,
         "service_point_name": o.service_point_name,
         "post_number": o.post_number,
@@ -204,12 +293,19 @@ def _to_response(o: OnlineOrder) -> dict[str, Any]:
 async def list_online_orders(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    company_id: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
+    station_code: str | None = Query(None),
     limit: int = Query(500, ge=1, le=5000),
 ):
     """Журнал загруженных онлайн-заказов (вкладка «Данные» канала MSTO)."""
-    q = select(OnlineOrder).where(OnlineOrder.company_id == user.company_id)
+    cid = await assert_company_member(company_id, user, db) if company_id else user.company_id
+    q = (
+        select(OnlineOrder, FuelStation.code, FuelStation.name)
+        .outerjoin(FuelStation, FuelStation.id == OnlineOrder.station_id)
+        .where(OnlineOrder.company_id == cid)
+    )
     if date_from:
         try:
             q = q.where(OnlineOrder.order_date >= datetime.fromisoformat(date_from))
@@ -220,9 +316,63 @@ async def list_online_orders(
             q = q.where(OnlineOrder.order_date <= datetime.fromisoformat(date_to + "T23:59:59"))
         except ValueError:
             pass
+    if station_code and station_code != "all":
+        parsed_code = _int(station_code)
+        if parsed_code is not None:
+            q = q.where(FuelStation.code == parsed_code)
     q = q.order_by(OnlineOrder.order_date.desc().nullslast()).limit(limit)
-    rows = (await db.execute(q)).scalars().all()
-    return [_to_response(o) for o in rows]
+    rows = (await db.execute(q)).all()
+    return [_to_response(order, code, name) for order, code, name in rows]
+
+
+@router.post("/refresh")
+async def refresh_online_orders(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    company_id: str | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    station_code: str | None = Query(None),
+):
+    """Обновить локальный журнал из MSTO для монитора онлайн-заказов."""
+    cid = await assert_company_member(company_id, user, db) if company_id else user.company_id
+    selected_station_code = station_code if station_code and station_code != "all" else None
+    service_point_ids = await _company_service_point_ids(db, cid, selected_station_code)
+    if not service_point_ids:
+        scope = "выбранной АЗС" if selected_station_code else "компании"
+        return {
+            "created": 0,
+            "updated": 0,
+            "fetched": 0,
+            "warning": f"Для {scope} не заданы servicePointId MSTO",
+        }
+    sync_from = date_from
+    period_start = None
+    period_end = None
+    try:
+        period_start = datetime.fromisoformat(date_from) if date_from else None
+        period_end = datetime.fromisoformat(f"{date_to}T23:59:59") if date_to else None
+    except ValueError:
+        pass
+    latest_query = select(func.max(OnlineOrder.order_date)).where(OnlineOrder.company_id == cid)
+    latest_query = latest_query.where(OnlineOrder.service_point_id.in_(service_point_ids))
+    if period_start is not None:
+        latest_query = latest_query.where(OnlineOrder.order_date >= period_start)
+    if period_end is not None:
+        latest_query = latest_query.where(OnlineOrder.order_date <= period_end)
+    latest = (await db.execute(latest_query)).scalar_one_or_none()
+    if latest is not None:
+        overlap = (latest - timedelta(days=2)).date().isoformat()
+        sync_from = max(date_from, overlap) if date_from else overlap
+
+    result = await ingest_online_orders(db, cid, sync_from, date_to, service_point_ids)
+    await db.commit()
+    return {
+        **result,
+        "mode": "incremental" if sync_from != date_from else "full",
+        "date_from": sync_from,
+        "date_to": date_to,
+    }
 
 
 @router.get("/count")

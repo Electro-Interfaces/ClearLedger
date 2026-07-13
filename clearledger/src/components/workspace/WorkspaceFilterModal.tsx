@@ -1,26 +1,22 @@
-/**
- * Модальное окно настройки основного фильтра рабочей области.
- * Свёрнутая строка (`WorkspaceFilterBar`) показывает сводку, здесь — полная
- * настройка всех параметров: период, станция STS, точки, регионы, типы документов.
- *
- * Единый фильтр применяется ко всем разделам рабочего стола (management/financial/
- * accounting/tax). Период/точки/регионы/типы живут в `FilterContext`, станция STS —
- * в `WorkspaceContext` (используется онлайн-загрузкой смен).
- */
-
 import { useMemo, useState } from 'react'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Bookmark, CalendarDays, Check, Database, FileText, History,
+  MapPinned, Plus, RotateCcw, X, type LucideIcon,
+} from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Calendar, MapPin, Map as MapIcon, FileText, Fuel, X, Bookmark, History, Plus, Check } from 'lucide-react'
-import { useFilters } from '@/contexts/FilterContext'
-import type { FilterState } from '@/contexts/FilterContext'
+import { Badge } from '@/components/ui/badge'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import { useFilters, type FilterState } from '@/contexts/FilterContext'
+import { activeFilterCount, clearFilterSelections, sameFilterState } from '@/contexts/filterState'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useQuery } from '@tanstack/react-query'
 import { useLocations } from '@/hooks/useLocations'
@@ -28,7 +24,6 @@ import { getStsStationsFromLocations } from '@/services/locationService'
 import { getChargeDimensions } from '@/services/analyticsService'
 import { todayISO, daysAgoISO, monthFirstISO, prevMonthBounds } from './analytics/periodPresets'
 
-// Наборы типов документов по профилю (перенесены из GlobalFilters — единый фильтр).
 const FUEL_DOC_TYPES = [
   { id: 'shift_report', label: 'Сменные отчёты' },
   { id: 'receipt', label: 'Поступления (ТТН)' },
@@ -39,6 +34,7 @@ const FUEL_DOC_TYPES = [
   { id: 'msto_transactions', label: 'MSTO транзакции' },
   { id: 'corp_transactions', label: 'TradeCorp транзакции' },
 ]
+
 const ENERGY_DOC_TYPES = [
   { id: 'charge_sessions', label: 'Зарядные сессии' },
   { id: 'ofd_z_reports', label: 'Z-отчёты ОФД' },
@@ -51,35 +47,64 @@ const PERIOD_PRESETS = [
   { label: '30 дней', value: () => ({ from: daysAgoISO(30), to: todayISO() }) },
   { label: 'Текущий месяц', value: () => ({ from: monthFirstISO(), to: todayISO() }) },
   { label: 'Прошлый месяц', value: prevMonthBounds },
-  { label: 'YTD', value: () => ({ from: `${new Date().getFullYear()}-01-01`, to: todayISO() }) },
+  { label: 'С начала года', value: () => ({ from: `${new Date().getFullYear()}-01-01`, to: todayISO() }) },
 ]
+
+type ArrayFilterKey = 'locationIds' | 'regionIds' | 'stationCodes' | 'docTypeIds'
+
+function cloneState(state: FilterState): FilterState {
+  return {
+    ...state,
+    period: { ...state.period },
+    locationIds: [...state.locationIds],
+    regionIds: [...state.regionIds],
+    stationCodes: [...state.stationCodes],
+    docTypeIds: [...state.docTypeIds],
+  }
+}
 
 function fmtShort(iso: string): string {
   const [, m, d] = iso.split('-')
   return d && m ? `${d}.${m}` : iso
 }
 
-/** Краткое описание набора фильтра для чипов истории. */
-function describeState(s: FilterState): string {
-  const parts = [`${fmtShort(s.period.from)}–${fmtShort(s.period.to)}`]
-  if (s.stationCode && s.stationCode !== 'all') parts.push(`ст. ${s.stationCode}`)
-  const cnt = s.locationIds.length + s.regionIds.length + (s.stationCodes?.length ?? 0) + s.docTypeIds.length
-  if (cnt) parts.push(`фильтров ${cnt}`)
+function describeState(state: FilterState): string {
+  const scopeCount = state.locationIds.length + state.regionIds.length + state.stationCodes.length
+  const parts = [`${fmtShort(state.period.from)}–${fmtShort(state.period.to)}`]
+  if (scopeCount > 0) parts.push(`область: ${scopeCount}`)
+  if (state.docTypeIds.length > 0) parts.push(`данные: ${state.docTypeIds.length}`)
+  if (state.stationCode !== 'all') parts.push(`STS: ${state.stationCode}`)
   return parts.join(' · ')
 }
 
-function Section({ icon: Icon, title, action, children }: {
-  icon: React.ComponentType<{ className?: string }>
+function locationRegion(location: ReturnType<typeof useLocations>[number]): string {
+  return String((location.metadata as Record<string, unknown> | undefined)?.federalSubject ?? '').trim()
+}
+
+function FilterSection({
+  icon: Icon,
+  title,
+  description,
+  action,
+  children,
+}: {
+  icon: LucideIcon
   title: string
+  description: string
   action?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          <Icon className="h-3.5 w-3.5" />
-          {title}
+    <section className="flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <Icon className="size-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold leading-5">{title}</h3>
+            <p className="text-xs leading-4 text-muted-foreground">{description}</p>
+          </div>
         </div>
         {action}
       </div>
@@ -88,291 +113,427 @@ function Section({ icon: Icon, title, action, children }: {
   )
 }
 
-export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; onOpenChange: (value: boolean) => void }) {
   const {
-    period, setPeriod,
-    stationCode, setStationCode,
-    locationIds, setLocationIds, toggleLocation,
-    regionIds, setRegionIds, toggleRegion,
-    stationCodes, setStationCodes, toggleStationCode,
-    docTypeIds, setDocTypeIds, toggleDocType,
-    clearAll, applyState,
+    state, applyState, commitToHistory,
     history, presets, savePreset, deletePreset,
   } = useFilters()
   const { company, companyId } = useCompany()
   const isEnergy = company.profileId === 'energy'
   const locations = useLocations()
   const stations = getStsStationsFromLocations()
-  const [locQuery, setLocQuery] = useState('')
-  const [stQuery, setStQuery] = useState('')
+  const [draft, setDraft] = useState<FilterState>(() => cloneState(state))
+  const [locationQuery, setLocationQuery] = useState('')
+  const [stationQuery, setStationQuery] = useState('')
   const [savingPreset, setSavingPreset] = useState(false)
   const [presetName, setPresetName] = useState('')
 
-  // Справочник ЭЗС (energy) — станции и каноничные регионы из сессий.
-  const { data: dims } = useQuery({
+  const { data: dimensions } = useQuery({
     queryKey: ['charge-dimensions', companyId],
     queryFn: () => getChargeDimensions(companyId),
     enabled: isEnergy && open,
   })
 
   const docTypes = isEnergy ? ENERGY_DOC_TYPES : FUEL_DOC_TYPES
-  const docSet = useMemo(() => new Set(docTypeIds), [docTypeIds])
-  const locSet = useMemo(() => new Set(locationIds), [locationIds])
-  const regionSet = useMemo(() => new Set(regionIds), [regionIds])
-  const stationCodeSet = useMemo(() => new Set(stationCodes), [stationCodes])
-
-  const fuelRegions = useMemo(
-    () => Array.from(new Set(
-      locations.map((l) => String((l.metadata as Record<string, unknown> | undefined)?.federalSubject ?? '').trim()).filter(Boolean),
-    )).sort((a, b) => a.localeCompare(b, 'ru')),
+  const locationSet = useMemo(() => new Set(draft.locationIds), [draft.locationIds])
+  const regionSet = useMemo(() => new Set(draft.regionIds), [draft.regionIds])
+  const stationCodeSet = useMemo(() => new Set(draft.stationCodes), [draft.stationCodes])
+  const docTypeSet = useMemo(() => new Set(draft.docTypeIds), [draft.docTypeIds])
+  const locationRegions = useMemo(
+    () => new Map(locations.map((location) => [location.id, locationRegion(location)])),
     [locations],
   )
-  const regions = isEnergy ? (dims?.regions ?? []).map((r) => r.region) : fuelRegions
 
-  const energyStations = useMemo(() => {
-    const q = stQuery.trim().toLowerCase()
-    const list = dims?.stations ?? []
-    return q ? list.filter((s) => `${s.name} ${s.code}`.toLowerCase().includes(q)) : list
-  }, [dims, stQuery])
+  const regions = useMemo(() => {
+    if (isEnergy) return [...(dimensions?.regions ?? [])].map((region) => region.region).sort((a, b) => a.localeCompare(b, 'ru'))
+    return Array.from(new Set(locations.map(locationRegion).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'))
+  }, [dimensions?.regions, isEnergy, locations])
 
   const filteredLocations = useMemo(() => {
-    const q = locQuery.trim().toLowerCase()
-    const list = q ? locations.filter((l) => l.name.toLowerCase().includes(q)) : locations
-    return [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
-  }, [locations, locQuery])
+    const query = locationQuery.trim().toLowerCase()
+    return locations
+      .filter((location) => draft.regionIds.length === 0 || regionSet.has(locationRegion(location)))
+      .filter((location) => !query || location.name.toLowerCase().includes(query))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  }, [draft.regionIds.length, locationQuery, locations, regionSet])
+
+  const energyStations = useMemo(() => {
+    const query = stationQuery.trim().toLowerCase()
+    return (dimensions?.stations ?? []).filter((station) => (
+      !query || `${station.name} ${station.code}`.toLowerCase().includes(query)
+    ))
+  }, [dimensions?.stations, stationQuery])
+
+  const count = activeFilterCount(draft)
+  const dirty = !sameFilterState(draft, state)
+
+  function toggleValue(key: ArrayFilterKey, value: string) {
+    setDraft((current) => {
+      const next = new Set(current[key])
+      if (next.has(value)) next.delete(value)
+      else next.add(value)
+      return { ...current, [key]: [...next] }
+    })
+  }
+
+  function toggleRegion(region: string) {
+    setDraft((current) => {
+      const next = new Set(current.regionIds)
+      if (next.has(region)) next.delete(region)
+      else next.add(region)
+      const regionIds = [...next]
+      const locationIds = regionIds.length === 0
+        ? current.locationIds
+        : current.locationIds.filter((id) => next.has(locationRegions.get(id) ?? ''))
+      return { ...current, regionIds, locationIds }
+    })
+  }
+
+  function applyDraft(next: FilterState) {
+    setDraft(cloneState(next))
+  }
+
+  function handleApply() {
+    applyState(draft)
+    commitToHistory(draft)
+    onOpenChange(false)
+  }
+
+  function handleSavePreset() {
+    const name = presetName.trim()
+    if (!name) return
+    savePreset(name, draft)
+    setPresetName('')
+    setSavingPreset(false)
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Фильтр рабочей области</DialogTitle>
+      <DialogContent
+        showCloseButton={false}
+        className="flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(760px,calc(100vh-2rem))] sm:w-[calc(100vw-2rem)]"
+      >
+        <DialogHeader className="shrink-0 border-b px-4 py-4 text-left sm:px-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <DialogTitle>Фильтры рабочей области</DialogTitle>
+                <Badge variant={count > 0 ? 'default' : 'secondary'}>
+                  {count > 0 ? `Ограничений: ${count}` : 'Вся сеть'}
+                </Badge>
+              </div>
+              <DialogDescription className="mt-1">
+                Соберите выборку и примените её ко всем разделам рабочего стола.
+              </DialogDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="size-8 rounded-lg"
+              onClick={() => onOpenChange(false)}
+              aria-label="Закрыть без применения"
+            >
+              <X />
+            </Button>
+          </div>
         </DialogHeader>
 
-        <div className="grid gap-5 max-h-[65vh] overflow-y-auto pr-1">
-          {/* Наборы (пресеты) и история применений */}
-          <div className="rounded-md border border-border/40 bg-muted/20 p-2.5 space-y-2">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground mr-1">
-                <Bookmark className="h-3.5 w-3.5" /> Наборы
+        <div className="grid min-h-0 flex-1 md:grid-cols-[230px_minmax(0,1fr)]">
+          <aside className="flex max-h-48 flex-col gap-4 overflow-y-auto border-b bg-muted/20 p-3 md:max-h-none md:border-r md:border-b-0 md:p-4">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-1.5 text-xs font-semibold">
+                  <Bookmark className="size-3.5" aria-hidden="true" />
+                  Сохранённые наборы
+                </h3>
+                {!savingPreset ? (
+                  <Button variant="ghost" size="icon-xs" onClick={() => setSavingPreset(true)} aria-label="Сохранить текущий набор">
+                    <Plus />
+                  </Button>
+                ) : null}
               </div>
-              {presets.length === 0 && !savingPreset && (
-                <span className="text-xs text-muted-foreground/60">нет сохранённых</span>
-              )}
-              {presets.map((p) => (
-                <span key={p.id} className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-background/60 pl-2 pr-1 py-0.5 text-xs">
-                  <button className="hover:text-primary transition-colors" onClick={() => applyState(p.state)} title={describeState(p.state)}>{p.name}</button>
-                  <button className="opacity-50 hover:opacity-100 hover:text-destructive transition-opacity" onClick={() => deletePreset(p.id)} title="Удалить набор">
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
+
               {savingPreset ? (
-                <span className="inline-flex items-center gap-1">
+                <div className="flex items-center gap-1">
                   <Input
                     autoFocus
                     value={presetName}
-                    onChange={(e) => setPresetName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') { savePreset(presetName); setPresetName(''); setSavingPreset(false) }
-                      if (e.key === 'Escape') { setSavingPreset(false); setPresetName('') }
+                    onChange={(event) => setPresetName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') handleSavePreset()
+                      if (event.key === 'Escape') { setSavingPreset(false); setPresetName('') }
                     }}
-                    placeholder="Имя набора"
-                    className="h-7 w-36 text-xs"
+                    placeholder="Название набора"
+                    className="h-8 text-xs"
+                    aria-label="Название набора"
                   />
-                  <Button size="icon" variant="ghost" className="h-7 w-7"
-                    onClick={() => { savePreset(presetName); setPresetName(''); setSavingPreset(false) }}>
-                    <Check className="h-3.5 w-3.5" />
+                  <Button variant="ghost" size="icon-xs" onClick={handleSavePreset} disabled={!presetName.trim()} aria-label="Сохранить набор">
+                    <Check />
                   </Button>
-                </span>
-              ) : (
-                <Button size="sm" variant="outline" className="h-7 text-xs px-2 gap-1" onClick={() => setSavingPreset(true)}>
-                  <Plus className="h-3.5 w-3.5" /> Сохранить текущий
-                </Button>
-              )}
-            </div>
-
-            {history.length > 0 && (
-              <div className="space-y-1 pt-1 border-t border-border/30">
-                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <History className="h-3.5 w-3.5" /> Недавние
                 </div>
-                <div className="flex items-center gap-1 flex-wrap">
-                  {history.map((h, i) => (
+              ) : null}
+
+              {presets.length === 0 && !savingPreset ? (
+                <p className="text-xs leading-4 text-muted-foreground">Сохраните часто используемую выборку.</p>
+              ) : null}
+
+              <div className="flex flex-col gap-1">
+                {presets.map((preset) => (
+                  <div key={preset.id} className="group flex items-center gap-1 rounded-md hover:bg-background/70">
                     <button
-                      key={i}
-                      onClick={() => applyState(h)}
-                      className="rounded-md border border-border/40 bg-background/40 px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
+                      type="button"
+                      className="min-w-0 flex-1 px-2 py-1.5 text-left"
+                      onClick={() => applyDraft(preset.state)}
+                      title={describeState(preset.state)}
                     >
-                      {describeState(h)}
+                      <span className="block truncate text-xs font-medium">{preset.name}</span>
+                      <span className="block truncate text-[10px] text-muted-foreground">{describeState(preset.state)}</span>
                     </button>
-                  ))}
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="mr-1 opacity-60 group-hover:opacity-100"
+                      onClick={() => deletePreset(preset.id)}
+                      aria-label={`Удалить набор ${preset.name}`}
+                    >
+                      <X />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {history.length > 0 ? (
+              <>
+                <Separator />
+                <div className="flex flex-col gap-2">
+                  <h3 className="flex items-center gap-1.5 text-xs font-semibold">
+                    <History className="size-3.5" aria-hidden="true" />
+                    Недавние выборки
+                  </h3>
+                  <div className="flex flex-col gap-1">
+                    {history.slice(0, 6).map((entry, index) => (
+                      <button
+                        key={`${entry.period.from}-${entry.period.to}-${index}`}
+                        type="button"
+                        className="rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-background/70 hover:text-foreground"
+                        onClick={() => applyDraft(entry)}
+                      >
+                        {describeState(entry)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              </>
+            ) : null}
+          </aside>
 
-          {/* Период */}
-          <Section icon={Calendar} title="Период">
-            <div className="flex flex-wrap items-center gap-2">
-              <Input
-                type="date"
-                value={period.from}
-                onChange={(e) => setPeriod({ ...period, from: e.target.value })}
-                className="h-8 w-[150px] text-xs"
-              />
-              <span className="text-xs text-muted-foreground">—</span>
-              <Input
-                type="date"
-                value={period.to}
-                onChange={(e) => setPeriod({ ...period, to: e.target.value })}
-                className="h-8 w-[150px] text-xs"
-              />
-              <div className="flex flex-wrap items-center gap-1 ml-1">
-                {PERIOD_PRESETS.map((p) => (
-                  <Button key={p.label} variant="outline" size="sm" className="h-8 text-xs px-2"
-                    onClick={() => setPeriod(p.value())}>
-                    {p.label}
+          <ScrollArea className="min-h-0">
+            <div className="flex flex-col gap-6 p-4 sm:p-5">
+              <FilterSection
+                icon={CalendarDays}
+                title="Период"
+                description="Единый интервал для отчётов, сверок и документов."
+              >
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    С даты
+                    <Input
+                      type="date"
+                      value={draft.period.from}
+                      max={draft.period.to}
+                      onChange={(event) => setDraft((current) => ({ ...current, period: { ...current.period, from: event.target.value } }))}
+                      className="h-9 w-[150px] text-xs text-foreground"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    По дату
+                    <Input
+                      type="date"
+                      value={draft.period.to}
+                      min={draft.period.from}
+                      onChange={(event) => setDraft((current) => ({ ...current, period: { ...current.period, to: event.target.value } }))}
+                      className="h-9 w-[150px] text-xs text-foreground"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {PERIOD_PRESETS.map((preset) => (
+                      <Button
+                        key={preset.label}
+                        variant="outline"
+                        size="xs"
+                        className="h-8"
+                        onClick={() => setDraft((current) => ({ ...current, period: preset.value() }))}
+                      >
+                        {preset.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </FilterSection>
+
+              <Separator />
+
+              <FilterSection
+                icon={MapPinned}
+                title="Область учёта"
+                description="Регион сужает список точек; выбранные точки задают рабочий контур."
+                action={draft.locationIds.length + draft.regionIds.length + draft.stationCodes.length > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setDraft((current) => ({ ...current, locationIds: [], regionIds: [], stationCodes: [] }))}
+                  >
+                    Очистить
                   </Button>
-                ))}
-              </div>
-            </div>
-          </Section>
+                ) : undefined}
+              >
+                {regions.length > 0 ? (
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="mb-1 text-xs font-medium">Регионы</legend>
+                    <div className="grid max-h-32 grid-cols-1 gap-0.5 overflow-y-auto rounded-md border p-1.5 sm:grid-cols-2">
+                      {regions.map((region) => (
+                        <label key={region} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
+                          <Checkbox checked={regionSet.has(region)} onCheckedChange={() => toggleRegion(region)} />
+                          <span className="truncate">{region}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
 
-          {/* Станция STS — только fuel (онлайн-загрузка смен) */}
-          {!isEnergy && (
-            <Section icon={Fuel} title="Станция (онлайн-данные STS)">
-              <Select value={stationCode} onValueChange={setStationCode}>
-                <SelectTrigger className="h-8 w-[240px] text-xs">
-                  <SelectValue placeholder="Все станции" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Все станции</SelectItem>
-                  {stations.map((s) => (
-                    <SelectItem key={s.code} value={String(s.code)}>{s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Section>
-          )}
-
-          {/* Станции ЭЗС — energy (сужение аналитики сессий) */}
-          {isEnergy && (
-            <Section
-              icon={Fuel}
-              title={`Станции ЭЗС${stationCodes.length ? ` · ${stationCodes.length}` : ''}`}
-              action={
-                <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2"
-                  onClick={() => setStationCodes([])} disabled={stationCodes.length === 0}>
-                  Все
-                </Button>
-              }
-            >
-              <Input
-                placeholder="Поиск станции…"
-                value={stQuery}
-                onChange={(e) => setStQuery(e.target.value)}
-                className="h-8 text-xs"
-              />
-              <div className="max-h-40 overflow-y-auto rounded-md border border-border/40 p-1.5 space-y-0.5">
-                {energyStations.length === 0 && (
-                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">Станции не найдены</div>
+                {isEnergy ? (
+                  <fieldset className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <legend className="text-xs font-medium">Станции ЭЗС</legend>
+                      <span className="text-[10px] text-muted-foreground">Выбрано: {draft.stationCodes.length}</span>
+                    </div>
+                    <Input
+                      placeholder="Найти станцию по названию или коду"
+                      value={stationQuery}
+                      onChange={(event) => setStationQuery(event.target.value)}
+                      className="h-9 text-xs"
+                    />
+                    <div className="max-h-44 overflow-y-auto rounded-md border p-1.5">
+                      {energyStations.length === 0 ? (
+                        <p className="px-2 py-5 text-center text-xs text-muted-foreground">Станции не найдены</p>
+                      ) : energyStations.map((station) => (
+                        <label key={station.code} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
+                          <Checkbox checked={stationCodeSet.has(station.code)} onCheckedChange={() => toggleValue('stationCodes', station.code)} />
+                          <span className="min-w-0 flex-1 truncate">{station.name}</span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">{station.code}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : (
+                  <fieldset className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <legend className="text-xs font-medium">Точки обслуживания</legend>
+                      <span className="text-[10px] text-muted-foreground">Выбрано: {draft.locationIds.length}</span>
+                    </div>
+                    <Input
+                      placeholder="Найти точку"
+                      value={locationQuery}
+                      onChange={(event) => setLocationQuery(event.target.value)}
+                      className="h-9 text-xs"
+                    />
+                    <div className="max-h-44 overflow-y-auto rounded-md border p-1.5">
+                      {filteredLocations.length === 0 ? (
+                        <p className="px-2 py-5 text-center text-xs text-muted-foreground">Точки не найдены</p>
+                      ) : filteredLocations.map((location) => (
+                        <label key={location.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
+                          <Checkbox checked={locationSet.has(location.id)} onCheckedChange={() => toggleValue('locationIds', location.id)} />
+                          <span className="min-w-0 flex-1 truncate">{location.name}</span>
+                          {locationRegion(location) ? (
+                            <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">{locationRegion(location)}</span>
+                          ) : null}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                 )}
-                {energyStations.map((s) => (
-                  <label key={s.code}
-                    className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/40 cursor-pointer">
-                    <Checkbox checked={stationCodeSet.has(s.code)} onCheckedChange={() => toggleStationCode(s.code)} className="h-3.5 w-3.5" />
-                    <span className="truncate flex-1">{s.name}</span>
-                    <span className="text-muted-foreground/60 shrink-0 tabular-nums">{s.code}</span>
-                  </label>
-                ))}
-              </div>
-            </Section>
-          )}
+              </FilterSection>
 
-          {/* Точки обслуживания */}
-          <Section
-            icon={MapPin}
-            title={`Точки обслуживания${locationIds.length ? ` · ${locationIds.length}` : ''}`}
-            action={
-              <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2"
-                onClick={() => setLocationIds([])} disabled={locationIds.length === 0}>
-                Все
-              </Button>
-            }
-          >
-            <Input
-              placeholder="Поиск точки…"
-              value={locQuery}
-              onChange={(e) => setLocQuery(e.target.value)}
-              className="h-8 text-xs"
-            />
-            <div className="max-h-40 overflow-y-auto rounded-md border border-border/40 p-1.5 space-y-0.5">
-              {filteredLocations.length === 0 && (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">Точки не найдены</div>
-              )}
-              {filteredLocations.map((l) => (
-                <label key={l.id}
-                  className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/40 cursor-pointer">
-                  <Checkbox checked={locSet.has(l.id)} onCheckedChange={() => toggleLocation(l.id)} className="h-3.5 w-3.5" />
-                  <span className="truncate">{l.name}</span>
-                </label>
-              ))}
+              {!isEnergy ? (
+                <>
+                  <Separator />
+                  <FilterSection
+                    icon={Database}
+                    title="Источник онлайн-данных STS"
+                    description="Отдельный источник загрузки смен. Он не заменяет область учёта выше."
+                    action={draft.stationCode !== 'all' ? (
+                      <Button variant="ghost" size="xs" onClick={() => setDraft((current) => ({ ...current, stationCode: 'all' }))}>
+                        Сбросить
+                      </Button>
+                    ) : undefined}
+                  >
+                    <Select value={draft.stationCode} onValueChange={(stationCode) => setDraft((current) => ({ ...current, stationCode }))}>
+                      <SelectTrigger size="sm" className="w-full max-w-sm">
+                        <SelectValue placeholder="Все станции STS" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          <SelectItem value="all">Все станции STS</SelectItem>
+                          {stations.map((station) => (
+                            <SelectItem key={station.code} value={String(station.code)}>{station.name}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </FilterSection>
+                </>
+              ) : null}
+
+              <Separator />
+
+              <FilterSection
+                icon={FileText}
+                title="Типы данных"
+                description="Ограничение действует только в разделах, которые поддерживают выбранные типы."
+                action={draft.docTypeIds.length > 0 ? (
+                  <Button variant="ghost" size="xs" onClick={() => setDraft((current) => ({ ...current, docTypeIds: [] }))}>
+                    Все типы
+                  </Button>
+                ) : undefined}
+              >
+                <fieldset>
+                  <legend className="sr-only">Типы данных</legend>
+                  <div className="grid grid-cols-1 gap-0.5 rounded-md border p-1.5 sm:grid-cols-2">
+                    {docTypes.map((docType) => (
+                      <label key={docType.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
+                        <Checkbox checked={docTypeSet.has(docType.id)} onCheckedChange={() => toggleValue('docTypeIds', docType.id)} />
+                        <span className="truncate">{docType.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </FilterSection>
             </div>
-          </Section>
-
-          {/* Регионы */}
-          {regions.length > 0 && (
-            <Section
-              icon={MapIcon}
-              title={`Регионы${regionIds.length ? ` · ${regionIds.length}` : ''}`}
-              action={
-                <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2"
-                  onClick={() => setRegionIds([])} disabled={regionIds.length === 0}>
-                  Все
-                </Button>
-              }
-            >
-              <div className="max-h-36 overflow-y-auto rounded-md border border-border/40 p-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5">
-                {regions.map((r) => (
-                  <label key={r}
-                    className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/40 cursor-pointer">
-                    <Checkbox checked={regionSet.has(r)} onCheckedChange={() => toggleRegion(r)} className="h-3.5 w-3.5" />
-                    <span className="truncate">{r}</span>
-                  </label>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          {/* Типы документов */}
-          <Section
-            icon={FileText}
-            title={`Типы документов${docTypeIds.length ? ` · ${docTypeIds.length}` : ''}`}
-            action={
-              <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2"
-                onClick={() => setDocTypeIds([])} disabled={docTypeIds.length === 0}>
-                Все
-              </Button>
-            }
-          >
-            <div className="rounded-md border border-border/40 p-1.5 grid grid-cols-2 gap-x-2 gap-y-0.5">
-              {docTypes.map((t) => (
-                <label key={t.id}
-                  className="flex items-center gap-2 py-1 px-1.5 rounded text-xs hover:bg-accent/40 cursor-pointer">
-                  <Checkbox checked={docSet.has(t.id)} onCheckedChange={() => toggleDocType(t.id)} className="h-3.5 w-3.5" />
-                  <span className="truncate">{t.label}</span>
-                </label>
-              ))}
-            </div>
-          </Section>
+          </ScrollArea>
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={clearAll}>
-            <X className="h-3.5 w-3.5" />
-            Сбросить выборки
+        <DialogFooter className="shrink-0 flex-row items-center justify-between border-t px-3 py-3 sm:px-5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 rounded-lg text-muted-foreground"
+            onClick={() => setDraft(clearFilterSelections(draft))}
+            disabled={count === 0}
+          >
+            <RotateCcw data-icon="inline-start" />
+            <span className="hidden sm:inline">Сбросить ограничения</span>
+            <span className="sm:hidden">Сбросить</span>
           </Button>
-          <Button size="sm" onClick={() => onOpenChange(false)}>Готово</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-9 rounded-lg" onClick={() => onOpenChange(false)}>
+              Отмена
+            </Button>
+            <Button size="sm" className="h-9 rounded-lg" onClick={handleApply} disabled={!dirty}>
+              <Check data-icon="inline-start" />
+              Применить
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
