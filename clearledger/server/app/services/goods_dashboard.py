@@ -615,7 +615,8 @@ class GoodsDashboardService:
         for r in (await self.session.execute(select(CbInventoryDoc).where(
                 CbInventoryDoc.company_id == self.company_id))).scalars().all():
             for ln in (r.lines or []):
-                if ln.get("ref") == guid:
+                # lines теперь полная ТЧ — движение по SKU только из строк-отклонений
+                if ln.get("ref") == guid and ln.get("dev"):
                     movement.append({"kind": "inventory", "date": r.doc_date, "number": r.number,
                                      "qty": ln.get("dev"), "amount": ln.get("amount_dev"),
                                      "reason": "отклонение факт−учёт"})
@@ -1216,7 +1217,8 @@ class GoodsDashboardService:
                 "shortage_qty": float(d.shortage_qty or 0), "shortage_amount": float(d.shortage_amount or 0),
                 "surplus_qty": float(d.surplus_qty or 0), "surplus_amount": float(d.surplus_amount or 0),
                 "net_amount": float(d.net_amount or 0),
-                "lines": d.lines or [],
+                # lines в БД — полная ТЧ; дрилл реестра показывает только отклонения
+                "lines": [ln for ln in (d.lines or []) if ln.get("dev")],
             })
         out_docs.sort(key=lambda x: (x["date"] or ""), reverse=True)
 
@@ -2060,7 +2062,8 @@ class GoodsDashboardService:
         inventory = [{
             "number": r.number, "dev_positions": r.dev_positions, "net": round(float(r.net_amount or 0), 2),
             "lines": [{"name": ln.get("name"), "fact": ln.get("fact"), "uchet": ln.get("uchet"),
-                       "dev": ln.get("dev"), "amount": ln.get("amount_dev")} for ln in (r.lines or [])],
+                       "dev": ln.get("dev"), "amount": ln.get("amount_dev")}
+                      for ln in (r.lines or []) if ln.get("dev")],
         } for r in inv_docs]
 
         mv = (await self.session.execute(select(CbMovementDoc).where(

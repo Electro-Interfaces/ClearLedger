@@ -19,7 +19,7 @@ import re as _re
 import uuid as _uuid
 from datetime import datetime
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef, CbInventoryDoc, CbMovementDoc
@@ -360,74 +360,89 @@ class BpPackageEmitter:
                 CbInventoryDoc.company_id == self.company_id,
                 _inv_range,
                 CbInventoryDoc.warehouse_code.in_(_WH_208)))).scalars().all():
+            if r.deleted:   # эталон: «НЕ ПометкаУдаления» в отборе
+                continue
+            # полная ТЧ Товары (носитель факта): Цена/Сумма/СуммаУчет — из строк ЦБ
             строки = []
             for i, ln in enumerate(r.lines or [], 1):
                 g = ln.get("ref")
                 if g:
                     nsi_nom.add(g)
-                fact = float(ln.get("fact") or 0)
-                uchet = float(ln.get("uchet") or 0)
-                dev = float(ln.get("dev") or 0)
-                amt_dev = float(ln.get("amount_dev") or 0)
-                цена = round(amt_dev / dev, 4) if dev else 0.0   # Цена = стоим.откл / кол-во откл
                 строки.append({
-                    "НомерСтроки": i, "Номенклатура": g,
+                    "НомерСтроки": ln.get("n") or i, "Номенклатура": g,
                     "Единица": (nom[g].unit or "" if nom.get(g) else ""),
-                    "Количество": round(fact, 3), "КоличествоУчет": round(uchet, 3),
-                    "Цена": цена, "Сумма": round(fact * цена, 2), "СуммаУчет": round(uchet * цена, 2),
+                    "Количество": round(float(ln.get("fact") or 0), 3),
+                    "КоличествоУчет": round(float(ln.get("uchet") or 0), 3),
+                    "Цена": round(float(ln.get("price") or 0), 2),
+                    "Сумма": round(float(ln.get("amount") or 0), 2),
+                    "СуммаУчет": round(float(ln.get("amount_uchet") or 0), 2),
                 })
             inventories.append({
                 "Тип": "inventory", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
-                "Дата": _iso(r.doc_date), "Проведен": True, "ПометкаУдаления": False,
+                "Дата": _iso(r.doc_date), "Проведен": bool(r.posted), "ПометкаУдаления": False,
                 "Организация": org_uuid, "Склад": wh_uuid, "Комментарий": r.comment or "",
-                "ДатаЗаполнения": "", "Товары": строки,
+                "ДатаЗаполнения": _iso(r.fill_date) if r.fill_date else "", "Товары": строки,
                 "СуммаДокумента": round(sum(s["Сумма"] for s in строки), 2),
             })
 
         writeoffs = []
         transfers = []
+        # transfer: отбор эталона — «СкладОтправитель=смены ИЛИ СкладПолучатель=смены»
+        # (входящие на 208 тоже эмитятся); writeoff (warehouse_to_code NULL) не задет.
         for r in (await self.session.execute(select(CbMovementDoc).where(
                 CbMovementDoc.company_id == self.company_id,
                 _mov_range,
-                CbMovementDoc.warehouse_code.in_(_WH_208)))).scalars().all():
+                or_(CbMovementDoc.warehouse_code.in_(_WH_208),
+                    CbMovementDoc.warehouse_to_code.in_(_WH_208))))).scalars().all():
+            if r.deleted:   # эталон: «НЕ ПометкаУдаления» в отборе
+                continue
             строки = []
             for i, ln in enumerate(r.lines or [], 1):
                 g = ln.get("ref")
                 if g:
                     nsi_nom.add(g)
                 строки.append({
-                    "НомерСтроки": i, "Номенклатура": g,
+                    "НомерСтроки": ln.get("n") or i, "Номенклатура": g,
                     "Единица": (nom[g].unit or "" if nom.get(g) else ""),
                     "Количество": round(float(ln.get("qty") or 0), 3),
                     "Цена": round(float(ln.get("price") or 0), 2),
                     "_amount": round(float(ln.get("amount") or 0), 2),
+                    "_cost": round(float(ln.get("cost") or 0), 2),
                 })
             if r.kind == "writeoff":
                 for s in строки:
                     s["Сумма"] = s.pop("_amount")
+                    s.pop("_cost")
                 writeoffs.append({
                     "Тип": "writeoff", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
-                    "Дата": _iso(r.doc_date), "Проведен": True, "ПометкаУдаления": False,
+                    "Дата": _iso(r.doc_date), "Проведен": bool(r.posted), "ПометкаУдаления": False,
                     "Организация": org_uuid, "Склад": wh_uuid, "Подразделение": "",
-                    "ИнвентаризацияUUID": "", "СуммаДокумента": round(float(r.total_amount or 0), 2),
+                    "ИнвентаризацияUUID": r.inventory_ref or "",
+                    "СуммаДокумента": round(float(r.total_amount or 0), 2),
                     "НДСвСтоимостиТоваров": "", "ВалютаДокумента": "RUB", "Товары": строки,
                 })
             elif r.kind == "transfer":
                 for s in строки:
-                    s["Себестоимость"] = s.pop("_amount")   # TODO: реальная себест. (сейчас = стоимость строки)
-                отпр = code2guid.get(str(r.warehouse_code or ""), wh_uuid)
-                получ = code2guid.get(str(r.warehouse_to_code or ""), "")
+                    s["Себестоимость"] = s.pop("_cost")   # реквизит ТЧ ЦБ (0 у внутренних)
+                    s.pop("_amount")
+                # Направление относительно складов смены (эталон: отправитель приоритетен)
+                si = str(r.warehouse_code or "") in _WH_208
+                di = str(r.warehouse_to_code or "") in _WH_208
+                # фолбэк wh_uuid — только для складов смены; чужой склад без GUID → ""
+                отпр = code2guid.get(str(r.warehouse_code or ""), wh_uuid if si else "")
+                получ = code2guid.get(str(r.warehouse_to_code or ""), wh_uuid if di else "")
                 if получ:
                     nsi_wh.add(получ)
                 if отпр:
                     nsi_wh.add(отпр)
+                направление = "Исходящее" if si else ("Входящее" if di else "Транзит")
                 transfers.append({
                     "Тип": "transfer", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
-                    "Дата": _iso(r.doc_date), "Проведен": True, "ПометкаУдаления": False,
+                    "Дата": _iso(r.doc_date), "Проведен": bool(r.posted), "ПометкаУдаления": False,
                     "Организация": org_uuid,
                     "СкладОтправитель": отпр, "СкладПолучатель": получ,
                     "Подразделение": "", "ВидОперации": "ТоварыПродукция",
-                    "Направление": "Исходящее", "Товары": строки,
+                    "Направление": направление, "Товары": строки,
                     "СуммаДокумента": round(float(r.total_amount or 0), 2),
                 })
 

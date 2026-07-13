@@ -73,13 +73,13 @@ async def main() -> None:
 
         hdr = await client.fetch_entity(
             f"Document_{DOC}",
-            select=["Ref_Key", "Number", "Date", "Склад_Key", "Комментарий",
-                    "ИнвентаризацияТоваровНаСкладе", "СуммаДокумента"],
+            select=["Ref_Key", "Number", "Date", "Posted", "DeletionMark", "Склад_Key",
+                    "Комментарий", "ИнвентаризацияТоваровНаСкладе", "СуммаДокумента"],
             orderby="Date УБЫВ", top=2000,
         )
         lines = await client.query_tabular(
             DOC, "Товары",
-            select=["Ссылка", "Ссылка.Склад", "Номенклатура", "Количество", "Сумма", "Цена"],
+            select=["Ссылка", "Ссылка.Склад", "НомерСтроки", "Номенклатура", "Количество", "Сумма", "Цена"],
             top=200000,
         )
     print(f"получено: списаний {len(hdr)}, строк {len(lines)}, складов {len(wh)}")
@@ -102,6 +102,7 @@ async def main() -> None:
             a["pos"] += 1; a["qty"] += qty; a["amt"] += amt
             if len(a["lines"]) < 500:
                 a["lines"].append({
+                    "n": int(_num(r.get("НомерСтроки"))) or (len(a["lines"]) + 1),
                     "ref": nom, "name": names.get(nom, nom[:8]),
                     "qty": round(qty, 3), "amount": round(amt, 2), "price": _num(r.get("Цена")),
                 })
@@ -122,11 +123,13 @@ async def main() -> None:
                 company_id=cid, kind=KIND, external_ref=ref,
                 number=(str(h.get("Number")) if h.get("Number") else None),
                 doc_date=(str(h.get("Date"))[:10] if h.get("Date") else None),
+                posted=bool(h.get("Posted")), deleted=bool(h.get("DeletionMark")),
+                inventory_ref=(str(inv) if from_inv else None),
                 warehouse_code=code, warehouse_name=wh.get(h.get("Склад_Key"), ("?", ""))[1],
                 comment=comment, reason=_reason(from_inv, comment), from_inventory=from_inv,
                 positions=a["pos"], total_qty=round(a["qty"], 3),
                 total_amount=round(a["amt"], 2) if a["amt"] else _num(h.get("СуммаДокумента")),
-                lines=(sorted(a["lines"], key=lambda x: -x["amount"]) or None),
+                lines=(sorted(a["lines"], key=lambda x: x["n"]) or None),
             ))
             n += 1
         await db.commit()

@@ -374,6 +374,9 @@ class CbInventoryDoc(Base):
     external_ref: Mapped[str] = mapped_column(String(36), nullable=False)  # GUID документа
     number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     doc_date: Mapped[str | None] = mapped_column(String(20), nullable=True)  # ISO дата
+    posted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    fill_date: Mapped[str | None] = mapped_column(String(30), nullable=True)  # ДатаЗаполнения ISO (пакет БП)
     warehouse_code: Mapped[str] = mapped_column(String(20), nullable=False)
     warehouse_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -384,7 +387,10 @@ class CbInventoryDoc(Base):
     surplus_qty: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)       # излишки, ед. (>0)
     surplus_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)    # излишки, ₽ (>0)
     net_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)        # чистое отклонение, ₽
-    lines: Mapped[list | None] = mapped_column(JSONB, nullable=True)  # строки-отклонения [{ref,name,fact,uchet,dev,amount_dev}]
+    # ВСЕ строки ТЧ Товары в порядке НомерСтроки (эмиттер БП: носитель факта, эталон
+    # отдаёт полную ТЧ). [{n,ref,name,fact,uchet,price,amount,amount_uchet,dev,amount_dev}].
+    # UI-дриллы отклонений фильтруют dev≠0 сами.
+    lines: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     snapshot_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -411,6 +417,9 @@ class CbMovementDoc(Base):
     external_ref: Mapped[str] = mapped_column(String(36), nullable=False)
     number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     doc_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    posted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    inventory_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)  # writeoff: GUID инвентаризации-основания
     warehouse_code: Mapped[str] = mapped_column(String(20), nullable=False)
     warehouse_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     warehouse_to_code: Mapped[str | None] = mapped_column(String(20), nullable=True)     # перемещение → получатель

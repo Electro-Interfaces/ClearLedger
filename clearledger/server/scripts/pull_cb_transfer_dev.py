@@ -64,13 +64,14 @@ async def main() -> None:
 
         hdr = await client.fetch_entity(
             f"Document_{DOC}",
-            select=["Ref_Key", "Number", "Date", "СкладОтправитель_Key", "СкладПолучатель_Key", "Комментарий"],
+            select=["Ref_Key", "Number", "Date", "Posted", "DeletionMark",
+                    "СкладОтправитель_Key", "СкладПолучатель_Key", "Комментарий"],
             orderby="Date УБЫВ", top=2000,
         )
         lines = await client.query_tabular(
             DOC, "Товары",
             select=["Ссылка", "Ссылка.СкладОтправитель", "Ссылка.СкладПолучатель",
-                    "Номенклатура", "Количество", "Цена"],
+                    "НомерСтроки", "Номенклатура", "Количество", "Цена", "Себестоимость"],
             top=200000,
         )
     print(f"получено: перемещений {len(hdr)}, строк {len(lines)}, складов {len(wh)}")
@@ -95,8 +96,10 @@ async def main() -> None:
             a["pos"] += 1; a["qty"] += qty; a["amt"] += amt
             if len(a["lines"]) < 500:
                 a["lines"].append({
+                    "n": int(_num(r.get("НомерСтроки"))) or (len(a["lines"]) + 1),
                     "ref": nom, "name": names.get(nom, nom[:8]),
                     "qty": round(qty, 3), "price": round(price, 2), "amount": round(amt, 2),
+                    "cost": round(_num(r.get("Себестоимость")), 2),
                 })
 
         await db.execute(delete(CbMovementDoc).where(
@@ -113,12 +116,13 @@ async def main() -> None:
                 company_id=cid, kind=KIND, external_ref=ref,
                 number=(str(h.get("Number")) if h.get("Number") else None),
                 doc_date=(str(h.get("Date"))[:10] if h.get("Date") else None),
+                posted=bool(h.get("Posted")), deleted=bool(h.get("DeletionMark")),
                 warehouse_code=src[0], warehouse_name=src[1],
                 warehouse_to_code=dst[0], warehouse_to_name=dst[1],
                 comment=((str(h.get("Комментарий")) or None) if h.get("Комментарий") else None),
                 reason=_direction(src[0], dst[0]), from_inventory=False,
                 positions=a["pos"], total_qty=round(a["qty"], 3), total_amount=round(a["amt"], 2),
-                lines=(sorted(a["lines"], key=lambda x: -x["amount"]) or None),
+                lines=(sorted(a["lines"], key=lambda x: x["n"]) or None),
             ))
             n += 1
         await db.commit()
