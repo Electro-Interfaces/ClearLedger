@@ -640,6 +640,18 @@ class BpPackageEmitter:
         empty_vat = [n.get("Наименование") for n in нси if n.get("Тип") == "Номенклатура" and not n.get("СтавкаНДС")]
         add("НСИ: ставки НДС номенклатуры распознаны", not empty_vat, f"пустых: {len(empty_vat)}")
 
+        # Приёмник (первая ветка, НЕ правим) принимает НДС18 МОЛЧА: purchase — в документ
+        # с ндс=0, retail — форс НДС22. Архаичную ставку ловим у себя ДО выгрузки.
+        _archaic = {"НДС18", "НДС18_118"}
+        bad_vat = []
+        for d in docs:
+            for t in (d.get("Товары") or []):
+                if t.get("СтавкаНДС") in _archaic:
+                    bad_vat.append(f"{d.get('Тип')} №{d.get('Номер')}: {t.get('СтавкаНДС')}")
+        bad_vat += [f"НСИ {n.get('Наименование')}: {n.get('СтавкаНДС')}"
+                    for n in нси if n.get("СтавкаНДС") in _archaic]
+        add("Нет архаичных ставок НДС18 (приёмник ест молча)", not bad_vat, f"строк: {bad_vat[:5]}")
+
         sm = pkt.get("Смена") or {}
         return {
             "shift_key": shift_key,
