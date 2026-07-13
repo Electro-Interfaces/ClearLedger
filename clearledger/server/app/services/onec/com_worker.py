@@ -1061,6 +1061,71 @@ def op_fetch_production(period_from: str, period_to: str, station: str = "208") 
     return out
 
 
+def op_fetch_recipes(period_from: str, period_to: str, station: str = "208") -> list[dict[str, Any]]:
+    """kind=recipe (ТТК блюд для модели B общепита). Зеркалит СобратьRecipe из
+    TL_ЭкспортБП: блюда+ТТК — DISTINCT из Документ.ВыпускПродукции.Товары за период
+    по складу; ингредиенты — из Документ.ТТК.Товары (ресурс Брутто = валовый расход
+    сырья на 1 порцию, только Учитывать). Read-only. Дедуп по блюду."""
+    ib = _require_ib()
+    if ib.Метаданные.Документы.Найти("ТТК") is None:
+        return []
+    q = ib.NewObject("Запрос")
+    q.Текст = (
+        "ВЫБРАТЬ РАЗЛИЧНЫЕ Тов.Номенклатура КАК Блюдо, Тов.Номенклатура.Наименование КАК БлюдоИмя, "
+        "Тов.ТТК КАК ТТК ИЗ Документ.ВыпускПродукции.Товары КАК Тов "
+        f"ГДЕ Тов.Ссылка.Дата >= ДАТАВРЕМЯ({_dt_lit(period_from)}) "
+        f"И Тов.Ссылка.Дата <= ДАТАВРЕМЯ({_dt_lit(period_to, True)}) "
+        f'И Тов.Ссылка.Склад.Код = "{station}" И НЕ Тов.Ссылка.ПометкаУдаления'
+    )
+    sel = q.Выполнить().Выбрать()
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    while sel.Следующий():
+        блюдо = sel.Блюдо
+        if not _val(блюдо):
+            continue
+        bkey = _xs(ib, блюдо)
+        if bkey in seen:
+            continue
+        ттк = sel.ТТК
+        if not _val(ттк):
+            continue
+        obj = ттк.ПолучитьОбъект()
+        if obj is None:
+            continue
+        ингр: list[dict[str, Any]] = []
+        for i in range(obj.Товары.Количество()):
+            r = obj.Товары.Получить(i)
+            try:
+                уч = _val(r.Учитывать)
+            except Exception:
+                уч = True
+            if уч is False:
+                continue
+            инг = r.Номенклатура
+            if not _val(инг):
+                continue
+            try:
+                брутто = float(_val(r.Брутто) or 0)
+            except Exception:
+                брутто = 0.0
+            if брутто == 0:
+                continue
+            ингр.append({"НоменклатураUUID": _xs(ib, инг), "Количество": брутто})
+        if not ингр:
+            continue
+        seen.add(bkey)
+        out.append({
+            "Тип": "recipe",
+            "ИсточникUUID": _xs(ib, ттк),
+            "БлюдоUUID": bkey,
+            "БлюдоНаименование": str(_val(sel.БлюдоИмя) or "").strip(),
+            "Ингредиенты": ингр,
+            "_station": station,
+        })
+    return out
+
+
 def op_fetch_gain(period_from: str, period_to: str, station: str = "208") -> list[dict[str, Any]]:
     """Документ.ОприходованиеТоваров за период по станции → пакет-готовые item'ы
     gain. Read-only."""
@@ -1213,6 +1278,8 @@ def main() -> int:
                 result = op_fetch_production(**args)
             elif op == "fetch_gain":
                 result = op_fetch_gain(**args)
+            elif op == "fetch_recipes":
+                result = op_fetch_recipes(**args)
             elif op == "exit":
                 return 0
             else:

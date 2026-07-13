@@ -111,6 +111,7 @@ class BpPackageEmitter:
         nsi_wh: set[str] = set()
         nsi_contr: set[str] = set()
         contr_names: dict[str, str] = {}
+        dish_uuids: set[str] = set()  # блюда общепита смены → эмитим их recipe (ТТК)
 
         org_uuid = str(sm.get("Организация") or "")
         wh_uuid = str(sm.get("Склад") or "")
@@ -168,6 +169,8 @@ class BpPackageEmitter:
                 }
                 if класс == "Общепит":
                     строка["ЭтоБлюдо"] = True
+                    if g:
+                        dish_uuids.add(g)
                 товары.append(строка)
 
         оплаты = []
@@ -388,8 +391,50 @@ class BpPackageEmitter:
                     "СуммаДокумента": round(float(r.total_amount or 0), 2),
                 })
 
+        # ── recipe (ТТК блюд, модель B общепита) ──
+        # Для блюд смены (общепит-строки retail) эмитим ТТК ПЕРВЫМИ: приёмник строит
+        # Справочник.СпецификацияНоменклатуры, из неё генерит Комплектацию (собирает
+        # себестоимость), затем блюдо продаётся товаром в ОРП. Без recipe — «продано
+        # как товар, себестоимость не собрана».
+        recipes = []
+        if dish_uuids:
+            recipe_entries = (await self.session.execute(select(DataEntry).where(
+                DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
+                DataEntry.doc_type_id == "recipe"))).scalars().all()
+            recipe_by_dish: dict[str, dict] = {}
+            for re_ in recipe_entries:
+                rd = (re_.meta or {}).get("Документ") or {}
+                bu = str(rd.get("БлюдоUUID") or "")
+                if bu:
+                    recipe_by_dish[bu] = rd
+            for du in sorted(dish_uuids):
+                rd = recipe_by_dish.get(du)
+                if not rd:
+                    continue
+                ингредиенты = []
+                for ing in rd.get("Ингредиенты") or []:
+                    iu = str(ing.get("НоменклатураUUID") or "")
+                    if not iu:
+                        continue
+                    nsi_nom.add(iu)  # ингредиент → в НСИ
+                    ингредиенты.append({
+                        "НоменклатураUUID": iu,
+                        "Количество": float(ing.get("Количество") or 0),
+                        "Единица": (nom[iu].unit if nom.get(iu) else "") or "",
+                    })
+                if not ингредиенты:
+                    continue
+                nsi_nom.add(du)  # блюдо → в НСИ
+                recipes.append({
+                    "Тип": "recipe",
+                    "ИсточникUUID": str(rd.get("ИсточникUUID") or ""),
+                    "БлюдоUUID": du,
+                    "БлюдоНаименование": str(rd.get("БлюдоНаименование") or ""),
+                    "Ингредиенты": ингредиенты,
+                })
+
         # Порядок контракта: recipe → purchase → retail → production → [return] → inventory → gain → writeoff → transfer
-        документы = [*purchases, retail, *productions, *inventories, *gains, *writeoffs, *transfers]
+        документы = [*recipes, *purchases, retail, *productions, *inventories, *gains, *writeoffs, *transfers]
 
         # ── НСИ ──
         def _s(v) -> str:
