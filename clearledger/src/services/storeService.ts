@@ -598,6 +598,15 @@ export const emitBpPackage = (shiftKey: string, directory?: string) => {
   return post<BpEmitResult>(`/api/store/bp-package/emit?${qs.toString()}`)
 }
 
+export interface BpVerifyCheck { Проверка: string; ok: boolean; Детали: string }
+export interface BpVerifyResult {
+  shift_key: string; ok: boolean; passed: number; total: number
+  Документов: number; НСИ: number; ХешПакета: string; КодАЗС?: string | number
+  checks: BpVerifyCheck[]
+}
+export const getBpPackageVerify = (shiftKey: string) =>
+  get<BpVerifyResult>('/api/store/bp-package/verify', { shift_key: shiftKey })
+
 // ── Смена-детализация (модалка): операции одной смены ──
 export interface ShiftSaleLine { guid: string; name: string; category: string | null; marked: boolean; qty: number; revenue: number }
 export interface ShiftPayment { form: string; amount: number }

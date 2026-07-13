@@ -516,3 +516,84 @@ class BpPackageEmitter:
             "documents": dict(Counter(d["Тип"] for d in пакет["Документы"])),
             "nsi": len(пакет["НСИ"]),
         }
+
+    async def verify_shift_package(self, shift_key: str) -> dict:
+        """Сверка сопутки: самосогласованность пакета + сверка с источником. Строит
+        пакет и прогоняет проверки готовности к загрузке приёмником (без 1С-эталона):
+        балансы документов, полнота НСИ, fail-fast НДС, хеш. Возвращает список проверок."""
+        pkt = await self.build_shift_package(shift_key)
+        docs = pkt["Документы"]
+        нси = pkt["НСИ"]
+        checks: list[dict] = []
+
+        def add(name: str, ok: bool, detail: str = "") -> None:
+            checks.append({"Проверка": name, "ok": bool(ok), "Детали": detail})
+
+        nsi_by_type: dict[str, set] = {}
+        for n in нси:
+            nsi_by_type.setdefault(n.get("Тип"), set()).add(n.get("ИсточникUUID"))
+        nom_set = nsi_by_type.get("Номенклатура", set())
+
+        h = pkt.get("ХешПакета") or ""
+        add("Хеш пакета — 64 hex", len(h) == 64 and all(c in "0123456789abcdef" for c in h), (h[:12] + "…") if h else "нет")
+        add("Версия формата = 2", pkt.get("ВерсияФормата") == "2", str(pkt.get("ВерсияФормата")))
+        add("НСИ-инвариант: документы>0 → НСИ непуста", not (docs and not нси), f"документов={len(docs)} НСИ={len(нси)}")
+
+        ref_nom: set = set(); ref_org: set = set(); ref_wh: set = set()
+        for d in docs:
+            for t in (d.get("Товары") or []):
+                if t.get("Номенклатура"):
+                    ref_nom.add(t["Номенклатура"])
+            for ing in (d.get("Ингредиенты") or []):
+                if ing.get("НоменклатураUUID"):
+                    ref_nom.add(ing["НоменклатураUUID"])
+            if d.get("БлюдоUUID"):
+                ref_nom.add(d["БлюдоUUID"])
+            for k in ("Организация",):
+                if d.get(k):
+                    ref_org.add(d[k])
+            for k in ("Склад", "СкладОтправитель", "СкладПолучатель"):
+                if d.get(k):
+                    ref_wh.add(d[k])
+        add("Номенклатура документов вся в НСИ", not (ref_nom - nom_set), f"нет в НСИ: {len(ref_nom - nom_set)}")
+        add("Организации документов в НСИ", not (ref_org - nsi_by_type.get("Организация", set())), f"нет: {len(ref_org - nsi_by_type.get('Организация', set()))}")
+        add("Склады документов в НСИ", not (ref_wh - nsi_by_type.get("Склад", set())), f"нет: {len(ref_wh - nsi_by_type.get('Склад', set()))}")
+
+        retail = next((d for d in docs if d.get("Тип") == "retail_sale_sidegoods"), None)
+        if retail:
+            товары = retail.get("Товары") or []
+            s_d = float(retail.get("СуммаДокумента") or 0)
+            s_t = round(sum(float(t.get("Сумма") or 0) for t in товары), 2)
+            add("Розница: Σ строк = СуммаДокумента", abs(s_t - s_d) < 0.02, f"{s_t} ↔ {s_d}")
+            s_nds = round(sum(float(t.get("СуммаНДС") or 0) for t in товары), 2)
+            add("Розница: Σ СуммаНДС строк = СуммаНДС", abs(s_nds - float(retail.get("СуммаНДС") or 0)) < 0.02, f"{s_nds} ↔ {retail.get('СуммаНДС')}")
+            s_p = round(sum(float(o.get("Сумма") or 0) for o in (retail.get("Оплаты") or [])), 2)
+            add("Розница: Σ Оплаты = СуммаДокумента", abs(s_p - s_d) < 0.02, f"{s_p} ↔ {s_d}")
+            add("Розница: все ставки НДС распознаны", not [t for t in товары if not t.get("СтавкаНДС")], f"пустых: {len([t for t in товары if not t.get('СтавкаНДС')])}")
+
+        purch = [d for d in docs if d.get("Тип") == "purchase"]
+        if purch:
+            bad = [p.get("Номер") for p in purch
+                   if abs(round(sum(float(t.get("Сумма") or 0) for t in (p.get("Товары") or [])), 2) - float(p.get("СуммаДокумента") or 0)) >= 0.02]
+            add(f"Поступления ({len(purch)}): Σ строк = СуммаДокумента", not bad, f"расхождения: {bad}")
+
+        recs = [d for d in docs if d.get("Тип") == "recipe"]
+        if recs:
+            no_ing = [r.get("БлюдоНаименование") for r in recs if not r.get("Ингредиенты")]
+            add(f"Рецептуры ({len(recs)}): все с ингредиентами", not no_ing, f"без ингредиентов: {no_ing}")
+
+        empty_vat = [n.get("Наименование") for n in нси if n.get("Тип") == "Номенклатура" and not n.get("СтавкаНДС")]
+        add("НСИ: ставки НДС номенклатуры распознаны", not empty_vat, f"пустых: {len(empty_vat)}")
+
+        sm = pkt.get("Смена") or {}
+        return {
+            "shift_key": shift_key,
+            "ok": all(c["ok"] for c in checks),
+            "passed": sum(1 for c in checks if c["ok"]),
+            "total": len(checks),
+            "Документов": len(docs),
+            "НСИ": len(нси),
+            "ХешПакета": h,
+            "КодАЗС": sm.get("КодАЗС"),
+            "checks": checks,
+        }

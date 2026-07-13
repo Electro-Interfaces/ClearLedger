@@ -377,6 +377,18 @@ async def store_bp_package_emit(
     return await BpPackageEmitter(db, user.company_id).emit_to_dir(shift_key, directory)
 
 
+@router.get("/bp-package/verify")
+async def store_bp_package_verify(
+    shift_key: str = Query(..., description="GUID смены или 'дата|станция'"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сверка сопутки: самосогласованность пакета + готовность к загрузке (балансы,
+    полнота НСИ, fail-fast НДС, хеш). Список проверок ok/детали."""
+    from app.services.bp_export import BpPackageEmitter
+    return await BpPackageEmitter(db, user.company_id).verify_shift_package(shift_key)
+
+
 @router.get("/{report}")
 async def store_report(
     report: str,
