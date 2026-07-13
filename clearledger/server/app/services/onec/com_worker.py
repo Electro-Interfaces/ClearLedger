@@ -936,15 +936,21 @@ def _build_shift_package(ib: Any, orp: Any, station: str) -> dict[str, Any]:
         pass
 
     nomer = str(_val(orp.Номер) or "").strip()
+    orp_uuid = _xs(ib, orp.Ссылка)
     doc = {
-        "Тип": "retail_sale_sidegoods", "ИсточникUUID": _xs(ib, orp.Ссылка),
+        "Тип": "retail_sale_sidegoods", "ИсточникUUID": orp_uuid,
         "Номер": nomer, "Дата": str(_val(orp.Дата)),
+        "Проведен": bool(_val(getattr(orp, "Проведен", True))),
+        "ПометкаУдаления": bool(_val(getattr(orp, "ПометкаУдаления", False))),
         "СуммаДокумента": float(_val(getattr(orp, "СуммаДокумента", 0)) or 0),
         "Товары": tovary, "Оплаты": oplaty, "ВозвращенныеТовары": vozvraty,
     }
     return {
         "ВерсияФормата": "2",
         "Смена": {
+            # П1-фикс: GUID смены (ОРП Ссылка) — уникальный ключ per-смена. Без него
+            # ключ деградировал до «день|станция» и схлопывал двухсменные дни в 1 пакет.
+            "Смена": orp_uuid,
             "КодАЗС": station, "НомерСмены": nomer, "ОСЭНомер": nomer,
             "Открытие": str(_val(getattr(orp, "ДатаВремяОткрытия", ""))),
             "Закрытие": str(_val(getattr(orp, "ДатаВремяЗакрытия", ""))),

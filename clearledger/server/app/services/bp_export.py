@@ -19,7 +19,7 @@ import re as _re
 import uuid as _uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DataEntry, CbNomenclature, StockOnHand, CbRef, CbInventoryDoc, CbMovementDoc
@@ -209,10 +209,21 @@ class BpPackageEmitter:
         cparty_ref = await self._refs("counterparty")
         shift_day = _day(sm)
         shift_station = str(sm.get("КодАЗС") or "")
+        # П1-фикс: линковка документов по ИНТЕРВАЛУ смены [НачалоДня(Открытие)..
+        # КонецДня(Закрытие)] как эталон СобратьPurchase — ловит многодневные смены и
+        # «сиротские» дни; двухсменный день = 2 пакета по GUID (идемпотентность снимает дубли).
+        shift_open = (str(sm.get("Открытие") or "")[:10]) or shift_day
+        shift_close = (str(sm.get("Закрытие") or "")[:10]) or shift_day
+        if shift_open > shift_close:
+            shift_open, shift_close = shift_close, shift_open
+
+        def _in_shift(dsm: dict) -> bool:
+            d = _day(dsm)
+            return bool(d) and shift_open <= d <= shift_close and str(dsm.get("КодАЗС") or "") == shift_station
+
         for pe in purch_entries:
             psm = (pe.meta or {}).get("Смена") or {}
-            # приход не несёт GUID смены → линк по (дата открытия, станция)
-            if _day(psm) != shift_day or str(psm.get("КодАЗС") or "") != shift_station:
+            if not _in_shift(psm):
                 continue
             pdoc = (pe.meta or {}).get("Документ") or {}
             контр = str(pdoc.get("Контрагент") or "")
@@ -272,7 +283,7 @@ class BpPackageEmitter:
         productions = []
         for pr in prod_entries:
             prsm = (pr.meta or {}).get("Смена") or {}
-            if _day(prsm) != shift_day or str(prsm.get("КодАЗС") or "") != shift_station:
+            if not _in_shift(prsm):
                 continue
             it = dict((pr.meta or {}).get("Документ") or {})
             it.pop("_station", None)
@@ -297,7 +308,7 @@ class BpPackageEmitter:
         gains = []
         for ge in gain_entries:
             gsm = (ge.meta or {}).get("Смена") or {}
-            if _day(gsm) != shift_day or str(gsm.get("КодАЗС") or "") != shift_station:
+            if not _in_shift(gsm):
                 continue
             it = dict((ge.meta or {}).get("Документ") or {})
             for k in ("_station", "_day"):
@@ -313,12 +324,14 @@ class BpPackageEmitter:
 
         # ── inventory / writeoff / transfer (движение того же дня) ──
         # строим из Cb*Doc (склады 208); поля пакета деривируем из строк аналитики.
-        dl = shift_day + "%"
+        # интервал смены по дате-части (как эталон): день Открытия..день Закрытия
+        _inv_range = func.substr(CbInventoryDoc.doc_date, 1, 10).between(shift_open, shift_close)
+        _mov_range = func.substr(CbMovementDoc.doc_date, 1, 10).between(shift_open, shift_close)
         code2guid = {str((r.extra or {}).get("code") or ""): r.external_ref for r in whs.values()}
         inventories = []
         for r in (await self.session.execute(select(CbInventoryDoc).where(
                 CbInventoryDoc.company_id == self.company_id,
-                CbInventoryDoc.doc_date.like(dl),
+                _inv_range,
                 CbInventoryDoc.warehouse_code.in_(_WH_208)))).scalars().all():
             строки = []
             for i, ln in enumerate(r.lines or [], 1):
@@ -348,7 +361,7 @@ class BpPackageEmitter:
         transfers = []
         for r in (await self.session.execute(select(CbMovementDoc).where(
                 CbMovementDoc.company_id == self.company_id,
-                CbMovementDoc.doc_date.like(dl),
+                _mov_range,
                 CbMovementDoc.warehouse_code.in_(_WH_208)))).scalars().all():
             строки = []
             for i, ln in enumerate(r.lines or [], 1):
