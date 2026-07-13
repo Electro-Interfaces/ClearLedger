@@ -592,11 +592,9 @@ export interface BpEmitResult {
 }
 export const getBpPackage = (shiftKey: string) =>
   get<BpPackage>('/api/store/bp-package', { shift_key: shiftKey })
-export const emitBpPackage = (shiftKey: string, directory?: string) => {
-  const qs = new URLSearchParams({ shift_key: shiftKey })
-  if (directory) qs.set('directory', directory)
-  return post<BpEmitResult>(`/api/store/bp-package/emit?${qs.toString()}`)
-}
+export const emitBpPackage = (shiftKey: string) =>
+  // каталог задаёт сервер (BP_EXPORT_DIR), клиент путь не передаёт (directory-injection закрыта)
+  post<BpEmitResult>(`/api/store/bp-package/emit?shift_key=${encodeURIComponent(shiftKey)}`)
 
 export interface BpVerifyCheck { Проверка: string; ok: boolean; Детали: string }
 export interface BpVerifyResult {

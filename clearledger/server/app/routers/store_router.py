@@ -8,7 +8,9 @@
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +18,11 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import User
 from app.services.goods_dashboard import GoodsDashboardService
+
+# Каталог выгрузки пакетов БП — ТОЛЬКО из окружения сервера (не из клиентского
+# Query — закрыта directory-injection: раньше любой аутентиф. пользователь мог
+# писать в произвольный путь ФС сервера).
+BP_EXPORT_DIR = os.environ.get("TL_BP_EXPORT_DIR", r"C:\TL_BP_Export")
 
 router = APIRouter(prefix="/store", tags=["Магазин"])
 
@@ -362,19 +369,29 @@ async def store_bp_package(
 ):
     """Preview пакета «смена→БП» (эмиттер Ledger): все типы документов + НСИ + хеш."""
     from app.services.bp_export import BpPackageEmitter
-    return await BpPackageEmitter(db, user.company_id).build_shift_package(shift_key)
+    try:
+        return await BpPackageEmitter(db, user.company_id).build_shift_package(shift_key)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Сборка пакета: {e}")
 
 
 @router.post("/bp-package/emit")
 async def store_bp_package_emit(
     shift_key: str = Query(..., description="GUID смены или 'дата|станция'"),
-    directory: str = Query(r"C:\TL_BP_Export", description="каталог выгрузки"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Выгрузить пакет в каталог (Ф3) — файл АЗС{код}_{дата}_смена-{номер}_{uuid}.json."""
+    """Выгрузить пакет в серверный каталог BP_EXPORT_DIR (клиент путь НЕ задаёт).
+    Файл АЗС{код}_{дата}_смена-{номер}_{uuid}.json."""
     from app.services.bp_export import BpPackageEmitter
-    return await BpPackageEmitter(db, user.company_id).emit_to_dir(shift_key, directory)
+    try:
+        return await BpPackageEmitter(db, user.company_id).emit_to_dir(shift_key, BP_EXPORT_DIR)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Выгрузка в каталог: {e}")
 
 
 @router.get("/bp-package/verify")
@@ -386,7 +403,12 @@ async def store_bp_package_verify(
     """Сверка сопутки: самосогласованность пакета + готовность к загрузке (балансы,
     полнота НСИ, fail-fast НДС, хеш). Список проверок ok/детали."""
     from app.services.bp_export import BpPackageEmitter
-    return await BpPackageEmitter(db, user.company_id).verify_shift_package(shift_key)
+    try:
+        return await BpPackageEmitter(db, user.company_id).verify_shift_package(shift_key)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Сверка: {e}")
 
 
 @router.get("/{report}")

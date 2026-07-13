@@ -42,7 +42,7 @@ def _diff(a, b, path, out):
     else:
         # числа сравниваем с допуском (float-погрешность/округление)
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-            if abs(float(a) - float(b)) > 0.01:
+            if abs(float(a) - float(b)) > 0.005:   # ловим расхождение ≥0.01 (было >0.01 → пропускало ровно копейку)
                 out.append(f"{path}: эталон={a} наш={b} (Δ={round(float(a) - float(b), 4)})")
         elif a != b:
             out.append(f"{path}: эталон={a!r} наш={b!r}")

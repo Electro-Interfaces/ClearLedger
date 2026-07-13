@@ -180,6 +180,23 @@ class BpPackageEmitter:
                 вид = "Наличные"
             оплаты.append({"ВидОплаты": вид, "Сумма": round(float(o.get("Сумма") or 0), 2)})
 
+        # ── ВозвращенныеТовары (возвраты покупателей смены) — P1-фикс, раньше [] ──
+        возвраты = []
+        for i, ln in enumerate((sec.get("возвраты") or {}).get("строки") or [], 1):
+            g = ln.get("Номенклатура")
+            if g:
+                nsi_nom.add(g)
+            возвраты.append({
+                "НомерСтроки": ln.get("НомерСтроки") or i,
+                "Номенклатура": g,
+                "Единица": (nom[g].unit if nom.get(g) else "") or "",
+                "Количество": float(ln.get("Количество") or 0),
+                "Цена": float(ln.get("Цена") or 0),
+                "Сумма": round(float(ln.get("Сумма") or 0), 2),
+                "СтавкаНДС": _nds(ln.get("СтавкаНДС")) or _nds(nom[g].vat if nom.get(g) else ""),
+                "СуммаНДС": round(float(ln.get("СуммаНДС") or 0), 2),
+            })
+
         retail = {
             "Тип": "retail_sale_sidegoods",
             "ИсточникUUID": str(doc_meta.get("ИсточникUUID") or sm.get("Смена") or ""),
@@ -195,7 +212,7 @@ class BpPackageEmitter:
             "ВалютаДокумента": "RUB",
             "СуммаВключаетНДС": True,
             "Товары": товары,
-            "ВозвращенныеТовары": [],
+            "ВозвращенныеТовары": возвраты,
             "СуммаНДС": round(сумма_ндс_итого, 2),
             "Оплаты": оплаты,
         }

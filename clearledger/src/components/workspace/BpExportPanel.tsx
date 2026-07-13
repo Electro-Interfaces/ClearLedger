@@ -158,7 +158,7 @@ export function BpExportPanel({ dateFrom, dateTo }: { companyId: string; dateFro
                     <FileJson className="h-3.5 w-3.5" /> {emitMut.data.file}
                   </span>
                 )}
-                {emitMut.isError && <span className="text-xs text-red-400/90">Ошибка выгрузки (каталог сервера)</span>}
+                {emitMut.isError && <span className="text-xs text-red-400/90">Ошибка выгрузки: {(emitMut.error as Error)?.message || 'неизвестно'}</span>}
               </div>
 
               {/* Состав документов */}
