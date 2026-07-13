@@ -185,8 +185,9 @@ class BpPackageEmitter:
             "ИсточникUUID": str(doc_meta.get("ИсточникUUID") or sm.get("Смена") or ""),
             "Номер": str(sm.get("НомерСмены") or "").strip(),
             "Дата": _iso(sm.get("Закрытие")),
-            "Проведен": True,
-            "ПометкаУдаления": False,
+            # П3-фикс: Проведен/ПометкаУдаления из ОРП ЦБ, не хардкод
+            "Проведен": bool(doc_meta.get("Проведен", True)),
+            "ПометкаУдаления": bool(doc_meta.get("ПометкаУдаления", False)),
             "Организация": org_uuid,
             "Склад": wh_uuid,
             "Подразделение": "",
@@ -206,6 +207,7 @@ class BpPackageEmitter:
             DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
             DataEntry.doc_type_id == "purchase"))).scalars().all()
         purchases = []
+        seen_purch: set[str] = set()   # дедуп ПТУ: двухсменные дни дают дубль DataEntry
         cparty_ref = await self._refs("counterparty")
         shift_day = _day(sm)
         shift_station = str(sm.get("КодАЗС") or "")
@@ -226,6 +228,12 @@ class BpPackageEmitter:
             if not _in_shift(psm):
                 continue
             pdoc = (pe.meta or {}).get("Документ") or {}
+            if pdoc.get("ПометкаУдаления"):   # П3: не эмитим удалённые в ЦБ документы
+                continue
+            puid = str(pdoc.get("ИсточникUUID") or "")
+            if puid in seen_purch:   # дедуп: один ПТУ — один раз в пакете
+                continue
+            seen_purch.add(puid)
             контр = str(pdoc.get("Контрагент") or "")
             if контр:
                 nsi_contr.add(контр)
@@ -249,7 +257,8 @@ class BpPackageEmitter:
                     "Единица": (nn.unit or "" if nn else ""),
                     "Цена": float(ln.get("Цена") or 0),
                     "Сумма": round(summ, 2),
-                    "СтавкаНДС": _nds(nn.vat if nn else ""),   # дерив. из карточки
+                    # П2-фикс: ставка НДС из СТРОКИ документа, карточка — только fallback
+                    "СтавкаНДС": _nds(ln.get("СтавкаНДС")) or _nds(nn.vat if nn else ""),
                     "СуммаНДС": round(nds, 2),
                 })
             purchases.append({
@@ -257,9 +266,10 @@ class BpPackageEmitter:
                 "ИсточникUUID": str(pdoc.get("ИсточникUUID") or ""),
                 "Номер": str(pdoc.get("Номер") or "").strip(),
                 "Дата": _iso(pdoc.get("Дата")),
-                "Проведен": True,
-                "ПометкаУдаления": False,
-                "Организация": org_uuid,
+                # П3-фикс: Проведен/ПометкаУдаления/Организация из документа ЦБ, не хардкод
+                "Проведен": bool(pdoc.get("Проведен", True)),
+                "ПометкаУдаления": bool(pdoc.get("ПометкаУдаления", False)),
+                "Организация": str(pdoc.get("Организация") or org_uuid),
                 "Контрагент": контр,
                 "ДоговорКонтрагента": "",   # TODO-Ф1: не тянули договор
                 "Склад": wh_uuid,

@@ -118,6 +118,8 @@ def normalize_shift_package(package: dict) -> dict:
     recipes = _recipe_index(docs)
 
     shift_meta = {
+        # П1-фикс: переносим GUID смены (ОРП Ссылка) из пакета — уникальный ключ смены.
+        "Смена": shift.get("Смена"),
         "КодАЗС": station,
         "НомерСмены": shift.get("НомерСмены"),
         "ОСЭНомер": shift.get("ОСЭНомер"),

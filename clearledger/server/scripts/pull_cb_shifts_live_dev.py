@@ -51,14 +51,19 @@ async def main() -> None:
     async with async_session_factory() as db:
         cid = await resolve_company_id(COMPANY, db)
 
-        # 2) удалить старые oneC-данные gig (апрельский снимок продаж/приходов)
+        # 2) удалить старые oneC-данные gig — ТОЛЬКО типы, что создаёт shift-пул
+        # (retail/purchase/return). П2-фикс: раньше сносил ВСЕ oneC → одиночный
+        # перезапуск уничтожал recipe/production/gain до прогона их пулов.
+        SHIFT_KINDS = ["retail_sale_sidegoods", "purchase", "return_purchase"]
         old = (await db.execute(select(DataEntry.id).where(
-            DataEntry.company_id == cid, DataEntry.source == "oneC"))).scalars().all()
+            DataEntry.company_id == cid, DataEntry.source == "oneC",
+            DataEntry.doc_type_id.in_(SHIFT_KINDS)))).scalars().all()
         if old:
             await db.execute(delete(DataEntry).where(
-                DataEntry.company_id == cid, DataEntry.source == "oneC"))
+                DataEntry.company_id == cid, DataEntry.source == "oneC",
+                DataEntry.doc_type_id.in_(SHIFT_KINDS)))
             await db.commit()
-        print(f"удалено старых oneC DataEntry: {len(old)}")
+        print(f"удалено старых oneC DataEntry (retail/purchase/return): {len(old)}")
 
         # 3) залить свежие
         result = await ingest_packages(db, cid, packages)
