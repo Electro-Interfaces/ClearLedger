@@ -566,6 +566,38 @@ export const getStoreShifts = (dateFrom: string, dateTo: string, stations?: stri
     stations: stations?.length ? stations.join(',') : undefined,
   })
 
+// ── Выгрузка пакетов ЦБ→БП (эмиттер Ledger — замена TL_ЭкспортБП) ──
+// Приёмник TradeLedger.cfe (TL_СопуткаСервис.ОбработатьПакетИзСтроки) не меняется.
+export interface BpPackageDoc {
+  Тип: string
+  ИсточникUUID?: string
+  Номер?: string
+  СуммаДокумента?: number
+  [k: string]: unknown
+}
+export interface BpNsiItem { Тип: string; [k: string]: unknown }
+export interface BpPackage {
+  ВерсияФормата: string
+  ВремяВыгрузки?: string
+  ИдентификаторПакета: string
+  Источник?: string
+  Смена: Record<string, unknown>
+  Документы: BpPackageDoc[]
+  НСИ: BpNsiItem[]
+  ХешПакета: string
+}
+export interface BpEmitResult {
+  file: string; path: string; hash: string
+  documents: Record<string, number>; nsi: number
+}
+export const getBpPackage = (shiftKey: string) =>
+  get<BpPackage>('/api/store/bp-package', { shift_key: shiftKey })
+export const emitBpPackage = (shiftKey: string, directory?: string) => {
+  const qs = new URLSearchParams({ shift_key: shiftKey })
+  if (directory) qs.set('directory', directory)
+  return post<BpEmitResult>(`/api/store/bp-package/emit?${qs.toString()}`)
+}
+
 // ── Смена-детализация (модалка): операции одной смены ──
 export interface ShiftSaleLine { guid: string; name: string; category: string | null; marked: boolean; qty: number; revenue: number }
 export interface ShiftPayment { form: string; amount: number }

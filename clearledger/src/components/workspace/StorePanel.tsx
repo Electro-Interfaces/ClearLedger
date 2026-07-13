@@ -28,6 +28,7 @@ import { StorePricingPanel } from './StorePricingPanel'
 import { StoreAssortmentPanel } from './StoreAssortmentPanel'
 import { StoreMrcPanel } from './StoreMrcPanel'
 import { StoreShiftsPanel } from './StoreShiftsPanel'
+import { BpExportPanel } from './BpExportPanel'
 import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
 
 // Под-экраны, работающие на реестре SKU (/api/store/skus).
@@ -192,6 +193,13 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <StoreShiftsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  if (sub === 'export') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
       </div>
     )
   }

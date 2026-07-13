@@ -150,12 +150,13 @@ export const STORE_VIEWS: StoreView[] = [
     key: 'export', label: 'Выгрузка в БП', group: 'Данные', icon: FileOutput,
     title: 'Выгрузка в БП ГИГ',
     subtitle: 'Ledger как единый продюсер пакетов для БП ГИГ — замена TL_ЭкспортБП. Приёмник TradeLedger.cfe не меняется.',
-    status: 'wip',
+    status: 'ready',
     blocks: [
-      { name: 'Формирование пакетов', desc: 'Свёртка продаж/поступлений/инвентаризаций в ExportPacket (kind sidegoods_orp/purchase_ttn/…). Ядро инкремента.', source: '/export-packets/build (TODO: retail_sale_sidegoods)' },
-      { name: 'Очередь и квитирование', desc: 'TradeLedger.cfe тянет очередь и проводит; статус ack + авто-линк на документ БП.', source: '/export-packets/queue · /{id}/ack' },
-      { name: 'Параллельная сверка', desc: 'Пакеты Ledger сверяются с текущим каналом ЦБ→БП (состав/суммы/проводки) до совпадения 1:1.' },
-      { name: 'Идемпотентность', desc: 'Натуральный ключ .cfe (TL|СМЕНА|…) — без дублей при пересинке.' },
+      { name: 'Формирование пакетов', desc: 'Эмиттер собирает смену в пакет (8 типов: recipe→purchase→retail→production→…→transfer) + НСИ + ХешПакета. Русские ключи, дискриминатор Тип.', source: 'GET /store/bp-package · services/bp_export.py' },
+      { name: 'Анализ и выгрузка', desc: 'Превью состава документов/НСИ, готовность, скачать JSON или выгрузить в каталог (POST /store/bp-package/emit → C:\\TL_BP_Export).', source: 'BpExportPanel.tsx' },
+      { name: 'Приёмник (не меняется)', desc: 'TL_СопуткаСервис.ОбработатьПакетИзСтроки строит документы БП. Проверено на стенде: recipe→Комплектация, проводки по эталону, 0 ошибок.' },
+      { name: 'Идемпотентность', desc: 'Ключ (Тип + ИсточникUUID) в РС.TL_СоответствиеИсточников — без дублей при пересинке.' },
+      { name: 'Параллельная сверка (TODO)', desc: 'Пакеты Ledger ↔ текущий канал Ц→БП (состав/суммы/проводки) до совпадения 1:1.' },
     ],
   },
 
