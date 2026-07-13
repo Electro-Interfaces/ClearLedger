@@ -9,6 +9,24 @@ import { isApiEnabled } from './services/apiClient'
 import { setServicesCompany } from './services/cacheReset'
 import { defaultCompanyId } from './config/companies'
 
+// После деплоя закэшированный index.html тянет чанки со старыми хэшами → Vite
+// кидает vite:preloadError («Failed to fetch dynamically imported module»).
+// Лечение — один автоматический reload (свежий index подтянет новые чанки);
+// гард в sessionStorage защищает от цикла, если проблема не в кэше.
+window.addEventListener('vite:preloadError', (e) => {
+  if (sessionStorage.getItem('tl-chunk-reload') !== '1') {
+    sessionStorage.setItem('tl-chunk-reload', '1')
+    e.preventDefault()
+    console.warn('[TradeLedger] Устаревшая сборка в кэше — перезагрузка за свежей')
+    window.location.reload()
+  }
+})
+// Флаг снимаем только после 30с стабильной работы: следующий деплой в этой же
+// вкладке снова получит свой одиночный reload, а реальный сбой не зациклится.
+window.addEventListener('load', () => {
+  setTimeout(() => sessionStorage.removeItem('tl-chunk-reload'), 30_000)
+})
+
 // Миграция схемы: per-company ключи (tl-*-${companyId}) вместо глобальных gig-*.
 const SCHEMA_VERSION = '5'
 if (localStorage.getItem('gig-schema') !== SCHEMA_VERSION) {

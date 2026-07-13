@@ -23,13 +23,30 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Vite-base /ClearLedger/ — отдаём из подпапки если её просят, иначе fallback к /
+    # Хэшированные ассеты Vite — кэшировать намертво (имя меняется при пересборке).
+    # Отсутствующий чанк = честный 404 (НЕ HTML-fallback: иначе браузер получает
+    # text/html вместо JS → «Strict MIME type checking» на весь экран).
+    location /ClearLedger/assets/ {
+        alias /usr/share/nginx/html/assets/;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # index.html и SPA-fallback — всегда ревалидировать (ETag → дешёвый 304).
+    # Без no-cache браузер держит старый index после деплоя и тянет удалённые
+    # чанки → «Failed to fetch dynamically imported module».
     location /ClearLedger/ {
         alias /usr/share/nginx/html/;
+        add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
     }
 
     location / {
+        add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
     }
 }
