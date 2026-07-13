@@ -31,6 +31,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     cs_dashboard: 'Обзор сети', cs_map: 'Карта', cs_list: 'Реестр сессий', cs_sessions: 'Сессии', cs_reliability: 'Надёжность', cs_clients: 'Тарифы', cs_corporate: 'Корпоратив', cs_retail: 'Частные лица',
   },
   operations: {
+    ops_overview: 'Обзор', ops_balance: 'Баланс (факт)', ops_completeness: 'Полнота данных',
     procurement: 'Энергозакупка', rent: 'Аренда', balance: 'Баланс ЭЗС',
   },
   store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),

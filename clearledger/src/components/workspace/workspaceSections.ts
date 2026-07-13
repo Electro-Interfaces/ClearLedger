@@ -107,8 +107,19 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
     ...(isEnergy ? CHARGE_SESSIONS_MENU : []),
   ]
+  const energyOps = ENERGY_MGMT.filter((m) => on(m.key))
   const opsItems: CentralMenuItem[] = [
-    ...ENERGY_MGMT.filter((m) => on(m.key)),
+    // Кокпит решений (energy) — ядро раздела, не отключаемый модуль: обзор ситуации
+    // (светофор проблем + рабочие списки), пообъектный энергобаланс (вход по счетам
+    // vs отпуск по сессиям vs собственные нужды) и полнота данных за период.
+    ...(isEnergy && energyOps.length > 0
+      ? [
+          { key: 'ops_overview', label: 'Обзор' },
+          { key: 'ops_balance', label: 'Баланс (факт)' },
+          { key: 'ops_completeness', label: 'Полнота данных' },
+        ]
+      : []),
+    ...energyOps,
     ...(balMod && on(balMod.id) ? [{ key: 'balance', label: balMod.navLabel }] : []),
   ]
 

@@ -32,6 +32,8 @@ import {
   fmtMoney, fmtMoneyShort, fmtLiters, fmtPct,
 } from '@/services/analyticsService'
 import { BalanceVitrine } from '@/components/balance/BalanceVitrine'
+import { OpsOverviewVitrine, OpsBalanceVitrine } from '@/components/balance/OpsCockpit'
+import { OpsCompletenessVitrine } from '@/components/balance/OpsCompleteness'
 import {
   NetworkOverviewVitrine, RevenueVitrine, TariffsVitrine, ReceivablesVitrine, ProcurementVitrine, RentVitrine,
 } from '@/components/balance/EnergyManagementVitrines'
@@ -123,6 +125,16 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
     )
   }
 
+  // Кокпит решений (energy): обзор ситуации + пообъектный энергобаланс (факт)
+  if (activeTab === 'ops_overview') {
+    return <div className="h-full overflow-y-auto"><OpsOverviewVitrine /></div>
+  }
+  if (activeTab === 'ops_balance') {
+    return <div className="h-full overflow-y-auto"><OpsBalanceVitrine /></div>
+  }
+  if (activeTab === 'ops_completeness') {
+    return <div className="h-full overflow-y-auto"><OpsCompletenessVitrine /></div>
+  }
   if (activeTab === 'balance') {
     return <div className="h-full overflow-y-auto"><BalanceVitrine /></div>
   }
