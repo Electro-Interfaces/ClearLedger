@@ -245,12 +245,34 @@ export function usePaymentDisciplineSummary() {
   })
 }
 
-/** Детализация платёжной дисциплины (строки таблицы) по роли energy|rent. */
-export function useSettlementsDetail(role?: 'energy' | 'rent') {
+/** Детализация платёжной дисциплины (строки таблицы) по роли energy|rent|service. */
+export function useSettlementsDetail(role?: 'energy' | 'rent' | 'service') {
   const { companyId } = useCompany()
   return useQuery({
     queryKey: ['axis', 'settlements-detail', companyId, role ?? 'all'],
     queryFn: () => ref.getSettlementsDetail(companyId, role),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  })
+}
+
+/** Модель нормализации канала реестров (потоки → сопряжение → L2-сущности). */
+export function useReestrModel() {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'reestr-model', companyId],
+    queryFn: () => ref.getReestrModel(companyId),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  })
+}
+
+/** Входящая э/э по месяцам (объёмы/тарифы/стоимость) — витрина «Энергозакупка». */
+export function useEnergyPeriodsSummary(months = 24) {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'energy-periods', companyId, months],
+    queryFn: () => ref.getEnergyPeriodsSummary(companyId, months),
     enabled: !!companyId,
     staleTime: 60_000,
   })

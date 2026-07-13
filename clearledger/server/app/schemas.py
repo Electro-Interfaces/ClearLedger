@@ -755,6 +755,79 @@ class SettlementDetail(BaseModel):
     paidThrough: str | None = None
     paymentStatus: str
     comment: str | None = None
+    # v2.10 (реестры РусГидро): ежемесячная плата (постоянная часть) и сроки договора.
+    amountGross: float | None = None       # с НДС, руб/мес
+    amountNet: float | None = None         # без НДС, руб/мес
+    vatPct: float | None = None
+    contractStart: str | None = None
+    contractEnd: str | None = None
+    extra: dict | None = None              # переменная часть/сроки оплаты/ср. тариф...
+
+
+class EnergyPeriodPoint(BaseModel):
+    """Месяц входящей э/э по сети: объём, средний тариф, оценка стоимости."""
+    period: str                            # 'YYYY-MM-01'
+    kwh: float = 0                         # Σ объёма входящей э/э
+    stations: int = 0                      # станций с объёмом
+    tariffAvg: float | None = None         # средний входящий тариф, руб/кВт·ч с НДС
+    costEst: float | None = None           # оценка стоимости: Σ kwh×тариф (мес или ср. станции)
+
+
+class EnergySupplierRow(BaseModel):
+    """Поставщик э/э: станции на договоре + объём за окно периода."""
+    name: str
+    inn: str | None = None
+    stations: int = 0
+    kwh: float = 0                         # Σ объёма по станциям поставщика за окно
+    tariffAvg: float | None = None         # средневзвешенный тариф (по объёму)
+    unpaid: int = 0                        # станций со статусом «не оплачено»
+
+
+class EnergyPeriodsSummary(BaseModel):
+    """Витрина «Энергозакупка»: реальные объёмы/тарифы входящей э/э по месяцам."""
+    series: list[EnergyPeriodPoint] = Field(default_factory=list)
+    suppliers: list[EnergySupplierRow] = Field(default_factory=list)
+    totalKwh: float = 0
+    totalCostEst: float | None = None
+    stationsWithVolumes: int = 0
+    stationsWithTariff: int = 0
+    lastPeriod: str | None = None
+
+
+class ReestrStreamStat(BaseModel):
+    """Поток канала реестров: строки L1 и сопряжение со справочником объектов."""
+    stream: str                            # svodnaya | arenda | tariffs | svod
+    label: str
+    l1Rows: int = 0
+    resolved: int = 0                      # строк, сопоставленных с объектом
+    orphans: int = 0                       # строк без объекта («сироты»)
+
+
+class ReestrOrphanRow(BaseModel):
+    """Строка реестра без объекта в справочнике (кандидат на дозагрузку станций)."""
+    stream: str
+    bu: str | None = None                  # № по БУ
+    zoi: str | None = None                 # № ZOI-1
+    name: str | None = None
+    kwh: float | None = None               # Σ объёма э/э (важность для «Сводной»)
+
+
+class ReestrEntityStat(BaseModel):
+    """L2-сущность, которую наполняет канал реестров."""
+    key: str                               # counterparties | contracts | settlements | periods
+    label: str
+    records: int = 0
+    note: str | None = None
+
+
+class ReestrModel(BaseModel):
+    """Модель нормализации канала реестров: потоки (L1) → сопряжение со
+    справочником объектов → L2-сущности. Аналог charge-sessions/model."""
+    streams: list[ReestrStreamStat] = Field(default_factory=list)
+    entities: list[ReestrEntityStat] = Field(default_factory=list)
+    orphans: list[ReestrOrphanRow] = Field(default_factory=list)
+    objectsLinked: int = 0                 # уникальных объектов с данными реестра
+    objectsTotal: int = 0                  # объектов в справочнике (для %)
 
 
 class RoleDiscipline(BaseModel):

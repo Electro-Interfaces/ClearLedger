@@ -14,7 +14,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { loadChannels } from '@/services/channelService'
 import { isApiEnabled } from '@/services/apiClient'
 import { getChargeModel, getStationsModel, getStationsLinkage } from '@/services/analyticsService'
-import { usePaymentDisciplineSummary } from '@/hooks/useReferences'
+import { usePaymentDisciplineSummary, useReestrModel } from '@/hooks/useReferences'
 import type { Channel } from '@/types/channel'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -47,50 +47,122 @@ function Kpi({ label, value, sub }: { label: string; value: string; sub?: string
   )
 }
 
-/* ── РЕАЛЬНЫЙ блок: нормализация реестра «Энергоснабжение и аренда ЭЗС» (L1→L2) ── */
+/* ── РЕАЛЬНЫЙ блок: нормализация канала реестров «Энергоснабжение и аренда ЭЗС».
+   Тот же принцип, что у остальных каналов: L1 RAW (файлы-потоки) → сопряжение со
+   справочником объектов (конформная размерность, клеймо _match в сырье) →
+   L2-сущности (контрагенты / договоры / платёжная дисциплина / объёмы+тарифы). ── */
 function ReestrNormalizationBlock() {
-  const q = usePaymentDisciplineSummary()
-  const s = q.data
-  if (!s || (s.l1Raw === 0 && s.settlements === 0)) {
-    return <div className="px-6 py-10 text-sm text-muted-foreground">Реестр ещё не загружен — нормализовать нечего.</div>
+  const q = useReestrModel()
+  const m = q.data
+  if (q.isLoading) {
+    return <div className="px-6 py-10 text-sm text-muted-foreground">Загрузка модели нормализации…</div>
   }
-  const stages = [
-    { t: 'Приём L1 (RAW)', d: 'Строки реестра «как есть» (одна строка = одна ЭЗС).', n: s.l1Raw, tone: 'bg-slate-500/15 text-slate-600 dark:text-slate-300' },
-    { t: 'Нормализация', d: 'Резолв станции по № ЭЗС, разбор «оплачено по» → статус, основание (договор/разрешение).', n: s.l1Raw, tone: 'bg-blue-500/15 text-blue-600 dark:text-blue-400' },
-    { t: 'L2 (CLEAN)', d: 'Контрагенты, договоры и платёжная дисциплина по ЭЗС → разрезы «Поставщики э/э»/«Аренда».', n: s.l2Clean, tone: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
-  ]
+  if (!m || m.streams.every((s) => s.l1Rows === 0)) {
+    return <div className="px-6 py-10 text-sm text-muted-foreground">Реестры ещё не загружены — нормализовать нечего. Загрузите файлы в канале «Энергоснабжение и аренда ЭЗС».</div>
+  }
+  const l1Total = m.streams.reduce((a, s) => a + s.l1Rows, 0)
+  const resolvedTotal = m.streams.reduce((a, s) => a + s.resolved, 0)
+  const orphanTotal = m.streams.reduce((a, s) => a + s.orphans, 0)
+  const importantOrphans = m.orphans.filter((o) => (o.kwh ?? 0) > 0)
   return (
     <div className="space-y-5 px-6 py-6">
       <Card className="border-l-2 border-l-primary"><CardContent className="space-y-3 pt-5">
         <div className="flex items-center gap-2">
-          <div className="text-sm font-medium">Нормализация реестра «Энергоснабжение и аренда ЭЗС»</div>
+          <div className="text-sm font-medium">Нормализация: реестры «Энергоснабжение и аренда ЭЗС»</div>
           <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Kpi label="Записей L1 (RAW)" value={fmtN(s.l1Raw)} />
-          <Kpi label="Нормализовано (L2)" value={fmtN(s.l2Clean)} />
-          <Kpi label="Записей платёжной дисциплины" value={fmtN(s.settlements)} />
-          <Kpi label="ЭЗС охвачено" value={fmtN(s.stationsCovered)} />
+          <Kpi label="Строк L1 (3 файла-потока)" value={fmtN(l1Total)} />
+          <Kpi label="Сопряжено с объектами" value={`${fmtN(resolvedTotal)} (${l1Total ? Math.round(resolvedTotal / l1Total * 100) : 0}%)`} sub="справочник объектов — хаб" />
+          <Kpi label="Сироты (без объекта)" value={fmtN(orphanTotal)} sub={importantOrphans.length ? `${importantOrphans.length} с объёмами э/э!` : 'склады/демонтаж — норма'} />
+          <Kpi label="Объектов с данными реестра" value={`${fmtN(m.objectsLinked)} из ${fmtN(m.objectsTotal)}`} />
         </div>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-          {stages.map((st, i) => (
-            <div key={st.t} className="flex flex-1 items-stretch gap-3">
-              <div className="flex-1 rounded-lg border bg-muted/30 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium">{st.t}</span>
-                  <Badge variant="secondary" className={`text-[10px] ${st.tone}`}>{fmtN(st.n)}</Badge>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">{st.d}</p>
-              </div>
-              {i < stages.length - 1 && <div className="hidden self-center text-muted-foreground/60 lg:block">→</div>}
-            </div>
+
+        {/* Потоки: L1 → сопряжение (тот же конвейер, что у сессий/станций) */}
+        <Table><TableHeader><TableRow>
+          <TableHead>Поток (файл)</TableHead>
+          <TableHead className="text-right">Строк L1</TableHead>
+          <TableHead className="text-right">Сопряжено</TableHead>
+          <TableHead className="text-right">Сироты</TableHead>
+        </TableRow></TableHeader><TableBody>
+          {m.streams.map((s) => (
+            <TableRow key={s.stream}>
+              <TableCell className="font-medium">{s.label}</TableCell>
+              <TableCell className="text-right tabular-nums">{fmtN(s.l1Rows)}</TableCell>
+              <TableCell className="text-right tabular-nums">
+                {fmtN(s.resolved)} <span className={pctCls(s.l1Rows ? s.resolved / s.l1Rows * 100 : 0)}>({s.l1Rows ? Math.round(s.resolved / s.l1Rows * 100) : 0}%)</span>
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {s.orphans ? <span className="text-amber-600 dark:text-amber-400">{fmtN(s.orphans)}</span> : '—'}
+              </TableCell>
+            </TableRow>
           ))}
-        </div>
+        </TableBody></Table>
         <p className="text-xs text-muted-foreground/70">
-          Источник «Реестр энергоснабжения и аренды ЭЗС» → канал «Энергоснабжение и аренда ЭЗС» (загрузка xlsx →
-          L1 RAW → нормализация → L2). Витрины «Поставщики э/э» / «Аренда» строятся на L2.
+          Ключ сопряжения: № по БУ → станция № объекта, добор по зав. номеру / OCPP ID / координатам.
+          «Сводная» — якорный поток: она прописывает объектам № БУ и № ZOI-1, по которым затем
+          резолвятся аренда и тарифы (порядок каскада соблюдается кнопкой «Обработать все»).
         </p>
       </CardContent></Card>
+
+      {/* L2-сущности, которые наполняет канал (разбивка нормализации по сущностям) */}
+      <Card><CardContent className="space-y-3 pt-5">
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-medium">L2-сущности канала</div>
+          <span className="text-xs text-muted-foreground/70">потоки наполняют общие справочники и факты — их же используют другие каналы</span>
+        </div>
+        <Table><TableHeader><TableRow>
+          <TableHead>Сущность (L2)</TableHead>
+          <TableHead className="text-right">Записей</TableHead>
+          <TableHead>Состав</TableHead>
+          <TableHead>Потребители</TableHead>
+        </TableRow></TableHeader><TableBody>
+          {m.entities.map((e) => {
+            const consumers: Record<string, string> = {
+              counterparties: 'НСИ · Корпоратив · Аренда',
+              contracts: 'НСИ · ось «договор ↔ точки»',
+              settlements: 'Энергозакупка · Аренда · Дебиторка',
+              periods: 'Энергозакупка · (буд.) Баланс ЭЗС: вход vs отпуск из сессий',
+            }
+            return (
+              <TableRow key={e.key}>
+                <TableCell className="font-medium">{e.label}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtN(e.records)}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{e.note || '—'}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">{consumers[e.key] || '—'}</TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody></Table>
+      </CardContent></Card>
+
+      {/* Сироты: строки реестров без объекта — рабочий список на дозагрузку станций */}
+      {m.orphans.length > 0 && (
+        <Card><CardContent className="space-y-3 pt-5">
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium">Сироты — строки без объекта в справочнике</div>
+            <Badge variant="secondary" className="bg-amber-500/15 text-[10px] text-amber-600 dark:text-amber-400">{fmtN(orphanTotal)}</Badge>
+            <span className="text-xs text-muted-foreground/70">с объёмами э/э — сверху; лечится загрузкой свежего справочника станций + «Обработать все»</span>
+          </div>
+          <div className="max-h-[320px] overflow-auto rounded-md border border-border/40">
+            <Table><TableHeader className="sticky top-0 bg-card"><TableRow>
+              <TableHead>№ БУ</TableHead><TableHead>№ ZOI-1</TableHead>
+              <TableHead>Наименование</TableHead><TableHead>Поток</TableHead>
+              <TableHead className="text-right">Σ э/э, кВт·ч</TableHead>
+            </TableRow></TableHeader><TableBody>
+              {m.orphans.map((o, i) => (
+                <TableRow key={i}>
+                  <TableCell className="font-medium tabular-nums">{o.bu || '—'}</TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">{o.zoi || '—'}</TableCell>
+                  <TableCell className="max-w-[340px] truncate text-xs text-muted-foreground">{o.name || '—'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{o.stream}</TableCell>
+                  <TableCell className={`text-right tabular-nums ${(o.kwh ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>{o.kwh != null ? fmtN(Math.round(o.kwh)) : '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody></Table>
+          </div>
+        </CardContent></Card>
+      )}
     </div>
   )
 }

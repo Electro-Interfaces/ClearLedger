@@ -9,7 +9,10 @@ import type {
   CounterpartyBalance, ContractScopeType, LocationBrief, CounterpartyLocations,
   LocationContracts, ContractDimensions,
 } from '@/types'
-import type { StationSettlement, PaymentDisciplineSummary, SettlementDetail, SettlementRole } from '@/types/settlement'
+import type {
+  StationSettlement, PaymentDisciplineSummary, SettlementDetail, SettlementRole,
+  EnergyPeriodsSummary, ReestrModel,
+} from '@/types/settlement'
 import { isApiEnabled, get, post, patch, put, del, upload } from './apiClient'
 import {
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
@@ -514,6 +517,26 @@ export async function getSettlementsDetail(
   const params: Record<string, string> = { company_id: companyId }
   if (role) params.role = role
   return get<SettlementDetail[]>('/api/references/settlements/detail', params)
+}
+
+/** Входящая э/э по месяцам (объёмы/тарифы/стоимость) — витрина «Энергозакупка». */
+export async function getEnergyPeriodsSummary(
+  companyId: string, months = 24,
+): Promise<EnergyPeriodsSummary> {
+  if (!isApiEnabled()) {
+    return { series: [], suppliers: [], totalKwh: 0, totalCostEst: null,
+             stationsWithVolumes: 0, stationsWithTariff: 0, lastPeriod: null }
+  }
+  return get<EnergyPeriodsSummary>('/api/references/energy-periods/summary',
+    { company_id: companyId, months: String(months) })
+}
+
+/** Модель нормализации канала реестров (потоки → сопряжение → L2-сущности). */
+export async function getReestrModel(companyId: string): Promise<ReestrModel> {
+  if (!isApiEnabled()) {
+    return { streams: [], entities: [], orphans: [], objectsLinked: 0, objectsTotal: 0 }
+  }
+  return get<ReestrModel>('/api/references/reestr/model', { company_id: companyId })
 }
 
 /** Загрузить файл-таблицу (xlsx) как L1-сырьё источника. Возвращает source_id (SourceFile). */

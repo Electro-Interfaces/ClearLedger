@@ -296,24 +296,109 @@ async def _run_msto(db: AsyncSession, channel: Channel, src: Source,
 # ---------------------------------------------------------------------------
 # Ветка ручной таблицы (реестр «Договоры и оплаты ЭЗС») — server-side L1→L2
 # ---------------------------------------------------------------------------
-async def _run_reestr(db: AsyncSession, channel: Channel, src: Source) -> dict[str, Any]:
-    """Загруженный xlsx (SourceFile из config.uploadFileId) → L1 RAW → нормализация → L2."""
-    cfg = channel.config or {}
+async def _run_reestr(db: AsyncSession, channel: Channel, src: Source,
+                      mode: str = "append") -> dict[str, Any]:
+    """Реестры «Энергоснабжение и аренда ЭЗС» — ОДИН канал, НЕСКОЛЬКО файлов-слотов.
+
+    Формат загруженного xlsx определяется автоматически (detect_reestr_format):
+    старый «Общий свод» либо «Сводная» / «Договоры_Аренда» / «Тарифы
+    Электроэнергия_Входящие». Обработанный файл запоминается в слоте
+    config.uploadFiles[<формат>] — по слоту на формат.
+
+    mode='append' (обычная загрузка) — обработать свежезагруженный файл
+    (config.uploadFileId) и обновить его слот; mode='all' — переобработать ВСЕ
+    сохранённые слоты в порядке каскада (Сводная прописывает станциям
+    buNumber/zoi1, затем аренда и тарифы резолвятся по ним) — полезно после
+    обновления справочника станций."""
+    from app.services.reestr_rushydro import (
+        REESTR_SLOT_LABEL, REESTR_SLOT_ORDER, run_reestr_file,
+    )
+    cfg = dict(channel.config or {})
+    slots = dict(cfg.get("uploadFiles") or {})
+
+    async def _read_file(file_id) -> tuple[SourceFile | None, bytes | None]:
+        try:
+            sf = await db.get(SourceFile, _uuid.UUID(str(file_id)))
+        except (ValueError, TypeError):
+            sf = None
+        if sf is None:
+            return None, None
+        with open(sf.storage_path, "rb") as fh:
+            return sf, fh.read()
+
+    def _fix_name(s: str | None) -> str | None:
+        """Имя файла из multipart может прийти mojibake: байты UTF-8 или CP1251,
+        прочитанные как latin-1 (загрузка curl'ом/сторонним клиентом; браузер шлёт
+        корректный UTF-8). Если перекодировка даёт кириллицу — чиним."""
+        if not s:
+            return s
+
+        def cyr(t: str) -> int:
+            return sum(1 for ch in t if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
+
+        if cyr(s):
+            return s
+        try:
+            raw = s.encode("latin-1")
+        except UnicodeEncodeError:
+            return s
+        for enc in ("utf-8", "cp1251"):
+            try:
+                fixed = raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+            if cyr(fixed):
+                return fixed
+        return s
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    if mode == "all":
+        if not slots:
+            return {"status": "skipped",
+                    "message": "нет сохранённых файлов реестров: сначала загрузите таблицы"}
+        parts: list[str] = []
+        totals = {"shifts": 0, "created": 0, "unmatched": 0}
+        for fmt in REESTR_SLOT_ORDER:
+            slot = slots.get(fmt)
+            if not slot:
+                continue
+            sf, content = await _read_file(slot.get("fileId"))
+            if content is None:
+                parts.append(f"{REESTR_SLOT_LABEL.get(fmt, fmt)}: файл не найден")
+                continue
+            res = await run_reestr_file(db, channel.company_id, content)
+            slots[fmt] = {**slot, "processedAt": now,
+                          "fileName": _fix_name(slot.get("fileName")),
+                          "rows": res.get("shifts"), "unmatched": res.get("unmatched")}
+            for k in totals:
+                totals[k] += int(res.get(k) or 0)
+            parts.append(res.get("message") or f"{fmt}: ok")
+        cfg["uploadFiles"] = slots
+        channel.config = cfg
+        return {"status": "success", "kind": "reestr_all",
+                "shifts": totals["shifts"], "created": totals["created"],
+                "updated": 0, "skipped_kinds": [],
+                "unmatched": totals["unmatched"],
+                "message": "Полный прогон реестров — " + "; ".join(parts)}
+
     file_id = cfg.get("uploadFileId") or cfg.get("upload_file_id")
     if not file_id:
         return {"status": "skipped",
                 "message": "не загружена таблица: сначала «Загрузить таблицу» (config.uploadFileId пуст)"}
-    try:
-        sf = await db.get(SourceFile, _uuid.UUID(str(file_id)))
-    except (ValueError, TypeError):
-        sf = None
-    if sf is None:
+    sf, content = await _read_file(file_id)
+    if content is None:
         return {"status": "error", "message": f"файл {file_id} не найден"}
-    with open(sf.storage_path, "rb") as fh:
-        content = fh.read()
-    from app.services.reestr_normalize import ingest_reestr, parse_reestr_xlsx
-    rows = parse_reestr_xlsx(content)
-    return await ingest_reestr(db, channel.company_id, rows, channel_id=channel.id)
+    res = await run_reestr_file(db, channel.company_id, content)
+    fmt = res.get("format") or "svod"
+    slots[fmt] = {
+        "fileId": str(file_id), "fileName": _fix_name(sf.file_name) if sf else None,
+        "uploadedAt": now, "processedAt": now,
+        "rows": res.get("shifts"), "unmatched": res.get("unmatched"),
+    }
+    cfg["uploadFiles"] = slots
+    channel.config = cfg
+    return res
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +482,7 @@ async def run_channel(
     if src.source_type == "onec_operational":
         return await _run_cb(db, channel, src, date_from, date_to)
     if src.source_type == "manual_table":
-        return await _run_reestr(db, channel, src)
+        return await _run_reestr(db, channel, src, mode=mode)
     if src.source_type == "charge_sessions_excel":
         return await _run_charge_sessions(db, channel, src, mode=mode, log_id=log_id)
     if src.source_type == "stations_excel":

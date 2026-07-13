@@ -4,7 +4,7 @@
  * Бэкенд: StationContractSettlement + /references/settlements + /payment-discipline/summary.
  */
 
-export type SettlementRole = 'energy' | 'rent'
+export type SettlementRole = 'energy' | 'rent' | 'service'
 export type PaymentStatus = 'paid' | 'unpaid' | 'unknown' | 'special'
 
 export interface StationSettlement {
@@ -35,6 +35,73 @@ export interface SettlementDetail {
   paidThrough: string | null
   paymentStatus: PaymentStatus
   comment: string | null
+  /** Ежемесячная плата (постоянная часть) и сроки договора — из реестров РусГидро. */
+  amountGross: number | null
+  amountNet: number | null
+  vatPct: number | null
+  contractStart: string | null
+  contractEnd: string | null
+  extra: Record<string, unknown> | null
+}
+
+/** Месяц входящей э/э по сети (объём/тариф/оценка стоимости). */
+export interface EnergyPeriodPoint {
+  period: string
+  kwh: number
+  stations: number
+  tariffAvg: number | null
+  costEst: number | null
+}
+
+export interface EnergySupplierRow {
+  name: string
+  inn: string | null
+  stations: number
+  kwh: number
+  tariffAvg: number | null
+  unpaid: number
+}
+
+export interface EnergyPeriodsSummary {
+  series: EnergyPeriodPoint[]
+  suppliers: EnergySupplierRow[]
+  totalKwh: number
+  totalCostEst: number | null
+  stationsWithVolumes: number
+  stationsWithTariff: number
+  lastPeriod: string | null
+}
+
+/** Модель нормализации канала реестров: потоки L1 → сопряжение → L2-сущности. */
+export interface ReestrStreamStat {
+  stream: string
+  label: string
+  l1Rows: number
+  resolved: number
+  orphans: number
+}
+
+export interface ReestrOrphanRow {
+  stream: string
+  bu: string | null
+  zoi: string | null
+  name: string | null
+  kwh: number | null
+}
+
+export interface ReestrEntityStat {
+  key: string
+  label: string
+  records: number
+  note: string | null
+}
+
+export interface ReestrModel {
+  streams: ReestrStreamStat[]
+  entities: ReestrEntityStat[]
+  orphans: ReestrOrphanRow[]
+  objectsLinked: number
+  objectsTotal: number
 }
 
 export interface RoleDiscipline {
@@ -64,6 +131,7 @@ export interface PaymentDisciplineSummary {
 export const ROLE_LABEL: Record<SettlementRole, string> = {
   energy: 'Энергоснабжение',
   rent: 'Аренда',
+  service: 'Сервис',
 }
 
 export const PAYMENT_META: Record<PaymentStatus, { label: string; cls: string }> = {

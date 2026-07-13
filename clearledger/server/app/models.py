@@ -870,7 +870,8 @@ class StationContractSettlement(Base):
         String(40), ForeignKey("service_locations.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
-    # Роль контура обязательства: energy (энергоснабжение/закупка) | rent (аренда земли/площадки).
+    # Роль контура обязательства: energy (энергоснабжение/закупка) | rent (аренда
+    # земли/площадки) | service (сервисный договор на обслуживание ЭЗС).
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     # Мягкая ссылка на договор (резолв по контрагент+номер+тип); NULL если не сопоставлен.
     contract_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -892,6 +893,15 @@ class StationContractSettlement(Base):
     # Снимок периода реестра (напр. '2026-06-01') — для будущей истории.
     period: Mapped[str | None] = mapped_column(String(20), nullable=True)
     source: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # v2.9 (реестры РусГидро): ежемесячная плата по договору (постоянная часть).
+    amount_gross: Mapped[float | None] = mapped_column(Float, nullable=True)   # с НДС, руб/мес
+    amount_net: Mapped[float | None] = mapped_column(Float, nullable=True)     # без НДС, руб/мес
+    vat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)        # ставка НДС, %
+    contract_start: Mapped[str | None] = mapped_column(String(20), nullable=True)  # ISO-дата
+    contract_end: Mapped[str | None] = mapped_column(String(20), nullable=True)    # ISO-дата
+    # Прочие атрибуты источника (переменная часть, сроки оплаты, ср. тариф э/э,
+    # единовременный платёж, вид деятельности, способ обмена...) — без жёстких колонок.
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -903,6 +913,46 @@ class StationContractSettlement(Base):
         # Один текущий статус на станцию×роль (идемпотентный upsert реестра).
         Index("uq_station_settlement", "company_id", "location_id", "role", unique=True),
         Index("idx_station_settlement_status", "company_id", "role", "payment_status"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# StationEnergyPeriod (входящая э/э по станции × месяц — v2.9, РусГидро)
+# ---------------------------------------------------------------------------
+# Помесячный факт входящей электроэнергии по объекту: объём, который выставляют
+# контрагенты (из «Сводной» реестра договоров), и входящий тариф руб/кВт·ч с НДС
+# (из «Тарифы Электроэнергия_Входящие»). Слои приходят из РАЗНЫХ файлов канала
+# reestr_contracts_payments — upsert по (company, location, period) не затирает
+# чужое поле. Стоимость = intake_kwh × tariff_rub_kwh (считается на чтении).
+# ---------------------------------------------------------------------------
+class StationEnergyPeriod(Base):
+    __tablename__ = "station_energy_periods"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Первое число месяца ISO: '2026-06-01'.
+    period: Mapped[str] = mapped_column(String(10), nullable=False)
+    # Объём входящей э/э за месяц, кВт·ч (выставлено контрагентом).
+    intake_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Входящий тариф, руб/кВт·ч с НДС (помесячный, ведётся с июня 2026).
+    tariff_rub_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_station_energy_period", "company_id", "location_id", "period", unique=True),
+        Index("idx_station_energy_period", "company_id", "period"),
     )
 
 

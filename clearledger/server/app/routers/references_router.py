@@ -23,6 +23,7 @@ from app.models import (
     Organization,
     ServiceLocation,
     StationContractSettlement,
+    StationEnergyPeriod,
     User,
     Warehouse,
 )
@@ -45,7 +46,14 @@ from app.schemas import (
     CounterpartyCreate,
     CounterpartyResponse,
     CounterpartyUpdate,
+    EnergyPeriodPoint,
+    EnergyPeriodsSummary,
+    EnergySupplierRow,
     PaymentDisciplineSummary,
+    ReestrEntityStat,
+    ReestrModel,
+    ReestrOrphanRow,
+    ReestrStreamStat,
     RoleDiscipline,
     SettlementDetail,
     SettlementResponse,
@@ -1029,6 +1037,12 @@ async def settlements_detail(
             paidThrough=r.paid_through,
             paymentStatus=r.payment_status,
             comment=r.comment,
+            amountGross=r.amount_gross,
+            amountNet=r.amount_net,
+            vatPct=r.vat_pct,
+            contractStart=r.contract_start,
+            contractEnd=r.contract_end,
+            extra=r.extra,
         ))
     # сорт: проблемные/неоплаченные сверху, затем по № БУ
     order = {"unpaid": 0, "special": 1, "unknown": 2, "paid": 3}
@@ -1088,6 +1102,219 @@ async def payment_discipline_summary(
         counterpartiesUnpaidEnergy=len(cp_unpaid["energy"]),
         counterpartiesUnpaidRent=len(cp_unpaid["rent"]),
         l1Raw=l1_raw, l2Clean=l2_clean, settlements=len(rows),
+    )
+
+
+@router.get("/energy-periods/summary", response_model=EnergyPeriodsSummary)
+async def energy_periods_summary(
+    company_id: str = Query(...),
+    months: int = Query(24, ge=1, le=60, description="окно серии, месяцев"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Витрина «Энергозакупка»: помесячные объёмы входящей э/э (кВт·ч, из «Сводной»
+    реестра) и входящие тарифы (руб/кВт·ч с НДС) + разрез по поставщикам э/э.
+    Стоимость — ОЦЕНКА: объём × (тариф месяца, иначе средний тариф станции из
+    реестра). Источник: station_energy_periods + station_contract_settlements."""
+    cid = await assert_company_member(company_id, current_user, db)
+    periods = (await db.execute(
+        select(StationEnergyPeriod).where(StationEnergyPeriod.company_id == cid)
+    )).scalars().all()
+    if not periods:
+        return EnergyPeriodsSummary()
+
+    # средний тариф станции (extra.avgTariff из «Сводной») + поставщик станции
+    settl = (await db.execute(
+        select(StationContractSettlement).where(
+            StationContractSettlement.company_id == cid,
+            StationContractSettlement.role == "energy",
+        )
+    )).scalars().all()
+    avg_tariff: dict[str, float] = {}
+    supplier_of: dict[str, str] = {}
+    unpaid_of: dict[str, bool] = {}
+    for s in settl:
+        t = (s.extra or {}).get("avgTariff")
+        if isinstance(t, (int, float)) and t > 0:
+            avg_tariff[s.location_id] = float(t)
+        if s.counterparty_id:
+            supplier_of[s.location_id] = s.counterparty_id
+        unpaid_of[s.location_id] = s.payment_status == "unpaid"
+    cp_names: dict[str, tuple[str, str | None]] = {}
+    cp_uuids = []
+    for v in set(supplier_of.values()):
+        try:
+            cp_uuids.append(uuid.UUID(v))
+        except (ValueError, TypeError):
+            pass
+    if cp_uuids:
+        for cp in (await db.execute(
+            select(Counterparty).where(Counterparty.id.in_(cp_uuids))
+        )).scalars().all():
+            cp_names[str(cp.id)] = (cp.name, cp.inn or None)
+
+    # актуальный тариф станции: значение последнего месяца с тарифом
+    last_tariff: dict[str, tuple[str, float]] = {}
+    for p in periods:
+        if p.tariff_rub_kwh is not None:
+            cur = last_tariff.get(p.location_id)
+            if cur is None or p.period > cur[0]:
+                last_tariff[p.location_id] = (p.period, p.tariff_rub_kwh)
+
+    # помесячная серия
+    by_period: dict[str, dict] = {}
+    total_kwh = 0.0
+    total_cost = 0.0
+    cost_known = False
+    for p in periods:
+        b = by_period.setdefault(p.period, {"kwh": 0.0, "stations": 0, "t_sum": 0.0,
+                                            "t_n": 0, "cost": 0.0})
+        if p.intake_kwh is not None:
+            b["kwh"] += p.intake_kwh
+            b["stations"] += 1
+            total_kwh += p.intake_kwh
+            t = p.tariff_rub_kwh or avg_tariff.get(p.location_id) \
+                or (last_tariff.get(p.location_id) or (None, None))[1]
+            if t:
+                b["cost"] += p.intake_kwh * t
+                total_cost += p.intake_kwh * t
+                cost_known = True
+        if p.tariff_rub_kwh is not None:
+            b["t_sum"] += p.tariff_rub_kwh
+            b["t_n"] += 1
+    series = [
+        EnergyPeriodPoint(
+            period=k, kwh=round(v["kwh"], 1), stations=v["stations"],
+            tariffAvg=round(v["t_sum"] / v["t_n"], 2) if v["t_n"] else None,
+            costEst=round(v["cost"], 0) if v["cost"] else None,
+        )
+        for k, v in sorted(by_period.items())
+    ][-months:]
+
+    # разрез по поставщикам (окно = те же months, объёмы Σ)
+    window = {pt.period for pt in series}
+    sup: dict[str, dict] = {}
+    for p in periods:
+        if p.period not in window or p.intake_kwh is None:
+            continue
+        cp_id = supplier_of.get(p.location_id)
+        name, inn = cp_names.get(cp_id, ("— поставщик не указан", None)) if cp_id \
+            else ("— поставщик не указан", None)
+        e = sup.setdefault(name, {"inn": inn, "locs": set(), "kwh": 0.0,
+                                  "tw": 0.0, "tw_kwh": 0.0, "unpaid": set()})
+        e["locs"].add(p.location_id)
+        e["kwh"] += p.intake_kwh
+        t = p.tariff_rub_kwh or avg_tariff.get(p.location_id)
+        if t:
+            e["tw"] += p.intake_kwh * t
+            e["tw_kwh"] += p.intake_kwh
+        if unpaid_of.get(p.location_id):
+            e["unpaid"].add(p.location_id)
+    suppliers = sorted(
+        (EnergySupplierRow(
+            name=n, inn=e["inn"], stations=len(e["locs"]), kwh=round(e["kwh"], 1),
+            tariffAvg=round(e["tw"] / e["tw_kwh"], 2) if e["tw_kwh"] else None,
+            unpaid=len(e["unpaid"]),
+        ) for n, e in sup.items()),
+        key=lambda r: -r.kwh,
+    )
+
+    locs_vol = {p.location_id for p in periods if p.intake_kwh is not None}
+    locs_tar = {p.location_id for p in periods if p.tariff_rub_kwh is not None}
+    return EnergyPeriodsSummary(
+        series=series, suppliers=suppliers[:30],
+        totalKwh=round(total_kwh, 1),
+        totalCostEst=round(total_cost, 0) if cost_known else None,
+        stationsWithVolumes=len(locs_vol), stationsWithTariff=len(locs_tar),
+        lastPeriod=max(by_period) if by_period else None,
+    )
+
+
+@router.get("/reestr/model", response_model=ReestrModel)
+async def reestr_model(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Модель нормализации канала реестров (аналог charge-sessions/model):
+    потоки L1 (три файла) → сопряжение со справочником объектов (клеймо `_match`
+    в сырье) → L2-сущности (контрагенты/договоры/платёжная дисциплина/объёмы и
+    тарифы э/э). Сироты — строки без объекта, кандидаты на дозагрузку станций."""
+    from app.services.reestr_rushydro import TAG_ARENDA, TAG_SVODNAYA, TAG_TARIFFS
+    cid = await assert_company_member(company_id, current_user, db)
+
+    stream_defs = [
+        ("svodnaya", TAG_SVODNAYA, "Сводная: договоры + объёмы э/э"),
+        ("arenda", TAG_ARENDA, "Договоры аренды (актуальные)"),
+        ("tariffs", TAG_TARIFFS, "Тарифы э/э входящие"),
+    ]
+    streams: list[ReestrStreamStat] = []
+    orphans: list[ReestrOrphanRow] = []
+    for stream, tag, label in stream_defs:
+        raws = (await db.execute(
+            select(DataEntry.meta).where(
+                DataEntry.company_id == cid, DataEntry.layer == "raw",
+                DataEntry.source_label.like(f"{tag}-%"))
+        )).scalars().all()
+        resolved = orphan_n = 0
+        for meta in raws:
+            m = (meta or {}).get("_match") or {}
+            if m.get("resolved"):
+                resolved += 1
+                continue
+            orphan_n += 1
+            months = (meta or {}).get("_months") or {}
+            kwh = sum(v for v in months.values() if isinstance(v, (int, float)))
+            orphans.append(ReestrOrphanRow(
+                stream=stream,
+                bu=str((meta or {}).get("bu") or "") or None,
+                zoi=str((meta or {}).get("zoi") or "") or None,
+                name=str((meta or {}).get("bu_name") or (meta or {}).get("object") or "")[:120] or None,
+                kwh=round(kwh, 1) if kwh else None,
+            ))
+        streams.append(ReestrStreamStat(
+            stream=stream, label=label, l1Rows=len(raws),
+            resolved=resolved, orphans=orphan_n))
+
+    settl = (await db.execute(
+        select(StationContractSettlement).where(StationContractSettlement.company_id == cid)
+    )).scalars().all()
+    by_role: dict[str, int] = {}
+    for s in settl:
+        by_role[s.role] = by_role.get(s.role, 0) + 1
+    n_periods = (await db.execute(select(func.count(StationEnergyPeriod.id)).where(
+        StationEnergyPeriod.company_id == cid))).scalar() or 0
+    kwh_total = (await db.execute(select(func.coalesce(func.sum(StationEnergyPeriod.intake_kwh), 0)).where(
+        StationEnergyPeriod.company_id == cid))).scalar() or 0
+    n_cp = (await db.execute(select(func.count(Counterparty.id)).where(
+        Counterparty.company_id == cid))).scalar() or 0
+    n_cp_inn = (await db.execute(select(func.count(Counterparty.id)).where(
+        Counterparty.company_id == cid, Counterparty.inn != ""))).scalar() or 0
+    n_contracts = (await db.execute(select(func.count(Contract.id)).where(
+        Contract.company_id == cid,
+        Contract.type.in_(["Энергоснабжение", "Аренда", "Сервис"])))).scalar() or 0
+
+    role_label = {"energy": "э/э", "rent": "аренда", "service": "сервис"}
+    entities = [
+        ReestrEntityStat(key="counterparties", label="Контрагенты (справочник)", records=n_cp,
+                         note=f"с ИНН {n_cp_inn}"),
+        ReestrEntityStat(key="contracts", label="Договоры (справочник)", records=int(n_contracts),
+                         note="энергоснабжение · аренда · сервис"),
+        ReestrEntityStat(key="settlements", label="Платёжная дисциплина (по объектам)", records=len(settl),
+                         note=" · ".join(f"{role_label.get(r, r)} {n}" for r, n in sorted(by_role.items()))),
+        ReestrEntityStat(key="periods", label="Входящая э/э по месяцам", records=int(n_periods),
+                         note=f"Σ {round(float(kwh_total)):,} кВт·ч".replace(",", " ")),
+    ]
+
+    linked_locs = {s.location_id for s in settl}
+    objects_total = (await db.execute(select(func.count(ServiceLocation.id)).where(
+        ServiceLocation.company_id == cid))).scalar() or 0
+
+    # сироты: важные (с объёмами) сверху, затем по № БУ
+    orphans.sort(key=lambda o: (-(o.kwh or 0), o.bu or ""))
+    return ReestrModel(
+        streams=streams, entities=entities, orphans=orphans[:100],
+        objectsLinked=len(linked_locs), objectsTotal=int(objects_total),
     )
 
 

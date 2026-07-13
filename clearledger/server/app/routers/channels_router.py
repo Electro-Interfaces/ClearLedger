@@ -296,7 +296,7 @@ class RunRequest(BaseModel):
     date_to: str | None = None
     station_codes: list[int] | None = None
     all_period: bool = False   # вся история (игнорировать даты)
-    mode: str = "append"       # режим табличной загрузки: append | replace (сессии ЭЗС)
+    mode: str = "append"       # режим табличной загрузки: append | replace (сессии/станции) | all (реестры: переобработать все файлы-слоты)
 
 
 def _loaded_total(result: dict) -> int:

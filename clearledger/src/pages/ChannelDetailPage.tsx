@@ -371,6 +371,22 @@ function StationsCard({ channel }: { channel: Channel }) {
 
 // ─── Карточка ручной таблицы (источник manual_table): загрузка + обработка ──
 
+/** Слот файла-реестра (config.uploadFiles[fmt]) — канал «Энергоснабжение и аренда ЭЗС». */
+interface ReestrSlot {
+  fileId?: string
+  fileName?: string | null
+  uploadedAt?: string
+  processedAt?: string
+  rows?: number
+  unmatched?: number
+}
+const REESTR_SLOTS: { key: string; label: string }[] = [
+  { key: 'svodnaya', label: 'Сводная: договоры + объёмы э/э' },
+  { key: 'arenda', label: 'Договоры аренды (актуальные)' },
+  { key: 'tariffs', label: 'Тарифы э/э входящие' },
+  { key: 'svod', label: 'Общий свод (старый формат)' },
+]
+
 function ManualTableCard({ channel }: { channel: Channel }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
@@ -381,21 +397,24 @@ function ManualTableCard({ channel }: { channel: Channel }) {
   const [mode, setMode] = useState<'append' | 'replace'>('append')
   const isSessions = channel.templateId === 'charge_sessions'
   const isStations = channel.templateId === 'stations'
+  const isReestr = channel.templateId === 'reestr_contracts_payments'
   const supportsMode = isSessions || isStations   // таблицы с режимом подгрузить/переписать
   const fileId = (channel.config ?? {}).uploadFileId as string | undefined
+  const slots = ((channel.config ?? {}).uploadFiles ?? {}) as Record<string, ReestrSlot>
+  const slotCount = REESTR_SLOTS.filter((s) => slots[s.key]?.fileId).length
 
-  async function uploadAndRun() {
-    if (!file && !fileId) { toast.error('Выберите файл таблицы (xlsx)'); return }
+  async function uploadAndRun(runMode?: 'all') {
+    if (runMode !== 'all' && !file && !fileId) { toast.error('Выберите файл таблицы (xlsx)'); return }
     setBusy(true)
     try {
-      if (file) {
+      if (file && runMode !== 'all') {
         const r = await uploadTableFile(companyId, file)
         await updateChannel(channel.id, { config: { ...channel.config, uploadFileId: r.source_id } })
         toast.success('Таблица загружена (L1)')
       }
       // Прогон идёт В ФОНЕ (эндпоинт сразу возвращает running) — поллим статус до
       // завершения и показываем итог (для «переписать» — «удалено N, загружено M»).
-      await runChannel(channel.id, supportsMode ? { mode } : undefined)
+      await runChannel(channel.id, runMode === 'all' ? { mode: 'all' } : (supportsMode ? { mode } : undefined))
       setProg({ pct: null, msg: 'Обработка…' })
       let final: ChannelRunStatus | null = null
       for (let i = 0; i < 400 && !final; i++) {
@@ -445,8 +464,37 @@ function ManualTableCard({ channel }: { channel: Channel }) {
             ? 'Файл выгрузки зарядных сессий (xlsx, ChargeTransactions) → L1 RAW → нормализация (коннектор/ФЛ-ЮЛ) → сессии (L2).'
             : isStations
             ? 'Справочник станций ЭЗС (xlsx, лист «Станции») → L1 RAW → нормализация паспорта → объекты / Точки обслуживания (L2, ЭЗС).'
+            : isReestr
+            ? 'Файлы реестров грузятся ПО ОЧЕРЕДИ, формат определяется автоматически (Сводная / Договоры аренды / Тарифы э/э) — каждый занимает свой слот. Загрузка → L1 RAW → сопряжение со станциями (№ БУ / зав. номер / координаты) → L2 (договоры, платёжная дисциплина, объёмы и тарифы э/э).'
             : 'Файл реестра (xlsx) → загрузка как сырьё (L1) → нормализация → нормализованная БД (L2) и разрезы «Поставщики э/э» / «Аренда».'}
         </p>
+        {isReestr && (
+          <div className="rounded-md border border-border/50">
+            <table className="w-full text-xs">
+              <tbody>
+                {REESTR_SLOTS.filter((s) => s.key !== 'svod' || slots.svod?.fileId).map((s) => {
+                  const slot = slots[s.key]
+                  return (
+                    <tr key={s.key} className="border-b border-border/40 last:border-0">
+                      <td className="px-2 py-1.5 font-medium">{s.label}</td>
+                      <td className="px-2 py-1.5 text-muted-foreground">
+                        {slot?.fileId
+                          ? <>
+                              {slot.fileName || `${String(slot.fileId).slice(0, 8)}…`}
+                              {slot.processedAt && <span className="ml-1 text-[10px] text-muted-foreground/70">· {slot.processedAt.slice(0, 10)}</span>}
+                            </>
+                          : <span className="text-muted-foreground/60">не загружен</span>}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground whitespace-nowrap">
+                        {slot?.rows != null && <>{slot.rows} строк{slot.unmatched ? <span className="text-amber-600 dark:text-amber-400"> · {slot.unmatched} без объекта</span> : null}</>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
         {supportsMode && (
           <div className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-muted-foreground">Режим загрузки таблицы</span>
@@ -475,11 +523,19 @@ function ManualTableCard({ channel }: { channel: Channel }) {
           <Input type="file" accept=".xlsx,.xls"
             className="h-8 max-w-xs text-xs"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-          <Button size="sm" className="h-8 gap-1.5" disabled={busy || (!file && !fileId)} onClick={uploadAndRun}>
+          <Button size="sm" className="h-8 gap-1.5" disabled={busy || (!file && !fileId)} onClick={() => uploadAndRun()}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
             {file ? 'Загрузить и обработать' : 'Запустить обработку'}
           </Button>
-          {fileId && !file && (
+          {isReestr && slotCount > 0 && (
+            <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={busy}
+              onClick={() => uploadAndRun('all')}
+              title="Переобработать все сохранённые файлы-слоты в порядке каскада (Сводная → Аренда → Тарифы). Полезно после обновления справочника станций.">
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              Обработать все ({slotCount})
+            </Button>
+          )}
+          {fileId && !file && !isReestr && (
             <span className="text-[10px] text-muted-foreground">файл загружен ранее · {String(fileId).slice(0, 8)}…</span>
           )}
         </div>

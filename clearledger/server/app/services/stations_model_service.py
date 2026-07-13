@@ -13,7 +13,8 @@ from sqlalchemy import case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Channel, ChargeSession, Region, ServiceLocation, StationContractSettlement,
+    Channel, ChargeSession, DataEntry, Region, ServiceLocation,
+    StationContractSettlement, StationEnergyPeriod,
 )
 
 
@@ -57,13 +58,28 @@ async def stations_linkage(db: AsyncSession, company_id) -> dict[str, Any]:
     sess_rec_linked = int((await db.execute(select(func.count()).select_from(ChargeSession).where(
         ChargeSession.company_id == company_id, ChargeSession.location_id.is_not(None)))).scalar() or 0)
 
-    # Оплаты → по FK location_id
+    # Реестры (договоры/оплаты/объёмы/тарифы) → по FK location_id; «сироты» —
+    # строки L1-сырья реестров без объекта (клеймо _match.resolved=false).
     set_locs = {str(x) for x in (await db.execute(
         select(distinct(StationContractSettlement.location_id)).where(
             StationContractSettlement.company_id == company_id))).scalars() if x}
     set_total = int((await db.execute(select(func.count()).select_from(StationContractSettlement).where(
         StationContractSettlement.company_id == company_id))).scalar() or 0)
+    per_total = int((await db.execute(select(func.count()).select_from(StationEnergyPeriod).where(
+        StationEnergyPeriod.company_id == company_id))).scalar() or 0)
     set_linked = set_locs & obj_ids
+    reestr_raw = (await db.execute(
+        select(DataEntry.meta).where(
+            DataEntry.company_id == company_id, DataEntry.layer == "raw",
+            DataEntry.source_label.like("reestr-rh-%"))
+    )).scalars().all()
+    reestr_orphans: set[str] = set()
+    for meta in reestr_raw:
+        m = (meta or {}).get("_match") or {}
+        if m and not m.get("resolved"):
+            bu = str((meta or {}).get("bu") or (meta or {}).get("zoi") or "").strip()
+            if bu:
+                reestr_orphans.add(bu)
 
     def pct(a: int, b: int) -> float:
         return round(a / b * 100, 1) if b else 0.0
@@ -77,11 +93,13 @@ async def stations_linkage(db: AsyncSession, company_id) -> dict[str, Any]:
          "stations": len(sess_codes), "linked": len(sess_linked), "linked_pct": pct(len(sess_linked), len(sess_codes)),
          "records": sess_total, "records_linked": sess_rec_linked, "records_pct": pct(sess_rec_linked, sess_total),
          "orphans": len(sess_orphans), "orphan_examples": orphan_examples(sess_orphans)},
-        {"name": "Договоры и оплаты ЭЗС", "template": "reestr_contracts_payments",
-         "key": "location_id (FK)", "materialized": True,
-         "stations": len(set_locs), "linked": len(set_linked), "linked_pct": pct(len(set_linked), len(set_locs)),
-         "records": set_total, "records_linked": set_total, "records_pct": 100.0 if set_total else 0.0,
-         "orphans": len(set_locs - obj_ids), "orphan_examples": []},
+        {"name": "Энергоснабжение и аренда ЭЗС", "template": "reestr_contracts_payments",
+         "key": "№ БУ / зав.№ / координаты → location_id (FK)", "materialized": True,
+         "stations": len(set_locs) + len(reestr_orphans), "linked": len(set_linked),
+         "linked_pct": pct(len(set_linked), len(set_locs) + len(reestr_orphans)),
+         "records": set_total + per_total, "records_linked": set_total + per_total,
+         "records_pct": 100.0 if set_total + per_total else 0.0,
+         "orphans": len(reestr_orphans), "orphan_examples": orphan_examples(reestr_orphans)},
         {"name": "Справочник станций ЭЗС", "template": "stations",
          "key": "ext_id/serial → объект", "materialized": True,
          "stations": len(objs), "linked": enriched, "linked_pct": pct(enriched, len(objs)),

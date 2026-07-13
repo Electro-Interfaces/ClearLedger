@@ -11,7 +11,7 @@ import {
   DEMO_EZS, sumBuy, sumRelease, lossKwh, lossPct, overNorm, fmtN,
   supplierContract, tariffCheck, openClaimsCount, CONTRACT_STATUS_META,
 } from './balanceCalc'
-import { usePaymentDisciplineSummary, useSettlementsDetail } from '@/hooks/useReferences'
+import { usePaymentDisciplineSummary, useSettlementsDetail, useEnergyPeriodsSummary } from '@/hooks/useReferences'
 import { useLocations } from '@/hooks/useLocations'
 import { m } from '@/components/locations/fleet/locationFleetService'
 import { ROLE_LABEL, PAYMENT_META, paidThroughLabel, type SettlementRole } from '@/types/settlement'
@@ -81,12 +81,14 @@ function PaymentDisciplineBlock({ role }: { role?: SettlementRole }) {
   )
 }
 
-function Head({ title, subtitle }: { title: string; subtitle: string }) {
+function Head({ title, subtitle, real }: { title: string; subtitle: string; real?: boolean }) {
   return (
     <div>
       <div className="flex items-center gap-2">
         <h1 className="text-xl font-semibold">{title}</h1>
-        <Badge variant="secondary" className="text-[10px]">демо-данные</Badge>
+        {real
+          ? <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+          : <Badge variant="secondary" className="text-[10px]">демо-данные</Badge>}
       </div>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{subtitle}</p>
     </div>
@@ -361,12 +363,18 @@ function SettlementDetailTable({ role }: { role: SettlementRole }) {
           <TableHead>ЭЗС</TableHead>
           <TableHead>{role === 'rent' ? 'Арендодатель' : 'Поставщик э/э'}</TableHead>
           <TableHead>{role === 'rent' ? 'Договор / разрешение' : 'Договор'}</TableHead>
+          {role === 'rent' && <TableHead className="text-right">Плата, ₽/мес</TableHead>}
+          {role === 'rent' && <TableHead className="text-right">Срок до</TableHead>}
+          {role === 'energy' && <TableHead className="text-right">Тариф ср., ₽/кВт·ч</TableHead>}
           <TableHead>Оплата</TableHead>
           <TableHead>Комментарий</TableHead>
         </TableRow></TableHeader><TableBody>
           {rows.map((r) => {
             const meta = PAYMENT_META[r.paymentStatus]
             const contractCell = r.contractNumber || (r.basis && r.basis !== 'договор' ? r.basis : '—')
+            const amount = r.amountGross ?? r.amountNet
+            const avgTariff = typeof r.extra?.avgTariff === 'number' ? r.extra.avgTariff : null
+            const expired = !!(r.contractEnd && r.contractEnd < new Date().toISOString().slice(0, 10))
             return (
               <TableRow key={`${r.locationId}-${r.role}`}>
                 <TableCell className="font-medium whitespace-nowrap">
@@ -375,6 +383,20 @@ function SettlementDetailTable({ role }: { role: SettlementRole }) {
                 </TableCell>
                 <TableCell className="text-muted-foreground">{r.counterpartyName || '—'}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{contractCell}</TableCell>
+                {role === 'rent' && (
+                  <TableCell className="text-right tabular-nums">
+                    {amount != null ? fmtN(Math.round(amount)) : '—'}
+                    {amount != null && r.amountGross == null && <span className="ml-0.5 text-[9px] text-muted-foreground">без НДС</span>}
+                  </TableCell>
+                )}
+                {role === 'rent' && (
+                  <TableCell className={`text-right text-xs tabular-nums whitespace-nowrap ${expired ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                    {r.contractEnd ? r.contractEnd.split('-').reverse().join('.') : '—'}
+                  </TableCell>
+                )}
+                {role === 'energy' && (
+                  <TableCell className="text-right tabular-nums">{avgTariff != null ? avgTariff.toFixed(2) : '—'}</TableCell>
+                )}
                 <TableCell><span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.cls}`}>{paidThroughLabel(r)}</span></TableCell>
                 <TableCell className="max-w-[280px] text-xs text-muted-foreground">{r.comment || ''}</TableCell>
               </TableRow>
@@ -425,55 +447,138 @@ export function ReceivablesVitrine() {
   )
 }
 
-/* ── Энергозакупка ── */
+/* ── Энергозакупка (РЕАЛЬНЫЕ данные: объёмы входящей э/э из «Сводной» реестра,
+   тарифы из «Тарифы Электроэнергия_Входящие»; стоимость — оценка объём×тариф). ── */
+const MONTH_SHORT = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+function periodLabel(iso: string): string {
+  const [y, m] = iso.split('-')
+  return `${MONTH_SHORT[Number(m)] || m} ${y.slice(2)}`
+}
+
 export function ProcurementVitrine() {
-  const buyKwh = all.reduce((a, s) => a + sumBuy(s).kwh, 0), buyRub = all.reduce((a, s) => a + sumBuy(s).rub, 0)
-  const bySupplier = new Map<string, { kwh: number; rub: number; stations: number }>()
-  for (const s of all) for (const p of s.purchase) {
-    const e = bySupplier.get(p.supplier) ?? { kwh: 0, rub: 0, stations: 0 }
-    e.kwh += p.kwh; e.rub += p.rub; e.stations += 1
-    bySupplier.set(p.supplier, e)
-  }
+  const q = useEnergyPeriodsSummary(24)
+  const s = q.data
+  const series = s?.series ?? []
+  const last12 = series.slice(-12)
+  const kwh12 = last12.reduce((a, p) => a + p.kwh, 0)
+  const cost12 = last12.reduce((a, p) => a + (p.costEst ?? 0), 0)
+  const lastTariff = [...series].reverse().find((p) => p.tariffAvg != null)
+  const maxKwh = Math.max(1, ...last12.map((p) => p.kwh))
   return (
     <div className="space-y-5 px-6 py-6">
-      <Head title="Энергозакупка" subtitle="Закупка э/э по поставщикам, цена ₽/кВт·ч, договоры энергоснабжения, эффективность закупки." />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi label="Закупка, кВт·ч" value={fmtN(buyKwh)} />
-        <Kpi label="Закупка, ₽" value={fmtN(buyRub)} />
-        <Kpi label="Средняя цена, ₽/кВт·ч" value={rate(buyRub, buyKwh)} />
-        <Kpi label="Поставщиков" value={String(bySupplier.size)} />
-      </div>
+      <Head
+        real={!!s && series.length > 0}
+        title="Энергозакупка"
+        subtitle="Входящая электроэнергия по сети: объёмы, которые выставляют контрагенты (помесячно из реестра), входящие тарифы и оценка стоимости закупки."
+      />
+      {q.isLoading && <p className="text-sm text-muted-foreground">Загрузка данных энергозакупки…</p>}
+      {!!s && series.length > 0 && (
+        <>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Kpi real label="Входящая э/э за 12 мес, кВт·ч" value={fmtN(Math.round(kwh12))} />
+            <Kpi real label="Оценка стоимости за 12 мес, ₽" value={cost12 ? fmtN(Math.round(cost12)) : '—'} />
+            <Kpi real label={`Средний входящий тариф${lastTariff ? ` (${periodLabel(lastTariff.period)})` : ''}, ₽/кВт·ч`} value={lastTariff?.tariffAvg != null ? lastTariff.tariffAvg.toFixed(2) : '—'} />
+            <Kpi real label="ЭЗС с объёмами / с тарифом" value={`${s.stationsWithVolumes} / ${s.stationsWithTariff}`} />
+          </div>
+
+          <Card><CardContent className="space-y-3 pt-5">
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-medium">Входящая э/э по месяцам</div>
+              <span className="text-xs text-muted-foreground/70">
+                последние 12 мес · всего в реестре {fmtN(Math.round(s.totalKwh))} кВт·ч с 09.2022
+              </span>
+            </div>
+            <Table><TableHeader><TableRow>
+              <TableHead>Месяц</TableHead>
+              <TableHead className="w-[34%]"></TableHead>
+              <TableHead className="text-right">Объём, кВт·ч</TableHead>
+              <TableHead className="text-right">ЭЗС</TableHead>
+              <TableHead className="text-right">Тариф ср., ₽/кВт·ч</TableHead>
+              <TableHead className="text-right">Стоимость (оценка), ₽</TableHead>
+            </TableRow></TableHeader><TableBody>
+              {last12.map((p) => (
+                <TableRow key={p.period}>
+                  <TableCell className="font-medium whitespace-nowrap">{periodLabel(p.period)}</TableCell>
+                  <TableCell>
+                    <div className="h-2 rounded-sm bg-primary/70" style={{ width: `${Math.max(2, (p.kwh / maxKwh) * 100)}%` }} />
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtN(Math.round(p.kwh))}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{p.stations}</TableCell>
+                  <TableCell className="text-right tabular-nums">{p.tariffAvg != null ? p.tariffAvg.toFixed(2) : '—'}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{p.costEst != null ? fmtN(Math.round(p.costEst)) : '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody></Table>
+            <p className="text-xs text-muted-foreground/70">
+              Стоимость — оценка: объём × входящий тариф месяца (для месяцев без тарифной сетки — средний тариф станции из реестра). Помесячные тарифы контрагент ведёт с июня 2026.
+            </p>
+          </CardContent></Card>
+
+          {s.suppliers.length > 0 && (
+            <Card><CardContent className="space-y-3 overflow-x-auto pt-5">
+              <div className="flex items-center gap-2">
+                <div className="text-sm font-medium">Поставщики э/э</div>
+                <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+                <span className="text-xs text-muted-foreground/70">объёмы за окно 24 мес · по договорам энергоснабжения</span>
+              </div>
+              <Table><TableHeader><TableRow>
+                <TableHead>Поставщик э/э</TableHead><TableHead>ИНН</TableHead>
+                <TableHead className="text-right">ЭЗС</TableHead>
+                <TableHead className="text-right">Объём, кВт·ч</TableHead>
+                <TableHead className="text-right">Тариф средневзв., ₽/кВт·ч</TableHead>
+                <TableHead className="text-right">Не оплачено, ЭЗС</TableHead>
+              </TableRow></TableHeader><TableBody>
+                {s.suppliers.map((r) => (
+                  <TableRow key={r.name}>
+                    <TableCell className="font-medium">{r.name}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{r.inn || '—'}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.stations}</TableCell>
+                    <TableCell className="text-right tabular-nums">{fmtN(Math.round(r.kwh))}</TableCell>
+                    <TableCell className="text-right tabular-nums">{r.tariffAvg != null ? r.tariffAvg.toFixed(2) : '—'}</TableCell>
+                    <TableCell className={`text-right tabular-nums ${r.unpaid ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>{r.unpaid || ''}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody></Table>
+            </CardContent></Card>
+          )}
+        </>
+      )}
       <PaymentDisciplineBlock role="energy" />
       <SettlementDetailTable role="energy" />
-      <Card><CardContent className="overflow-x-auto pt-5">
-        <Table><TableHeader><TableRow>
-          <TableHead>Поставщик э/э</TableHead><TableHead className="text-right">Объём, кВт·ч</TableHead>
-          <TableHead className="text-right">Сумма, ₽</TableHead><TableHead className="text-right">₽/кВт·ч</TableHead>
-          <TableHead className="text-right">ЭЗС</TableHead>
-        </TableRow></TableHeader><TableBody>
-          {[...bySupplier.entries()].sort((a, b) => b[1].rub - a[1].rub).map(([sup, e]) => (
-            <TableRow key={sup}>
-              <TableCell className="font-medium">{sup}</TableCell>
-              <TableCell className="text-right tabular-nums">{fmtN(e.kwh)}</TableCell>
-              <TableCell className="text-right tabular-nums text-muted-foreground">{fmtN(e.rub)}</TableCell>
-              <TableCell className="text-right tabular-nums">{rate(e.rub, e.kwh)}</TableCell>
-              <TableCell className="text-right tabular-nums text-muted-foreground">{e.stations}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody></Table>
-      </CardContent></Card>
     </div>
   )
 }
 
-/* ── Аренда (земля/площадки ЭЗС) — отдельный управленческий модуль ── */
+/* ── Аренда (земля/площадки ЭЗС) — отдельный управленческий модуль.
+   Суммы постоянной части и сроки — из реестра «ЭЗС_Договоры_Аренда» (актуальный)
+   и «Сводной». ── */
 export function RentVitrine() {
+  const q = useSettlementsDetail('rent')
+  const rows = q.data ?? []
+  const withAmount = rows.filter((r) => (r.amountGross ?? r.amountNet) != null)
+  const monthlyGross = withAmount.reduce((a, r) => a + (r.amountGross ?? r.amountNet ?? 0), 0)
+  const monthlyNet = withAmount.reduce((a, r) => a + (r.amountNet ?? 0), 0)
+  const now = new Date()
+  const in90 = new Date(now.getTime() + 90 * 864e5).toISOString().slice(0, 10)
+  const today = now.toISOString().slice(0, 10)
+  const expiring = rows.filter((r) => r.contractEnd && r.contractEnd >= today && r.contractEnd <= in90).length
+  const expired = rows.filter((r) => r.contractEnd && r.contractEnd < today).length
   return (
     <div className="space-y-5 px-6 py-6">
       <Head
+        real={rows.length > 0}
         title="Аренда (земля и площадки ЭЗС)"
-        subtitle="Договоры и разрешения на размещение ЭЗС, арендодатели (в т.ч. муниципалитеты), статус оплаты «оплачено по», особый порядок (% от выручки / фикс / сервитут) и проблемные позиции."
+        subtitle="Договоры и разрешения на размещение ЭЗС, арендодатели (в т.ч. муниципалитеты), постоянная часть арендной платы, сроки договоров, статус оплаты «оплачено по», особый порядок (% от выручки / фикс / сервитут)."
       />
+      {rows.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Kpi real label="Постоянная часть, ₽/мес (с НДС)" value={fmtN(Math.round(monthlyGross))} />
+          <Kpi real label="в т.ч. без НДС, ₽/мес" value={monthlyNet ? fmtN(Math.round(monthlyNet)) : '—'} />
+          <Kpi real label="Договоров с суммой" value={`${withAmount.length} из ${rows.length}`} />
+          <Kpi real label="Истекают за 90 дней / истекли" value={`${expiring} / ${expired}`}
+               accent={expiring + expired ? 'warn' : undefined} />
+        </div>
+      )}
       <PaymentDisciplineBlock role="rent" />
       <SettlementDetailTable role="rent" />
     </div>
