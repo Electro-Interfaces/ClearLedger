@@ -38,8 +38,8 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',
   },
   accounting: {
-    reports: 'Дашборды', ttn: 'Поступления', shifts: 'Смены',
-    export: 'Выгрузка в БП', recon1c: 'Сверка с 1С', margin: 'Маржинальность',
+    shifts: 'Смены', ttn: 'Поступления', margin: 'Маржинальность', reports: 'Дашборды', recon1c: 'Сверка с 1С',
+    cb_load: 'Загрузка из ЦБ', cb_shifts: 'Смены сопутки', export: 'Выгрузка в БП', cb_recon: 'Сверка сопутки',
   },
   tax: {
     vat: 'НДС', profit: 'Налог на прибыль', compliance: 'Соответствие',

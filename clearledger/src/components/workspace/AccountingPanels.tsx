@@ -15,6 +15,7 @@ import { FuelTransactionsPanel } from './FuelTransactionsPanel'
 import { FuelMapPanel } from './FuelMapPanel'
 import { FuelBalancePanel } from './FuelBalancePanel'
 import { BpExportPanel } from './BpExportPanel'
+import { AccountingStreamsPanel } from './AccountingStreamsPanel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -540,6 +541,9 @@ export function AccountingPanel() {
         )}
         {tab === 'reports' && <ShiftDashboardPanel />}
         {tab === 'export' && <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
+        {(tab === 'cb_load' || tab === 'cb_shifts' || tab === 'cb_recon') && (
+          <AccountingStreamsPanel tab={tab} companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        )}
         {tab === 'recon1c' && <SyncWith1CPanel />}
     </ScrollArea>
   )
