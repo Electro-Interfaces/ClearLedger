@@ -464,6 +464,23 @@ async def create_all() -> None:
             "ALTER TABLE cb_movement_doc ADD COLUMN IF NOT EXISTS posted BOOLEAN NOT NULL DEFAULT true",
             "ALTER TABLE cb_movement_doc ADD COLUMN IF NOT EXISTS deleted BOOLEAN NOT NULL DEFAULT false",
             "ALTER TABLE cb_movement_doc ADD COLUMN IF NOT EXISTS inventory_ref VARCHAR(36)",
+            # v3.0: аудит L2 (13.07) — индексы под частые паттерны (роллап смен по
+            # дню закрытия, журнал поступлений по дате приёмки).
+            "CREATE INDEX IF NOT EXISTS idx_fuel_shifts_company_closed ON fuel_shifts(company_id, closed_at)",
+            "CREATE INDEX IF NOT EXISTS idx_fuel_receipts_company_received ON fuel_receipts(company_id, received_at)",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
+        # v2.10: реестры РусГидро (новый входной поток «Сводная»/«Договоры_Аренда»/
+        # «Тарифы Электроэнергия_Входящие») — суммы и сроки на платёжной дисциплине;
+        # station_energy_periods создаётся через metadata.create_all.
+        for stmt in (
+            "ALTER TABLE station_contract_settlements ADD COLUMN IF NOT EXISTS amount_gross DOUBLE PRECISION",
+            "ALTER TABLE station_contract_settlements ADD COLUMN IF NOT EXISTS amount_net DOUBLE PRECISION",
+            "ALTER TABLE station_contract_settlements ADD COLUMN IF NOT EXISTS vat_pct DOUBLE PRECISION",
+            "ALTER TABLE station_contract_settlements ADD COLUMN IF NOT EXISTS contract_start VARCHAR(20)",
+            "ALTER TABLE station_contract_settlements ADD COLUMN IF NOT EXISTS contract_end VARCHAR(20)",
+            "ALTER TABLE station_contract_settlements ADD COLUMN IF NOT EXISTS extra JSONB",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
