@@ -284,7 +284,10 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                 {pageRows.map((r) => (
                   <TableRow key={r.session_ext_id}>
                     <TableCell className="whitespace-nowrap font-mono text-muted-foreground">{fmtDT(r.started_at)}</TableCell>
-                    <TableCell className="max-w-[220px] truncate font-medium" title={`${r.station_name ?? ''} (${r.station_code ?? '—'})`}>{r.station_name || r.station_code || '—'}</TableCell>
+                    {/* Канон подписи станции: «Имя (код)» — имена не уникальны и меняются, код стабилен */}
+                    <TableCell className="max-w-[220px] truncate font-medium" title={`${r.station_name ?? ''} (${r.station_code ?? '—'})`}>
+                      {r.station_name || 'Станция'}{r.station_code ? ` (${r.station_code})` : ''}
+                    </TableCell>
                     <TableCell className="max-w-[160px] truncate">{r.region || '—'}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.connector_type || '—'}</TableCell>
                     <TableCell>{r.user_type || '—'}</TableCell>

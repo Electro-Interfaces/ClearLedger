@@ -233,8 +233,11 @@ async def ingest_charge_sessions(
 
     # Durable self-heal: неизвестные станции из сессий → объекты L2 + резолв location_id,
     # чтобы «сироты» (location_id NULL) не копились после загрузки.
-    from app.services.stations_normalize import backfill_session_locations
+    from app.services.stations_normalize import backfill_session_locations, refresh_location_names
     heal = await backfill_session_locations(db, company_id, auto_create=True)
+    # Переименования CPO: имя объекта = свежайшее имя из сессий (история в
+    # extra_metadata.nameHistory) — каталог не отстаёт от загрузок.
+    renamed = await refresh_location_names(db, company_id)
 
     if mode == "replace":
         message = f"переписано: удалено {deleted}, загружено {created}"
@@ -242,6 +245,8 @@ async def ingest_charge_sessions(
         message = f"загружено {created}, пропущено {skipped}"
     if heal.get("stations_created"):
         message += f"; станций заведено из сессий: {heal['stations_created']}"
+    if renamed:
+        message += f"; объектов переименовано по свежим сессиям: {renamed}"
     await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
             "errors": errors, "deleted": deleted, "stations_created": heal.get("stations_created", 0),

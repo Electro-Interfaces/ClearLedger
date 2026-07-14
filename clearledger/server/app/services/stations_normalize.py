@@ -589,3 +589,30 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
             "message": (f"связано {linked_rows} из {total} сессий "
                         f"({matched}/{len(codes)} станций"
                         + (f", создано {created_stations} из сессий" if created_stations else "") + ")")}
+
+
+async def refresh_location_names(db: AsyncSession, company_id) -> int:
+    """Имя объекта-станции = СВЕЖАЙШЕЕ имя из сессий (по последней сессии кода).
+
+    CPO переименовывает станции (волна 01.07.26: 611 «Новая Рига Аутлет
+    Вилладж»→«Новая Рига»), а каталог грузится из xlsx и отстаёт. Идентичность
+    станции = код; имя — только подпись, старое сохраняем в
+    extra_metadata.nameHistory (поиск по нему остаётся). Вызывается после
+    ingest сессий; идемпотентно. Возвращает число переименованных объектов."""
+    from sqlalchemy import text
+    res = await db.execute(text(
+        "WITH fresh AS ("
+        "  SELECT DISTINCT ON (location_id) location_id, btrim(station_name) AS nm"
+        "  FROM charge_sessions"
+        "  WHERE company_id = :cid AND location_id IS NOT NULL"
+        "    AND station_name IS NOT NULL AND btrim(station_name) <> ''"
+        "  ORDER BY location_id, started_at DESC NULLS LAST) "
+        "UPDATE service_locations sl SET "
+        "  extra_metadata = jsonb_set(coalesce(sl.extra_metadata, '{}'::jsonb), '{nameHistory}',"
+        "      coalesce(sl.extra_metadata->'nameHistory', '[]'::jsonb) || to_jsonb(sl.name)),"
+        "  name = f.nm "
+        "FROM fresh f "
+        "WHERE f.location_id = sl.id AND sl.company_id = :cid "
+        "  AND btrim(sl.name) IS DISTINCT FROM f.nm"
+    ), {"cid": str(company_id)})
+    return int(res.rowcount or 0)

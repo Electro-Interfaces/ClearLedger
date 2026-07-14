@@ -493,7 +493,26 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
-
+        # v2.13: имена объектов ЭЗС = свежайшее имя из сессий (волна переименований
+        # CPO 01.07.26: 611 «Новая Рига Аутлет Вилладж»→«Новая Рига» и др.; каталог
+        # грузился из xlsx до переименования и отстал). Старое имя — в
+        # extra_metadata.nameHistory (поиск по нему сохраняется). Идемпотентно:
+        # после выравнивания имён — no-op; при новых переименованиях в сессиях
+        # подхватит на следующем старте (страховка к обновлению при ingest).
+        await conn.execute(__import__("sqlalchemy").text(
+            "WITH fresh AS ("
+            "  SELECT DISTINCT ON (location_id) location_id, btrim(station_name) AS nm"
+            "  FROM charge_sessions"
+            "  WHERE location_id IS NOT NULL AND station_name IS NOT NULL"
+            "    AND btrim(station_name) <> ''"
+            "  ORDER BY location_id, started_at DESC NULLS LAST) "
+            "UPDATE service_locations sl SET "
+            "  extra_metadata = jsonb_set(coalesce(sl.extra_metadata, '{}'::jsonb), '{nameHistory}',"
+            "      coalesce(sl.extra_metadata->'nameHistory', '[]'::jsonb) || to_jsonb(sl.name)),"
+            "  name = f.nm "
+            "FROM fresh f "
+            "WHERE f.location_id = sl.id AND btrim(sl.name) IS DISTINCT FROM f.nm"
+        ))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

@@ -22,6 +22,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import and_, case, distinct, func, select
@@ -556,9 +557,49 @@ class AnalyticsService:
             return func.to_char(S.started_at, "YYYY-MM")
         if group_by == "quarter":
             return func.concat(func.to_char(S.started_at, "YYYY"), "-Q", func.to_char(S.started_at, "Q"))
-        # station: уникальна по КОДУ (одно имя часто у многих ЭЗС, напр. «СНК» у 60 станций),
-        # поэтому в ключ включаем код — иначе одноимённые станции схлопываются. Подпись «Имя (код)».
-        return func.concat(func.coalesce(S.station_name, "Станция"), " (", func.coalesce(S.station_code, "—"), ")")
+        # station: идентичность станции = ТОЛЬКО код. Имя в ключ не включаем:
+        # CPO переименовывает станции (611 «Новая Рига Аутлет Вилладж»→«Новая Рига»
+        # 01.07.26), и ключ с именем раздваивал одну станцию на две строки. Имена
+        # при этом не уникальны («СНК» у 60 станций, «Новая Рига» = коды 611 и 643),
+        # так что группировать по имени нельзя вдвойне. Подпись «свежайшее имя (код)»
+        # подставляется после агрегации — см. _relabel_station_rows.
+        return func.coalesce(S.station_code, "—")
+
+    async def _station_names(self, company_id) -> dict[str, str]:
+        """Код станции → СВЕЖАЙШЕЕ имя (по последней сессии кода, btrim).
+
+        Правило витрин: станции переименовываются (волна CPO 01.07.26) — актуально
+        имя последней сессии, старые имена игнорируются. max(name) не годится:
+        он алфавитный (для 611 выбрал бы старое «Новая Рига Аутлет Вилладж»)."""
+        S = ChargeSession
+        rows = (await self.session.execute(
+            select(S.station_code, S.station_name)
+            .where(S.company_id == company_id, S.station_code.is_not(None))
+            .distinct(S.station_code)
+            .order_by(S.station_code, S.started_at.desc().nulls_last())
+        )).all()
+        return {r.station_code: (r.station_name or "").strip() for r in rows}
+
+    async def _station_labels(self, company_id) -> dict[str, str]:
+        """Код → каноническая подпись «свежайшее имя (код)» для витрин."""
+        names = await self._station_names(company_id)
+        return {c: f"{n or 'Станция'} ({c})" for c, n in names.items()}
+
+    async def _relabel_station_rows(self, company_id, rows: list[Any], *fields: str) -> list[Any]:
+        """Подменить в строках агрегата значение полей-кодов станции на подпись
+        «свежайшее имя (код)». Группировка выполнена по коду — здесь только ярлык."""
+        if not rows:
+            return rows
+        labels = await self._station_labels(company_id)
+        out = []
+        for r in rows:
+            m = dict(r._mapping)
+            for f in fields:
+                code = m.get(f)
+                if code is not None:
+                    m[f] = labels.get(code, f"Станция ({code})")
+            out.append(SimpleNamespace(**m))
+        return out
 
     @staticmethod
     def _dim_cond(dim_by, dim_val):
@@ -616,7 +657,10 @@ class AnalyticsService:
             func.count(distinct(self._port_key())).label("ports"),
             func.count(distinct(S.station_code)).label("stations"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)).group_by(gcol)
-        return list((await self.session.execute(stmt)).all())
+        rows = list((await self.session.execute(stmt)).all())
+        if group_by == "station":
+            rows = await self._relabel_station_rows(company_id, rows, "g")
+        return rows
 
     async def _cs_ports(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None) -> int:
         """Число физических портов сети (distinct станция+коннектор) за период/сужение."""
@@ -714,7 +758,11 @@ class AnalyticsService:
         stmt = select(*sel).where(
             *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)
         ).group_by(*groups)
-        return list((await self.session.execute(stmt)).all())
+        rows = list((await self.session.execute(stmt)).all())
+        station_fields = [f for f, dim in (("b", bucket_by), ("s", series_by)) if dim == "station"]
+        if station_fields:
+            rows = await self._relabel_station_rows(company_id, rows, *station_fields)
+        return rows
 
     _CS_METRICS = ("sessions", "energy_kwh", "amount", "avg_check", "avg_energy",
                    "avg_duration_min", "success_pct", "price_per_kwh")
@@ -1081,11 +1129,17 @@ class AnalyticsService:
     async def charge_dimensions(self, company_id) -> dict[str, Any]:
         """Справочник для фильтра раздела: станции ЭЗС (код+имя) и регионы компании."""
         S = ChargeSession
-        st_rows = (await self.session.execute(
-            select(S.station_code, func.max(S.station_name).label("name"), func.count().label("cnt"))
+        st_counts = (await self.session.execute(
+            select(S.station_code, func.count().label("cnt"))
             .where(S.company_id == company_id, S.station_code.is_not(None))
             .group_by(S.station_code).order_by(func.count().desc())
         )).all()
+        # Имя — свежайшее по последней сессии кода (не max: он алфавитный и после
+        # переименования показывал бы старое имя).
+        names = await self._station_names(company_id)
+        st_rows = [SimpleNamespace(station_code=r.station_code,
+                                   name=names.get(r.station_code) or r.station_code,
+                                   cnt=r.cnt) for r in st_counts]
         rg_rows = (await self.session.execute(
             select(S.region, func.count().label("cnt"))
             .where(S.company_id == company_id, S.region.is_not(None))
@@ -1189,8 +1243,12 @@ class AnalyticsService:
             )).all()
             return [{"label": str(x.m), "count": int(x.cnt)} for x in r]
 
-        station_lbl = func.concat(func.coalesce(S.station_name, "Станция"), " (", S.station_code, ")")
-        m_station = await members(station_lbl, 6)
+        # Члены измерения «станция»: группировка по коду (переименования не двоят),
+        # подпись — свежайшее имя.
+        st_labels = await self._station_labels(company_id)
+        m_station_raw = await members(S.station_code, 6)
+        m_station = [{"label": st_labels.get(x["label"], f"Станция ({x['label']})"),
+                      "count": x["count"]} for x in m_station_raw]
         m_region = await members(S.region, 6)
         m_conn = await members(S.connector_type, 12)
         m_charge = await members(S.charge_type, 12)
