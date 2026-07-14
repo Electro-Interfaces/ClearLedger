@@ -116,10 +116,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # Приложение
 # ---------------------------------------------------------------------------
 
+# Единая версия приложения — синхронизирована с src/config/version.ts и package.json
+APP_VERSION = "1.2.1"
+
 app = FastAPI(
     title="TradeLedger API",
     description="Бэкенд системы приёма, классификации и верификации документов",
-    version="0.5.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -190,7 +193,7 @@ async def health_check():
     """Проверка работоспособности сервера."""
     return {
         "status": "ok",
-        "version": "0.7.0",
+        "version": APP_VERSION,
         "service": "TradeLedger API",
     }
 
@@ -250,6 +253,6 @@ async def debug_state(current_user=Depends(get_current_user)):
         "env": s.app_env,
         "git_sha": s.git_sha or _git_sha_local() or "unknown",
         "db": db_fp,
-        "version": "0.7.0",
+        "version": APP_VERSION,
         "companies": sorted(per, key=lambda x: x["slug"]),
     }
