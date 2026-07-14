@@ -29,6 +29,8 @@ export interface SettlementDetail {
   stationName: string | null
   buNumber: string | null
   role: SettlementRole
+  /** Мягкая ссылка на контрагента (UUID Counterparty или GUID 1С). */
+  counterpartyId: string | null
   counterpartyName: string | null
   contractNumber: string | null
   basis: string | null

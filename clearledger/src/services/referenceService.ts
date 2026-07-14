@@ -484,6 +484,26 @@ export async function getLocationContracts(locationId: string): Promise<Location
   return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
 }
 
+// ---- Активность контрагента в учёте (fuel/ГИГ: документы БП по ИНН) ----
+
+export interface CounterpartyDocGroup { docType: string; count: number; amount: number }
+export interface CounterpartyDocBrief {
+  docType: string; number: string; date: string; amount: number; operationType?: string | null
+}
+export interface CounterpartyActivity {
+  docs: number
+  amount: number
+  lastDate: string | null
+  byType: CounterpartyDocGroup[]
+  recent: CounterpartyDocBrief[]
+}
+
+/** Документы БП контрагента (сопоставление по ИНН) — для карточки в «Контрагентах». */
+export async function getCounterpartyActivity(counterpartyId: string): Promise<CounterpartyActivity> {
+  if (!isApiEnabled()) return { docs: 0, amount: 0, lastDate: null, byType: [], recent: [] }
+  return get<CounterpartyActivity>(`/api/references/counterparties/${counterpartyId}/activity`)
+}
+
 // ---- Платёжная дисциплина (реестр «Договоры и оплаты ЭЗС», energy) ----
 
 /** Записи платёжной дисциплины станции (для окна станции). */

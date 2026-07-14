@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
+    AccountingDoc,
     BankAccount,
     Contract,
     ContractDimension,
@@ -37,7 +38,10 @@ from app.schemas import (
     ContractResponse,
     ContractScopeUpdate,
     ContractUpdate,
+    CounterpartyActivityResponse,
     CounterpartyBrief,
+    CounterpartyDocBrief,
+    CounterpartyDocGroup,
     CounterpartyLocationsResponse,
     CounterpartiesPage,
     LocationBrief,
@@ -796,6 +800,55 @@ async def get_counterparty_locations(
     )
 
 
+@router.get("/counterparties/{item_id}/activity", response_model=CounterpartyActivityResponse)
+async def get_counterparty_activity(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Активность контрагента в учёте (fuel/ГИГ): документы БП по ИНН —
+    сколько, на какую сумму, каких видов, последние 10 (для карточки контрагента)."""
+    uid = _parse_uuid(item_id)
+    cp = (await db.execute(select(Counterparty).where(Counterparty.id == uid))).scalar_one_or_none()
+    if not cp:
+        raise HTTPException(status_code=404, detail="Контрагент не найден")
+    await assert_company_member(str(cp.company_id), current_user, db)
+    inn = (cp.inn or "").strip()
+    if not inn:
+        return CounterpartyActivityResponse()
+
+    base = (
+        AccountingDoc.company_id == cp.company_id,
+        AccountingDoc.counterparty_inn == inn,
+    )
+    groups = (await db.execute(
+        select(AccountingDoc.doc_type, func.count(), func.coalesce(func.sum(AccountingDoc.amount), 0.0))
+        .where(*base).group_by(AccountingDoc.doc_type)
+        .order_by(func.count().desc())
+    )).all()
+    if not groups:
+        return CounterpartyActivityResponse()
+
+    last_date = (await db.execute(
+        select(func.max(AccountingDoc.date)).where(*base)
+    )).scalar_one_or_none()
+    recent = (await db.execute(
+        select(AccountingDoc).where(*base)
+        .order_by(AccountingDoc.date.desc()).limit(10)
+    )).scalars().all()
+
+    return CounterpartyActivityResponse(
+        docs=sum(n for _, n, _ in groups),
+        amount=round(sum(a for _, _, a in groups), 2),
+        lastDate=last_date,
+        byType=[CounterpartyDocGroup(docType=t, count=n, amount=round(a, 2)) for t, n, a in groups],
+        recent=[CounterpartyDocBrief(
+            docType=d.doc_type, number=d.number, date=d.date,
+            amount=d.amount, operationType=d.operation_type,
+        ) for d in recent],
+    )
+
+
 @router.get("/locations/{loc_id}/contracts", response_model=LocationContractsResponse)
 async def get_location_contracts(
     loc_id: str,
@@ -1031,6 +1084,7 @@ async def settlements_detail(
             stationName=loc.name if loc else None,
             buNumber=md.get("buNumber"),
             role=r.role,
+            counterpartyId=r.counterparty_id,
             counterpartyName=cp_map.get(r.counterparty_id) if r.counterparty_id else None,
             contractNumber=contr_map.get(r.contract_id) if r.contract_id else None,
             basis=r.basis,

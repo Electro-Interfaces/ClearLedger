@@ -49,9 +49,9 @@ export function ReferenceStatusWidget() {
             variant="outline"
             size="sm"
             className="flex-1"
-            onClick={() => navigate('/references')}
+            onClick={() => navigate('/contractors')}
           >
-            Справочники
+            Контрагенты и договоры
           </Button>
         </div>
       </CardContent>

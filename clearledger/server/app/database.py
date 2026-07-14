@@ -484,6 +484,17 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.11: чистка «пустых дат 1С» в договорах (OData отдаёт 0001/0100-01-01,
+        # старый синк сохранял их как есть → в UI мусор «0100-01-01»). Синк теперь
+        # отбрасывает такие даты на входе; здесь — чистка уже сохранённых строк.
+        for stmt in (
+            "UPDATE contracts SET valid_until = NULL WHERE valid_until < '1900-01-01'",
+            "UPDATE contracts SET date = '' WHERE date <> '' AND date < '1900-01-01'",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
+
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

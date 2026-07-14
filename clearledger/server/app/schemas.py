@@ -749,6 +749,7 @@ class SettlementDetail(BaseModel):
     stationName: str | None = None
     buNumber: str | None = None
     role: str
+    counterpartyId: str | None = None      # мягкая ссылка (UUID Counterparty или GUID 1С)
     counterpartyName: str | None = None
     contractNumber: str | None = None
     basis: str | None = None
@@ -882,6 +883,31 @@ class CounterpartyLocationsResponse(BaseModel):
     locations: list[LocationBrief]
     contractsCount: int
     unassignedCount: int
+
+
+class CounterpartyDocGroup(BaseModel):
+    """Группа документов БП контрагента по виду документа."""
+    docType: str
+    count: int
+    amount: float
+
+
+class CounterpartyDocBrief(BaseModel):
+    """Последний документ БП контрагента (для карточки в «Контрагентах»)."""
+    docType: str
+    number: str
+    date: str
+    amount: float
+    operationType: str | None = None
+
+
+class CounterpartyActivityResponse(BaseModel):
+    """Активность контрагента в учёте (fuel/ГИГ): документы БП, сопоставленные по ИНН."""
+    docs: int = 0
+    amount: float = 0
+    lastDate: str | None = None
+    byType: list[CounterpartyDocGroup] = Field(default_factory=list)
+    recent: list[CounterpartyDocBrief] = Field(default_factory=list)
 
 
 class LocationContractBrief(BaseModel):

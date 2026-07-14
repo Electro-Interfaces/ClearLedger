@@ -124,6 +124,12 @@ def _norm_contract_kind(raw: Any) -> str | None:
     return _CONTRACT_KIND_BY_SYNONYM.get(s.lower(), s)
 
 
+def _clean_1c_date(val: Any) -> str:
+    """Дата OData → 'YYYY-MM-DD'; «пустая дата 1С» (0001/0100-01-01) → ''."""
+    s = (str(val) if val else "")[:10]
+    return "" if s and s < "1900-01-01" else s
+
+
 class OneCSyncService:
     """Pull-синхронизация НСИ из БП ГИГ в локальную нормализованную БД.
 
@@ -1152,9 +1158,9 @@ class OneCSyncService:
                 owner = _clean_ref(item.get("Owner_Key") or item.get("Владелец_Key")) or ""
                 org = _clean_ref(item.get("Организация_Key")) or ""
                 number = (item.get("Номер") or item.get("Description") or "").strip()
-                date = (item.get("Дата") or "")[:10]
+                date = _clean_1c_date(item.get("Дата"))
                 kind = _norm_contract_kind(item.get("ВидДоговора"))
-                valid_until = (item.get("СрокДействия") or "")[:10] or None
+                valid_until = _clean_1c_date(item.get("СрокДействия")) or None
                 is_closed = bool(item.get("ДоговорЗакрыт"))
                 amount = item.get("Сумма")
                 amount_limit = float(amount) if isinstance(amount, (int, float)) else None

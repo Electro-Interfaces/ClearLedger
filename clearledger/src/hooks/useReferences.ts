@@ -213,6 +213,16 @@ export function useLocationContracts(locationId: string | null) {
   })
 }
 
+/** Активность контрагента в учёте (fuel/ГИГ: документы БП по ИНН). */
+export function useCounterpartyActivity(counterpartyId: string | null) {
+  return useQuery({
+    queryKey: ['axis', 'counterparty', counterpartyId, 'activity'],
+    queryFn: () => ref.getCounterpartyActivity(counterpartyId!),
+    enabled: !!counterpartyId,
+    staleTime: 60_000,
+  })
+}
+
 /** Платёжная дисциплина станции (энергоснабжение/аренда, статусы оплат). */
 export function useLocationSettlements(locationId: string | null) {
   const { companyId } = useCompany()
