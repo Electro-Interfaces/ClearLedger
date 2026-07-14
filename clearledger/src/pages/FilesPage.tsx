@@ -7,20 +7,15 @@
  * в соседнем пункте «Загрузка» (IntakePage).
  */
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
-import { useCompany } from '@/contexts/CompanyContext'
 import { ExplorerView } from '@/components/workspace/raw-panel/ExplorerView'
-import { EnergyRawPanel } from '@/components/workspace/EnergySidePanels'
 
 function FilesContent() {
-  // Профиль определяет источник первого слоя: fuel (ГИГ) — смены/ТТН STS,
-  // energy (РусГидро, ЭЗС) — первичка инфраструктуры.
-  const { company } = useCompany()
-  const isEnergy = company.profileId === 'energy'
-
+  // Источник первого слоя определяет useRawPanelTree по профилю компании:
+  // fuel (ГИГ) — смены/ТТН из БД, прочие — каналы и история их прогонов.
   return (
     <div className="h-full min-h-0 overflow-hidden flex flex-col">
       <div className="flex-1 min-h-0 overflow-hidden">
-        {isEnergy ? <EnergyRawPanel /> : <ExplorerView />}
+        <ExplorerView />
       </div>
     </div>
   )

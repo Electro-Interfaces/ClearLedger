@@ -19,6 +19,8 @@ import { useRawPanelState } from './useRawPanelState'
 import { useRawPanelTree, buildVisibleList, docTypeLabel } from './useRawPanelTree'
 import { ShiftDetailModal } from '@/components/shift-reports/ShiftDetailModal'
 import { DeliveryDetailModal } from '@/components/shift-reports/DeliveryDetailModal'
+import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
+import { ReceiptDetailsModal } from '@/components/fuel/ReceiptDetailsModal'
 import type { FsNode } from './raw-panel-types'
 import { cn } from '@/lib/utils'
 
@@ -373,9 +375,19 @@ export function ExplorerView() {
         {selected && <span className="ml-auto truncate">{selected.name}</span>}
       </div>
 
-      {/* Модалки просмотра документов */}
+      {/* Модалки просмотра документов: localStorage-прототип + серверные (БД) */}
       <ShiftDetailModal shift={state.viewingShift} onClose={() => state.setViewingShift(null)} />
       <DeliveryDetailModal delivery={state.viewingDelivery} onClose={() => state.setViewingDelivery(null)} />
+      <ShiftDetailsDialog
+        shiftId={state.viewingApiShiftId}
+        open={!!state.viewingApiShiftId}
+        onClose={() => state.setViewingApiShiftId(null)}
+      />
+      <ReceiptDetailsModal
+        receipt={state.viewingApiReceipt}
+        open={!!state.viewingApiReceipt}
+        onClose={() => state.setViewingApiReceipt(null)}
+      />
     </div>
   )
 }

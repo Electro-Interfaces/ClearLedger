@@ -23,6 +23,8 @@ export interface LoadedDocument {
   docType: string
   fingerprint: string
   title: string
+  /** 'api' — документ из БД бэкенда (id = серверный id); отсутствует — локальный прототип. */
+  origin?: 'api'
   stationId: number
   date: string
   data: ShiftRecord | unknown

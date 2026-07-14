@@ -3,6 +3,7 @@ import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getItem, setItem } from '@/services/storage'
 import type { ShiftRecord } from '@/services/fuel/types'
 import type { DeliveryRecord } from '@/services/receiptExtractService'
+import type { LoadedShift, LoadedReceipt } from '@/services/fuel/fuelMappingService'
 import type { FsNode, ViewMode, SortConfig, RawPanelFilters, TreeState, AdvancedFilters, GroupMode } from './raw-panel-types'
 import { DEFAULT_ADVANCED_FILTERS } from './raw-panel-types'
 import { LS_KEY_VIEW_MODE, LS_KEY_TREE_STATE, LS_KEY_SORT_CONFIG } from './raw-panel-constants'
@@ -48,6 +49,9 @@ export function useRawPanelState() {
   const [searchExpanded, setSearchExpanded] = useState(false)
   const [viewingShift, setViewingShift] = useState<ShiftRecord | null>(null)
   const [viewingDelivery, setViewingDelivery] = useState<DeliveryRecord | null>(null)
+  // Серверные документы БД (origin: 'api') — свои просмотрщики.
+  const [viewingApiShiftId, setViewingApiShiftId] = useState<string | null>(null)
+  const [viewingApiReceipt, setViewingApiReceipt] = useState<LoadedReceipt | null>(null)
 
   // --- Advanced filter dialog ---
   const [filterDialogOpen, setFilterDialogOpen] = useState(false)
@@ -127,6 +131,22 @@ export function useRawPanelState() {
     // Открыть просмотрщик по типу документа из узла.
     const d = node.doc
     if (!d) return
+    if (d.origin === 'api') {
+      // Серверные документы БД: смена — просмотрщик по id, ТТН — по строке реестра.
+      if (d.docType === 'shift_report') {
+        const rec = d.data as LoadedShift
+        if (node.stationId != null && rec?.shift_number != null) {
+          workspace.selectShift(node.stationId, rec.shift_number)
+        }
+        setViewingApiShiftId(d.id)
+        return
+      }
+      if (d.docType === 'delivery' || d.docType === 'receipt') {
+        setViewingApiReceipt(d.data as LoadedReceipt)
+        return
+      }
+      return // channel_run и прочие — только выделение и панель деталей
+    }
     if (d.docType === 'shift_report') {
       const rec = d.data as ShiftRecord
       if (node.stationId != null && rec?.shiftNumber != null) {
@@ -196,6 +216,7 @@ export function useRawPanelState() {
     searchExpanded, setSearchExpanded,
     // Modals
     viewingShift, setViewingShift, viewingDelivery, setViewingDelivery,
+    viewingApiShiftId, setViewingApiShiftId, viewingApiReceipt, setViewingApiReceipt,
     // Advanced filter dialog
     filterDialogOpen, setFilterDialogOpen,
     advancedFilters, setAdvancedFilters, applyPreset, clearAdvancedFilters,

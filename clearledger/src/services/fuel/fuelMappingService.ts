@@ -162,8 +162,12 @@ export const deleteFuelPeriod = (body: DeletePeriodBody) =>
 export const getLoadedStations = () =>
   get<{ code: number; name: string }[]>(`/api/fuel/loaded-stations`)
 
-export const getLoadedShifts = () => get<LoadedShift[]>('/api/fuel/shifts')
-export const getLoadedReceipts = () => get<LoadedReceipt[]>('/api/fuel/receipts')
+// typeof-guard обязателен: эти функции передают напрямую как queryFn,
+// и React Query подставляет QueryFunctionContext первым аргументом.
+export const getLoadedShifts = (limit?: number) =>
+  get<LoadedShift[]>('/api/fuel/shifts', typeof limit === 'number' ? { limit } : undefined)
+export const getLoadedReceipts = (limit?: number) =>
+  get<LoadedReceipt[]>('/api/fuel/receipts', typeof limit === 'number' ? { limit } : undefined)
 /** Реальное число загруженных смен/ТТН (без limit) — для карточки «Загружено». */
 export const getLoadedCount = () => get<{ shifts: number; receipts: number }>('/api/fuel/count')
 

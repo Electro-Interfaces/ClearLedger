@@ -296,6 +296,7 @@ async def fuel_count(
 @router.get("/shifts", response_model=list[ShiftOut])
 async def list_shifts(
     station_code: int | None = Query(None),
+    limit: int = Query(200, le=20000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -303,7 +304,7 @@ async def list_shifts(
     q = select(FuelShift).where(FuelShift.company_id == company_id)
     if station_code is not None:
         q = q.join(FuelStation).where(FuelStation.code == station_code)
-    q = q.order_by(FuelShift.shift_number.desc()).limit(200)
+    q = q.order_by(FuelShift.shift_number.desc()).limit(limit)
     shifts = list((await db.execute(q)).scalars())
     st_ids = {s.station_id for s in shifts}
     stations = {st.id: st for st in (await db.execute(
