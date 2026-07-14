@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { getStoreShiftDetail, type ShiftDocLine } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number | null | undefined) => (n == null ? '—' : fmtMoney(n))
@@ -145,6 +146,7 @@ export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: s
                 <table className="w-full text-xs">
                   <thead className="text-muted-foreground sticky top-0 bg-card"><tr>
                     <th className="px-2 py-1 text-left font-medium">Товар</th>
+                    <th className="px-2 py-1 text-center font-medium">ЧЗ</th>
                     <th className="px-2 py-1 text-left font-medium">Категория</th>
                     <th className="px-2 py-1 text-right font-medium">Кол-во</th>
                     <th className="px-2 py-1 text-right font-medium">Выручка</th>
@@ -152,7 +154,8 @@ export function ShiftDetailModal({ shiftKey, companyId, onClose }: { shiftKey: s
                   <tbody>
                     {(data.sales ?? []).map((l) => (
                       <tr key={l.guid} className="border-t border-border/30">
-                        <td className="px-2 py-1">{l.marked && <span title="маркированный">🔖 </span>}{l.name}</td>
+                        <td className="px-2 py-1">{l.name}</td>
+                        <td className="px-2 py-1 text-center">{l.marked && <ChzBadge />}</td>
                         <td className="px-2 py-1 text-muted-foreground">{l.category ?? '—'}</td>
                         <td className="px-2 py-1 text-right tabular-nums">{nf(l.qty, 3)}</td>
                         <td className="px-2 py-1 text-right tabular-nums">{fmtMoney(l.revenue)}</td>

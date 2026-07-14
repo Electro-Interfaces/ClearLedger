@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreStock, type StoreStockItem } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -122,6 +123,7 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
           <thead className="bg-muted/30 text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium text-left">Товар</th>
+              <th className="px-3 py-2 font-medium text-center">ЧЗ</th>
               <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Штрихкод</th>
               <th className="px-3 py-2 font-medium text-right">Остаток</th>
               <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Розн. цена</th>
@@ -135,9 +137,10 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
             {items.slice(0, 400).map((i) => (
               <tr key={i.guid} className="border-t border-border/30 hover:bg-accent/20">
                 <td className="px-3 py-1.5">
-                  {i.marked && <span title="маркированный (Честный Знак)">🔖 </span>}{i.name}
+                  {i.name}
                   {i.weighed && <span className="ml-1 text-[10px] text-muted-foreground/60" title="весовой — остаток в базовых единицах">вес.</span>}
                 </td>
+                <td className="px-3 py-1.5 text-center">{i.marked && <ChzBadge />}</td>
                 <td className="px-3 py-1.5 text-muted-foreground tabular-nums">{i.barcode ?? '—'}</td>
                 <td className={`px-3 py-1.5 text-right tabular-nums ${i.negative ? 'text-red-400/80 font-medium' : ''}`}>{nf(i.qty, 3)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{i.retail_price != null ? fmtMoney(i.retail_price) : '—'}</td>

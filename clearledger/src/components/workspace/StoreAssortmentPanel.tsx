@@ -10,6 +10,7 @@ import { getStoreAssortment, type AssortmentSku, type PriceCategory, type StockS
 import { fmtMoney } from '@/services/analyticsService'
 import { SkuDetailModal } from './SkuDetailModal'
 import { ExportButton } from './analytics/ExportButton'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -206,6 +207,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
           <thead className="bg-muted/30 text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium text-left">Товар</th>
+              <th className="px-3 py-2 font-medium text-center">ЧЗ</th>
               <th className="px-3 py-2 font-medium text-center">ABC-XYZ</th>
               {th('qty', 'Продано')}
               {th('revenue', 'Выручка')}
@@ -220,7 +222,8 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
               const stM = STATUS_META[d.status]
               return (
                 <tr key={d.guid} onClick={() => setOpenGuid(d.guid)} className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
-                  <td className="px-3 py-1.5">{d.marked && <span title="маркированный">🔖 </span>}{d.name}</td>
+                  <td className="px-3 py-1.5">{d.name}</td>
+                  <td className="px-3 py-1.5 text-center">{d.marked && <ChzBadge />}</td>
                   <td className="px-3 py-1.5 text-center"><span className="font-mono text-[11px] text-muted-foreground">{d.abc_xyz}</span></td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{nf(d.qty)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(d.revenue)}</td>

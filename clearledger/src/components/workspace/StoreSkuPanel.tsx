@@ -10,6 +10,7 @@ import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreSkus, type StoreSku } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -27,14 +28,16 @@ interface Col {
   cls?: (s: StoreSku) => string
 }
 
-const nameCell = (s: StoreSku): ReactNode => (
-  <span>{s.marked && <span title="маркированный (Честный Знак)">🔖 </span>}{s.name}</span>
-)
+const nameCell = (s: StoreSku): ReactNode => s.name
+
+/** Колонка «ЧЗ» — маркировка в отдельном столбце, не пометкой у названия. */
+const chzCol: Col = { key: 'chz', label: 'ЧЗ', render: (s) => (s.marked ? <ChzBadge /> : null) }
 
 const COLS: Record<SkuMode, Col[]> = {
   assortment: [
     { key: 'abc', label: 'ABC', render: (s) => <span className={`font-semibold ${ABC_CLS[s.abc]}`}>{s.abc}</span> },
     { key: 'name', label: 'Товар', render: nameCell },
+    chzCol,
     { key: 'cat', label: 'Категория', render: (s) => s.category ?? '—' },
     { key: 'rev', label: 'Выручка', num: true, render: (s) => fmtMoney(s.revenue) },
     { key: 'qty', label: 'Продано', num: true, render: (s) => nf(s.qty) },
@@ -42,6 +45,7 @@ const COLS: Record<SkuMode, Col[]> = {
   ],
   pricing: [
     { key: 'name', label: 'Товар', render: nameCell },
+    chzCol,
     { key: 'price', label: 'Ср.цена', num: true, render: (s) => fmtMoney(s.avg_price) },
     { key: 'cost', label: 'Себест.', num: true, render: (s) => (s.cost_net != null ? fmtMoney(s.cost_net) : '—') },
     { key: 'margin', label: 'Маржа', num: true, render: (s) => (s.margin != null ? fmtMoney(s.margin) : '—') },
@@ -53,11 +57,12 @@ const COLS: Record<SkuMode, Col[]> = {
     { key: 'art', label: 'Артикул', render: (s) => s.article ?? '—' },
     { key: 'cat', label: 'Категория', render: (s) => s.category ?? '—' },
     { key: 'vat', label: 'НДС', render: (s) => s.vat ?? '—' },
-    { key: 'mark', label: 'Маркировка', render: (s) => (s.marked ? 'маркир.' : '—') },
+    chzCol,
     { key: 'weigh', label: 'Весовой', render: (s) => (s.weighed ? 'да' : '—') },
   ],
   sales: [
     { key: 'name', label: 'Товар', render: nameCell },
+    chzCol,
     { key: 'cat', label: 'Категория', render: (s) => s.category ?? '—' },
     { key: 'qty', label: 'Продано', num: true, render: (s) => nf(s.qty) },
     { key: 'rev', label: 'Выручка', num: true, render: (s) => fmtMoney(s.revenue) },
@@ -65,6 +70,7 @@ const COLS: Record<SkuMode, Col[]> = {
   ],
   stock: [
     { key: 'name', label: 'Товар', render: nameCell },
+    chzCol,
     { key: 'cat', label: 'Категория', render: (s) => s.category ?? '—' },
     { key: 'purch', label: 'Закуплено', num: true, render: (s) => nf(s.purch_qty) },
     { key: 'qty', label: 'Продано', num: true, render: (s) => nf(s.qty) },

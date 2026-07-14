@@ -11,6 +11,7 @@ import { getStorePricing, type PricingSku, type PricingGroup, type PriceCategory
 import { fmtMoney } from '@/services/analyticsService'
 import { SkuDetailModal } from './SkuDetailModal'
 import { ExportButton } from './analytics/ExportButton'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
@@ -145,6 +146,7 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: 
           <thead className="bg-muted/30 text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium text-left">Товар</th>
+              <th className="px-3 py-2 font-medium text-center">ЧЗ</th>
               <th className="px-3 py-2 font-medium text-left">Категория</th>
               {th('qty', 'Продано')}
               {th('revenue', 'Выручка')}
@@ -158,7 +160,8 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: 
           <tbody>
             {skus.slice(0, 400).map((d: PricingSku) => (
               <tr key={d.guid} onClick={() => setOpenGuid(d.guid)} className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
-                <td className="px-3 py-1.5">{d.marked && <span title="маркированный">🔖 </span>}{d.name}</td>
+                <td className="px-3 py-1.5">{d.name}</td>
+                <td className="px-3 py-1.5 text-center">{d.marked && <ChzBadge />}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{d.category ?? '—'}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{nf(d.qty)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(d.revenue)}</td>

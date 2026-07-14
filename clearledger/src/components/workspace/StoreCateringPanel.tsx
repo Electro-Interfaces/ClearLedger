@@ -11,6 +11,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid } fro
 import { getStoreCateringMenu, type CateringDish, type MenuClass } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ExportButton } from './analytics/ExportButton'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
@@ -224,6 +225,7 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
                   <thead className="bg-muted/20 text-muted-foreground">
                     <tr>
                       <th className="px-2.5 py-1.5 text-left font-medium">Ингредиент</th>
+                      <th className="px-2.5 py-1.5 text-center font-medium">ЧЗ</th>
                       <th className="px-2.5 py-1.5 text-right font-medium">На порцию</th>
                       <th className="px-2.5 py-1.5 text-right font-medium">Себест/порц</th>
                       <th className="px-2.5 py-1.5 text-right font-medium">Всего за период</th>
@@ -232,7 +234,8 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
                   <tbody>
                     {d.ingredients.map((ing) => (
                       <tr key={ing.ref} className="border-t border-border/20">
-                        <td className="px-2.5 py-1">{ing.marked && '🔖 '}{ing.name}</td>
+                        <td className="px-2.5 py-1">{ing.name}</td>
+                        <td className="px-2.5 py-1 text-center">{ing.marked && <ChzBadge />}</td>
                         <td className="px-2.5 py-1 text-right tabular-nums">{ing.qty_per_portion != null ? nf(ing.qty_per_portion, 3) : '—'}</td>
                         <td className="px-2.5 py-1 text-right tabular-nums">{ing.cost_per_portion != null ? fmtMoney(ing.cost_per_portion) : '—'}</td>
                         <td className="px-2.5 py-1 text-right tabular-nums text-muted-foreground">{ing.cost_total != null ? fmtMoney(ing.cost_total) : '—'}</td>
@@ -240,6 +243,7 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
                     ))}
                     <tr className="border-t border-border/40 font-medium">
                       <td className="px-2.5 py-1">Итого себестоимость порции</td>
+                      <td />
                       <td />
                       <td className="px-2.5 py-1 text-right tabular-nums">{d.cost_per_portion != null ? fmtMoney(d.cost_per_portion) : '—'}</td>
                       <td className="px-2.5 py-1 text-right tabular-nums">{d.cost != null ? fmtMoney(d.cost) : '—'}</td>

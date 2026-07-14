@@ -9,6 +9,7 @@ import { getStoreNomenclature, type SalesMarked } from '@/services/storeService'
 import { Kpi } from './analytics/Kpi'
 import { fmtMoney } from '@/services/analyticsService'
 import { NomenclatureCardModal } from './NomenclatureCardModal'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(n)
 
@@ -89,6 +90,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
                   <th className="px-3 py-2 text-left font-medium">Вид</th>
                   <th className="px-3 py-2 text-left font-medium">НДС</th>
                   <th className="px-3 py-2 text-center font-medium">ШК</th>
+                  <th className="px-3 py-2 text-center font-medium">ЧЗ</th>
                   <th className="px-3 py-2 text-right font-medium">Остаток</th>
                   <th className="px-3 py-2 text-right font-medium">Цена</th>
                   <th className="px-3 py-2 text-right font-medium">Выручка</th>
@@ -98,11 +100,12 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
                 {data.items.slice(0, 400).map((i) => (
                   <tr key={i.guid} onClick={() => setOpenGuid(i.guid)}
                     className="border-t border-border/30 hover:bg-accent/20 cursor-pointer">
-                    <td className="px-3 py-1.5">{i.marked && <span title="маркированный">🔖 </span>}{i.name}</td>
+                    <td className="px-3 py-1.5">{i.name}</td>
                     <td className="px-3 py-1.5">{i.article ?? '—'}</td>
                     <td className="px-3 py-1.5">{i.kind}</td>
                     <td className="px-3 py-1.5">{i.vat ?? '—'}</td>
                     <td className="px-3 py-1.5 text-center">{i.has_barcode ? '✓' : ''}</td>
+                    <td className="px-3 py-1.5 text-center">{i.marked && <ChzBadge />}</td>
                     <td className={`px-3 py-1.5 text-right tabular-nums ${i.stock_qty <= 0 ? 'text-muted-foreground/50' : ''}`}>{i.stock_qty ? nf(i.stock_qty) : '—'}{i.unit && i.stock_qty ? <span className="text-muted-foreground/60 ml-0.5 text-[10px]">{i.unit}</span> : ''}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{i.retail_price != null ? fmtMoney(i.retail_price) : '—'}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{i.revenue ? fmtMoney(i.revenue) : '—'}</td>

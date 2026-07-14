@@ -63,7 +63,6 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
         <div className="flex items-start justify-between px-5 py-3.5 border-b border-border/50">
           <div className="min-w-0">
             <div className="text-base font-semibold flex items-center gap-2 flex-wrap">
-              {data?.marked && <span title="маркированный (Честный знак)">🔖</span>}
               {data?.name ?? 'Карточка товара'}
             </div>
             {data && (
@@ -71,7 +70,7 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                 {data.kind && <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.kind}</span>}
                 <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.unit ?? (data.weighed ? 'весовой' : 'штучный')}</span>
                 <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">НДС {data.vat ?? '—'}</span>
-                {data.marked && <span className="px-1.5 py-0.5 rounded border border-emerald-400/40 text-emerald-300/80">ЧЗ</span>}
+                {data.marked && <span className="px-1.5 py-0.5 rounded border border-zinc-600 text-zinc-400" title="Маркированный товар (Честный знак)">ЧЗ</span>}
                 {data.category && <span className="px-1.5 py-0.5 rounded border border-border/50 text-muted-foreground">{data.category}</span>}
               </div>
             )}

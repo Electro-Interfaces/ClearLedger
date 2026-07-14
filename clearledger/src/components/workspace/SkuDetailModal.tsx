@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid } from 'recharts'
 import { getStoreSkuDetail, type SkuDetailData } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { ChzBadge } from '@/components/common/ChzBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
@@ -25,7 +26,7 @@ export function SkuDetailModal({ guid, dateFrom, dateTo, onClose }: { guid: stri
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-base font-semibold truncate">{d?.name ?? 'Товар'}</h3>
-              {d?.marked && <span className="inline-flex items-center rounded-full border border-emerald-400/40 text-emerald-300/80 px-2 py-0.5 text-[10px]">🔖 маркир.</span>}
+              {d?.marked && <ChzBadge />}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
               {[d?.category, d?.kind, d?.article ? `арт. ${d.article}` : null, d?.vat ? `НДС ${d.vat}` : null].filter(Boolean).join(' · ') || ' '}
