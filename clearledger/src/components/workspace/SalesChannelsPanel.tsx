@@ -25,7 +25,7 @@ const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 const metricMeta = {
   amount: { label: 'Выручка', short: '₽', format: (value: number) => `${fmtMoneyShort(value)} ₽` },
   liters: { label: 'Объём', short: 'л', format: (value: number) => fmtLiters(value) },
-  count: { label: 'Наливы', short: 'шт.', format: (value: number) => nf0.format(value) },
+  count: { label: 'Реализации', short: 'шт.', format: (value: number) => nf0.format(value) },
 } as const
 type TrendMetric = keyof typeof metricMeta
 
@@ -81,12 +81,12 @@ function BreakdownTable({ rows, selected, onSelect, empty }: {
         <thead>
           <tr className="border-b bg-muted/35 text-muted-foreground">
             <th className="p-2.5 text-left font-medium">Разрез</th>
-            <th className="p-2.5 text-right font-medium">Наливы</th>
+            <th className="p-2.5 text-right font-medium">Реализации</th>
             <th className="p-2.5 text-right font-medium">Объём</th>
             <th className="p-2.5 text-right font-medium">Выручка</th>
             <th className="p-2.5 text-right font-medium">Доля</th>
             <th className="p-2.5 text-right font-medium">Средний чек</th>
-            <th className="p-2.5 text-right font-medium">Средний налив</th>
+            <th className="p-2.5 text-right font-medium">Ср. реализация</th>
             <th className="p-2.5 text-right font-medium">₽/л</th>
           </tr>
         </thead>
@@ -143,7 +143,7 @@ function PaymentTable({ data, selected, onSelect }: {
         <thead className="sticky top-0 z-10 bg-card">
           <tr className="border-b text-muted-foreground">
             <th className="p-2.5 text-left font-medium">Способ оплаты</th>
-            <th className="p-2.5 text-right font-medium">Наливы</th>
+            <th className="p-2.5 text-right font-medium">Реализации</th>
             <th className="p-2.5 text-right font-medium">Объём</th>
             <th className="p-2.5 text-right font-medium">Выручка</th>
             <th className="p-2.5 text-right font-medium">Доля</th>
@@ -192,7 +192,7 @@ function StationPaymentTable({ rows }: { rows: SalesChannelsAnalytics['station_p
           <tr className="border-b bg-muted/35 text-muted-foreground">
             <th className="p-2.5 text-left font-medium">АЗС</th>
             <th className="p-2.5 text-left font-medium">Способ оплаты</th>
-            <th className="p-2.5 text-right font-medium">Наливы</th>
+            <th className="p-2.5 text-right font-medium">Реализации</th>
             <th className="p-2.5 text-right font-medium">Объём</th>
             <th className="p-2.5 text-right font-medium">Выручка</th>
             <th className="p-2.5 text-right font-medium">Доля в АЗС</th>
@@ -313,16 +313,16 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
       const XLSX = await import('xlsx')
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.by_payment.map((row) => ({
-        'Способ оплаты': row.name, 'Наливы': row.count, 'Объём, л': row.liters,
+        'Способ оплаты': row.name, 'Реализации': row.count, 'Объём, л': row.liters,
         'Выручка, ₽': row.amount, 'Доля, %': row.share, 'Средний чек, ₽': row.avg_check,
-        'Средний налив, л': row.avg_fill, 'Цена, ₽/л': row.avg_price,
+        'Ср. реализация, л': row.avg_fill, 'Цена, ₽/л': row.avg_price,
       }))), 'Способы оплаты')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.by_station.map((row) => ({
-        'АЗС': row.name, 'Код': row.code, 'Наливы': row.count, 'Объём, л': row.liters,
+        'АЗС': row.name, 'Код': row.code, 'Реализации': row.count, 'Объём, л': row.liters,
         'Выручка, ₽': row.amount, 'Доля, %': row.share, 'Средний чек, ₽': row.avg_check,
       }))), 'АЗС')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.station_payment.map((row) => ({
-        'АЗС': row.station_name, 'Способ оплаты': row.payment, 'Наливы': row.count,
+        'АЗС': row.station_name, 'Способ оплаты': row.payment, 'Реализации': row.count,
         'Объём, л': row.liters, 'Выручка, ₽': row.amount, 'Доля в АЗС, %': row.share,
       }))), 'АЗС × оплата')
       XLSX.writeFile(wb, `kanaly_prodazh_${dateFrom}_${dateTo}.xlsx`)
@@ -384,9 +384,9 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
             <CardContent className="grid grid-cols-2 p-0 md:grid-cols-3 xl:grid-cols-6">
               <Metric label="Выручка" value={`${fmtMoneyShort(data.totals.amount)} ₽`} hint={`${nf1.format(data.totals.share)}% выборки`} />
               <Metric label="Объём" value={fmtLiters(data.totals.liters)} hint={`${data.totals.stations} АЗС`} />
-              <Metric label="Наливы" value={nf0.format(data.totals.count)} hint={`${data.by_payment.length} видов оплаты`} />
+              <Metric label="Реализации" value={nf0.format(data.totals.count)} hint={`${data.by_payment.length} видов оплаты`} />
               <Metric label="Средний чек" value={`${fmtMoney(data.totals.avg_check)} ₽`} />
-              <Metric label="Средний налив" value={`${nf1.format(data.totals.avg_fill)} л`} />
+              <Metric label="Ср. реализация" value={`${nf1.format(data.totals.avg_fill)} л`} />
               <Metric label="Средняя цена" value={`${fmtMoney(data.totals.avg_price)} ₽/л`} />
             </CardContent>
           </Card>
@@ -455,7 +455,7 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
 
           <div className="flex items-start gap-2 rounded-md border border-border/70 bg-muted/25 px-3 py-2 text-xs text-muted-foreground">
             <RefreshCw className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>Источник — нормализованные пооперационные наливы STS. Технические способы оплаты не скрываются; доля в матрице считается внутри каждой АЗС.</span>
+            <span>Источник — нормализованные пооперационные реализации STS. Технические способы оплаты не скрываются; доля в матрице считается внутри каждой АЗС.</span>
           </div>
         </>
       ) : (

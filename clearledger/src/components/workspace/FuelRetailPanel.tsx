@@ -114,7 +114,7 @@ function PayDonut({ rows }: { rows: (FuelBreakdownRow & { channel: string })[] }
             </div>
           </div>
           <div className="min-w-0 flex-1 space-y-1.5 text-xs"
-            {...exportRows('Каналы оплаты', ['Канал', 'Наливов', 'Литры', 'Выручка, ₽', 'Доля, %'],
+            {...exportRows('Каналы оплаты', ['Канал', 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %'],
               rows.map((r) => [r.label, r.fills, r.liters, r.amount, r.share_pct]))}>
             {rows.map((r, i) => (
               <div key={r.channel} className="flex items-center gap-1.5">
@@ -138,7 +138,7 @@ function BreakdownTable({ title, labelCol, rows, showAvgCheck, exportName }: {
   title: string; labelCol: string; rows: FuelBreakdownRow[]; showAvgCheck?: boolean; exportName: string
 }) {
   const maxShare = Math.max(...rows.map((r) => r.share_pct), 0.01)
-  const exCols = [labelCol, 'Наливов', 'Литры', 'Выручка, ₽', 'Доля, %', ...(showAvgCheck ? ['Ср. чек, ₽'] : [])]
+  const exCols = [labelCol, 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %', ...(showAvgCheck ? ['Ср. чек, ₽'] : [])]
   const exData = rows.map((r) => [r.label, r.fills, r.liters, r.amount, r.share_pct, ...(showAvgCheck ? [r.avg_check ?? null] : [])] as (string | number | null)[])
   return (
     <Card>
@@ -149,7 +149,7 @@ function BreakdownTable({ title, labelCol, rows, showAvgCheck, exportName }: {
             <thead>
               <tr className="border-b bg-muted/40 text-muted-foreground">
                 <th className="p-2 text-left font-medium">{labelCol}</th>
-                <th className="p-2 text-right font-medium">Наливов</th>
+                <th className="p-2 text-right font-medium">Реализаций</th>
                 <th className="p-2 text-right font-medium">Литры</th>
                 <th className="p-2 text-right font-medium">Выручка</th>
                 <th className="p-2 text-right font-medium">Доля</th>
@@ -191,7 +191,7 @@ function WeeklyTooltip({ active, payload, label }: {
     <div className="rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md">
       <div className="font-medium">{String(label ?? d.week)}</div>
       <div className="text-muted-foreground">Выручка: <span className="font-mono">{fmtRub0(d.amount)}</span></div>
-      <div className="text-muted-foreground">Наливов: <span className="font-mono">{nf0.format(d.fills)}</span></div>
+      <div className="text-muted-foreground">Реализаций: <span className="font-mono">{nf0.format(d.fills)}</span></div>
       <div className="text-muted-foreground">Ср. чек: <span className="font-mono">{fmtFuelMetric('avg_check', d.avg_check)}</span></div>
     </div>
   )
@@ -212,16 +212,16 @@ function Overview({ companyId, dateFrom, dateTo }: TabProps) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Выручка" value={fmtFuelMetricCompact('amount', k.amount) + ' ₽'} accent="success" />
         <KpiCard label="Объём" value={nf0.format(k.liters) + ' л'} accent="info" />
-        <KpiCard label="Наливов" value={nf0.format(k.fills)} />
+        <KpiCard label="Реализаций" value={nf0.format(k.fills)} />
         <KpiCard label="Средний чек" value={fmtFuelMetric('avg_check', k.avg_check)} />
-        <KpiCard label="Ср. налив" value={fmtFuelMetric('avg_fill', k.avg_fill)} />
+        <KpiCard label="Ср. реализация" value={fmtFuelMetric('avg_fill', k.avg_fill)} />
         <KpiCard label="Доля безнала" value={pct1(k.cashless_pct)} hint="банковские карты в выручке розницы" />
         <KpiCard label="Доля от всех продаж" value={pct1(k.share_of_total_pct)} hint="розница в общей выручке" />
         <KpiCard label="Медиана чека" value={fmtRub0(k.check_median)} hint={`p90: ${fmtRub0(k.check_p90)}`} />
       </div>
       <ExportOnlyTable name="KPI розницы" columns={['Показатель', 'Значение']} rows={[
-        ['Выручка, ₽', k.amount], ['Литры', k.liters], ['Наливов', k.fills],
-        ['Средний чек, ₽', k.avg_check], ['Ср. налив, л', k.avg_fill],
+        ['Выручка, ₽', k.amount], ['Литры', k.liters], ['Реализаций', k.fills],
+        ['Средний чек, ₽', k.avg_check], ['Ср. реализация, л', k.avg_fill],
         ['Доля безнала, %', k.cashless_pct], ['Доля от всех продаж, %', k.share_of_total_pct],
         ['Медиана чека, ₽', k.check_median], ['P90 чека, ₽', k.check_p90],
       ]} />
@@ -253,7 +253,7 @@ function Overview({ companyId, dateFrom, dateTo }: TabProps) {
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
-            <ExportOnlyTable name="По неделям" columns={['Неделя', 'Наливов', 'Выручка, ₽', 'Ср. чек, ₽']}
+            <ExportOnlyTable name="По неделям" columns={['Неделя', 'Реализаций', 'Выручка, ₽', 'Ср. чек, ₽']}
               rows={data.weekly.map((w) => [w.week, w.fills, w.amount, w.avg_check])} />
           </CardContent>
         </Card>
@@ -277,7 +277,7 @@ function FreqTooltip({ active, payload }: { active?: boolean; payload?: readonly
     <div className="rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md">
       <div className="font-medium">{d.label}</div>
       <div className="text-muted-foreground">Карт: <span className="font-mono">{nf0.format(d.cards)}</span></div>
-      <div className="text-muted-foreground">Наливов: <span className="font-mono">{nf0.format(d.fills)}</span></div>
+      <div className="text-muted-foreground">Реализаций: <span className="font-mono">{nf0.format(d.fills)}</span></div>
       <div className="text-muted-foreground">Выручка: <span className="font-mono">{fmtRub0(d.amount)}</span></div>
     </div>
   )
@@ -291,7 +291,7 @@ function Loyalty({ companyId, dateFrom, dateTo }: TabProps) {
     queryFn: () => getFuelRetailLoyalty({ companyId, dateFrom: period.from, dateTo: period.to }),
   })
   if (isLoading) return <Loading />
-  if (!data || data.kpi.cards === 0) return <Empty text="Нет карточных наливов за период" />
+  if (!data || data.kpi.cards === 0) return <Empty text="Нет карточных реализаций за период" />
   const k = data.kpi
   const meta = FREQ_META[p.fm]
   return (
@@ -303,14 +303,14 @@ function Loyalty({ companyId, dateFrom, dateTo }: TabProps) {
         <KpiCard label="Карт" value={nf0.format(k.cards)} accent="info" hint="уникальных за период" />
         <KpiCard label="Повторных" value={pct1(k.repeat_share_pct)} accent="success" hint={`${nf0.format(k.repeat_cards)} карт с 2+ визитами`} />
         <KpiCard label="Выручка повторных" value={pct1(k.repeat_revenue_pct)} accent="success" hint="от карточной выручки" />
-        <KpiCard label="Наливов / карту" value={nf1.format(k.avg_fills_per_card)} hint="в среднем" />
-        <KpiCard label="Покрытие: наливы" value={pct1(k.card_coverage_fills_pct)} hint="наливов розницы по картам" />
+        <KpiCard label="Реализаций / карту" value={nf1.format(k.avg_fills_per_card)} hint="в среднем" />
+        <KpiCard label="Покрытие: реализации" value={pct1(k.card_coverage_fills_pct)} hint="реализаций розницы по картам" />
         <KpiCard label="Покрытие: выручка" value={pct1(k.card_coverage_amount_pct)} hint="выручки розницы по картам" />
       </div>
       <ExportOnlyTable name="KPI лояльности" columns={['Показатель', 'Значение']} rows={[
         ['Карт', k.cards], ['Повторных карт', k.repeat_cards], ['Доля повторных, %', k.repeat_share_pct],
-        ['Выручка повторных, %', k.repeat_revenue_pct], ['Ср. наливов на карту', k.avg_fills_per_card],
-        ['Покрытие наливов картами, %', k.card_coverage_fills_pct], ['Покрытие выручки картами, %', k.card_coverage_amount_pct],
+        ['Выручка повторных, %', k.repeat_revenue_pct], ['Ср. реализаций на карту', k.avg_fills_per_card],
+        ['Покрытие реализаций картами, %', k.card_coverage_fills_pct], ['Покрытие выручки картами, %', k.card_coverage_amount_pct],
       ]} />
       {data.freq_histogram.length > 0 && (
         <Card>
@@ -339,7 +339,7 @@ function Loyalty({ companyId, dateFrom, dateTo }: TabProps) {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <ExportOnlyTable name="Частота визитов" columns={['Частота', 'Карт', 'Наливов', 'Выручка, ₽']}
+            <ExportOnlyTable name="Частота визитов" columns={['Частота', 'Карт', 'Реализаций', 'Выручка, ₽']}
               rows={data.freq_histogram.map((r) => [r.label, r.cards, r.fills, r.amount])} />
             <div className="mt-2 text-[10px] text-muted-foreground">
               «1 визит» — случайные клиенты; хвост «21+» — ядро лояльной базы.
@@ -352,13 +352,13 @@ function Loyalty({ companyId, dateFrom, dateTo }: TabProps) {
           <CardContent className="p-0">
             <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">Топ-20 карт по выручке</div>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs" {...exportRows('Топ карт', ['Карта', 'Наливов', 'Литры', 'Сумма, ₽', 'Ср. чек, ₽'],
+              <table className="w-full text-xs" {...exportRows('Топ карт', ['Карта', 'Реализаций', 'Литры', 'Сумма, ₽', 'Ср. чек, ₽'],
                 data.top_cards.map((c) => [c.card, c.fills, c.liters, c.amount, c.fills ? c.amount / c.fills : null]))}>
                 <thead>
                   <tr className="border-b bg-muted/40 text-muted-foreground">
                     <th className="p-2 text-left font-medium">#</th>
                     <th className="p-2 text-left font-medium">Карта</th>
-                    <th className="p-2 text-right font-medium">Наливов</th>
+                    <th className="p-2 text-right font-medium">Реализаций</th>
                     <th className="p-2 text-right font-medium">Литры</th>
                     <th className="p-2 text-right font-medium">Сумма</th>
                     <th className="p-2 text-right font-medium">Ср. чек</th>

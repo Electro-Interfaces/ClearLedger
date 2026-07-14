@@ -44,7 +44,7 @@ interface TabProps { companyId: string; dateFrom: string; dateTo: string }
 function Loading() {
   return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
 }
-function Empty({ text = 'Нет корпоративных наливов за период' }: { text?: string }) {
+function Empty({ text = 'Нет корпоративных реализаций за период' }: { text?: string }) {
   return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div>
 }
 
@@ -155,10 +155,10 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Выручка" value={fmtRub0(k.amount)} accent="success" />
         <KpiCard label="Объём" value={nf0.format(k.liters) + ' л'} accent="info" />
-        <KpiCard label="Наливов" value={nf0.format(k.fills)} />
+        <KpiCard label="Реализаций" value={nf0.format(k.fills)} />
         <KpiCard label="Доля от всех продаж" value={nf1.format(k.share_of_total_pct) + '%'} hint="выручка сегмента / вся выручка" />
         <KpiCard label="Активных карт" value={nf0.format(k.active_cards)} hint="уникальных за период" />
-        <KpiCard label="Ср. налив" value={nf1.format(k.avg_fill) + ' л'} hint="крупные баки корп-парка" />
+        <KpiCard label="Ср. реализация" value={nf1.format(k.avg_fill) + ' л'} hint="крупные баки корп-парка" />
         <KpiCard label="Ср. цена" value={nf2.format(k.avg_price) + ' ₽/л'} />
         <KpiCard label="Станций" value={nf0.format(k.stations)} />
       </div>
@@ -168,12 +168,12 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
         <Widget title="Каналы сегмента: карты vs ведомости">
           {data.by_channel.map((c) => (
             <BarRow key={c.label} label={chanLabel(c.label)} value={fmtRub0(c.amount)}
-              frac={c.share_pct / 100} sub={`${nf1.format(c.share_pct)}% · ${nf0.format(c.fills)} наливов`} />
+              frac={c.share_pct / 100} sub={`${nf1.format(c.share_pct)}% · ${nf0.format(c.fills)} реализаций`} />
           ))}
           <p className="border-t border-border/40 pt-1.5 text-[11px] text-muted-foreground">
             Федеральные процессоры идут без номеров карт — контрагент определяется видом оплаты.
           </p>
-          <ExportOnlyTable name="Каналы сегмента" columns={['Канал', 'Наливов', 'Литры', 'Выручка, ₽', 'Доля, %']}
+          <ExportOnlyTable name="Каналы сегмента" columns={['Канал', 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %']}
             rows={data.by_channel.map((c) => [chanLabel(c.label), c.fills, c.liters, c.amount, c.share_pct])} />
         </Widget>
 
@@ -195,7 +195,7 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
               </ResponsiveContainer>
             </div>
           )}
-          <ExportOnlyTable name="Выручка по месяцам" columns={['Месяц', 'Наливов', 'Литры', 'Выручка, ₽', 'Карт']}
+          <ExportOnlyTable name="Выручка по месяцам" columns={['Месяц', 'Реализаций', 'Литры', 'Выручка, ₽', 'Карт']}
             rows={data.monthly.map((m) => [m.month, m.fills, m.liters, m.amount, m.cards])} />
         </Widget>
       </div>
@@ -206,12 +206,12 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Структура по видам топлива</div>
           <Card>
             <CardContent className="p-0 overflow-x-auto">
-              <table className="w-full text-xs" {...exportRows('По видам топлива', ['Топливо', 'Наливов', 'Литры', 'Выручка, ₽', 'Доля, %'],
+              <table className="w-full text-xs" {...exportRows('По видам топлива', ['Топливо', 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %'],
                 data.by_fuel.map((f) => [f.label, f.fills, f.liters, f.amount, f.share_pct]))}>
                 <thead>
                   <tr className="border-b bg-muted/40 text-muted-foreground">
                     <th className="p-2 text-left font-medium">Топливо</th>
-                    <th className="p-2 text-right font-medium">Наливов</th>
+                    <th className="p-2 text-right font-medium">Реализаций</th>
                     <th className="p-2 text-right font-medium">Литры</th>
                     <th className="p-2 text-right font-medium">Выручка</th>
                     <th className="p-2 text-right font-medium">Доля</th>
@@ -245,7 +245,7 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
               <BarRow key={s.label} label={s.label} value={fmtRub0(s.amount)} frac={s.amount / maxStation}
                 sub={`${nf1.format(s.share_pct)}% · ${nf0.format(s.fills)} нал.`} />
             ))}
-          <ExportOnlyTable name="По станциям" columns={['Станция', 'Наливов', 'Литры', 'Выручка, ₽', 'Доля, %']}
+          <ExportOnlyTable name="По станциям" columns={['Станция', 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %']}
             rows={data.by_station.map((s) => [s.label, s.fills, s.liters, s.amount, s.share_pct])} />
         </Widget>
       </div>
@@ -294,7 +294,7 @@ function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
     )
   }
   const maxShare = Math.max(0.01, ...data.rows.map((r) => r.share_pct))
-  const exCols = ['Контрагент', 'Канал', 'Наливов', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. налив, л', 'Ср. цена, ₽/л', 'Станций', 'Карт']
+  const exCols = ['Контрагент', 'Канал', 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. реализация, л', 'Ср. цена, ₽/л', 'Станций', 'Карт']
   const exData: (string | number | null)[][] = [
     ...rows.map((r) => [r.name, chanLabel(r.channel), r.fills, r.liters, r.amount, r.share_pct, r.avg_fill, r.avg_price, r.stations, r.cards]),
     ['Итого', '', t.fills, t.liters, t.amount, 100, null, null, null, null],
@@ -306,7 +306,7 @@ function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
         <KpiCard label="Контрагентов" value={nf0.format(data.rows.length)} hint="процессоры + ведомости" />
         <KpiCard label="Выручка сегмента" value={fmtRub0(t.amount)} accent="success" />
         <KpiCard label="Объём" value={nf0.format(t.liters) + ' л'} accent="info" />
-        <KpiCard label="Наливов" value={nf0.format(t.fills)} />
+        <KpiCard label="Реализаций" value={nf0.format(t.fills)} />
       </div>
       <Card>
         <CardContent className="p-0 overflow-x-auto">
@@ -315,11 +315,11 @@ function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
               <tr className="border-b bg-muted/40 text-muted-foreground">
                 <H k="name" left>Контрагент</H>
                 <H k="channel" left>Канал</H>
-                <H k="fills">Наливов</H>
+                <H k="fills">Реализаций</H>
                 <H k="liters">Литры</H>
                 <H k="amount">Выручка</H>
                 <H k="share_pct">Доля</H>
-                <H k="avg_fill">Ср. налив</H>
+                <H k="avg_fill">Ср. реализация</H>
                 <H k="avg_price">₽/л</H>
                 <H k="stations">Станций</H>
                 <H k="cards">Карт</H>
@@ -422,7 +422,7 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
   const pages = Math.max(1, Math.ceil(total / CARDS_PAGE))
   const from = total === 0 ? 0 : page * CARDS_PAGE + 1
   const to = Math.min(total, (page + 1) * CARDS_PAGE)
-  const exCols = ['Карта', 'Организация', 'Вид оплаты', 'Наливов', 'Литры', 'Сумма, ₽', 'Ср. налив, л', 'Станций', 'Топлив', 'Первый налив', 'Последний налив']
+  const exCols = ['Карта', 'Организация', 'Вид оплаты', 'Реализаций', 'Литры', 'Сумма, ₽', 'Ср. реализация, л', 'Станций', 'Топлив', 'Первая реализация', 'Последняя реализация']
   const exData = data.rows.map((r) => [
     r.card, r.org ?? '—', r.pay_type ?? '—', r.fills, r.liters, r.amount, r.avg_fill, r.stations, r.fuels, r.first_dt, r.last_dt,
   ] as (string | number | null)[])
@@ -448,7 +448,7 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Карт всего" value={nf0.format(t.cards)} hint={search ? `по поиску «${search}»` : 'в корп-сегменте за период'} />
-        <KpiCard label="Наливов" value={nf0.format(t.fills)} />
+        <KpiCard label="Реализаций" value={nf0.format(t.fills)} />
         <KpiCard label="Объём" value={nf0.format(t.liters) + ' л'} accent="info" />
         <KpiCard label="Сумма" value={fmtRub0(t.amount)} accent="success" />
       </div>
@@ -463,10 +463,10 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
                     <th className="p-2 text-left font-medium">Карта</th>
                     <th className="p-2 text-left font-medium" title={orgTitle}>Организация</th>
                     <th className="p-2 text-left font-medium">Вид оплаты</th>
-                    <CardsSortHead label="Наливов" k="fills" sort={sort} order={order} onSort={onSort} />
+                    <CardsSortHead label="Реализаций" k="fills" sort={sort} order={order} onSort={onSort} />
                     <CardsSortHead label="Литры" k="liters" sort={sort} order={order} onSort={onSort} />
                     <CardsSortHead label="Сумма" k="amount" sort={sort} order={order} onSort={onSort} />
-                    <CardsSortHead label="Ср. налив" k="avg_fill" sort={sort} order={order} onSort={onSort} />
+                    <CardsSortHead label="Ср. реализация" k="avg_fill" sort={sort} order={order} onSort={onSort} />
                     <th className="p-2 text-right font-medium">Станций</th>
                     <th className="p-2 text-right font-medium">Топлив</th>
                     <CardsSortHead label="Первый" k="first_dt" sort={sort} order={order} onSort={onSort} />

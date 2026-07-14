@@ -1,8 +1,8 @@
 /**
- * Клиент API аналитики продаж топлива по наливам (/api/fuel/analytics/*,
+ * Клиент API аналитики продаж топлива по реализациям (/api/fuel/analytics/*,
  * /api/fuel/tariffs/*, /api/fuel/corporate/*, /api/fuel/retail/*).
  *
- * Раздел «Продажи» ГИГ, группы «Аналитика» (Наливы) и «Коммерция»
+ * Раздел «Продажи» ГИГ, группы «Аналитика» (Реализация) и «Коммерция»
  * (Тарифы / Корпоратив / Частные лица). Зеркало charge-секции analyticsService,
  * но в топливных единицах: литры, ₽/л, виды оплаты STS, каналы/сегменты.
  */
@@ -46,7 +46,7 @@ export interface FuelPeriodParams extends FuelNarrow {
   dateTo: string
 }
 
-// ─── Наливы: разрезы ────────────────────────────────────────────────
+// ─── Реализации: разрезы ────────────────────────────────────────────────
 
 export interface FuelFillsLine {
   key: string
@@ -79,7 +79,7 @@ export async function getFuelFills(p: FuelPeriodParams & { groupBy?: FuelGroupBy
   })
 }
 
-// ─── Наливы: динамика / нарезка / сравнение / heatmap ──────────────
+// ─── Реализации: динамика / нарезка / сравнение / heatmap ──────────────
 
 export interface FuelTimeseriesResponse {
   bucket: FuelBucket
@@ -166,7 +166,7 @@ export async function getFuelHeatmap(p: FuelPeriodParams & { metric?: FuelMetric
   })
 }
 
-// ─── Наливы: когорты «новые карты» ──────────────────────────────────
+// ─── Реализации: когорты «новые карты» ──────────────────────────────────
 
 export interface FuelNewCardsInterval extends FuelInterval {
   activeCards: number
@@ -432,9 +432,9 @@ export async function getFuelRetailLoyalty(p: { companyId: string; dateFrom: str
 export const FUEL_METRIC_LABELS: Record<FuelMetric, string> = {
   amount: 'Выручка, ₽',
   liters: 'Объём, л',
-  fills: 'Наливы',
+  fills: 'Реализации',
   avg_check: 'Средний чек, ₽',
-  avg_fill: 'Ср. налив, л',
+  avg_fill: 'Ср. реализация, л',
   avg_price: 'Цена, ₽/л',
 }
 

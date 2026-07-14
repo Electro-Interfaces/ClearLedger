@@ -131,7 +131,7 @@ function KpiCard({ k }: { k: Kpi }) {
 interface BreakRow { name: string; revenue: number; volume: number; count?: number }
 
 /** Полная таблица разреза продаж (виды топлива / способы оплаты) — как в эталоне:
- *  все строки, Выручка · Объём · Доля · Наливы + Итого. Наливы (count) — из
+ *  все строки, Выручка · Объём · Доля · Реализации + Итого. Реализации (count) — из
  *  пооперационных транзакций; при их отсутствии колонка скрыта. */
 function BreakdownTable({ title, nameCol, icon, rows }: {
   title: string; nameCol: string; icon: ReactNode; rows: BreakRow[]
@@ -147,7 +147,7 @@ function BreakdownTable({ title, nameCol, icon, rows }: {
         {rows.length === 0 ? <div className="p-4 text-xs text-muted-foreground">Нет данных за период</div> : (
           <table className="w-full text-xs" data-export-name={title}
             data-export-rows={JSON.stringify({
-              columns: [nameCol, 'Выручка, ₽', 'Объём, л', 'Доля, %', ...(hasCount ? ['Наливы'] : [])],
+              columns: [nameCol, 'Выручка, ₽', 'Объём, л', 'Доля, %', ...(hasCount ? ['Реализации'] : [])],
               rows: rows.map((r) => [r.name, r.revenue, r.volume, totRev ? (r.revenue / totRev) * 100 : 0, ...(hasCount ? [r.count ?? 0] : [])]),
             })}>
             <thead>
@@ -156,7 +156,7 @@ function BreakdownTable({ title, nameCol, icon, rows }: {
                 <th className="p-2 text-right font-medium">Выручка</th>
                 <th className="p-2 text-right font-medium">Объём, л</th>
                 <th className="p-2 text-right font-medium">Доля</th>
-                {hasCount && <th className="p-2 text-right font-medium">Наливы</th>}
+                {hasCount && <th className="p-2 text-right font-medium">Реализации</th>}
               </tr>
             </thead>
             <tbody>
@@ -541,14 +541,14 @@ const WD_FULL: Record<number, string> = { 1: 'Понедельник', 2: 'Вт�
 function HourlyActivity({ a }: { a: DashActivity }) {
   return (
     <Card><CardContent className="pt-4">
-      <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Clock className="h-4 w-4 text-blue-600 dark:text-blue-400" />Наливы по часам суток{a.peak_hour != null ? ` · пик ${String(a.peak_hour).padStart(2, '0')}:00` : ''}</div>
+      <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Clock className="h-4 w-4 text-blue-600 dark:text-blue-400" />Реализации по часам суток{a.peak_hour != null ? ` · пик ${String(a.peak_hour).padStart(2, '0')}:00` : ''}</div>
       <div data-chart>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={a.hourly} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
             <XAxis dataKey="label" tick={chartAxis} interval={1} stroke="hsl(var(--muted-foreground))" />
             <YAxis tick={chartAxis} tickFormatter={(v: number) => nf0.format(v)} width={44} stroke="hsl(var(--muted-foreground))" />
-            <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(l) => `${l}:00`} formatter={(v) => [`${nf0.format(Number(v))} наливов`, 'Наливы']} />
+            <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(l) => `${l}:00`} formatter={(v) => [`${nf0.format(Number(v))} реализаций`, 'Реализации']} />
             <Bar dataKey="count" fill={SERIES[0]} radius={[3, 3, 0, 0]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
@@ -587,11 +587,11 @@ function TopCards({ cards }: { cards: DashCard[] }) {
     <Card><CardContent className="p-0">
       <div className="flex items-center gap-1.5 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground"><CreditCard className="h-3.5 w-3.5" />Топ карт по обороту ({cards.length})</div>
       <table className="w-full text-xs" data-export-name="Топ карт"
-        data-export-rows={JSON.stringify({ columns: ['Карта', 'Наливы', 'Объём, л', 'Сумма, ₽'], rows: cards.map((c) => [c.card, c.count, c.liters, c.amount]) })}>
+        data-export-rows={JSON.stringify({ columns: ['Карта', 'Реализации', 'Объём, л', 'Сумма, ₽'], rows: cards.map((c) => [c.card, c.count, c.liters, c.amount]) })}>
         <thead>
           <tr className="border-b text-muted-foreground">
             <th className="p-2 text-left font-medium">Карта</th>
-            <th className="p-2 text-right font-medium">Наливы</th>
+            <th className="p-2 text-right font-medium">Реализации</th>
             <th className="p-2 text-right font-medium">Объём, л</th>
             <th className="p-2 text-right font-medium">Сумма</th>
           </tr>
@@ -760,13 +760,13 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
               {kpis.map((k) => <KpiCard key={k.label} k={k} />)}
             </div>
 
-            {/* средние показатели АЗС (по наливам) */}
+            {/* средние показатели АЗС (по реализациям) */}
             {data.averages && data.averages.tx_count > 0 && (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                <CountCard label="Средний чек" value={`${fmtMoney(data.averages.avg_check)} ₽`} hint="на налив" />
-                <CountCard label="Средняя заправка" value={`${nf1.format(data.averages.avg_fill_liters)} л`} hint="объём на налив" />
+                <CountCard label="Средний чек" value={`${fmtMoney(data.averages.avg_check)} ₽`} hint="на реализацию" />
+                <CountCard label="Средняя заправка" value={`${nf1.format(data.averages.avg_fill_liters)} л`} hint="объём на реализацию" />
                 <CountCard label="Операций в день" value={nf1.format(data.averages.ops_per_day)} hint="в среднем" />
-                <CountCard label="Наливов всего" value={nf0.format(data.averages.tx_count)} hint="за период" />
+                <CountCard label="Реализаций всего" value={nf0.format(data.averages.tx_count)} hint="за период" />
               </div>
             )}
 
@@ -785,13 +785,13 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
                 rows={data.payment_methods ?? []} />
             </div>
             <div className="text-[11px] text-muted-foreground">
-              Разрез — по пооперационным транзакциям (наливам): каждый вид оплаты как есть (все методы) + счётчик наливов. При отсутствии транзакций за период — фолбэк на сырые отчёты смен (без счётчика).
+              Разрез — по пооперационным транзакциям (реализациям): каждый вид оплаты как есть (все методы) + счётчик реализаций. При отсутствии транзакций за период — фолбэк на сырые отчёты смен (без счётчика).
             </div>
 
             {/* профиль активности (по транзакциям) */}
             {data.activity && data.activity.hourly.some((h) => h.count > 0) && (
               <>
-                <SectionTitle hint="по пооперационным наливам">Профиль активности</SectionTitle>
+                <SectionTitle hint="по пооперационным реализациям">Профиль активности</SectionTitle>
                 <div className="grid gap-3 lg:grid-cols-2">
                   <HourlyActivity a={data.activity} />
                   <WeekdayActivity a={data.activity} />

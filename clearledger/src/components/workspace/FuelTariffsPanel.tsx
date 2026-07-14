@@ -3,8 +3,8 @@
  * Табы: Прайс-лист (станция × топливо) · Средние цены · Отклонения цен · Динамика цен.
  * Данные — /api/fuel/tariffs/* (сетка, отклонения, динамика) + /api/fuel/analytics/fills.
  *
- * Семантика: `price` в наливах = номинальная цена стеллы ₽/л; факт-цена =
- * Σвыручка/Σлитры (realized); скидки на грейне налива ≈ 0 — реальные скидки
+ * Семантика: `price` в реализациях = номинальная цена стеллы ₽/л; факт-цена =
+ * Σвыручка/Σлитры (realized); скидки на грейне реализации ≈ 0 — реальные скидки
  * живут в сменных отчётах и приходят готовым блоком discounts_by_channel.
  */
 
@@ -157,9 +157,9 @@ function PriceGridTab({ companyId, dateFrom, dateTo }: TabProps) {
         <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
       </div>
       <div className="text-xs text-muted-foreground">
-        Номинальная цена стеллы ₽/л по наливам за период. «~» — цена в периоде менялась (диапазон и факт-цена — в подсказке ячейки).
+        Номинальная цена стеллы ₽/л по реализациям за период. «~» — цена в периоде менялась (диапазон и факт-цена — в подсказке ячейки).
       </div>
-      {isLoading ? <Loading /> : !data || data.cells.length === 0 ? <Empty text="Нет наливов за период" /> : (
+      {isLoading ? <Loading /> : !data || data.cells.length === 0 ? <Empty text="Нет реализаций за период" /> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
             {netAvg.map((f) => (
@@ -184,7 +184,7 @@ function PriceGridTab({ companyId, dateFrom, dateTo }: TabProps) {
                       if (!c || c.price_avg == null) {
                         return <td key={f.code} className="text-right p-2 tabular-nums"><span className="text-muted-foreground/30">—</span></td>
                       }
-                      const title = `${nf0.format(c.fills)} наливов · ${nf0.format(c.liters)} л`
+                      const title = `${nf0.format(c.fills)} реализаций · ${nf0.format(c.liters)} л`
                         + (c.varies ? ` · диапазон ${nf2.format(c.price_min)}–${nf2.format(c.price_max)} ₽/л` : '')
                         + (c.realized != null ? ` · факт ${nf2.format(c.realized)} ₽/л` : '')
                       return (
@@ -235,7 +235,7 @@ function AvgPricesTab({ companyId, dateFrom, dateTo }: TabProps) {
 
   const cols: Col<FuelFillsLine>[] = [
     { key: 'label', label: cutLabel, left: true, get: (r) => r.label, cell: (r) => r.label },
-    { key: 'fills', label: 'Наливов', get: (r) => r.fills, cell: (r) => nf0.format(r.fills) },
+    { key: 'fills', label: 'Реализаций', get: (r) => r.fills, cell: (r) => nf0.format(r.fills) },
     { key: 'liters', label: 'Литры', get: (r) => r.liters, cell: (r) => nf0.format(r.liters) },
     { key: 'amount', label: 'Выручка', get: (r) => r.amount, cell: (r) => fmtFuelMetricCompact('amount', r.amount) },
     { key: 'avg_price', label: 'Ср. цена ₽/л', get: (r) => r.avg_price, cell: (r) => <span className="font-medium text-foreground">{nf2.format(r.avg_price)}</span> },
@@ -253,7 +253,7 @@ function AvgPricesTab({ companyId, dateFrom, dateTo }: TabProps) {
         </Field>
       </div>
       <div className="text-xs text-muted-foreground">Факт-цена = Σвыручка / Σлитры за период — где дорого/дёшево продаётся литр.</div>
-      {isLoading ? <Loading /> : !data || data.lines.length === 0 ? <Empty text="Нет наливов за период" /> : (
+      {isLoading ? <Loading /> : !data || data.lines.length === 0 ? <Empty text="Нет реализаций за период" /> : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             <Kpi label="Ср. цена сети" value={`${nf2.format(data.totals.avg_price)} ₽/л`} sub="средневзвешенно" />
@@ -263,7 +263,7 @@ function AvgPricesTab({ companyId, dateFrom, dateTo }: TabProps) {
           <SortTable rows={data.lines} cols={cols} initial="liters" rowKey={(r) => r.key}
             exp={{
               name: 'Средние цены',
-              columns: [cutLabel, 'Наливов', 'Литры', 'Выручка, ₽', 'Ср. цена, ₽/л', 'Ср. чек, ₽'],
+              columns: [cutLabel, 'Реализаций', 'Литры', 'Выручка, ₽', 'Ср. цена, ₽/л', 'Ср. чек, ₽'],
               rows: [
                 ...data.lines.map((l) => [l.label, l.fills, l.liters, l.amount, l.avg_price, l.avg_check] as (string | number | null)[]),
                 ['Итого', data.totals.fills, data.totals.liters, data.totals.amount, data.totals.avg_price, data.totals.avg_check],
@@ -297,7 +297,7 @@ function DeviationsTab({ companyId, dateFrom, dateTo }: TabProps) {
   const cols: Col<FuelPriceDeviationLine>[] = [
     { key: 'station', label: 'Станция', left: true, get: (r) => r.station, cell: (r) => r.station },
     { key: 'fuel', label: 'Топливо', left: true, get: (r) => r.fuel, cell: (r) => r.fuel },
-    { key: 'fills', label: 'Наливов', get: (r) => r.fills, cell: (r) => nf0.format(r.fills) },
+    { key: 'fills', label: 'Реализаций', get: (r) => r.fills, cell: (r) => nf0.format(r.fills) },
     { key: 'liters', label: 'Литры', get: (r) => r.liters, cell: (r) => nf0.format(r.liters) },
     { key: 'price', label: 'Цена станции', get: (r) => r.price, cell: (r) => <span className="font-medium text-foreground">{nf2.format(r.price)}</span> },
     { key: 'net_avg', label: 'Средняя сети', get: (r) => r.net_avg, cell: (r) => nf2.format(r.net_avg) },
@@ -321,12 +321,12 @@ function DeviationsTab({ companyId, dateFrom, dateTo }: TabProps) {
       <div className="text-xs text-muted-foreground">
         Цена станции vs средняя по сети (по тому же топливу): Δ &gt; 0 — станция дороже сети, Δ &lt; 0 — дешевле.
       </div>
-      {isLoading ? <Loading /> : !data || data.lines.length === 0 ? <Empty text="Нет наливов за период" /> : (
+      {isLoading ? <Loading /> : !data || data.lines.length === 0 ? <Empty text="Нет реализаций за период" /> : (
         <>
           <SortTable rows={lines} cols={cols} initial="delta_pct" rowKey={(r) => `${r.station_code}|${r.fuel_code}`}
             exp={{
               name: 'Отклонения цен',
-              columns: ['Станция', 'Топливо', 'Наливов', 'Литры', 'Цена станции, ₽/л', 'Средняя сети, ₽/л', 'Δ, ₽/л', 'Δ, %'],
+              columns: ['Станция', 'Топливо', 'Реализаций', 'Литры', 'Цена станции, ₽/л', 'Средняя сети, ₽/л', 'Δ, ₽/л', 'Δ, %'],
               rows: lines.map((l) => [l.station, l.fuel, l.fills, l.liters, l.price, l.net_avg, l.delta, l.delta_pct] as (string | number | null)[]),
             }} />
           <Card><CardContent className="p-0">

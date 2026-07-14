@@ -29,7 +29,7 @@ import { EnergyNormalizationModel } from './EnergyNormalizationModel'
 
 /* Карта: шаблон канала ГИГ → набор данных нормализации. */
 const NORM_TEMPLATES: Record<string, { entity: string; dataset: FuelModelDataset }> = {
-  fuel_shift: { entity: 'Смены АЗС + наливы (FuelShift)', dataset: 'shifts' },
+  fuel_shift: { entity: 'Смены АЗС + реализации (FuelShift)', dataset: 'shifts' },
   fuel_delivery: { entity: 'Поступления топлива (FuelReceipt)', dataset: 'receipts' },
   sidegoods: { entity: 'Сопутка/общепит ЦБ (DataEntry)', dataset: 'sidegoods' },
   food: { entity: 'Сопутка/общепит ЦБ (DataEntry)', dataset: 'sidegoods' },
@@ -39,8 +39,8 @@ const DATASET_PROPS: Record<FuelModelDataset, { title: string; subtitle: string;
   shifts: {
     title: 'Модель данных · смены АЗС (STS)',
     subtitle: 'Внутренняя многослойная база смен (L1 RAW → L2 CLEAN → L3 EXPORT → L4 1C_REF), звёздная схема: '
-      + 'факт «Смена АЗС» (выручка/литры/наливы) + измерения (станция / канал оплаты / топливо / время). '
-      + 'Наливы (операции ТРК) — связанный факт нижнего грейна с дедупом по STS id.',
+      + 'факт «Смена АЗС» (выручка/литры/реализации) + измерения (станция / канал оплаты / топливо / время). '
+      + 'Реализации (операции ТРК) — связанный факт нижнего грейна с дедупом по STS id.',
     entityUnit: 'Смен',
     emptyText: 'Нет загруженных смен STS. Загрузите период в канале «Топливо: сменный отчёт», затем модель данных отобразится здесь на реальных сменах.',
   },
@@ -111,7 +111,7 @@ function NormalizationOverview({ channels, onOpen }: { channels: Channel[]; onOp
       const m = models.shifts
       const tx = measure(m, 'tx')
       return { entity: tpl.entity, records: m?.rows ?? 0, unit: 'смен',
-               enrich: tx ? `наливы ${fmtN(tx)}` : '—', ok: (m?.rows ?? 0) > 0 }
+               enrich: tx ? `реализации ${fmtN(tx)}` : '—', ok: (m?.rows ?? 0) > 0 }
     }
     if (tpl.dataset === 'receipts') {
       const m = models.receipts

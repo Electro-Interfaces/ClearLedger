@@ -1,5 +1,5 @@
 /**
- * «Наливы» — управленческий анализ наливов топлива (fuel, ГИГ).
+ * «Реализация» — управленческий анализ реализаций топлива (fuel, ГИГ).
  * Табы: Разрезы · Время и загрузка · Динамика (тренд) · Сравнение периодов
  * (+ блок когорт «Новые карты»). Данные — /api/fuel/analytics/fills*.
  *
@@ -36,7 +36,7 @@ const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 function Loading() {
   return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
 }
-function Empty({ text = 'Нет наливов за период' }: { text?: string }) {
+function Empty({ text = 'Нет реализаций за период' }: { text?: string }) {
   return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div>
 }
 
@@ -198,10 +198,10 @@ function FillKpis({ t }: { t: FuelFillsLine }) {
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <KpiCard label="Выручка" value={fmtFuelMetricCompact('amount', t.amount) + ' ₽'} accent="success" />
       <KpiCard label="Объём" value={nf0.format(t.liters) + ' л'} accent="info" />
-      <KpiCard label="Наливов" value={nf0.format(t.fills)} />
+      <KpiCard label="Реализаций" value={nf0.format(t.fills)} />
       <KpiCard label="Ср. цена" value={fmtFuelMetric('avg_price', t.avg_price)} />
       <KpiCard label="Средний чек" value={fmtFuelMetric('avg_check', t.avg_check)} />
-      <KpiCard label="Ср. налив" value={fmtFuelMetric('avg_fill', t.avg_fill)} />
+      <KpiCard label="Ср. реализация" value={fmtFuelMetric('avg_fill', t.avg_fill)} />
       <KpiCard label="Станций" value={nf0.format(t.stations)} />
       <KpiCard label="Карт" value={nf0.format(t.cards)} hint="уникальных за период" />
     </div>
@@ -253,7 +253,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
   const t = data.totals
   const col = GROUP_LABELS[p.group] ?? 'Разрез'
   const showCards = ['channel', 'pay_type', 'segment', 'station'].includes(p.group)
-  const exCols = [col, 'Наливов', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. чек, ₽', 'Ср. налив, л', 'Цена, ₽/л', ...(showCards ? ['Карт'] : [])]
+  const exCols = [col, 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. чек, ₽', 'Ср. реализация, л', 'Цена, ₽/л', ...(showCards ? ['Карт'] : [])]
   const exData: (string | number)[][] = [
     ...lines.map((l) => [l.label, l.fills, l.liters, l.amount, l.share_pct, l.avg_check, l.avg_fill, l.avg_price, ...(showCards ? [l.cards] : [])]),
     ['Итого', t.fills, t.liters, t.amount, 100, t.avg_check, t.avg_fill, t.avg_price, ...(showCards ? [t.cards] : [])],
@@ -295,12 +295,12 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
             <thead>
               <tr className="border-b bg-muted/40 text-muted-foreground">
                 <H k="label" left>{col}</H>
-                <H k="fills">Наливов</H>
+                <H k="fills">Реализаций</H>
                 <H k="liters">Литры</H>
                 <H k="amount">Выручка</H>
                 <H k="share_pct">Доля</H>
                 <H k="avg_check">Ср. чек</H>
-                <H k="avg_fill">Ср. налив</H>
+                <H k="avg_fill">Ср. реализация</H>
                 <H k="avg_price">₽/л</H>
                 {showCards && <H k="cards">Карт</H>}
                 {withSpark && <th className="p-2 font-medium text-right whitespace-nowrap">Тренд ₽</th>}
@@ -413,8 +413,8 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
       <FuelHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} metric={p.metric} />
       <Card>
         <CardContent className="pt-4">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Профиль по часам суток (наливы · литры)</div>
-          <div className="space-y-1" {...exportRows('Профиль по часам', ['Час', 'Наливов', 'Литры', 'Выручка, ₽'],
+          <div className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Профиль по часам суток (реализации · литры)</div>
+          <div className="space-y-1" {...exportRows('Профиль по часам', ['Час', 'Реализаций', 'Литры', 'Выручка, ₽'],
             data.lines.map((l) => [l.label, l.fills, l.liters, l.amount]))}>
             {data.lines.map((l) => (
               <div key={l.key} className="flex items-center gap-2 text-xs">
@@ -768,7 +768,7 @@ function NewCardsBlock({ companyId, dateFrom, dateTo, bucket, narrow }: {
   if (isLoading || !data || data.intervals.length === 0) return null
   const iv = data.intervals
   const histNote = data.historyFrom && data.historyFrom >= dateFrom
-  const exCols = ['Интервал', 'Активных карт', 'Новых', 'Доля новых, %', 'Вернувшихся', 'Наливы новых', 'Литры новых', 'Выручка новых, ₽', 'Доля выручки новых, %']
+  const exCols = ['Интервал', 'Активных карт', 'Новых', 'Доля новых, %', 'Вернувшихся', 'Реализаций новых', 'Литры новых', 'Выручка новых, ₽', 'Доля выручки новых, %']
   const exData = iv.map((r) => [r.label, r.activeCards, r.newCards, r.newSharePct, r.returningCards, r.newFills, r.newLiters, r.newRevenue, r.newRevenueSharePct] as (string | number | null)[])
   const dim = (r: FuelNewCardsInterval) => (r.partial ? 'text-muted-foreground/40' : '')
   return (
@@ -792,7 +792,7 @@ function NewCardsBlock({ companyId, dateFrom, dateTo, bucket, narrow }: {
                 <th className="p-2 text-right font-medium">Новых</th>
                 <th className="p-2 text-right font-medium">Доля новых</th>
                 <th className="p-2 text-right font-medium">Вернувшихся</th>
-                <th className="p-2 text-right font-medium">Наливы новых</th>
+                <th className="p-2 text-right font-medium">Реализаций новых</th>
                 <th className="p-2 text-right font-medium">Литры новых</th>
                 <th className="p-2 text-right font-medium">Выручка новых</th>
                 <th className="p-2 text-right font-medium">Доля выручки</th>
@@ -896,8 +896,8 @@ function NewCardsListModal({ companyId, interval, narrow, onClose }: {
                 <tr className="border-b text-muted-foreground">
                   <th className="p-2 text-left font-medium">Карта</th>
                   <th className="p-2 text-left font-medium">Канал</th>
-                  <th className="p-2 text-left font-medium">Первый налив</th>
-                  <th className="p-2 text-right font-medium">Наливов</th>
+                  <th className="p-2 text-left font-medium">Первая реализация</th>
+                  <th className="p-2 text-right font-medium">Реализаций</th>
                   <th className="p-2 text-right font-medium">Литры</th>
                   <th className="p-2 text-right font-medium">Выручка</th>
                   <th className="p-2 text-right font-medium">Станций</th>
@@ -943,7 +943,7 @@ function subView(sub: string, p: { companyId: string; dateFrom: string; dateTo: 
   }
 }
 
-/** Пункт «Наливы» — контейнер с внутренними табами + общий тумблер сегмента. */
+/** Пункт «Реализация» — контейнер с внутренними табами + общий тумблер сегмента. */
 export function FuelFillsPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
@@ -967,7 +967,7 @@ export function FuelFillsPanel({ companyId, dateFrom, dateTo }: {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <SegmentToggle value={segment} onChange={setSegment} />
-          <ExportButton title={`Наливы · ${v.title}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
+          <ExportButton title={`Реализация · ${v.title}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
         </div>
       </div>
       {/* key={st.sub} — ремаунт под-вида при смене таба (чистое локальное состояние). */}

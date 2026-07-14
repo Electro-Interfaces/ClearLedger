@@ -1,5 +1,5 @@
 /**
- * Раздел «Операции» — реестр наливов + KPI-карточки (по видам топлива и способам
+ * Раздел «Операции» — реестр реализаций + KPI-карточки (по видам топлива и способам
  * оплаты, кликабельные фильтры) + «Итого» + модалка деталей операции.
  * Перенос функционала «Операции» из TradeFrame («Монитор») на данные Ledger
  * (fuel_transactions). Серверная пагинация/фильтры/сортировка (сотни тысяч строк).
@@ -86,11 +86,11 @@ function BreakdownTable({ title, nameColumn, rows }: {
       </div>
       <div className="max-h-[330px] overflow-auto">
         <table className="w-full min-w-[470px] text-[13px]">
-          <caption className="sr-only">{title}: количество наливов, объём и выручка</caption>
+          <caption className="sr-only">{title}: количество реализаций, объём и выручка</caption>
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b bg-muted/35 text-xs text-muted-foreground">
               <th className="px-4 py-2.5 text-left font-medium">{nameColumn}</th>
-              <th className="px-3 py-2.5 text-right font-medium">Наливы</th>
+              <th className="px-3 py-2.5 text-right font-medium">Реализации</th>
               <th className="px-3 py-2.5 text-right font-medium">Объём</th>
               <th className="px-4 py-2.5 text-right font-medium">Выручка</th>
             </tr>
@@ -157,7 +157,7 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
   }, [searchInput])
   useEffect(() => { setPage(0) }, [station, fuelCodes, payTypes, search, sort, order, dateFrom, dateTo])
 
-  // статус фоновой загрузки наливов
+  // статус фоновой загрузки реализаций
   const syncStatus = useQuery({
     queryKey: ['fuel-tx-sync-status'], queryFn: getFuelTxSyncStatus,
     enabled: syncing, refetchInterval: syncing ? 2500 : false,
@@ -261,14 +261,14 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold tracking-tight text-foreground">Операции</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Реестр наливов STS: отберите нужный разрез и откройте операцию для деталей.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Реестр реализаций STS: отберите нужный разрез и откройте операцию для деталей.</p>
           {syncing && syncStatus.data && (
             <p className="mt-1 text-xs text-primary">{syncStatus.data.message} · загружено {nf0.format(syncStatus.data.loaded)}</p>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" className="h-9" onClick={loadTx} disabled={syncing} title="Загрузить наливы из STS за период раздела">
-            {syncing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Загрузить наливы
+          <Button variant="outline" size="sm" className="h-9" onClick={loadTx} disabled={syncing} title="Загрузить реализации из STS за период раздела">
+            {syncing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Загрузить реализации
           </Button>
           <Button variant="outline" size="sm" className="h-9" onClick={exportXlsx} disabled={exporting || total === 0}>
             {exporting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}Экспорт{total > 50000 ? ' (до 50к)' : ''}
@@ -314,7 +314,7 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
                 {hasFreshFilterTotals ? 'Показатели пересчитаны по активным фильтрам.' : hasFilters ? 'Загружаем показатели по новому отбору.' : 'Все операции в границах периода и рабочей области.'}
               </p>
             </div>
-            <SummaryMetric label="Наливы" value={nf0.format(summary.count)} className="border-b border-border/70" />
+            <SummaryMetric label="Реализации" value={nf0.format(summary.count)} className="border-b border-border/70" />
             <SummaryMetric label="Объём" value={fmtLiters(summary.liters)} className="border-b border-border/70" />
             <SummaryMetric label="Выручка" value={`${fmtMoney(summary.amount)} ₽`} />
           </CardContent>
@@ -438,7 +438,7 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Операция (налив)</DialogTitle>
+            <DialogTitle>Операция (реализация)</DialogTitle>
             <DialogDescription>{detail?.station_name}{detail?.dt ? ` · ${fmtDt(detail.dt)}` : ''}</DialogDescription>
           </DialogHeader>
           {detail && (

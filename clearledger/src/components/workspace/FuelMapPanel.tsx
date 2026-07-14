@@ -1,7 +1,7 @@
 /**
  * «Карта» — интерактивная карта сети АЗС ГИГ (Leaflet + тайлы CARTO, тема light/dark).
  * Координаты станций — из STS /v1/points (гео-паспорт FuelStation). Метрики за период
- * (наливы/объём/выручка из транзакций) → раскраска/размер точек. Аналог ЭЗС «Карта».
+ * (реализации/объём/выручка из транзакций) → раскраска/размер точек. Аналог ЭЗС «Карта».
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -21,7 +21,7 @@ const nf2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 type Metric = 'amount' | 'transactions' | 'liters'
 const METRICS: Record<Metric, { label: string; get: (s: FuelMapStation) => number; fmt: (v: number) => string }> = {
   amount: { label: 'Выручка', get: (s) => s.amount, fmt: (v) => fmtMoneyShort(v) + ' ₽' },
-  transactions: { label: 'Наливы', get: (s) => s.transactions, fmt: (v) => nf0.format(v) },
+  transactions: { label: 'Реализации', get: (s) => s.transactions, fmt: (v) => nf0.format(v) },
   liters: { label: 'Объём', get: (s) => s.liters, fmt: (v) => fmtLiters(v) },
 }
 // viridis — перцептивно-равномерная, colorblind-safe (низкая → высокая величина).
@@ -119,7 +119,7 @@ function StationMarkers({ pts, metric, th, dark, maxVal }: {
                 <div className="border-t border-border/60 bg-muted/20 px-3 py-2">
                   <div className="grid grid-cols-2 gap-1.5">
                     <Stat icon={Wallet} label="Выручка" value={`${fmtMoneyShort(p.amount)} ₽`} />
-                    <Stat icon={Gauge} label="Наливы" value={nf0.format(p.transactions)} />
+                    <Stat icon={Gauge} label="Реализации" value={nf0.format(p.transactions)} />
                     <Stat icon={Fuel} label="Объём" value={fmtLiters(p.liters)} />
                     <Stat icon={Wallet} label="Ср. цена" value={avg ? `${nf2.format(avg)} ₽/л` : '—'} />
                   </div>

@@ -2245,7 +2245,7 @@ async def _tx_sync_bg(company_id, date_from, date_to, station_codes, all_period)
                 # новые наливы → инвалидация версионного кеша аналитики продаж
                 await bump_version(db, company_id)
             _TX_SYNC[key] = {"running": False, "stations_done": total, "stations_total": total,
-                             "loaded": loaded, "message": f"готово: {loaded} наливов"}
+                             "loaded": loaded, "message": f"готово: {loaded} реализаций"}
     except Exception as e:  # noqa: BLE001
         _TX_SYNC[key] = {"running": False, "stations_done": 0, "stations_total": 0,
                          "loaded": 0, "message": f"сбой синка: {str(e)[:80]}"}
