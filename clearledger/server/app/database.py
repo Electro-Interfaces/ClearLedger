@@ -493,6 +493,31 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.12: аналитика продаж ГИГ по наливам (раздел «Продажи» → Аналитика/
+        # Коммерция). Индекс под когорты «новые карты» (MIN(dt) GROUP BY card по
+        # всей истории) и реестр карт. Досев паттернов маппинга оплат: на
+        # ТРАНЗАКЦИОННОМ грейне STS имена видов оплаты отличаются от сменного
+        # sales-блока («Карта МПС» = банковские карты 64% наливов, «КР» =
+        # локальные топливные карты, тех.отпуски) — без досева 2/3 наливов
+        # оставались «не размечено». sort_order 106+ — ПОСЛЕ 'кредит'(103)/
+        # 'кред.рубл'(104), иначе паттерн 'кр' перехватил бы «Кредит».
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS idx_ftx_company_card_dt "
+            "ON fuel_transactions (company_id, card, dt) WHERE card IS NOT NULL",
+            "INSERT INTO payment_mappings (id, company_id, pattern, channel_code, warehouse_override, sort_order) "
+            "SELECT gen_random_uuid(), c.id, v.pattern, v.channel_code, v.warehouse_override, v.sort_order "
+            "FROM companies c "
+            "CROSS JOIN (VALUES "
+            "  ('мпс', 'retail_card', NULL, 106), "
+            "  ('кр', 'cards', 'Карты', 107), "
+            "  ('мерник', 'writeoff_fuel', NULL, 108), "
+            "  ('отпуск бо', 'writeoff_fuel', NULL, 109)"
+            ") AS v(pattern, channel_code, warehouse_override, sort_order) "
+            "WHERE EXISTS (SELECT 1 FROM payment_mappings m WHERE m.company_id = c.id) "
+            "ON CONFLICT (company_id, pattern) DO NOTHING",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
         # v2.13: имена объектов ЭЗС = свежайшее имя из сессий (волна переименований
         # CPO 01.07.26: 611 «Новая Рига Аутлет Вилладж»→«Новая Рига» и др.; каталог
         # грузился из xlsx до переименования и отстал). Старое имя — в

@@ -28,6 +28,15 @@ export interface ChartView {
 }
 export const DEFAULT_VIEW: ChartView = { type: 'bar', mode: 'plain', log: false, avg: false, stack: 'none' }
 
+/** Переопределение форматирования для НЕ-charge метрик (напр. топливо ₽/л):
+ * график остаётся общим, доменную семантику даёт вызывающий. */
+export interface ChartFormat {
+  label: string
+  ratio: boolean
+  fmt: (v: number | null) => string
+  fmtShort: (v: number) => string
+}
+
 const RATIO_METRICS: ChargeMetric[] = ['avg_check', 'avg_energy', 'avg_duration_min', 'success_pct', 'price_per_kwh']
 const isRatio = (m: ChargeMetric) => RATIO_METRICS.includes(m)
 
@@ -38,8 +47,8 @@ export function useChartView(initial: Partial<ChartView> = {}) {
 type Row = Record<string, string | number | null>
 
 /** Применить режим (накопительно/индекс) к данным по каждой серии. */
-function applyMode(data: Row[], series: string[], view: ChartView, metric: ChargeMetric): Row[] {
-  if (view.mode === 'cumulative' && !isRatio(metric)) {
+function applyMode(data: Row[], series: string[], view: ChartView, ratio: boolean): Row[] {
+  if (view.mode === 'cumulative' && !ratio) {
     const acc: Record<string, number> = {}
     return data.map((row) => {
       const r: Row = { ...row }
@@ -59,19 +68,20 @@ function applyMode(data: Row[], series: string[], view: ChartView, metric: Charg
   return data
 }
 
-export function ChargeChart({ data, series, metric, view, height = 320 }: {
-  data: Row[]; series: string[]; metric: ChargeMetric; view: ChartView; height?: number
+export function ChargeChart({ data, series, metric = 'amount', view, height = 320, format }: {
+  data: Row[]; series: string[]; metric?: ChargeMetric; view: ChartView; height?: number; format?: ChartFormat
 }) {
   const single = series.length === 1
-  const d = applyMode(data, series, view, metric)
+  const ratio = format ? format.ratio : isRatio(metric)
+  const d = applyMode(data, series, view, ratio)
   const canStack = !single && view.type !== 'line' && view.stack !== 'none'
   const stackId = canStack ? 'a' : undefined
   const percent = canStack && view.stack === 'percent'
   const isIndex = view.mode === 'index'
 
   // Форматтеры значений с учётом режима
-  const fmtVal = (v: number | null) => isIndex ? `${v ?? 0}` : fmtMetric(metric, v)
-  const fmtAxis = (v: number) => percent ? `${Math.round(v * 100)}%` : isIndex ? `${v}` : fmtMetricShort(metric, v)
+  const fmtVal = (v: number | null) => isIndex ? `${v ?? 0}` : (format ? format.fmt(v) : fmtMetric(metric, v))
+  const fmtAxis = (v: number) => percent ? `${Math.round(v * 100)}%` : isIndex ? `${v}` : (format ? format.fmtShort(v) : fmtMetricShort(metric, v))
 
   // Пик/минимум для подсветки одиночных столбцов (только обычный режим)
   const nums = single ? d.map((r) => r[series[0]]).filter((v): v is number => typeof v === 'number') : []
@@ -82,7 +92,7 @@ export function ChargeChart({ data, series, metric, view, height = 320 }: {
 
   const renderSeries = (s: string, i: number) => {
     const color = COLORS[i % COLORS.length]
-    const name = s === 'value' ? CHARGE_METRIC_LABELS[metric] : s
+    const name = s === 'value' ? (format ? format.label : CHARGE_METRIC_LABELS[metric]) : s
     if (view.type === 'line') {
       return <Line key={s} type="monotone" dataKey={s} name={name} stroke={color} strokeWidth={2} dot={false} connectNulls activeDot={{ r: 4 }} />
     }
@@ -120,7 +130,7 @@ export function ChargeChart({ data, series, metric, view, height = 320 }: {
         {series.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
         {view.avg && single && mean != null && !isIndex && view.stack === 'none' && (
           <ReferenceLine y={mean} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4"
-            label={{ value: `среднее ${fmtMetricShort(metric, mean)}`, position: 'right', fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} />
+            label={{ value: `среднее ${format ? format.fmtShort(mean) : fmtMetricShort(metric, mean)}`, position: 'right', fill: 'hsl(var(--muted-foreground))', fontSize: 10 }} />
         )}
         {series.map(renderSeries)}
       </ComposedChart>
@@ -128,10 +138,11 @@ export function ChargeChart({ data, series, metric, view, height = 320 }: {
   )
 }
 
-/** Тулбар переключателей вида графика. */
-export function ChartControls({ view, onChange, single, metric }: {
-  view: ChartView; onChange: (v: ChartView) => void; single: boolean; metric: ChargeMetric
+/** Тулбар переключателей вида графика. ratio — переопределение для не-charge метрик. */
+export function ChartControls({ view, onChange, single, metric = 'amount', ratio }: {
+  view: ChartView; onChange: (v: ChartView) => void; single: boolean; metric?: ChargeMetric; ratio?: boolean
 }) {
+  const isRatioMetric = ratio ?? isRatio(metric)
   const set = (patch: Partial<ChartView>) => onChange({ ...view, ...patch })
   const Seg = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) => (
     <Button variant={active ? 'default' : 'outline'} size="sm" className="h-7 text-xs px-2" onClick={onClick}>{children}</Button>
@@ -147,7 +158,7 @@ export function ChartControls({ view, onChange, single, metric }: {
       <div className="flex items-center gap-1">
         <span className="text-[11px] text-muted-foreground mr-1">Режим:</span>
         <Seg active={view.mode === 'plain'} onClick={() => set({ mode: 'plain' })}>Обычные</Seg>
-        {!isRatio(metric) && <Seg active={view.mode === 'cumulative'} onClick={() => set({ mode: 'cumulative' })}>Накопительно</Seg>}
+        {!isRatioMetric && <Seg active={view.mode === 'cumulative'} onClick={() => set({ mode: 'cumulative' })}>Накопительно</Seg>}
         <Seg active={view.mode === 'index'} onClick={() => set({ mode: 'index' })}>Индекс 100</Seg>
       </div>
       <div className="flex items-center gap-1">

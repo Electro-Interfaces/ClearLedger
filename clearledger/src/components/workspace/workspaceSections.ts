@@ -22,17 +22,28 @@ import { STORE_MENU } from '@/config/storeCatalog'
 
 /* ── Наборы под-разделов ── */
 
-// Управленческий контур сети АЗС (нефтепродукты)
+// Управленческий контур сети АЗС (нефтепродукты). Сгруппировано по смыслу
+// (заголовки групп рисует сайдбар по полю group, по образцу ЭЗС):
+//   СЕТЬ — состояние сети (обзор + карта);
+//   АНАЛИТИКА — наливы (внутр. табы: разрезы/время/динамика/сравнение),
+//     построчный реестр, каналы оплаты, онлайн-заказы;
+//   КОММЕРЦИЯ — цена (тарифы) и клиентские направления (корпоратив/розница);
+//   ТОВАРОДВИЖЕНИЕ — маржа, поступления ТТН, контроль баланса.
 export const MGMT_MENU: CentralMenuItem[] = [
-  { key: 'overview',     label: 'Обзор' },
-  { key: 'map',          label: 'Карта' },
-  { key: 'channels',     label: 'Каналы продаж' },
-  { key: 'online-orders', label: 'Онлайн-заказы' },
-  { key: 'transactions', label: 'Операции' },
-  { key: 'margin',       label: 'Маржа и цены' },
-  { key: 'purchases',    label: 'Поступления' },
-  { key: 'tanks',        label: 'Контроль баланса' },
+  { key: 'overview',       label: 'Обзор',            group: 'Сеть' },
+  { key: 'map',            label: 'Карта',            group: 'Сеть' },
+  { key: 'fills',          label: 'Наливы',           group: 'Аналитика' },
+  { key: 'transactions',   label: 'Реестр операций',  group: 'Аналитика' },
+  { key: 'channels',       label: 'Каналы продаж',    group: 'Аналитика' },
+  { key: 'online-orders',  label: 'Онлайн-заказы',    group: 'Аналитика' },
+  { key: 'fuel-tariffs',   label: 'Тарифы',           group: 'Коммерция' },
+  { key: 'fuel-corporate', label: 'Корпоратив',       group: 'Коммерция' },
+  { key: 'fuel-retail',    label: 'Частные лица',     group: 'Коммерция' },
+  { key: 'margin',         label: 'Маржа и цены',     group: 'Товародвижение' },
+  { key: 'purchases',      label: 'Поступления',      group: 'Товародвижение' },
+  { key: 'tanks',          label: 'Контроль баланса', group: 'Товародвижение' },
 ]
+export const MGMT_MENU_KEYS = MGMT_MENU.map((m) => m.key)
 
 // Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).
 export const ENERGY_MGMT: CentralMenuItem[] = [

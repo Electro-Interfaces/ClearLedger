@@ -24,7 +24,8 @@ GIG_PAYMENT_CHANNELS: list[dict] = [
     {"code": "writeoff_fuel", "name": "Списание топлива (Прочие)",      "warehouse_name": None,        "requires_transfer": False},
 ]
 
-# Маппинг оплат (прод, 22 записи): pattern (lower), channel_code, warehouse_override
+# Маппинг оплат: pattern (lower), channel_code, warehouse_override
+# (база — живой справочник прода, 22 записи + досев 14.07.2026, см. хвост списка)
 GIG_PAYMENT_MAPPINGS: list[dict] = [
     {"pattern": "наличн",       "channel_code": "retail_cash",   "warehouse_override": None},
     {"pattern": "сбербанк",     "channel_code": "retail_card",   "warehouse_override": None},
@@ -48,6 +49,19 @@ GIG_PAYMENT_MAPPINGS: list[dict] = [
     {"pattern": "прочие",       "channel_code": "writeoff_fuel", "warehouse_override": None},
     {"pattern": "купон",        "channel_code": "",              "warehouse_override": None},
     {"pattern": "прокач",       "channel_code": "",              "warehouse_override": None},
+    # ↓ живой справочник прода (сверка 13-14.07.2026): дубли-аналитика и спец-виды.
+    {"pattern": "дисконт",      "channel_code": "",              "warehouse_override": None},
+    {"pattern": "монополи",     "channel_code": "cards",         "warehouse_override": "Карты"},
+    {"pattern": "кредит",       "channel_code": "ledger",        "warehouse_override": "Ведомости"},
+    {"pattern": "кред.рубл",    "channel_code": "",              "warehouse_override": None},
+    # ↓ транзакционный грейн STS (/v2/transactions) — имена видов оплаты отличаются
+    # от сменного sales-блока: «Карта МПС» = банковские карты (64% наливов ГИГ),
+    # «КР» = локальные топливные карты. ПОРЯДОК: 'кр' строго после 'кредит'/'кред.рубл',
+    # иначе подстрочный матч перехватит «Кредит».
+    {"pattern": "мпс",          "channel_code": "retail_card",   "warehouse_override": None},
+    {"pattern": "кр",           "channel_code": "cards",         "warehouse_override": "Карты"},
+    {"pattern": "мерник",       "channel_code": "writeoff_fuel", "warehouse_override": None},
+    {"pattern": "отпуск бо",    "channel_code": "writeoff_fuel", "warehouse_override": None},
 ]
 
 # Виды топлива: service_code, fuel_name, nomenclature_tonnes, nomenclature_liters, density

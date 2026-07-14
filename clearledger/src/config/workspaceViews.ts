@@ -24,7 +24,8 @@ export const MODE_LABELS: Record<CoreMode, string> = {
 // Подписи под-разделов по режимам (ключ = ключ под-вида в панели).
 const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   management: {
-    overview: 'Обзор', map: 'Карта', transactions: 'Операции',
+    overview: 'Обзор', map: 'Карта', transactions: 'Реестр операций',
+    fills: 'Наливы', 'fuel-tariffs': 'Тарифы', 'fuel-corporate': 'Корпоратив', 'fuel-retail': 'Частные лица',
     'by-station': 'По станциям', 'by-fuel': 'По топливу',
     'by-month': 'По месяцам', channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы', margin: 'Маржа и цены',
     purchases: 'Поступления', tanks: 'Контроль баланса', balance: 'Баланс',

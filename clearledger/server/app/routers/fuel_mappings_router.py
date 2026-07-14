@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import FuelMapping, PaymentChannel, PaymentMapping, ReconcileMapping, User
+from app.services.analytics_cache import bump_version
 
 router = APIRouter(prefix="/fuel-mappings", tags=["Маппинги топлива"])
 
@@ -138,6 +139,7 @@ async def create_channel(body: PaymentChannelIn, user: User = Depends(get_curren
     db.add(ch)
     await db.commit()
     await db.refresh(ch)
+    await bump_version(db, cid)  # классификация каналов → сброс кеша аналитики
     return _ch_out(ch)
 
 
@@ -152,6 +154,7 @@ async def update_channel(ch_id: str, body: PaymentChannelIn,
         setattr(ch, k, v)
     await db.commit()
     await db.refresh(ch)
+    await bump_version(db, cid)
     return _ch_out(ch)
 
 
@@ -164,6 +167,7 @@ async def delete_channel(ch_id: str, user: User = Depends(get_current_user),
         raise HTTPException(404, "Канал не найден")
     await db.delete(ch)
     await db.commit()
+    await bump_version(db, cid)
     return {"deleted": ch_id}
 
 
@@ -187,6 +191,7 @@ async def create_payment_mapping(body: PaymentMappingIn, user: User = Depends(ge
     db.add(m)
     await db.commit()
     await db.refresh(m)
+    await bump_version(db, cid)
     return _pm_out(m)
 
 
@@ -204,6 +209,7 @@ async def update_payment_mapping(m_id: str, body: PaymentMappingIn,
     m.sort_order = body.sort_order
     await db.commit()
     await db.refresh(m)
+    await bump_version(db, cid)
     return _pm_out(m)
 
 
@@ -216,6 +222,7 @@ async def delete_payment_mapping(m_id: str, user: User = Depends(get_current_use
         raise HTTPException(404, "Маппинг не найден")
     await db.delete(m)
     await db.commit()
+    await bump_version(db, cid)
     return {"deleted": m_id}
 
 

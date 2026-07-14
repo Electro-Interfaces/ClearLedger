@@ -8,15 +8,9 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceSubView, type CoreMode } from '@/contexts/WorkspaceContext'
-import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS } from './workspaceSections'
+import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS } from './workspaceSections'
 import { ChargeSalesRouter } from './ChargeSalesRouter'
-import { FuelOverviewPanel } from './FuelOverviewPanel'
-import { FuelTransactionsPanel } from './FuelTransactionsPanel'
-import { FuelMapPanel } from './FuelMapPanel'
-import { MarginDecisionPanel } from './MarginDecisionPanel'
-import { OnlineOrdersPanel } from './OnlineOrdersPanel'
-import { SalesChannelsPanel } from './SalesChannelsPanel'
-import { FuelBalancePanel } from './FuelBalancePanel'
+import { FuelSalesRouter } from './FuelSalesRouter'
 import { BpExportPanel } from './BpExportPanel'
 import { AccountingStreamsPanel } from './AccountingStreamsPanel'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -162,19 +156,19 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   if (ENERGY_MGMT_KEYS.includes(activeTab)) {
     return <div className="h-full overflow-y-auto"><EnergyMgmtVitrine tab={activeTab} /></div>
   }
+  if (MGMT_MENU_KEYS.includes(activeTab)) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <FuelSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} stationCode={stationCode} />
+      </div>
+    )
+  }
+  // Легаси-ключи P&L из старых закладок (?sub=by-station|by-fuel|by-month)
   return (
     <div className="h-full overflow-y-auto">
-      {activeTab === 'overview' && <FuelOverviewPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-      {activeTab === 'map' && <FuelMapPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
       {activeTab === 'by-station' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="station" />}
       {activeTab === 'by-fuel' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="fuel" />}
       {activeTab === 'by-month' && <MgmtPnLTable companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy="month" />}
-      {activeTab === 'channels' && <SalesChannelsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-      {activeTab === 'online-orders' && <OnlineOrdersPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stationCode={stationCode} />}
-      {activeTab === 'transactions' && <FuelTransactionsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-      {activeTab === 'margin' && <MarginDecisionPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
-      {activeTab === 'purchases' && <ReceiptsSection />}
-      {activeTab === 'tanks' && <FuelBalancePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
     </div>
   )
 }

@@ -63,10 +63,12 @@ from app.models import (
     FuelExportDoc, FuelShiftSale, FuelShiftSaleOverride, FuelShiftCorrectionNote,
     FuelTransaction, ExportPacket, User, DataEntry,
 )
+from app.services.analytics_cache import bump_version
 from app.services.fuel_documents import build_shift_documents, build_ttn_documents
 from app.services.fuel_costing import FuelCostingService
 from app.services.fuel_dashboard import FuelDashboardService
 from app.services.fuel_mappings import MappingContext, build_sales_agg, load_mapping_context
+from app.services.fuel_sales_analytics import FuelSalesAnalytics
 from app.services.sts_client import (
     sts_get_shifts, sts_get_shift_report, sts_get_receipts,
     sts_test_connection,
@@ -2239,6 +2241,9 @@ async def _tx_sync_bg(company_id, date_from, date_to, station_codes, all_period)
                         _TX_SYNC[key].update({"message": f"АЗС {st['code']} {wf}: ошибка {str(e)[:60]}"})
                     _TX_SYNC[key].update({"loaded": loaded})
                 _TX_SYNC[key].update({"stations_done": idx + 1, "loaded": loaded})
+            if loaded:
+                # новые наливы → инвалидация версионного кеша аналитики продаж
+                await bump_version(db, company_id)
             _TX_SYNC[key] = {"running": False, "stations_done": total, "stations_total": total,
                              "loaded": loaded, "message": f"готово: {loaded} наливов"}
     except Exception as e:  # noqa: BLE001
@@ -2430,6 +2435,268 @@ async def sales_channels(
         date.fromisoformat(date_from), date.fromisoformat(date_to),
         _csv_ints(station_codes), _csv_ints(fuel_codes), _csv_strs(pay_types),
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Аналитика продаж по наливам (раздел «Продажи» → «Аналитика» / «Коммерция»)
+# ═══════════════════════════════════════════════════════════════
+
+_FA_GROUPS = {"station", "fuel", "pay_type", "channel", "segment", "hour", "weekday",
+              "shift", "card", "day", "week", "decade", "month", "quarter"}
+_FA_BUCKETS = {"day", "week", "decade", "month", "quarter"}
+_FA_METRICS = {"amount", "liters", "fills", "avg_check", "avg_fill", "avg_price"}
+
+
+def _fa_dates(date_from: str, date_to: str) -> tuple[date, date]:
+    try:
+        return date.fromisoformat(date_from), date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(400, "Неверный формат дат (ожидается YYYY-MM-DD)")
+
+
+def _fa_check(value: str | None, allowed: set[str], what: str) -> None:
+    if value is not None and value not in allowed:
+        raise HTTPException(400, f"Недопустимое значение {what}: {value}")
+
+
+@router.get("/analytics/fills")
+async def analytics_fills(
+    date_from: str = Query(...), date_to: str = Query(...),
+    group_by: str = Query("station"),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    card: str | None = Query(None), top: int = Query(500, le=2000),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Разрез наливов: выручка/литры/наливы/ср.чек/ср.налив/ср.цена по группе."""
+    cid = await _company_id(user, db)
+    _fa_check(group_by, _FA_GROUPS, "group_by")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).fills(
+        cid, df, dt, group_by=group_by,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None, card=card or None, top=top)
+
+
+@router.get("/analytics/fills/timeseries")
+async def analytics_fills_timeseries(
+    date_from: str = Query(...), date_to: str = Query(...),
+    bucket: str = Query("day"), metric: str = Query("amount"),
+    series_by: str | None = Query(None), top_n: int = Query(5, le=12),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    card: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Динамика метрики наливов по бакетам; series_by → multi-series (топ-N + «Прочие»)."""
+    cid = await _company_id(user, db)
+    _fa_check(bucket, _FA_BUCKETS, "bucket")
+    _fa_check(metric, _FA_METRICS, "metric")
+    _fa_check(series_by, _FA_GROUPS, "series_by")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).fills_timeseries(
+        cid, df, dt, bucket=bucket, metric=metric, series_by=series_by or None, top_n=top_n,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None, card=card or None)
+
+
+@router.get("/analytics/fills/slice")
+async def analytics_fills_slice(
+    date_from: str = Query(...), date_to: str = Query(...),
+    bucket: str = Query("month"), group_by: str | None = Query(None),
+    metric: str = Query("amount"), top_n: int = Query(8, le=1000),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Нарезка периода на интервалы; строки = разрез (или «Вся сеть»)."""
+    cid = await _company_id(user, db)
+    _fa_check(bucket, _FA_BUCKETS, "bucket")
+    _fa_check(metric, _FA_METRICS, "metric")
+    _fa_check(group_by, _FA_GROUPS, "group_by")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).fills_slice(
+        cid, df, dt, bucket=bucket, group_by=group_by or None, metric=metric, top_n=top_n,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/fills/compare")
+async def analytics_fills_compare(
+    periods: str = Query(..., description="CSV пар YYYY-MM-DD:YYYY-MM-DD (2–4 периода)"),
+    group_by: str = Query("station"), metric: str = Query("amount"),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Сравнение 2–4 произвольных периодов по разрезу."""
+    cid = await _company_id(user, db)
+    _fa_check(group_by, _FA_GROUPS, "group_by")
+    _fa_check(metric, _FA_METRICS, "metric")
+    pairs: list[tuple[str, str]] = []
+    for chunk in periods.split(","):
+        parts = chunk.strip().split(":")
+        if len(parts) != 2:
+            raise HTTPException(400, f"Неверный период: {chunk}")
+        _fa_dates(parts[0], parts[1])  # валидация формата
+        pairs.append((parts[0], parts[1]))
+    if not 2 <= len(pairs) <= 4:
+        raise HTTPException(400, "Ожидается 2–4 периода")
+    return await FuelSalesAnalytics(db).fills_compare_multi(
+        cid, tuple(pairs), group_by=group_by, metric=metric,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/fills/heatmap")
+async def analytics_fills_heatmap(
+    date_from: str = Query(...), date_to: str = Query(...),
+    metric: str = Query("fills"),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Матрица час (0–23) × день недели (1=Пн..7=Вс) по наливам."""
+    cid = await _company_id(user, db)
+    _fa_check(metric, _FA_METRICS, "metric")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).fills_heatmap(
+        cid, df, dt, metric=metric,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/fills/new-cards")
+async def analytics_fills_new_cards(
+    date_from: str = Query(...), date_to: str = Query(...),
+    bucket: str = Query("month"),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Когорты «новые карты» по интервалам нарезки периода."""
+    cid = await _company_id(user, db)
+    _fa_check(bucket, _FA_BUCKETS, "bucket")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).new_cards_slice(
+        cid, df, dt, bucket=bucket,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/fills/new-cards/list")
+async def analytics_fills_new_cards_list(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    limit: int = Query(500, le=2000),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Конкретные новые карты интервала (для модалки списка)."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).new_cards_list(
+        cid, df, dt,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None, limit=limit)
+
+
+@router.get("/tariffs/grid")
+async def tariffs_grid(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Прайс-сетка станция × вид топлива (номинал стеллы, диапазон, факт)."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).tariff_grid(cid, df, dt)
+
+
+@router.get("/tariffs/deviations")
+async def tariffs_deviations(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отклонения факт-цены станций от сети + скидки по каналам (сменный блок)."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).price_deviations(cid, df, dt)
+
+
+@router.get("/tariffs/timeseries")
+async def tariffs_timeseries(
+    date_from: str = Query(...), date_to: str = Query(...),
+    bucket: str = Query("week"), fuel_codes: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Динамика цены ₽/л по видам топлива (средневзвешенная по литрам)."""
+    cid = await _company_id(user, db)
+    _fa_check(bucket, _FA_BUCKETS, "bucket")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).price_timeseries(
+        cid, df, dt, bucket=bucket, fuel_codes=tuple(_csv_ints(fuel_codes)))
+
+
+@router.get("/corporate/overview")
+async def corporate_overview(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """KPI корпоративного сегмента (топливные карты + ведомости)."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).corporate_overview(cid, df, dt)
+
+
+@router.get("/corporate/counterparties")
+async def corporate_counterparties(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Контрагенты-процессоры corp-сегмента (уровень вида оплаты)."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).corporate_counterparties(cid, df, dt)
+
+
+@router.get("/corporate/cards")
+async def corporate_cards(
+    date_from: str = Query(...), date_to: str = Query(...),
+    sort: str = Query("amount"), order: str = Query("desc"),
+    limit: int = Query(50, le=1000), offset: int = Query(0),
+    search: str | None = Query(None), segment: str = Query("corp"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Реестр карт сегмента: пагинация/сортировка/поиск по номеру."""
+    cid = await _company_id(user, db)
+    if sort not in FuelSalesAnalytics._CARDS_SORT:
+        raise HTTPException(400, f"Недопустимая сортировка: {sort}")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).corporate_cards(
+        cid, df, dt, sort=sort, order=order, limit=limit, offset=offset,
+        search=search or None, segment=segment)
+
+
+@router.get("/retail/overview")
+async def retail_overview(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """KPI розницы: нал/безнал, структура, гистограмма чеков, понедельно."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).retail_overview(cid, df, dt)
+
+
+@router.get("/retail/loyalty")
+async def retail_loyalty(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Лояльность розницы по токенам банковских карт."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelSalesAnalytics(db).retail_loyalty(cid, df, dt)
 
 
 @router.post("/stations/sync-geo")
