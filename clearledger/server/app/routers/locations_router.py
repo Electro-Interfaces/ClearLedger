@@ -19,7 +19,10 @@ from app.deps import CompanyDep, get_owned
 from app.models import AuditEvent, Company, ServiceLocation, User
 from app.services import hubex_service
 
-OP_STATUSES = {"working", "not_working", "on_repair", "maintenance", "unknown"}
+# decommissioned входит в белый список: раньше значение существовало только как
+# продукт ингеста CPO («Выведена из эксплуатации»), а ручная смена и демонтаж
+# оборудования (складской контур) выставить его не могли — асимметрия.
+OP_STATUSES = {"working", "not_working", "on_repair", "maintenance", "unknown", "decommissioned"}
 
 router = APIRouter(prefix="/locations", tags=["Точки обслуживания"])
 
@@ -85,6 +88,13 @@ def _passport(l: ServiceLocation) -> dict[str, Any] | None:
         "hubexLinkStatus": getattr(l, "hubex_link_status", None),
         "rating": getattr(l, "rating", None), "successPct": getattr(l, "success_pct", None),
         "regionId": str(l.region_id) if getattr(l, "region_id", None) else None,
+        # атрибуты из сводной выработки (слот obshaya, v2.14)
+        "locationClass": getattr(l, "location_class", None),
+        "speedClass": getattr(l, "speed_class", None),
+        "installedOn": getattr(l, "installed_on", None),
+        "decommissionedOn": getattr(l, "decommissioned_on", None),
+        "inventoryNumber": getattr(l, "inventory_number", None),
+        "isCorp": True if getattr(l, "is_corp", False) else None,
     }
     out = {k: v for k, v in fields.items() if v is not None}
     return out or None

@@ -15,8 +15,9 @@ export const OP_META: Record<string, { label: string; cls: string }> = {
   on_repair: { label: 'На ремонте', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
   maintenance: { label: 'Обслуживание', cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400' },
   unknown: { label: 'Неизвестно', cls: 'bg-muted text-muted-foreground' },
+  decommissioned: { label: 'Выведена', cls: 'bg-zinc-500/15 text-zinc-500 dark:text-zinc-400' },
 }
-export const OP_OPTIONS = ['working', 'not_working', 'on_repair', 'maintenance', 'unknown']
+export const OP_OPTIONS = ['working', 'not_working', 'on_repair', 'maintenance', 'unknown', 'decommissioned']
 
 /**
  * Ключи metadata, относящиеся к ОБОРУДОВАНИЮ (вкладка «Оборудование»).
