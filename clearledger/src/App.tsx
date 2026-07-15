@@ -44,7 +44,6 @@ const FuelMappingsPage = lazy(() => import('@/pages/FuelMappingsPage').then((m) 
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 const NormalizationWorkspacePage = lazy(() => import('@/pages/NormalizationWorkspacePage').then((m) => ({ default: m.NormalizationWorkspacePage })))
-const BalancePage = lazy(() => import('@/pages/BalancePage').then((m) => ({ default: m.BalancePage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
@@ -164,7 +163,6 @@ const router = createBrowserRouter([
           { path: '/forecast', element: <LazyPage><MonthCloseForecastPage /></LazyPage> },
           { path: '/normalization', element: <LazyPage><NormalizationWorkspacePage /></LazyPage> },
           { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
-          { path: '/balance', element: <LazyPage><BalancePage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
           { path: '/admin', element: <LazyPage><AdminPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },

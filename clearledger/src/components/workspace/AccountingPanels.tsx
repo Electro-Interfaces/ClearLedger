@@ -29,12 +29,9 @@ import {
   getVat, getProfit,
   fmtMoney, fmtMoneyShort, fmtLiters, fmtPct,
 } from '@/services/analyticsService'
-import { BalanceVitrine } from '@/components/balance/BalanceVitrine'
 import { OpsOverviewVitrine, OpsBalanceVitrine } from '@/components/balance/OpsCockpit'
 import { OpsCompletenessVitrine } from '@/components/balance/OpsCompleteness'
-import {
-  NetworkOverviewVitrine, RevenueVitrine, TariffsVitrine, ReceivablesVitrine, ProcurementVitrine, RentVitrine,
-} from '@/components/balance/EnergyManagementVitrines'
+import { ProcurementVitrine, RentVitrine } from '@/components/balance/EnergyManagementVitrines'
 import { FinancialVitrine } from '@/components/balance/EnergyFinancialVitrine'
 import { AccountingVitrine } from '@/components/balance/EnergyAccountingVitrine'
 import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
@@ -89,13 +86,11 @@ function SectionEmpty({ section, org }: { section: string; org: string }) {
 /*                     Управленческий учёт                          */
 /* ────────────────────────────────────────────────────────────── */
 
-// Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).
+// Хозяйство (energy): реальные витрины на реестрах station_energy_periods /
+// station_contract_settlements. Демо-витрины (net_overview/revenue/tariffs/
+// receivables на DEMO_EZS) удалены.
 function EnergyMgmtVitrine({ tab }: { tab: string }) {
   switch (tab) {
-    case 'net_overview': return <NetworkOverviewVitrine />
-    case 'revenue': return <RevenueVitrine />
-    case 'tariffs': return <TariffsVitrine />
-    case 'receivables': return <ReceivablesVitrine />
     case 'procurement': return <ProcurementVitrine />
     case 'rent': return <RentVitrine />
     default: return null
@@ -147,9 +142,6 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   }
   if (activeTab === 'ops_completeness') {
     return <div className="h-full overflow-y-auto"><OpsCompletenessVitrine /></div>
-  }
-  if (activeTab === 'balance') {
-    return <div className="h-full overflow-y-auto"><BalanceVitrine /></div>
   }
   // Складской учёт оборудования ЭЗС (energy): парк/склады/движения/ЗИП.
   if (EQUIPMENT_KEYS.includes(activeTab)) {

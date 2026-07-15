@@ -15,7 +15,6 @@ import { useCompany } from '@/contexts/CompanyContext'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import type { CentralMenuItem } from './CentralPanelLayout'
 import { getWorkspaceModule } from '@/config/workspaceModules'
-import { balanceModuleForProfile } from '@/config/balanceModules'
 import { useModuleConnections, isModuleConnected, isComponentEnabled } from '@/services/moduleConnectionService'
 import { getModuleComponentDefs } from '@/config/moduleComponents'
 import { STORE_MENU } from '@/config/storeCatalog'
@@ -113,8 +112,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   }
 
   // «Продажи» (mode=management) — аналитика продаж: топливный P&L + сессии ЭЗС.
-  // «Управленческий» (mode=operations) — энергозакупка/аренда/баланс (перенесено из management).
-  const balMod = balanceModuleForProfile(company.profileId)
+  // «Управленческий» (mode=operations) — энергозакупка/аренда (реальные реестры).
   const mgmtItems: CentralMenuItem[] = [
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
     ...(isEnergy ? CHARGE_SESSIONS_MENU : []),
@@ -140,9 +138,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
       : []),
     ...energyOps,
     ...(!isEnergy && on('ops_contracts') ? [{ key: 'contracts', label: 'Договоры и аренда' }] : []),
-    ...(balMod && on(balMod.id) && isEnergy
-      ? [{ key: 'balance', label: balMod.navLabel, group: 'Хозяйство' }]
-      : []),
+    // «Баланс ЭЗС» (демо-витрина BalanceVitrine на DEMO_EZS) убран — реальный
+    // пообъектный баланс живёт в «Мониторинг → Баланс (факт)» (ops_balance).
   ]
 
   const storeOn = on('store_module')
