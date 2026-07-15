@@ -412,8 +412,10 @@ async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id) -> tup
                 client_tariff=rate, client_amount=S.energy_kwh * rate))
             priced += int(r.rowcount or 0)
         elif mode == "retail":
+            # розница сессии × (1 − скидка%): биллинг ПК для каршеринга — ровно так
+            k = 1 - disc / 100
             r = await db.execute(update(S).where(*where(phone)).values(
-                client_tariff=S.tariff, client_amount=S.energy_kwh * S.tariff))
+                client_tariff=S.tariff * k, client_amount=S.energy_kwh * S.tariff * k))
             priced += int(r.rowcount or 0)
         elif mode == "matrix":
             r = await db.execute(update(S).where(*where(phone)).values(
