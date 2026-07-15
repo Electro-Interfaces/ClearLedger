@@ -539,6 +539,33 @@ async def create_all() -> None:
             "WHERE f.location_id = sl.id AND btrim(sl.name) IS DISTINCT FROM f.nm"
         ))
 
+        # v2.14: сводная выработка ЭЗС («ОБЩАЯ_2024-2026», слот obshaya канала
+        # реестров) — паспортные атрибуты станции из станционного листа «Общие
+        # итоги»; station_dispense_periods создаётся через metadata.create_all.
+        for stmt in (
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS location_class VARCHAR(20)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS speed_class VARCHAR(10)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS installed_on VARCHAR(10)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS decommissioned_on VARCHAR(10)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS inventory_number VARCHAR(60)",
+            "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS is_corp BOOLEAN NOT NULL DEFAULT false",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
+        # v2.15: складской учёт оборудования ЭЗС (ezs_equipment_units/_movements,
+        # ezs_spare_parts/_stock/_movements — таблицы через metadata.create_all).
+        # Здесь — только функциональные уникальные индексы (декларативно не выразить):
+        # серийник уникален per company без учёта регистра (пустые не участвуют);
+        # имя номенклатуры ЗИП уникально per company без учёта регистра.
+        for stmt in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ezs_unit_serial "
+            "ON ezs_equipment_units (company_id, lower(serial_number)) "
+            "WHERE serial_number IS NOT NULL AND serial_number <> ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ezs_spare_name "
+            "ON ezs_spare_parts (company_id, lower(name))",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

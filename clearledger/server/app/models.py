@@ -957,6 +957,53 @@ class StationEnergyPeriod(Base):
 
 
 # ---------------------------------------------------------------------------
+# StationDispensePeriod (L2: ОТПУСК э/э станции помесячно — из сводной выработки)
+# ---------------------------------------------------------------------------
+# Симметрия StationEnergyPeriod (вход): помесячный отпуск кВт·ч и выручка ₽ по
+# станции из ручной сводной контрагента («ОБЩАЯ_2024-2026», слот obshaya канала
+# реестров). Гранулярность — тип коннектора; connector_type IS NULL = станционная
+# строка (для станций без коннекторной детализации в файле). Сумма по станции =
+# SUM всех её строк: коннекторные и станционные строки НЕ пересекаются (см.
+# ingest_obshaya). Транзакционный отпуск 2026+ — charge_sessions; этот ряд даёт
+# историю 2024–2025 и базу сверки на пересечении периодов.
+# ---------------------------------------------------------------------------
+class StationDispensePeriod(Base):
+    __tablename__ = "station_dispense_periods"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Первое число месяца ISO: '2024-03-01'.
+    period: Mapped[str] = mapped_column(String(10), nullable=False)
+    # Тип коннектора (CCS2/CHADEMO/GBT_DC/...); NULL — станционная строка.
+    connector_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Отпуск за месяц, кВт·ч (кВтч-листы ведутся с 03.2024).
+    dispense_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Выручка за месяц, ₽ (₽-лист ведётся 01.2024–07.2025; дальше — сессии).
+    amount_rub: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # '' вместо NULL в connector_type не используем: уникальность через COALESCE
+        # не выразить штатным Index — ключ включает connector_type, NULL-строки
+        # дедуплицируются в ingest (upsert через префетч-кеш).
+        Index("idx_station_dispense_loc", "company_id", "location_id", "period"),
+        Index("idx_station_dispense_period", "company_id", "period"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # ContractDimension (обобщённая грань ограничения договора по разрезу — Фаза 3)
 # ---------------------------------------------------------------------------
 # Договор может ограничиваться не только торговыми точками, но и другими
@@ -2553,6 +2600,20 @@ class ServiceLocation(Base):
     hubex_link_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     rating: Mapped[float | None] = mapped_column(Float, nullable=True)
     success_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ── Атрибуты из сводной выработки контрагента (слот obshaya, v2.14):
+    # размещение city|highway (их «трасса/город») — субсидийный разрез;
+    location_class: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # класс скорости fast|slow (их «Быстрая/Медленная»);
+    speed_class: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # даты жизненного цикла ISO 'YYYY-MM-DD' (вывод: дата распознана из «Дата
+    # вывода из эксплуатации»; текст без даты — в extra_metadata.decommissionNote);
+    installed_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    decommissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # инвентарный номер ОС (мост к бухучёту; «НЕТ НА 01»/«не известно» → NULL);
+    inventory_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # станция закреплена за корп-контуром (каршеринг) — их «статус корп».
+    is_corp: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -3352,3 +3413,189 @@ class MetrikaConnection(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (Index("uq_metrika_company", "company_id", unique=True),)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Складской учёт оборудования ЭЗС (energy): единицы, движения, ЗИП.
+#
+# «Железка» отделена от «места»: EzsEquipmentUnit — учётная карточка станции
+# (серийник/вендор/паспорт), её местонахождение — ссылка на ServiceLocation
+# (склад type=warehouse ЛИБО площадка ev_charging) или внешний держатель
+# (подрядчик/производитель — custodian + custodian_name). Первая реализованная
+# фаза схемы модернизации справочника (Станция ≠ Площадка, 13.07.2026).
+#
+# Карточки НЕ создаются массово для работающего парка — рождаются при закупке,
+# демонтаже, Excel-импорте складского реестра или ручном вводе; после монтажа
+# карточка живёт дальше (state='in_operation').
+# Префикс Ezs*/ezs_* — имена Warehouse/StockOnHand заняты магазином (сопутка).
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class EzsEquipmentUnit(Base):
+    """Единица оборудования ЭЗС (станция-железка складского контура)."""
+    __tablename__ = "ezs_equipment_units"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="station")  # задел: module|...
+    serial_number: Mapped[str | None] = mapped_column(String(120), nullable=True)     # trim при записи
+    vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)            # канон (canon_vendor)
+    vendor_raw: Mapped[str | None] = mapped_column(String(200), nullable=True)        # как пришло
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    station_type: Mapped[str | None] = mapped_column(String(40), nullable=True)       # DC/AC/…
+    power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    connectors_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    connector_types: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    inventory_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    purchase_doc: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    purchase_date: Mapped[str | None] = mapped_column(String(10), nullable=True)      # ISO YYYY-MM-DD
+    warranty_until: Mapped[str | None] = mapped_column(String(10), nullable=True)     # ISO
+    # Жизненный цикл: in_stock_new | in_stock_used | reserved | in_installation |
+    # in_operation | in_repair | returned_to_vendor | written_off (терминальные два).
+    # Переходы — словарь TRANSITIONS в services/ezs_equipment.py (валидация на бэке).
+    state: Mapped[str] = mapped_column(String(30), nullable=False, default="in_stock_new")
+    # Грейд «б/у» — атрибут единицы, НЕЗАВИСИМЫЙ от state: определяет, в какое
+    # складское состояние возвращаться из reserved/in_repair (new или used).
+    is_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    current_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    # Держатель: warehouse|site — наши локации; contractor|vendor — внешний
+    # (custodian_name), current_location_id тогда NULL; none — списана/утиль.
+    custodian: Mapped[str] = mapped_column(String(20), nullable=False, default="warehouse")
+    custodian_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    origin_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    reserved_for_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_unit_company_state", "company_id", "state"),
+        Index("ix_ezs_unit_company_loc", "company_id", "current_location_id"),
+        # Частично-уникальный индекс по lower(serial_number) — в миграции v2.15
+        # (функциональный, декларативно не выразить).
+    )
+
+
+class EzsEquipmentMovement(Base):
+    """Движение единицы оборудования: полный журнал судьбы железки.
+
+    Каждое движение атомарно меняет unit (state/current_location/custodian) —
+    текущее состояние единицы всегда выводимо из последнего движения."""
+    __tablename__ = "ezs_equipment_movements"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    unit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_equipment_units.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # receipt|transfer|reserve|unreserve|to_installation|commissioning|dismantle|
+    # to_repair|from_repair|to_vendor|write_off|correction
+    op: Mapped[str] = mapped_column(String(20), nullable=False)
+    from_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    to_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    from_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    to_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    counterparty: Mapped[str | None] = mapped_column(String(300), nullable=True)  # кому передано
+    occurred_on: Mapped[str] = mapped_column(String(10), nullable=False)          # ISO дата операции
+    basis: Mapped[str | None] = mapped_column(String(300), nullable=True)         # документ-основание
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_move_company_date", "company_id", "occurred_on"),
+        Index("ix_ezs_move_unit_created", "unit_id", "created_at"),
+    )
+
+
+class EzsSparePart(Base):
+    """Номенклатура ЗИП (запчасти) — количественный учёт, без серийников."""
+    __tablename__ = "ezs_spare_parts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    # power_module|controller|connector|cable|display|board|other
+    category: Mapped[str] = mapped_column(String(30), nullable=False, default="other")
+    vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    article: Mapped[str | None] = mapped_column(String(100), nullable=True)         # артикул
+    compatible_models: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    unit_label: Mapped[str] = mapped_column(String(20), nullable=False, default="шт")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Удаление при наличии движений запрещено — архив (скрытие из подбора).
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # Уникальность (company_id, lower(name)) — функциональный индекс в v2.15.
+
+
+class EzsSparePartStock(Base):
+    """Материализованный остаток ЗИП: (номенклатура × склад) → количество.
+
+    Паттерн StockOnHand: снимок, корректируется движениями транзакционно
+    (with_for_update), отрицательный остаток запрещён сервисом."""
+    __tablename__ = "ezs_spare_part_stock"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    part_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_spare_parts.id", ondelete="CASCADE"), nullable=False)
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), nullable=False)
+    qty: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_ezs_spare_stock", "company_id", "part_id", "location_id", unique=True),
+    )
+
+
+class EzsSparePartMovement(Base):
+    """Движение ЗИП: приход/расход/перемещение/списание/корректировка.
+
+    Расход (issue) может быть привязан к станции-единице (target_unit_id)
+    и/или площадке (target_location_id) — на что потрачена запчасть."""
+    __tablename__ = "ezs_spare_part_movements"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    part_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_spare_parts.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    op: Mapped[str] = mapped_column(String(20), nullable=False)  # receipt|issue|transfer|write_off|correction
+    qty: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)  # > 0 (семантику даёт op)
+    from_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    to_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    target_unit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_equipment_units.id", ondelete="SET NULL"), nullable=True)
+    target_location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    occurred_on: Mapped[str] = mapped_column(String(10), nullable=False)
+    basis: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_spmove_company_date", "company_id", "occurred_on"),
+        Index("ix_ezs_spmove_part_created", "part_id", "created_at"),
+    )
