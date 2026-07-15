@@ -1,17 +1,38 @@
 /**
- * SupportContext — лёгкий аналог модуля «Взаимодействие» из TradeFrame.
+ * SupportContext — управление вспомогательной областью «Взаимодействие».
  *
- * Управляет открытием модалок Чат / Заявки / Инфо из шапки (toggle: повторное
- * нажатие или крестик закрывают). Без бэкенда поддержки (Matrix/TSupport) —
- * счётчики непрочитанных пока нулевые, структура оставлена для будущей привязки.
+ * Двухрежимная подача одних и тех же разделов (Чат / Заявки / Инфо):
+ *  • mode='modal' — вызов из ВЕРХНЕГО хедера: окно поверх всего.
+ *  • mode='dock'  — вызов ТАПОМ в правой области / контекстно из функции:
+ *                   живёт вкладкой в правом доке, без модалки.
+ * Переключатель режима (setInteractionMode) позволяет «закрепить справа» ↔
+ * «открыть окном». Счётчик непрочитанных чата — живой (React Query).
  */
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { getToken, isApiEnabled } from '@/services/apiClient'
+import { getRooms } from '@/services/chatService'
 
 export type InteractionSection = 'chat' | 'tickets' | 'help'
+export type InteractionMode = 'modal' | 'dock'
+
+interface InteractionState {
+  section: InteractionSection | null
+  mode: InteractionMode
+  /** Контекст вызова (для будущих контекстных чатов: id функции/экрана). */
+  context?: string | null
+}
 
 interface SupportContextValue {
   interactionSection: InteractionSection | null
+  interactionMode: InteractionMode
+  interactionContext: string | null
+  /** Хедер: открыть/закрыть в модалке (toggle). */
   toggleInteraction: (section: InteractionSection) => void
+  /** Правая область / контекст: открыть в доке (можно передать контекст). */
+  openInteraction: (section: InteractionSection, context?: string | null) => void
+  /** Переключить подачу текущего раздела (окно ↔ док). */
+  setInteractionMode: (mode: InteractionMode) => void
   closeInteraction: () => void
   unreadCounts: { chat: number; tickets: number }
 }
@@ -19,17 +40,23 @@ interface SupportContextValue {
 const SupportContext = createContext<SupportContextValue | undefined>(undefined)
 
 export function SupportProvider({ children }: { children: ReactNode }) {
-  const [interactionSection, setInteractionSection] = useState<InteractionSection | null>(null)
+  const [state, setState] = useState<InteractionState>({ section: null, mode: 'modal', context: null })
 
-  const toggleInteraction = useCallback(
-    (section: InteractionSection) =>
-      setInteractionSection((prev) => (prev === section ? null : section)),
-    [],
-  )
-  const closeInteraction = useCallback(() => setInteractionSection(null), [])
+  const toggleInteraction = useCallback((section: InteractionSection) => {
+    setState((prev) =>
+      prev.section === section && prev.mode === 'modal'
+        ? { section: null, mode: 'modal', context: null }
+        : { section, mode: 'modal', context: null })
+  }, [])
+  const openInteraction = useCallback((section: InteractionSection, context: string | null = null) => {
+    setState({ section, mode: 'dock', context })
+  }, [])
+  const setInteractionMode = useCallback((mode: InteractionMode) => {
+    setState((prev) => (prev.section ? { ...prev, mode } : prev))
+  }, [])
+  const closeInteraction = useCallback(() => setState((prev) => ({ ...prev, section: null })), [])
 
-  // Cmd/Ctrl+K — открыть/закрыть «Инфо» с любого экрана (как в TradeFrame).
-  // e.code='KeyK' не зависит от раскладки; в полях ввода не перехватываем.
+  // Cmd/Ctrl+K — открыть/закрыть «Инфо» окном (как в TradeFrame).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code !== 'KeyK' || !(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
@@ -37,18 +64,30 @@ export function SupportProvider({ children }: { children: ReactNode }) {
       const tag = t?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return
       e.preventDefault()
-      setInteractionSection((prev) => (prev === 'help' ? null : 'help'))
+      setState((prev) => (prev.section === 'help' ? { ...prev, section: null } : { section: 'help', mode: 'modal', context: null }))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Пока без живого бэкенда — счётчики нулевые (бейджи не рисуются).
-  const unreadCounts = { chat: 0, tickets: 0 }
+  // Живой счётчик непрочитанных чата (общий кеш с ChatPanel: ключ ['chat-rooms', false]).
+  const { data: rooms } = useQuery({
+    queryKey: ['chat-rooms', false],
+    queryFn: () => getRooms(false),
+    enabled: isApiEnabled() && !!getToken(),
+    refetchInterval: 60000,
+  })
+  const chatUnread = (rooms || []).reduce((a, r) => a + (r.unreadCount || 0), 0)
+  const unreadCounts = { chat: chatUnread, tickets: 0 }
 
   return (
     <SupportContext.Provider
-      value={{ interactionSection, toggleInteraction, closeInteraction, unreadCounts }}
+      value={{
+        interactionSection: state.section,
+        interactionMode: state.mode,
+        interactionContext: state.context ?? null,
+        toggleInteraction, openInteraction, setInteractionMode, closeInteraction, unreadCounts,
+      }}
     >
       {children}
     </SupportContext.Provider>

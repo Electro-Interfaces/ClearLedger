@@ -176,7 +176,7 @@ export function OneCSyncStatus({ connectionId, exchangePath }: Props) {
             <Separator />
             <div className="rounded-lg border p-3 bg-muted/30">
               <p className="text-sm font-medium mb-2">Результат</p>
-              <div className="grid grid-cols-4 gap-2 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                 <StatBox label="Обработано" value={lastResult.stats.processed} />
                 <StatBox label="Создано" value={lastResult.stats.created} color="text-green-500" />
                 <StatBox label="Обновлено" value={lastResult.stats.updated} color="text-blue-500" />

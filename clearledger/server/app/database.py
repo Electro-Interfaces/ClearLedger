@@ -566,6 +566,18 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.16: чат (chat_rooms/participants/messages/reactions/folders — через
+        # metadata.create_all). Здесь — presence-колонка + поля фазы 2 (закреп,
+        # вложения) на существующих таблицах.
+        for stmt in (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
+            "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS pinned_message_id UUID",
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_url TEXT",
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_name VARCHAR(500)",
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_size INTEGER",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

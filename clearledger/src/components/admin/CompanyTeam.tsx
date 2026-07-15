@@ -295,7 +295,7 @@ function InviteDialog({ companyId }: { companyId: string }) {
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
               placeholder="employee@company.ru" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Должность</Label>
               <Input value={position} onChange={(e) => setPosition(e.target.value)}
@@ -349,7 +349,7 @@ function AddUserDialog({ companyId }: { companyId: string }) {
       <DialogContent>
         <DialogHeader><DialogTitle>Добавить сотрудника вручную</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2"><Label>ФИО</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Фамилия Имя Отчество" /></div>
             <div className="space-y-2"><Label>Email</Label>
@@ -450,7 +450,7 @@ export function RolesAccessTab({ companyId, canManage }: { companyId: string; ca
   return (
     <div className="grid lg:grid-cols-2 gap-4 items-start">
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardHeader className="flex-row items-center justify-between space-y-0 flex-wrap gap-2">
           <div>
             <CardTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" /> Роли доступа</CardTitle>
             <CardDescription>Именованные наборы модулей. Системные — только чтение; кастомные можно менять.</CardDescription>

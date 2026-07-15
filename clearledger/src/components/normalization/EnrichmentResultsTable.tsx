@@ -69,8 +69,8 @@ export function EnrichmentResultsTable({ results, onApply, isPending }: Props) {
         )}
       </div>
 
-      <div className="rounded-md border">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto rounded-md border">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="text-left p-3 font-medium">Название</th>

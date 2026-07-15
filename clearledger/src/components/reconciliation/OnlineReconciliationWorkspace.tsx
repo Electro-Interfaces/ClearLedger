@@ -427,7 +427,7 @@ export function OnlineReconciliationWorkspace({
         </div>
       ) : null}
 
-      <div className="grid min-h-[520px] grid-cols-[300px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-background">
+      <div className="grid min-h-[520px] grid-cols-1 overflow-visible lg:grid-cols-[300px_minmax(0,1fr)] lg:overflow-hidden rounded-xl border bg-background">
         <aside className="border-r bg-muted/15 p-2">
           <button
             type="button"

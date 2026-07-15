@@ -67,7 +67,7 @@ export function CategoryChart() {
             <YAxis
               type="category"
               dataKey="name"
-              width={140}
+              width={90}
               tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 13 }}
               axisLine={false}
               tickLine={false}

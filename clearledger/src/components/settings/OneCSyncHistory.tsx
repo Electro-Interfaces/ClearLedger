@@ -76,7 +76,7 @@ function LogRow({
     <div className="border rounded-lg">
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/50 transition-colors"
+        className="w-full flex flex-wrap items-center gap-3 p-3 text-left hover:bg-muted/50 transition-colors"
       >
         {isExpanded ? (
           <ChevronDown className="size-4 text-muted-foreground shrink-0" />
@@ -90,11 +90,11 @@ function LogRow({
           <ArrowUpFromLine className="size-4 text-orange-500 shrink-0" />
         )}
 
-        <span className="text-sm text-muted-foreground shrink-0 w-36">
+        <span className="text-sm text-muted-foreground shrink-0 w-36 hidden sm:inline">
           {format(new Date(log.startedAt), 'dd MMM yyyy HH:mm', { locale: ru })}
         </span>
 
-        <span className="text-sm font-medium shrink-0">
+        <span className="text-sm font-medium shrink-0 min-w-0">
           {typeLabels[log.syncType] ?? log.syncType}
         </span>
 

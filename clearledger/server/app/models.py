@@ -88,6 +88,10 @@ class User(Base):
     reset_token_expires: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Presence чата: время последнего отключения WS (для «был(а) N мин назад»).
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -3598,4 +3602,139 @@ class EzsSparePartMovement(Base):
     __table_args__ = (
         Index("ix_ezs_spmove_company_date", "company_id", "occurred_on"),
         Index("ix_ezs_spmove_part_created", "part_id", "created_at"),
+    )
+
+
+# ===========================================================================
+# Чат (внутренний мессенджер, Telegram-подобный) — порт ядра из TSupport.
+# Комнаты компании (Общий/Объявления) + личные + группы; company-scoped.
+# ===========================================================================
+class ChatRoom(Base):
+    """Комната чата: company (kind general/news), direct (личный), group."""
+    __tablename__ = "chat_rooms"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # type: company | direct | group. kind (только для company): general | news.
+    type: Mapped[str] = mapped_column(String(20), nullable=False, default="direct")
+    kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)  # NULL у direct → имя собеседника
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)      # false = soft-delete
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Закреплённое сообщение (одно на комнату). Мягкая ссылка (без FK — избегаем
+    # цикла chat_rooms↔chat_messages); валидность проверяет роут.
+    pinned_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # updated_at = время последней активности (сортировка списка комнат)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_chat_rooms_company", "company_id"),
+        Index("idx_chat_rooms_type", "type"),
+        # Одна системная комната каждого вида (general/news) на компанию среди активных.
+        Index("uq_chat_rooms_company_kind", "company_id", "kind",
+              unique=True, postgresql_where=text("kind IS NOT NULL AND is_active = true")),
+    )
+
+
+class ChatParticipant(Base):
+    """Участник комнаты + курсор непрочитанного (last_read_at)."""
+    __tablename__ = "chat_participants"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")  # member | admin
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_chat_participants", "room_id", "user_id", unique=True),
+        Index("idx_chat_participants_user", "user_id"),
+    )
+
+
+class ChatMessage(Base):
+    """Сообщение комнаты. user_name денормализован (история). Soft-delete."""
+    __tablename__ = "chat_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")  # text|image|video|file|system
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Вложение (одиночный файл на сообщение; серия изображений = серия сообщений-«альбом»).
+    file_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reply_to: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True
+    )
+    is_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_chat_messages_room_created", "room_id", "created_at"),
+    )
+
+
+class ChatMessageReaction(Base):
+    """Реакция-эмодзи на сообщение. Одна на пользователя (UNIQUE)."""
+    __tablename__ = "chat_message_reactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    emoji: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_chat_reaction", "message_id", "user_id", unique=True),
+        Index("idx_chat_reaction_message", "message_id"),
+    )
+
+
+class ChatFolder(Base):
+    """Персональная папка чатов (Telegram-стиль): набор комнат + порядок."""
+    __tablename__ = "chat_folders"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    room_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=False, default=list)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_chat_folders_user", "user_id", "sort_order"),
     )

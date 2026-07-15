@@ -319,7 +319,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
         count={result.verifiedEntries.length}
         defaultOpen={false}
       >
-        <div className="rounded-lg border overflow-hidden">
+        <div className="rounded-lg border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-muted/50 text-muted-foreground text-xs">
@@ -368,7 +368,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
               </Button>
             </div>
           )}
-          <div className="rounded-lg border overflow-hidden">
+          <div className="rounded-lg border overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/50 text-muted-foreground text-xs">
@@ -432,7 +432,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
         count={result.correspondences.length}
         defaultOpen={false}
       >
-        <div className="rounded-lg border overflow-hidden">
+        <div className="rounded-lg border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-muted/50 text-muted-foreground text-xs">

@@ -146,14 +146,14 @@ export function NormalizationPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">Нормализация</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Валидация, обогащение из справочников и контроль соответствия
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             onClick={handleRunAudit}

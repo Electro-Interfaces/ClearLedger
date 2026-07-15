@@ -132,7 +132,7 @@ function RawRequisites({ raw, hide }: { raw?: Record<string, unknown>; hide?: st
   )
   if (entries.length === 0) return <p className="text-sm text-muted-foreground">Доп. реквизиты не загружены.</p>
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5">
       {entries.map(([k, v]) => (
         <div key={k} className="space-y-0.5">
           <div className="text-[11px] text-muted-foreground/70">{RAW_LABELS[k] ?? k}</div>
@@ -215,7 +215,7 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
             <Req label="Номер" value={c.number} />
             <Req label="Дата" value={c.date} />
             <Req label="Вид договора" value={<ContractKindBadge contract={c} />} />
@@ -434,7 +434,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
           <span>Реквизиты</span>
           <ChevronDown className="size-4 transition-transform group-open:rotate-180" />
         </summary>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 pt-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 pt-3">
           <Req label="Полное наименование" value={cp.fullName} span />
           <Req label="ИНН" value={cp.inn} />
           <Req label="КПП" value={cp.kpp} />
@@ -563,7 +563,7 @@ function FSection({ title, children }: { title: string; children: React.ReactNod
   return (
     <div className="space-y-2.5">
       <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">{title}</p>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">{children}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-2.5">{children}</div>
     </div>
   )
 }
@@ -746,7 +746,7 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
               <SelectTrigger><SelectValue placeholder={orgs.length ? 'Выберите' : 'Нет организаций'} /></SelectTrigger>
               <SelectContent>{orgs.map((o) => <SelectItem key={o.id} value={o.externalRef || o.id}>{o.name}</SelectItem>)}</SelectContent>
             </Select></div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div className="space-y-1.5"><Label>Валюта</Label>
               <Input value={f.currency} onChange={(e) => setF((s) => ({ ...s, currency: e.target.value }))} /></div>
             <div className="space-y-1.5"><Label>Срок действия</Label>
@@ -754,7 +754,7 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
             <div className="space-y-1.5"><Label>Сумма</Label>
               <Input value={f.amountLimit} onChange={(e) => setF((s) => ({ ...s, amountLimit: e.target.value.replace(/[^\d.]/g, '') }))} /></div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div className="space-y-1.5"><Label>Ставка НДС</Label>
               <Input value={f.vatRate} onChange={(e) => setF((s) => ({ ...s, vatRate: e.target.value }))} placeholder="20% / Без НДС" /></div>
             <div className="space-y-1.5"><Label>Сумма включает НДС</Label>

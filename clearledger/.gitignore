@@ -32,3 +32,6 @@ server/uploads/
 
 # Windows reserved-name junk (случайные редиректы в nul)
 nul
+
+# Локальные аудит-скрипты с секретами (.token) — не коммитить
+undefined/

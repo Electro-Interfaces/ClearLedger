@@ -33,6 +33,7 @@ from app.routers import (
     intake_router,
     mappings_router,
     meetings_router,
+    chat_router,
     ocr_router,
     analytics_router,
     charge_sessions_router,
@@ -187,6 +188,7 @@ app.include_router(overview_router.router, prefix=API_PREFIX)
 app.include_router(store_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 app.include_router(meetings_router.router, prefix=API_PREFIX)
+app.include_router(chat_router.router, prefix=API_PREFIX)
 app.include_router(metrika_router.router, prefix=API_PREFIX)
 
 

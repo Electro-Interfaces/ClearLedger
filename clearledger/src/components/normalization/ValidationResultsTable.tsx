@@ -68,8 +68,8 @@ export function ValidationResultsTable({ results }: Props) {
           {results.length === 0 ? 'Запустите нормализацию для получения результатов' : 'Ничего не найдено'}
         </div>
       ) : (
-        <div className="rounded-md border">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[520px] text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="w-[30px]" />

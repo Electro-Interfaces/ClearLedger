@@ -213,7 +213,7 @@ function MobileWorkspace() {
   }, { replace: true })
 
   return (
-    <div className="h-full min-h-0 flex flex-col pb-14">
+    <div className="h-full min-h-0 flex flex-col">
       {/* Фильтр рабочей области (период/станции/…) — свайп без видимого скроллбара */}
       <div className="overflow-x-auto scrollbar-hide shrink-0"><WorkspaceToolbar /></div>
 

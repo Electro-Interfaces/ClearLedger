@@ -206,7 +206,7 @@ export function CorePanel({ hideHeader: _hideHeader = false }: { hideHeader?: bo
                 <CardTitle className="text-xs font-semibold">Оплаты</CardTitle>
               </CardHeader>
               <CardContent className="p-3 pt-0">
-                <div className="grid grid-cols-4 gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   <div>
                     <p className="text-muted-foreground">Наличные</p>
                     <p className="font-semibold">{fmt(shift.payments.cash)} ₽</p>

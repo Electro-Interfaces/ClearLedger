@@ -59,8 +59,8 @@ export function KpiCards() {
               >
                 <Icon className={`h-6 w-6 ${card.iconColor}`} />
               </div>
-              <div>
-                <p className="text-2xl font-bold tracking-tight">{card.value.toLocaleString('ru-RU')}</p>
+              <div className="min-w-0">
+                <p className="text-xl sm:text-2xl font-bold tracking-tight truncate">{card.value.toLocaleString('ru-RU')}</p>
                 <p className="text-sm text-muted-foreground">{card.label}</p>
               </div>
             </CardContent>

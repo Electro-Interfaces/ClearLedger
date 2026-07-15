@@ -72,7 +72,9 @@ export function MainLayout() {
           {isMobile ? (
             // Мобильный: одностраничная навигация без вкладок (как раньше).
             isWorkspace ? (
-              <div className="flex-1 min-h-0 overflow-hidden">
+              // max-md:pb-14 — запас под нижнюю навигацию (<768px); workspace-страницы
+              // (/, /files, /reconciliation, /normalization) не перекрываются навбаром.
+              <div className="flex-1 min-h-0 overflow-hidden max-md:pb-14">
                 <Outlet />
               </div>
             ) : (
@@ -89,13 +91,14 @@ export function MainLayout() {
             </>
           )}
         </SidebarInset>
+
+        {/* Правая вспомогательная область «Взаимодействие» (Чат / Заявки / Инфо).
+            Десктоп: пристыкованная панель-вкладки, двигает контент; мобайл: оверлей. */}
+        <InteractionHost />
       </div>
 
       {/* Нижняя навигация телефонов (<768px; сама скрывается md:hidden) */}
       {isMobile && <MobileBottomNav />}
-
-      {/* Глобальные модалки Чат / Заявки / Инфо */}
-      <InteractionHost />
     </SidebarProvider>
   )
 }

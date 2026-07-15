@@ -203,7 +203,7 @@ function FuelTable({ data }: { data: ShiftDashboardData }) {
     <Card>
       <CardContent className="pt-4">
         <div className="mb-2 flex items-center gap-2"><Fuel className="h-4 w-4 text-blue-500" /><h3 className={H3}>Реализация по топливу</h3></div>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full min-w-[440px] text-sm">
           <thead><tr className="border-b border-border/60">
             <th className={cn(TH, 'text-left')}>Топливо</th>
             <th className={cn(TH, 'text-right')}>Объём, л</th>
@@ -226,7 +226,7 @@ function FuelTable({ data }: { data: ShiftDashboardData }) {
             <td className={cn(TD, 'text-right')}>{rub(data.financial.total_revenue)}</td>
             <td className={cn(TD, 'text-right text-muted-foreground')}>100%</td>
           </tr></tfoot>
-        </table>
+        </table></div>
       </CardContent>
     </Card>
   )
@@ -245,7 +245,7 @@ function PaymentTable({ data }: { data: ShiftDashboardData }) {
     <Card>
       <CardContent className="pt-4">
         <div className="mb-2 flex items-center gap-2"><Wallet className="h-4 w-4 text-emerald-500" /><h3 className={H3}>Выручка по способам оплаты</h3></div>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full min-w-[440px] text-sm">
           <thead><tr className="border-b border-border/60">
             <th className={cn(TH, 'text-left')}>Способ</th>
             <th className={cn(TH, 'text-right')}>Выручка, ₽</th>
@@ -290,7 +290,7 @@ function PaymentTable({ data }: { data: ShiftDashboardData }) {
             <td className={cn(TD, 'text-right text-primary')}>{vol(totalVol)}</td>
             <td className={cn(TD, 'text-right text-muted-foreground')}>100%</td>
           </tr></tfoot>
-        </table>
+        </table></div>
         <p className="mt-1.5 text-[10px] text-muted-foreground">Безнал (топл./корп. карты, онлайн, талоны) — только объём отпуска; выручка учитывается вне кассы.</p>
       </CardContent>
     </Card>
@@ -306,7 +306,7 @@ function ReceiptsTable({ data }: { data: ShiftDashboardData }) {
     <Card>
       <CardContent className="pt-4">
         <div className="mb-2 flex items-center gap-2"><Truck className="h-4 w-4 text-emerald-500" /><h3 className={H3}>Поступления по ТТН</h3><span className="text-xs text-muted-foreground">{r.ttn_count} ТТН</span></div>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto"><table className="w-full min-w-[440px] text-sm">
           <thead><tr className="border-b border-border/60">
             <th className={cn(TH, 'text-left')}>Топливо</th>
             <th className={cn(TH, 'text-right')}>ТТН</th>
@@ -332,7 +332,7 @@ function ReceiptsTable({ data }: { data: ShiftDashboardData }) {
             <td className={cn(TD, 'text-right text-primary')}>{vol(r.total_fact)}</td>
             <td className={cn(TD, 'text-right', diffCls(r.total_diff))}>{r.total_diff > 0 ? '+' : ''}{vol(r.total_diff)}</td>
           </tr></tfoot>
-        </table>
+        </table></div>
       </CardContent>
     </Card>
   )

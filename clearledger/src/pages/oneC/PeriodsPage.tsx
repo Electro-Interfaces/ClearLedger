@@ -109,7 +109,7 @@ export function PeriodsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Card className="py-3 gap-1">
           <CardHeader className="pb-0">
             <CardDescription className="text-[10px] uppercase tracking-wide">Месяцев</CardDescription>

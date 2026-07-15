@@ -126,8 +126,23 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
           </div>
         </div>
 
-        {/* Правый блок: переключатель темы + профиль */}
+        {/* Правый блок: чат (моб.) + переключатель темы + профиль */}
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          {/* Мобильный вход в чат — на &lt;768px кнопки взаимодействия скрыты (md:flex) */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden relative h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground"
+            onClick={() => toggleInteraction('chat')}
+            title="Чат"
+          >
+            <MessageCircle className="h-[18px] w-[18px]" />
+            {unreadCounts.chat > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                {unreadCounts.chat}
+              </span>
+            )}
+          </Button>
           <Button
             variant="ghost"
             size="icon"

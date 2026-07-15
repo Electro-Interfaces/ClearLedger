@@ -173,7 +173,7 @@ function CompanyProfileCard({ company, canEdit }: { company: OrgProfile; canEdit
         <CardDescription>Код <span className="font-mono">{company.slug}</span></CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2"><Label>Наименование</Label>
             <Input value={name} disabled={!canEdit} onChange={(e) => setName(e.target.value)} /></div>
           <div className="space-y-2"><Label>Краткое имя</Label>
