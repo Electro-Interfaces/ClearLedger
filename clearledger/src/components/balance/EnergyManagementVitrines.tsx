@@ -4,8 +4,10 @@
  * Модули рабочего стола (раздел «Управленческий»), подключаются через каталог.
  * Заменяются выборкой из L2/разрезов. uptime/утилизация — заглушки до телеметрии.
  */
+import { useRef } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   DEMO_EZS, sumBuy, sumRelease, lossKwh, lossPct, overNorm, fmtN,
@@ -81,7 +83,11 @@ function PaymentDisciplineBlock({ role }: { role?: SettlementRole }) {
   )
 }
 
-function Head({ title, subtitle, real }: { title: string; subtitle: string; real?: boolean }) {
+function Head({ title, subtitle, real, exportEl }: {
+  title: string; subtitle: string; real?: boolean
+  /** Корневой элемент витрины для экспорта Excel/PDF (кнопка — только на реальных данных). */
+  exportEl?: () => HTMLElement | null
+}) {
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -89,6 +95,7 @@ function Head({ title, subtitle, real }: { title: string; subtitle: string; real
         {real
           ? <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
           : <Badge variant="secondary" className="text-[10px]">демо-данные</Badge>}
+        {exportEl && real && <ExportButton title={title} getEl={exportEl} />}
       </div>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{subtitle}</p>
     </div>
@@ -456,6 +463,7 @@ function periodLabel(iso: string): string {
 }
 
 export function ProcurementVitrine() {
+  const rootRef = useRef<HTMLDivElement>(null)
   const q = useEnergyPeriodsSummary(24)
   const s = q.data
   const series = s?.series ?? []
@@ -465,11 +473,12 @@ export function ProcurementVitrine() {
   const lastTariff = [...series].reverse().find((p) => p.tariffAvg != null)
   const maxKwh = Math.max(1, ...last12.map((p) => p.kwh))
   return (
-    <div className="space-y-5 px-6 py-6">
+    <div ref={rootRef} className="space-y-5 px-6 py-6">
       <Head
         real={!!s && series.length > 0}
         title="Энергозакупка"
         subtitle="Входящая электроэнергия по сети: объёмы, которые выставляют контрагенты (помесячно из реестра), входящие тарифы и оценка стоимости закупки."
+        exportEl={() => rootRef.current}
       />
       {q.isLoading && <p className="text-sm text-muted-foreground">Загрузка данных энергозакупки…</p>}
       {!!s && series.length > 0 && (
@@ -553,6 +562,7 @@ export function ProcurementVitrine() {
    Суммы постоянной части и сроки — из реестра «ЭЗС_Договоры_Аренда» (актуальный)
    и «Сводной». ── */
 export function RentVitrine() {
+  const rootRef = useRef<HTMLDivElement>(null)
   const q = useSettlementsDetail('rent')
   const rows = q.data ?? []
   const withAmount = rows.filter((r) => (r.amountGross ?? r.amountNet) != null)
@@ -564,11 +574,12 @@ export function RentVitrine() {
   const expiring = rows.filter((r) => r.contractEnd && r.contractEnd >= today && r.contractEnd <= in90).length
   const expired = rows.filter((r) => r.contractEnd && r.contractEnd < today).length
   return (
-    <div className="space-y-5 px-6 py-6">
+    <div ref={rootRef} className="space-y-5 px-6 py-6">
       <Head
         real={rows.length > 0}
         title="Аренда (земля и площадки ЭЗС)"
         subtitle="Договоры и разрешения на размещение ЭЗС, арендодатели (в т.ч. муниципалитеты), постоянная часть арендной платы, сроки договоров, статус оплаты «оплачено по», особый порядок (% от выручки / фикс / сервитут)."
+        exportEl={() => rootRef.current}
       />
       {rows.length > 0 && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

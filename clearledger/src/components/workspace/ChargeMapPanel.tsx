@@ -81,22 +81,35 @@ function rampColor(value: number, th: number[]): string {
   return RAMP[i]
 }
 
-type ColorBy = 'single' | 'status' | 'link' | 'power' | Metric
+type ColorBy = 'single' | 'status' | 'link' | 'power' | 'locClass' | 'speed' | Metric
 const COLOR_BY: { v: ColorBy; label: string }[] = [
   { v: 'single', label: 'Единый цвет' }, { v: 'status', label: 'Статус' },
   { v: 'link', label: 'Связь с сессиями' }, { v: 'power', label: 'Мощность' },
+  { v: 'locClass', label: 'Город / трасса' }, { v: 'speed', label: 'Быстрые / медленные' },
   { v: 'revenue', label: 'Выручка (метрика)' }, { v: 'sessions', label: 'Сессии (метрика)' },
   { v: 'utilization', label: 'Загрузка (метрика)' },
 ]
+
+/** Метки/цвета паспортных классов (слот obshaya): размещение и скорость. */
+const locMeta = (v: string) =>
+  v === 'city' ? { label: 'Город', color: 'hsl(217, 91%, 60%)' }
+    : v === 'highway' ? { label: 'Трасса', color: 'hsl(25, 100%, 55%)' }
+    : { label: 'Не размечено', color: NODATA }
+const speedMeta = (v: string) =>
+  v === 'fast' ? { label: 'Быстрая', color: 'hsl(152, 69%, 45%)' }
+    : v === 'slow' ? { label: 'Медленная', color: 'hsl(280, 65%, 65%)' }
+    : { label: 'Не размечено', color: NODATA }
 type SizeBy = 'fixed' | Metric
 const SIZE_BY: { v: SizeBy; label: string }[] = [
   { v: 'fixed', label: 'Одинаковый' }, { v: 'revenue', label: 'по выручке' },
   { v: 'sessions', label: 'по сессиям' }, { v: 'utilization', label: 'по загрузке' },
 ]
-function catColor(p: Pt, by: 'single' | 'status' | 'link' | 'power'): string {
+function catColor(p: Pt, by: 'single' | 'status' | 'link' | 'power' | 'locClass' | 'speed'): string {
   if (by === 'status') return opMeta(p.opStatus).color
   if (by === 'link') return linkMeta(p.linkStatus).color
   if (by === 'power') return powerMeta(p.power).color
+  if (by === 'locClass') return locMeta(p.locClass).color
+  if (by === 'speed') return speedMeta(p.speedClass).color
   return SINGLE
 }
 
@@ -107,6 +120,8 @@ interface Pt {
   power: number | null; connectors: number | null
   opStatus: string; linkStatus: string
   manufacturer: string; stage: string; owner: string
+  /** Паспортные классы из сводной контрагента (слот obshaya). */
+  locClass: string; speedClass: string; isCorp: boolean; decommissioned: boolean
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -114,6 +129,7 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' 
 
 function toPoint(l: ServiceLocation): Pt | null {
   const m = (l.metadata ?? {}) as Record<string, unknown>
+  const pp = (l.passport ?? {}) as Record<string, unknown>
   const lat = num(m.latitude), lon = num(m.longitude)
   if (lat === null || lon === null) return null
   const city = str(m.cityName)
@@ -124,6 +140,9 @@ function toPoint(l: ServiceLocation): Pt | null {
     power: num(m.maxPowerKw), connectors: num(m.connectorCount),
     opStatus: l.operationalStatus || 'unknown', linkStatus: str(m.linkStatus) || 'unknown',
     manufacturer: str(m.manufacturer) || '—', stage: str(m.stage) || '—', owner: str(m.ownerTitle) || '—',
+    locClass: str(pp.locationClass), speedClass: str(pp.speedClass),
+    isCorp: pp.isCorp === true,
+    decommissioned: pp.decommissionedOn != null || l.operationalStatus === 'decommissioned',
   }
 }
 
@@ -300,6 +319,9 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   const [manuf, setManuf] = useState(ALL)
   const [stage, setStage] = useState(ALL)
   const [owner, setOwner] = useState(ALL)
+  const [locClass, setLocClass] = useState(ALL)
+  const [speed, setSpeed] = useState(ALL)
+  const [lifecycle, setLifecycle] = useState(ALL)   // active | decommissioned | corp
   const [colorBy, setColorBy] = useState<ColorBy>('single')
   const [sizeBy, setSizeBy] = useState<SizeBy>('fixed')
 
@@ -323,10 +345,15 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       if (manuf !== ALL && p.manufacturer !== manuf) return false
       if (stage !== ALL && p.stage !== stage) return false
       if (owner !== ALL && p.owner !== owner) return false
+      if (locClass !== ALL && p.locClass !== locClass) return false
+      if (speed !== ALL && p.speedClass !== speed) return false
+      if (lifecycle === 'active' && p.decommissioned) return false
+      if (lifecycle === 'decommissioned' && !p.decommissioned) return false
+      if (lifecycle === 'corp' && !p.isCorp) return false
       if (q && !`${p.name} ${p.city} ${p.address} ${p.number}`.toLowerCase().includes(q)) return false
       return true
     })
-  }, [allPoints, search, region, status, link, power, manuf, stage, owner])
+  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, lifecycle])
 
   // пороги раскраски по метрике (квантили над видимыми точками)
   const colorTh = useMemo(() => {
@@ -359,6 +386,8 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
     for (const p of points) {
       const m = colorBy === 'status' ? { key: p.opStatus, ...opMeta(p.opStatus) }
         : colorBy === 'link' ? { key: p.linkStatus, ...linkMeta(p.linkStatus) }
+        : colorBy === 'locClass' ? { key: p.locClass || 'na', ...locMeta(p.locClass) }
+        : colorBy === 'speed' ? { key: p.speedClass || 'na', ...speedMeta(p.speedClass) }
         : powerMeta(p.power)
       const e = c.get(m.key) ?? { label: m.label, color: m.color, count: 0 }
       e.count++; c.set(m.key, e)
@@ -389,6 +418,12 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
         <FSelect value={manuf} onChange={setManuf} all="Производитель: все" options={manufs.map((x) => ({ v: x, label: x }))} w="w-[170px]" />
         <FSelect value={stage} onChange={setStage} all="Этап: все" options={stages.map((x) => ({ v: x, label: x }))} w="w-[150px]" />
         <FSelect value={owner} onChange={setOwner} all="Владелец: все" options={owners.map((x) => ({ v: x, label: x }))} w="w-[170px]" />
+        <FSelect value={locClass} onChange={setLocClass} all="Размещение: все"
+          options={[{ v: 'city', label: 'Город' }, { v: 'highway', label: 'Трасса' }]} w="w-[150px]" />
+        <FSelect value={speed} onChange={setSpeed} all="Класс: все"
+          options={[{ v: 'fast', label: 'Быстрые' }, { v: 'slow', label: 'Медленные' }]} w="w-[140px]" />
+        <FSelect value={lifecycle} onChange={setLifecycle} all="Контур: все"
+          options={[{ v: 'active', label: 'Действующие' }, { v: 'decommissioned', label: 'Выведенные' }, { v: 'corp', label: 'Корп (каршеринг)' }]} w="w-[170px]" />
         <div className="ml-auto flex items-center gap-2">
           <div className="flex items-center gap-1"><span className="text-xs text-muted-foreground">Цвет:</span>
             <Select value={colorBy} onValueChange={(v) => setColorBy(v as ColorBy)}>

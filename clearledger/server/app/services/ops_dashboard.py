@@ -21,7 +21,9 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
 from statistics import median
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import func, select
@@ -33,6 +35,7 @@ from app.models import (
     DataEntry,
     ServiceLocation,
     StationContractSettlement,
+    StationDispensePeriod,
     StationEnergyPeriod,
 )
 
@@ -76,6 +79,42 @@ async def _load(db: AsyncSession, company_id):
 
     settl = (await db.execute(select(StationContractSettlement).where(
         StationContractSettlement.company_id == company_id))).scalars().all()
+
+    # ── длинный горизонт отпуска: до появления полных сессий отпуск берём из
+    # сводной выработки контрагента (station_dispense_periods, слот obshaya).
+    # Точка склейки — первый месяц, где сессии дают ≥80% сводной (как в
+    # «Динамике 2024+»); до неё сессионные хвосты (напр. 65 кВт·ч за 12.2025)
+    # заменяются сводной целиком — без двойного счёта.
+    disp_rows = (await db.execute(
+        select(StationDispensePeriod.location_id, StationDispensePeriod.period,
+               func.sum(StationDispensePeriod.dispense_kwh).label("kwh"),
+               func.sum(StationDispensePeriod.amount_rub).label("rub"))
+        .where(StationDispensePeriod.company_id == company_id)
+        .group_by(StationDispensePeriod.location_id, StationDispensePeriod.period)
+    )).all()
+    if disp_rows:
+        sess_by_m: dict[str, float] = {}
+        for r in sess_rows:
+            if (m := _month(r.m)) is not None:
+                sess_by_m[m] = sess_by_m.get(m, 0.0) + float(r.kwh or 0)
+        disp_by_m: dict[str, float] = {}
+        for d in disp_rows:
+            if d.kwh:
+                disp_by_m[d.period] = disp_by_m.get(d.period, 0.0) + float(d.kwh)
+        cutoff = None
+        for m in sorted(set(sess_by_m) | set(disp_by_m)):
+            sk, fk = sess_by_m.get(m, 0.0), disp_by_m.get(m)
+            if sk > 0 and (fk is None or sk >= fk * 0.8):
+                cutoff = m
+                break
+        cutoff = cutoff or "9999-99"
+        sess_rows = (
+            [r for r in sess_rows if (_month(r.m) or "") >= cutoff]
+            + [SimpleNamespace(location_id=d.location_id,
+                               m=datetime.strptime(d.period, "%Y-%m-%d"),
+                               kwh=float(d.kwh or 0), rub=float(d.rub or 0), n=0)
+               for d in disp_rows if d.period < cutoff and (d.kwh or d.rub)]
+        )
     return loc_by_id, periods, sess_rows, settl
 
 

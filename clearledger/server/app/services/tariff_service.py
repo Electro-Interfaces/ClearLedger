@@ -47,12 +47,11 @@ class TariffService:
         диапазон, сессии/энергия/факт.цена. by = region | station. Фронт пивотит в матрицу."""
         S = ChargeSession
         lo, hi = self._range(df, dt)
-        # Строка сетки: станция (имя+код) или регион.
+        # Строка сетки: станция ТОЛЬКО по коду (имя — подпись после агрегации,
+        # свежайшее из сессий; имя в ключе группировки двоило строку при
+        # переименованиях CPO — «идентичность станции = код»), либо регион.
         if by == "station":
-            rowdim = func.coalesce(
-                func.concat(func.coalesce(S.station_name, S.station_code),
-                            " (", func.coalesce(S.station_code, ""), ")"),
-                S.station_code, "—")
+            rowdim = func.coalesce(S.station_code, "—")
         else:
             rowdim = func.coalesce(S.region, "—")
         stmt = select(
@@ -68,6 +67,17 @@ class TariffService:
         ).where(*self._base_conds(company_id, lo, hi, user_type)).group_by("row", "connector")
         raw = (await self.db.execute(stmt)).all()
 
+        # подпись станции: свежайшее имя из сессий + код
+        label_of: dict[str, str] = {}
+        if by == "station":
+            fresh = (await self.db.execute(
+                select(S.station_code, S.station_name)
+                .where(S.company_id == company_id, S.station_name.is_not(None))
+                .distinct(S.station_code)
+                .order_by(S.station_code, S.started_at.desc())
+            )).all()
+            label_of = {str(c): f"{n} ({c})" for c, n in fresh if c is not None}
+
         cells: list[dict[str, Any]] = []
         rows_vol: dict[str, int] = {}
         connectors: dict[str, int] = {}
@@ -75,15 +85,16 @@ class TariffService:
             energy = float(r.energy)
             amount = float(r.amount)
             tmin, tmax = float(r.tmin or 0), float(r.tmax or 0)
+            row_label = label_of.get(str(r.row), str(r.row)) if by == "station" else r.row
             cells.append({
-                "row": r.row, "connector": r.connector,
+                "row": row_label, "connector": r.connector,
                 "sessions": int(r.sessions), "energy_kwh": round(energy, 1),
                 "tariff": round(float(r.tmode or 0), 2),        # преобладающий (mode)
                 "tariff_min": round(tmin, 2), "tariff_max": round(tmax, 2),
                 "varies": abs(tmax - tmin) > 0.01,
                 "realized": round(amount / energy, 2) if energy else 0.0,   # факт: ₽/кВтч
             })
-            rows_vol[r.row] = rows_vol.get(r.row, 0) + int(r.sessions)
+            rows_vol[row_label] = rows_vol.get(row_label, 0) + int(r.sessions)
             connectors[r.connector] = connectors.get(r.connector, 0) + int(r.sessions)
         # порядок строк/коннекторов — по объёму (сессиям)
         row_order = [k for k, _ in sorted(rows_vol.items(), key=lambda x: -x[1])]

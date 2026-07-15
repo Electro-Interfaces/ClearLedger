@@ -15,7 +15,7 @@ from typing import Any
 
 import re
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChannelSyncLog, ChargeSession, CorporateClient
@@ -384,7 +384,12 @@ async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id) -> tup
     S = ChargeSession
 
     def where(phone):
-        conds = [S.company_id == company_id, S.user_id == phone]
+        # Обогащаем только постоплатные сессии (amount=0) либо явно ЮЛ-помеченные:
+        # у телефона организации бывают розничные сессии с реальным списанием —
+        # подменять живую оплату расчётной договорной суммой (и уводить сессию
+        # из розницы через client_name) нельзя.
+        conds = [S.company_id == company_id, S.user_id == phone,
+                 or_(S.user_type == "ЮЛ", func.coalesce(S.amount, 0) == 0)]
         if channel_id is not None:
             conds.append(S.channel_id == channel_id)
         return conds

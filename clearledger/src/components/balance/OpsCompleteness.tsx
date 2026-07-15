@@ -8,8 +8,9 @@
  * Период (от/до, из доступных месяцев наблюдений) и регион — селекты.
  * Данные: /api/ops/completeness (services/ops_dashboard.ops_completeness).
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -74,6 +75,7 @@ function KindDetails({ kind, onOpenStation }: { kind: OpsComplKind; onOpenStatio
 
 export function OpsCompletenessVitrine() {
   const { companyId } = useCompany()
+  const rootRef = useRef<HTMLDivElement>(null)
   const [from, setFrom] = useState<string | undefined>(undefined)
   const [to, setTo] = useState<string | undefined>(undefined)
   const [region, setRegion] = useState<string | undefined>(undefined)
@@ -93,13 +95,14 @@ export function OpsCompletenessVitrine() {
   const statics = d.kinds.filter((k) => !k.monthly)
   const missingTotal = d.kinds.reduce((a, k) => a + k.missingCount, 0)
   return (
-    <div className="space-y-5 px-6 py-6">
+    <div ref={rootRef} className="space-y-5 px-6 py-6">
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <FileWarning className="h-5 w-5 text-primary" />
             <h1 className="text-xl font-semibold">Полнота данных</h1>
             <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+            <ExportButton title="Полнота данных ЭЗС" getEl={() => rootRef.current} />
           </div>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Каких документов и данных не хватает за период анализа — по месяцам и видам.

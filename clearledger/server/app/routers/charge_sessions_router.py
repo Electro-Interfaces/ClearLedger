@@ -168,3 +168,101 @@ async def export_sessions(
     fname = f"sessions_{company_id}_{date_from[:10]}_{date_to[:10]}.xlsx"
     return Response(content=buf.getvalue(), media_type=_XLSX_MIME,
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@router.get("/export/monthly-matrix")
+async def export_monthly_matrix(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Матрица «станция × месяц» (кВт·ч) в формате привычного свода «ОБЩАЯ»:
+    паспортные колонки + месяцы за весь горизонт. Отпуск = сводная контрагента
+    (station_dispense_periods) до точки склейки, далее — зарядные сессии (то же
+    правило, что в «Динамике 2024+»). Прямая замена ручного Excel-свода."""
+    from sqlalchemy import text as sa_text
+
+    from app.models import ServiceLocation
+    cid = await assert_company_member(company_id, current_user, db)
+
+    file_rows = (await db.execute(sa_text(
+        "SELECT location_id, period, SUM(dispense_kwh) AS kwh "
+        "FROM station_dispense_periods "
+        "WHERE company_id = :cid AND dispense_kwh IS NOT NULL "
+        "GROUP BY location_id, period"), {"cid": str(cid)})).all()
+    sess_rows = (await db.execute(sa_text(
+        "SELECT location_id, to_char(date_trunc('month', started_at), 'YYYY-MM-01') AS period, "
+        "       SUM(energy_kwh) AS kwh "
+        "FROM charge_sessions "
+        "WHERE company_id = :cid AND location_id IS NOT NULL AND energy_kwh IS NOT NULL "
+        "GROUP BY location_id, 2"), {"cid": str(cid)})).all()
+
+    # точка склейки: первый месяц, где сессии дают ≥80% сводной (см. long-trend)
+    f_tot: dict[str, float] = {}
+    for r in file_rows:
+        f_tot[r.period] = f_tot.get(r.period, 0.0) + float(r.kwh or 0)
+    s_tot: dict[str, float] = {}
+    for r in sess_rows:
+        s_tot[r.period] = s_tot.get(r.period, 0.0) + float(r.kwh or 0)
+    cutoff = None
+    for p in sorted(set(f_tot) | set(s_tot)):
+        sk, fk = s_tot.get(p, 0.0), f_tot.get(p)
+        if sk > 0 and (fk is None or sk >= fk * 0.8):
+            cutoff = p
+            break
+    cutoff = cutoff or "9999-99"
+
+    cell: dict[tuple[str, str], float] = {}
+    for r in file_rows:
+        if r.period < cutoff:
+            cell[(r.location_id, r.period)] = cell.get((r.location_id, r.period), 0.0) + float(r.kwh or 0)
+    for r in sess_rows:
+        if r.period >= cutoff:
+            cell[(r.location_id, r.period)] = cell.get((r.location_id, r.period), 0.0) + float(r.kwh or 0)
+    months = sorted({p for (_, p) in cell})
+    loc_ids = {lid for (lid, _) in cell}
+
+    locs = {l.id: l for l in (await db.execute(
+        select(ServiceLocation).where(ServiceLocation.company_id == cid)
+    )).scalars().all() if l.id in loc_ids}
+
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Станция × месяц"
+    loc_cls = {"city": "город", "highway": "трасса"}
+    spd_cls = {"fast": "Быстрая", "slow": "Медленная"}
+    ws.append(["Б/У", "№ ZOI-1", "Регион", "Город", "Адрес", "трасса/город",
+               "Быстрая/медленная", "Марка", "Мощность", "Инвентарный номер",
+               "Дата установки", "Дата вывода"]
+              + [f"{m[5:7]}.{m[:4]}" for m in months] + ["Итого, кВт·ч"])
+    order = sorted(loc_ids, key=lambda lid: (
+        (locs.get(lid).extra_metadata or {}).get("federalSubject") or "" if locs.get(lid) else "",
+        locs.get(lid).name if locs.get(lid) else ""))
+    for lid in order:
+        l = locs.get(lid)
+        md = (l.extra_metadata or {}) if l else {}
+        row_vals = [round(cell.get((lid, m), 0.0), 1) or None for m in months]
+        ws.append([
+            md.get("buNumber") or md.get("number") or (l.station_number if l else None),
+            md.get("zoi1"),
+            md.get("federalSubject") or (l.city if l else None),
+            (l.city if l else None) or md.get("cityName"),
+            (l.address if l else None),
+            loc_cls.get(getattr(l, "location_class", None) or ""),
+            spd_cls.get(getattr(l, "speed_class", None) or ""),
+            getattr(l, "brand", None),
+            getattr(l, "power_kwt", None),
+            getattr(l, "inventory_number", None),
+            getattr(l, "installed_on", None),
+            getattr(l, "decommissioned_on", None),
+        ] + row_vals + [round(sum(v for v in (cell.get((lid, m), 0.0) for m in months)), 1)])
+    # итоговая строка сети
+    ws.append(["", "", "ИТОГО по сети", "", "", "", "", "", "", "", "", ""]
+              + [round(sum(cell.get((lid, m), 0.0) for lid in loc_ids), 1) for m in months]
+              + [round(sum(cell.values()), 1)])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(content=buf.getvalue(), media_type=_XLSX_MIME,
+                    headers={"Content-Disposition": 'attachment; filename="station_monthly_matrix.xlsx"'})

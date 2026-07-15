@@ -423,10 +423,23 @@ async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source,
         return {"status": "error", "message": f"файл {file_id} не найден"}
     with open(sf.storage_path, "rb") as fh:
         content = fh.read()
-    from app.services.charge_sessions_normalize import ingest_charge_sessions, parse_sessions_xlsx
+    from app.services.charge_sessions_normalize import (
+        enrich_from_registry, ingest_charge_sessions, parse_sessions_xlsx,
+    )
     rows = parse_sessions_xlsx(content)
-    return await ingest_charge_sessions(db, channel.company_id, rows, channel_id=channel.id,
-                                        mode=mode, log_id=log_id)
+    res = await ingest_charge_sessions(db, channel.company_id, rows, channel_id=channel.id,
+                                       mode=mode, log_id=log_id)
+    # Автопереобогащение ЮЛ из сохранённого реестра: без него свежезагруженные
+    # корп-сессии висят с выручкой 0 (amount=0, client_amount ещё не рассчитан)
+    # до ручного «Переприменить» — занижение во всех панелях.
+    if res.get("status") == "success":
+        try:
+            enr = await enrich_from_registry(db, channel.company_id, channel_id=channel.id)
+            if enr.get("status") == "success" and enr.get("updated"):
+                res["message"] = (res.get("message") or "") + f"; авто-обогащение ЮЛ: {enr['message']}"
+        except Exception as exc:  # обогащение — не повод ронять загрузку
+            res["message"] = (res.get("message") or "") + f"; авто-обогащение ЮЛ не удалось: {exc}"
+    return res
 
 
 async def _run_stations(db: AsyncSession, channel: Channel, src: Source,

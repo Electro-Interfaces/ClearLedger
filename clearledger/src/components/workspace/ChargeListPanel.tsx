@@ -35,6 +35,13 @@ function fmtDT(iso: string | null): string {
 type SortKey = 'started_at' | 'station' | 'region' | 'connector' | 'user_type' | 'client'
   | 'charge_type' | 'energy_kwh' | 'duration_min' | 'tariff' | 'revenue' | 'result'
 
+/** Расшифровка «канала запуска» сессии (сырые коды выгрузки ПК). */
+const CHARGE_TYPE_LABEL: Record<string, string> = {
+  USER: 'Приложение', ADMIN: 'Оператор', RFID: 'Карта RFID',
+}
+const chargeTypeLabel = (v: string | null): string =>
+  v ? (CHARGE_TYPE_LABEL[v.toUpperCase()] ?? v) : '—'
+
 const NUM_KEYS: SortKey[] = ['energy_kwh', 'duration_min', 'tariff', 'revenue']
 
 function rowVal(r: ChargeSessionRow, k: SortKey): string | number {
@@ -183,10 +190,11 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
         'Коннектор': r.connector_type || '',
         'Тип клиента': r.user_type || '',
         'Клиент (ЮЛ)': r.client_name || '',
-        'Канал запуска': r.charge_type || '',
+        'Канал запуска': r.charge_type ? chargeTypeLabel(r.charge_type) : '',
         'Энергия кВтч': Number(r.energy_kwh) || 0,
         'Длительность мин': Number(r.duration_min) || 0,
         'Тариф ₽/кВтч': Number(r.tariff) || 0,
+        'Тариф договора ₽/кВтч': r.client_tariff != null ? Number(r.client_tariff) : '',
         'Выручка ₽': Number(r.revenue) || 0,
         'Исход': r.result || '',
         'Оплата': r.paid_at ? fmtDT(r.paid_at) : '',
@@ -292,10 +300,14 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                     <TableCell className="whitespace-nowrap">{r.connector_type || '—'}</TableCell>
                     <TableCell>{r.user_type || '—'}</TableCell>
                     <TableCell className="max-w-[200px] truncate" title={r.client_name ?? ''}>{r.client_name || '—'}</TableCell>
-                    <TableCell className="whitespace-nowrap">{r.charge_type || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">{chargeTypeLabel(r.charge_type)}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{nf1.format(r.energy_kwh)}</TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{nf0.format(r.duration_min)}</TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{fmtMoney(r.tariff)}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {r.client_tariff != null
+                        ? <span title={`договорной тариф ЮЛ (розничный ${fmtMoney(r.tariff)})`}>{fmtMoney(r.client_tariff)}<span className="text-muted-foreground">*</span></span>
+                        : fmtMoney(r.tariff)}
+                    </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{fmtMoney(r.revenue)}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.result || '—'}</TableCell>
                     <TableCell className="text-center">

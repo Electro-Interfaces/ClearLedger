@@ -40,6 +40,27 @@ export async function reenrichChargeSessions(companyId: string): Promise<EnrichR
  * договорной тариф ЮЛ + обе выручки + разница). Фильтры: период (обяз.),
  * опц. тип клиента (ФЛ/ЮЛ) и конкретный клиент. Скачивает файл в браузере.
  */
+/**
+ * Матрица «станция × месяц» (кВт·ч) в формате привычного свода «ОБЩАЯ»:
+ * паспорт + месяцы за весь горизонт (сводная контрагента до склейки, далее сессии).
+ */
+export async function exportMonthlyMatrixXlsx(companyId: string): Promise<void> {
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/api/charge-sessions/export/monthly-matrix?company_id=${companyId}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`Выгрузка не удалась (${res.status})`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'station_monthly_matrix.xlsx'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function exportChargeSessionsXlsx(p: {
   companyId: string; dateFrom: string; dateTo: string; userType?: string; client?: string
 }): Promise<void> {

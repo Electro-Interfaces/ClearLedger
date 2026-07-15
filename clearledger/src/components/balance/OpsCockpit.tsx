@@ -15,8 +15,9 @@
  * ⚠ Ширина модалок: базовый dialog.tsx перебивает sm:max-w-lg — задаём
  * sm:max-w-6xl прямо на DialogContent (как drill-down в ChargeChart).
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -331,6 +332,7 @@ function IssueCard({ issue, onOpenAll, onOpenStation }: {
 /* ═════════════════ «Обзор» — общая ситуация + светофор проблем ═════════════════ */
 export function OpsOverviewVitrine() {
   const { companyId } = useCompany()
+  const rootRef = useRef<HTMLDivElement>(null)
   const [region, setRegion] = useState<string | undefined>(undefined)
   const [drill, setDrill] = useState<string | null>(null)
   const [issueModal, setIssueModal] = useState<OpsIssue | null>(null)
@@ -350,12 +352,13 @@ export function OpsOverviewVitrine() {
   const red = d.issues.filter((i) => i.severity === 'red')
   const amber = d.issues.filter((i) => i.severity === 'amber')
   return (
-    <div className="space-y-5 px-6 py-6">
+    <div ref={rootRef} className="space-y-5 px-6 py-6">
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold">Управленческий обзор ЭЗС</h1>
             <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+            <ExportButton title="Управленческий обзор ЭЗС" subtitle={region} getEl={() => rootRef.current} />
           </div>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Общая ситуация по обязательствам и энергобалансу сети + конкретные проблемы с рабочими
@@ -456,6 +459,7 @@ type SortKey = 'over' | 'intake' | 'dispensed' | 'margin' | 'bu'
 
 export function OpsBalanceVitrine() {
   const { companyId } = useCompany()
+  const rootRef = useRef<HTMLDivElement>(null)
   const [period, setPeriod] = useState<string | undefined>(undefined)
   const [region, setRegion] = useState<string | undefined>(undefined)
   const [qtext, setQtext] = useState('')
@@ -501,11 +505,12 @@ export function OpsBalanceVitrine() {
     cost: a.cost + (r.costEst ?? 0), rev: a.rev + (r.revenue ?? 0),
   }), { intake: 0, disp: 0, over: 0, cost: 0, rev: 0 })
   return (
-    <div className="space-y-4 px-6 py-6">
+    <div ref={rootRef} className="space-y-4 px-6 py-6">
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold">Энергобаланс по объектам</h1>
           <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+          <ExportButton title="Энергобаланс по объектам" subtitle={d.period ? mLabel(d.period) : undefined} getEl={() => rootRef.current} />
         </div>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Вход по счетам vs отпуск по сессиям vs собственные нужды (СН ≈{fmtN(d.ownUseFleetMedianKwh)} кВт·ч/мес медиана парка,

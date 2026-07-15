@@ -653,7 +653,13 @@ class AnalyticsService:
             func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(S.duration_min), 0).label("duration"),
             func.coalesce(func.sum(case((S.result == "Complete", 1), else_=0)), 0).label("success"),
-            func.coalesce(func.sum(case((S.paid_at.is_not(None), 1), else_=0)), 0).label("paid"),
+            # «Неоплачено» считаем только по не-ЮЛ: у ЮЛ paid_at штатно пуст
+            # (постоплата по договору) — это не задолженность розницы.
+            func.coalesce(func.sum(case(
+                (S.user_type.is_distinct_from("ЮЛ"), 1), else_=0)), 0).label("cnt_retail"),
+            func.coalesce(func.sum(case(
+                (and_(S.paid_at.is_not(None), S.user_type.is_distinct_from("ЮЛ")), 1),
+                else_=0)), 0).label("paid"),
             func.count(distinct(self._port_key())).label("ports"),
             func.count(distinct(S.station_code)).label("stations"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)).group_by(gcol)
@@ -710,6 +716,7 @@ class AnalyticsService:
         cnt = int(r.cnt); energy = float(r.energy); amount = float(r.amount)
         dur = float(r.duration); success = int(r.success)
         paid = int(getattr(r, "paid", 0) or 0)
+        cnt_retail = int(getattr(r, "cnt_retail", 0) or 0)
         ports = int(getattr(r, "ports", 0) or 0)
         stations = int(getattr(r, "stations", 0) or 0)
         port_min = ports * period_days * 1440  # доступные порт-минуты за период
@@ -729,8 +736,9 @@ class AnalyticsService:
             "utilization_pct": round(dur / port_min * 100, 1) if port_min else 0.0,
             "throughput_port": round(energy / ports / period_days, 1) if (ports and period_days) else 0.0,
             "revenue_port": round(amount / ports, 0) if ports else 0.0,
-            "unpaid_pct": round((cnt - paid) / cnt * 100, 1) if cnt else 0.0,
-            "_dur_sum": dur, "_success": success, "_paid": paid,
+            # только розница/аноним: ЮЛ-постоплата — не «неоплачено»
+            "unpaid_pct": round((cnt_retail - paid) / cnt_retail * 100, 1) if cnt_retail else 0.0,
+            "_dur_sum": dur, "_success": success, "_paid": paid, "_cnt_retail": cnt_retail,
         }
 
     async def _cs_aggregate_2d(
@@ -847,6 +855,7 @@ class AnalyticsService:
         td = sum(l["_dur_sum"] for l in lines)
         tsucc = sum(l["_success"] for l in lines)
         tpaid = sum(l["_paid"] for l in lines)
+        tretail = sum(l["_cnt_retail"] for l in lines)
         # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят
         # сегменты). 2 доп. distinct-скана; пропускаем, если totals не нужны.
         if with_totals:
@@ -867,11 +876,11 @@ class AnalyticsService:
             "utilization_pct": round(td / port_min * 100, 1) if port_min else 0.0,
             "throughput_port": round(te / net_ports / period_days, 1) if (net_ports and period_days) else 0.0,
             "revenue_port": round(total_amount / net_ports, 0) if net_ports else 0.0,
-            "unpaid_pct": round((ts - tpaid) / ts * 100, 1) if ts else 0.0,
+            "unpaid_pct": round((tretail - tpaid) / tretail * 100, 1) if tretail else 0.0,
             "share_pct": 100.0,
         }
         for l in lines:
-            l.pop("_dur_sum", None); l.pop("_success", None); l.pop("_paid", None)
+            l.pop("_dur_sum", None); l.pop("_success", None); l.pop("_paid", None); l.pop("_cnt_retail", None)
         return {"period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
                 "group_by": group_by, "lines": lines, "totals": totals, "period_days": period_days}
 
@@ -1453,7 +1462,8 @@ class AnalyticsService:
         stmt = select(
             S.session_ext_id, S.station_code, S.station_name, S.region, S.connector_type,
             S.started_at, S.finished_at, S.duration_min, S.result, S.charge_type, S.user_type,
-            S.client_name, S.energy_kwh, S.amount, S.client_amount, S.tariff, S.paid_at, S.cut_key,
+            S.client_name, S.energy_kwh, S.amount, S.client_amount, S.client_tariff,
+            S.tariff, S.paid_at, S.cut_key,
         ).where(
             *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
         ).order_by(S.started_at).limit(limit + 1)
@@ -1474,7 +1484,10 @@ class AnalyticsService:
             # У ЮЛ amount=0 (постоплата) — реальная выручка в client_amount. Сырой amount
             # оставляем отдельным полем «списание».
             "revenue": float(r.client_amount if r.client_amount is not None else (r.amount or 0)),
-            "tariff": float(r.tariff or 0), "paid_at": iso(r.paid_at),
+            "tariff": float(r.tariff or 0),
+            # договорной ₽/кВт·ч ЮЛ (NULL у розницы) — для биллинга и сверки скидок
+            "client_tariff": float(r.client_tariff) if r.client_tariff is not None else None,
+            "paid_at": iso(r.paid_at),
             "cut_key": r.cut_key,
         } for r in res[:limit]]
         return {"rows": out, "total": len(out), "truncated": truncated}
