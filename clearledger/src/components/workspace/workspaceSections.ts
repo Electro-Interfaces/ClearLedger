@@ -122,23 +122,27 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Управленческий» у ГИГ (fuel) = хозяйственные отношения компании (договоры/аренда),
   // не баланс (концепт МАГа 13.07.2026): контроль топлива уже живёт в «Продажах»,
   // «Баланс АЗС» из этого раздела убран. У energy — энергозакупка/аренда/баланс ЭЗС.
+  // Меню «Управленческого» (energy) — три группы:
+  //   КОКПИТ — ядро раздела (не отключаемое): светофор проблем + энергобаланс + полнота;
+  //   ОБОРУДОВАНИЕ — складской контур железа (тоже ядро);
+  //   ХОЗЯЙСТВО — подключаемые модули денежного контура площадок (энергозакупка,
+  //   аренда) + витрина баланса ЭЗС.
   const energyOps = ENERGY_MGMT.filter((m) => on(m.key))
+    .map((m) => ({ ...m, group: 'Хозяйство' }))
   const opsItems: CentralMenuItem[] = [
-    // Кокпит решений (energy) — ядро раздела, не отключаемый модуль: обзор ситуации
-    // (светофор проблем + рабочие списки) и пообъектный энергобаланс
-    // (вход по счетам vs отпуск по сессиям vs собственные нужды станции).
-    ...(isEnergy && energyOps.length > 0
+    ...(isEnergy
       ? [
           { key: 'ops_overview', label: 'Обзор', group: 'Кокпит' },
           { key: 'ops_balance', label: 'Баланс (факт)', group: 'Кокпит' },
           { key: 'ops_completeness', label: 'Полнота данных', group: 'Кокпит' },
+          ...EQUIPMENT_MENU,
         ]
       : []),
-    // Складской контур оборудования — ядро energy-раздела (гейт-модуль — расширение).
-    ...(isEnergy ? EQUIPMENT_MENU : []),
     ...energyOps,
     ...(!isEnergy && on('ops_contracts') ? [{ key: 'contracts', label: 'Договоры и аренда' }] : []),
-    ...(balMod && on(balMod.id) && isEnergy ? [{ key: 'balance', label: balMod.navLabel }] : []),
+    ...(balMod && on(balMod.id) && isEnergy
+      ? [{ key: 'balance', label: balMod.navLabel, group: 'Хозяйство' }]
+      : []),
   ]
 
   const storeOn = on('store_module')
