@@ -277,6 +277,17 @@ export function useReestrModel() {
   })
 }
 
+/** Сверка отпуска: сводная выработка (слот obshaya) ↔ зарядные сессии. */
+export function useDispenseRecon() {
+  const { companyId } = useCompany()
+  return useQuery({
+    queryKey: ['axis', 'dispense-recon', companyId],
+    queryFn: () => ref.getDispenseRecon(companyId),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  })
+}
+
 /** Входящая э/э по месяцам (объёмы/тарифы/стоимость) — витрина «Энергозакупка». */
 export function useEnergyPeriodsSummary(months = 24) {
   const { companyId } = useCompany()

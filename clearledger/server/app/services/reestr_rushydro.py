@@ -47,6 +47,7 @@ from app.models import (
     Organization,
     ServiceLocation,
     StationContractSettlement,
+    StationDispensePeriod,
     StationEnergyPeriod,
 )
 from app.services.reestr_normalize import (
@@ -62,6 +63,7 @@ from app.services.reestr_normalize import (
 TAG_SVODNAYA = "reestr-rh-svodnaya"
 TAG_ARENDA = "reestr-rh-arenda"
 TAG_TARIFFS = "reestr-rh-tariffs"
+TAG_OBSHAYA = "reestr-rh-obshaya"
 
 RU_MONTHS = {
     "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "ма": 5, "июн": 6,
@@ -140,6 +142,35 @@ def _month_from_header(text: str) -> str | None:
     return f"{y:04d}-{mo:02d}-01"
 
 
+_RU_MONTH_ABBR = {
+    "янв": 1, "фев": 2, "мар": 3, "апр": 4, "май": 5, "мая": 5, "июн": 6,
+    "июл": 7, "авг": 8, "сен": 9, "окт": 10, "ноя": 11, "дек": 12,
+}
+_MONTH_SHORT_RE = re.compile(r"(янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек)\w*\s*[.\-,/ ]*\s*(\d{2,4})", re.I)
+
+
+def _month_short(v) -> str | None:
+    """Шапка месяца сводной выработки → '2024-03-01'.
+    Умеет datetime (лист «Сумма»), 'мар.24', 'мар.2024', 'июнь.25', 'июл.26'."""
+    if v is None:
+        return None
+    if hasattr(v, "isoformat"):
+        s = v.isoformat()[:10]
+        return s[:8] + "01" if s[:4].isdigit() else None
+    m = _MONTH_SHORT_RE.search(str(v))
+    if not m:
+        return None
+    mo = _RU_MONTH_ABBR.get(m.group(1).lower()[:3])
+    if mo is None:
+        return None
+    y = int(m.group(2))
+    if y < 100:
+        y += 2000
+    if not (2015 <= y <= 2040):
+        return None
+    return f"{y:04d}-{mo:02d}-01"
+
+
 def _ru_month_paid(v) -> tuple[str, str | None, str | None]:
     """«Последний оплаченный месяц» → (status, paid_through_ISO, note).
     Умеет datetime, 'февраль' (год неизвестен → note), 'не оплачено'."""
@@ -195,6 +226,8 @@ def detect_reestr_format(content: bytes) -> str:
             return "svodnaya"
         if "Договоры_Аренда" in names:
             return "arenda"
+        if "Коннектор_общая" in names or "Общие итоги" in names:
+            return "obshaya"
         if OLD_SHEET in names:
             return "svod"
         # «Тарифы…»: лист может называться «Лист1» — ищем сигнатуру шапки
@@ -351,6 +384,7 @@ class L2Cache:
         self.contr_by_cp_type: dict[tuple, list[Contract]] = {}
         self.settl: dict[tuple, StationContractSettlement] = {}
         self.periods: dict[tuple, StationEnergyPeriod] = {}
+        self.dispense: dict[tuple, StationDispensePeriod] = {}
         self.contract_locs: set[tuple] = set()
         self.org_id: str = ""
 
@@ -376,6 +410,10 @@ class L2Cache:
             select(StationEnergyPeriod).where(StationEnergyPeriod.company_id == company_id)
         )).scalars().all():
             self.periods[(p.location_id, p.period)] = p
+        for d in (await db.execute(
+            select(StationDispensePeriod).where(StationDispensePeriod.company_id == company_id)
+        )).scalars().all():
+            self.dispense[(d.location_id, d.period, d.connector_type or "")] = d
         for cl in (await db.execute(
             select(ContractLocation).where(ContractLocation.company_id == company_id)
         )).scalars().all():
@@ -489,6 +527,28 @@ class L2Cache:
             p.intake_kwh = intake_kwh
         if tariff is not None:
             p.tariff_rub_kwh = tariff
+        if source:
+            p.source = source
+
+    def dispense_period(self, db: AsyncSession, company_id, loc: ServiceLocation,
+                        period: str, connector: str | None, *,
+                        kwh: float | None = None, rub: float | None = None,
+                        source: str | None = None, res: dict | None = None) -> None:
+        """Upsert StationDispensePeriod: кВт·ч и ₽ приходят из разных листов."""
+        key = (loc.id, period, connector or "")
+        p = self.dispense.get(key)
+        if p is None:
+            p = StationDispensePeriod(
+                company_id=company_id, location_id=loc.id, period=period,
+                connector_type=connector or None, source=source)
+            db.add(p)
+            self.dispense[key] = p
+            if res is not None:
+                res["dispense_periods"] = res.get("dispense_periods", 0) + 1
+        if kwh is not None:
+            p.dispense_kwh = kwh
+        if rub is not None:
+            p.amount_rub = rub
         if source:
             p.source = source
 
@@ -906,13 +966,277 @@ async def ingest_tariffs(db: AsyncSession, company_id, parsed: dict) -> dict[str
             **res}
 
 
+# --------------------------------------------------------------------------- obshaya
+# Сводная выработка «ОБЩАЯ_2024-2026» — четвёртый слот канала реестров.
+# кВт·ч: «Коннектор_общая» (коннектор×месяц, ~472 станции) + добор станций без
+# коннекторной детализации из станционного листа «Общие итоги» (478; «Медленные» —
+# его подмножество, не читается). ₽: скрытый лист «Сумма» (коннектор×месяц,
+# 01.2024–07.2025). Сумма коннекторов сверена со станционным листом (0 расхожде-
+# ний) — поэтому кВт·ч храним ТОЛЬКО на одной гранулярности на станцию (без
+# двойного счёта: SUM по станции всегда корректен). Паспортные атрибуты станции
+# (трасса/город, Быстрая/Медленная, марка, даты жизненного цикла, инвентарный
+# номер, статус корп) обогащают service_locations из станционного листа.
+
+def _pv(v) -> str:
+    """Значение ячейки сводной: '(пусто)' (подпись Excel-pivot) → ''."""
+    s = _s(v)
+    return "" if s.lower() in ("(пусто)", "пусто") else s
+
+
+def _hdr_index(hdr: tuple, want: dict[str, tuple[str, ...]]) -> dict[str, int]:
+    """Индексы колонок по подстрокам заголовков (первая подошедшая колонка)."""
+    out: dict[str, int] = {}
+    for i, h in enumerate(hdr):
+        if h is None:
+            continue
+        low = str(h).strip().lower()
+        for key, pats in want.items():
+            if key not in out and any(p in low for p in pats):
+                out[key] = i
+                break
+    return out
+
+
+_OBSH_STATION_COLS = {
+    "bu": ("б/у",), "zoi": ("zoi",), "region": ("регион",),
+    "loc_class": ("трасса",), "city": ("город",), "address": ("адрес",),
+    "speed": ("быстрая",), "brand": ("марка", "производитель", "пр-тель"),
+    "power": ("мощность",), "lat": ("широта",), "lon": ("долгота",),
+    "corp": ("корп",), "installed": ("дата установки",),
+    "decommissioned": ("вывода",), "inv": ("инвентарный",),
+    "connector": ("connector",),
+}
+
+
+def _parse_obsh_sheet(rows: list[tuple], fmt: str, *, need_connector: bool) -> list[dict]:
+    """Общий разбор листа сводной: шапка r2 (или r1), месяцы после паспортных
+    колонок. Дубли ключа (станция/коннектор) агрегируются суммой месяцев."""
+    hrow = 1 if rows and rows[0] and any(c is not None for c in rows[0]) else 1
+    # шапка — первая строка, где есть «zoi»
+    hdr_i = next((i for i, r in enumerate(rows[:4])
+                  if any(c is not None and "zoi" in str(c).lower() for c in r)), None)
+    if hdr_i is None:
+        raise ValueError(f"«{fmt}»: не найдена шапка с колонкой ZOI-1")
+    hdr = rows[hdr_i]
+    idx = _hdr_index(hdr, _OBSH_STATION_COLS)
+    if "zoi" not in idx and "bu" not in idx:
+        raise ValueError(f"«{fmt}»: нет ключевых колонок Б/У / № ZOI-1")
+    mstart = max(idx.values()) + 1
+    month_cols = {i: iso for i in range(mstart, len(hdr))
+                  if (iso := _month_short(hdr[i])) is not None}
+    if not month_cols:
+        raise ValueError(f"«{fmt}»: не найдены колонки месяцев")
+
+    agg: dict[tuple, dict] = {}
+    for r in rows[hdr_i + 1:]:
+        get = lambda k: (r[idx[k]] if k in idx and idx[k] < len(r) else None)  # noqa: E731
+        bu, zoi = _pv(get("bu")), _pv(get("zoi"))
+        if not bu and not zoi:
+            continue
+        region = _pv(get("region"))
+        if region.lower().endswith("сумма"):
+            continue  # агрегатные строки Excel-свода
+        ct = _pv(get("connector"))[:40]
+        if need_connector and not ct:
+            continue  # в коннекторном листе строка без коннектора = агрегат
+        key = (zoi or bu, ct if need_connector else "")
+        row = agg.get(key)
+        if row is None:
+            row = {k: get(k) for k in _OBSH_STATION_COLS}
+            row["connector"] = ct or None
+            row["_months"] = {}
+            agg[key] = row
+        for i, iso in month_cols.items():
+            v = _num(r[i]) if i < len(r) else None
+            if v is not None:
+                row["_months"][iso] = row["_months"].get(iso, 0.0) + v
+    return list(agg.values())
+
+
+def parse_obshaya(content: bytes) -> dict[str, Any]:
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    try:
+        names = set(wb.sheetnames)
+
+        def sheet(title: str) -> list[tuple]:
+            return list(wb[title].iter_rows(values_only=True)) if title in names else []
+
+        stations = _parse_obsh_sheet(sheet("Общие итоги"), "Общие итоги",
+                                     need_connector=False) if "Общие итоги" in names else []
+        connectors = _parse_obsh_sheet(sheet("Коннектор_общая"), "Коннектор_общая",
+                                       need_connector=True) if "Коннектор_общая" in names else []
+        rub = _parse_obsh_sheet(sheet("Сумма"), "Сумма (₽)",
+                                need_connector=True) if "Сумма" in names else []
+        if not stations and not connectors:
+            raise ValueError("Сводная выработка: нет листов «Общие итоги» / «Коннектор_общая»")
+        return {"stations": stations, "connectors": connectors, "rub": rub}
+    finally:
+        wb.close()
+
+
+def _enrich_passport(loc: ServiceLocation, row: dict) -> bool:
+    """Обогащение паспорта станции из станционной строки сводной.
+    Классификаторы (city/highway, fast/slow, корп) переписываются свежим файлом;
+    факты (даты, инвентарный, марка, мощность) — только дозаполняются."""
+    changed = False
+
+    def setattr_if(attr: str, value) -> None:
+        nonlocal changed
+        if value is not None and getattr(loc, attr) != value:
+            setattr(loc, attr, value)
+            changed = True
+
+    lc = _pv(row.get("loc_class")).lower()
+    if lc.startswith("город"):
+        setattr_if("location_class", "city")
+    elif lc.startswith("трасс"):
+        setattr_if("location_class", "highway")
+    sp = _pv(row.get("speed")).lower()
+    if sp.startswith("быстр"):
+        setattr_if("speed_class", "fast")
+    elif sp.startswith("медлен"):
+        setattr_if("speed_class", "slow")
+    if _pv(row.get("corp")).lower().startswith("корп") and not loc.is_corp:
+        loc.is_corp = True
+        changed = True
+    inst = _iso_date(row.get("installed"))
+    if inst and not loc.installed_on:
+        loc.installed_on = inst
+        changed = True
+    dec_raw = row.get("decommissioned")
+    dec = _iso_date(dec_raw)
+    if dec and not loc.decommissioned_on:
+        loc.decommissioned_on = dec
+        changed = True
+    elif dec is None and not _blank(dec_raw):
+        s = str(dec_raw).strip()
+        # «Установлена» = работает (не вывод); прочий текст без даты — в примечание
+        if "установлен" not in s.lower() and s != "(пусто)":
+            md = dict(loc.extra_metadata or {})
+            if md.get("decommissionNote") != s[:200]:
+                md["decommissionNote"] = s[:200]
+                loc.extra_metadata = md
+                changed = True
+    inv = _pv(row.get("inv"))
+    if (inv and not loc.inventory_number
+            and "нет" not in inv.lower() and "не извест" not in inv.lower()):
+        loc.inventory_number = inv[:60]
+        changed = True
+    brand = _pv(row.get("brand"))
+    if brand and not loc.brand:
+        loc.brand = brand[:120]
+        changed = True
+    pw = _num(row.get("power"))
+    if pw and not loc.power_kwt:
+        loc.power_kwt = pw
+        changed = True
+    return changed
+
+
+async def ingest_obshaya(db: AsyncSession, company_id, parsed: dict) -> dict[str, Any]:
+    resolver = StationResolver()
+    await resolver.build(db, company_id)
+    l2 = L2Cache()
+    await l2.build(db, company_id)
+    raw_existing = await _prefetch_raw(db, company_id, TAG_OBSHAYA)
+
+    res: dict[str, Any] = {"rows": 0, "raw": 0, "unmatched": 0, "enriched": 0}
+
+    def skey(row: dict) -> str:
+        return _pv(row.get("zoi")) or _pv(row.get("bu"))
+
+    def resolve(row: dict) -> ServiceLocation | None:
+        return resolver.resolve(bu=_pv(row.get("bu")), zoi=_pv(row.get("zoi")),
+                                lat=row.get("lat"), lon=row.get("lon"))
+
+    # станции, покрытые коннекторным листом кВт·ч, — станционный ряд для них не пишем
+    conn_covered = {skey(r) for r in parsed["connectors"] if r.get("_months")}
+
+    # 1) станционный лист: L1 + паспорт + кВт·ч только для непокрытых коннекторами
+    for row in parsed["stations"]:
+        res["rows"] += 1
+        loc = resolve(row)
+        res["raw"] += await _upsert_raw(
+            db, company_id, TAG_OBSHAYA, f"st-{skey(row)}",
+            f"Выработка ЭЗС №{skey(row)} — сводная помесячно (станция)",
+            _jsonable_row({k: v for k, v in row.items() if k != "_months"}) |
+            {"_months": row["_months"], "_grain": "station",
+             "_match": {"resolved": loc is not None,
+                        "locationId": loc.id if loc else None}},
+            raw_existing,
+        )
+        if loc is None:
+            res["unmatched"] += 1
+            continue
+        if _enrich_passport(loc, row):
+            res["enriched"] += 1
+        if skey(row) not in conn_covered:
+            for period, kwh in (row["_months"] or {}).items():
+                l2.dispense_period(db, company_id, loc, period, None,
+                                   kwh=round(kwh, 3), source=TAG_OBSHAYA, res=res)
+
+    # 2) коннекторный лист кВт·ч (основная гранулярность)
+    for row in parsed["connectors"]:
+        res["rows"] += 1
+        loc = resolve(row)
+        ct = row.get("connector")
+        res["raw"] += await _upsert_raw(
+            db, company_id, TAG_OBSHAYA, f"conn-{skey(row)}-{ct or 'na'}",
+            f"Выработка ЭЗС №{skey(row)} · {ct or '—'} — кВт·ч помесячно",
+            _jsonable_row({k: v for k, v in row.items() if k != "_months"}) |
+            {"_months": row["_months"], "_grain": "connector",
+             "_match": {"resolved": loc is not None,
+                        "locationId": loc.id if loc else None}},
+            raw_existing,
+        )
+        if loc is None:
+            res["unmatched"] += 1
+            continue
+        for period, kwh in (row["_months"] or {}).items():
+            l2.dispense_period(db, company_id, loc, period, ct,
+                               kwh=round(kwh, 3), source=TAG_OBSHAYA, res=res)
+
+    # 3) ₽-лист «Сумма» (01.2024–07.2025): рубли ложатся в те же ключи периодов
+    for row in parsed["rub"]:
+        res["rows"] += 1
+        loc = resolve(row)
+        ct = row.get("connector")
+        res["raw"] += await _upsert_raw(
+            db, company_id, TAG_OBSHAYA, f"rub-{skey(row)}-{ct or 'na'}",
+            f"Выручка ЭЗС №{skey(row)} · {ct or '—'} — ₽ помесячно",
+            _jsonable_row({k: v for k, v in row.items() if k != "_months"}) |
+            {"_months": row["_months"], "_grain": "rub",
+             "_match": {"resolved": loc is not None,
+                        "locationId": loc.id if loc else None}},
+            raw_existing,
+        )
+        if loc is None:
+            res["unmatched"] += 1
+            continue
+        for period, rub_v in (row["_months"] or {}).items():
+            l2.dispense_period(db, company_id, loc, period, ct,
+                               rub=round(rub_v, 2), source=TAG_OBSHAYA, res=res)
+
+    await db.flush()
+    res["resolve"] = resolver.stats
+    return {"status": "success", "kind": "reestr_obshaya",
+            "shifts": res["rows"],
+            "created": res.get("dispense_periods", 0),
+            "updated": 0, "skipped_kinds": [],
+            "message": (f"Сводная выработка: строк {res['rows']}, не сопоставлено "
+                        f"{res['unmatched']}; периодов отпуска {res.get('dispense_periods', 0)}, "
+                        f"паспортов обогащено {res['enriched']}"),
+            **res}
+
+
 # --------------------------------------------------------------------------- dispatch
 # Порядок обработки слотов при полном прогоне: сначала якорная «Сводная» (она
 # прописывает станциям buNumber/zoi1), затем уточняющие аренда и тарифы.
-REESTR_SLOT_ORDER = ("svod", "svodnaya", "arenda", "tariffs")
+REESTR_SLOT_ORDER = ("svod", "svodnaya", "obshaya", "arenda", "tariffs")
 REESTR_SLOT_LABEL = {
     "svod": "Общий свод (старый формат)",
     "svodnaya": "Сводная: договоры + объёмы э/э",
+    "obshaya": "Сводная выработка 2024–2026 (кВт·ч/₽)",
     "arenda": "Договоры аренды (актуальные)",
     "tariffs": "Тарифы э/э входящие",
 }
@@ -927,6 +1251,8 @@ async def run_reestr_file(db: AsyncSession, company_id, content: bytes) -> dict[
         res = await ingest_reestr(db, company_id, parse_reestr_xlsx(content))
     elif fmt == "svodnaya":
         res = await ingest_svodnaya(db, company_id, parse_svodnaya(content))
+    elif fmt == "obshaya":
+        res = await ingest_obshaya(db, company_id, parse_obshaya(content))
     elif fmt == "arenda":
         res = await ingest_arenda(db, company_id, parse_arenda(content))
     else:

@@ -21,6 +21,7 @@ export function PassportTab({
   const types = useLocationTypes()
   const typeDef = types.find((t) => t.code === location.type)
   const meta = (location.metadata ?? {}) as Record<string, unknown>
+  const pp = (location.passport ?? {}) as Record<string, unknown>
   const curOp = location.operationalStatus ?? 'unknown'
   const lifeMeta = LOCATION_STATUS_META[location.status]
 
@@ -78,6 +79,29 @@ export function PassportTab({
       <SectionCard title={`Характеристики · ${typeDef?.name ?? location.type}`}>
         <MetadataFieldsReader fields={passportFields} values={meta} />
       </SectionCard>
+
+      {/* Учётные атрибуты из сводной выработки контрагента (слот obshaya) */}
+      {(pp.locationClass != null || pp.speedClass != null || pp.installedOn != null
+        || pp.decommissionedOn != null || pp.inventoryNumber != null || pp.isCorp != null) && (
+        <SectionCard title="Учётные атрибуты (сводная контрагента)">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+            {pp.locationClass != null && (
+              <Field label="Размещение" value={pp.locationClass === 'highway' ? 'Трасса' : 'Город'} />
+            )}
+            {pp.speedClass != null && (
+              <Field label="Класс станции" value={pp.speedClass === 'fast' ? 'Быстрая' : 'Медленная'} />
+            )}
+            {pp.installedOn != null && <Field label="Дата установки" value={String(pp.installedOn)} mono />}
+            {pp.decommissionedOn != null && (
+              <Field label="Выведена из эксплуатации" value={String(pp.decommissionedOn)} mono />
+            )}
+            {pp.inventoryNumber != null && (
+              <Field label="Инвентарный номер (ОС)" value={String(pp.inventoryNumber)} mono />
+            )}
+            {pp.isCorp != null && <Field label="Корп-контур (каршеринг)" value="Да" />}
+          </div>
+        </SectionCard>
+      )}
 
       {renderEdit?.(location, (
         <Button variant="outline"><Pencil className="mr-2 h-4 w-4" /> Редактировать паспорт</Button>

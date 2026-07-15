@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -328,6 +329,113 @@ async def get_charge_dimensions(
     """Справочник фильтра раздела для ЭЗС: станции (код+имя) и каноничные регионы."""
     cid = await assert_company_module(company_id, current_user, db, "management")
     return await AnalyticsService(db).charge_dimensions(cid)
+
+
+@router.get("/charge-sessions/long-trend")
+async def get_charge_long_trend(
+    company_id: str,
+    group_by: str = Query("none", pattern="^(none|connector|speed|location_class)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Длинный горизонт отпуска (01.2024 → сейчас) на склейке двух L2-рядов:
+    сводная выработка контрагента (station_dispense_periods) до появления полных
+    сессий, транзакционные charge_sessions — после. Точка склейки — первый месяц,
+    где сессии дают ≥80% объёма сводной (либо сводной нет). Разрезы: тип
+    коннектора / Быстрая-Медленная / город-трасса (паспорт станции, слот obshaya)."""
+    from sqlalchemy import text as sa_text
+    cid = await assert_company_module(company_id, current_user, db, "management")
+
+    dim_file = {
+        "none": "''",
+        "connector": "COALESCE(d.connector_type, '—')",
+        "speed": "COALESCE(sl.speed_class, '—')",
+        "location_class": "COALESCE(sl.location_class, '—')",
+    }[group_by]
+    dim_sess = {
+        "none": "''",
+        "connector": "COALESCE(NULLIF(btrim(s.connector_type), ''), '—')",
+        "speed": "COALESCE(sl.speed_class, '—')",
+        "location_class": "COALESCE(sl.location_class, '—')",
+    }[group_by]
+
+    file_rows = (await db.execute(sa_text(
+        f"SELECT d.period AS period, {dim_file} AS dim, "
+        "        SUM(d.dispense_kwh) AS kwh, SUM(d.amount_rub) AS rub "
+        "FROM station_dispense_periods d "
+        "JOIN service_locations sl ON sl.id = d.location_id "
+        "WHERE d.company_id = :cid "
+        "GROUP BY 1, 2"), {"cid": str(cid)})).all()
+    sess_rows = (await db.execute(sa_text(
+        f"SELECT to_char(date_trunc('month', s.started_at), 'YYYY-MM-01') AS period, "
+        f"       {dim_sess} AS dim, "
+        # канон выручки: ЮЛ — договорная client_amount (розничный amount у них 0)
+        "        SUM(s.energy_kwh) AS kwh, SUM(COALESCE(s.client_amount, s.amount)) AS rub "
+        "FROM charge_sessions s "
+        "LEFT JOIN service_locations sl ON sl.id = s.location_id "
+        "WHERE s.company_id = :cid AND s.energy_kwh IS NOT NULL "
+        "GROUP BY 1, 2"), {"cid": str(cid)})).all()
+
+    # канонизация типа коннектора: сводная и ПК пишут по-разному
+    # («CCS2»/«CCS Combo 2», «GBT_DC»/«GB/T DC») — иначе серии рвутся на склейке
+    _CONn = {
+        "CCS2": "CCS2", "CCSCOMBO2": "CCS2", "CCSCOMBO1": "CCS1", "CCS1": "CCS1",
+        "CHADEMO": "CHAdeMO", "GBTDC": "GB/T DC", "GBTAC": "GB/T AC",
+        "TYPE2": "Type 2", "TYPE1": "Type 1", "TYPE2,TYPE1": "Type 2 + Type 1",
+        "SHUKO": "Schuko", "SHUCO": "Schuko", "SCHUKO": "Schuko",
+    }
+
+    def canon(dim: str) -> str:
+        if group_by != "connector" or dim == "—":
+            return dim
+        key = re.sub(r"[\s/_\-]+", "", dim).upper()
+        return _CONn.get(key, dim)
+
+    def fold(rows) -> tuple[dict[str, dict[str, float]], dict[str, float], dict[str, float]]:
+        by_dim: dict[str, dict[str, float]] = {}
+        kwh_t: dict[str, float] = {}
+        rub_t: dict[str, float] = {}
+        for r in rows:
+            k = float(r.kwh or 0)
+            dim = canon(r.dim)
+            per = by_dim.setdefault(r.period, {})
+            per[dim] = round(per.get(dim, 0) + k, 1)
+            kwh_t[r.period] = kwh_t.get(r.period, 0) + k
+            rub_t[r.period] = rub_t.get(r.period, 0) + float(r.rub or 0)
+        return by_dim, kwh_t, rub_t
+
+    f_dim, f_kwh, f_rub = fold(file_rows)
+    s_dim, s_kwh, s_rub = fold(sess_rows)
+
+    # точка склейки: первый месяц, где сессии «полные»
+    all_periods = sorted(set(f_kwh) | set(s_kwh))
+    cutoff = None
+    for p in all_periods:
+        sk = s_kwh.get(p, 0)
+        fk = f_kwh.get(p)
+        if sk > 0 and (fk is None or sk >= fk * 0.8):
+            cutoff = p
+            break
+
+    months: list[dict[str, Any]] = []
+    for p in all_periods:
+        use_sessions = cutoff is not None and p >= cutoff and p in s_kwh
+        src = "sessions" if use_sessions else "file"
+        kwh = s_kwh.get(p, 0) if use_sessions else f_kwh.get(p, 0)
+        rub = s_rub.get(p, 0) if use_sessions else f_rub.get(p, 0)
+        dims = (s_dim if use_sessions else f_dim).get(p, {})
+        months.append({
+            "period": p, "source": src,
+            "kwh": round(kwh, 1), "rub": round(rub, 0) or None,
+            "dims": dims if group_by != "none" else None,
+        })
+
+    dim_keys = sorted(
+        {k for m in months for k in (m["dims"] or {})},
+        key=lambda k: -sum((m["dims"] or {}).get(k, 0) for m in months),
+    ) if group_by != "none" else []
+    return {"months": months, "groupBy": group_by, "dimKeys": dim_keys,
+            "cutoff": cutoff}
 
 
 @router.get("/charge-sessions/model")

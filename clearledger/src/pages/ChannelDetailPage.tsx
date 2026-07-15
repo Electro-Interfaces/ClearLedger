@@ -382,6 +382,7 @@ interface ReestrSlot {
 }
 const REESTR_SLOTS: { key: string; label: string }[] = [
   { key: 'svodnaya', label: 'Сводная: договоры + объёмы э/э' },
+  { key: 'obshaya', label: 'Сводная выработка 2024–2026 (кВт·ч/₽)' },
   { key: 'arenda', label: 'Договоры аренды (актуальные)' },
   { key: 'tariffs', label: 'Тарифы э/э входящие' },
   { key: 'svod', label: 'Общий свод (старый формат)' },

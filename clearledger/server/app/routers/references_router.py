@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.deps import get_owned
 from app.models import (
     AccountingDoc,
     BankAccount,
@@ -24,6 +25,7 @@ from app.models import (
     Organization,
     ServiceLocation,
     StationContractSettlement,
+    StationDispensePeriod,
     StationEnergyPeriod,
     User,
     Warehouse,
@@ -54,6 +56,9 @@ from app.schemas import (
     EnergyPeriodsSummary,
     EnergySupplierRow,
     PaymentDisciplineSummary,
+    DispenseRecon,
+    DispenseReconMonth,
+    DispenseReconStation,
     ReestrEntityStat,
     ReestrModel,
     ReestrOrphanRow,
@@ -212,10 +217,7 @@ async def update_counterparty(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Counterparty).where(Counterparty.id == uid))
-    cp = result.scalar_one_or_none()
-    if not cp:
-        raise HTTPException(status_code=404, detail="Контрагент не найден")
+    cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
 
     if body.inn is not None:
         cp.inn = body.inn
@@ -246,10 +248,7 @@ async def delete_counterparty(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Counterparty).where(Counterparty.id == uid))
-    cp = result.scalar_one_or_none()
-    if not cp:
-        raise HTTPException(status_code=404, detail="Контрагент не найден")
+    cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
     await db.delete(cp)
 
 
@@ -365,10 +364,7 @@ async def update_organization(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Organization).where(Organization.id == uid))
-    org = result.scalar_one_or_none()
-    if not org:
-        raise HTTPException(status_code=404, detail="Организация не найдена")
+    org = await get_owned(Organization, uid, current_user, db)  # 404 для чужой/несуществующей
 
     if body.inn is not None:
         org.inn = body.inn
@@ -395,10 +391,7 @@ async def delete_organization(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Organization).where(Organization.id == uid))
-    org = result.scalar_one_or_none()
-    if not org:
-        raise HTTPException(status_code=404, detail="Организация не найдена")
+    org = await get_owned(Organization, uid, current_user, db)  # 404 для чужой/несуществующей
     await db.delete(org)
 
 
@@ -499,10 +492,7 @@ async def update_nomenclature(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(NomenclatureItem).where(NomenclatureItem.id == uid))
-    n = result.scalar_one_or_none()
-    if not n:
-        raise HTTPException(status_code=404, detail="Номенклатура не найдена")
+    n = await get_owned(NomenclatureItem, uid, current_user, db)  # 404 для чужой/несуществующей
 
     if body.code is not None:
         n.code = body.code
@@ -527,10 +517,7 @@ async def delete_nomenclature(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(NomenclatureItem).where(NomenclatureItem.id == uid))
-    n = result.scalar_one_or_none()
-    if not n:
-        raise HTTPException(status_code=404, detail="Номенклатура не найдена")
+    n = await get_owned(NomenclatureItem, uid, current_user, db)  # 404 для чужой/несуществующей
     await db.delete(n)
 
 
@@ -623,10 +610,7 @@ async def update_contract(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Contract).where(Contract.id == uid))
-    c = result.scalar_one_or_none()
-    if not c:
-        raise HTTPException(status_code=404, detail="Договор не найден")
+    c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
 
     if body.number is not None:
         c.number = body.number
@@ -673,10 +657,7 @@ async def delete_contract(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Contract).where(Contract.id == uid))
-    c = result.scalar_one_or_none()
-    if not c:
-        raise HTTPException(status_code=404, detail="Договор не найден")
+    c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
     await db.delete(c)
 
 
@@ -1294,11 +1275,14 @@ async def reestr_model(
     потоки L1 (три файла) → сопряжение со справочником объектов (клеймо `_match`
     в сырье) → L2-сущности (контрагенты/договоры/платёжная дисциплина/объёмы и
     тарифы э/э). Сироты — строки без объекта, кандидаты на дозагрузку станций."""
-    from app.services.reestr_rushydro import TAG_ARENDA, TAG_SVODNAYA, TAG_TARIFFS
+    from app.services.reestr_rushydro import (
+        TAG_ARENDA, TAG_OBSHAYA, TAG_SVODNAYA, TAG_TARIFFS,
+    )
     cid = await assert_company_member(company_id, current_user, db)
 
     stream_defs = [
         ("svodnaya", TAG_SVODNAYA, "Сводная: договоры + объёмы э/э"),
+        ("obshaya", TAG_OBSHAYA, "Сводная выработка 2024–2026 (кВт·ч/₽)"),
         ("arenda", TAG_ARENDA, "Договоры аренды (актуальные)"),
         ("tariffs", TAG_TARIFFS, "Тарифы э/э входящие"),
     ]
@@ -1323,7 +1307,8 @@ async def reestr_model(
                 stream=stream,
                 bu=str((meta or {}).get("bu") or "") or None,
                 zoi=str((meta or {}).get("zoi") or "") or None,
-                name=str((meta or {}).get("bu_name") or (meta or {}).get("object") or "")[:120] or None,
+                name=str((meta or {}).get("bu_name") or (meta or {}).get("object")
+                         or (meta or {}).get("address") or "")[:120] or None,
                 kwh=round(kwh, 1) if kwh else None,
             ))
         streams.append(ReestrStreamStat(
@@ -1348,6 +1333,13 @@ async def reestr_model(
         Contract.company_id == cid,
         Contract.type.in_(["Энергоснабжение", "Аренда", "Сервис"])))).scalar() or 0
 
+    n_disp = (await db.execute(select(func.count(StationDispensePeriod.id)).where(
+        StationDispensePeriod.company_id == cid))).scalar() or 0
+    disp_kwh = (await db.execute(select(func.coalesce(func.sum(StationDispensePeriod.dispense_kwh), 0)).where(
+        StationDispensePeriod.company_id == cid))).scalar() or 0
+    disp_rub = (await db.execute(select(func.coalesce(func.sum(StationDispensePeriod.amount_rub), 0)).where(
+        StationDispensePeriod.company_id == cid))).scalar() or 0
+
     role_label = {"energy": "э/э", "rent": "аренда", "service": "сервис"}
     entities = [
         ReestrEntityStat(key="counterparties", label="Контрагенты (справочник)", records=n_cp,
@@ -1358,6 +1350,9 @@ async def reestr_model(
                          note=" · ".join(f"{role_label.get(r, r)} {n}" for r, n in sorted(by_role.items()))),
         ReestrEntityStat(key="periods", label="Входящая э/э по месяцам", records=int(n_periods),
                          note=f"Σ {round(float(kwh_total)):,} кВт·ч".replace(",", " ")),
+        ReestrEntityStat(key="dispense", label="Отпуск по месяцам (сводная выработка)", records=int(n_disp),
+                         note=(f"Σ {round(float(disp_kwh)):,} кВт·ч · "
+                               f"{round(float(disp_rub)):,} ₽").replace(",", " ")),
     ]
 
     linked_locs = {s.location_id for s in settl}
@@ -1369,6 +1364,80 @@ async def reestr_model(
     return ReestrModel(
         streams=streams, entities=entities, orphans=orphans[:100],
         objectsLinked=len(linked_locs), objectsTotal=int(objects_total),
+    )
+
+
+@router.get("/reestr/dispense-recon", response_model=DispenseRecon)
+async def reestr_dispense_recon(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сверка отпуска: ручная сводная контрагента (station_dispense_periods,
+    слот obshaya) ↔ транзакционные зарядные сессии. Помесячные суммы на
+    пересечении периодов + станции с наибольшим расхождением. Расхождение —
+    сигнал качества обоих контуров (ручной свод vs выгрузка ПК)."""
+    from sqlalchemy import text as sa_text
+    cid = await assert_company_member(company_id, current_user, db)
+
+    disp = (await db.execute(sa_text(
+        "SELECT period, SUM(dispense_kwh) AS kwh, COUNT(DISTINCT location_id) AS st "
+        "FROM station_dispense_periods "
+        "WHERE company_id = :cid AND dispense_kwh IS NOT NULL "
+        "GROUP BY period ORDER BY period"), {"cid": str(cid)})).all()
+    if not disp:
+        return DispenseRecon()
+    sess = (await db.execute(sa_text(
+        "SELECT to_char(date_trunc('month', started_at), 'YYYY-MM-01') AS period, "
+        "       SUM(energy_kwh) AS kwh, COUNT(DISTINCT location_id) AS st "
+        "FROM charge_sessions "
+        "WHERE company_id = :cid AND energy_kwh IS NOT NULL "
+        "GROUP BY 1"), {"cid": str(cid)})).all()
+    sess_by_p = {r.period: r for r in sess}
+
+    months: list[DispenseReconMonth] = []
+    overlap: list[str] = []
+    for r in disp:
+        s = sess_by_p.get(r.period)
+        if s is None or not float(s.kwh or 0):
+            continue
+        overlap.append(r.period)
+        f_kwh, s_kwh = float(r.kwh or 0), float(s.kwh or 0)
+        months.append(DispenseReconMonth(
+            period=r.period, fileKwh=round(f_kwh, 1), sessionsKwh=round(s_kwh, 1),
+            deltaKwh=round(f_kwh - s_kwh, 1),
+            deltaPct=round((f_kwh - s_kwh) / s_kwh * 100, 1) if s_kwh else None,
+            fileStations=int(r.st or 0), sessStations=int(s.st or 0),
+        ))
+
+    top: list[DispenseReconStation] = []
+    if overlap:
+        rows = (await db.execute(sa_text(
+            "WITH f AS (SELECT location_id, SUM(dispense_kwh) kwh "
+            "           FROM station_dispense_periods "
+            "           WHERE company_id = :cid AND period = ANY(:ps) "
+            "             AND dispense_kwh IS NOT NULL GROUP BY location_id), "
+            "     s AS (SELECT location_id, SUM(energy_kwh) kwh "
+            "           FROM charge_sessions "
+            "           WHERE company_id = :cid AND location_id IS NOT NULL "
+            "             AND to_char(date_trunc('month', started_at), 'YYYY-MM-01') = ANY(:ps) "
+            "           GROUP BY location_id) "
+            "SELECT COALESCE(f.location_id, s.location_id) AS loc, "
+            "       COALESCE(f.kwh, 0) AS fk, COALESCE(s.kwh, 0) AS sk, "
+            "       sl.name AS name "
+            "FROM f FULL OUTER JOIN s ON s.location_id = f.location_id "
+            "JOIN service_locations sl ON sl.id = COALESCE(f.location_id, s.location_id) "
+            "ORDER BY ABS(COALESCE(f.kwh, 0) - COALESCE(s.kwh, 0)) DESC LIMIT 15"),
+            {"cid": str(cid), "ps": overlap})).all()
+        top = [DispenseReconStation(
+            locationId=r.loc, name=r.name or r.loc,
+            fileKwh=round(float(r.fk), 1), sessionsKwh=round(float(r.sk), 1),
+            deltaKwh=round(float(r.fk) - float(r.sk), 1),
+        ) for r in rows]
+
+    return DispenseRecon(
+        months=months, topStations=top,
+        filePeriodFrom=disp[0].period, filePeriodTo=disp[-1].period,
     )
 
 
@@ -1552,10 +1621,7 @@ async def update_warehouse(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Warehouse).where(Warehouse.id == uid))
-    w = result.scalar_one_or_none()
-    if not w:
-        raise HTTPException(status_code=404, detail="Склад не найден")
+    w = await get_owned(Warehouse, uid, current_user, db)  # 404 для чужого/несуществующего
 
     if body.code is not None:
         w.code = body.code
@@ -1578,10 +1644,7 @@ async def delete_warehouse(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(Warehouse).where(Warehouse.id == uid))
-    w = result.scalar_one_or_none()
-    if not w:
-        raise HTTPException(status_code=404, detail="Склад не найден")
+    w = await get_owned(Warehouse, uid, current_user, db)  # 404 для чужого/несуществующего
     await db.delete(w)
 
 
@@ -1652,10 +1715,7 @@ async def update_bank_account(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(BankAccount).where(BankAccount.id == uid))
-    ba = result.scalar_one_or_none()
-    if not ba:
-        raise HTTPException(status_code=404, detail="Банковский счёт не найден")
+    ba = await get_owned(BankAccount, uid, current_user, db)  # 404 для чужого/несуществующего
 
     if body.number is not None:
         ba.number = body.number
@@ -1682,8 +1742,5 @@ async def delete_bank_account(
     current_user: User = Depends(get_current_user),
 ):
     uid = _parse_uuid(item_id)
-    result = await db.execute(select(BankAccount).where(BankAccount.id == uid))
-    ba = result.scalar_one_or_none()
-    if not ba:
-        raise HTTPException(status_code=404, detail="Банковский счёт не найден")
+    ba = await get_owned(BankAccount, uid, current_user, db)  # 404 для чужого/несуществующего
     await db.delete(ba)

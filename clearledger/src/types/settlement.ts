@@ -106,6 +106,32 @@ export interface ReestrModel {
   objectsTotal: number
 }
 
+/** Сверка отпуска: сводная выработка (слот obshaya) ↔ зарядные сессии. */
+export interface DispenseReconMonth {
+  period: string
+  fileKwh: number
+  sessionsKwh: number
+  deltaKwh: number
+  deltaPct: number | null
+  fileStations: number
+  sessStations: number
+}
+
+export interface DispenseReconStation {
+  locationId: string
+  name: string
+  fileKwh: number
+  sessionsKwh: number
+  deltaKwh: number
+}
+
+export interface DispenseRecon {
+  months: DispenseReconMonth[]
+  topStations: DispenseReconStation[]
+  filePeriodFrom: string | null
+  filePeriodTo: string | null
+}
+
 export interface RoleDiscipline {
   role: string
   total: number

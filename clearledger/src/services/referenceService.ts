@@ -11,7 +11,7 @@ import type {
 } from '@/types'
 import type {
   StationSettlement, PaymentDisciplineSummary, SettlementDetail, SettlementRole,
-  EnergyPeriodsSummary, ReestrModel,
+  EnergyPeriodsSummary, ReestrModel, DispenseRecon,
 } from '@/types/settlement'
 import { isApiEnabled, get, post, patch, put, del, upload } from './apiClient'
 import {
@@ -557,6 +557,14 @@ export async function getReestrModel(companyId: string): Promise<ReestrModel> {
     return { streams: [], entities: [], orphans: [], objectsLinked: 0, objectsTotal: 0 }
   }
   return get<ReestrModel>('/api/references/reestr/model', { company_id: companyId })
+}
+
+/** Сверка отпуска: сводная выработка (слот obshaya) ↔ зарядные сессии. */
+export async function getDispenseRecon(companyId: string): Promise<DispenseRecon> {
+  if (!isApiEnabled()) {
+    return { months: [], topStations: [], filePeriodFrom: null, filePeriodTo: null }
+  }
+  return get<DispenseRecon>('/api/references/reestr/dispense-recon', { company_id: companyId })
 }
 
 /** Загрузить файл-таблицу (xlsx) как L1-сырьё источника. Возвращает source_id (SourceFile). */

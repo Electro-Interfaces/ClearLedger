@@ -440,6 +440,8 @@ export interface ChargeSessionRow {
   client_name: string | null; energy_kwh: number; amount: number
   /** Выручка = client_amount (ЮЛ) либо amount (розница). У ЮЛ amount=0 — реальная выручка тут. */
   revenue: number; tariff: number
+  /** Договорной ₽/кВт·ч ЮЛ (NULL у розницы). */
+  client_tariff: number | null
   paid_at: string | null; cut_key: string | null
 }
 export interface ChargeSessionRowsResponse { rows: ChargeSessionRow[]; total: number; truncated: boolean }
@@ -508,6 +510,28 @@ export async function getChargeSessions(p: PeriodParams & { groupBy?: ChargeGrou
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     group_by: p.groupBy ?? 'station',
     ...narrowParams(p),
+  })
+}
+
+/** Длинный горизонт отпуска (2024→сейчас): сводная контрагента + сессии (склейка). */
+export interface ChargeLongTrendMonth {
+  period: string
+  source: 'file' | 'sessions'
+  kwh: number
+  rub: number | null
+  dims: Record<string, number> | null
+}
+export interface ChargeLongTrendResponse {
+  months: ChargeLongTrendMonth[]
+  groupBy: string
+  dimKeys: string[]
+  cutoff: string | null
+}
+export async function getChargeLongTrend(
+  companyId: string, groupBy: 'none' | 'connector' | 'speed' | 'location_class',
+): Promise<ChargeLongTrendResponse> {
+  return get<ChargeLongTrendResponse>('/api/analytics/charge-sessions/long-trend', {
+    company_id: companyId, group_by: groupBy,
   })
 }
 

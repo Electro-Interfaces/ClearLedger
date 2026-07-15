@@ -14,7 +14,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { loadChannels } from '@/services/channelService'
 import { isApiEnabled } from '@/services/apiClient'
 import { getChargeModel, getStationsModel, getStationsLinkage } from '@/services/analyticsService'
-import { usePaymentDisciplineSummary, useReestrModel } from '@/hooks/useReferences'
+import { usePaymentDisciplineSummary, useReestrModel, useDispenseRecon } from '@/hooks/useReferences'
 import type { Channel } from '@/types/channel'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -72,7 +72,7 @@ function ReestrNormalizationBlock() {
           <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <Kpi label="Строк L1 (3 файла-потока)" value={fmtN(l1Total)} />
+          <Kpi label="Строк L1 (файлы-потоки)" value={fmtN(l1Total)} />
           <Kpi label="Сопряжено с объектами" value={`${fmtN(resolvedTotal)} (${l1Total ? Math.round(resolvedTotal / l1Total * 100) : 0}%)`} sub="справочник объектов — хаб" />
           <Kpi label="Сироты (без объекта)" value={fmtN(orphanTotal)} sub={importantOrphans.length ? `${importantOrphans.length} с объёмами э/э!` : 'склады/демонтаж — норма'} />
           <Kpi label="Объектов с данными реестра" value={`${fmtN(m.objectsLinked)} из ${fmtN(m.objectsTotal)}`} />
@@ -123,6 +123,7 @@ function ReestrNormalizationBlock() {
               contracts: 'НСИ · ось «договор ↔ точки»',
               settlements: 'Энергозакупка · Аренда · Дебиторка',
               periods: 'Энергозакупка · (буд.) Баланс ЭЗС: вход vs отпуск из сессий',
+              dispense: 'История отпуска 2024–2025 · Сверка со сводной (ниже)',
             }
             return (
               <TableRow key={e.key}>
@@ -135,6 +136,9 @@ function ReestrNormalizationBlock() {
           })}
         </TableBody></Table>
       </CardContent></Card>
+
+      {/* Сверка отпуска: ручная сводная контрагента ↔ транзакционные сессии */}
+      <DispenseReconBlock />
 
       {/* Сироты: строки реестров без объекта — рабочий список на дозагрузку станций */}
       {m.orphans.length > 0 && (
@@ -164,6 +168,84 @@ function ReestrNormalizationBlock() {
         </CardContent></Card>
       )}
     </div>
+  )
+}
+
+/* ── Сверка отпуска: сводная выработка контрагента ↔ зарядные сессии.
+   Пересечение периодов (2026+) — тест достоверности ОБОИХ контуров: ручной
+   Excel-свод и транзакционная выгрузка ПК. Стабильное расхождение по станции —
+   сигнал дубля объекта или недоучёта в одном из рядов. ── */
+function DispenseReconBlock() {
+  const q = useDispenseRecon()
+  const r = q.data
+  if (!r || r.months.length === 0) return null
+  const dCls = (pct: number | null) =>
+    pct == null ? 'text-muted-foreground'
+      : Math.abs(pct) <= 3 ? 'text-emerald-600 dark:text-emerald-400'
+      : Math.abs(pct) <= 10 ? 'text-amber-600 dark:text-amber-400'
+      : 'text-red-600 dark:text-red-400'
+  return (
+    <Card><CardContent className="space-y-3 pt-5">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-sm font-medium">Сверка отпуска: сводная контрагента ↔ зарядные сессии</div>
+        <Badge className="bg-blue-500/15 text-[10px] text-blue-600 dark:text-blue-400">качество данных</Badge>
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          сводная: {r.filePeriodFrom?.slice(0, 7)} — {r.filePeriodTo?.slice(0, 7)}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Помесячные кВт·ч из ручного свода (слот «Сводная выработка») против суммы зарядных
+        сессий — на пересечении периодов. Расхождение — сигнал недоучёта в одном из контуров
+        или дубля станции в справочнике.
+      </p>
+      <Table><TableHeader><TableRow>
+        <TableHead>Месяц</TableHead>
+        <TableHead className="text-right">Сводная, кВт·ч</TableHead>
+        <TableHead className="text-right">Сессии, кВт·ч</TableHead>
+        <TableHead className="text-right">Δ, кВт·ч</TableHead>
+        <TableHead className="text-right">Δ, %</TableHead>
+        <TableHead className="text-right">Станций (свод/сессии)</TableHead>
+      </TableRow></TableHeader><TableBody>
+        {r.months.map((m) => (
+          <TableRow key={m.period}>
+            <TableCell className="font-medium tabular-nums">{m.period.slice(0, 7)}</TableCell>
+            <TableCell className="text-right tabular-nums">{fmtN(Math.round(m.fileKwh))}</TableCell>
+            <TableCell className="text-right tabular-nums">{fmtN(Math.round(m.sessionsKwh))}</TableCell>
+            <TableCell className={`text-right tabular-nums ${dCls(m.deltaPct)}`}>{fmtN(Math.round(m.deltaKwh))}</TableCell>
+            <TableCell className={`text-right tabular-nums ${dCls(m.deltaPct)}`}>
+              {m.deltaPct != null && Math.abs(m.deltaPct) <= 1000 ? `${m.deltaPct > 0 ? '+' : ''}${m.deltaPct}%` : '—'}
+            </TableCell>
+            <TableCell className="text-right tabular-nums text-muted-foreground">{m.fileStations} / {m.sessStations}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody></Table>
+      {r.topStations.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+            Станции с наибольшим расхождением ({r.topStations.length})
+          </summary>
+          <div className="mt-2 max-h-[260px] overflow-auto rounded-md border border-border/40">
+            <Table><TableHeader className="sticky top-0 bg-card"><TableRow>
+              <TableHead>Станция</TableHead>
+              <TableHead className="text-right">Сводная, кВт·ч</TableHead>
+              <TableHead className="text-right">Сессии, кВт·ч</TableHead>
+              <TableHead className="text-right">Δ</TableHead>
+            </TableRow></TableHeader><TableBody>
+              {r.topStations.map((s) => (
+                <TableRow key={s.locationId}>
+                  <TableCell className="max-w-[300px] truncate">{s.name}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtN(Math.round(s.fileKwh))}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmtN(Math.round(s.sessionsKwh))}</TableCell>
+                  <TableCell className={`text-right tabular-nums ${Math.abs(s.deltaKwh) > 5000 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                    {fmtN(Math.round(s.deltaKwh))}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody></Table>
+          </div>
+        </details>
+      )}
+    </CardContent></Card>
   )
 }
 

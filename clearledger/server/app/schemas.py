@@ -831,6 +831,35 @@ class ReestrModel(BaseModel):
     objectsTotal: int = 0                  # объектов в справочнике (для %)
 
 
+class DispenseReconMonth(BaseModel):
+    """Месяц сверки: отпуск по сводной выработке vs сумма зарядных сессий."""
+    period: str                            # 'YYYY-MM-01'
+    fileKwh: float = 0                     # кВт·ч по сводной (слот obshaya)
+    sessionsKwh: float = 0                 # кВт·ч по charge_sessions
+    deltaKwh: float = 0                    # file − sessions
+    deltaPct: float | None = None          # delta / sessions, %
+    fileStations: int = 0
+    sessStations: int = 0
+
+
+class DispenseReconStation(BaseModel):
+    """Станция с наибольшим расхождением сводная↔сессии за пересечение периодов."""
+    locationId: str
+    name: str
+    fileKwh: float = 0
+    sessionsKwh: float = 0
+    deltaKwh: float = 0
+
+
+class DispenseRecon(BaseModel):
+    """Сверка отпуска: ручная сводная контрагента ↔ транзакционные сессии.
+    Месяцы пересечения обоих рядов + полный диапазон сводной для контекста."""
+    months: list[DispenseReconMonth] = Field(default_factory=list)
+    topStations: list[DispenseReconStation] = Field(default_factory=list)
+    filePeriodFrom: str | None = None
+    filePeriodTo: str | None = None
+
+
 class RoleDiscipline(BaseModel):
     """Сводка по одной роли (energy|rent): счётчики статусов оплаты."""
     role: str
