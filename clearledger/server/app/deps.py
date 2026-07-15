@@ -8,18 +8,48 @@
 """
 
 import uuid
+from contextvars import ContextVar
 from typing import Annotated, TypeVar
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import CompanyScope, get_current_user
+from app.auth import CompanyScope, assert_company_member, get_current_user
 from app.database import get_db
 from app.models import User, UserCompany
 
 # company_id из query + проверка членства → UUID компании.
 CompanyDep = Annotated[uuid.UUID, Depends(CompanyScope())]
+
+
+# ── Активная компания из UI для роутеров со скоупом «по юзеру» ────────────────
+# Роутеры fuel/store/… исторически скоупятся по user.company_id (дефолтная
+# компания). Из-за этого переключение компании в шапке UI на них не влияло —
+# суперадмин/мультикомпанийный юзер всегда видел дефолтную. Фронт теперь шлёт
+# заголовок X-Company-Id (выбранная компания); он кладётся в contextvar
+# зависимостью роутера (dependency и эндпоинт — один asyncio-контекст, значение
+# видно в теле; между запросами не течёт — свой контекст на запрос + default).
+_active_company: ContextVar[str | None] = ContextVar("active_company", default=None)
+
+
+async def capture_company_header(
+    x_company_id: str | None = Header(None, alias="X-Company-Id"),
+) -> None:
+    """Зависимость роутера: сохранить выбранную в UI компанию в contextvar."""
+    _active_company.set(x_company_id)
+
+
+async def scope_company_id(user: User, db: AsyncSession) -> uuid.UUID:
+    """company_id для роутеров со скоупом «по юзеру»: выбранная в UI компания
+    (заголовок X-Company-Id, с проверкой членства → 403 для чужой) либо
+    дефолтная user.company_id, если заголовок не передан."""
+    ref = _active_company.get()
+    if ref:
+        return await assert_company_member(ref, user, db)
+    if user.company_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Компания не определена")
+    return user.company_id
 
 # Текущий пользователь (для краткости в сигнатурах).
 CurrentUser = Annotated[User, Depends(get_current_user)]

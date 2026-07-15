@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.deps import get_owned
 from app.models import Connector, User
 from app.schemas import ConnectorCreate, ConnectorResponse, ConnectorUpdate
 
@@ -39,22 +40,14 @@ def _connector_response(conn: Connector) -> ConnectorResponse:
 
 
 async def _get_connector_or_404(
-    connector_id: str, db: AsyncSession
+    connector_id: str, current_user: User, db: AsyncSession
 ) -> Connector:
-    """Получает коннектор или бросает 404."""
+    """Получает коннектор компании юзера или бросает 404 (в т.ч. для чужого)."""
     try:
         uid = uuid.UUID(connector_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Невалидный ID коннектора")
-
-    result = await db.execute(select(Connector).where(Connector.id == uid))
-    conn = result.scalar_one_or_none()
-    if conn is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Коннектор не найден",
-        )
-    return conn
+    return await get_owned(Connector, uid, current_user, db)
 
 
 @router.get("", response_model=list[ConnectorResponse])
@@ -88,7 +81,7 @@ async def get_connector(
     current_user: User = Depends(get_current_user),
 ):
     """Получить коннектор по ID."""
-    conn = await _get_connector_or_404(connector_id, db)
+    conn = await _get_connector_or_404(connector_id, current_user, db)
     return _connector_response(conn)
 
 
@@ -128,7 +121,7 @@ async def update_connector(
     current_user: User = Depends(get_current_user),
 ):
     """Частичное обновление коннектора."""
-    conn = await _get_connector_or_404(connector_id, db)
+    conn = await _get_connector_or_404(connector_id, current_user, db)
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -145,7 +138,7 @@ async def delete_connector(
     current_user: User = Depends(get_current_user),
 ):
     """Удаление коннектора."""
-    conn = await _get_connector_or_404(connector_id, db)
+    conn = await _get_connector_or_404(connector_id, current_user, db)
     await db.delete(conn)
 
 
@@ -160,7 +153,7 @@ async def poll_connector(
     В текущей версии — обновляет статусы и last_sync_at.
     Реальный polling внешних систем — TODO.
     """
-    conn = await _get_connector_or_404(connector_id, db)
+    conn = await _get_connector_or_404(connector_id, current_user, db)
 
     now = datetime.now(timezone.utc)
     conn.sync_status = "syncing"

@@ -18,16 +18,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.deps import capture_company_header, scope_company_id
 from app.models import FuelMapping, PaymentChannel, PaymentMapping, ReconcileMapping, User
 from app.services.analytics_cache import bump_version
 
-router = APIRouter(prefix="/fuel-mappings", tags=["Маппинги топлива"])
+router = APIRouter(prefix="/fuel-mappings", tags=["Маппинги топлива"],
+                   dependencies=[Depends(capture_company_header)])
 
 
-async def _cid(user: User) -> uuid.UUID:
-    if user.company_id is None:
-        raise HTTPException(400, "Пользователь не привязан к компании")
-    return user.company_id
+async def _cid(user: User, db: AsyncSession) -> uuid.UUID:
+    """Выбранная в UI компания (X-Company-Id) либо дефолтная user.company_id."""
+    return await scope_company_id(user, db)
 
 
 # ─── Схемы ──────────────────────────────────────────────────────────────────
@@ -108,7 +109,7 @@ async def _sync_reconcile_fuel(db: AsyncSession, cid, f: FuelMapping) -> None:
 @router.get("")
 async def list_all(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Все три справочника одним вызовом (для страницы каналов)."""
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     chs = (await db.execute(select(PaymentChannel).where(
         PaymentChannel.company_id == cid).order_by(PaymentChannel.sort_order))).scalars().all()
     pms = (await db.execute(select(PaymentMapping).where(
@@ -125,7 +126,7 @@ async def list_all(user: User = Depends(get_current_user), db: AsyncSession = De
 # ─── payment_channels ───────────────────────────────────────────────────────
 @router.get("/payment-channels")
 async def list_channels(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     rows = (await db.execute(select(PaymentChannel).where(
         PaymentChannel.company_id == cid).order_by(PaymentChannel.sort_order))).scalars().all()
     return [_ch_out(c) for c in rows]
@@ -134,7 +135,7 @@ async def list_channels(user: User = Depends(get_current_user), db: AsyncSession
 @router.post("/payment-channels")
 async def create_channel(body: PaymentChannelIn, user: User = Depends(get_current_user),
                          db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     ch = PaymentChannel(company_id=cid, **body.model_dump())
     db.add(ch)
     await db.commit()
@@ -146,7 +147,7 @@ async def create_channel(body: PaymentChannelIn, user: User = Depends(get_curren
 @router.put("/payment-channels/{ch_id}")
 async def update_channel(ch_id: str, body: PaymentChannelIn,
                         user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     ch = await db.get(PaymentChannel, uuid.UUID(ch_id))
     if ch is None or ch.company_id != cid:
         raise HTTPException(404, "Канал не найден")
@@ -161,7 +162,7 @@ async def update_channel(ch_id: str, body: PaymentChannelIn,
 @router.delete("/payment-channels/{ch_id}")
 async def delete_channel(ch_id: str, user: User = Depends(get_current_user),
                         db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     ch = await db.get(PaymentChannel, uuid.UUID(ch_id))
     if ch is None or ch.company_id != cid:
         raise HTTPException(404, "Канал не найден")
@@ -175,7 +176,7 @@ async def delete_channel(ch_id: str, user: User = Depends(get_current_user),
 @router.get("/payment-mappings")
 async def list_payment_mappings(user: User = Depends(get_current_user),
                                db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     rows = (await db.execute(select(PaymentMapping).where(
         PaymentMapping.company_id == cid).order_by(PaymentMapping.sort_order))).scalars().all()
     return [_pm_out(m) for m in rows]
@@ -184,7 +185,7 @@ async def list_payment_mappings(user: User = Depends(get_current_user),
 @router.post("/payment-mappings")
 async def create_payment_mapping(body: PaymentMappingIn, user: User = Depends(get_current_user),
                                 db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     m = PaymentMapping(company_id=cid, pattern=body.pattern.lower().strip(),
                        channel_code=body.channel_code,
                        warehouse_override=body.warehouse_override, sort_order=body.sort_order)
@@ -199,7 +200,7 @@ async def create_payment_mapping(body: PaymentMappingIn, user: User = Depends(ge
 async def update_payment_mapping(m_id: str, body: PaymentMappingIn,
                                 user: User = Depends(get_current_user),
                                 db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     m = await db.get(PaymentMapping, uuid.UUID(m_id))
     if m is None or m.company_id != cid:
         raise HTTPException(404, "Маппинг не найден")
@@ -216,7 +217,7 @@ async def update_payment_mapping(m_id: str, body: PaymentMappingIn,
 @router.delete("/payment-mappings/{m_id}")
 async def delete_payment_mapping(m_id: str, user: User = Depends(get_current_user),
                                 db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     m = await db.get(PaymentMapping, uuid.UUID(m_id))
     if m is None or m.company_id != cid:
         raise HTTPException(404, "Маппинг не найден")
@@ -230,7 +231,7 @@ async def delete_payment_mapping(m_id: str, user: User = Depends(get_current_use
 @router.get("/fuel-types")
 async def list_fuel_mappings(user: User = Depends(get_current_user),
                             db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     rows = (await db.execute(select(FuelMapping).where(
         FuelMapping.company_id == cid).order_by(FuelMapping.service_code))).scalars().all()
     return [_fm_out(f) for f in rows]
@@ -239,7 +240,7 @@ async def list_fuel_mappings(user: User = Depends(get_current_user),
 @router.post("/fuel-types")
 async def create_fuel_mapping(body: FuelMappingIn, user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     f = FuelMapping(company_id=cid, **body.model_dump())
     db.add(f)
     await db.flush()
@@ -253,7 +254,7 @@ async def create_fuel_mapping(body: FuelMappingIn, user: User = Depends(get_curr
 async def update_fuel_mapping(f_id: str, body: FuelMappingIn,
                              user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     f = await db.get(FuelMapping, uuid.UUID(f_id))
     if f is None or f.company_id != cid:
         raise HTTPException(404, "Вид топлива не найден")
@@ -269,7 +270,7 @@ async def update_fuel_mapping(f_id: str, body: FuelMappingIn,
 @router.delete("/fuel-types/{f_id}")
 async def delete_fuel_mapping(f_id: str, user: User = Depends(get_current_user),
                              db: AsyncSession = Depends(get_db)):
-    cid = await _cid(user)
+    cid = await _cid(user, db)
     f = await db.get(FuelMapping, uuid.UUID(f_id))
     if f is None or f.company_id != cid:
         raise HTTPException(404, "Вид топлива не найден")

@@ -450,8 +450,13 @@ async def fetch_document_lines(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid doc id") from exc
 
+    # Документ обязан принадлежать компании коннекшна (conn уже проверен на членство),
+    # иначе юзер компании A перезаписал бы doc.lines документа компании B.
     doc = (await db.execute(
-        select(AccountingDoc).where(AccountingDoc.id == doc_uuid)
+        select(AccountingDoc).where(
+            AccountingDoc.id == doc_uuid,
+            AccountingDoc.company_id == conn.company_id,
+        )
     )).scalar_one_or_none()
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Document not found")

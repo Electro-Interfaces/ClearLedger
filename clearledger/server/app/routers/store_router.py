@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.deps import capture_company_header, scope_company_id
 from app.models import User
 from app.services.goods_dashboard import GoodsDashboardService
 
@@ -24,7 +25,11 @@ from app.services.goods_dashboard import GoodsDashboardService
 # писать в произвольный путь ФС сервера).
 BP_EXPORT_DIR = os.environ.get("TL_BP_EXPORT_DIR", r"C:\TL_BP_Export")
 
-router = APIRouter(prefix="/store", tags=["Магазин"])
+# capture_company_header кладёт X-Company-Id (выбранная компания) в contextvar;
+# scope_company_id ниже резолвит её вместо жёсткой user.company_id (переключение
+# компании в UI теперь влияет и на «Магазин»).
+router = APIRouter(prefix="/store", tags=["Магазин"],
+                   dependencies=[Depends(capture_company_header)])
 
 
 @router.get("/overview")
@@ -37,7 +42,7 @@ async def store_overview(
     db: AsyncSession = Depends(get_db),
 ):
     """KPI обзора магазина за период (продажи сопутки/общепита)."""
-    cid: uuid.UUID = user.company_id
+    cid: uuid.UUID = await scope_company_id(user, db)
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
     return await GoodsDashboardService(db, cid).compute(
         date.fromisoformat(date_from), date.fromisoformat(date_to), st, compare,
@@ -53,7 +58,7 @@ async def store_skus(
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр SKU с маржой и ABC (питает Ассортимент / Цены-маржа / Номенклатуру)."""
-    cid: uuid.UUID = user.company_id
+    cid: uuid.UUID = await scope_company_id(user, db)
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
     return await GoodsDashboardService(db, cid).sku_analytics(
         date.fromisoformat(date_from), date.fromisoformat(date_to), st,
@@ -74,7 +79,7 @@ async def store_sales(
 ):
     """Анализ продаж с гибкой группировкой и фильтрами (инструмент менеджера)."""
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
-    return await GoodsDashboardService(db, user.company_id).sales_analysis(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).sales_analysis(
         date.fromisoformat(date_from), date.fromisoformat(date_to),
         group_by=group_by, category=category, marked=marked, q=q, stations=st,
     )
@@ -95,7 +100,7 @@ async def store_nomenclature(
 ):
     """Полный справочник номенклатуры + обогащение продажами/ШК + фильтры (мастер-НСИ)."""
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
-    return await GoodsDashboardService(db, user.company_id).nomenclature_catalog(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).nomenclature_catalog(
         date.fromisoformat(date_from), date.fromisoformat(date_to),
         kind=kind, marked=marked, weighed=weighed, has_sales=has_sales, q=q, stations=st,
     )
@@ -111,7 +116,7 @@ async def store_stock(
     db: AsyncSession = Depends(get_db),
 ):
     """Достоверный остаток товара (снимок регистров ЦБ ТоварыНаАЗК+Партии), не оценка."""
-    return await GoodsDashboardService(db, user.company_id).stock_onhand(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).stock_onhand(
         warehouse=warehouse, q=q, marked=marked, only_negative=only_negative,
     )
 
@@ -129,7 +134,7 @@ async def store_inventory(
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр инвентаризаций ЦБ + недостачи/излишки (shrinkage) с drill-down по строкам."""
-    return await GoodsDashboardService(db, user.company_id).inventory(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).inventory(
         warehouse=warehouse, only_dev=only_dev, date_from=_od(date_from), date_to=_od(date_to),
     )
 
@@ -143,7 +148,7 @@ async def store_writeoffs(
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр списаний ЦБ (СписаниеТоваров) + причины + топ списанных SKU."""
-    return await GoodsDashboardService(db, user.company_id).writeoffs(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).writeoffs(
         warehouse=warehouse, reason=reason, date_from=_od(date_from), date_to=_od(date_to),
     )
 
@@ -156,7 +161,7 @@ async def store_transfers(
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр перемещений ЦБ (ПеремещениеТоваров) откуда→куда + направления."""
-    return await GoodsDashboardService(db, user.company_id).transfers(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).transfers(
         direction=direction, date_from=_od(date_from), date_to=_od(date_to))
 
 
@@ -168,7 +173,7 @@ async def store_revaluation(
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр переоценок ЦБ (ПереоценкаТоваровАЗК): старая→новая цена, Δ%, влияние."""
-    return await GoodsDashboardService(db, user.company_id).revaluation(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).revaluation(
         reason=reason, date_from=_od(date_from), date_to=_od(date_to))
 
 
@@ -182,7 +187,7 @@ async def store_catering(
 ):
     """Инжиниринг меню общепита: блюда + фудкост/маржа + класс меню + состав ТТК + динамика."""
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
-    return await GoodsDashboardService(db, user.company_id).catering_menu(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).catering_menu(
         date.fromisoformat(date_from), date.fromisoformat(date_to), st,
     )
 
@@ -198,7 +203,7 @@ async def store_pricing(
 ):
     """Цены и маржа: сегмент (сопутка/общепит/всё) + группы + реестр SKU."""
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
-    return await GoodsDashboardService(db, user.company_id).pricing_analysis(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).pricing_analysis(
         date.fromisoformat(date_from), date.fromisoformat(date_to), category=category, stations=st,
     )
 
@@ -214,7 +219,7 @@ async def store_assortment(
 ):
     """Ассортимент: ABC×XYZ + оборачиваемость/запасы + GMROI + дефицит/неликвиды + action-list."""
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
-    return await GoodsDashboardService(db, user.company_id).assortment_analysis(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).assortment_analysis(
         date.fromisoformat(date_from), date.fromisoformat(date_to), category=category, stations=st,
     )
 
@@ -230,7 +235,7 @@ async def store_sku_detail(
 ):
     """Детализация товара (модалка): метрики + история цен + продажи + закупки + остаток."""
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
-    return await GoodsDashboardService(db, user.company_id).sku_detail(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).sku_detail(
         guid, date.fromisoformat(date_from), date.fromisoformat(date_to), st,
     )
 
@@ -247,7 +252,7 @@ async def store_sku_card(
     """Полная карточка номенклатуры (товаровед): паспорт + ШК + цена/остаток +
     продажи + поставщики + движение + рецептура ТТК + МРЦ."""
     st = [s.strip() for s in stations.split(",") if s.strip()] if stations else None
-    return await GoodsDashboardService(db, user.company_id).sku_card(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).sku_card(
         guid, date.fromisoformat(date_from), date.fromisoformat(date_to), st,
     )
 
@@ -278,7 +283,7 @@ async def store_get_plan(
     db: AsyncSession = Depends(get_db),
 ):
     """План продаж магазина на месяц (сырьё для формы редактирования)."""
-    return await GoodsDashboardService(db, user.company_id).get_plans(period)
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).get_plans(period)
 
 
 @router.put("/plan")
@@ -288,7 +293,7 @@ async def store_save_plan(
     db: AsyncSession = Depends(get_db),
 ):
     """Сохранить план (ручной ввод руководителя). Значение ≤0 удаляет строку."""
-    return await GoodsDashboardService(db, user.company_id).save_plans(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).save_plans(
         body.period, [i.model_dump() for i in body.items],
     )
 
@@ -300,7 +305,7 @@ async def store_plan_facts(
     db: AsyncSession = Depends(get_db),
 ):
     """План-факт-светофор за месяц: карты факт/план/%/🟢🟡🔴 + спарклайн."""
-    return await GoodsDashboardService(db, user.company_id).plan_facts(period)
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).plan_facts(period)
 
 
 # ── МРЦ табака: регуляторный контроль «продажа выше МРЦ» (О-3) ──
@@ -322,7 +327,7 @@ async def store_mrc(
     db: AsyncSession = Depends(get_db),
 ):
     """Контроль МРЦ табака: розница vs МРЦ (нарушения) + табак без МРЦ."""
-    return await GoodsDashboardService(db, user.company_id).mrc_control()
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).mrc_control()
 
 
 @router.post("/mrc/import")
@@ -332,7 +337,7 @@ async def store_mrc_import(
     db: AsyncSession = Depends(get_db),
 ):
     """Импорт справочника МРЦ (CSV → строки). Матч по штрихкоду/артикулу."""
-    return await GoodsDashboardService(db, user.company_id).import_mrc(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).import_mrc(
         [r.model_dump() for r in body.rows],
     )
 
@@ -346,7 +351,7 @@ async def store_shifts(
     db: AsyncSession = Depends(get_db),
 ):
     """Смены как составной документ: продажи + приходы/инвентаризации/списания/возвраты за смену."""
-    return await GoodsDashboardService(db, user.company_id).shifts_composite(
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).shifts_composite(
         date.fromisoformat(date_from), date.fromisoformat(date_to), _stations(stations),
     )
 
@@ -358,7 +363,7 @@ async def store_shift_detail(
     db: AsyncSession = Depends(get_db),
 ):
     """Смена-детализация (модалка): строки продаж + касса + приходы/инвентаризации/списания дня."""
-    return await GoodsDashboardService(db, user.company_id).shift_detail(key)
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).shift_detail(key)
 
 
 @router.get("/bp-package")
@@ -370,7 +375,7 @@ async def store_bp_package(
     """Preview пакета «смена→БП» (эмиттер Ledger): все типы документов + НСИ + хеш."""
     from app.services.bp_export import BpPackageEmitter
     try:
-        return await BpPackageEmitter(db, user.company_id).build_shift_package(shift_key)
+        return await BpPackageEmitter(db, await scope_company_id(user, db)).build_shift_package(shift_key)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -387,7 +392,7 @@ async def store_bp_package_emit(
     Файл АЗС{код}_{дата}_смена-{номер}_{uuid}.json."""
     from app.services.bp_export import BpPackageEmitter
     try:
-        return await BpPackageEmitter(db, user.company_id).emit_to_dir(shift_key, BP_EXPORT_DIR)
+        return await BpPackageEmitter(db, await scope_company_id(user, db)).emit_to_dir(shift_key, BP_EXPORT_DIR)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -404,7 +409,7 @@ async def store_bp_package_verify(
     полнота НСИ, fail-fast НДС, хеш). Список проверок ok/детали."""
     from app.services.bp_export import BpPackageEmitter
     try:
-        return await BpPackageEmitter(db, user.company_id).verify_shift_package(shift_key)
+        return await BpPackageEmitter(db, await scope_company_id(user, db)).verify_shift_package(shift_key)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -421,7 +426,7 @@ async def store_report(
     db: AsyncSession = Depends(get_db),
 ):
     """Отчёты раздела: receipts · suppliers · catering · categories · barcodes · recipes."""
-    svc = GoodsDashboardService(db, user.company_id)
+    svc = GoodsDashboardService(db, await scope_company_id(user, db))
     method = {"receipts": svc.receipts, "suppliers": svc.suppliers,
               "catering": svc.catering, "categories": svc.categories,
               "barcodes": svc.barcodes, "recipes": svc.recipes}.get(report)

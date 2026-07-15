@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AuditEvent, User
+from app.models import AuditEvent, User, UserCompany
 from app.schemas import AuditEventResponse
 
 
@@ -130,10 +130,13 @@ async def get_entry_audit(
     except ValueError:
         raise HTTPException(status_code=400, detail="Невалидный ID записи")
 
-    result = await db.execute(
-        select(AuditEvent)
-        .where(AuditEvent.entry_id == eid)
-        .order_by(AuditEvent.timestamp.desc())
-    )
+    stmt = select(AuditEvent).where(AuditEvent.entry_id == eid)
+    # Изоляция: обычный юзер видит аудит только доступных компаний (иначе утечка
+    # журнала чужой записи по её id).
+    if not current_user.is_superadmin:
+        stmt = stmt.where(AuditEvent.company_id.in_(
+            select(UserCompany.company_id).where(UserCompany.user_id == current_user.id)
+        ))
+    result = await db.execute(stmt.order_by(AuditEvent.timestamp.desc()))
     events = result.scalars().all()
     return [_audit_response(e) for e in events]

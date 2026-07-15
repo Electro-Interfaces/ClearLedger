@@ -2,27 +2,33 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard,
   FileText,
-  GitCompare,
-  MapPin,
-  MoreHorizontal,
+  Building2,
+  Boxes,
+  Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useCompany } from '@/contexts/CompanyContext'
+import { routeAllowed } from '@/config/accessModules'
 
 interface BottomNavItem {
   label: string
   path: string
   icon: React.ComponentType<{ className?: string }>
-  badge?: number
 }
 
+/**
+ * Нижняя навигация для телефонов (<768px, md:hidden) — быстрый доступ к главным
+ * разделам; полное меню — в шторке по гамбургеру. Пункты фильтруются RBAC.
+ */
 export function MobileBottomNav() {
+  const { companyModules } = useCompany()
   const items: BottomNavItem[] = [
     { label: 'Рабочий стол', path: '/', icon: LayoutDashboard },
-    { label: 'Файлы', path: '/files', icon: FileText },
-    { label: 'Разрезы', path: '/reconciliation', icon: GitCompare },
-    { label: 'Точки', path: '/locations', icon: MapPin },
-    { label: 'Ещё', path: '/settings', icon: MoreHorizontal },
-  ]
+    { label: 'Документы', path: '/files', icon: FileText },
+    { label: 'Контрагенты', path: '/contractors', icon: Building2 },
+    { label: 'Объекты', path: '/objects', icon: Boxes },
+    { label: 'Настройки', path: '/settings', icon: Settings },
+  ].filter((i) => routeAllowed(i.path, companyModules))
 
   return (
     <nav
@@ -37,21 +43,14 @@ export function MobileBottomNav() {
             end={item.path === '/'}
             className={({ isActive }) =>
               cn(
-                'relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg text-[10px] font-medium transition-colors duration-200 min-w-[48px]',
+                'relative flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-lg text-[10px] font-medium transition-colors duration-200 min-w-[48px]',
                 isActive
                   ? 'text-primary'
                   : 'text-muted-foreground hover:text-foreground',
               )
             }
           >
-            <div className="relative">
-              <item.icon className="size-5" />
-              {item.badge !== undefined && item.badge > 0 && (
-                <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center">
-                  {item.badge > 99 ? '99+' : item.badge}
-                </span>
-              )}
-            </div>
+            <item.icon className="size-5" />
             <span>{item.label}</span>
           </NavLink>
         ))}

@@ -22,8 +22,9 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { mainNavItems, dataItems, oneCItems, settingsItems, adminItem } from '@/config/navigation'
 import { routeAllowed } from '@/config/accessModules'
 
-function NavItem({ to, icon: Icon, label, end, collapsed }: {
-  to: string; icon: React.ComponentType<{ className?: string }>; label: string; end?: boolean; collapsed?: boolean
+function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate }: {
+  to: string; icon: React.ComponentType<{ className?: string }>; label: string
+  end?: boolean; collapsed?: boolean; onNavigate?: () => void
 }) {
   return (
     <SidebarMenuItem>
@@ -33,6 +34,7 @@ function NavItem({ to, icon: Icon, label, end, collapsed }: {
             <NavLink
               to={to}
               end={end}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   isActive
@@ -52,9 +54,18 @@ function NavItem({ to, icon: Icon, label, end, collapsed }: {
   )
 }
 
-export function AppSidebar() {
-  const { state, toggleSidebar } = useSidebar()
-  const collapsed = state === 'collapsed'
+/**
+ * Содержимое навигации сайдбара — без обёртки `<Sidebar>` из ui-кита.
+ * Используется в двух контекстах:
+ *  - десктоп: внутри `<Sidebar collapsible="icon">` (AppSidebar ниже);
+ *  - мобильная шторка: напрямую в SheetContent (MainLayout). Класть сюда
+ *    `<AppSidebar>` нельзя — ui-Sidebar на мобиле рендерит СВОЙ закрытый Sheet,
+ *    и шторка получалась пустой.
+ * `onNavigate` — колбэк на клик по пункту (мобила закрывает шторку).
+ */
+export function SidebarNavContent({ collapsed = false, onNavigate }: {
+  collapsed?: boolean; onNavigate?: () => void
+}) {
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
   const { user } = useAuth()
@@ -76,6 +87,126 @@ export function AppSidebar() {
   )
 
   return (
+    <>
+      {/* Main nav */}
+      {mainNav.length > 0 && (
+        <SidebarGroup className="py-0">
+          <SidebarMenu>
+            {mainNav.map((item) => (
+              <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      )}
+
+      {dataNav.length > 0 && <SidebarSeparator className="my-2" />}
+
+      {/* ДАННЫЕ section (бывш. «Загрузка») */}
+      {dataNav.length > 0 && (
+      <SidebarGroup className="py-0">
+        {collapsed ? (
+          <SidebarMenu>
+            <NavItem to={dataNav[0].to} icon={Layers} label="Данные" collapsed />
+          </SidebarMenu>
+        ) : (
+          <Collapsible open={dataOpen} onOpenChange={setDataOpen}>
+            <CollapsibleTrigger asChild>
+              <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
+                <span className="flex items-center gap-1.5">
+                  <Layers className="h-3 w-3" />
+                  Данные
+                </span>
+                <ChevronDown className={`h-3 w-3 transition-transform ${dataOpen ? '' : '-rotate-90'}`} />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarMenu>
+                {dataNav.map((item) => (
+                  <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+                ))}
+              </SidebarMenu>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
+      </SidebarGroup>
+      )}
+
+      {/* 1С section — fuel-профиль (ГИГ) + доступ к модулю onec; energy (ЭЗС) без 1С */}
+      {!isEnergy && oneCNav.length > 0 && (
+        <>
+          <SidebarSeparator className="my-2" />
+          <SidebarGroup className="py-0">
+            {collapsed ? (
+              <SidebarMenu>
+                <NavItem to="/1c/connection" icon={Database} label="1С" collapsed />
+              </SidebarMenu>
+            ) : (
+              <Collapsible open={oneCOpen} onOpenChange={setOneCOpen}>
+                <CollapsibleTrigger asChild>
+                  <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
+                    <span className="flex items-center gap-1.5">
+                      <Database className="h-3 w-3" />
+                      1С
+                    </span>
+                    <ChevronDown className={`h-3 w-3 transition-transform ${oneCOpen ? '' : '-rotate-90'}`} />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarMenu>
+                    {oneCNav.map((item) => (
+                      <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+                    ))}
+                  </SidebarMenu>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+          </SidebarGroup>
+        </>
+      )}
+
+      <SidebarSeparator className="my-2" />
+
+      {/* Settings */}
+      {settingsNav.length > 0 && (
+      <SidebarGroup className="py-0">
+        {!collapsed && (
+          <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
+            Настройки
+          </p>
+        )}
+        <SidebarMenu>
+          {settingsNav.map((item) => (
+            <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+      )}
+
+      {/* Администрирование — только для админа/суперадмина */}
+      {canAdmin && (
+        <>
+          <SidebarSeparator className="my-2" />
+          <SidebarGroup className="py-0">
+            {!collapsed && (
+              <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
+                Администрирование
+              </p>
+            )}
+            <SidebarMenu>
+              <NavItem {...adminItem} collapsed={collapsed} onNavigate={onNavigate} />
+            </SidebarMenu>
+          </SidebarGroup>
+        </>
+      )}
+    </>
+  )
+}
+
+export function AppSidebar() {
+  const { state, toggleSidebar } = useSidebar()
+  const collapsed = state === 'collapsed'
+
+  return (
     <Sidebar collapsible="icon" className="border-r border-border/40 pt-[var(--header-height)] pb-12">
       <SidebarContent className="px-1.5 py-1">
         {/* Toggle button */}
@@ -86,116 +217,7 @@ export function AppSidebar() {
           </Button>
         </div>
 
-        {/* Main nav */}
-        {mainNav.length > 0 && (
-          <SidebarGroup className="py-0">
-            <SidebarMenu>
-              {mainNav.map((item) => (
-                <NavItem key={item.to} {...item} collapsed={collapsed} />
-              ))}
-            </SidebarMenu>
-          </SidebarGroup>
-        )}
-
-        {dataNav.length > 0 && <SidebarSeparator className="my-2" />}
-
-        {/* ДАННЫЕ section (бывш. «Загрузка») */}
-        {dataNav.length > 0 && (
-        <SidebarGroup className="py-0">
-          {collapsed ? (
-            <SidebarMenu>
-              <NavItem to={dataNav[0].to} icon={Layers} label="Данные" collapsed />
-            </SidebarMenu>
-          ) : (
-            <Collapsible open={dataOpen} onOpenChange={setDataOpen}>
-              <CollapsibleTrigger asChild>
-                <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
-                  <span className="flex items-center gap-1.5">
-                    <Layers className="h-3 w-3" />
-                    Данные
-                  </span>
-                  <ChevronDown className={`h-3 w-3 transition-transform ${dataOpen ? '' : '-rotate-90'}`} />
-                </button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <SidebarMenu>
-                  {dataNav.map((item) => (
-                    <NavItem key={item.to} {...item} collapsed={collapsed} />
-                  ))}
-                </SidebarMenu>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
-        </SidebarGroup>
-        )}
-
-        {/* 1С section — fuel-профиль (ГИГ) + доступ к модулю onec; energy (ЭЗС) без 1С */}
-        {!isEnergy && oneCNav.length > 0 && (
-          <>
-            <SidebarSeparator className="my-2" />
-            <SidebarGroup className="py-0">
-              {collapsed ? (
-                <SidebarMenu>
-                  <NavItem to="/1c/connection" icon={Database} label="1С" collapsed />
-                </SidebarMenu>
-              ) : (
-                <Collapsible open={oneCOpen} onOpenChange={setOneCOpen}>
-                  <CollapsibleTrigger asChild>
-                    <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
-                      <span className="flex items-center gap-1.5">
-                        <Database className="h-3 w-3" />
-                        1С
-                      </span>
-                      <ChevronDown className={`h-3 w-3 transition-transform ${oneCOpen ? '' : '-rotate-90'}`} />
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenu>
-                      {oneCNav.map((item) => (
-                        <NavItem key={item.to} {...item} collapsed={collapsed} />
-                      ))}
-                    </SidebarMenu>
-                  </CollapsibleContent>
-                </Collapsible>
-              )}
-            </SidebarGroup>
-          </>
-        )}
-
-        <SidebarSeparator className="my-2" />
-
-        {/* Settings */}
-        {settingsNav.length > 0 && (
-        <SidebarGroup className="py-0">
-          {!collapsed && (
-            <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-              Настройки
-            </p>
-          )}
-          <SidebarMenu>
-            {settingsNav.map((item) => (
-              <NavItem key={item.to} {...item} collapsed={collapsed} />
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
-        )}
-
-        {/* Администрирование — только для админа/суперадмина */}
-        {canAdmin && (
-          <>
-            <SidebarSeparator className="my-2" />
-            <SidebarGroup className="py-0">
-              {!collapsed && (
-                <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-                  Администрирование
-                </p>
-              )}
-              <SidebarMenu>
-                <NavItem {...adminItem} collapsed={collapsed} />
-              </SidebarMenu>
-            </SidebarGroup>
-          </>
-        )}
+        <SidebarNavContent collapsed={collapsed} />
       </SidebarContent>
 
       <SidebarFooter />

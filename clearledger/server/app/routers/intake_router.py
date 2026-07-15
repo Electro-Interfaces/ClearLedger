@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.config import get_settings
 from app.database import get_db
+from app.deps import get_owned
 from app.models import SourceFile, User
 
 router = APIRouter(tags=["Intake / Файлы"])
@@ -101,13 +102,8 @@ async def download_file(
     except ValueError:
         raise HTTPException(status_code=400, detail="Невалидный ID файла")
 
-    result = await db.execute(select(SourceFile).where(SourceFile.id == uid))
-    source = result.scalar_one_or_none()
-    if source is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Файл не найден",
-        )
+    # 404 и для несуществующего, и для файла чужой компании (не раскрываем факт).
+    source = await get_owned(SourceFile, uid, current_user, db)
 
     file_path = Path(source.storage_path)
     if not file_path.exists():

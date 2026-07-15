@@ -11,6 +11,16 @@ const TOKEN_KEY = 'clearledger-token'
 /** API сконфигурирован? */
 export const isApiEnabled = (): boolean => !!BASE_URL
 
+// Активная компания из UI — уходит в заголовке X-Company-Id. Роутеры со скоупом
+// «по юзеру» (fuel/store/…) раньше игнорировали выбор компании в шапке и всегда
+// показывали дефолтную; теперь следуют выбору. Устанавливается из CompanyContext.
+let activeCompanyId: string | null = null
+
+/** Прокинуть активную компанию в HTTP-клиент (заголовок X-Company-Id). */
+export function setApiCompany(id: string | null): void {
+  activeCompanyId = id || null
+}
+
 /** Получить сохранённый токен */
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -109,6 +119,7 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...extra }
   const token = getToken()
   if (token) h['Authorization'] = `Bearer ${token}`
+  if (activeCompanyId) h['X-Company-Id'] = activeCompanyId
   return h
 }
 

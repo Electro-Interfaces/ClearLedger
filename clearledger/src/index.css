@@ -306,6 +306,23 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
+
+  /* Узкие экраны: системный auto-скроллбар (12px) слишком массивный —
+     широкие таблицы обрастали толстыми серыми полосами. Тонкий вариант. */
+  @media (max-width: 767px) {
+    * {
+      scrollbar-width: thin;
+    }
+    *::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    *::-webkit-scrollbar-thumb {
+      border: none;
+      background-clip: border-box;
+      border-radius: 3px;
+    }
+  }
 }
 
 @layer utilities {

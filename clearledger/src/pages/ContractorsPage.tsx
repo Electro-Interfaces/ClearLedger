@@ -26,6 +26,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import { useMaxWidth } from '@/hooks/use-mobile'
 import { Search, Building2, MapPin, Loader2, Database, FileText, Plus, Pencil, Trash2, ChevronDown, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
@@ -1080,6 +1082,8 @@ export function ContractorsPage() {
   const { data: counterparties = [], isLoading } = useCounterparties()
   const { data: allContracts = [] } = useContracts()
   const [view, setView] = useState<'counterparties' | 'contracts' | 'corp'>('counterparties')
+  // <1024 (порог грида lg): мастер-деталь — карточка шторкой поверх списка.
+  const isNarrow = useMaxWidth(1024)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<string>('all')
   const [sortBy, setSortBy] = useState<'name' | 'contracts'>('name')
@@ -1156,8 +1160,10 @@ export function ContractorsPage() {
         <AllContractsView counterparties={counterparties} />
       ) : (
       <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
-        {/* Список контрагентов */}
-        <Card className="lg:h-[calc(100vh-12rem)] flex flex-col">
+        {/* Список контрагентов. Высота капится и на мобиле: без капа список из
+            тысячи записей раздувал страницу до ~60 000px, а карточка выбранного
+            рендерилась за экраном — тап выглядел «ничего не произошло». */}
+        <Card className="h-[calc(100dvh-19rem)] lg:h-[calc(100vh-12rem)] flex flex-col">
           <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -1237,7 +1243,8 @@ export function ContractorsPage() {
           </CardContent>
         </Card>
 
-        {/* Детали выбранного контрагента */}
+        {/* Детали выбранного контрагента — на десктопе правая колонка */}
+        {!isNarrow && (
         <Card className="lg:h-[calc(100vh-12rem)] overflow-y-auto">
           <CardContent className="p-4">
             {selected
@@ -1249,7 +1256,22 @@ export function ContractorsPage() {
               )}
           </CardContent>
         </Card>
+        )}
       </div>
+      )}
+
+      {/* Мобила/планшет: карточка контрагента — шторкой снизу поверх списка */}
+      {isNarrow && (
+        <Sheet open={!!selected && view === 'counterparties'}
+          onOpenChange={(o) => { if (!o) setSelectedId(null) }}>
+          <SheetContent side="bottom" className="h-[92dvh] p-0 rounded-t-xl">
+            <SheetTitle className="sr-only">Карточка контрагента</SheetTitle>
+            <SheetDescription className="sr-only">Реквизиты и договоры контрагента</SheetDescription>
+            <div className="h-full overflow-y-auto p-4 pt-5">
+              {selected && <ContractorDetail cp={selected} all={counterparties} />}
+            </div>
+          </SheetContent>
+        </Sheet>
       )}
     </div>
   )

@@ -57,6 +57,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db, async_session_factory
+from app.deps import capture_company_header, scope_company_id
 from app.models import (
     FuelStation, FuelShift, FuelTank, FuelPump, FuelCashMovement,
     FuelReceipt, FuelReceiptOverride, FuelReceiptCost, FuelOpeningBalance, FuelPurchaseBatch,
@@ -74,10 +75,13 @@ from app.services.sts_client import (
     sts_test_connection,
 )
 async def _company_id(user: User, db: AsyncSession) -> uuid.UUID:
-    """Resolve company_id from user."""
-    return user.company_id
+    """company_id раздела: выбранная в UI компания (X-Company-Id, с проверкой
+    членства) либо дефолтная user.company_id. Раньше игнорировала выбор в шапке."""
+    return await scope_company_id(user, db)
 
-router = APIRouter(prefix="/fuel", tags=["Топливо"])
+# capture_company_header кладёт X-Company-Id в contextvar до тела эндпоинта.
+router = APIRouter(prefix="/fuel", tags=["Топливо"],
+                   dependencies=[Depends(capture_company_header)])
 
 
 # ═══════════════════════════════════════════════════════════════

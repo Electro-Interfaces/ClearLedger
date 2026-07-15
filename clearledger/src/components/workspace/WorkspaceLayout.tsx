@@ -13,6 +13,9 @@ import { getSettings } from '@/services/settingsService'
 import { modeAllowed } from '@/config/accessModules'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { Button } from '@/components/ui/button'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { NormalizationPanel } from './NormalizationPanel'
 import { ReconciliationPanel } from './ReconciliationPanel'
 import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
@@ -211,37 +214,44 @@ function MobileWorkspace() {
 
   return (
     <div className="h-full min-h-0 flex flex-col pb-14">
-      {/* Фильтр рабочей области (период/станции/…) — прокрутка при переполнении */}
-      <div className="overflow-x-auto shrink-0"><WorkspaceToolbar /></div>
+      {/* Фильтр рабочей области (период/станции/…) — свайп без видимого скроллбара */}
+      <div className="overflow-x-auto scrollbar-hide shrink-0"><WorkspaceToolbar /></div>
 
-      {/* Полоса режимов */}
-      <div className="flex gap-1 overflow-x-auto border-b border-border/50 bg-muted/20 px-2 py-1.5 shrink-0">
-        {sections.map((s) => {
-          const Icon = s.icon
-          const on = s.mode === coreMode
-          return (
-            <button key={s.mode} onClick={() => setCoreMode(s.mode)}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs transition-colors ${on ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground'}`}>
-              <Icon className="h-3.5 w-3.5 shrink-0" />{s.label}
-            </button>
-          )
-        })}
+      {/* Режим — компактный селект (вместо длинной скролл-полосы), под-виды — свайп-полоса */}
+      <div className="flex items-center gap-1.5 border-b border-border/50 bg-muted/20 px-2 py-1.5 shrink-0">
+        <Select value={coreMode} onValueChange={(v) => setCoreMode(v as typeof coreMode)}>
+          <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1.5 text-xs font-medium">
+            {/* иконка приезжает из выбранного SelectItem через SelectValue */}
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {sections.map((s) => {
+              const Icon = s.icon
+              return (
+                <SelectItem key={s.mode} value={s.mode}>
+                  <span className="flex items-center gap-2"><Icon className="h-3.5 w-3.5" />{s.label}</span>
+                </SelectItem>
+              )
+            })}
+          </SelectContent>
+        </Select>
+
+        {/* Под-виды активного режима — свайп без видимого скроллбара */}
+        {items.length > 0 && (
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto scrollbar-hide">
+            {items.map((it) => {
+              const on = it.key === activeSub
+              return (
+                <button key={it.key} onClick={() => setSub(it.key)}
+                  ref={(el) => { if (on && el) el.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }}
+                  className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors ${on ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'}`}>
+                  {it.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
-
-      {/* Полоса под-видов активного режима */}
-      {items.length > 0 && (
-        <div className="flex gap-1 overflow-x-auto border-b border-border/40 px-2 py-1 shrink-0">
-          {items.map((it) => {
-            const on = it.key === activeSub
-            return (
-              <button key={it.key} onClick={() => setSub(it.key)}
-                className={`whitespace-nowrap rounded-md px-2.5 py-1 text-xs transition-colors ${on ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'}`}>
-                {it.label}
-              </button>
-            )
-          })}
-        </div>
-      )}
 
       {/* Контент режима — тот же диспетчер, что на десктопе */}
       <div className="flex-1 min-h-0 overflow-hidden">

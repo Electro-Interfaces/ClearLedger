@@ -227,6 +227,10 @@ export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0 pb-3">
+          {/* Фикс. колонки журнала на мобиле распирали раздел — скролл внутри
+              карточки; w-0+min-w-full гасит проброс min-content вверх */}
+          <div className="overflow-x-auto w-0 min-w-full">
+          <div className="min-w-[880px]">
           <div className="grid grid-cols-[28px_130px_50px_56px_88px_1fr_92px_92px_100px_120px] gap-2 px-3 pb-2 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
             <span></span><span>Дата</span><span>ТТ</span><span>Смена</span><span>ТТН</span><span>Топливо</span>
             <span className="text-right">Объём л</span><span className="text-right">Масса кг</span><span className="text-right">Откл. кг</span><span>Приёмка</span>
@@ -259,6 +263,8 @@ export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
                 </div>
               )
             })}
+          </div>
+          </div>
           </div>
         </CardContent>
       </Card>

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.deps import get_owned
 from app.models import InventoryBatch, NomenclaturePrice, OneCPolicy, PostingTemplate, User
 
 router = APIRouter(tags=["1С политика и схема проводок"])
@@ -142,7 +143,14 @@ async def create_posting_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PostingTemplateResponse:
-    cid = await assert_company_member(payload.company_id, current_user, db) if payload.company_id else None
+    # Глобальный шаблон (company_id=None) влияет на все компании — только суперадмин.
+    if payload.company_id:
+        cid = await assert_company_member(payload.company_id, current_user, db)
+    else:
+        if not current_user.is_superadmin:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                detail="Глобальный шаблон может создать только суперадмин")
+        cid = None
     t = PostingTemplate(
         id=uuid.uuid4(),
         company_id=cid,
@@ -177,9 +185,8 @@ async def delete_posting_template(
         tid = uuid.UUID(template_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid template id") from exc
-    t = (await db.execute(select(PostingTemplate).where(PostingTemplate.id == tid))).scalar_one_or_none()
-    if t is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Template not found")
+    # Глобальный шаблон (company_id=None) удалит только суперадмин (иначе 404).
+    t = await get_owned(PostingTemplate, tid, _current_user, db)
     await db.delete(t)
 
 
@@ -507,9 +514,7 @@ async def match_doc_postings(
         did = uuid.UUID(doc_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid doc id") from exc
-    doc = (await db.execute(select(AccountingDoc).where(AccountingDoc.id == did))).scalar_one_or_none()
-    if doc is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Document not found")
+    doc = await get_owned(AccountingDoc, did, _current_user, db)  # 404 для чужого/несуществующего
 
     # Подбираем шаблон по (doc_type, operation_type). Сначала с конкретной компанией.
     from sqlalchemy import or_

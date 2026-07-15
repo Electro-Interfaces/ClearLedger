@@ -693,6 +693,11 @@ function ShiftsPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0 pb-3">
+          {/* Фикс. колонки журнала (~760px) на мобиле распирали весь раздел —
+              скроллим журнал внутри карточки. w-0+min-w-full гасит проброс
+              min-content вверх (панель живёт в Radix ScrollArea display:table). */}
+          <div className="overflow-x-auto w-0 min-w-full">
+          <div className="min-w-[720px]">
           <div className={`${gridCols} px-3 pb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70`}>
             <span>Смена</span><span>Станция</span><span>Открыта</span><span>Закрыта</span>
             <span className="text-right">Литры</span><span className="text-right">Сумма, ₽</span>
@@ -721,6 +726,8 @@ function ShiftsPanel() {
                 <span className="text-right tabular-nums text-foreground/80">{fmtN(s.total_amount, 2)}</span>
               </div>
             ))}
+          </div>
+          </div>
           </div>
         </CardContent>
       </Card>

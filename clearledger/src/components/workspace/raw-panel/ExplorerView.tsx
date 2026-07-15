@@ -137,12 +137,12 @@ function DetailsList({
 
   return (
     <div className="min-w-0 flex-1 flex flex-col">
-      {/* заголовки колонок */}
-      <div className="grid grid-cols-[minmax(220px,1fr)_150px_180px_110px] h-9 border-b border-border shrink-0 bg-card sticky top-0 z-10">
+      {/* заголовки колонок — на мобиле только Имя + Дата */}
+      <div className="grid grid-cols-[minmax(0,1fr)_104px] md:grid-cols-[minmax(220px,1fr)_150px_180px_110px] h-9 border-b border-border shrink-0 bg-card sticky top-0 z-10">
         <Head col="name" label="Имя" />
         <Head col="date" label="Дата изменения" />
-        <Head label="Тип" />
-        <Head label="Размер" className="justify-end pr-3" />
+        <Head label="Тип" className="hidden md:flex" />
+        <Head label="Размер" className="justify-end pr-3 hidden md:flex" />
       </div>
       {/* строки */}
       <div className="flex-1 overflow-y-auto scroll-thin">
@@ -162,7 +162,7 @@ function DetailsList({
               onClick={() => onSelect(n)}
               onDoubleClick={() => onOpen(n)}
               className={cn(
-                'group grid grid-cols-[minmax(220px,1fr)_150px_180px_110px] items-center h-8 text-[13px] cursor-default select-none',
+                'group grid grid-cols-[minmax(0,1fr)_104px] md:grid-cols-[minmax(220px,1fr)_150px_180px_110px] items-center h-8 text-[13px] cursor-default select-none',
                 selected ? 'bg-primary/25' : 'hover:bg-accent/70',
               )}
             >
@@ -176,8 +176,8 @@ function DetailsList({
                 <span className="truncate">{n.name}</span>
               </div>
               <div className="px-2 text-muted-foreground tabular-nums truncate">{n.date ?? '—'}</div>
-              <div className="px-2 text-muted-foreground truncate">{typeLabel(n)}</div>
-              <div className="px-3 text-right text-muted-foreground tabular-nums truncate">
+              <div className="hidden md:block px-2 text-muted-foreground truncate">{typeLabel(n)}</div>
+              <div className="hidden md:block px-3 text-right text-muted-foreground tabular-nums truncate">
                 {isFolder ? (n.childCount ? `${n.childCount} эл.` : '') : (n.size && n.size !== '—' ? n.size : '')}
               </div>
             </div>
@@ -192,14 +192,14 @@ function DetailsList({
 function PreviewPane({ node }: { node: FsNode | null }) {
   if (!node) {
     return (
-      <div className="w-72 shrink-0 bg-card border-l border-border flex items-center justify-center text-xs text-muted-foreground/50 p-4 text-center">
+      <div className="hidden md:flex w-72 shrink-0 bg-card border-l border-border items-center justify-center text-xs text-muted-foreground/50 p-4 text-center">
         Выберите файл для предпросмотра
       </div>
     )
   }
   const { Icon, cls } = node.type === 'folder' ? { Icon: Folder, cls: 'text-amber-400' } : fileIcon(node)
   return (
-    <div className="w-72 shrink-0 bg-card border-l border-border flex flex-col p-4 gap-3 overflow-y-auto scroll-thin">
+    <div className="hidden md:flex w-72 shrink-0 bg-card border-l border-border flex-col p-4 gap-3 overflow-y-auto scroll-thin">
       <div className="flex flex-col items-center gap-2 py-4">
         <Icon className={cn('h-16 w-16', cls)} />
         <div className="text-sm font-medium text-center break-words">{node.name}</div>
@@ -302,8 +302,8 @@ export function ExplorerView() {
           ))}
         </div>
 
-        {/* Поиск */}
-        <div className="flex items-center gap-1.5 h-8 w-64 shrink-0 px-2.5 rounded-md bg-background/70 border border-border">
+        {/* Поиск — на мобиле уже, чтобы не выдавливать крошки */}
+        <div className="flex items-center gap-1.5 h-8 w-36 md:w-64 shrink-0 px-2.5 rounded-md bg-background/70 border border-border">
           <Search className="h-3.5 w-3.5 text-muted-foreground" />
           <input
             value={state.filters.searchQuery}
@@ -314,8 +314,8 @@ export function ExplorerView() {
         </div>
       </div>
 
-      {/* Командная панель */}
-      <div className="flex items-center gap-0.5 h-10 px-2 bg-card/60 border-b border-border shrink-0">
+      {/* Командная панель — свайп на мобиле без видимого скроллбара */}
+      <div className="flex items-center gap-0.5 h-10 px-2 bg-card/60 border-b border-border shrink-0 overflow-x-auto scrollbar-hide">
         <CmdButton icon={Plus} label="Создать" chevron disabled />
         <Sep />
         <CmdButton icon={Scissors} disabled />
@@ -333,9 +333,10 @@ export function ExplorerView() {
         <CmdButton icon={PanelRight} label="Просмотр" onClick={() => setPreviewOpen((v) => !v)} />
       </div>
 
-      {/* Тело: дерево | таблица | превью */}
+      {/* Тело: дерево | таблица | превью. Дерево на мобиле скрыто —
+          навигация по папкам через крошки и открытие папок в списке. */}
       <div className="flex-1 flex min-h-0">
-        <div className="w-64 shrink-0 bg-sidebar border-r border-border overflow-y-auto scroll-thin">
+        <div className="hidden md:block w-64 shrink-0 bg-sidebar border-r border-border overflow-y-auto scroll-thin">
           {/* Быстрый доступ */}
           <div className="py-1">
             <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Быстрый доступ</div>

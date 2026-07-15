@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.deps import get_owned
 from app.models import ExportPacket, User
 from app.schemas import (
     ExportPacketCreate,
@@ -91,9 +92,7 @@ async def update_packet(
         pid = uuid.UUID(packet_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
-    p = (await db.execute(select(ExportPacket).where(ExportPacket.id == pid))).scalar_one_or_none()
-    if p is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Packet not found")
+    p = await get_owned(ExportPacket, pid, _u, db)  # 404 для чужого/несуществующего
 
     # Автозаполнение sent_at/acked_at при смене статуса
     if payload.status:
@@ -131,9 +130,8 @@ async def delete_packet(
         pid = uuid.UUID(packet_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
-    res = await db.execute(delete(ExportPacket).where(ExportPacket.id == pid))
-    if res.rowcount == 0:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Packet not found")
+    p = await get_owned(ExportPacket, pid, _u, db)  # 404 для чужого/несуществующего
+    await db.delete(p)
 
 
 @router.get("/stats", response_model=dict)
@@ -430,6 +428,9 @@ async def packets_by_doc(
         did = uuid.UUID(doc_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid doc id") from exc
+    from app.models import AccountingDoc
+    # Проверяем владение документом (404 для чужого) — иначе утекают пакеты чужой компании.
+    await get_owned(AccountingDoc, did, _u, db)
     rows = (await db.execute(
         select(ExportPacket).where(ExportPacket.target_doc_id == did)
     )).scalars().all()

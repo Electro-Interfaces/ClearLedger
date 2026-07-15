@@ -20,6 +20,7 @@ import { getCategoriesForProfile, type Category } from '@/config/categories'
 import { useAuth } from '@/contexts/AuthContext'
 import type { CompanyRef } from '@/services/authService'
 import { resetServiceCaches, setServicesCompany } from '@/services/cacheReset'
+import { setApiCompany } from '@/services/apiClient'
 
 interface CompanyContextType {
   company: Company
@@ -73,10 +74,11 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   // Выбор активной компании при появлении пользователя / смене списка.
   useEffect(() => {
-    if (!user) { setCompanyIdState(''); return }
+    if (!user) { setApiCompany(null); setCompanyIdState(''); return }
     const saved = localStorage.getItem(activeKey(user.id))
     const valid = saved && companies.some((c) => c.id === saved)
     const next = valid ? saved! : (companies[0]?.id ?? '')
+    setApiCompany(next)  // синхронно до setState — чтобы первые запросы несли X-Company-Id
     setCompanyIdState(next)
   }, [user, companies])
 
@@ -84,6 +86,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const prevId = useRef<string | null>(null)
   useEffect(() => {
     if (!companyId) return
+    // Заголовок X-Company-Id ставим ПЕРЕД сбросом кэша — чтобы рефетчи после
+    // qc.clear() уже несли новую компанию (fuel/store скоупятся по нему).
+    setApiCompany(companyId)
     if (prevId.current && prevId.current !== companyId) {
       qc.clear()
       resetServiceCaches()
@@ -96,6 +101,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     if (!user) return
     if (!companies.some((c) => c.id === id)) return  // валидация: id ∈ доступные
     localStorage.setItem(activeKey(user.id), id)
+    setApiCompany(id)  // синхронно — заголовок готов до рефетчей
     setCompanyIdState(id)
   }, [user, companies])
 

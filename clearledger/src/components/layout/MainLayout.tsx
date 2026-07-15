@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { AppSidebar } from './AppSidebar'
+import { AppSidebar, SidebarNavContent } from './AppSidebar'
+import { MobileBottomNav } from './MobileBottomNav'
 import { Header } from './Header'
 import { WorkspaceTabBar } from './WorkspaceTabBar'
 import { KeepAliveOutlet } from './KeepAliveOutlet'
@@ -58,7 +59,11 @@ export function MainLayout() {
             <SheetContent side="left" className="p-0 w-72 mobile-safe-left">
               <SheetTitle className="sr-only">Меню навигации</SheetTitle>
               <SheetDescription className="sr-only">Навигация TradeLedger</SheetDescription>
-              <AppSidebar />
+              {/* Именно контент, НЕ <AppSidebar>: ui-Sidebar на мобиле рендерит
+                  собственный (закрытый) Sheet — шторка получалась пустой. */}
+              <div className="h-full overflow-y-auto px-1.5 py-3">
+                <SidebarNavContent onNavigate={() => setMobileMenuOpen(false)} />
+              </div>
             </SheetContent>
           </Sheet>
         )}
@@ -71,7 +76,8 @@ export function MainLayout() {
                 <Outlet />
               </div>
             ) : (
-              <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-12">
+              // pb-20 — запас под нижнюю навигацию (h-14, <768px); ≥768 её нет → pb-12
+              <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-20 md:pb-12">
                 <Outlet />
               </div>
             )
@@ -84,6 +90,9 @@ export function MainLayout() {
           )}
         </SidebarInset>
       </div>
+
+      {/* Нижняя навигация телефонов (<768px; сама скрывается md:hidden) */}
+      {isMobile && <MobileBottomNav />}
 
       {/* Глобальные модалки Чат / Заявки / Инфо */}
       <InteractionHost />
