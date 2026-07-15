@@ -52,6 +52,16 @@ export const ENERGY_MGMT: CentralMenuItem[] = [
 ]
 export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 
+// Складской учёт оборудования ЭЗС (energy): станции-железки на складах/в ремонте,
+// движения жизненного цикла, ЗИП. Ядро раздела «Управленческий», группа «Оборудование».
+export const EQUIPMENT_MENU: CentralMenuItem[] = [
+  { key: 'eq_fleet',      label: 'Парк оборудования', group: 'Оборудование' },
+  { key: 'eq_warehouses', label: 'Склады и остатки',  group: 'Оборудование' },
+  { key: 'eq_movements',  label: 'Движения',          group: 'Оборудование' },
+  { key: 'eq_spares',     label: 'ЗИП и запчасти',    group: 'Оборудование' },
+]
+export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
+
 // Анализ зарядных сессий ЭЗС (реальные данные, для energy-профиля).
 // Сгруппировано по смыслу (заголовки групп рисует сайдбар по полю group):
 //   СЕТЬ — состояние сети (обзор + карта);
@@ -60,6 +70,7 @@ export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
   { key: 'cs_dashboard',  label: 'Обзор',         group: 'Сеть' },
   { key: 'cs_map',        label: 'Карта',         group: 'Сеть' },
+  { key: 'cs_trend',      label: 'Динамика 2024+', group: 'Сеть' },
   { key: 'cs_sessions',    label: 'Сессии',        group: 'Аналитика сессий' },
   { key: 'cs_reliability', label: 'Надёжность',    group: 'Аналитика сессий' },
   { key: 'cs_list',        label: 'Реестр сессий', group: 'Аналитика сессий' },
@@ -118,11 +129,13 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     // (вход по счетам vs отпуск по сессиям vs собственные нужды станции).
     ...(isEnergy && energyOps.length > 0
       ? [
-          { key: 'ops_overview', label: 'Обзор' },
-          { key: 'ops_balance', label: 'Баланс (факт)' },
-          { key: 'ops_completeness', label: 'Полнота данных' },
+          { key: 'ops_overview', label: 'Обзор', group: 'Кокпит' },
+          { key: 'ops_balance', label: 'Баланс (факт)', group: 'Кокпит' },
+          { key: 'ops_completeness', label: 'Полнота данных', group: 'Кокпит' },
         ]
       : []),
+    // Складской контур оборудования — ядро energy-раздела (гейт-модуль — расширение).
+    ...(isEnergy ? EQUIPMENT_MENU : []),
     ...energyOps,
     ...(!isEnergy && on('ops_contracts') ? [{ key: 'contracts', label: 'Договоры и аренда' }] : []),
     ...(balMod && on(balMod.id) && isEnergy ? [{ key: 'balance', label: balMod.navLabel }] : []),

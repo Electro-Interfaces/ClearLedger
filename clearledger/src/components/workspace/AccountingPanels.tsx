@@ -8,7 +8,8 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceSubView, type CoreMode } from '@/contexts/WorkspaceContext'
-import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS } from './workspaceSections'
+import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS, EQUIPMENT_KEYS } from './workspaceSections'
+import { EquipmentRouter } from '@/components/equipment/EquipmentRouter'
 import { ChargeSalesRouter } from './ChargeSalesRouter'
 import { FuelSalesRouter } from './FuelSalesRouter'
 import { BpExportPanel } from './BpExportPanel'
@@ -149,6 +150,10 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   }
   if (activeTab === 'balance') {
     return <div className="h-full overflow-y-auto"><BalanceVitrine /></div>
+  }
+  // Складской учёт оборудования ЭЗС (energy): парк/склады/движения/ЗИП.
+  if (EQUIPMENT_KEYS.includes(activeTab)) {
+    return <div className="h-full overflow-y-auto"><EquipmentRouter tab={activeTab} companyId={companyId} /></div>
   }
   if (CHARGE_SESSIONS_KEYS.includes(activeTab)) {
     return <div className="h-full overflow-y-auto"><ChargeSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} /></div>
