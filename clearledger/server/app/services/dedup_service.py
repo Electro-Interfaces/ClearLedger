@@ -83,6 +83,7 @@ async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
     """Идемпотентно заменяет кеш дедупа компании: local208 (карточки+цены+привязки)
     из дампа + склейка ЦБ (CbNomenclature) по GUID. Используется CLI-загрузчиком и
     эндпоинтом «Обновить срез»."""
+    dump_text = dump_text.lstrip("﻿")  # BOM от ADODB.Stream utf-8 (дамп с ноды 208)
     await db.execute(delete(DedupNsBinding).where(DedupNsBinding.company_id == cid))
     await db.execute(delete(DedupCard).where(DedupCard.company_id == cid))
     await db.commit()
