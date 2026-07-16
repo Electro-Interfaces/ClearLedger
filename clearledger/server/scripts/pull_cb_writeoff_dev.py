@@ -19,7 +19,8 @@ except Exception:
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import delete, select  # noqa: E402
+from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: E402
 
 from app.database import async_session_factory, engine, Base  # noqa: E402
 from app.models import CbMovementDoc, CbNomenclature  # noqa: E402
@@ -107,9 +108,11 @@ async def main() -> None:
                     "qty": round(qty, 3), "amount": round(amt, 2), "price": _num(r.get("Цена")),
                 })
 
-        await db.execute(delete(CbMovementDoc).where(
-            CbMovementDoc.company_id == cid, CbMovementDoc.kind == KIND))
-        n = 0
+        # WIPE-fix: upsert по (company_id, kind, external_ref) вместо delete-all.
+        # Раньше «удалить всё + залить top-2000 новейших» стирал документы старше
+        # окна выборки при каждом перезапуске. Теперь окно лишь освежает попавшие
+        # в него документы (snapshot_at=now), а более старые остаются в витрине.
+        rows = []
         for h in hdr:
             code = wh.get(h.get("Склад_Key"), ("?", ""))[0]
             if code not in STORE_WAREHOUSES:
@@ -119,7 +122,7 @@ async def main() -> None:
             from_inv = bool(inv and str(inv) != NULL)
             comment = (str(h.get("Комментарий")) or None) if h.get("Комментарий") else None
             a = by_doc.get(ref, {"pos": 0, "qty": 0.0, "amt": 0.0, "lines": []})
-            db.add(CbMovementDoc(
+            rows.append(dict(
                 company_id=cid, kind=KIND, external_ref=ref,
                 number=(str(h.get("Number")) if h.get("Number") else None),
                 doc_date=(str(h.get("Date"))[:10] if h.get("Date") else None),
@@ -131,7 +134,17 @@ async def main() -> None:
                 total_amount=round(a["amt"], 2) if a["amt"] else _num(h.get("СуммаДокумента")),
                 lines=(sorted(a["lines"], key=lambda x: x["n"]) or None),
             ))
-            n += 1
+        n = len(rows)
+        if rows:
+            upd = ["number", "doc_date", "posted", "deleted", "inventory_ref",
+                   "warehouse_code", "warehouse_name", "comment", "reason",
+                   "from_inventory", "positions", "total_qty", "total_amount", "lines"]
+            stmt = pg_insert(CbMovementDoc).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["company_id", "kind", "external_ref"],
+                set_={**{c: getattr(stmt.excluded, c) for c in upd}, "snapshot_at": func.now()},
+            )
+            await db.execute(stmt)
         await db.commit()
 
     tot = sum(v["amt"] for v in by_doc.values())

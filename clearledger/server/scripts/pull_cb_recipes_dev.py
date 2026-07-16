@@ -48,16 +48,26 @@ async def main() -> None:
 
     async with async_session_factory() as db:
         cid = await resolve_company_id(COMPANY, db)
-        await db.execute(delete(DataEntry).where(
-            DataEntry.company_id == cid, DataEntry.source == "oneC", DataEntry.doc_type_id == DOC_TYPE))
+        # WIPE-fix: сносим ТОЛЬКО перезаливаемые ТТК (по source_id блюда), не весь
+        # doc_type — fetch_recipes отдаёт блюда за период, delete-all стирал ТТК
+        # блюд, не проданных в этом окне.
+        prepared = []
         for it in items:
             blyudo = str(it.get("БлюдоUUID") or "")
             if not blyudo:
                 continue
+            prepared.append((f"{DOC_TYPE}:{blyudo}", it))
+        ids = [p[0] for p in prepared]
+        if ids:
+            await db.execute(delete(DataEntry).where(
+                DataEntry.company_id == cid, DataEntry.source == "oneC",
+                DataEntry.doc_type_id == DOC_TYPE, DataEntry.source_id.in_(ids)))
+        for sid, it in prepared:
+            blyudo = sid.split(":", 1)[1]
             meta = {"kind": DOC_TYPE, "Документ": it}
             db.add(DataEntry(
                 company_id=cid, category_id="retail", subcategory_id="recipe", doc_type_id=DOC_TYPE,
-                source="oneC", source_id=f"{DOC_TYPE}:{blyudo}",
+                source="oneC", source_id=sid,
                 source_label="ЦБ ЭЛСИ.АЗК", layer="clean", status="new",
                 title=f"ТТК {it.get('БлюдоНаименование') or blyudo[:8]}", meta=meta,
             ))

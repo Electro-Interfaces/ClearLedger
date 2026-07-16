@@ -45,13 +45,21 @@ async def main() -> None:
 
     async with async_session_factory() as db:
         cid = await resolve_company_id(COMPANY, db)
-        await db.execute(delete(DataEntry).where(
-            DataEntry.company_id == cid, DataEntry.source == "oneC", DataEntry.doc_type_id == DOC_TYPE))
-        n = 0
+        # WIPE-fix: сносим ТОЛЬКО перезаливаемые документы (по source_id), не весь
+        # doc_type — см. pull_cb_gain_dev.py.
+        prepared = []
         for it in items:
             uid = str(it.get("ИсточникUUID") or "")
             if not uid:
                 continue
+            prepared.append((f"{it.get('Номер') or ''}:{DOC_TYPE}:{uid}", it))
+        ids = [p[0] for p in prepared]
+        if ids:
+            await db.execute(delete(DataEntry).where(
+                DataEntry.company_id == cid, DataEntry.source == "oneC",
+                DataEntry.doc_type_id == DOC_TYPE, DataEntry.source_id.in_(ids)))
+        n = 0
+        for sid, it in prepared:
             meta = {
                 "kind": DOC_TYPE,
                 "Документ": it,
@@ -59,7 +67,7 @@ async def main() -> None:
             }
             db.add(DataEntry(
                 company_id=cid, category_id="retail", subcategory_id="production", doc_type_id=DOC_TYPE, source="oneC",
-                source_id=f"{it.get('Номер') or ''}:{DOC_TYPE}:{uid}",
+                source_id=sid,
                 source_label="ЦБ ЭЛСИ.АЗК", layer="clean", status="new",
                 title=f"Выпуск продукции {it.get('Номер') or ''}", meta=meta,
             ))

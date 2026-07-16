@@ -19,7 +19,8 @@ except Exception:
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import delete, select  # noqa: E402
+from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: E402
 
 from app.database import async_session_factory, engine, Base  # noqa: E402
 from app.models import CbMovementDoc, CbNomenclature  # noqa: E402
@@ -103,9 +104,9 @@ async def main() -> None:
                     "pct": (round(pct, 1) if pct is not None else None), "qty": round(qty, 3),
                 })
 
-        await db.execute(delete(CbMovementDoc).where(
-            CbMovementDoc.company_id == cid, CbMovementDoc.kind == KIND))
-        n = 0
+        # WIPE-fix: upsert по (company_id, kind, external_ref) вместо delete-all —
+        # см. pull_cb_writeoff_dev.py.
+        rows = []
         for h in hdr:
             code = wh.get(h.get("Склад_Key"), ("?", ""))[0]
             if code not in STORE_WAREHOUSES:
@@ -114,7 +115,7 @@ async def main() -> None:
             a = by_doc.get(ref)
             if not a:  # переоценка без фактических изменений цены — пропускаем
                 continue
-            db.add(CbMovementDoc(
+            rows.append(dict(
                 company_id=cid, kind=KIND, external_ref=ref,
                 number=(str(h.get("Number")) if h.get("Number") else None),
                 doc_date=(str(h.get("Date"))[:10] if h.get("Date") else None),
@@ -124,7 +125,17 @@ async def main() -> None:
                 positions=a["pos"], total_qty=a["up"], total_amount=round(a["impact"], 2),
                 lines=(sorted(a["lines"], key=lambda x: (x["pct"] if x["pct"] is not None else 0)) or None),
             ))
-            n += 1
+        n = len(rows)
+        if rows:
+            upd = ["number", "doc_date", "warehouse_code", "warehouse_name",
+                   "comment", "reason", "from_inventory", "positions",
+                   "total_qty", "total_amount", "lines"]
+            stmt = pg_insert(CbMovementDoc).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["company_id", "kind", "external_ref"],
+                set_={**{c: getattr(stmt.excluded, c) for c in upd}, "snapshot_at": func.now()},
+            )
+            await db.execute(stmt)
         await db.commit()
 
     up = sum(v["up"] for v in by_doc.values()); down = sum(v["down"] for v in by_doc.values())

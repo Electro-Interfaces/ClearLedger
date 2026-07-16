@@ -21,7 +21,8 @@ except Exception:
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import delete, select  # noqa: E402
+from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy.dialects.postgresql import insert as pg_insert  # noqa: E402
 
 from app.database import async_session_factory, engine, Base  # noqa: E402
 from app.models import CbInventoryDoc, CbNomenclature  # noqa: E402
@@ -106,15 +107,16 @@ async def main() -> None:
                 "dev": round(d_qty, 3), "amount_dev": round(d_amt, 2),
             })
 
-        await db.execute(delete(CbInventoryDoc).where(CbInventoryDoc.company_id == cid))
-        n = 0
+        # WIPE-fix: upsert по (company_id, external_ref) вместо delete-all —
+        # см. pull_cb_writeoff_dev.py.
+        rows = []
         for h in hdr:
             code = wh.get(h.get("Склад_Key"), ("?", ""))[0]
             if code not in STORE_WAREHOUSES:
                 continue
             ref = str(h.get("Ref_Key") or "")
             a = agg.get(ref, {"dev_pos": 0, "sh_qty": 0.0, "sh_amt": 0.0, "su_qty": 0.0, "su_amt": 0.0, "lines": []})
-            db.add(CbInventoryDoc(
+            rows.append(dict(
                 company_id=cid, external_ref=ref,
                 number=(str(h.get("Number")) if h.get("Number") else None),
                 doc_date=(str(h.get("Date"))[:10] if h.get("Date") else None),
@@ -128,7 +130,18 @@ async def main() -> None:
                 net_amount=round(a["sh_amt"] + a["su_amt"], 2),
                 lines=(sorted(a["lines"], key=lambda x: x["n"]) or None),
             ))
-            n += 1
+        n = len(rows)
+        if rows:
+            upd = ["number", "doc_date", "posted", "deleted", "fill_date",
+                   "warehouse_code", "warehouse_name", "comment", "dev_positions",
+                   "shortage_qty", "shortage_amount", "surplus_qty", "surplus_amount",
+                   "net_amount", "lines"]
+            stmt = pg_insert(CbInventoryDoc).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["company_id", "external_ref"],
+                set_={**{c: getattr(stmt.excluded, c) for c in upd}, "snapshot_at": func.now()},
+            )
+            await db.execute(stmt)
         await db.commit()
 
     with_dev = sum(1 for h in hdr

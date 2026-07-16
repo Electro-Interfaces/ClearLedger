@@ -9,6 +9,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreInventory, type StoreInventoryDoc } from '@/services/storeService'
+import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { fmtMoney } from '@/services/analyticsService'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -43,7 +44,10 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
     <div className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Инвентаризация — недостачи и излишки</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold">Инвентаризация — недостачи и излишки</h3>
+            <SnapshotBadge at={data.snapshot_at} />
+          </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             Реестр инвентаризаций из ЦБ + отклонения факт↔учёт. Клик по документу — строки-отклонения.
             Полные пересчёты без отклонений (факт=учёт) — контрольные, это норма.

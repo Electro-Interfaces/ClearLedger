@@ -7,6 +7,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreTransfers, type StoreTransferDoc } from '@/services/storeService'
+import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { fmtMoney } from '@/services/analyticsService'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -45,7 +46,7 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
     <div className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Перемещения — движение между складами</h3>
+          <h3 className="text-base font-semibold inline-flex items-center gap-2">Перемещения — движение между складами <SnapshotBadge at={data.snapshot_at} /></h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             ПеремещениеТоваров из ЦБ относительно складов 208. Большинство — внутренние (склад ↔ торговый
             зал, пополнение полки). Клик по документу — строки. {direction && <>Фильтр: <b>{direction}</b> <button className="underline ml-1" onClick={() => setDirection(null)}>сбросить</button></>}

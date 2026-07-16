@@ -54,6 +54,16 @@ class GoodsDashboardService:
         return self._sales_cache
 
     @staticmethod
+    def _snap(rows) -> str | None:
+        """Дата последнего снимка данных (max snapshot_at) — для индикации свежести
+        движения товара/остатков в витринах (F3): движение/остатки наполняются
+        отдельным пуллом и отстают от продаж; пользователь должен видеть, на какую
+        дату актуальны цифры."""
+        ts = [getattr(r, "snapshot_at", None) for r in rows]
+        ts = [t for t in ts if t is not None]
+        return max(ts).isoformat() if ts else None
+
+    @staticmethod
     def _purch_net(doc: dict, ln: dict) -> float:
         """Net-себестоимость строки ПТУ (закуп без НДС). F8: если документ помечен
         СуммаВключаетНДС=Ложь — Сумма уже без НДС, повторно вычитать НельзяДважды.
@@ -1158,6 +1168,7 @@ class GoodsDashboardService:
             "warehouse": wh,
             "warehouses": warehouses,
             "items": items,
+            "snapshot_at": self._snap(rows),   # F3: дата снимка остатков
             "summary": {
                 "sku_count": len(items),
                 "positive": len(pos),
@@ -1247,6 +1258,7 @@ class GoodsDashboardService:
             "warehouses": warehouses,
             "docs": out_docs,
             "top_shortage": top_short,
+            "snapshot_at": self._snap(sel),   # F3: дата снимка данных
             "summary": {
                 "docs_count": len(sel),
                 "docs_with_dev": sum(1 for d in sel if d.dev_positions),
@@ -1317,6 +1329,7 @@ class GoodsDashboardService:
             "docs": out_docs,
             "by_reason": by_reason,
             "top_sku": top_sku,
+            "snapshot_at": self._snap(sel),   # F3: дата снимка данных
             "summary": {
                 "docs_count": len(sel),
                 "total_amount": round(tot_amt, 2),
@@ -1383,6 +1396,7 @@ class GoodsDashboardService:
             "docs": out_docs,
             "by_direction": by_direction,
             "top_sku": top_sku,
+            "snapshot_at": self._snap(sel),   # F3: дата снимка данных
             "summary": {
                 "docs_count": len(sel),
                 "total_amount": round(tot_amt, 2),
@@ -1454,6 +1468,7 @@ class GoodsDashboardService:
             "by_reason": by_reason,
             "top_up": top_up,
             "top_down": top_down,
+            "snapshot_at": self._snap(sel),   # F3: дата снимка данных
             "summary": {
                 "docs_count": len(sel),
                 "up_lines": up_lines, "down_lines": down_lines,

@@ -105,10 +105,20 @@ async def _run_cb(db: AsyncSession, channel: Channel, src: Source,
     cfg = src.connection_config or {}
     station = str((channel.config or {}).get("station") or cfg.get("default_station") or "208")
     pf, pt = _period(channel, date_from, date_to)
+    # F7: лимит поднят с 200 до 3000 (месяц ≈ 30–60 смен на АЗС; обрезка теперь
+    # практически невозможна, а при ней COM отбрасывает СТАРЕЙШИЕ, не новейшие —
+    # см. op_fetch_cb_shifts УПОРЯДОЧИТЬ ПО Дата УБЫВ). truncated сигналим в UI.
+    _LIMIT = 3000
     async with OneCComClient(conn) as client:
-        packages = await client.fetch_cb_shifts(pf, pt, station=station, limit=200)
+        packages = await client.fetch_cb_shifts(pf, pt, station=station, limit=_LIMIT)
     result = await ingest_packages(db, channel.company_id, packages, channel_id=channel.id)
-    return {"status": "success", "kind": "cb", "period": [pf, pt], "station": station, **result}
+    truncated = len(packages) >= _LIMIT
+    msg = result.get("message") or ""
+    if truncated:
+        msg = (msg + "; ⚠ достигнут лимит выборки смен — сузьте период").strip("; ")
+    return {"status": "success", "kind": "cb", "period": [pf, pt], "station": station,
+            "truncated": truncated, **{k: v for k, v in result.items() if k != "message"},
+            "message": msg}
 
 
 # ---------------------------------------------------------------------------

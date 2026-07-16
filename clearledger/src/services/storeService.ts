@@ -194,6 +194,8 @@ export interface StoreStockData {
   warehouse: string | null
   warehouses: StoreStockWarehouse[]
   items: StoreStockItem[]
+  /** F3: дата последнего снимка данных (ISO) — для индикации свежести. */
+  snapshot_at?: string | null
   summary: {
     sku_count: number; positive: number; negative: number
     retail_value_positive: number; retail_value_all: number
@@ -230,6 +232,8 @@ export interface StoreInventoryData {
   warehouses: { code: string; name: string | null; count: number }[]
   docs: StoreInventoryDoc[]
   top_shortage: { name: string; qty: number; amount: number; docs: number }[]
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   summary: {
     docs_count: number; docs_with_dev: number
     shortage_amount: number; surplus_amount: number; net_amount: number
@@ -259,6 +263,8 @@ export interface StoreWriteoffData {
   docs: StoreWriteoffDoc[]
   by_reason: { reason: string; count: number; amount: number }[]
   top_sku: { name: string; qty: number; amount: number; docs: number }[]
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   summary: {
     docs_count: number; total_amount: number
     from_inventory_amount: number; other_amount: number
@@ -287,6 +293,8 @@ export interface StoreTransferData {
   docs: StoreTransferDoc[]
   by_direction: { direction: string; count: number; amount: number }[]
   top_sku: { name: string; qty: number; amount: number; docs: number }[]
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   summary: {
     docs_count: number; total_amount: number
     inbound_amount: number; outbound_amount: number; internal_amount: number
@@ -316,6 +324,8 @@ export interface StoreRevaluationData {
   by_reason: { reason: string; count: number }[]
   top_up: StoreRevalMove[]
   top_down: StoreRevalMove[]
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   summary: {
     docs_count: number; up_lines: number; down_lines: number
     avg_pct: number | null; value_impact: number
