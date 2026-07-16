@@ -68,6 +68,13 @@ export const MODULE_COMPONENTS: ModuleComponent[] = [
     menuItems: [{ key: 'reports', label: 'Дашборды', group: 'Нефтепродукты' }],
   },
   {
+    id: 'acc_spec_cash', moduleId: 'accounting', kind: 'specialized',
+    label: 'Касса и инкассация',
+    description: 'Журнал инкассаций из money-секции смен (сумма + накоплено с прошлой — основание для РКО в 1С), выдачи наличных, остатки касс по АЗС и дни без инкассации.',
+    profiles: ['fuel'], status: 'active', defaultOn: true,
+    menuItems: [{ key: 'cash', label: 'Касса и инкассация', group: 'Нефтепродукты' }],
+  },
+  {
     id: 'acc_std_recon1c', moduleId: 'accounting', kind: 'standard',
     label: 'Сверка с 1С (топливо)',
     description: 'Готовность к загрузке и разница приложение↔1С: воронка выгрузки пакетов, сверка сумм с проведёнными документами 1С, расхождения.',

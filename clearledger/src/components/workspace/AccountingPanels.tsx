@@ -41,6 +41,7 @@ import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
 import { useMemo, useState } from 'react'
 import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
 import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
+import { AccountingCashPanel } from './AccountingCashPanel'
 import { SyncWith1CPanel } from '@/components/fuel/SyncWith1CPanel'
 import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
 import {
@@ -470,6 +471,7 @@ export function AccountingPanel() {
           </div>
         )}
         {tab === 'reports' && <ShiftDashboardPanel />}
+        {tab === 'cash' && <AccountingCashPanel dateFrom={period.from} dateTo={period.to} />}
         {tab === 'export' && <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {(tab === 'cb_load' || tab === 'cb_shifts' || tab === 'cb_recon') && (
           <AccountingStreamsPanel tab={tab} companyId={companyId} dateFrom={period.from} dateTo={period.to} />

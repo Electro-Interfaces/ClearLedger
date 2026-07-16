@@ -541,6 +541,26 @@ class FuelDashboardService:
         for m in cash:
             name = (m.operation_name or "").lower()
             amt = float(m.amount or 0)
+            # Снимки, НЕ потоки: накопительные счётчики ККТ (сотни млрд) и остатки
+            # касс — не приход/расход; без этого income раздувался на порядки.
+            if "показания" in name and ("счётчик" in name or "счетчик" in name):
+                cf_details.append({
+                    "operation": m.operation_name, "type": "meter", "amount": round(amt, 2),
+                    "pos": m.pos_number, "shift": shift_num.get(m.shift_id),
+                })
+                continue
+            if "остаток на нач" in name or "остаток на начало" in name:
+                cf_details.append({
+                    "operation": m.operation_name, "type": "opening", "amount": round(amt, 2),
+                    "pos": m.pos_number, "shift": shift_num.get(m.shift_id),
+                })
+                continue
+            if "остаток на кон" in name or "остаток на конец" in name:
+                cf_details.append({
+                    "operation": m.operation_name, "type": "closing", "amount": round(amt, 2),
+                    "pos": m.pos_number, "shift": shift_num.get(m.shift_id),
+                })
+                continue
             if "инкасс" in name or "сдан" in name or "изъят" in name:
                 cashout_total += amt
                 expense += amt
@@ -639,4 +659,131 @@ class FuelDashboardService:
             "revenue": tr(cur["financial"]["total_revenue"], prev["financial"]["total_revenue"]),
             "volume": tr(cur["volume"]["total"], prev["volume"]["total"]),
             "shifts": tr(cur["operational"]["shifts_count"], prev["operational"]["shifts_count"]),
+        }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Касса и инкассация (бухгалтерский контур): журнал инкассаций из money-секции
+# смен + остатки касс по АЗС. Данные — FuelCashMovement (money-секция STS):
+# «Выручка» = ВСЯ наличка ККТ (топливо + сопутка), «Инкассация»/«Сдано»,
+# «Выдано наличными», «Остаток на конец смены по всей АЗС» (снимок кассы).
+# «Накоплено с прошлой инкассации» = Σ выручки между инкассациями станции —
+# основание для РКО в 1С (в пакеты БП инкассация не выгружается: приёмник
+# TradeLedger.cfe её не принимает).
+# ────────────────────────────────────────────────────────────────────────────
+class CashCollectionsService:
+    def __init__(self, session: AsyncSession, company_id):
+        self.session = session
+        self.company_id = company_id
+
+    @staticmethod
+    def _kind(name: str) -> str:
+        n = (name or "").lower()
+        if "инкасс" in n or "сдан" in n or "изъят" in n:
+            return "collection"
+        if "выручк" in n or "внесен" in n:
+            return "revenue"
+        if "выдан" in n:
+            return "payout"
+        if ("остаток на кон" in n or "остаток на конец" in n) and "азс" in n:
+            return "closing_azs"
+        return "other"
+
+    async def compute(self, date_from: date, date_to: date) -> dict:
+        rows = (await self.session.execute(
+            select(
+                FuelCashMovement.operation_name, FuelCashMovement.amount,
+                FuelCashMovement.pos_number,
+                FuelShift.opened_at, FuelShift.shift_number,
+                FuelStation.id.label("station_id"), FuelStation.code, FuelStation.name,
+            )
+            .join(FuelShift, FuelShift.id == FuelCashMovement.shift_id)
+            .join(FuelStation, FuelStation.id == FuelShift.station_id)
+            .where(FuelShift.company_id == self.company_id,
+                   FuelShift.opened_at.is_not(None))
+            .order_by(FuelStation.code, FuelShift.opened_at, FuelShift.shift_number)
+        )).all()
+
+        lo = datetime.combine(date_from, datetime.min.time())
+        hi = datetime.combine(date_to, datetime.max.time())
+
+        def naive(dt):
+            return dt.replace(tzinfo=None) if dt is not None and dt.tzinfo else dt
+
+        journal: list[dict] = []
+        payouts: list[dict] = []
+        st: dict = {}   # station_id → состояние накопления/остатка
+        for r in rows:
+            kind = self._kind(r.operation_name)
+            if kind == "other":
+                continue
+            amt = float(r.amount or 0)
+            opened = naive(r.opened_at)
+            s = st.setdefault(r.station_id, {
+                "code": r.code, "name": r.name,
+                "accrued": 0.0, "last_coll_at": None, "last_coll_amount": None,
+                "balance": None, "balance_at": None, "collected_total": 0.0,
+            })
+            if kind == "revenue":
+                s["accrued"] += amt
+            elif kind == "collection":
+                row = {
+                    "date": opened.isoformat(),
+                    "station_code": r.code, "station_name": r.name,
+                    "shift_number": r.shift_number, "pos": r.pos_number,
+                    "amount": round(amt, 2),
+                    "accrued_since_last": round(s["accrued"], 2),
+                    "diff": round(amt - s["accrued"], 2),
+                }
+                if lo <= opened <= hi:
+                    journal.append(row)
+                    s["collected_total"] += amt
+                s["accrued"] = 0.0
+                s["last_coll_at"] = opened
+                s["last_coll_amount"] = amt
+            elif kind == "payout":
+                if lo <= opened <= hi:
+                    payouts.append({
+                        "date": opened.isoformat(),
+                        "station_code": r.code, "station_name": r.name,
+                        "shift_number": r.shift_number, "amount": round(amt, 2),
+                    })
+            elif kind == "closing_azs":
+                s["balance"] = amt
+                s["balance_at"] = opened
+
+        ref = hi if hi < datetime.now() else datetime.now()
+        stations = []
+        for s in st.values():
+            days = (ref - s["last_coll_at"]).days if s["last_coll_at"] else None
+            stations.append({
+                "station_code": s["code"], "station_name": s["name"],
+                "balance": round(s["balance"], 2) if s["balance"] is not None else None,
+                "balance_at": s["balance_at"].isoformat() if s["balance_at"] else None,
+                "accrued_since_last": round(s["accrued"], 2),
+                "last_collection_at": s["last_coll_at"].isoformat() if s["last_coll_at"] else None,
+                "last_collection_amount": round(s["last_coll_amount"], 2) if s["last_coll_amount"] is not None else None,
+                "days_since_collection": days,
+            })
+        stations.sort(key=lambda x: -(x["days_since_collection"] if x["days_since_collection"] is not None else 10_000))
+
+        journal.sort(key=lambda x: x["date"], reverse=True)
+        revenue_period = 0.0
+        for r in rows:
+            if self._kind(r.operation_name) == "revenue" and lo <= naive(r.opened_at) <= hi:
+                revenue_period += float(r.amount or 0)
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "kpis": {
+                "collected": round(sum(j["amount"] for j in journal), 2),
+                "collections": len(journal),
+                "cashRevenue": round(revenue_period, 2),
+                "payouts": round(sum(p["amount"] for p in payouts), 2),
+                "networkBalance": round(sum(s["balance"] or 0 for s in stations), 2),
+                "stale7": sum(1 for s in stations
+                              if (s["days_since_collection"] or 0) >= 7 and (s["accrued_since_last"] or 0) > 0),
+            },
+            "journal": journal[:500],
+            "payouts": payouts[:100],
+            "stations": stations,
         }

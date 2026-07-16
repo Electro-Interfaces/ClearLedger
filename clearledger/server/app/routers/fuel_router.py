@@ -2105,6 +2105,23 @@ async def shift_dashboard(
         date.fromisoformat(date_from), date.fromisoformat(date_to), station_ids, compare)
 
 
+@router.get("/cash-collections")
+async def fuel_cash_collections(
+    date_from: str = Query(...),
+    date_to: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Касса и инкассация (бухгалтерский контур): журнал инкассаций за период
+    (сумма + накоплено с прошлой инкассации — основание для РКО в 1С), выдачи
+    наличных, остатки касс по АЗС (последний снимок «по всей АЗС»), дни без
+    инкассации. Источник — money-секция сменных отчётов STS."""
+    from app.services.fuel_dashboard import CashCollectionsService
+    cid = await _company_id(user, db)
+    svc = CashCollectionsService(db, cid)
+    return await svc.compute(date.fromisoformat(date_from), date.fromisoformat(date_to))
+
+
 @router.get("/readiness")
 async def fuel_readiness(
     date_from: str = Query(...),
