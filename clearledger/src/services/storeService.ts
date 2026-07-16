@@ -677,11 +677,14 @@ export interface DedupNsCode { nsCode: string; active: boolean; price: number | 
 export interface DedupMember {
   guid: string; code: string | null; prefix: string | null; name: string
   marked: boolean; group: string | null; price: number | null
+  soldQty: number | null; sellsNow: boolean
   nsCodes: DedupNsCode[]; nsActive: boolean; inCb: boolean
 }
 export interface DedupGroup {
   key: string; title: string; count: number; live: number; assortment: boolean
-  prefixes: string[]; priceSpread: number[]; members: DedupMember[]
+  prefixes: string[]; priceSpread: number[]
+  sellingCount: number; recommendedCanon: string | null
+  members: DedupMember[]
   status: string; canonGuid: string | null; note: string | null
 }
 export interface DedupBridgeRow {

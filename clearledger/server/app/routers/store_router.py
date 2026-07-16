@@ -524,3 +524,52 @@ async def dedup_set_status(
 @router.get("/dedup/export")
 async def dedup_export(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await dedup_service.export_plan(db, await scope_company_id(user, db))
+
+
+# ── корректировки по команде менеджера ───────────────────────────────────────
+class CorrectBody(BaseModel):
+    groupKeys: list[str]
+    dryRun: bool = False
+
+
+@router.post("/dedup/correct")
+async def dedup_correct(
+    body: CorrectBody,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Команда менеджера: создать задание перецепа кодов НС на канон по выбранным
+    группам (нода 208 выполнит). dryRun=true — пробный прогон (план без записи)."""
+    if not body.groupKeys:
+        raise HTTPException(400, "Не выбраны группы")
+    cid = await scope_company_id(user, db)
+    return await dedup_service.create_repoint_job(
+        db, cid, group_keys=body.groupKeys, dry_run=body.dryRun, user=user.name or user.email)
+
+
+@router.get("/dedup/jobs")
+async def dedup_jobs(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await dedup_service.list_jobs(db, await scope_company_id(user, db))
+
+
+@router.post("/dedup/jobs/{job_id}/cancel")
+async def dedup_job_cancel(
+    job_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    try:
+        jid = uuid.UUID(job_id)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Невалидный ID")
+    ok = await dedup_service.cancel_job(db, await scope_company_id(user, db), jid)
+    if not ok:
+        raise HTTPException(404, "Задание не найдено или уже выполнено")
+    return {"ok": True}
+
+
+@router.get("/dedup/merge-map")
+async def dedup_merge_map(
+    group_keys: str | None = Query(None, description="ключи групп через | (опц.)"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Карта слияния дубль→канон для .epf (ЗаменитьСсылки — запуск руками в тихое окно)."""
+    keys = [k for k in group_keys.split("|") if k] if group_keys else None
+    return await dedup_service.merge_map(db, await scope_company_id(user, db), group_keys=keys)

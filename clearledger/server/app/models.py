@@ -3764,6 +3764,7 @@ class DedupCard(Base):
     is_assortment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # «в ассортименте» — НЕ дубль
     group_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     price: Mapped[float | None] = mapped_column(Float, nullable=True)  # розн. цена (РС.ЦеныНоменклатуры «Розничная 208»)
+    sold_qty: Mapped[float | None] = mapped_column(Float, nullable=True)  # продано за 30 дн (ОРП) — «продаётся сейчас»
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -3824,4 +3825,31 @@ class DedupStatus(Base):
 
     __table_args__ = (
         Index("uq_dedup_status", "company_id", "entity_type", "entity_key", unique=True),
+    )
+
+
+class DedupCorrectionJob(Base):
+    """Задание на корректировку по команде менеджера. kind='repoint' — перецеп
+    кодов НС на канон (Документ.УстановкаКодовНС на станции, авто через ноду).
+    Слияние ЗаменитьСсылки НЕ автоматизируем (виснет) — отдаётся .epf-картой.
+    Нода 208 забирает pending по ключу, выполняет, репортит результат."""
+    __tablename__ = "dedup_correction_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="repoint")
+    # pending | running | done | error | cancelled
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    dry_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # пробный прогон (план без записи)
+    # {warehouse, groups:[{groupKey,title,canonGuid,canonCode,nsCodes:[...]}]}
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # отчёт ноды
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_dedup_jobs_company", "company_id", "status"),
     )

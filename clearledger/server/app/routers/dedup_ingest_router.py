@@ -6,7 +6,10 @@
 компания резолвится по cloud_api_key. Скоуп «Магазин» здесь НЕ применяется —
 это машинный приём под ключ конкретной компании.
 """
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_company_by_api_key
@@ -32,3 +35,34 @@ async def dedup_reload_by_key(
     if "#CARDS" not in text:
         raise HTTPException(400, "Не похоже на дамп 208 (нет секции #CARDS)")
     return await dedup_service.load_dump(db, company.id, text)
+
+
+@router.get("/jobs/claim")
+async def claim_job(
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Нода забирает следующий pending-перецеп (помечает running). null — нет заданий."""
+    return await dedup_service.claim_pending_job(db, company.id)
+
+
+class JobResultBody(BaseModel):
+    ok: bool = True
+    result: dict = {}
+
+
+@router.post("/jobs/{job_id}/result")
+async def report_job_result(
+    job_id: str, body: JobResultBody,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Нода отчитывается по выполненному заданию (отчёт → status done/error)."""
+    try:
+        jid = uuid.UUID(job_id)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Невалидный ID")
+    ok = await dedup_service.report_job(db, company.id, jid, ok=body.ok, result=body.result)
+    if not ok:
+        raise HTTPException(404, "Задание не найдено")
+    return {"ok": True}

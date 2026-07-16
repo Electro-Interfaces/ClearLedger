@@ -585,6 +585,13 @@ async def create_all() -> None:
         await conn.execute(__import__("sqlalchemy").text(
             "ALTER TABLE dedup_cards ADD COLUMN IF NOT EXISTS price DOUBLE PRECISION"))
 
+        # v2.19: задания на корректировку дублей (dedup_correction_jobs — новая
+        # таблица через metadata.create_all, ALTER не нужен).
+
+        # v2.20: продажи карточки за 30 дн (ОРП) — «продаётся сейчас» для выбора канона.
+        await conn.execute(__import__("sqlalchemy").text(
+            "ALTER TABLE dedup_cards ADD COLUMN IF NOT EXISTS sold_qty DOUBLE PRECISION"))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

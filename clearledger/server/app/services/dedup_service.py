@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DedupCard, DedupNsBinding, DedupStatus, CbNomenclature
+from app.models import DedupCard, DedupNsBinding, DedupStatus, DedupCorrectionJob, CbNomenclature
 
 # ── нормализация имени (ключ группировки дублей) ─────────────────────────────
 _PUNCT = re.compile(r'[«»"\'`.,()\[\]{}/\\\-–—:;!?]+')
@@ -59,7 +59,7 @@ def _to_price(s: str) -> float | None:
 
 def _parse_dump(text: str):
     section = None
-    cards, binds, prices = [], [], {}
+    cards, binds, prices, sales = [], [], {}, {}
     for ln in text.splitlines():
         if ln.startswith("#CARDS"):
             section = "cards"; continue
@@ -67,6 +67,8 @@ def _parse_dump(text: str):
             section = "bind"; continue
         if ln.startswith("#PRICES"):
             section = "prices"; continue
+        if ln.startswith("#SALES"):
+            section = "sales"; continue
         if ln.startswith("#END") or not ln.strip():
             continue
         p = ln.split("|")
@@ -76,7 +78,12 @@ def _parse_dump(text: str):
             binds.append(p)
         elif section == "prices" and len(p) >= 2:
             prices[p[0].lower()] = _to_price(p[1])
-    return cards, binds, prices
+        elif section == "sales" and len(p) >= 2:
+            try:
+                sales[p[0].lower()] = float(str(p[1]).replace(",", "."))
+            except (ValueError, TypeError):
+                pass
+    return cards, binds, prices, sales
 
 
 async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
@@ -88,14 +95,14 @@ async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
     await db.execute(delete(DedupCard).where(DedupCard.company_id == cid))
     await db.commit()
 
-    cards, binds, prices = _parse_dump(dump_text)
+    cards, binds, prices, sales = _parse_dump(dump_text)
     for c in cards:
         guid, code, marked, name, group = c[0].lower(), c[1], c[2], c[3], c[4]
         db.add(DedupCard(
             company_id=cid, source="local208", guid=guid, code=code,
             code_prefix=code_prefix(code), name=name, name_norm=normalize_name(name),
             marked=marked == "1", is_assortment=is_assortment(name), group_name=group,
-            price=prices.get(guid)))
+            price=prices.get(guid), sold_qty=sales.get(guid)))
     for p in binds:
         wh, ns, cg, cm, bc, act, price = p[:7]
         db.add(DedupNsBinding(
@@ -115,7 +122,8 @@ async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
             name_norm=normalize_name(c.name or ""), marked=False,
             is_assortment=is_assortment(c.name or ""), group_name=None))
     await db.commit()
-    return {"cards": len(cards), "bindings": len(binds), "prices": len(prices), "cb": len(cb)}
+    return {"cards": len(cards), "bindings": len(binds), "prices": len(prices),
+            "sales": len(sales), "cb": len(cb)}
 
 
 # ── сводка (KPI) ─────────────────────────────────────────────────────────────
@@ -209,15 +217,21 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
             continue
         prefixes = sorted({m.code_prefix or "иное" for m in members})
         mem = []
-        for m in sorted(members, key=lambda x: (x.marked, x.code or "")):
+        # карточки, которые ПРОДАЮТСЯ сейчас — сверху (кандидаты в канон)
+        for m in sorted(members, key=lambda x: (-(x.sold_qty or 0), x.marked, x.code or "")):
             mcodes = codes_by_card.get(m.guid, [])
             mem.append({
                 "guid": m.guid, "code": m.code, "prefix": m.code_prefix,
                 "name": m.name, "marked": m.marked, "group": m.group_name,
-                "price": m.price,
+                "price": m.price, "soldQty": m.sold_qty,
+                "sellsNow": bool(m.sold_qty and m.sold_qty > 0),
                 "nsCodes": mcodes, "nsActive": any(x["active"] for x in mcodes),
                 "inCb": m.guid in cb,
             })
+        # рекомендуемый канон = ЖИВАЯ карточка с макс. продажами (что реально бьёт касса)
+        selling = [m for m in members if not m.marked and m.sold_qty and m.sold_qty > 0]
+        selling.sort(key=lambda x: -(x.sold_qty or 0))
+        recommended = selling[0].guid if selling else None
         # рассинхрон цен: разные розн.цены у ЖИВЫХ карточек-дублей одного товара
         live_prices = sorted({m.price for m in members if not m.marked and m.price})
         spread = live_prices if len(live_prices) > 1 else []
@@ -227,6 +241,8 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
             "key": key, "title": title, "count": len(members), "live": len(live),
             "assortment": members[0].is_assortment, "prefixes": prefixes,
             "priceSpread": spread,
+            "sellingCount": len(selling),          # сколько карточек продаётся (>1 = конфликт)
+            "recommendedCanon": recommended,       # канон по факту продаж
             "members": mem,
             "status": st.status if st else "pending",
             "canonGuid": st.canon_guid if st else None,
@@ -316,7 +332,7 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID) -> list[dict]:
     for g in gs:
         if g["status"] in ("not_duplicate",):
             continue
-        canon = g.get("canonGuid")
+        canon = g.get("canonGuid") or g.get("recommendedCanon")
         if not canon:
             live = [m for m in g["members"] if not m["marked"]]
             pool = live or g["members"]
@@ -337,3 +353,132 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID) -> list[dict]:
                 "canonPrice": canon_m["price"] if canon_m else None,
             })
     return plan
+
+
+# ── корректировки по команде менеджера ───────────────────────────────────────
+async def create_repoint_job(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str],
+                             dry_run: bool, user: str) -> dict:
+    """Создать задание перецепа кодов НС на канон по выбранным группам. Канон
+    берётся из статуса группы (обязателен). Собирает активные коды кассы с
+    НЕ-канонических карточек → перецеп на канон. Нода 208 выполнит по ключу."""
+    gs = await groups(db, cid, include_assortment=True)
+    by_key = {g["key"]: g for g in gs}
+    pgroups, skipped = [], []
+    wh = "208"
+    for k in group_keys:
+        g = by_key.get(k)
+        if not g:
+            skipped.append({"key": k, "why": "группа не найдена"}); continue
+        canon = g.get("canonGuid")
+        if not canon:
+            skipped.append({"key": k, "why": "не выбран канон"}); continue
+        canon_m = next((m for m in g["members"] if m["guid"] == canon), None)
+        codes = sorted({x["nsCode"] for m in g["members"] if m["guid"] != canon
+                        for x in m["nsCodes"] if x["active"]})
+        if not codes:
+            skipped.append({"key": k, "why": "нет активных кодов кассы на дублях"}); continue
+        pgroups.append({
+            "groupKey": k, "title": g["title"], "canonGuid": canon,
+            "canonCode": canon_m["code"] if canon_m else None,
+            "canonName": canon_m["name"] if canon_m else None,
+            "canonPrice": canon_m["price"] if canon_m else None,
+            "nsCodes": codes,
+        })
+    if not pgroups:
+        return {"error": "нет групп с каноном и кодами для перецепа", "skipped": skipped}
+    job = DedupCorrectionJob(
+        company_id=cid, kind="repoint", status="pending", dry_run=dry_run,
+        payload={"warehouse": wh, "groups": pgroups}, created_by=user)
+    db.add(job)
+    await db.commit()
+    return {"jobId": str(job.id), "groups": len(pgroups),
+            "codes": sum(len(g["nsCodes"]) for g in pgroups), "skipped": skipped,
+            "dryRun": dry_run}
+
+
+def _job_out(j: DedupCorrectionJob) -> dict:
+    pg = (j.payload or {}).get("groups", [])
+    return {
+        "id": str(j.id), "kind": j.kind, "status": j.status, "dryRun": j.dry_run,
+        "warehouse": (j.payload or {}).get("warehouse"), "groups": len(pg),
+        "codes": sum(len(g.get("nsCodes", [])) for g in pg),
+        "titles": [g.get("title") for g in pg][:8],
+        "result": j.result, "createdBy": j.created_by,
+        "createdAt": j.created_at.isoformat() if j.created_at else None,
+        "executedAt": j.executed_at.isoformat() if j.executed_at else None,
+    }
+
+
+async def list_jobs(db: AsyncSession, cid: uuid.UUID, limit: int = 30) -> list[dict]:
+    rows = (await db.execute(select(DedupCorrectionJob)
+            .where(DedupCorrectionJob.company_id == cid)
+            .order_by(DedupCorrectionJob.created_at.desc()).limit(limit))).scalars().all()
+    return [_job_out(j) for j in rows]
+
+
+async def cancel_job(db: AsyncSession, cid: uuid.UUID, job_id: uuid.UUID) -> bool:
+    j = await db.get(DedupCorrectionJob, job_id)
+    if j is None or j.company_id != cid or j.status not in ("pending", "running"):
+        return False
+    j.status = "cancelled"
+    await db.commit()
+    return True
+
+
+async def claim_pending_job(db: AsyncSession, cid: uuid.UUID) -> dict | None:
+    """Нода забирает следующий pending-перецеп (помечает running). Плоские rows
+    для JScript: {jobId, dryRun, warehouse, rows:[{nsCode, canonGuid, canonName}]}."""
+    j = (await db.execute(select(DedupCorrectionJob).where(
+        DedupCorrectionJob.company_id == cid, DedupCorrectionJob.kind == "repoint",
+        DedupCorrectionJob.status == "pending")
+        .order_by(DedupCorrectionJob.created_at).limit(1))).scalar_one_or_none()
+    if j is None:
+        return None
+    j.status = "running"
+    j.executed_at = datetime.now(timezone.utc)
+    await db.commit()
+    rows = []
+    for g in (j.payload or {}).get("groups", []):
+        for code in g.get("nsCodes", []):
+            rows.append({"nsCode": code, "canonGuid": g["canonGuid"], "canonName": g.get("canonName")})
+    return {"jobId": str(j.id), "dryRun": j.dry_run,
+            "warehouse": (j.payload or {}).get("warehouse", "208"), "rows": rows}
+
+
+async def report_job(db: AsyncSession, cid: uuid.UUID, job_id: uuid.UUID, *,
+                     ok: bool, result: dict) -> bool:
+    j = await db.get(DedupCorrectionJob, job_id)
+    if j is None or j.company_id != cid:
+        return False
+    j.status = "done" if ok else "error"
+    j.result = result
+    j.executed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return True
+
+
+async def merge_map(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str] | None = None) -> list[dict]:
+    """Карта слияния дубль→канон для .epf (ОбщегоНазначения.ЗаменитьСсылки).
+    ЗаменитьСсылки НЕ автоматизируем (виснет на активной кассе) — менеджер
+    запускает .epf в Предприятии в тихое окно. Канон = статус группы или 008-живая."""
+    gs = await groups(db, cid, include_assortment=False)
+    if group_keys:
+        keys = set(group_keys)
+        gs = [g for g in gs if g["key"] in keys]
+    out = []
+    for g in gs:
+        canon = g.get("canonGuid") or g.get("recommendedCanon")
+        if not canon:
+            live = [m for m in g["members"] if not m["marked"]]
+            pool = live or g["members"]
+            canon = next((m["guid"] for m in pool if m["prefix"] == "008"), pool[0]["guid"])
+        canon_m = next((m for m in g["members"] if m["guid"] == canon), None)
+        for m in g["members"]:
+            if m["guid"] == canon:
+                continue
+            out.append({
+                "dupGuid": m["guid"], "dupCode": m["code"], "dupName": m["name"],
+                "canonGuid": canon, "canonCode": canon_m["code"] if canon_m else None,
+                "canonName": canon_m["name"] if canon_m else None,
+            })
+    return out

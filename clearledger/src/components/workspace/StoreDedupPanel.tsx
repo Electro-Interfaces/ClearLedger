@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import * as XLSX from 'xlsx'
 import {
   CopyCheck, Search, Download, ChevronDown, ChevronRight, AlertTriangle,
-  Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw,
+  Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw, ShoppingCart,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -61,7 +61,8 @@ function Kpi({ label, value, hint, warn }: { label: string; value: string; hint?
 function GroupCard({ g }: { g: DedupGroup }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [canon, setCanon] = useState<string | null>(g.canonGuid)
+  // канон по умолчанию — карточка, что РЕАЛЬНО продаётся сейчас (recommendedCanon)
+  const [canon, setCanon] = useState<string | null>(g.canonGuid ?? g.recommendedCanon)
   const [note, setNote] = useState(g.note ?? '')
   const sm = statusMeta(g.status)
 
@@ -79,6 +80,13 @@ function GroupCard({ g }: { g: DedupGroup }) {
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.title}</span>
         {g.priceSpread.length > 1 && (
           <Badge variant="outline" className="border-red-400/50 text-red-300/80 gap-1"><AlertTriangle className="size-3" />цены {g.priceSpread.join('/')}</Badge>
+        )}
+        {g.sellingCount === 0 ? (
+          <Badge variant="outline" className="border-zinc-600 text-zinc-400 gap-1"><ShoppingCart className="size-3" />нет продаж</Badge>
+        ) : g.sellingCount === 1 ? (
+          <Badge variant="outline" className="border-emerald-400/50 text-emerald-300/80 gap-1"><ShoppingCart className="size-3" />продаётся 1</Badge>
+        ) : (
+          <Badge variant="outline" className="border-amber-400/50 text-amber-300/80 gap-1"><ShoppingCart className="size-3" />продаётся {g.sellingCount} ⚠</Badge>
         )}
         {g.prefixes.map((p) => (
           <Badge key={p} variant="outline" className={cn('text-[10px]', PREFIX_CLS[p] ?? 'border-zinc-600 text-zinc-400')}>{p}</Badge>
@@ -103,7 +111,7 @@ function GroupCard({ g }: { g: DedupGroup }) {
                 </tr>
               </thead>
               <tbody>
-                {g.members.map((m) => <MemberRow key={m.guid} m={m} canon={canon} onCanon={setCanon} spread={g.priceSpread} />)}
+                {g.members.map((m) => <MemberRow key={m.guid} m={m} canon={canon} onCanon={setCanon} spread={g.priceSpread} recommended={g.recommendedCanon} />)}
               </tbody>
             </table>
           </div>
@@ -128,12 +136,16 @@ function GroupCard({ g }: { g: DedupGroup }) {
   )
 }
 
-function MemberRow({ m, canon, onCanon, spread }: { m: DedupMember; canon: string | null; onCanon: (g: string) => void; spread: number[] }) {
+function MemberRow({ m, canon, onCanon, spread, recommended }: {
+  m: DedupMember; canon: string | null; onCanon: (g: string) => void; spread: number[]; recommended: string | null
+}) {
   const isCanon = canon === m.guid
+  const isRec = recommended === m.guid
   // при рассинхроне подсвечиваем цену, отличную от минимальной живой (переоценённый дубль)
   const desync = spread.length > 1 && m.price != null && !m.marked && m.price !== Math.min(...spread)
   return (
-    <tr className={cn('border-b border-border/20', m.marked && 'opacity-55')}>
+    <tr className={cn('border-b border-border/20', m.marked && 'opacity-55',
+      isRec && 'bg-emerald-500/5')}>
       <td className="py-1 pr-2">
         <button onClick={() => onCanon(m.guid)} title="Сделать каноном (хозяином группы)"
           className={cn('inline-flex size-4 items-center justify-center rounded-full border',
@@ -148,6 +160,13 @@ function MemberRow({ m, canon, onCanon, spread }: { m: DedupMember; canon: strin
       <td className="py-1 pr-2">
         {m.name}
         {m.marked && <span className="ml-1 rounded bg-red-500/15 px-1 text-[9px] text-red-300">помечена</span>}
+        {m.sellsNow && (
+          <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-emerald-500/15 px-1 text-[9px] text-emerald-300"
+            title={`Касса реально продаёт через эту карточку: ${m.soldQty} шт за 30 дн`}>
+            <ShoppingCart className="size-2.5" />продаётся {Math.round(m.soldQty ?? 0)}
+          </span>
+        )}
+        {isRec && <span className="ml-1 rounded bg-emerald-600/80 px-1 text-[9px] text-white">канон по продажам</span>}
       </td>
       <td className={cn('py-1 pr-2 text-right tabular-nums whitespace-nowrap', desync && 'font-semibold text-red-400')} title={desync ? 'Цена отличается от минимальной в группе' : undefined}>
         {fmtPrice(m.price)}
