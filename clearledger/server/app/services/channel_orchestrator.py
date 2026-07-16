@@ -19,11 +19,12 @@ from typing import Any
 
 import uuid as _uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Channel, ChannelStream, ChannelSyncLog, Source, SourceCredentials, SourceFile
+from app.models import Channel, ChannelStream, ChannelSyncLog, DataEntry, Source, SourceCredentials, SourceFile
 from app.services.cb_intake import ingest_packages
+from app.services.cb_vitrine_ingest import ingest_cb_vitrine
 from app.services.onec.com_client import OneCComClient
 from app.services.onec.crypto import decrypt_password
 from app.services.sts_client import sts_get_points
@@ -99,6 +100,60 @@ def _period(
 # ---------------------------------------------------------------------------
 # Ветка ЦБ (сопутка/общепит)
 # ---------------------------------------------------------------------------
+# F2/OB-5/F3: типы документов ЦБ, которых НЕТ в пакете смены (retail/purchase/
+# recipe уже там), но эталон эмитит их на смену. Тянем период-уровнем и апсертим
+# DataEntry — так «Обновить» канала наполняет и их (раньше только dev-скрипты).
+#   (метод com_client, doc_type_id, subcategory)
+_CB_EXTRA_DATAENTRY = [
+    ("fetch_production", "production_release", "production"),  # OB-5 выпуск общепита
+    ("fetch_gain", "gain", "gain"),                            # оприходование излишков
+    ("fetch_returns", "return_purchase", "return_purchase"),   # F2 возврат поставщику
+]
+
+# kind → category_id DataEntry (совместимо с существующими данными и _CATEGORY)
+_CATEGORY_FOR = {"production_release": "food", "gain": "retail", "return_purchase": "purchase"}
+
+
+async def _ingest_cb_dataentry_extras(db: AsyncSession, cid, client, pf: str, pt: str,
+                                      station: str) -> dict[str, int]:
+    """Штатная загрузка production_release/gain/return_purchase → DataEntry (F2/OB-5).
+
+    Апсерт по source_id (сносим только перезаливаемые id — прочие периоды целы,
+    как WIPE-фикс pull-скриптов). meta.Смена.Открытие=дата документа → эмиттер БП
+    относит документ к своей смене через _in_shift."""
+    counts: dict[str, int] = {}
+    for method, kind, subcat in _CB_EXTRA_DATAENTRY:
+        try:
+            items = await getattr(client, method)(pf, pt, station=station)
+        except Exception as e:  # тип не покрыт конфигурацией (напр. возвраты) → 0
+            counts[kind] = 0
+            counts[f"{kind}_error"] = str(e)[:120]  # type: ignore[assignment]
+            continue
+        prepared = []
+        for it in items or []:
+            uid = str(it.get("ИсточникUUID") or "")
+            if not uid:
+                continue
+            sid = f"{it.get('Номер') or ''}:{kind}:{uid}"
+            meta = {"kind": kind, "Документ": it,
+                    "Смена": {"КодАЗС": it.get("_station") or station,
+                              "Открытие": it.get("Дата") or "", "Закрытие": it.get("Дата") or ""}}
+            prepared.append((sid, it, meta))
+        ids = [p[0] for p in prepared]
+        if ids:
+            await db.execute(delete(DataEntry).where(
+                DataEntry.company_id == cid, DataEntry.source == "oneC",
+                DataEntry.doc_type_id == kind, DataEntry.source_id.in_(ids)))
+        for sid, it, meta in prepared:
+            db.add(DataEntry(
+                company_id=cid, category_id=_CATEGORY_FOR.get(kind, "retail"),
+                subcategory_id=subcat, doc_type_id=kind, source="oneC", source_id=sid,
+                source_label="ЦБ ЭЛСИ.АЗК", layer="clean", status="new",
+                title=f"{kind} · АЗС {station} · {it.get('Номер') or ''}", meta=meta))
+        counts[kind] = len(prepared)
+    return counts
+
+
 async def _run_cb(db: AsyncSession, channel: Channel, src: Source,
                   date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
     conn = _conn_string(src, await _decrypt_pwd(db, src.id))
@@ -111,13 +166,19 @@ async def _run_cb(db: AsyncSession, channel: Channel, src: Source,
     _LIMIT = 3000
     async with OneCComClient(conn) as client:
         packages = await client.fetch_cb_shifts(pf, pt, station=station, limit=_LIMIT)
-    result = await ingest_packages(db, channel.company_id, packages, channel_id=channel.id)
+        result = await ingest_packages(db, channel.company_id, packages, channel_id=channel.id)
+        # F2/OB-5/F3: типы вне пакета смены (production/gain/return) — штатно в канал.
+        extras = await _ingest_cb_dataentry_extras(db, channel.company_id, client, pf, pt, station)
+        # F3: витринные снимки (inventory/writeoff/transfer/revaluation/stock) — тоже канал.
+        vitrine = await ingest_cb_vitrine(db, channel.company_id, client)
+    await db.commit()
     truncated = len(packages) >= _LIMIT
     msg = result.get("message") or ""
     if truncated:
         msg = (msg + "; ⚠ достигнут лимит выборки смен — сузьте период").strip("; ")
     return {"status": "success", "kind": "cb", "period": [pf, pt], "station": station,
-            "truncated": truncated, **{k: v for k, v in result.items() if k != "message"},
+            "truncated": truncated, "extras": extras, "vitrine": vitrine,
+            **{k: v for k, v in result.items() if k != "message"},
             "message": msg}
 
 

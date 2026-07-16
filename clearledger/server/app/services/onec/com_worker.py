@@ -1225,6 +1225,88 @@ def op_fetch_gain(period_from: str, period_to: str, station: str = "208") -> lis
     return out
 
 
+def _return_doc_type_name(ib: Any) -> str:
+    """Имя типа документа возврата поставщику в текущей конфигурации ЭЛСИ.АЗК.
+    Зеркало эталона ОпределитьИмяТипаВозвратаПоставщику (bsl:869): в разных
+    редакциях документ называется по-разному. Возврат "" если не покрыт."""
+    for name in ("ВозвратТоваровПоставщикуНаАЗК", "ВозвратТоваровПоставщику"):
+        if ib.Метаданные.Документы.Найти(name) is not None:
+            return name
+    return ""
+
+
+def op_fetch_returns(period_from: str, period_to: str, station: str = "208") -> list[dict[str, Any]]:
+    """Документ.ВозвратТоваровПоставщику(НаАЗК) за период по станции → пакет-готовые
+    item'ы return_purchase (F2). Зеркало эталона СобратьReturnPurchase/
+    СформироватьОбъектReturnPurchase (TL_ЭкспортБП_Сервер.bsl:815-962). Read-only.
+    Пусто, если конфигурация не покрывает возвраты поставщику."""
+    ib = _require_ib()
+    tname = _return_doc_type_name(ib)
+    if not tname:
+        return []
+    q = ib.NewObject("Запрос")
+    # Склад может отсутствовать у документа в части редакций (эталон оборачивает в
+    # Попытку) — фильтруем по складу, при синтакс-ошибке падаем на период целиком.
+    base = (
+        f"ВЫБРАТЬ Т.Ссылка КАК Ссылка ИЗ Документ.{tname} КАК Т "
+        f"ГДЕ Т.Дата >= ДАТАВРЕМЯ({_dt_lit(period_from)}) И Т.Дата <= ДАТАВРЕМЯ({_dt_lit(period_to, True)}) "
+        "И Т.ПометкаУдаления = ЛОЖЬ"
+    )
+    try:
+        q.Текст = base + f' И Т.Склад.Код = "{station}" УПОРЯДОЧИТЬ ПО Т.Дата'
+        sel = q.Выполнить().Выбрать()
+    except Exception:
+        q.Текст = base + " УПОРЯДОЧИТЬ ПО Т.Дата"
+        sel = q.Выполнить().Выбрать()
+    out: list[dict[str, Any]] = []
+    while sel.Следующий():
+        o = sel.Ссылка.ПолучитьОбъект()
+        товары = []
+        сумма_ндс = 0.0
+        for i in range(o.Товары.Количество()):
+            r = o.Товары.Получить(i)
+            nds = float(_val(r.СуммаНДС) or 0)
+            сумма_ндс += nds
+            товары.append({
+                "НомерСтроки": i + 1,
+                "Номенклатура": _xs(ib, r.Номенклатура),
+                "Количество": float(_val(r.Количество) or 0),
+                "Цена": float(_val(r.Цена) or 0),
+                "Сумма": float(_val(r.Сумма) or 0),
+                "СтавкаНДС": str(_val(getattr(r, "СтавкаНДС", "")) or "").strip(),
+                "СуммаНДС": nds,
+            })
+        # ПервичнаяПТУ_UUID — документ-основание (Сделка в БП 3.0); берём осторожно.
+        pervichnaya = ""
+        try:
+            sd = getattr(o, "Сделка", None)
+            if _val(sd):
+                pervichnaya = _xs(ib, sd)
+        except Exception:
+            pass
+        d = str(_val(o.Дата))
+        out.append({
+            "Тип": "return_purchase",
+            "ИсточникUUID": _xs(ib, o.Ссылка),
+            "Номер": str(_val(o.Номер) or "").strip(),
+            "Дата": d,
+            "Проведен": bool(_val(getattr(o, "Проведен", True))),
+            "ПометкаУдаления": bool(_val(getattr(o, "ПометкаУдаления", False))),
+            "Организация": _xs(ib, o.Организация) if _val(getattr(o, "Организация", None)) else "",
+            "Контрагент": _xs(ib, o.Контрагент) if _val(getattr(o, "Контрагент", None)) else "",
+            "Склад": _xs(ib, o.Склад) if _val(getattr(o, "Склад", None)) else "",
+            "ПервичнаяПТУ_UUID": pervichnaya,
+            "СуммаДокумента": float(_val(getattr(o, "СуммаДокумента", 0)) or 0),
+            "ВалютаДокумента": "RUB",
+            "СуммаВключаетНДС": bool(_val(getattr(o, "СуммаВключаетНДС", True))),
+            "Товары": товары,
+            "СуммаНДС": round(сумма_ндс, 2),
+            "_station": station,
+            "_day": d[:10],
+        })
+    return out
+
+
 def op_fetch_orgs() -> list[dict[str, Any]]:
     """Справочник.Организации → реквизиты для НСИ-секции пакета (Организация
     ищется приёмником по ИНН, не автосоздаётся). Поля ЭЛСИ.АЗК: ИНН/КПП/
@@ -1324,6 +1406,8 @@ def main() -> int:
                 result = op_fetch_gain(**args)
             elif op == "fetch_recipes":
                 result = op_fetch_recipes(**args)
+            elif op == "fetch_returns":
+                result = op_fetch_returns(**args)
             elif op == "exit":
                 return 0
             else:

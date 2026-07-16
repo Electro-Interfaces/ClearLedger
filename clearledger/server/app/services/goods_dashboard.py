@@ -264,6 +264,25 @@ class GoodsDashboardService:
             out.append(m)
         return out
 
+    async def _load_returns(self) -> list[dict]:
+        """Возвраты поставщику (F2) all-time, дедуп по ИсточникUUID — как _load_purchases.
+        Вычитаются из закупочной базы себестоимости (иначе возвращённый товар завышает
+        закупленное количество и искажает удельную закупку). Возвраты часто 0."""
+        if getattr(self, "_ret_cache", None) is None:
+            self._ret_cache = (await self.session.execute(select(DataEntry).where(
+                DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
+                DataEntry.doc_type_id == "return_purchase"))).scalars().all()
+        selected = self._select(self._ret_cache, date(2000, 1, 1), date(2100, 1, 1), None)
+        out: list[dict] = []
+        seen: set[str] = set()
+        for i, m in enumerate(selected):
+            uid = str((m.get("Документ") or {}).get("ИсточникUUID") or "") or f"__ret{i}"
+            if uid in seen:
+                continue
+            seen.add(uid)
+            out.append(m)
+        return out
+
     async def _names(self) -> dict:
         if getattr(self, "_names_cache", None) is not None:
             return self._names_cache
@@ -291,6 +310,16 @@ class GoodsDashboardService:
                     continue
                 agg[g][0] += self._purch_net(doc, ln)
                 agg[g][1] += float(ln.get("Количество") or 0)
+        # F2: возвраты поставщику уменьшают чистую закупку (net + количество). Так
+        # удельная закупка = (Σзакуп − Σвозврат)/(Σкол − Σвозврат) не завышена.
+        for m in await self._load_returns():
+            doc = m.get("Документ") or {}
+            for ln in doc.get("Товары") or []:
+                g = ln.get("Номенклатура")
+                if not g:
+                    continue
+                agg[g][0] -= self._purch_net(doc, ln)
+                agg[g][1] -= float(ln.get("Количество") or 0)
         cm: dict[str, tuple[float, str, float]] = {}
         for g, v in agg.items():
             if v[1] and (v[0] / v[1]) > 0:

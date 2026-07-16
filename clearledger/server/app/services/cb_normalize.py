@@ -137,7 +137,30 @@ def normalize_shift_package(package: dict) -> dict:
     for d in docs:
         kind = d.get("Тип") or d.get("kind")
         if kind == "recipe":
-            continue  # справочный поток: используется для разворота блюд
+            # OB-1/персист: recipe используется для разворота блюд (выше, _recipe_index),
+            # НО также персистится как DataEntry(doc_type_id='recipe') — раньше терялся,
+            # и эмиттер БП зависел от ручного pull_cb_recipes_dev.py. Ключ по БлюдоUUID
+            # (period-independent) → один ТТК на блюдо, идемпотентный upsert между сменами.
+            blyudo = str(d.get("БлюдоUUID") or d.get("Блюдо") or "").strip()
+            if not blyudo:
+                continue
+            rec_doc = dict(d)
+            rec_doc.setdefault("БлюдоUUID", blyudo)
+            entries.append({
+                "title": f"ТТК блюда · {blyudo[:8]}",
+                # category_id='retail' — как pull_cb_recipes_dev.py (30 существующих
+                # recipe в БД), чтобы канальные и скриптовые ТТК были неотличимы.
+                "category_id": "retail",
+                "subcategory_id": "recipe",
+                "doc_type_id": "recipe",
+                "source": "oneC",
+                "source_label": "ЦБ ЭЛСИ.АЗК",
+                "source_id": f"recipe:{blyudo}",
+                "layer": "clean",
+                "status": "verified",
+                "meta": {"kind": "recipe", "Документ": rec_doc},
+            })
+            continue
         category = _CATEGORY.get(kind)
         if category is None:
             skipped.append(str(kind))

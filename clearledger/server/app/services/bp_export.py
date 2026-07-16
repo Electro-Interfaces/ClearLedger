@@ -361,6 +361,66 @@ class BpPackageEmitter:
                 ln["СтавкаНДС"] = _nds(ln.pop("СтавкаНДС_raw", "")) or _nds(nom[g].vat if nom.get(g) else "")
             gains.append(it)
 
+        # ── return_purchase (возврат поставщику, F2) ──
+        # Эталон СобратьReturnPurchase (bsl:815): на стороне БП → Документ.
+        # КорректировкаПоступления с ВидОперации=СогласованноеИзменение. Порядок
+        # контракта: после production, перед inventory.
+        ret_entries = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id, DataEntry.source == "oneC",
+            DataEntry.doc_type_id == "return_purchase"))).scalars().all()
+        returns = []
+        for re_ in ret_entries:
+            rsm = (re_.meta or {}).get("Смена") or {}
+            if not _in_shift(rsm):
+                continue
+            rdoc = (re_.meta or {}).get("Документ") or {}
+            if rdoc.get("ПометкаУдаления"):
+                continue
+            контр = str(rdoc.get("Контрагент") or "")
+            if контр:
+                nsi_contr.add(контр)
+                if контр in cparty_ref:
+                    contr_names[контр] = cparty_ref[контр].name
+            rtov = []
+            rsum = rnds = 0.0
+            for i, ln in enumerate(rdoc.get("Товары") or [], 1):
+                g = ln.get("Номенклатура")
+                if g:
+                    nsi_nom.add(g)
+                nn = nom.get(g)
+                summ = float(ln.get("Сумма") or 0)
+                nds = float(ln.get("СуммаНДС") or 0)
+                rsum += summ
+                rnds += nds
+                rtov.append({
+                    "НомерСтроки": ln.get("НомерСтроки") or i,
+                    "Номенклатура": g,
+                    "Количество": float(ln.get("Количество") or 0),
+                    "Единица": (nn.unit or "" if nn else ""),
+                    "Цена": float(ln.get("Цена") or 0),
+                    "Сумма": round(summ, 2),
+                    "СтавкаНДС": _nds(ln.get("СтавкаНДС")) or _nds(nn.vat if nn else ""),
+                    "СуммаНДС": round(nds, 2),
+                })
+            returns.append({
+                "Тип": "return_purchase",
+                "ИсточникUUID": str(rdoc.get("ИсточникUUID") or ""),
+                "Номер": str(rdoc.get("Номер") or "").strip(),
+                "Дата": _iso(rdoc.get("Дата")),
+                "Проведен": bool(rdoc.get("Проведен", True)),
+                "ПометкаУдаления": bool(rdoc.get("ПометкаУдаления", False)),
+                "Организация": str(rdoc.get("Организация") or org_uuid),
+                "Контрагент": контр,
+                "ДоговорКонтрагента": "",
+                "ПервичнаяПТУ_UUID": str(rdoc.get("ПервичнаяПТУ_UUID") or ""),
+                "Склад": str(rdoc.get("Склад") or wh_uuid),
+                "СуммаДокумента": round(rsum, 2) if rsum else float(rdoc.get("СуммаДокумента") or 0),
+                "ВалютаДокумента": "RUB",
+                "СуммаВключаетНДС": bool(rdoc.get("СуммаВключаетНДС", True)),
+                "СуммаНДС": round(rnds, 2),
+                "Товары": rtov,
+            })
+
         # ── inventory / writeoff / transfer (движение того же дня) ──
         # строим из Cb*Doc (склады 208); поля пакета деривируем из строк аналитики.
         # интервал смены по дате-части (как эталон): день Открытия..день Закрытия
@@ -506,8 +566,8 @@ class BpPackageEmitter:
                     "Ингредиенты": ингредиенты,
                 })
 
-        # Порядок контракта: recipe → purchase → retail → production → [return] → inventory → gain → writeoff → transfer
-        документы = [*recipes, *purchases, retail, *productions, *inventories, *gains, *writeoffs, *transfers]
+        # Порядок контракта: recipe → purchase → retail → production → return → inventory → gain → writeoff → transfer
+        документы = [*recipes, *purchases, retail, *productions, *returns, *inventories, *gains, *writeoffs, *transfers]
 
         # ── НСИ ──
         def _s(v) -> str:
