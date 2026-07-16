@@ -654,3 +654,44 @@ export interface SkuCardData extends SkuDetailData {
 
 export const getStoreSkuCard = (guid: string, dateFrom: string, dateTo: string) =>
   get<SkuCardData>(`/api/store/sku-card/${encodeURIComponent(guid)}`, { date_from: dateFrom, date_to: dateTo })
+
+/* ─────────────────────────── Контроль дублей ──────────────────────────── */
+export interface DedupSummary {
+  cardsTotal: number; cardsMarked: number; byPrefix: Record<string, number>
+  dupGroups: number; excessCards: number; liveDupGroups: number; assortmentCards: number
+  nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
+}
+export interface DedupNsCode { nsCode: string; active: boolean; price: number | null }
+export interface DedupMember {
+  guid: string; code: string | null; prefix: string | null; name: string
+  marked: boolean; group: string | null; nsCodes: DedupNsCode[]; nsActive: boolean
+  prices: number[]; inCb: boolean
+}
+export interface DedupGroup {
+  key: string; title: string; count: number; live: number; assortment: boolean
+  prefixes: string[]; priceSpread: number[]; members: DedupMember[]
+  status: string; canonGuid: string | null; note: string | null
+}
+export interface DedupBridgeRow {
+  nsCode?: string; warehouse?: string; cardGuid?: string; cardName?: string
+  price?: number | null; barcode?: string; codes?: number; nsCodes?: string[]
+  prices?: number[]; marked?: boolean
+}
+export interface DedupExportRow {
+  group: string; status: string; dupGuid: string; dupCode: string | null; dupName: string
+  dupMarked: boolean; dupNsCodes: string[]; canonGuid: string; canonCode: string | null; canonName: string | null
+}
+
+export const getDedupSummary = () => get<DedupSummary>('/api/store/dedup/summary')
+export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; onlyLive?: boolean; status?: string }) =>
+  get<DedupGroup[]>('/api/store/dedup/groups', {
+    q: p?.q || undefined,
+    include_assortment: p?.includeAssortment ? 'true' : undefined,
+    only_live: p?.onlyLive ? 'true' : undefined,
+    status: p?.status || undefined,
+  })
+export const getDedupBridge = (kind: 'on_marked' | 'multi' | 'price_split') =>
+  get<DedupBridgeRow[]>('/api/store/dedup/bridge', { kind })
+export const setDedupStatus = (body: { entityType: 'group' | 'card'; entityKey: string; status?: string; canonGuid?: string | null; note?: string }) =>
+  post<{ status: string; canonGuid: string | null; note: string | null; history: unknown[] }>('/api/store/dedup/status', body)
+export const getDedupExport = () => get<DedupExportRow[]>('/api/store/dedup/export')

@@ -3738,3 +3738,89 @@ class ChatFolder(Base):
     __table_args__ = (
         Index("idx_chat_folders_user", "user_id", "sort_order"),
     )
+
+
+# ===========================================================================
+# Контроль дублей номенклатуры по цепочке Нефтосервер → локальная 1С 208 → ЦБ.
+# Кеш карточек + привязок кассы (КодНефтосервера) + статусы/трекинг правок.
+# Ключ склейки уровней — GUID карточки (lowercase-дефис, совпадает у 208 и ЦБ).
+# ===========================================================================
+class DedupCard(Base):
+    """Карточка номенклатуры для анализа дублей. source='local208' (живой pull
+    станции) или 'cb' (снимок ЦБ). Ключ склейки уровней — guid."""
+    __tablename__ = "dedup_cards"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(20), nullable=False)   # local208 | cb
+    guid: Mapped[str] = mapped_column(String(40), nullable=False)     # UUID карточки (склейка)
+    code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    code_prefix: Mapped[str | None] = mapped_column(String(8), nullable=True)  # 008|208|ЦБ0|000|...
+    name: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    name_norm: Mapped[str] = mapped_column(String(500), nullable=False, default="")  # ключ группировки
+    marked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_assortment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # «в ассортименте» — НЕ дубль
+    group_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_dedup_cards", "company_id", "source", "guid", unique=True),
+        Index("idx_dedup_cards_norm", "company_id", "name_norm"),
+    )
+
+
+class DedupNsBinding(Base):
+    """Привязка кода кассы (КодНефтосервера) → карточка. Мост Нефтосервер↔1С:
+    какой код на какую карточку бьёт, активна ли, розн.цена, помечена ли цель."""
+    __tablename__ = "dedup_ns_bindings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    warehouse: Mapped[str | None] = mapped_column(String(20), nullable=True)   # код склада (208)
+    ns_code: Mapped[str] = mapped_column(String(40), nullable=False)           # КодНС (ProdCode кассы)
+    card_guid: Mapped[str | None] = mapped_column(String(40), nullable=True)   # карточка-цель
+    card_marked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # цель помечена → касса бьёт дубль
+    barcode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)  # Актуальность
+    retail_price: Mapped[float | None] = mapped_column(Float, nullable=True)   # ЦенаВРознице
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_dedup_ns", "company_id", "warehouse", "ns_code", unique=True),
+        Index("idx_dedup_ns_card", "company_id", "card_guid"),
+    )
+
+
+class DedupStatus(Base):
+    """Отметка статуса дедупа (ручной трекинг). entity_type: 'group' (по
+    нормализованному имени) или 'card' (по guid). Хранит статус + канон + заметку
+    + историю изменений — чтобы отмечать что исправлено (скриптом/руками) и видеть прогресс."""
+    __tablename__ = "dedup_statuses"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    entity_type: Mapped[str] = mapped_column(String(10), nullable=False)   # group | card
+    entity_key: Mapped[str] = mapped_column(String(500), nullable=False)   # name_norm | guid
+    # pending | not_duplicate | in_progress | repointed | merged | done
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    canon_guid: Mapped[str | None] = mapped_column(String(40), nullable=True)  # выбранный хозяин группы
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)  # [{at,by,from,to,note}]
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_dedup_status", "company_id", "entity_type", "entity_key", unique=True),
+    )

@@ -23,7 +23,7 @@ import {
   Plug, FileOutput,
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
-  QrCode, ScanLine, PackageMinus, ShieldAlert, CalendarClock,
+  QrCode, ScanLine, PackageMinus, ShieldAlert, CalendarClock, CopyCheck,
 } from 'lucide-react'
 
 export type StoreStatus = 'ready' | 'wip' | 'planned'
@@ -337,6 +337,21 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Производство (общепит)', desc: 'Маркированный ингредиент в блюдо → вывод по причине «производство/собственные нужды».' },
       { name: 'Сверка баланса', desc: 'Остаток кодов у нас ↔ ГИС МТ; расхождения приёмка/выбытие.' },
       { name: 'Граница', desc: 'Продажную реализацию и фискальное выбытие делает касса Нефтосервер автономно — здесь НЕ дублируем.' },
+    ],
+  },
+
+  /* ───────────────────── КОНТРОЛЬ (качество данных) ───────────────────── */
+  {
+    key: 'dedup', label: 'Дубли', group: 'Контроль', icon: CopyCheck,
+    title: 'Контроль дублей номенклатуры',
+    subtitle: 'Дубли карточек по всей цепочке Нефтосервер → локальная 1С 208 → ЦБ на примере АЗС 208: наглядно видно проблемы (один товар под кодами 008/208/ЦБ, касса бьёт удалённый дубль, рассинхрон цен), можно отмечать статусы правок и вести трекинг после корректировок скриптами и руками.',
+    status: 'ready',
+    blocks: [
+      { name: 'Обзор', desc: 'KPI: карточек 7240 (008/208/ЦБ), групп дублей, «в ассортименте» (не дубли), привязок кассы, кодов на помеченные карточки, карточек с ≥2 кодами.', source: 'dedup_service.summary · /api/store/dedup/summary' },
+      { name: 'Группы дублей', desc: 'Нечёткий матч (регистр/пробелы/пунктуация/«г↔гр», «в ассортименте»=не дубль): группы карточек-дублей с префиксами кодов, привязками кассы, ЦБ-связкой; статус + канон + заметка по каждой.', source: 'dedup_service.groups · /api/store/dedup/groups' },
+      { name: 'Мост касса↔карточка', desc: 'Коды кассы на помеченные карточки (касса бьёт дубль), карточки с несколькими кодами, рассинхрон цен.', source: 'dedup_service.bridge · /api/store/dedup/bridge' },
+      { name: 'Трекинг правок', desc: 'Статусы дубль/канон/не-дубль/перецеплено/слито/готово + история — отмечать что исправлено скриптом или руками, видеть прогресс.', source: 'dedup_statuses · /api/store/dedup/status' },
+      { name: 'Экспорт для исполнителя', desc: 'План дедупа (пары дубль→канон + коды кассы) в JSON/Excel — для .epf-обработки или скриптов в боевой 1С (сам Ledger в боевую 1С не пишет).', source: 'dedup_service.export_plan · /api/store/dedup/export' },
     ],
   },
 ]

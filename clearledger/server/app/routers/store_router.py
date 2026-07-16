@@ -434,3 +434,62 @@ async def store_report(
         from fastapi import HTTPException
         raise HTTPException(404, f"Неизвестный отчёт: {report}")
     return await method(date.fromisoformat(date_from), date.fromisoformat(date_to), _stations(stations))
+
+
+# ─────────────────────────── Контроль дублей ────────────────────────────────
+# Анализ дублей номенклатуры по цепочке Нефтосервер → локальная 1С 208 → ЦБ.
+from app.services import dedup_service
+
+
+@router.get("/dedup/summary")
+async def dedup_summary(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await dedup_service.summary(db, await scope_company_id(user, db))
+
+
+@router.get("/dedup/groups")
+async def dedup_groups(
+    q: str | None = Query(None),
+    include_assortment: bool = Query(False),
+    only_live: bool = Query(False),
+    status: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await scope_company_id(user, db)
+    return await dedup_service.groups(db, cid, q=q, include_assortment=include_assortment,
+                                      only_live=only_live, status=status)
+
+
+@router.get("/dedup/bridge")
+async def dedup_bridge(
+    kind: str = Query("on_marked", pattern="^(on_marked|multi|price_split)$"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    return await dedup_service.bridge(db, await scope_company_id(user, db), kind=kind)
+
+
+class DedupStatusBody(BaseModel):
+    entityType: str            # group | card
+    entityKey: str
+    status: str | None = None
+    canonGuid: str | None = None
+    note: str | None = None
+
+
+@router.post("/dedup/status")
+async def dedup_set_status(
+    body: DedupStatusBody,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    if body.entityType not in ("group", "card"):
+        raise HTTPException(400, "entityType: group|card")
+    cid = await scope_company_id(user, db)
+    row = await dedup_service.set_status(
+        db, cid, entity_type=body.entityType, entity_key=body.entityKey,
+        status=body.status, canon_guid=body.canonGuid, note=body.note, user=user.name or user.email)
+    return {"status": row.status, "canonGuid": row.canon_guid, "note": row.note,
+            "history": row.history}
+
+
+@router.get("/dedup/export")
+async def dedup_export(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    return await dedup_service.export_plan(db, await scope_company_id(user, db))
