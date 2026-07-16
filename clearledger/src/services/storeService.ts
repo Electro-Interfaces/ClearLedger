@@ -673,7 +673,8 @@ export interface DedupSummary {
   nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
   updatedAt: string | null
 }
-export interface DedupNsCode { nsCode: string; active: boolean; price: number | null }
+/** Код кассы живёт в разрезе склада: один и тот же код на другом складе — другой товар. */
+export interface DedupNsCode { nsCode: string; wh: string | null; active: boolean; price: number | null }
 export interface DedupMember {
   guid: string; code: string | null; prefix: string | null; name: string
   marked: boolean; group: string | null; price: number | null
@@ -718,3 +719,22 @@ export const getDedupBridge = (kind: 'on_marked' | 'multi' | 'price_split') =>
 export const setDedupStatus = (body: { entityType: 'group' | 'card'; entityKey: string; status?: string; canonGuid?: string | null; note?: string }) =>
   post<{ status: string; canonGuid: string | null; note: string | null; history: unknown[] }>('/api/store/dedup/status', body)
 export const getDedupExport = () => get<DedupExportRow[]>('/api/store/dedup/export')
+
+export interface DedupJob {
+  id: string; kind: string; status: string; dryRun: boolean
+  warehouse: string | null; groups: number; codes: number; titles: string[]
+  result: { done?: number; failed?: number; log?: string[]; error?: string } | null
+  createdBy: string | null; createdAt: string | null; executedAt: string | null
+}
+export interface DedupMergeRow {
+  dupGuid: string; dupCode: string | null; dupName: string
+  canonGuid: string; canonCode: string | null; canonName: string | null
+}
+/** Команда менеджера: перецеп кодов кассы на канон по выбранным группам (нода 208 выполнит). */
+export const correctDedup = (body: { groupKeys: string[]; dryRun: boolean }) =>
+  post<{ jobId?: string; groups?: number; codes?: number; skipped?: { key: string; why: string }[]; error?: string }>(
+    '/api/store/dedup/correct', body)
+export const getDedupJobs = () => get<DedupJob[]>('/api/store/dedup/jobs')
+export const cancelDedupJob = (id: string) => post<{ ok: boolean }>(`/api/store/dedup/jobs/${id}/cancel`, {})
+export const getDedupMergeMap = (groupKeys?: string[]) =>
+  get<DedupMergeRow[]>('/api/store/dedup/merge-map', groupKeys?.length ? { group_keys: groupKeys.join('|') } : undefined)

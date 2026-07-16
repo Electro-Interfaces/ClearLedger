@@ -13,6 +13,7 @@ import * as XLSX from 'xlsx'
 import {
   CopyCheck, Search, Download, ChevronDown, ChevronRight, AlertTriangle,
   Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw, ShoppingCart,
+  PlayCircle, GitMerge,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -23,6 +24,7 @@ import {
 } from '@/components/ui/select'
 import {
   getDedupSummary, getDedupGroups, getDedupBridge, setDedupStatus, getDedupExport, reloadDedup,
+  correctDedup, getDedupJobs, cancelDedupJob, getDedupMergeMap,
   type DedupGroup, type DedupMember,
 } from '@/services/storeService'
 
@@ -72,6 +74,25 @@ function GroupCard({ g }: { g: DedupGroup }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['dedup-groups'] }); qc.invalidateQueries({ queryKey: ['dedup-summary'] }); toast.success('Статус сохранён') },
     onError: () => toast.error('Не удалось сохранить'),
   })
+
+  // Перецеп кодов кассы на канон — только по команде менеджера, погруппово.
+  // Канон в задании берётся из статуса, поэтому сначала фиксируем выбор.
+  const job = useMutation({
+    mutationFn: async () => {
+      await setDedupStatus({ entityType: 'group', entityKey: g.key, canonGuid: canon, status: 'in_progress' })
+      return correctDedup({ groupKeys: [g.key], dryRun: true })
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['dedup-groups'] })
+      qc.invalidateQueries({ queryKey: ['dedup-jobs'] })
+      if (r.error) toast.error(r.error)
+      else toast.success(`Задание создано: ${r.codes} код(ов) кассы → канон. Нода 208 выполнит пробный прогон.`)
+    },
+    onError: () => toast.error('Не удалось создать задание'),
+  })
+  // Перецеп трогает только кассу своей АЗС: коды чужих складов не в счёт.
+  const dupCodes = g.members.filter((m) => m.guid !== canon)
+    .reduce((n, m) => n + m.nsCodes.filter((c) => c.active && c.wh === '208').length, 0)
 
   return (
     <div className="rounded-lg border border-border/50 bg-card/30">
@@ -129,6 +150,17 @@ function GroupCard({ g }: { g: DedupGroup }) {
               {mut.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <Check className="mr-1 size-3.5" />}
               Сохранить {canon ? '(канон выбран)' : ''}
             </Button>
+            <Button size="sm" variant="outline" className="h-8 border-violet-400/40 text-xs text-violet-300/90 hover:bg-violet-500/10"
+              onClick={() => job.mutate()} disabled={job.isPending || !canon || dupCodes === 0}
+              title={!canon ? 'Сначала выберите канон' : dupCodes === 0 ? 'На дублях нет активных кодов кассы' :
+                `Пробный прогон: нода 208 покажет план перецепа ${dupCodes} код(ов) кассы на канон, без записи в 1С`}>
+              {job.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <PlayCircle className="mr-1 size-3.5" />}
+              Перецеп пробно{dupCodes > 0 ? ` (${dupCodes})` : ''}
+            </Button>
+          </div>
+          <div className="mt-1.5 text-[10px] text-muted-foreground/70">
+            Перецеп меняет только привязку кодов кассы к канону. Слияние карточек (ЗаменитьСсылки) на активной кассе
+            не автоматизируем — берите «Карту слияния» и запускайте .epf в тихое окно.
           </div>
         </div>
       )}
@@ -173,8 +205,11 @@ function MemberRow({ m, canon, onCanon, spread, recommended }: {
       </td>
       <td className="py-1 pr-2 text-[11px]">
         {m.nsCodes.length === 0 ? <span className="text-muted-foreground/50">—</span> : m.nsCodes.map((c) => (
-          <span key={c.nsCode} className={cn('mr-1 inline-block rounded px-1', c.active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground line-through')}>
-            {c.nsCode}
+          <span key={`${c.wh}-${c.nsCode}`}
+            className={cn('mr-1 inline-block rounded px-1', c.active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground line-through',
+              c.wh !== '208' && 'opacity-60')}
+            title={c.wh === '208' ? `Касса АЗС 208, код ${c.nsCode}` : `Склад ${c.wh} — чужой, перецеп его не трогает`}>
+            {c.nsCode}{c.wh !== '208' && <span className="ml-0.5 text-[9px] opacity-70">·скл {c.wh}</span>}
           </span>
         ))}
         {m.marked && m.nsActive && <span className="ml-1 rounded bg-red-500/20 px-1 text-[9px] text-red-300">касса бьёт удалённую!</span>}
@@ -230,10 +265,84 @@ function BridgeTab() {
   )
 }
 
+// ── задания корректировки ─────────────────────────────────────────────────────
+const JOB_CLS: Record<string, string> = {
+  pending: 'border-blue-400/50 text-blue-300/80',
+  running: 'border-amber-400/50 text-amber-300/80',
+  done: 'bg-emerald-600/80 text-white border-transparent',
+  error: 'border-red-400/50 text-red-300/80',
+  cancelled: 'border-zinc-600 text-zinc-500',
+}
+const JOB_LABEL: Record<string, string> = {
+  pending: 'ждёт ноду', running: 'выполняется', done: 'выполнено', error: 'ошибка', cancelled: 'отменено',
+}
+
+function JobsTab() {
+  const qc = useQueryClient()
+  const { data: jobs = [], isLoading } = useQuery({
+    queryKey: ['dedup-jobs'], queryFn: getDedupJobs, refetchInterval: 15000,
+  })
+  const cancel = useMutation({
+    mutationFn: (id: string) => cancelDedupJob(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['dedup-jobs'] }); toast.success('Задание отменено') },
+    onError: () => toast.error('Задание уже выполняется или выполнено'),
+  })
+
+  if (isLoading) return <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+  if (jobs.length === 0) {
+    return (
+      <p className="py-10 text-center text-sm text-muted-foreground">
+        Заданий нет. Перецеп запускается вручную из группы дублей — кнопка «Перецеп пробно».
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-1.5">
+      {jobs.map((j) => (
+        <div key={j.id} className="rounded-lg border border-border/50 bg-card/30 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">{j.kind === 'repoint' ? 'Перецеп кодов кассы' : j.kind}</span>
+            <Badge variant="outline" className={cn('text-[10px]', JOB_CLS[j.status] ?? 'border-zinc-600 text-zinc-400')}>
+              {JOB_LABEL[j.status] ?? j.status}
+            </Badge>
+            {j.dryRun && <Badge variant="outline" className="border-sky-400/50 text-[10px] text-sky-300/80">пробный (без записи)</Badge>}
+            <Badge variant="outline" className="text-[10px]">склад {j.warehouse} · {j.groups} групп · {j.codes} код.</Badge>
+            <span className="ml-auto text-[11px] text-muted-foreground/70">
+              {j.createdBy} · {j.createdAt ? new Date(j.createdAt).toLocaleString('ru-RU') : ''}
+            </span>
+            {['pending', 'running'].includes(j.status) && (
+              <Button size="sm" variant="ghost" className="h-6 text-[11px] text-muted-foreground"
+                onClick={() => cancel.mutate(j.id)} disabled={cancel.isPending}>Отменить</Button>
+            )}
+          </div>
+          {j.titles.length > 0 && (
+            <div className="mt-1 truncate text-[11px] text-muted-foreground">{j.titles.join(' · ')}</div>
+          )}
+          {j.result && (
+            <div className="mt-1.5 rounded border border-border/40 bg-background/40 px-2 py-1 text-[11px]">
+              {j.result.error ? <span className="text-red-300/90">{j.result.error}</span> : (
+                <span className="text-muted-foreground">
+                  Обработано {j.result.done ?? 0}{j.result.failed ? `, ошибок ${j.result.failed}` : ''}
+                  {j.executedAt ? ` · ${new Date(j.executedAt).toLocaleString('ru-RU')}` : ''}
+                </span>
+              )}
+              {j.result.log && j.result.log.length > 0 && (
+                <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto font-mono text-[10px] text-muted-foreground/80">
+                  {j.result.log.map((l, i) => <li key={i}>{l}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── корневой ──────────────────────────────────────────────────────────────────
 export function StoreDedupPanel() {
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'groups' | 'bridge'>('groups')
+  const [tab, setTab] = useState<'groups' | 'bridge' | 'jobs'>('groups')
   const [q, setQ] = useState('')
   const [onlyLive, setOnlyLive] = useState(true)
   const [inclAssort, setInclAssort] = useState(false)
@@ -276,6 +385,19 @@ export function StoreDedupPanel() {
       XLSX.writeFile(wb, `dedup_plan_208_${new Date().toISOString().slice(0, 10)}.xlsx`)
       toast.success(`Excel: ${rows.length} пар дубль→канон`)
     } catch { toast.error('Не удалось выгрузить Excel') }
+  }
+
+  // Карта слияния — вход для .epf ЗаменитьСсылки (запуск руками в тихое окно).
+  const exportMergeMap = async () => {
+    try {
+      const rows = await getDedupMergeMap()
+      const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' })
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `merge_map_208_${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      toast.success(`Карта слияния: ${rows.length} пар дубль→канон для .epf`)
+    } catch { toast.error('Не удалось выгрузить карту слияния') }
   }
 
   const exportPlan = async () => {
@@ -323,17 +445,20 @@ export function StoreDedupPanel() {
       <div className="flex items-center gap-1.5 border-b border-border/40">
         <button onClick={() => setTab('groups')} className={cn('flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm', tab === 'groups' ? 'border-primary text-foreground font-medium' : 'border-transparent text-muted-foreground hover:text-foreground')}><Tag className="size-4" />Группы дублей</button>
         <button onClick={() => setTab('bridge')} className={cn('flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm', tab === 'bridge' ? 'border-primary text-foreground font-medium' : 'border-transparent text-muted-foreground hover:text-foreground')}><Store className="size-4" />Мост касса↔карточка</button>
+        <button onClick={() => setTab('jobs')} className={cn('flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm', tab === 'jobs' ? 'border-primary text-foreground font-medium' : 'border-transparent text-muted-foreground hover:text-foreground')}><PlayCircle className="size-4" />Задания</button>
         <div className="flex-1" />
         <input ref={fileRef} type="file" accept=".txt" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) reloadMut.mutate(f); if (fileRef.current) fileRef.current.value = '' }} />
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => fileRef.current?.click()} disabled={reloadMut.isPending} title="Загрузить свежий дамп 208 (probe-раннер)">
           {reloadMut.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <RefreshCw className="mr-1 size-3.5" />}Обновить срез
         </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportMergeMap}
+          title="Карта дубль→канон для .epf (ЗаменитьСсылки) — запускать в тихое окно, касса активна"><GitMerge className="mr-1 size-3.5" />Карта слияния</Button>
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportExcel}><FileSpreadsheet className="mr-1 size-3.5" />Excel</Button>
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportPlan}><Download className="mr-1 size-3.5" />JSON</Button>
       </div>
 
-      {tab === 'groups' ? (
+      {tab === 'jobs' ? <JobsTab /> : tab === 'groups' ? (
         <div className="space-y-2.5">
           {/* Фильтры */}
           <div className="flex flex-wrap items-center gap-2">

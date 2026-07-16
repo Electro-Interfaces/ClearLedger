@@ -185,7 +185,8 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
     for b in binds:
         if b.card_guid:
             codes_by_card.setdefault(b.card_guid, []).append(
-                {"nsCode": b.ns_code, "active": b.active, "price": b.retail_price})
+                {"nsCode": b.ns_code, "wh": b.warehouse, "active": b.active,
+                 "price": b.retail_price})
     # ЦБ-карточки по guid (гибрид)
     cb = {c.guid: c for c in (await db.execute(select(DedupCard).where(
         DedupCard.company_id == cid, DedupCard.source == "cb"))).scalars().all()}
@@ -373,16 +374,22 @@ async def create_repoint_job(db: AsyncSession, cid: uuid.UUID, *, group_keys: li
         if not canon:
             skipped.append({"key": k, "why": "не выбран канон"}); continue
         canon_m = next((m for m in g["members"] if m["guid"] == canon), None)
+        # ⚠ Только коды СВОЕГО склада: один код НС живёт на разных складах и там
+        # указывает на другой товар (208/381=уголь, 210/381=Camel). Без фильтра
+        # перецеп сорвал бы чужую привязку кассы.
         codes = sorted({x["nsCode"] for m in g["members"] if m["guid"] != canon
-                        for x in m["nsCodes"] if x["active"]})
+                        for x in m["nsCodes"] if x["active"] and str(x.get("wh") or "") == wh})
         if not codes:
-            skipped.append({"key": k, "why": "нет активных кодов кассы на дублях"}); continue
+            skipped.append({"key": k, "why": f"нет активных кодов кассы склада {wh} на дублях"}); continue
+        # Ожидаемые владельцы кодов — карточки-дубли этой группы. Нода сверит и
+        # не тронет код, который «уехал» на посторонний товар.
         pgroups.append({
             "groupKey": k, "title": g["title"], "canonGuid": canon,
             "canonCode": canon_m["code"] if canon_m else None,
             "canonName": canon_m["name"] if canon_m else None,
             "canonPrice": canon_m["price"] if canon_m else None,
             "nsCodes": codes,
+            "fromGuids": sorted({m["guid"] for m in g["members"] if m["guid"] != canon}),
         })
     if not pgroups:
         return {"error": "нет групп с каноном и кодами для перецепа", "skipped": skipped}
@@ -440,7 +447,9 @@ async def claim_pending_job(db: AsyncSession, cid: uuid.UUID) -> dict | None:
     rows = []
     for g in (j.payload or {}).get("groups", []):
         for code in g.get("nsCodes", []):
-            rows.append({"nsCode": code, "canonGuid": g["canonGuid"], "canonName": g.get("canonName")})
+            rows.append({"nsCode": code, "canonGuid": g["canonGuid"],
+                         "canonName": g.get("canonName"),
+                         "fromGuids": g.get("fromGuids", [])})
     return {"jobId": str(j.id), "dryRun": j.dry_run,
             "warehouse": (j.payload or {}).get("warehouse", "208"), "rows": rows}
 
