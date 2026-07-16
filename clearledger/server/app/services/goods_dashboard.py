@@ -26,6 +26,11 @@ from app.models import (
 # секция meta → категория UI
 _SECTIONS = (("продажа_сопутка", "Сопутка"), ("продажа_общепит", "Общепит"))
 
+# Минимальное покрытие ТТК для «costed»-блюда (OB-3/К-5): доля ингредиентов с
+# известной закупочной себестоимостью. При меньшем покрытии food-cost занижен
+# (считается по части состава) → блюдо «предварительное», вне сводной маржи.
+_TTK_COVERAGE_MIN = 0.9
+
 
 def _day(smena: dict) -> str:
     """Дата смены для группировки — по закрытию (фолбэк — открытие)."""
@@ -428,7 +433,7 @@ class GoodsDashboardService:
             if s["category"] == "Общепит" and s["margin"] is None:
                 dc = dishc.get(s["guid"])
                 coverage = (len(dc["known"]) / len(dc["ings"])) if (dc and dc["ings"]) else 0.0
-                if dc and coverage >= 0.6:
+                if dc and coverage >= _TTK_COVERAGE_MIN:   # OB-3/К-5
                     cogs = round(dc["cost"], 2)
                     s["cost_net"] = round(dc["cost"] / s["qty"], 4) if s["qty"] else None
                     s["cogs"] = cogs
@@ -489,7 +494,11 @@ class GoodsDashboardService:
         kinds = await self._refs("nom_kind")
 
         purch_metas = await self._load_purchases(date_from, date_to, stations)
-        avgc = self._avg_cost(purch_metas)  # для себестоимости ингредиентов общепита
+        # OB-4/K-2: единая база себестоимости ингредиента — all-time _cost_unit_map,
+        # как в catering_menu/pricing (раньше карточка считала по _avg_cost окна →
+        # тот же food-cost блюда расходился между меню и карточкой, а в узком окне
+        # без закупок терялся).
+        avgc = {g: c[0] for g, c in (await self._cost_unit_map()).items()}
 
         # продажи (сопутка+общепит) — итоги + дневная динамика; для общепита копим
         # себестоимость по ингредиентам ТТК.
@@ -833,18 +842,6 @@ class GoodsDashboardService:
             "skus": rows,
         }
 
-    def _avg_cost(self, purch_metas: list[dict]) -> dict:
-        """Средневзвешенная net-себестоимость по GUID из поступлений."""
-        pc: dict[str, dict] = defaultdict(lambda: {"c": 0.0, "q": 0.0})
-        for m in purch_metas:
-            doc = m.get("Документ") or {}
-            for ln in doc.get("Товары") or []:
-                g = ln.get("Номенклатура")
-                if not g:
-                    continue
-                pc[g]["c"] += self._purch_net(doc, ln)
-                pc[g]["q"] += float(ln.get("Количество") or 0)
-        return {g: (v["c"] / v["q"]) for g, v in pc.items() if v["q"]}
 
     # ── Приёмка (реестр поступлений) ──
     async def receipts(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
@@ -898,45 +895,12 @@ class GoodsDashboardService:
             "summary": {"count": len(rows), "amount_net": round(sum(r["amount_net"] for r in rows), 2)},
         }
 
-    # ── Общепит (блюда + food-cost по ТТК) ──
+    # OB-4/K-2: старый catering() (оконная база _avg_cost) → тонкий алиас на
+    # catering_menu (единая all-time база _cost_unit_map). Раньше давал третью,
+    # расходящуюся базу food-cost; теперь одна база для всех экранов общепита.
+    # (метод-маршрут store_report сохранён, чтобы не трогать роутер.)
     async def catering(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
-        sale_metas = self._select(await self._load(), date_from, date_to, stations)
-        avgc = self._avg_cost(await self._load_purchases(date_from, date_to, stations))
-        nom = await self._names()
-        dish: dict[str, dict] = defaultdict(lambda: {"qty": 0.0, "rev": 0.0, "revnet": 0.0, "cost": 0.0, "cost_known": False})
-        for m in sale_metas:
-            for ln in ((m.get("Секции") or {}).get("продажа_общепит") or {}).get("строки") or []:
-                g = ln.get("Номенклатура")
-                if not g:
-                    continue
-                q = float(ln.get("Количество") or 0)
-                d = dish[g]
-                d["qty"] += q
-                d["rev"] += float(ln.get("Сумма") or 0)
-                d["revnet"] += float(ln.get("Сумма") or 0) - float(ln.get("СуммаНДС") or 0)
-                for ing in ln.get("Ингредиенты") or []:
-                    ig = ing.get("Номенклатура")
-                    iq = float(ing.get("Количество") or 0)
-                    if ig in avgc:
-                        d["cost"] += iq * avgc[ig]
-                        d["cost_known"] = True
-        rows = []
-        for g, d in dish.items():
-            n = nom.get(g)
-            fc = (100 * d["cost"] / d["revnet"]) if d["cost_known"] and d["revnet"] else None
-            rows.append({
-                "guid": g, "name": (n.name if n else g[:8]),
-                "qty": round(d["qty"], 2), "revenue": round(d["rev"], 2),
-                "revenue_net": round(d["revnet"], 2),
-                "cost": round(d["cost"], 2) if d["cost_known"] else None,
-                "food_cost_pct": round(fc, 1) if fc is not None else None,
-            })
-        rows.sort(key=lambda x: -x["revenue"])
-        return {
-            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
-            "dishes": rows,
-            "summary": {"count": len(rows), "revenue": round(sum(r["revenue"] for r in rows), 2)},
-        }
+        return await self.catering_menu(date_from, date_to, stations)
 
     # ── Общепит — инжиниринг меню (продажи блюд + состав ТТК + динамика) ──
     async def catering_menu(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
@@ -971,12 +935,13 @@ class GoodsDashboardService:
                         c = iq * avgc[ig]; ii["cost"] += c; ii["known"] = True
                         d["cost"] += c; d["cost_known"] = True
 
-        # покрытие ТТК: доля ингредиентов с известной себест. Costed только при ≥90%,
-        # иначе food-cost занижен, класс меню неверен (К-5).
+        # покрытие ТТК: доля ингредиентов с известной себест. Costed только при ≥90%
+        # (OB-3/К-5): при 60–89% food-cost занижен (cost по части состава) и класс
+        # меню неверен — такие блюда «предварительные», вне сводной costed-маржи.
         for d in dishes.values():
             tot_ing = len(d["ings"])
             d["coverage"] = (sum(1 for ii in d["ings"].values() if ii["known"]) / tot_ing) if tot_ing else 0.0
-            d["covered"] = tot_ing > 0 and d["coverage"] >= 0.6
+            d["covered"] = tot_ing > 0 and d["coverage"] >= _TTK_COVERAGE_MIN
 
         total_rev = sum(x["rev"] for x in dishes.values()) or 1.0
         total_qty = sum(x["qty"] for x in dishes.values()) or 1.0
@@ -1035,6 +1000,9 @@ class GoodsDashboardService:
                 "popularity_pct": round(pop, 1),
                 "menu_class": cls,
                 "coverage": round(100 * d["coverage"]),
+                # OB-3: 60–89% покрытия — себестоимость частичная, показываем как
+                # «предварительную» (в costed-маржу не входит, cost=None выше).
+                "preliminary": (not d["covered"]) and d["coverage"] >= 0.6,
                 "ing_count": len(ings),
                 "ingredients": ings,
                 "daily": daily,
@@ -1987,6 +1955,13 @@ class GoodsDashboardService:
             elif r.kind == "revaluation":
                 rv_by_day[day]["count"] += 1
 
+        # F6: документы дня (приходы/инвентаризации/списания/перемещения) связаны с
+        # днём, не со сменой; на ДВУХСМЕННОМ дне они приписывались КАЖДОЙ смене и
+        # задваивались в summary. Привязываем день-документы к ОДНОЙ смене дня
+        # (первой по (станция, дата)); остальные смены дня получают нули.
+        metas = sorted(metas, key=lambda m: (
+            _day(m.get("Смена") or {}), str((m.get("Смена") or {}).get("Открытие") or "")))
+        day_assigned: set[str] = set()
         shifts = []
         for m in metas:
             smena = m.get("Смена") or {}
@@ -1997,8 +1972,13 @@ class GoodsDashboardService:
             obsh = sec.get("продажа_общепит") or {}
             sop_rev = float(sop.get("сумма") or 0)
             obsh_rev = float(obsh.get("сумма") or 0)
-            rec, inv, wo = rec_by_day.get(day, {}), inv_by_day.get(day, {}), wo_by_day.get(day, {})
-            tr, rv = tr_by_day.get(day, {}), rv_by_day.get(day, {})
+            dkey = f"{station}|{day}"
+            if dkey in day_assigned:
+                rec = inv = wo = tr = rv = {}   # день уже отдан первой смене
+            else:
+                day_assigned.add(dkey)
+                rec, inv, wo = rec_by_day.get(day, {}), inv_by_day.get(day, {}), wo_by_day.get(day, {})
+                tr, rv = tr_by_day.get(day, {}), rv_by_day.get(day, {})
             shifts.append({
                 "shift_key": str(smena.get("Смена") or f"{day}|{station}"),
                 "date": day, "station": station,

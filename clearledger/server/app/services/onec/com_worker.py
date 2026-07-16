@@ -794,8 +794,22 @@ def _recipe_for_dish(ib: Any, nom_ref: Any) -> list[dict[str, Any]]:
         out = []
         for j in range(ttk.Товары.Количество()):
             rr = ttk.Товары.Получить(j)
+            # OB-2: фильтры эталона (bsl:2060-2070, op_fetch_recipes:1125-1138) —
+            # пропускаем строки Учитывать=Ложь, без номенклатуры и Брутто=0,
+            # иначе фантомные ингредиенты завышают food-cost во всех витринах.
+            try:
+                уч = _val(rr.Учитывать)
+            except Exception:
+                уч = True
+            if уч is False:
+                continue
+            if not _val(rr.Номенклатура):
+                continue
+            брутто = float(_val(rr.Брутто) or 0)
+            if брутто == 0:
+                continue
             out.append({"НоменклатураUUID": _xs(ib, rr.Номенклатура),
-                        "Количество": float(_val(rr.Брутто) or 0)})
+                        "Количество": брутто})
         return out
     except Exception:
         return []

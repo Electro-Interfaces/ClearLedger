@@ -112,6 +112,7 @@ class BpPackageEmitter:
         nsi_contr: set[str] = set()
         contr_names: dict[str, str] = {}
         dish_uuids: set[str] = set()  # блюда общепита смены → эмитим их recipe (ТТК)
+        dish_inline_ings: dict[str, list] = {}  # OB-1: inline-ТТК из строк продаж (фолбэк)
 
         org_uuid = str(sm.get("Организация") or "")
         wh_uuid = str(sm.get("Склад") or "")
@@ -171,6 +172,16 @@ class BpPackageEmitter:
                     строка["ЭтоБлюдо"] = True
                     if g:
                         dish_uuids.add(g)
+                        # OB-1: inline-ТТК из строки продажи (cb_normalize._expand_dish) —
+                        # фолбэк, если recipe-DataEntry для блюда нет (иначе блюдо ушло
+                        # бы в БП без ТТК и списалось с 41.02 в минус).
+                        inl = [{"НоменклатураUUID": str(i.get("Номенклатура") or ""),
+                                "Количество": float(i.get("Количество") or 0),
+                                "БлюдоНаименование": (nom[g].name if nom.get(g) else "")}
+                               for i in (ln.get("Ингредиенты") or [])
+                               if i.get("Номенклатура")]
+                        if inl:
+                            dish_inline_ings[g] = inl
                 товары.append(строка)
 
         оплаты = []
@@ -381,7 +392,10 @@ class BpPackageEmitter:
             inventories.append({
                 "Тип": "inventory", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
                 "Дата": _iso(r.doc_date), "Проведен": bool(r.posted), "ПометкаУдаления": False,
-                "Организация": org_uuid, "Склад": wh_uuid, "Комментарий": r.comment or "",
+                # BP-4: Склад из САМОГО документа (напр. помещение 20800002), не смены —
+                # иначе движения кухни/склада приписывались торговому залу 208.
+                "Организация": org_uuid, "Склад": code2guid.get(str(r.warehouse_code or ""), wh_uuid),
+                "Комментарий": r.comment or "",
                 "ДатаЗаполнения": _iso(r.fill_date) if r.fill_date else "", "Товары": строки,
                 "СуммаДокумента": round(sum(s["Сумма"] for s in строки), 2),
             })
@@ -417,7 +431,9 @@ class BpPackageEmitter:
                 writeoffs.append({
                     "Тип": "writeoff", "ИсточникUUID": r.external_ref, "Номер": r.number or "",
                     "Дата": _iso(r.doc_date), "Проведен": bool(r.posted), "ПометкаУдаления": False,
-                    "Организация": org_uuid, "Склад": wh_uuid, "Подразделение": "",
+                    # BP-4: Склад документа (не смены) — списание с реального склада.
+                    "Организация": org_uuid, "Склад": code2guid.get(str(r.warehouse_code or ""), wh_uuid),
+                    "Подразделение": "",
                     "ИнвентаризацияUUID": r.inventory_ref or "",
                     "СуммаДокумента": round(float(r.total_amount or 0), 2),
                     "НДСвСтоимостиТоваров": "", "ВалютаДокумента": "RUB", "Товары": строки,
@@ -465,10 +481,10 @@ class BpPackageEmitter:
                     recipe_by_dish[bu] = rd
             for du in sorted(dish_uuids):
                 rd = recipe_by_dish.get(du)
-                if not rd:
-                    continue
+                # OB-1: нет recipe-DataEntry → фолбэк на inline-ТТК строки продажи.
+                src_ings = (rd.get("Ингредиенты") if rd else None) or dish_inline_ings.get(du) or []
                 ингредиенты = []
-                for ing in rd.get("Ингредиенты") or []:
+                for ing in src_ings:
                     iu = str(ing.get("НоменклатураUUID") or "")
                     if not iu:
                         continue
@@ -483,9 +499,10 @@ class BpPackageEmitter:
                 nsi_nom.add(du)  # блюдо → в НСИ
                 recipes.append({
                     "Тип": "recipe",
-                    "ИсточникUUID": str(rd.get("ИсточникUUID") or ""),
+                    "ИсточникUUID": str(rd.get("ИсточникUUID") or "") if rd else f"inline:{du}",
                     "БлюдоUUID": du,
-                    "БлюдоНаименование": str(rd.get("БлюдоНаименование") or ""),
+                    "БлюдоНаименование": str((rd.get("БлюдоНаименование") if rd else None)
+                                             or (nom[du].name if nom.get(du) else "")),
                     "Ингредиенты": ингредиенты,
                 })
 
@@ -637,6 +654,16 @@ class BpPackageEmitter:
         if recs:
             no_ing = [r.get("БлюдоНаименование") for r in recs if not r.get("Ингредиенты")]
             add(f"Рецептуры ({len(recs)}): все с ингредиентами", not no_ing, f"без ингредиентов: {no_ing}")
+
+        # OB-1: КАЖДОЕ блюдо смены (ЭтоБлюдо) должно иметь recipe в пакете — иначе
+        # приёмник спишет его товаром с 41.02 в минус. Раньше verify это не ловил.
+        dishes_sold = {t.get("Номенклатура") for d in docs
+                       if d.get("Тип") == "retail_sale_sidegoods"
+                       for t in (d.get("Товары") or []) if t.get("ЭтоБлюдо") and t.get("Номенклатура")}
+        recipe_dishes = {r.get("БлюдоUUID") for r in recs}
+        missing = dishes_sold - recipe_dishes
+        add(f"Все блюда смены ({len(dishes_sold)}) имеют ТТК в пакете",
+            not missing, f"без рецепта: {len(missing)}" + (f" {list(missing)[:3]}" if missing else ""))
 
         empty_vat = [n.get("Наименование") for n in нси if n.get("Тип") == "Номенклатура" and not n.get("СтавкаНДС")]
         add("НСИ: ставки НДС номенклатуры распознаны", not empty_vat, f"пустых: {len(empty_vat)}")
