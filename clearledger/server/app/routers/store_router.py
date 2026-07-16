@@ -546,6 +546,14 @@ async def dedup_correct(
         db, cid, group_keys=body.groupKeys, dry_run=body.dryRun, user=user.name or user.email)
 
 
+@router.post("/dedup/refresh")
+async def dedup_refresh(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Команда менеджера: станция снимет свежий срез с локальной 1С и зальёт сюда
+    (бэкенд в сеть станции не ходит — идём через очередь заданий)."""
+    cid = await scope_company_id(user, db)
+    return await dedup_service.create_refresh_job(db, cid, user=user.name or user.email)
+
+
 @router.get("/dedup/jobs")
 async def dedup_jobs(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await dedup_service.list_jobs(db, await scope_company_id(user, db))

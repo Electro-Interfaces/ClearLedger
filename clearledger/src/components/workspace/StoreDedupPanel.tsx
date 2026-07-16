@@ -6,14 +6,14 @@
  * касса↔карточка (коды на помеченные, ≥2 кода, рассинхрон цен), статусы/трекинг
  * правок, экспорт плана дедупа. Данные — кеш dedup_* (pull 208 + склейка ЦБ по GUID).
  */
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import * as XLSX from 'xlsx'
 import {
   CopyCheck, Search, Download, ChevronDown, ChevronRight, AlertTriangle,
   Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw, ShoppingCart,
-  PlayCircle, GitMerge,
+  PlayCircle, GitMerge, Upload,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -24,8 +24,8 @@ import {
 } from '@/components/ui/select'
 import {
   getDedupSummary, getDedupGroups, getDedupBridge, setDedupStatus, getDedupExport, reloadDedup,
-  correctDedup, getDedupJobs, cancelDedupJob, getDedupMergeMap,
-  type DedupGroup, type DedupMember,
+  correctDedup, refreshDedup, getDedupJobs, cancelDedupJob, getDedupMergeMap,
+  type DedupGroup, type DedupMember, type DedupJob,
 } from '@/services/storeService'
 
 const fmtPrice = (p: number | null | undefined) =>
@@ -277,11 +277,8 @@ const JOB_LABEL: Record<string, string> = {
   pending: 'ждёт ноду', running: 'выполняется', done: 'выполнено', error: 'ошибка', cancelled: 'отменено',
 }
 
-function JobsTab() {
+function JobsTab({ jobs, isLoading }: { jobs: DedupJob[]; isLoading: boolean }) {
   const qc = useQueryClient()
-  const { data: jobs = [], isLoading } = useQuery({
-    queryKey: ['dedup-jobs'], queryFn: getDedupJobs, refetchInterval: 15000,
-  })
   const cancel = useMutation({
     mutationFn: (id: string) => cancelDedupJob(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['dedup-jobs'] }); toast.success('Задание отменено') },
@@ -292,7 +289,7 @@ function JobsTab() {
   if (jobs.length === 0) {
     return (
       <p className="py-10 text-center text-sm text-muted-foreground">
-        Заданий нет. Перецеп запускается вручную из группы дублей — кнопка «Перецеп пробно».
+        Заданий нет. Станция выполняет их по команде: «Обновить срез» или «Перецеп пробно» в группе.
       </p>
     )
   }
@@ -301,12 +298,16 @@ function JobsTab() {
       {jobs.map((j) => (
         <div key={j.id} className="rounded-lg border border-border/50 bg-card/30 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{j.kind === 'repoint' ? 'Перецеп кодов кассы' : j.kind}</span>
+            <span className="text-sm font-medium">
+              {j.kind === 'repoint' ? 'Перецеп кодов кассы' : j.kind === 'refresh' ? 'Сбор свежего среза' : j.kind}
+            </span>
             <Badge variant="outline" className={cn('text-[10px]', JOB_CLS[j.status] ?? 'border-zinc-600 text-zinc-400')}>
               {JOB_LABEL[j.status] ?? j.status}
             </Badge>
             {j.dryRun && <Badge variant="outline" className="border-sky-400/50 text-[10px] text-sky-300/80">пробный (без записи)</Badge>}
-            <Badge variant="outline" className="text-[10px]">склад {j.warehouse} · {j.groups} групп · {j.codes} код.</Badge>
+            <Badge variant="outline" className="text-[10px]">
+              склад {j.warehouse}{j.kind === 'repoint' ? ` · ${j.groups} групп · ${j.codes} код.` : ''}
+            </Badge>
             <span className="ml-auto text-[11px] text-muted-foreground/70">
               {j.createdBy} · {j.createdAt ? new Date(j.createdAt).toLocaleString('ru-RU') : ''}
             </span>
@@ -350,6 +351,15 @@ export function StoreDedupPanel() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Задания опрашиваем в корне (а не во вкладке): пока станция собирает срез,
+  // менеджер обычно смотрит на группы — и витрина должна обновиться сама.
+  const { data: jobs = [], isLoading: jobsLoading } = useQuery({
+    queryKey: ['dedup-jobs'], queryFn: getDedupJobs,
+    refetchInterval: (q) =>
+      (q.state.data ?? []).some((j) => ['pending', 'running'].includes(j.status)) ? 5000 : 30000,
+  })
+  const seenRefresh = useRef<string | null | undefined>(undefined)
+
   const { data: sum } = useQuery({ queryKey: ['dedup-summary'], queryFn: getDedupSummary })
   const { data: groups = [], isLoading } = useQuery({
     queryKey: ['dedup-groups', q, onlyLive, inclAssort, priceDesync, statusFilter],
@@ -357,16 +367,46 @@ export function StoreDedupPanel() {
     enabled: tab === 'groups',
   })
 
+  const invalidateSlice = () => {
+    qc.invalidateQueries({ queryKey: ['dedup-summary'] })
+    qc.invalidateQueries({ queryKey: ['dedup-groups'] })
+    qc.invalidateQueries({ queryKey: ['dedup-bridge'] })
+  }
+
+  // Обновление среза — команда станции: бэкенд в сеть АЗС не ходит, поэтому
+  // задание кладётся в очередь, нода 208 снимает дамп с локальной 1С и заливает.
+  const refreshMut = useMutation({
+    mutationFn: refreshDedup,
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['dedup-jobs'] })
+      toast.success(r.already ? (r.note ?? 'Срез уже собирается')
+        : 'Станция 208 собирает срез — обычно около минуты. Ход виден на вкладке «Задания».')
+    },
+    onError: () => toast.error('Не удалось отправить команду на станцию'),
+  })
+
+  // Запасной ход: залить дамп файлом (если станция недоступна).
   const reloadMut = useMutation({
     mutationFn: (file: File) => reloadDedup(file),
     onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['dedup-summary'] })
-      qc.invalidateQueries({ queryKey: ['dedup-groups'] })
-      qc.invalidateQueries({ queryKey: ['dedup-bridge'] })
+      invalidateSlice()
       toast.success(`Срез обновлён: ${r.cards} карточек, ${r.bindings} привязок, ${r.prices} цен`)
     },
     onError: (e: Error) => toast.error(e.message || 'Не удалось загрузить дамп'),
   })
+
+  // Станция отчиталась по сбору среза — подтягиваем витрину, не дёргая менеджера.
+  useEffect(() => {
+    const newest = jobs.find((j) => j.kind === 'refresh' && j.status === 'done')?.id ?? null
+    if (seenRefresh.current === undefined) { seenRefresh.current = newest; return }
+    if (newest && newest !== seenRefresh.current) {
+      seenRefresh.current = newest
+      invalidateSlice()
+      toast.success('Станция прислала свежий срез')
+    }
+  }, [jobs]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const refreshing = jobs.some((j) => j.kind === 'refresh' && ['pending', 'running'].includes(j.status))
 
   const doneCount = useMemo(() => groups.filter((g) => ['merged', 'done'].includes(g.status)).length, [groups])
 
@@ -449,8 +489,16 @@ export function StoreDedupPanel() {
         <div className="flex-1" />
         <input ref={fileRef} type="file" accept=".txt" hidden
           onChange={(e) => { const f = e.target.files?.[0]; if (f) reloadMut.mutate(f); if (fileRef.current) fileRef.current.value = '' }} />
-        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => fileRef.current?.click()} disabled={reloadMut.isPending} title="Загрузить свежий дамп 208 (probe-раннер)">
-          {reloadMut.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <RefreshCw className="mr-1 size-3.5" />}Обновить срез
+        <Button size="sm" variant="outline" className="h-8 text-xs"
+          onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending || refreshing}
+          title="Станция 208 снимет свежий срез с локальной 1С и зальёт сюда (≈1 мин). Ночью то же самое идёт по расписанию.">
+          {refreshMut.isPending || refreshing ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <RefreshCw className="mr-1 size-3.5" />}
+          {refreshing ? 'Станция собирает…' : 'Обновить срез'}
+        </Button>
+        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-muted-foreground"
+          onClick={() => fileRef.current?.click()} disabled={reloadMut.isPending}
+          title="Запасной ход: залить дамп файлом, если станция недоступна">
+          {reloadMut.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
         </Button>
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportMergeMap}
           title="Карта дубль→канон для .epf (ЗаменитьСсылки) — запускать в тихое окно, касса активна"><GitMerge className="mr-1 size-3.5" />Карта слияния</Button>
@@ -458,7 +506,7 @@ export function StoreDedupPanel() {
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportPlan}><Download className="mr-1 size-3.5" />JSON</Button>
       </div>
 
-      {tab === 'jobs' ? <JobsTab /> : tab === 'groups' ? (
+      {tab === 'jobs' ? <JobsTab jobs={jobs} isLoading={jobsLoading} /> : tab === 'groups' ? (
         <div className="space-y-2.5">
           {/* Фильтры */}
           <div className="flex flex-wrap items-center gap-2">

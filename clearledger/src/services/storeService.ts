@@ -730,6 +730,9 @@ export interface DedupMergeRow {
   dupGuid: string; dupCode: string | null; dupName: string
   canonGuid: string; canonCode: string | null; canonName: string | null
 }
+/** Команда менеджера: станция сама снимет свежий срез с локальной 1С и зальёт его сюда. */
+export const refreshDedup = () =>
+  post<{ jobId: string; already: boolean; note?: string }>('/api/store/dedup/refresh', {})
 /** Команда менеджера: перецеп кодов кассы на канон по выбранным группам (нода 208 выполнит). */
 export const correctDedup = (body: { groupKeys: string[]; dryRun: boolean }) =>
   post<{ jobId?: string; groups?: number; codes?: number; skipped?: { key: string; why: string }[]; error?: string }>(

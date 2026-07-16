@@ -357,6 +357,25 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID) -> list[dict]:
 
 
 # ── корректировки по команде менеджера ───────────────────────────────────────
+async def create_refresh_job(db: AsyncSession, cid: uuid.UUID, *, user: str) -> dict:
+    """Задание «собрать свежий срез»: станция сама снимет дамп с локальной 1С и
+    зальёт его сюда. Прод-бэкенд в сеть станции не ходит — очередь заданий и есть
+    канал управления, файл руками менеджеру брать негде."""
+    pending = (await db.execute(select(DedupCorrectionJob).where(
+        DedupCorrectionJob.company_id == cid, DedupCorrectionJob.kind == "refresh",
+        DedupCorrectionJob.status.in_(("pending", "running"))))).scalars().first()
+    if pending is not None:
+        return {"jobId": str(pending.id), "already": True,
+                "note": "Срез уже собирается — задание в очереди"}
+    job = DedupCorrectionJob(
+        company_id=cid, kind="refresh", status="pending", dry_run=False,
+        payload={"warehouse": "208"}, created_by=user)
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return {"jobId": str(job.id), "already": False}
+
+
 async def create_repoint_job(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str],
                              dry_run: bool, user: str) -> dict:
     """Создать задание перецепа кодов НС на канон по выбранным группам. Канон
@@ -433,10 +452,11 @@ async def cancel_job(db: AsyncSession, cid: uuid.UUID, job_id: uuid.UUID) -> boo
 
 
 async def claim_pending_job(db: AsyncSession, cid: uuid.UUID) -> dict | None:
-    """Нода забирает следующий pending-перецеп (помечает running). Плоские rows
-    для JScript: {jobId, dryRun, warehouse, rows:[{nsCode, canonGuid, canonName}]}."""
+    """Нода забирает следующее pending-задание (помечает running). Плоские rows
+    для JScript: {jobId, kind, dryRun, warehouse, rows:[{nsCode, canonGuid, canonName}]}.
+    kind=refresh — снять и залить свежий срез, rows пуст."""
     j = (await db.execute(select(DedupCorrectionJob).where(
-        DedupCorrectionJob.company_id == cid, DedupCorrectionJob.kind == "repoint",
+        DedupCorrectionJob.company_id == cid,
         DedupCorrectionJob.status == "pending")
         .order_by(DedupCorrectionJob.created_at).limit(1))).scalar_one_or_none()
     if j is None:
@@ -450,7 +470,7 @@ async def claim_pending_job(db: AsyncSession, cid: uuid.UUID) -> dict | None:
             rows.append({"nsCode": code, "canonGuid": g["canonGuid"],
                          "canonName": g.get("canonName"),
                          "fromGuids": g.get("fromGuids", [])})
-    return {"jobId": str(j.id), "dryRun": j.dry_run,
+    return {"jobId": str(j.id), "kind": j.kind, "dryRun": j.dry_run,
             "warehouse": (j.payload or {}).get("warehouse", "208"), "rows": rows}
 
 
