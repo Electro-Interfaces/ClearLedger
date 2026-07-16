@@ -173,6 +173,28 @@ async def resolve_member_modules(m: UserCompany, db: AsyncSession) -> list[str] 
     return m.modules
 
 
+async def check_module_access(
+    user: User, cid: uuid.UUID, db: AsyncSession, module_key: str
+) -> None:
+    """RBAC-проверка модуля для УЖЕ резолвнутой компании (когда cid получен из
+    X-Company-Id через scope_company_id). Полный доступ: суперадмин, admin-член,
+    эффективные modules=NULL. Иначе 403, если module_key не в разрешённых.
+    Используется гейтом роутеров со скоупом «по юзеру» (store и т.п.)."""
+    if user.is_superadmin:
+        return
+    m = await db.get(UserCompany, (user.id, cid))
+    if m is None or m.role == "admin":
+        return
+    mods = await resolve_member_modules(m, db)
+    if mods is None:
+        return
+    if module_key not in mods:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Нет доступа к модулю",
+        )
+
+
 async def assert_company_module(
     company_ref: str, user: User, db: AsyncSession, module_key: str
 ) -> uuid.UUID:
@@ -182,19 +204,7 @@ async def assert_company_module(
     Иначе 403, если module_key не в разрешённых модулях (с учётом роли).
     """
     cid = await assert_company_member(company_ref, user, db)  # membership + 403
-    if user.is_superadmin:
-        return cid
-    m = await db.get(UserCompany, (user.id, cid))
-    if m is None or m.role == "admin":
-        return cid
-    mods = await resolve_member_modules(m, db)
-    if mods is None:
-        return cid
-    if module_key not in mods:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Нет доступа к модулю",
-        )
+    await check_module_access(user, cid, db, module_key)
     return cid
 
 

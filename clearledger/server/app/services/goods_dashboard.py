@@ -48,9 +48,35 @@ class GoodsDashboardService:
             ))).scalars().all()
         return self._sales_cache
 
+    @staticmethod
+    def _purch_net(doc: dict, ln: dict) -> float:
+        """Net-себестоимость строки ПТУ (закуп без НДС). F8: если документ помечен
+        СуммаВключаетНДС=Ложь — Сумма уже без НДС, повторно вычитать НельзяДважды.
+        Отсутствие флага (старые пакеты до досбора) трактуем как «включает НДС»
+        (проверено на текущих данных, K-1) — обратная совместимость."""
+        amt = float(ln.get("Сумма") or 0)
+        if doc.get("СуммаВключаетНДС") is False:
+            return amt
+        return amt - float(ln.get("СуммаНДС") or 0)
+
+    @staticmethod
+    def _is_active_doc(m: dict) -> bool:
+        """Документ учитывается в деньгах: НЕ помечен на удаление и (если флаг
+        Проведён присутствует) проведён. Зеркало эталона ВыбратьСмены (F5):
+        помеченные/непроведённые документы ЦБ в витрины не попадают. Отсутствие
+        флага (старые пакеты до досбора) трактуем как «учитывать» — не теряем
+        историю; инвентаризаций это не касается (posted=false у них норма, свой
+        путь CbInventoryDoc)."""
+        d = m.get("Документ") or {}
+        if d.get("ПометкаУдаления") is True:
+            return False
+        if d.get("Проведен") is False:
+            return False
+        return True
+
     def _select(self, rows: list[DataEntry], df: date, dt: date,
                 stations: list[str] | None) -> list[dict]:
-        """Отобрать meta записей в периоде/станциях."""
+        """Отобрать meta записей в периоде/станциях (без непроведённых/удалённых)."""
         df_iso, dt_iso = df.isoformat(), dt.isoformat()
         out = []
         for e in rows:
@@ -60,6 +86,8 @@ class GoodsDashboardService:
             if not (df_iso <= d <= dt_iso):
                 continue
             if stations and str(smena.get("КодАЗС") or "") not in stations:
+                continue
+            if not self._is_active_doc(m):
                 continue
             out.append(m)
         return out
@@ -205,7 +233,21 @@ class GoodsDashboardService:
             self._purch_cache = (await self.session.execute(select(DataEntry).where(
                 DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
                 DataEntry.doc_type_id == "purchase"))).scalars().all()
-        return self._select(self._purch_cache, df, dt, stations)
+        # F1 (P0): один ПТУ прицеплен к двум смежным сменам (дневное окно прицепки —
+        # зеркало эталона) → две DataEntry с общим Документ.ИсточникUUID; витрины
+        # суммировали обе. Дедуп по ИсточникUUID: считаем документ один раз (пакет
+        # БП дедуплится на приёмнике, здесь — только чтение). Строки без UUID
+        # (старые/ручные) не схлопываем — ключ по id записи.
+        selected = self._select(self._purch_cache, df, dt, stations)
+        out: list[dict] = []
+        seen: set[str] = set()
+        for i, m in enumerate(selected):
+            uid = str((m.get("Документ") or {}).get("ИсточникUUID") or "") or f"__row{i}"
+            if uid in seen:
+                continue
+            seen.add(uid)
+            out.append(m)
+        return out
 
     async def _names(self) -> dict:
         if getattr(self, "_names_cache", None) is not None:
@@ -227,11 +269,12 @@ class GoodsDashboardService:
             return self._ccache
         agg: dict[str, list] = defaultdict(lambda: [0.0, 0.0])
         for m in await self._load_purchases(date(2000, 1, 1), date(2100, 1, 1), None):
-            for ln in (m.get("Документ") or {}).get("Товары") or []:
+            doc = m.get("Документ") or {}
+            for ln in doc.get("Товары") or []:
                 g = ln.get("Номенклатура")
                 if not g:
                     continue
-                agg[g][0] += float(ln.get("Сумма") or 0) - float(ln.get("СуммаНДС") or 0)
+                agg[g][0] += self._purch_net(doc, ln)
                 agg[g][1] += float(ln.get("Количество") or 0)
         cm: dict[str, tuple[float, str, float]] = {}
         for g, v in agg.items():
@@ -264,13 +307,12 @@ class GoodsDashboardService:
 
         purch: dict[str, dict] = defaultdict(lambda: {"cost_net": 0.0, "qty": 0.0})
         for m in purch_metas:
-            for ln in (m.get("Документ") or {}).get("Товары") or []:
+            doc = m.get("Документ") or {}
+            for ln in doc.get("Товары") or []:
                 g = ln.get("Номенклатура")
                 if not g:
                     continue
-                summ = float(ln.get("Сумма") or 0)
-                vat = float(ln.get("СуммаНДС") or 0)
-                purch[g]["cost_net"] += summ - vat        # закупка net (Сумма включает НДС)
+                purch[g]["cost_net"] += self._purch_net(doc, ln)   # F8: учёт СуммаВключаетНДС
                 purch[g]["qty"] += float(ln.get("Количество") or 0)
 
         cost_map = await self._cost_unit_map()  # единая себест.: партии→закупка (К-2)
@@ -482,7 +524,7 @@ class GoodsDashboardService:
                 if ln.get("Номенклатура") != guid:
                     continue
                 q = float(ln.get("Количество") or 0)
-                net = float(ln.get("Сумма") or 0) - float(ln.get("СуммаНДС") or 0)
+                net = self._purch_net(d, ln)   # F8: учёт СуммаВключаетНДС
                 purchases.append({
                     "date": str(d.get("Дата") or "")[:10],
                     "supplier": cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "—"),
@@ -505,6 +547,7 @@ class GoodsDashboardService:
         # история цен — из переоценок (CbMovementDoc kind=revaluation)
         revs = (await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "revaluation"))).scalars().all()
         history = []
         for r in revs:
@@ -605,6 +648,7 @@ class GoodsDashboardService:
         for kind in ("writeoff", "transfer"):
             for r in (await self.session.execute(select(CbMovementDoc).where(
                     CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
                     CbMovementDoc.kind == kind))).scalars().all():
                 for ln in (r.lines or []):
                     if ln.get("ref") == guid:
@@ -613,7 +657,8 @@ class GoodsDashboardService:
                                          "reason": r.reason})
                         break
         for r in (await self.session.execute(select(CbInventoryDoc).where(
-                CbInventoryDoc.company_id == self.company_id))).scalars().all():
+                CbInventoryDoc.company_id == self.company_id,
+            CbInventoryDoc.deleted.is_(False)))).scalars().all():
             for ln in (r.lines or []):
                 # lines теперь полная ТЧ — движение по SKU только из строк-отклонений
                 if ln.get("ref") == guid and ln.get("dev"):
@@ -792,11 +837,12 @@ class GoodsDashboardService:
         """Средневзвешенная net-себестоимость по GUID из поступлений."""
         pc: dict[str, dict] = defaultdict(lambda: {"c": 0.0, "q": 0.0})
         for m in purch_metas:
-            for ln in (m.get("Документ") or {}).get("Товары") or []:
+            doc = m.get("Документ") or {}
+            for ln in doc.get("Товары") or []:
                 g = ln.get("Номенклатура")
                 if not g:
                     continue
-                pc[g]["c"] += float(ln.get("Сумма") or 0) - float(ln.get("СуммаНДС") or 0)
+                pc[g]["c"] += self._purch_net(doc, ln)
                 pc[g]["q"] += float(ln.get("Количество") or 0)
         return {g: (v["c"] / v["q"]) for g, v in pc.items() if v["q"]}
 
@@ -811,14 +857,15 @@ class GoodsDashboardService:
             lines = d.get("Товары") or []
             amt = sum(float(l.get("Сумма") or 0) for l in lines)
             vat = sum(float(l.get("СуммаНДС") or 0) for l in lines)
+            net = sum(self._purch_net(d, l) for l in lines)   # F8: учёт СуммаВключаетНДС
             docs.append({
                 "date": str(d.get("Дата") or "")[:10],
                 "number": d.get("Номер"),
                 "supplier": cparty.get(d.get("Контрагент")) or (d.get("Контрагент") or "—"),
                 "positions": len(lines),
-                "amount": round(amt, 2), "vat": round(vat, 2), "amount_net": round(amt - vat, 2),
+                "amount": round(amt, 2), "vat": round(vat, 2), "amount_net": round(net, 2),
             })
-            tot_net += amt - vat
+            tot_net += net
             tot_vat += vat
         docs.sort(key=lambda x: x["date"])
         return {
@@ -836,7 +883,7 @@ class GoodsDashboardService:
             d = m.get("Документ") or {}
             c = d.get("Контрагент") or "—"
             lines = d.get("Товары") or []
-            agg[c]["net"] += sum(float(l.get("Сумма") or 0) - float(l.get("СуммаНДС") or 0) for l in lines)
+            agg[c]["net"] += sum(self._purch_net(d, l) for l in lines)   # F8
             agg[c]["docs"] += 1
             for l in lines:
                 agg[c]["skus"].add(l.get("Номенклатура"))
@@ -1178,7 +1225,8 @@ class GoodsDashboardService:
         документы с отклонениями. date_from/date_to — период (К-17). Строки — drill-down.
         """
         docs = self._by_period((await self.session.execute(select(CbInventoryDoc).where(
-            CbInventoryDoc.company_id == self.company_id))).scalars().all(), date_from, date_to)
+            CbInventoryDoc.company_id == self.company_id,
+            CbInventoryDoc.deleted.is_(False)))).scalars().all(), date_from, date_to)
 
         # склады для селектора
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
@@ -1248,6 +1296,7 @@ class GoodsDashboardService:
         """Реестр списаний ЦБ (СписаниеТоваров) + разбивка по причинам и топ SKU."""
         docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "writeoff"))).scalars().all(), date_from, date_to)
 
         wh_agg: dict[str, dict] = defaultdict(lambda: {"name": None, "count": 0})
@@ -1320,6 +1369,7 @@ class GoodsDashboardService:
         """
         docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "transfer"))).scalars().all(), date_from, date_to)
 
         dirs_all: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
@@ -1383,6 +1433,7 @@ class GoodsDashboardService:
         Δ%, влияние на стоимость остатка (Σ Δ×кол). reason — фильтр направления."""
         docs = self._by_period((await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.kind == "revaluation"))).scalars().all(), date_from, date_to)
 
         reasons_all: dict[str, dict] = defaultdict(lambda: {"count": 0})
@@ -1910,7 +1961,8 @@ class GoodsDashboardService:
         # инвентаризации по дате
         inv_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "net": 0.0})
         for r in (await self.session.execute(select(CbInventoryDoc).where(
-                CbInventoryDoc.company_id == self.company_id))).scalars().all():
+                CbInventoryDoc.company_id == self.company_id,
+            CbInventoryDoc.deleted.is_(False)))).scalars().all():
             day = (r.doc_date or "")[:10]
             if d0 <= day <= d1:
                 inv_by_day[day]["count"] += 1
@@ -1921,7 +1973,8 @@ class GoodsDashboardService:
         tr_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0, "amount": 0.0})
         rv_by_day: dict[str, dict] = defaultdict(lambda: {"count": 0})
         for r in (await self.session.execute(select(CbMovementDoc).where(
-                CbMovementDoc.company_id == self.company_id))).scalars().all():
+                CbMovementDoc.company_id == self.company_id,
+                CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True)))).scalars().all():
             day = (r.doc_date or "")[:10]
             if not (d0 <= day <= d1):
                 continue
@@ -2058,6 +2111,7 @@ class GoodsDashboardService:
         dl = (day or "") + "%"
         inv_docs = (await self.session.execute(select(CbInventoryDoc).where(
             CbInventoryDoc.company_id == self.company_id,
+            CbInventoryDoc.deleted.is_(False),
             CbInventoryDoc.doc_date.like(dl)))).scalars().all()
         inventory = [{
             "number": r.number, "dev_positions": r.dev_positions, "net": round(float(r.net_amount or 0), 2),
@@ -2068,6 +2122,7 @@ class GoodsDashboardService:
 
         mv = (await self.session.execute(select(CbMovementDoc).where(
             CbMovementDoc.company_id == self.company_id,
+            CbMovementDoc.deleted.is_(False), CbMovementDoc.posted.is_(True),
             CbMovementDoc.doc_date.like(dl)))).scalars().all()
 
         def _mv_lines(r):

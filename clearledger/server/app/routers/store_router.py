@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import User
@@ -25,11 +25,25 @@ from app.services.goods_dashboard import GoodsDashboardService
 # писать в произвольный путь ФС сервера).
 BP_EXPORT_DIR = os.environ.get("TL_BP_EXPORT_DIR", r"C:\TL_BP_Export")
 
+
+async def _require_store_module(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """GAP-1: RBAC-гейт всего раздела «Магазин». Без него любой член компании с
+    урезанной ролью читал данные магазина и (что критично) мог эмитить пакет в
+    каталог обмена с живой бухгалтерией. Проверяем модуль 'store' для компании,
+    выбранной в UI (X-Company-Id), — как analytics-режимы через assert_company_module."""
+    cid = await scope_company_id(user, db)   # membership + резолв X-Company-Id
+    await check_module_access(user, cid, db, "store")
+
+
 # capture_company_header кладёт X-Company-Id (выбранная компания) в contextvar;
 # scope_company_id ниже резолвит её вместо жёсткой user.company_id (переключение
-# компании в UI теперь влияет и на «Магазин»).
+# компании в UI теперь влияет и на «Магазин»). _require_store_module — RBAC-гейт.
 router = APIRouter(prefix="/store", tags=["Магазин"],
-                   dependencies=[Depends(capture_company_header)])
+                   dependencies=[Depends(capture_company_header),
+                                 Depends(_require_store_module)])
 
 
 @router.get("/overview")

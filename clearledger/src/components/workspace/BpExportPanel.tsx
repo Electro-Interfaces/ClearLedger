@@ -6,7 +6,7 @@
  * Приёмник НЕ меняется. Контракт: русские ключи, дискриминатор Тип, 8 типов
  * (recipe→purchase→retail→production→…→transfer), НСИ-инвариант, ХешПакета.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Download, FolderUp, FileJson, CheckCircle2, AlertTriangle } from 'lucide-react'
 import {
@@ -43,18 +43,22 @@ function downloadJson(pkg: BpPackage, sh: ShiftComposite) {
   URL.revokeObjectURL(url)
 }
 
-export function BpExportPanel({ dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [key, setKey] = useState<string | null>(null)
+  // GAP-2: companyId в ключах — иначе после переключения компании панель до 5 мин
+  // показывает смены/пакет ПРЕЖНЕЙ компании из кеша React Query.
   const shiftsQ = useQuery({
-    queryKey: ['store-shifts', dateFrom, dateTo],
+    queryKey: ['store-shifts', companyId, dateFrom, dateTo],
     queryFn: () => getStoreShifts(dateFrom, dateTo),
   })
   const pkgQ = useQuery({
-    queryKey: ['bp-package', key],
+    queryKey: ['bp-package', companyId, key],
     queryFn: () => getBpPackage(key!),
     enabled: !!key,
   })
   const emitMut = useMutation({ mutationFn: () => emitBpPackage(key!) })
+  // Сбросить выбранную смену при смене компании (ключ смены чужой компании не валиден).
+  useEffect(() => { setKey(null) }, [companyId])
 
   const shift = shiftsQ.data?.shifts.find((s) => s.shift_key === key) ?? null
   const pkg = pkgQ.data ?? null
