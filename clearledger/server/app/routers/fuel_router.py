@@ -2122,6 +2122,43 @@ async def fuel_cash_collections(
     return await svc.compute(date.fromisoformat(date_from), date.fromisoformat(date_to))
 
 
+@router.get("/cash-collections/station")
+async def fuel_cash_station_detail(
+    station_code: int = Query(...),
+    shifts: int = Query(2, ge=1, le=10),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Детализация кассы станции: money-операции последних N смен по рабочим
+    местам (POS) — раскрытие строки в «Кассе и инкассации». Состояние
+    купюроприёмника по номиналам STS TMS не отдаёт (терминальный уровень) —
+    до подключения такого источника показываем разрез по POS."""
+    from app.models import FuelCashMovement, FuelShift, FuelStation
+    cid = await _company_id(user, db)
+    st = (await db.execute(select(FuelStation).where(
+        FuelStation.company_id == cid, FuelStation.code == station_code))).scalars().first()
+    if st is None:
+        raise HTTPException(404, "Станция не найдена")
+    last_shifts = (await db.execute(
+        select(FuelShift).where(FuelShift.station_id == st.id, FuelShift.opened_at.is_not(None))
+        .order_by(FuelShift.opened_at.desc()).limit(shifts))).scalars().all()
+    ids = [s.id for s in last_shifts]
+    moves = (await db.execute(select(FuelCashMovement).where(
+        FuelCashMovement.shift_id.in_(ids)))).scalars().all() if ids else []
+    by_shift: dict = {s.id: {"shift_number": s.shift_number,
+                             "opened_at": s.opened_at.isoformat() if s.opened_at else None,
+                             "status": s.status, "operations": []} for s in last_shifts}
+    for m in moves:
+        by_shift[m.shift_id]["operations"].append({
+            "pos": m.pos_number, "operation": m.operation_name,
+            "amount": float(m.amount or 0),
+        })
+    out = sorted(by_shift.values(), key=lambda x: -(x["shift_number"] or 0))
+    for sh in out:
+        sh["operations"].sort(key=lambda o: (o["pos"] or 0, o["operation"]))
+    return {"station_code": station_code, "station_name": st.name, "shifts": out}
+
+
 @router.get("/readiness")
 async def fuel_readiness(
     date_from: str = Query(...),

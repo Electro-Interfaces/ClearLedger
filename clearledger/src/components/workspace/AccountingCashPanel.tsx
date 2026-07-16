@@ -9,12 +9,12 @@
  *     инкассации — контроль накопления наличных на станциях.
  * «Выручка» money-секции = ВСЯ наличка ККТ (топливо + сопутка магазина).
  */
-import { useRef } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Banknote } from 'lucide-react'
+import { Banknote, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { ExportButton } from './analytics/ExportButton'
 import { get } from '@/services/apiClient'
 
@@ -34,6 +34,60 @@ interface CashCollections {
   stations: { station_code: number; station_name: string; balance: number | null; balance_at: string | null; accrued_since_last: number; last_collection_at: string | null; last_collection_amount: number | null; days_since_collection: number | null }[]
 }
 
+interface CashStationDetail {
+  station_code: number
+  station_name: string
+  shifts: { shift_number: number; opened_at: string | null; status: string | null; operations: { pos: number | null; operation: string; amount: number }[] }[]
+}
+
+/** Раскрытие строки кассы: money-операции последних смен по рабочим местам (POS).
+ *  Состояние купюроприёмника по номиналам STS TMS не отдаёт (терминальный
+ *  уровень) — до подключения такого источника показываем разрез по POS. */
+function StationCashDetail({ stationCode }: { stationCode: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['fuel-cash-station', stationCode],
+    queryFn: () => get<CashStationDetail>('/api/fuel/cash-collections/station', { station_code: stationCode, shifts: 2 }),
+    staleTime: 60_000,
+  })
+  if (isLoading) {
+    return <div className="flex items-center gap-2 px-4 py-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Загрузка детализации…</div>
+  }
+  if (!data || data.shifts.length === 0) {
+    return <div className="px-4 py-3 text-xs text-muted-foreground">Нет money-операций по станции.</div>
+  }
+  return (
+    <div className="space-y-3 bg-muted/20 px-4 py-3">
+      {data.shifts.map((sh) => (
+        <div key={sh.shift_number}>
+          <div className="mb-1 text-xs font-medium">
+            Смена №{sh.shift_number}
+            <span className="ml-2 font-normal text-muted-foreground">{fmtDT(sh.opened_at)}{sh.status === 'open' ? ' · открыта' : ''}</span>
+          </div>
+          <div className="overflow-hidden rounded-md border border-border/40">
+            <Table><TableHeader><TableRow>
+              <TableHead className="h-8 text-xs">Рабочее место (POS)</TableHead>
+              <TableHead className="h-8 text-xs">Операция</TableHead>
+              <TableHead className="h-8 text-right text-xs">Сумма, ₽</TableHead>
+            </TableRow></TableHeader><TableBody>
+              {sh.operations.map((o, i) => (
+                <TableRow key={i} className="text-xs">
+                  <TableCell className="py-1 tabular-nums text-muted-foreground">{o.pos != null ? `POS ${o.pos}` : '—'}</TableCell>
+                  <TableCell className="py-1">{o.operation}</TableCell>
+                  <TableCell className="py-1 text-right font-mono tabular-nums">{nf(o.amount, 2)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody></Table>
+          </div>
+        </div>
+      ))}
+      <p className="text-[11px] text-muted-foreground/70">
+        Разбивка купюроприёмника по номиналам недоступна в STS TMS (данные терминального уровня) —
+        появится после подключения источника терминалов.
+      </p>
+    </div>
+  )
+}
+
 function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'warn' | 'danger' }) {
   const tone = accent === 'danger' ? 'text-red-600 dark:text-red-400'
     : accent === 'warn' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'
@@ -48,6 +102,7 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
 
 export function AccountingCashPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const [openStation, setOpenStation] = useState<number | null>(null)
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-cash-collections', dateFrom, dateTo],
     queryFn: () => get<CashCollections>('/api/fuel/cash-collections', { date_from: dateFrom, date_to: dateTo }),
@@ -88,10 +143,11 @@ export function AccountingCashPanel({ dateFrom, dateTo }: { dateFrom: string; da
         <Kpi label="Δ выручка − инкассация" value={`${nf(k.cashRevenue - k.collected)} ₽`} sub="накопление за период" />
       </div>
 
-      {/* Остатки касс по АЗС */}
+      {/* Остатки касс по АЗС (клик по строке — детализация последних смен по POS) */}
       <Card><CardContent className="space-y-3 pt-5">
         <div className="text-sm font-medium">Кассы по АЗС — остатки и дни без инкассации</div>
         <Table><TableHeader><TableRow>
+          <TableHead className="w-8" />
           <TableHead>АЗС</TableHead>
           <TableHead className="text-right">Остаток кассы, ₽</TableHead>
           <TableHead className="text-right">Снимок</TableHead>
@@ -101,22 +157,38 @@ export function AccountingCashPanel({ dateFrom, dateTo }: { dateFrom: string; da
           <TableHead className="text-right">Дней без инкассации</TableHead>
         </TableRow></TableHeader><TableBody>
           {data.stations.map((s) => (
-            <TableRow key={s.station_code}>
-              <TableCell className="font-medium">{s.station_name} ({s.station_code})</TableCell>
-              <TableCell className={`text-right tabular-nums ${(s.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
-                {s.balance != null ? nf(s.balance, 2) : '—'}
-              </TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{fmtDT(s.balance_at)}</TableCell>
-              <TableCell className="text-right tabular-nums">{nf(s.accrued_since_last, 2)}</TableCell>
-              <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{fmtDT(s.last_collection_at)}</TableCell>
-              <TableCell className="text-right tabular-nums text-muted-foreground">{s.last_collection_amount != null ? nf(s.last_collection_amount, 2) : '—'}</TableCell>
-              <TableCell className={`text-right tabular-nums ${daysCls(s.days_since_collection, s.accrued_since_last)}`}>
-                {s.days_since_collection ?? '—'}
-              </TableCell>
-            </TableRow>
+            <Fragment key={s.station_code}>
+              <TableRow className="cursor-pointer hover:bg-accent/30"
+                onClick={() => setOpenStation(openStation === s.station_code ? null : s.station_code)}>
+                <TableCell className="py-1.5 pr-0">
+                  {openStation === s.station_code
+                    ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                </TableCell>
+                <TableCell className="font-medium">{s.station_name} ({s.station_code})</TableCell>
+                <TableCell className={`text-right tabular-nums ${(s.balance ?? 0) < 0 ? 'text-red-600 dark:text-red-400' : ''}`}>
+                  {s.balance != null ? nf(s.balance, 2) : '—'}
+                </TableCell>
+                <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{fmtDT(s.balance_at)}</TableCell>
+                <TableCell className="text-right tabular-nums">{nf(s.accrued_since_last, 2)}</TableCell>
+                <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">{fmtDT(s.last_collection_at)}</TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">{s.last_collection_amount != null ? nf(s.last_collection_amount, 2) : '—'}</TableCell>
+                <TableCell className={`text-right tabular-nums ${daysCls(s.days_since_collection, s.accrued_since_last)}`}>
+                  {s.days_since_collection ?? '—'}
+                </TableCell>
+              </TableRow>
+              {openStation === s.station_code && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={8} className="p-0">
+                    <StationCashDetail stationCode={s.station_code} />
+                  </TableCell>
+                </TableRow>
+              )}
+            </Fragment>
           ))}
         </TableBody></Table>
         <p className="text-xs text-muted-foreground/70">
+          Клик по строке — состояние кассы последних смен по рабочим местам (POS).
           Отрицательный остаток — аномалия учёта STS (проверить смену); жёлтый/красный — 7/14 дней
           без инкассации при ненулевом накоплении.
         </p>
