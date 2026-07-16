@@ -11,10 +11,10 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DedupCard, DedupNsBinding, DedupStatus
+from app.models import DedupCard, DedupNsBinding, DedupStatus, CbNomenclature
 
 # ── нормализация имени (ключ группировки дублей) ─────────────────────────────
 _PUNCT = re.compile(r'[«»"\'`.,()\[\]{}/\\\-–—:;!?]+')
@@ -48,6 +48,75 @@ def code_prefix(code: str) -> str:
     return "иное"
 
 
+# ── загрузка дампа 208 (CLI-скрипт + кнопка «Обновить срез») ─────────────────
+def _to_price(s: str) -> float | None:
+    try:
+        v = float(s)
+        return v if v != 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_dump(text: str):
+    section = None
+    cards, binds, prices = [], [], {}
+    for ln in text.splitlines():
+        if ln.startswith("#CARDS"):
+            section = "cards"; continue
+        if ln.startswith("#BINDINGS"):
+            section = "bind"; continue
+        if ln.startswith("#PRICES"):
+            section = "prices"; continue
+        if ln.startswith("#END") or not ln.strip():
+            continue
+        p = ln.split("|")
+        if section == "cards" and len(p) >= 5:
+            cards.append(p)
+        elif section == "bind" and len(p) >= 7:
+            binds.append(p)
+        elif section == "prices" and len(p) >= 2:
+            prices[p[0].lower()] = _to_price(p[1])
+    return cards, binds, prices
+
+
+async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
+    """Идемпотентно заменяет кеш дедупа компании: local208 (карточки+цены+привязки)
+    из дампа + склейка ЦБ (CbNomenclature) по GUID. Используется CLI-загрузчиком и
+    эндпоинтом «Обновить срез»."""
+    await db.execute(delete(DedupNsBinding).where(DedupNsBinding.company_id == cid))
+    await db.execute(delete(DedupCard).where(DedupCard.company_id == cid))
+    await db.commit()
+
+    cards, binds, prices = _parse_dump(dump_text)
+    for c in cards:
+        guid, code, marked, name, group = c[0].lower(), c[1], c[2], c[3], c[4]
+        db.add(DedupCard(
+            company_id=cid, source="local208", guid=guid, code=code,
+            code_prefix=code_prefix(code), name=name, name_norm=normalize_name(name),
+            marked=marked == "1", is_assortment=is_assortment(name), group_name=group,
+            price=prices.get(guid)))
+    for p in binds:
+        wh, ns, cg, cm, bc, act, price = p[:7]
+        db.add(DedupNsBinding(
+            company_id=cid, warehouse=(wh or "").strip(), ns_code=ns,
+            card_guid=(cg or "").lower() or None, card_marked=cm == "1",
+            barcode=bc or None, active=act == "1", retail_price=_to_price(price)))
+    await db.flush()
+
+    cb = (await db.execute(select(CbNomenclature).where(CbNomenclature.company_id == cid))).scalars().all()
+    for c in cb:
+        g = (c.external_ref or "").lower()
+        if not g:
+            continue
+        db.add(DedupCard(
+            company_id=cid, source="cb", guid=g, code=c.code,
+            code_prefix=code_prefix(c.code or ""), name=c.name or "",
+            name_norm=normalize_name(c.name or ""), marked=False,
+            is_assortment=is_assortment(c.name or ""), group_name=None))
+    await db.commit()
+    return {"cards": len(cards), "bindings": len(binds), "prices": len(prices), "cb": len(cb)}
+
+
 # ── сводка (KPI) ─────────────────────────────────────────────────────────────
 async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     cards = (await db.execute(select(DedupCard).where(
@@ -67,6 +136,10 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     dup_groups = {k: v for k, v in groups.items() if len(v) > 1}
     excess = sum(len(v) - 1 for v in dup_groups.values())
     live_groups = sum(1 for v in dup_groups.values() if sum(1 for x in v if not x.marked) > 1)
+    # рассинхрон цен: живые карточки группы с разными розн.ценами
+    price_desync = sum(1 for v in dup_groups.values()
+                       if len({x.price for x in v if not x.marked and x.price}) > 1)
+    updated = max((c.updated_at for c in cards if c.updated_at), default=None)
 
     # мост кассы
     binds = (await db.execute(select(DedupNsBinding).where(
@@ -81,17 +154,19 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     return {
         "cardsTotal": total, "cardsMarked": marked, "byPrefix": by_prefix,
         "dupGroups": len(dup_groups), "excessCards": excess, "liveDupGroups": live_groups,
+        "priceDesyncGroups": price_desync,
         "assortmentCards": sum(1 for c in cards if c.is_assortment),
         "nsActive": len(binds), "nsOnMarked": on_marked, "multiCodeCards": multi_code_cards,
         "cbLinked": (await db.execute(select(func.count()).select_from(DedupCard).where(
             DedupCard.company_id == cid, DedupCard.source == "cb"))).scalar() or 0,
+        "updatedAt": updated.isoformat() if updated else None,
     }
 
 
 # ── группы дублей ────────────────────────────────────────────────────────────
 async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
                  include_assortment: bool = False, only_live: bool = False,
-                 status: str | None = None) -> list[dict]:
+                 status: str | None = None, price_desync: bool = False) -> list[dict]:
     cards = (await db.execute(select(DedupCard).where(
         DedupCard.company_id == cid, DedupCard.source == "local208"))).scalars().all()
     # привязки кассы по карточке (для отметки «касса бьёт сюда»)
@@ -138,16 +213,19 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
             mem.append({
                 "guid": m.guid, "code": m.code, "prefix": m.code_prefix,
                 "name": m.name, "marked": m.marked, "group": m.group_name,
+                "price": m.price,
                 "nsCodes": mcodes, "nsActive": any(x["active"] for x in mcodes),
-                "prices": sorted({x["price"] for x in mcodes if x["price"]}),
                 "inCb": m.guid in cb,
             })
-        # рассинхрон цен внутри группы (разные активные цены на дубли одного товара)
-        all_prices = sorted({p for m in mem for p in m["prices"]})
+        # рассинхрон цен: разные розн.цены у ЖИВЫХ карточек-дублей одного товара
+        live_prices = sorted({m.price for m in members if not m.marked and m.price})
+        spread = live_prices if len(live_prices) > 1 else []
+        if price_desync and not spread:
+            continue
         out.append({
             "key": key, "title": title, "count": len(members), "live": len(live),
             "assortment": members[0].is_assortment, "prefixes": prefixes,
-            "priceSpread": all_prices if len(all_prices) > 1 else [],
+            "priceSpread": spread,
             "members": mem,
             "status": st.status if st else "pending",
             "canonGuid": st.canon_guid if st else None,
@@ -249,9 +327,12 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID) -> list[dict]:
                 continue
             plan.append({
                 "group": g["title"], "status": g["status"],
+                "priceSpread": "/".join(str(p) for p in g["priceSpread"]),
                 "dupGuid": m["guid"], "dupCode": m["code"], "dupName": m["name"],
-                "dupMarked": m["marked"], "dupNsCodes": [x["nsCode"] for x in m["nsCodes"]],
+                "dupMarked": m["marked"], "dupPrice": m["price"],
+                "dupNsCodes": [x["nsCode"] for x in m["nsCodes"]],
                 "canonGuid": canon, "canonCode": canon_m["code"] if canon_m else None,
                 "canonName": canon_m["name"] if canon_m else None,
+                "canonPrice": canon_m["price"] if canon_m else None,
             })
     return plan

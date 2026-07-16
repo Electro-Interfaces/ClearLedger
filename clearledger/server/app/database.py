@@ -581,6 +581,10 @@ async def create_all() -> None:
         # v2.17: контроль дублей номенклатуры (dedup_cards/dedup_ns_bindings/
         # dedup_statuses — новые таблицы через metadata.create_all, ALTER не нужен).
 
+        # v2.18: розничная цена карточки (РС.ЦеныНоменклатуры) для среза рассинхрона.
+        await conn.execute(__import__("sqlalchemy").text(
+            "ALTER TABLE dedup_cards ADD COLUMN IF NOT EXISTS price DOUBLE PRECISION"))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

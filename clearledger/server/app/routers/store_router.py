@@ -10,7 +10,7 @@ from datetime import date
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -465,12 +465,29 @@ async def dedup_groups(
     q: str | None = Query(None),
     include_assortment: bool = Query(False),
     only_live: bool = Query(False),
+    price_desync: bool = Query(False),
     status: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     cid = await scope_company_id(user, db)
     return await dedup_service.groups(db, cid, q=q, include_assortment=include_assortment,
-                                      only_live=only_live, status=status)
+                                      only_live=only_live, status=status, price_desync=price_desync)
+
+
+@router.post("/dedup/reload")
+async def dedup_reload(
+    file: UploadFile,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Обновить срез: загрузить свежий дамп 208 (probe-раннер) + склейка ЦБ."""
+    cid = await scope_company_id(user, db)
+    raw = await file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Дамп слишком большой")
+    text = raw.decode("utf-8", "replace")
+    if "#CARDS" not in text:
+        raise HTTPException(400, "Не похоже на дамп 208 (нет секции #CARDS)")
+    return await dedup_service.load_dump(db, cid, text)
 
 
 @router.get("/dedup/bridge")

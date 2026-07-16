@@ -18,6 +18,7 @@ from app.routers import (
     audit_data_router,
     audit_router,
     auth_router,
+    dedup_ingest_router,
     companies_router,
     connectors_router,
     roles_router,
@@ -159,6 +160,7 @@ app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_proxy_router.router, prefix=API_PREFIX)  # прокси «Сверки»: /api/tradecorp/*, /api/msto/*
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
+app.include_router(dedup_ingest_router.router, prefix=API_PREFIX)  # приём среза дублей 208 по X-Cloud-API-Key
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(fuel_mappings_router.router, prefix=API_PREFIX)

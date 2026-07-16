@@ -2,7 +2,7 @@
  * Клиент аналитики раздела «Магазин» (сопутка/общепит).
  * Пока — «Обзор магазина» (/api/store/overview → GoodsDashboardService).
  */
-import { get, put, post } from './apiClient'
+import { get, put, post, upload } from './apiClient'
 
 export interface StoreCategory {
   category: string
@@ -228,12 +228,12 @@ export interface StoreInventoryDoc {
   lines: StoreInventoryLine[]
 }
 export interface StoreInventoryData {
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   warehouse: string | null
   warehouses: { code: string; name: string | null; count: number }[]
   docs: StoreInventoryDoc[]
   top_shortage: { name: string; qty: number; amount: number; docs: number }[]
-  /** F3: дата последнего снимка данных (ISO). */
-  snapshot_at?: string | null
   summary: {
     docs_count: number; docs_with_dev: number
     shortage_amount: number; surplus_amount: number; net_amount: number
@@ -258,13 +258,13 @@ export interface StoreWriteoffDoc {
   lines: StoreWriteoffLine[]
 }
 export interface StoreWriteoffData {
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   warehouse: string | null
   warehouses: { code: string; name: string | null; count: number }[]
   docs: StoreWriteoffDoc[]
   by_reason: { reason: string; count: number; amount: number }[]
   top_sku: { name: string; qty: number; amount: number; docs: number }[]
-  /** F3: дата последнего снимка данных (ISO). */
-  snapshot_at?: string | null
   summary: {
     docs_count: number; total_amount: number
     from_inventory_amount: number; other_amount: number
@@ -289,12 +289,12 @@ export interface StoreTransferDoc {
   lines: StoreTransferLine[]
 }
 export interface StoreTransferData {
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   direction: string | null
   docs: StoreTransferDoc[]
   by_direction: { direction: string; count: number; amount: number }[]
   top_sku: { name: string; qty: number; amount: number; docs: number }[]
-  /** F3: дата последнего снимка данных (ISO). */
-  snapshot_at?: string | null
   summary: {
     docs_count: number; total_amount: number
     inbound_amount: number; outbound_amount: number; internal_amount: number
@@ -319,13 +319,13 @@ export interface StoreRevalDoc {
   lines: StoreRevalLine[]
 }
 export interface StoreRevaluationData {
+  /** F3: дата последнего снимка данных (ISO). */
+  snapshot_at?: string | null
   reason: string | null
   docs: StoreRevalDoc[]
   by_reason: { reason: string; count: number }[]
   top_up: StoreRevalMove[]
   top_down: StoreRevalMove[]
-  /** F3: дата последнего снимка данных (ISO). */
-  snapshot_at?: string | null
   summary: {
     docs_count: number; up_lines: number; down_lines: number
     avg_pct: number | null; value_impact: number
@@ -669,13 +669,15 @@ export const getStoreSkuCard = (guid: string, dateFrom: string, dateTo: string) 
 export interface DedupSummary {
   cardsTotal: number; cardsMarked: number; byPrefix: Record<string, number>
   dupGroups: number; excessCards: number; liveDupGroups: number; assortmentCards: number
+  priceDesyncGroups: number
   nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
+  updatedAt: string | null
 }
 export interface DedupNsCode { nsCode: string; active: boolean; price: number | null }
 export interface DedupMember {
   guid: string; code: string | null; prefix: string | null; name: string
-  marked: boolean; group: string | null; nsCodes: DedupNsCode[]; nsActive: boolean
-  prices: number[]; inCb: boolean
+  marked: boolean; group: string | null; price: number | null
+  nsCodes: DedupNsCode[]; nsActive: boolean; inCb: boolean
 }
 export interface DedupGroup {
   key: string; title: string; count: number; live: number; assortment: boolean
@@ -688,18 +690,26 @@ export interface DedupBridgeRow {
   prices?: number[]; marked?: boolean
 }
 export interface DedupExportRow {
-  group: string; status: string; dupGuid: string; dupCode: string | null; dupName: string
-  dupMarked: boolean; dupNsCodes: string[]; canonGuid: string; canonCode: string | null; canonName: string | null
+  group: string; status: string; priceSpread: string
+  dupGuid: string; dupCode: string | null; dupName: string; dupMarked: boolean
+  dupPrice: number | null; dupNsCodes: string[]
+  canonGuid: string; canonCode: string | null; canonName: string | null; canonPrice: number | null
 }
 
 export const getDedupSummary = () => get<DedupSummary>('/api/store/dedup/summary')
-export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; onlyLive?: boolean; status?: string }) =>
+export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; onlyLive?: boolean; priceDesync?: boolean; status?: string }) =>
   get<DedupGroup[]>('/api/store/dedup/groups', {
     q: p?.q || undefined,
     include_assortment: p?.includeAssortment ? 'true' : undefined,
     only_live: p?.onlyLive ? 'true' : undefined,
+    price_desync: p?.priceDesync ? 'true' : undefined,
     status: p?.status || undefined,
   })
+export const reloadDedup = (file: File) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return upload<{ cards: number; bindings: number; prices: number; cb: number }>('/api/store/dedup/reload', fd)
+}
 export const getDedupBridge = (kind: 'on_marked' | 'multi' | 'price_split') =>
   get<DedupBridgeRow[]>('/api/store/dedup/bridge', { kind })
 export const setDedupStatus = (body: { entityType: 'group' | 'card'; entityKey: string; status?: string; canonGuid?: string | null; note?: string }) =>

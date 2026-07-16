@@ -3763,6 +3763,7 @@ class DedupCard(Base):
     marked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_assortment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # «в ассортименте» — НЕ дубль
     group_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)  # розн. цена (РС.ЦеныНоменклатуры «Розничная 208»)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

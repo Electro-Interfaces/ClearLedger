@@ -6,12 +6,13 @@
  * касса↔карточка (коды на помеченные, ≥2 кода, рассинхрон цен), статусы/трекинг
  * правок, экспорт плана дедупа. Данные — кеш dedup_* (pull 208 + склейка ЦБ по GUID).
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import * as XLSX from 'xlsx'
 import {
   CopyCheck, Search, Download, ChevronDown, ChevronRight, AlertTriangle,
-  Tag, Store, Loader2, Check,
+  Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -21,9 +22,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  getDedupSummary, getDedupGroups, getDedupBridge, setDedupStatus, getDedupExport,
+  getDedupSummary, getDedupGroups, getDedupBridge, setDedupStatus, getDedupExport, reloadDedup,
   type DedupGroup, type DedupMember,
 } from '@/services/storeService'
+
+const fmtPrice = (p: number | null | undefined) =>
+  p == null ? '—' : new Intl.NumberFormat('ru-RU').format(p) + ' ₽'
 
 const STATUSES: { key: string; label: string; cls: string }[] = [
   { key: 'pending', label: 'Не разобрано', cls: 'border-zinc-600 text-zinc-400' },
@@ -92,13 +96,14 @@ function GroupCard({ g }: { g: DedupGroup }) {
                   <th className="py-1 pr-2 font-medium">Канон</th>
                   <th className="py-1 pr-2 font-medium">Код</th>
                   <th className="py-1 pr-2 font-medium">Наименование</th>
+                  <th className="py-1 pr-2 font-medium text-right">Цена</th>
                   <th className="py-1 pr-2 font-medium">Коды кассы</th>
                   <th className="py-1 pr-2 font-medium">ЦБ</th>
                   <th className="py-1 pr-2 font-medium">Статус карт.</th>
                 </tr>
               </thead>
               <tbody>
-                {g.members.map((m) => <MemberRow key={m.guid} m={m} canon={canon} onCanon={setCanon} />)}
+                {g.members.map((m) => <MemberRow key={m.guid} m={m} canon={canon} onCanon={setCanon} spread={g.priceSpread} />)}
               </tbody>
             </table>
           </div>
@@ -123,8 +128,10 @@ function GroupCard({ g }: { g: DedupGroup }) {
   )
 }
 
-function MemberRow({ m, canon, onCanon }: { m: DedupMember; canon: string | null; onCanon: (g: string) => void }) {
+function MemberRow({ m, canon, onCanon, spread }: { m: DedupMember; canon: string | null; onCanon: (g: string) => void; spread: number[] }) {
   const isCanon = canon === m.guid
+  // при рассинхроне подсвечиваем цену, отличную от минимальной живой (переоценённый дубль)
+  const desync = spread.length > 1 && m.price != null && !m.marked && m.price !== Math.min(...spread)
   return (
     <tr className={cn('border-b border-border/20', m.marked && 'opacity-55')}>
       <td className="py-1 pr-2">
@@ -141,6 +148,9 @@ function MemberRow({ m, canon, onCanon }: { m: DedupMember; canon: string | null
       <td className="py-1 pr-2">
         {m.name}
         {m.marked && <span className="ml-1 rounded bg-red-500/15 px-1 text-[9px] text-red-300">помечена</span>}
+      </td>
+      <td className={cn('py-1 pr-2 text-right tabular-nums whitespace-nowrap', desync && 'font-semibold text-red-400')} title={desync ? 'Цена отличается от минимальной в группе' : undefined}>
+        {fmtPrice(m.price)}
       </td>
       <td className="py-1 pr-2 text-[11px]">
         {m.nsCodes.length === 0 ? <span className="text-muted-foreground/50">—</span> : m.nsCodes.map((c) => (
@@ -166,7 +176,6 @@ function BridgeTab() {
         {([
           ['on_marked', 'Коды на помеченные карточки'],
           ['multi', 'Карточки с ≥2 кодами'],
-          ['price_split', 'Рассинхрон цен по кодам'],
         ] as const).map(([k, l]) => (
           <button key={k} onClick={() => setKind(k)}
             className={cn('rounded-md px-2.5 py-1.5 text-xs transition-colors', kind === k ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:bg-accent')}>{l}</button>
@@ -204,20 +213,51 @@ function BridgeTab() {
 
 // ── корневой ──────────────────────────────────────────────────────────────────
 export function StoreDedupPanel() {
+  const qc = useQueryClient()
   const [tab, setTab] = useState<'groups' | 'bridge'>('groups')
   const [q, setQ] = useState('')
   const [onlyLive, setOnlyLive] = useState(true)
   const [inclAssort, setInclAssort] = useState(false)
+  const [priceDesync, setPriceDesync] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const { data: sum } = useQuery({ queryKey: ['dedup-summary'], queryFn: getDedupSummary })
   const { data: groups = [], isLoading } = useQuery({
-    queryKey: ['dedup-groups', q, onlyLive, inclAssort, statusFilter],
-    queryFn: () => getDedupGroups({ q, onlyLive, includeAssortment: inclAssort, status: statusFilter === 'all' ? undefined : statusFilter }),
+    queryKey: ['dedup-groups', q, onlyLive, inclAssort, priceDesync, statusFilter],
+    queryFn: () => getDedupGroups({ q, onlyLive, includeAssortment: inclAssort, priceDesync, status: statusFilter === 'all' ? undefined : statusFilter }),
     enabled: tab === 'groups',
   })
 
+  const reloadMut = useMutation({
+    mutationFn: (file: File) => reloadDedup(file),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['dedup-summary'] })
+      qc.invalidateQueries({ queryKey: ['dedup-groups'] })
+      qc.invalidateQueries({ queryKey: ['dedup-bridge'] })
+      toast.success(`Срез обновлён: ${r.cards} карточек, ${r.bindings} привязок, ${r.prices} цен`)
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не удалось загрузить дамп'),
+  })
+
   const doneCount = useMemo(() => groups.filter((g) => ['merged', 'done'].includes(g.status)).length, [groups])
+
+  const exportExcel = async () => {
+    try {
+      const rows = await getDedupExport()
+      const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({
+        'Группа': r.group, 'Статус': r.status, 'Рассинхрон цен': r.priceSpread,
+        'Дубль код': r.dupCode, 'Дубль наим.': r.dupName, 'Дубль цена': r.dupPrice,
+        'Дубль помечен': r.dupMarked ? 'да' : '', 'Дубль коды кассы': r.dupNsCodes.join(', '),
+        'Канон код': r.canonCode, 'Канон наим.': r.canonName, 'Канон цена': r.canonPrice,
+        'Дубль GUID': r.dupGuid, 'Канон GUID': r.canonGuid,
+      })))
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Дедуп 208')
+      XLSX.writeFile(wb, `dedup_plan_208_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      toast.success(`Excel: ${rows.length} пар дубль→канон`)
+    } catch { toast.error('Не удалось выгрузить Excel') }
+  }
 
   const exportPlan = async () => {
     try {
@@ -241,14 +281,18 @@ export function StoreDedupPanel() {
           <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
             Цепочка Нефтосервер → локальная 1С 208 → ЦБ. Один товар под кодами 008/208/ЦБ, касса бьёт удалённый дубль, рассинхрон цен — видно наглядно, отмечается статусами.
           </p>
+          {sum?.updatedAt && (
+            <p className="mt-0.5 text-[11px] text-muted-foreground/70">Срез 208 обновлён: {new Date(sum.updatedAt).toLocaleString('ru-RU')}</p>
+          )}
         </div>
       </div>
 
       {/* KPI */}
       {sum && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
           <Kpi label="Карточек 208" value={fmt(sum.cardsTotal)} hint={`008:${fmt(sum.byPrefix['008'])} · 208:${fmt(sum.byPrefix['208'])} · ЦБ:${fmt(sum.byPrefix['ЦБ'])}`} />
-          <Kpi label="Групп дублей" value={fmt(sum.dupGroups)} hint={`лишних ${fmt(sum.excessCards)} · живых групп ${fmt(sum.liveDupGroups)}`} />
+          <Kpi label="Групп дублей" value={fmt(sum.dupGroups)} hint={`лишних ${fmt(sum.excessCards)} · живых ${fmt(sum.liveDupGroups)}`} />
+          <Kpi label="Рассинхрон цен" value={fmt(sum.priceDesyncGroups)} hint="разные цены на дубли" warn={(sum.priceDesyncGroups ?? 0) > 0} />
           <Kpi label="В ассортименте" value={fmt(sum.assortmentCards)} hint="не дубли (исключены)" />
           <Kpi label="Привязок кассы" value={fmt(sum.nsActive)} hint={`с ЦБ-склейкой ${fmt(sum.cbLinked)}`} />
           <Kpi label="Касса → удалён." value={fmt(sum.nsOnMarked)} hint="бьёт помеченную" warn={(sum.nsOnMarked ?? 0) > 0} />
@@ -261,7 +305,13 @@ export function StoreDedupPanel() {
         <button onClick={() => setTab('groups')} className={cn('flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm', tab === 'groups' ? 'border-primary text-foreground font-medium' : 'border-transparent text-muted-foreground hover:text-foreground')}><Tag className="size-4" />Группы дублей</button>
         <button onClick={() => setTab('bridge')} className={cn('flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm', tab === 'bridge' ? 'border-primary text-foreground font-medium' : 'border-transparent text-muted-foreground hover:text-foreground')}><Store className="size-4" />Мост касса↔карточка</button>
         <div className="flex-1" />
-        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportPlan}><Download className="mr-1 size-3.5" />Экспорт плана</Button>
+        <input ref={fileRef} type="file" accept=".txt" hidden
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) reloadMut.mutate(f); if (fileRef.current) fileRef.current.value = '' }} />
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => fileRef.current?.click()} disabled={reloadMut.isPending} title="Загрузить свежий дамп 208 (probe-раннер)">
+          {reloadMut.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <RefreshCw className="mr-1 size-3.5" />}Обновить срез
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportExcel}><FileSpreadsheet className="mr-1 size-3.5" />Excel</Button>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportPlan}><Download className="mr-1 size-3.5" />JSON</Button>
       </div>
 
       {tab === 'groups' ? (
@@ -273,6 +323,7 @@ export function StoreDedupPanel() {
               <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по названию…" className="h-8 pl-8 text-xs" />
             </div>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />только с &gt;1 живой</label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={priceDesync} onChange={(e) => setPriceDesync(e.target.checked)} />только рассинхрон цен</label>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={inclAssort} onChange={(e) => setInclAssort(e.target.checked)} />показать «в ассортименте»</label>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue placeholder="Статус" /></SelectTrigger>
