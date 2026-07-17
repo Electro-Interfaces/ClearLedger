@@ -13,7 +13,7 @@ import * as XLSX from 'xlsx'
 import {
   CopyCheck, Search, Download, ChevronDown, ChevronRight, AlertTriangle,
   Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw, ShoppingCart,
-  PlayCircle, GitMerge, Upload,
+  PlayCircle, GitMerge, Upload, Info,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -46,12 +46,46 @@ const PREFIX_CLS: Record<string, string> = {
   '208': 'border-amber-400/50 text-amber-300/80',
   'ЦБ': 'border-violet-400/50 text-violet-300/80',
 }
-// Префикс — нумерация карточки в базе 208, а НЕ станция: «008…» бьётся кассой 208
-// (код 5147 → Трос @550 ₽). Разрез «наше» даёт склад привязки, не префикс.
+// Бейдж показывает, ГДЕ заведён код карточки, а не чья она: вся витрина — одна
+// база (локальная 1С АЗС 208), карточек других станций тут нет. Читается это
+// неверно с одного взгляда («008» = станция 8), поэтому бейдж подписан «код NNN»
+// + легенда над списком: тултип не наводят, а ошибка стоит дорого — по префиксу
+// отсекли бы 28 групп живых проблем 208.
 const PREFIX_HINT: Record<string, string> = {
-  '008': 'Префикс кода номенклатуры (старая нумерация), не станция 8 — такие карточки бьёт касса 208',
-  '208': 'Префикс кода номенклатуры АЗС 208',
-  'ЦБ': 'Префикс кода номенклатуры центральной базы',
+  '008': 'Код заведён в старой нумерации базы 208 — не станция 8. Такие карточки бьёт касса 208',
+  '208': 'Код заведён на АЗС 208 в своей нумерации',
+  'ЦБ': 'Код пришёл из центральной базы',
+}
+const PREFIX_WHERE: Record<string, string> = {
+  '008': 'старая нумерация',
+  '208': 'заведено на 208',
+  'ЦБ': 'из центральной базы',
+}
+
+// ── легенда: что означает бейдж кода (и что он НЕ означает) ──────────────────
+function PrefixLegend({ byPrefix }: { byPrefix: Record<string, number> }) {
+  return (
+    <div className="flex gap-2 rounded-lg border border-blue-400/25 bg-blue-500/[0.04] px-3 py-2 text-[11px] leading-relaxed">
+      <Info className="mt-0.5 size-3.5 shrink-0 text-blue-300/70" />
+      <div className="min-w-0 space-y-1">
+        <div className="text-foreground/90">
+          Все карточки — из одной базы, локальной 1С <b>АЗС 208</b>. Бейдж показывает, где заведён код, а не чья карточка:
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {(['008', '208', 'ЦБ'] as const).map((p) => (
+            <span key={p} className="inline-flex items-center gap-1.5">
+              <Badge variant="outline" className={cn('text-[9px]', PREFIX_CLS[p])}>код {p}</Badge>
+              <span className="text-muted-foreground">{PREFIX_WHERE[p]} · {fmt(byPrefix[p])} карт.</span>
+            </span>
+          ))}
+        </div>
+        <div className="text-muted-foreground">
+          Касса 208 бьёт через <b>все три</b> — чаще всего как раз через «код 008»: у «Троса» (008000001476) активен код кассы 5147 склада 208 по 550 ₽ при живых дублях 440 и 265 ₽.
+          Поэтому принадлежность к станции определяет <span className="text-foreground/80">склад привязки кассы</span>, а не код — это и есть фильтр «только контур 208».
+        </div>
+      </div>
+    </div>
+  )
 }
 const fmt = (n: number | undefined) => new Intl.NumberFormat('ru-RU').format(n ?? 0)
 
@@ -122,7 +156,7 @@ function GroupCard({ g }: { g: DedupGroup }) {
         )}
         {g.prefixes.map((p) => (
           <Badge key={p} variant="outline" className={cn('text-[10px]', PREFIX_CLS[p] ?? 'border-zinc-600 text-zinc-400')}
-            title={PREFIX_HINT[p] ?? 'Префикс кода номенклатуры'}>{p}</Badge>
+            title={PREFIX_HINT[p] ?? 'Префикс кода номенклатуры'}>код {p}</Badge>
         ))}
         <Badge variant="outline" className="text-[10px]">{g.count} карт. · {g.live} живых</Badge>
         <Badge variant="outline" className={cn('text-[10px]', sm.cls)}>{sm.label}</Badge>
@@ -525,6 +559,7 @@ export function StoreDedupPanel() {
 
       {tab === 'jobs' ? <JobsTab jobs={jobs} isLoading={jobsLoading} /> : tab === 'groups' ? (
         <div className="space-y-2.5">
+          {sum && <PrefixLegend byPrefix={sum.byPrefix} />}
           {/* Фильтры */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[180px] flex-1 max-w-xs">
