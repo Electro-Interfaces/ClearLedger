@@ -466,12 +466,14 @@ async def dedup_groups(
     include_assortment: bool = Query(False),
     only_live: bool = Query(False),
     price_desync: bool = Query(False),
+    only_scope_208: bool = Query(True),
     status: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     cid = await scope_company_id(user, db)
     return await dedup_service.groups(db, cid, q=q, include_assortment=include_assortment,
-                                      only_live=only_live, status=status, price_desync=price_desync)
+                                      only_live=only_live, status=status, price_desync=price_desync,
+                                      only_scope_208=only_scope_208)
 
 
 @router.post("/dedup/reload")

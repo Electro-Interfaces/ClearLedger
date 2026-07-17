@@ -35,7 +35,14 @@ def is_assortment(name: str) -> bool:
     return bool(_ASSORT.search(name or ""))
 
 
+WH208 = "208"
+
+
 def code_prefix(code: str) -> str:
+    """Префикс КОДА номенклатуры в базе 208 — наследие нумерации, НЕ станция.
+    Карточка «008…» спокойно живёт на кассе 208: код 5147 склада 208 бьёт на
+    «008000001476» (Трос @550 ₽). Разрез «наше/не наше» — только по складу
+    привязки кассы (см. in_scope_208), никогда по префиксу."""
     c = (code or "").strip().upper()
     if c.startswith("008"):
         return "008"
@@ -126,6 +133,33 @@ async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
             "sales": len(sales), "cb": len(cb)}
 
 
+# ── разрез «контур станции 208» ──────────────────────────────────────────────
+def in_scope_208(members, codes_by_card: dict[str, list[dict]]) -> bool:
+    """Группа в контуре 208, если касса 208 через неё реально работает: активный
+    код склада 208 на любой карточке либо продажи. Мёртвые карточки (кофе-напитки,
+    лимонады) и коды чужих складов (5/210/8/207/209) — не наша зона."""
+    for m in members:
+        if m.sold_qty and m.sold_qty > 0:
+            return True
+        for x in codes_by_card.get(m.guid, []):
+            if x.get("active") and str(x.get("wh") or "") == WH208:
+                return True
+    return False
+
+
+async def _codes_by_card(db: AsyncSession, cid: uuid.UUID, *, active_only: bool = False) -> dict[str, list[dict]]:
+    stmt = select(DedupNsBinding).where(DedupNsBinding.company_id == cid)
+    if active_only:
+        stmt = stmt.where(DedupNsBinding.active.is_(True))
+    out: dict[str, list[dict]] = {}
+    for b in (await db.execute(stmt)).scalars().all():
+        if b.card_guid:
+            out.setdefault(b.card_guid, []).append(
+                {"nsCode": b.ns_code, "wh": b.warehouse, "active": b.active,
+                 "price": b.retail_price})
+    return out
+
+
 # ── сводка (KPI) ─────────────────────────────────────────────────────────────
 async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     cards = (await db.execute(select(DedupCard).where(
@@ -145,8 +179,12 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     dup_groups = {k: v for k, v in groups.items() if len(v) > 1}
     excess = sum(len(v) - 1 for v in dup_groups.values())
     live_groups = sum(1 for v in dup_groups.values() if sum(1 for x in v if not x.marked) > 1)
-    # рассинхрон цен: живые карточки группы с разными розн.ценами
-    price_desync = sum(1 for v in dup_groups.values()
+    # разрез «наше/не наше»: касса 208 работает через группу или нет
+    codes = await _codes_by_card(db, cid)
+    scoped = {k: v for k, v in dup_groups.items() if in_scope_208(v, codes)}
+    # рассинхрон цен: живые карточки группы с разными розн.ценами (только контур 208 —
+    # у мёртвых групп разные цены ни на что не влияют, это ложная тревога)
+    price_desync = sum(1 for v in scoped.values()
                        if len({x.price for x in v if not x.marked and x.price}) > 1)
     updated = max((c.updated_at for c in cards if c.updated_at), default=None)
 
@@ -163,6 +201,7 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     return {
         "cardsTotal": total, "cardsMarked": marked, "byPrefix": by_prefix,
         "dupGroups": len(dup_groups), "excessCards": excess, "liveDupGroups": live_groups,
+        "scopedGroups": len(scoped), "outOfScopeGroups": len(dup_groups) - len(scoped),
         "priceDesyncGroups": price_desync,
         "assortmentCards": sum(1 for c in cards if c.is_assortment),
         "nsActive": len(binds), "nsOnMarked": on_marked, "multiCodeCards": multi_code_cards,
@@ -175,18 +214,12 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
 # ── группы дублей ────────────────────────────────────────────────────────────
 async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
                  include_assortment: bool = False, only_live: bool = False,
-                 status: str | None = None, price_desync: bool = False) -> list[dict]:
+                 status: str | None = None, price_desync: bool = False,
+                 only_scope_208: bool = False) -> list[dict]:
     cards = (await db.execute(select(DedupCard).where(
         DedupCard.company_id == cid, DedupCard.source == "local208"))).scalars().all()
     # привязки кассы по карточке (для отметки «касса бьёт сюда»)
-    binds = (await db.execute(select(DedupNsBinding).where(
-        DedupNsBinding.company_id == cid))).scalars().all()
-    codes_by_card: dict[str, list[dict]] = {}
-    for b in binds:
-        if b.card_guid:
-            codes_by_card.setdefault(b.card_guid, []).append(
-                {"nsCode": b.ns_code, "wh": b.warehouse, "active": b.active,
-                 "price": b.retail_price})
+    codes_by_card = await _codes_by_card(db, cid)
     # ЦБ-карточки по guid (гибрид)
     cb = {c.guid: c for c in (await db.execute(select(DedupCard).where(
         DedupCard.company_id == cid, DedupCard.source == "cb"))).scalars().all()}
@@ -209,6 +242,9 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
             continue
         live = [m for m in members if not m.marked]
         if only_live and len(live) < 2:
+            continue
+        scoped = in_scope_208(members, codes_by_card)
+        if only_scope_208 and not scoped:
             continue
         st = statuses.get(key)
         if status and (st.status if st else "pending") != status:
@@ -241,7 +277,7 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
         out.append({
             "key": key, "title": title, "count": len(members), "live": len(live),
             "assortment": members[0].is_assortment, "prefixes": prefixes,
-            "priceSpread": spread,
+            "inScope208": scoped, "priceSpread": spread,
             "sellingCount": len(selling),          # сколько карточек продаётся (>1 = конфликт)
             "recommendedCanon": recommended,       # канон по факту продаж
             "members": mem,
@@ -325,10 +361,11 @@ async def set_status(db: AsyncSession, cid: uuid.UUID, *, entity_type: str, enti
 
 
 # ── экспорт плана дедупа (для .epf / скриптов) ───────────────────────────────
-async def export_plan(db: AsyncSession, cid: uuid.UUID) -> list[dict]:
-    """Пары дубль→канон для исполнителя. Канон = помеченный статусом группы
-    canon_guid, либо эвристика: живая 008-карточка, иначе первая живая."""
-    gs = await groups(db, cid, include_assortment=False)
+async def export_plan(db: AsyncSession, cid: uuid.UUID, *, only_scope_208: bool = True) -> list[dict]:
+    """Пары дубль→канон для исполнителя — по умолчанию только контур 208: план
+    работ по чужим складам и мёртвым карточкам исполнителю не нужен. Канон =
+    помеченный статусом группы canon_guid, либо рекомендация по продажам."""
+    gs = await groups(db, cid, include_assortment=False, only_scope_208=only_scope_208)
     plan = []
     for g in gs:
         if g["status"] in ("not_duplicate",):
@@ -486,11 +523,13 @@ async def report_job(db: AsyncSession, cid: uuid.UUID, job_id: uuid.UUID, *,
     return True
 
 
-async def merge_map(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str] | None = None) -> list[dict]:
+async def merge_map(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str] | None = None,
+                    only_scope_208: bool = True) -> list[dict]:
     """Карта слияния дубль→канон для .epf (ОбщегоНазначения.ЗаменитьСсылки).
     ЗаменитьСсылки НЕ автоматизируем (виснет на активной кассе) — менеджер
-    запускает .epf в Предприятии в тихое окно. Канон = статус группы или 008-живая."""
-    gs = await groups(db, cid, include_assortment=False)
+    запускает .epf в Предприятии в тихое окно. Канон = статус группы или
+    рекомендация по продажам. По умолчанию только контур 208."""
+    gs = await groups(db, cid, include_assortment=False, only_scope_208=only_scope_208)
     if group_keys:
         keys = set(group_keys)
         gs = [g for g in gs if g["key"] in keys]

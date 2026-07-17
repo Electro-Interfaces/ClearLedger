@@ -46,6 +46,13 @@ const PREFIX_CLS: Record<string, string> = {
   '208': 'border-amber-400/50 text-amber-300/80',
   'ЦБ': 'border-violet-400/50 text-violet-300/80',
 }
+// Префикс — нумерация карточки в базе 208, а НЕ станция: «008…» бьётся кассой 208
+// (код 5147 → Трос @550 ₽). Разрез «наше» даёт склад привязки, не префикс.
+const PREFIX_HINT: Record<string, string> = {
+  '008': 'Префикс кода номенклатуры (старая нумерация), не станция 8 — такие карточки бьёт касса 208',
+  '208': 'Префикс кода номенклатуры АЗС 208',
+  'ЦБ': 'Префикс кода номенклатуры центральной базы',
+}
 const fmt = (n: number | undefined) => new Intl.NumberFormat('ru-RU').format(n ?? 0)
 
 // ── KPI ──────────────────────────────────────────────────────────────────────
@@ -109,8 +116,13 @@ function GroupCard({ g }: { g: DedupGroup }) {
         ) : (
           <Badge variant="outline" className="border-amber-400/50 text-amber-300/80 gap-1"><ShoppingCart className="size-3" />продаётся {g.sellingCount} ⚠</Badge>
         )}
+        {!g.inScope208 && (
+          <Badge variant="outline" className="border-zinc-600 text-[10px] text-zinc-500"
+            title="Касса 208 через эту группу не работает: нет активных кодов склада 208 и нет продаж">вне контура 208</Badge>
+        )}
         {g.prefixes.map((p) => (
-          <Badge key={p} variant="outline" className={cn('text-[10px]', PREFIX_CLS[p] ?? 'border-zinc-600 text-zinc-400')}>{p}</Badge>
+          <Badge key={p} variant="outline" className={cn('text-[10px]', PREFIX_CLS[p] ?? 'border-zinc-600 text-zinc-400')}
+            title={PREFIX_HINT[p] ?? 'Префикс кода номенклатуры'}>{p}</Badge>
         ))}
         <Badge variant="outline" className="text-[10px]">{g.count} карт. · {g.live} живых</Badge>
         <Badge variant="outline" className={cn('text-[10px]', sm.cls)}>{sm.label}</Badge>
@@ -186,7 +198,8 @@ function MemberRow({ m, canon, onCanon, spread, recommended }: {
         </button>
       </td>
       <td className="py-1 pr-2 font-mono text-[11px] whitespace-nowrap">
-        <Badge variant="outline" className={cn('mr-1 text-[9px]', PREFIX_CLS[m.prefix ?? ''] ?? 'border-zinc-600 text-zinc-400')}>{m.prefix}</Badge>
+        <Badge variant="outline" className={cn('mr-1 text-[9px]', PREFIX_CLS[m.prefix ?? ''] ?? 'border-zinc-600 text-zinc-400')}
+          title={PREFIX_HINT[m.prefix ?? ''] ?? 'Префикс кода номенклатуры'}>{m.prefix}</Badge>
         {m.code}
       </td>
       <td className="py-1 pr-2">
@@ -348,6 +361,9 @@ export function StoreDedupPanel() {
   const [onlyLive, setOnlyLive] = useState(true)
   const [inclAssort, setInclAssort] = useState(false)
   const [priceDesync, setPriceDesync] = useState(false)
+  // Разбираем контур 208 (Нефтосервер → 1С 208 → ЦБ). Мёртвые карточки и коды
+  // чужих складов — не наша зона, по умолчанию скрыты.
+  const [onlyScope, setOnlyScope] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -362,8 +378,8 @@ export function StoreDedupPanel() {
 
   const { data: sum } = useQuery({ queryKey: ['dedup-summary'], queryFn: getDedupSummary })
   const { data: groups = [], isLoading } = useQuery({
-    queryKey: ['dedup-groups', q, onlyLive, inclAssort, priceDesync, statusFilter],
-    queryFn: () => getDedupGroups({ q, onlyLive, includeAssortment: inclAssort, priceDesync, status: statusFilter === 'all' ? undefined : statusFilter }),
+    queryKey: ['dedup-groups', q, onlyLive, inclAssort, priceDesync, onlyScope, statusFilter],
+    queryFn: () => getDedupGroups({ q, onlyLive, includeAssortment: inclAssort, priceDesync, onlyScope208: onlyScope, status: statusFilter === 'all' ? undefined : statusFilter }),
     enabled: tab === 'groups',
   })
 
@@ -461,6 +477,7 @@ export function StoreDedupPanel() {
           <h3 className="text-base font-semibold">Контроль дублей номенклатуры</h3>
           <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
             Цепочка Нефтосервер → локальная 1С 208 → ЦБ. Один товар под кодами 008/208/ЦБ, касса бьёт удалённый дубль, рассинхрон цен — видно наглядно, отмечается статусами.
+            Префикс кода — нумерация карточки, не станция: «008…» тоже бьётся кассой 208. Разрез даёт склад привязки, поэтому по умолчанию показан только контур 208.
           </p>
           {sum?.updatedAt && (
             <p className="mt-0.5 text-[11px] text-muted-foreground/70">Срез 208 обновлён: {new Date(sum.updatedAt).toLocaleString('ru-RU')}</p>
@@ -472,8 +489,8 @@ export function StoreDedupPanel() {
       {sum && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
           <Kpi label="Карточек 208" value={fmt(sum.cardsTotal)} hint={`008:${fmt(sum.byPrefix['008'])} · 208:${fmt(sum.byPrefix['208'])} · ЦБ:${fmt(sum.byPrefix['ЦБ'])}`} />
-          <Kpi label="Групп дублей" value={fmt(sum.dupGroups)} hint={`лишних ${fmt(sum.excessCards)} · живых ${fmt(sum.liveDupGroups)}`} />
-          <Kpi label="Рассинхрон цен" value={fmt(sum.priceDesyncGroups)} hint="разные цены на дубли" warn={(sum.priceDesyncGroups ?? 0) > 0} />
+          <Kpi label="Групп в контуре 208" value={fmt(sum.scopedGroups)} hint={`из ${fmt(sum.dupGroups)} · вне контура ${fmt(sum.outOfScopeGroups)}`} />
+          <Kpi label="Рассинхрон цен" value={fmt(sum.priceDesyncGroups)} hint="разные цены, касса 208 бьёт" warn={(sum.priceDesyncGroups ?? 0) > 0} />
           <Kpi label="В ассортименте" value={fmt(sum.assortmentCards)} hint="не дубли (исключены)" />
           <Kpi label="Привязок кассы" value={fmt(sum.nsActive)} hint={`с ЦБ-склейкой ${fmt(sum.cbLinked)}`} />
           <Kpi label="Касса → удалён." value={fmt(sum.nsOnMarked)} hint="бьёт помеченную" warn={(sum.nsOnMarked ?? 0) > 0} />
@@ -514,6 +531,9 @@ export function StoreDedupPanel() {
               <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск по названию…" className="h-8 pl-8 text-xs" />
             </div>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground"
+              title="Оставить группы, через которые касса 208 реально работает: активный код склада 208 или продажи. Префикс кода (008/208/ЦБ) на это не влияет.">
+              <input type="checkbox" checked={onlyScope} onChange={(e) => setOnlyScope(e.target.checked)} />только контур 208</label>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={onlyLive} onChange={(e) => setOnlyLive(e.target.checked)} />только с &gt;1 живой</label>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={priceDesync} onChange={(e) => setPriceDesync(e.target.checked)} />только рассинхрон цен</label>
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground"><input type="checkbox" checked={inclAssort} onChange={(e) => setInclAssort(e.target.checked)} />показать «в ассортименте»</label>

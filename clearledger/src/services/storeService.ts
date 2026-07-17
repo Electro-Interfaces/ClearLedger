@@ -669,6 +669,7 @@ export const getStoreSkuCard = (guid: string, dateFrom: string, dateTo: string) 
 export interface DedupSummary {
   cardsTotal: number; cardsMarked: number; byPrefix: Record<string, number>
   dupGroups: number; excessCards: number; liveDupGroups: number; assortmentCards: number
+  scopedGroups: number; outOfScopeGroups: number
   priceDesyncGroups: number
   nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
   updatedAt: string | null
@@ -683,7 +684,10 @@ export interface DedupMember {
 }
 export interface DedupGroup {
   key: string; title: string; count: number; live: number; assortment: boolean
-  prefixes: string[]; priceSpread: number[]
+  prefixes: string[]
+  /** Касса 208 работает через группу (активный код склада 208 либо продажи). */
+  inScope208: boolean
+  priceSpread: number[]
   sellingCount: number; recommendedCanon: string | null
   members: DedupMember[]
   status: string; canonGuid: string | null; note: string | null
@@ -701,12 +705,14 @@ export interface DedupExportRow {
 }
 
 export const getDedupSummary = () => get<DedupSummary>('/api/store/dedup/summary')
-export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; onlyLive?: boolean; priceDesync?: boolean; status?: string }) =>
+export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; onlyLive?: boolean; priceDesync?: boolean; onlyScope208?: boolean; status?: string }) =>
   get<DedupGroup[]>('/api/store/dedup/groups', {
     q: p?.q || undefined,
     include_assortment: p?.includeAssortment ? 'true' : undefined,
     only_live: p?.onlyLive ? 'true' : undefined,
     price_desync: p?.priceDesync ? 'true' : undefined,
+    // бэкенд по умолчанию режет не-208 — гасим явно, когда менеджер снял галку
+    only_scope_208: p?.onlyScope208 === false ? 'false' : undefined,
     status: p?.status || undefined,
   })
 export const reloadDedup = (file: File) => {
