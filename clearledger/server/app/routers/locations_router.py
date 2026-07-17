@@ -22,7 +22,10 @@ from app.services import hubex_service
 # decommissioned входит в белый список: раньше значение существовало только как
 # продукт ингеста CPO («Выведена из эксплуатации»), а ручная смена и демонтаж
 # оборудования (складской контур) выставить его не могли — асимметрия.
-OP_STATUSES = {"working", "not_working", "on_repair", "maintenance", "unknown", "decommissioned"}
+# no_link/disabled — статусы CPO «Нет связи»/«Отключена»: показывают текущее
+# состояние станции и раньше схлопывались в unknown/not_working, теряя смысл.
+OP_STATUSES = {"working", "no_link", "disabled", "not_working", "on_repair",
+               "maintenance", "unknown", "decommissioned"}
 
 router = APIRouter(prefix="/locations", tags=["Точки обслуживания"])
 

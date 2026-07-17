@@ -25,11 +25,14 @@ const SINGLE = '#3b82f6'
 
 // ── справочники раскраски (из нормализованного паспорта станции) ──
 const OP: Record<string, { label: string; color: string }> = {
-  working: { label: 'Работает', color: '#10b981' },
+  working: { label: 'Активная', color: '#10b981' },
+  no_link: { label: 'Нет связи', color: '#f59e0b' },
+  disabled: { label: 'Отключена', color: '#71717a' },
+  decommissioned: { label: 'Выведена из эксплуатации', color: '#52525b' },
   not_working: { label: 'Не работает', color: '#ef4444' },
   on_repair: { label: 'На ремонте', color: '#f59e0b' },
   maintenance: { label: 'Обслуживание', color: '#3b82f6' },
-  unknown: { label: 'Неизвестно', color: '#94a3b8' },
+  unknown: { label: 'Нет данных', color: '#94a3b8' },
 }
 const opMeta = (s: string) => OP[s] ?? OP.unknown
 

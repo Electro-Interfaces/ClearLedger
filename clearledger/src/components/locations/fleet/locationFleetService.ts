@@ -93,7 +93,12 @@ export function applyLocationFilters(locations: ServiceLocation[], f: LocationFi
 
 // ─── «Требуют внимания» ───────────────────────────────────────────────────────
 
+// «Нет связи» и «Отключена» — состояния из выгрузки CPO. Раньше первое схлопывалось
+// в unknown и в категории внимания не попадало вовсе, второе приходило как
+// not_working и мешалось с реальными авариями. Теперь это отдельные категории.
 export const ATTENTION = {
+  noLink: (l: ServiceLocation) => opStatusOf(l) === 'no_link',
+  disabled: (l: ServiceLocation) => opStatusOf(l) === 'disabled',
   notWorking: (l: ServiceLocation) => opStatusOf(l) === 'not_working',
   onRepair: (l: ServiceLocation) => opStatusOf(l) === 'on_repair',
   linkConflict: (l: ServiceLocation) => m(l, 'linkStatus') === 'conflict',
@@ -103,6 +108,8 @@ export type AttentionKey = keyof typeof ATTENTION
 
 /** Фильтр-патч, который выделяет точки данной категории «внимания». */
 export const ATTENTION_PATCH: Record<AttentionKey, Partial<LocationFilters>> = {
+  noLink: { opStatuses: ['no_link'] },
+  disabled: { opStatuses: ['disabled'] },
   notWorking: { opStatuses: ['not_working'] },
   onRepair: { opStatuses: ['on_repair'] },
   linkConflict: { linkStatuses: ['conflict'] },
@@ -110,6 +117,8 @@ export const ATTENTION_PATCH: Record<AttentionKey, Partial<LocationFilters>> = {
 }
 
 export const ATTENTION_META: Record<AttentionKey, { label: string }> = {
+  noLink: { label: 'Нет связи' },
+  disabled: { label: 'Отключены' },
   notWorking: { label: 'Не работают' },
   onRepair: { label: 'На ремонте' },
   linkConflict: { label: 'Конфликт связки HubEx' },
@@ -191,6 +200,8 @@ export function computeFleetStats(
     .sort((a, b) => b.count - a.count).slice(0, topN)
 
   const attention = {
+    noLink: locations.filter(ATTENTION.noLink).length,
+    disabled: locations.filter(ATTENTION.disabled).length,
     notWorking: locations.filter(ATTENTION.notWorking).length,
     onRepair: locations.filter(ATTENTION.onRepair).length,
     linkConflict: locations.filter(ATTENTION.linkConflict).length,

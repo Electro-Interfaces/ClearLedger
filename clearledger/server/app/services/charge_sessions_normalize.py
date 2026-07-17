@@ -140,7 +140,7 @@ async def ingest_charge_sessions(
     connector_map = await load_kind_map(db, company_id, "connector", channel_id)
     user_type_map = await load_kind_map(db, company_id, "user_type", channel_id)
     # Индекс объектов-станций (№ → location_id) — материализуем связь сессия→объект (FK).
-    from app.services.stations_normalize import build_station_index
+    from app.services.stations_normalize import _num_class, build_station_index
     station_idx = await build_station_index(db, company_id)
 
     deleted = 0
@@ -161,6 +161,7 @@ async def ingest_charge_sessions(
     )).scalars().all())
 
     created = skipped = errors = 0
+    tests = 0                  # сессии тестовых станций — в учёт не берём
     seen: set[str] = set()
     batch: list[ChargeSession] = []
 
@@ -185,6 +186,11 @@ async def ingest_charge_sessions(
             sid = row.get("session_ext_id")
             if not sid:
                 errors += 1
+                continue
+            # Сессии тестовых станций (код «Тест») в учёт не берём — это прогоны
+            # симуляторов, они искажают выручку и надёжность сети.
+            if _num_class(row.get("station_code")) == "test":
+                tests += 1
                 continue
             if sid in existing or sid in seen:
                 skipped += 1
@@ -243,13 +249,16 @@ async def ingest_charge_sessions(
         message = f"переписано: удалено {deleted}, загружено {created}"
     else:
         message = f"загружено {created}, пропущено {skipped}"
+    if tests:
+        message += f"; сессий тестовых станций исключено: {tests}"
     if heal.get("stations_created"):
         message += f"; станций заведено из сессий: {heal['stations_created']}"
     if renamed:
         message += f"; объектов переименовано по свежим сессиям: {renamed}"
     await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
-            "errors": errors, "deleted": deleted, "stations_created": heal.get("stations_created", 0),
+            "errors": errors, "deleted": deleted, "tests": tests,
+            "stations_created": heal.get("stations_created", 0),
             "message": message}
 
 

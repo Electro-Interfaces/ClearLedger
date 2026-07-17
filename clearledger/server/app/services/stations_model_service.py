@@ -301,7 +301,8 @@ async def stations_model(db: AsyncSession, company_id) -> dict[str, Any]:
     canonicalization = [
         {"name": "Регион", "from": "наименование региона из справочника", "to": "канонический регион + region_id (regions)",
          "members": int(agg.d_region or 0), "coverage_pct": pct(agg.f_region)},
-        {"name": "Операционный статус", "from": "«Статус (dev)» из справочника", "to": "working / not_working / on_repair / maintenance",
+        {"name": "Операционный статус", "from": "«Статус станции» из выгрузки CPO",
+         "to": "working / no_link / disabled / decommissioned (1:1 с CPO)",
          "members": int(agg.d_oper or 0), "coverage_pct": 100.0},
         {"name": "Стадия", "from": "«Стадия» из справочника", "to": "статус точки (active / planned / closed)",
          "members": int(agg.d_stage or 0), "coverage_pct": pct(agg.f_stage)},

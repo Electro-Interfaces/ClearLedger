@@ -22,6 +22,7 @@ import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
 import { LOCATION_STATUS_META, type ServiceLocation } from '@/types/location'
 import type { LocationTypeDef } from '@/types/locationType'
 import { m } from './fleet/locationFleetService'
+import { OP_META } from './cockpit/shared'
 import { useAllSettlements } from '@/hooks/useReferences'
 import {
   stationFlag, paidThroughLabel, ROLE_LABEL,
@@ -40,13 +41,9 @@ const LINK_META: Record<string, { label: string; cls: string }> = {
 }
 
 // Операционный статус станции → подпись + цвет (отдельно от жизненного статуса).
-const OP_STATUS_META: Record<string, { label: string; cls: string }> = {
-  working: { label: 'Работает', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
-  not_working: { label: 'Не работает', cls: 'bg-red-500/15 text-red-600 dark:text-red-400' },
-  on_repair: { label: 'На ремонте', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
-  maintenance: { label: 'Обслуживание', cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400' },
-  unknown: { label: '—', cls: 'bg-muted text-muted-foreground' },
-}
+// Справочник один на весь раздел (cockpit/shared): своя копия здесь молчала о
+// «Выведена из эксплуатации» — 57 станций рендерились с пустым бейджем.
+const OP_STATUS_META = OP_META
 
 // Сводный индикатор платёжной дисциплины станции (реестр «Договоры и оплаты ЭЗС», energy).
 const FLAG_META: Record<StationFlag, { label: string; cls: string; dot: string }> = {

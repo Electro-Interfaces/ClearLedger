@@ -8,16 +8,26 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { LocationType } from '@/types/location'
 
-/** Операционные статусы станции (метки + цвета бейджей). */
+/**
+ * Операционные статусы станции (метки + цвета бейджей).
+ *
+ * Первые четыре — состояние станции по данным CPO, переносятся 1:1 из выгрузки
+ * («Активная»/«Нет связи»/«Отключена»/«Выведена из эксплуатации»). Остальные
+ * приходят из других контуров: ручная смена статуса, HubEx, складской демонтаж.
+ * unknown = данных CPO нет вообще (станции нет в выгрузке), а не «нет связи».
+ */
 export const OP_META: Record<string, { label: string; cls: string }> = {
-  working: { label: 'Работает', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+  working: { label: 'Активная', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' },
+  no_link: { label: 'Нет связи', cls: 'bg-amber-400/15 text-amber-600 dark:text-amber-400/90' },
+  disabled: { label: 'Отключена', cls: 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400' },
+  decommissioned: { label: 'Выведена из эксплуатации', cls: 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-500' },
   not_working: { label: 'Не работает', cls: 'bg-red-500/15 text-red-600 dark:text-red-400' },
   on_repair: { label: 'На ремонте', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400' },
   maintenance: { label: 'Обслуживание', cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-400' },
-  unknown: { label: 'Неизвестно', cls: 'bg-muted text-muted-foreground' },
-  decommissioned: { label: 'Выведена', cls: 'bg-zinc-500/15 text-zinc-500 dark:text-zinc-400' },
+  unknown: { label: 'Нет данных', cls: 'bg-muted text-muted-foreground' },
 }
-export const OP_OPTIONS = ['working', 'not_working', 'on_repair', 'maintenance', 'unknown', 'decommissioned']
+export const OP_OPTIONS = ['working', 'no_link', 'disabled', 'decommissioned',
+  'not_working', 'on_repair', 'maintenance', 'unknown']
 
 /**
  * Ключи metadata, относящиеся к ОБОРУДОВАНИЮ (вкладка «Оборудование»).

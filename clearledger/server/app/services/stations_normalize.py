@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import re as _re
 import uuid as _uuid
 from typing import Any
 
@@ -76,18 +77,24 @@ def _status_from_stage(stage) -> str:
 
 
 def _oper_status(status_dev) -> str:
-    """Операционный статус станции (working|not_working|on_repair|maintenance|unknown).
+    """Операционный статус станции.
 
-    ВАЖНО: «Нет связи»/offline = нет телеметрии мониторинга, НЕ поломка станции →
-    unknown (иначе почти вся сеть ложно помечается «Не работает»). not_working —
-    только явная неисправность/авария."""
+    Четыре статуса CPO переносятся в объекты 1:1 — они показывают ТЕКУЩЕЕ состояние
+    станции и не должны схлопываться:
+      «Активная» → working | «Нет связи» → no_link | «Отключена» → disabled |
+      «Выведена из эксплуатации» → decommissioned.
+    unknown остаётся только для объектов БЕЗ данных CPO (нет в выгрузке).
+    not_working/on_repair/maintenance — из других контуров (ручная смена, HubEx,
+    складской демонтаж), CPO их не выставляет."""
     s = (status_dev or "").strip().lower()
     if not s:
         return "unknown"
     if "выведен" in s or "демонтир" in s or "демонтаж" in s:
         return "decommissioned"  # выведена из эксплуатации — не в сети
     if "отключ" in s:            # CPO «Отключена» — станция намеренно выключена
-        return "not_working"
+        return "disabled"
+    if "нет связи" in s or "офлайн" in s or "оффлайн" in s or "offline" in s:
+        return "no_link"        # нет телеметрии — НЕ поломка станции
     if "ремонт" in s:
         return "on_repair"
     if "обслуж" in s or "maintenance" in s:
@@ -96,7 +103,36 @@ def _oper_status(status_dev) -> str:
         return "not_working"
     if "работает" in s or "онлайн" in s or "online" in s or "доступ" in s or "активн" in s:
         return "working"
-    return "unknown"  # «Нет связи»/offline и прочее неопределённое
+    return "unknown"
+
+
+# Классы номера ЭЗС (канон РусГидро, 2026-07-17):
+#   «1»…«714»  — станции РусГидро;
+#   «65.135»   — станции СНК (партнёр нумерует сам: регион.порядковый);
+#   «TS1033»   — станция СНК (единичный формат);
+#   «Тест»     — тестовые станции, в учёт НЕ берутся;
+#   «72-1»/«73-1» — два исторических исключения (выведены, в отчётах не участвуют).
+_RE_SNK_DOT = _re.compile(r"^\d+\.\d+$")
+_RE_RH_NUM = _re.compile(r"^\d+$")
+
+
+def _num_class(number) -> str:
+    """Формат номера → класс станции: rushydro | snk | test | legacy."""
+    n = (number or "").strip()
+    if not n:
+        return "legacy"
+    if n.lower().startswith("тест") or n.lower().startswith("test"):
+        return "test"
+    if _RE_SNK_DOT.match(n) or n.upper().startswith("TS"):
+        return "snk"
+    if _RE_RH_NUM.match(n):
+        return "rushydro"
+    return "legacy"   # «72-1», «73-1» — старая нумерация
+
+
+def _owner_by_class(num_class: str | None) -> str | None:
+    """Класс номера → владелец сети (фолбэк, когда колонка «Владелец» пуста)."""
+    return {"snk": "СНК", "rushydro": "РусГидро", "legacy": "РусГидро"}.get(num_class or "")
 
 
 def _loc_id(company_id, ext_id: str) -> str:
@@ -120,6 +156,7 @@ def _parse_compact(ws) -> list[dict[str, Any]]:
         if not (num or ocpp):
             continue
         addr = _s(g(r, 3), 500)
+        cls = _num_class(num)
         rows.append({
             "compact": True,
             "number": num, "name": name, "ocpp_id": ocpp,
@@ -130,7 +167,10 @@ def _parse_compact(ws) -> list[dict[str, Any]]:
             "connector_types": _s(g(r, 6), 200),
             "status_dev": _s(g(r, 7), 60),
             "owner": _s(g(r, 8), 200),
-            "is_test": "тест" in f"{name or ''} {num or ''}".lower(),
+            # Тест определяется ФОРМАТОМ НОМЕРА («Тест»), а не подстрокой в имени:
+            # боевые станции с «тест» в названии (АЗС Импульс и пр.) — не тестовые.
+            "num_class": cls,
+            "is_test": cls == "test",
         })
     return rows
 
@@ -244,6 +284,13 @@ async def _ingest_compact(
       append  — существующие объекты не трогаем, добавляем только новые станции;
       replace — обновить существующие + добавить новые (выгрузка = источник истины
                 по оперативному статусу сети).
+
+    Идентичность железки = OCPP ID (в выгрузке уникален), номер = ключ ПЛОЩАДКИ и
+    уникальным не является: пары AC/DC стоят на одном номере (96, 110, 174, 175, 295).
+    Поэтому резолвим OCPP-first, номер — лишь фолбэк для объектов без OCPP-ключа;
+    иначе вторая станция пары садится на первую и молча теряет статус.
+
+    Тестовые станции (номер «Тест») в учёт не берутся — строки пропускаются целиком.
     """
     _region_id = await _make_region_resolver(db, company_id)
 
@@ -252,12 +299,15 @@ async def _ingest_compact(
     by_num: dict[str, ServiceLocation] = {}
     by_key: dict[str, ServiceLocation] = {}   # ocppId/stationId/ext_id/serial/code → объект
     for loc in existing:
+        # Тест-объекты исключены из индексов целиком: тест-строки мы не грузим, а
+        # боевая строка не должна сесть на тестовую карточку по совпадению номера
+        # (номер «123» носили и боевая «АЗС Импульс» в Ангарске, и тест-объект).
+        if loc.is_test:
+            continue
         md = loc.extra_metadata or {}
         for k in (md.get("ocppId"), md.get("stationId"), md.get("ext_id")):
             if k is not None and str(k).strip():
                 by_key.setdefault(str(k).strip(), loc)
-        if loc.is_test:
-            continue   # тест-объекты — только по точному ключу, не по serial/№
         for k in (loc.serial_number, loc.code):
             if k is not None and str(k).strip():
                 by_key.setdefault(str(k).strip(), loc)
@@ -266,24 +316,37 @@ async def _ingest_compact(
             by_num.setdefault(str(num).strip(), loc)
 
     created = updated = skipped = errors = 0
-    touched: set[str] = set()   # дубли № внутри файла → один объект, обновляем раз
+    tests = 0                   # тест-строки: в учёт не берём
+    pair_split = 0              # вторые железки пар AC/DC → отдельные карточки
+    touched: set[str] = set()   # карточки, уже занятые строкой этого файла
     total = len(rows)
     await _bump(db, log_id, 0, total, 0, 0)
 
     for idx, row in enumerate(rows):
         try:
             num, ocpp = row.get("number"), row.get("ocpp_id")
-            # тест-строки резолвим только по точному ключу (не сливать по № с боевыми)
-            loc = (by_key.get(ocpp) if ocpp else None) if row.get("is_test") else (
-                (by_num.get(num) if num else None) or (by_key.get(ocpp) if ocpp else None))
+            if row.get("is_test"):
+                tests += 1
+                continue
+            # OCPP-first: номер не уникален (пары AC/DC на одной площадке), OCPP — уникален.
+            loc = (by_key.get(ocpp) if ocpp else None) or (by_num.get(num) if num else None)
+            # Резолв по НОМЕРУ привёл на карточку, уже занятую другой строкой файла →
+            # это вторая железка пары AC/DC (её OCPP-ключа в базе ещё нет). Раньше
+            # строка молча пропускалась и DC-половина навсегда теряла статус —
+            # теперь заводим ей собственную карточку (id детерминирован по OCPP,
+            # повторный прогон найдёт её по ключу и просто обновит).
+            if loc is not None and loc.id in touched:
+                pair_split += 1
+                loc = None
             oper = _oper_status(row.get("status_dev"))
             md_extra = {k: v for k, v in {
                 "ocppId": ocpp,
                 "statusDev": row.get("status_dev"),
                 "ownerCpo": row.get("owner"),
+                "numClass": row.get("num_class"),
             }.items() if v}
             if loc is not None:
-                if loc.id in touched or mode == "append":
+                if mode == "append":
                     skipped += 1
                     continue
                 loc.operational_status = oper
@@ -317,20 +380,22 @@ async def _ingest_compact(
                 loc = ServiceLocation(
                     id=_loc_id(company_id, f"ocpp:{ocpp or num}"),
                     company_id=company_id, type="ev_charging",
-                    code=num or ocpp,
+                    # Код карточки = OCPP ID (уникален), а не номер: номер принадлежит
+                    # площадке и на паре AC/DC у двух карточек совпадает.
+                    code=ocpp or num,
                     name=row.get("name") or (f"ЭЗС №{num}" if num else ocpp),
                     station_number=num,
                     address=row.get("address"),
-                    # тест-строкам регион не резолвим — их мусорные адреса («Большой»,
-                    # «мм») иначе плодят фиктивные регионы в справочнике
-                    region_id=None if row.get("is_test") else await _region_id(row.get("region")),
+                    region_id=await _region_id(row.get("region")),
                     ocpp_protocol=row.get("ocpp_protocol"),
                     brand=row.get("brand"),
                     connector_types=row.get("connector_types"),
-                    owner=row.get("owner"),
+                    # Владелец: колонка CPO, а при пустой — по формату номера
+                    # («65.135»/«TS1033» = СНК, число = РусГидро).
+                    owner=row.get("owner") or _owner_by_class(row.get("num_class")),
                     status="closed" if oper == "decommissioned" else "active",
                     operational_status=oper,
-                    is_test=bool(row.get("is_test")),
+                    is_test=False,   # тест-строки сюда не доходят
                     source_bindings=[],
                     extra_metadata={"number": num, "source": "stations_compact",
                                     "regionRaw": row.get("region"),
@@ -338,7 +403,8 @@ async def _ingest_compact(
                                     **md_extra},
                 )
                 db.add(loc)
-                # дубль № внутри файла должен резолвиться на созданный объект
+                # На повторный дубль номера в файле by_num НЕ переопределяем: он должен
+                # указывать на первую карточку — иначе третья строка села бы на вторую.
                 if num:
                     by_num.setdefault(num, loc)
                 if ocpp:
@@ -353,9 +419,14 @@ async def _ingest_compact(
 
     await db.flush()
     await _bump(db, log_id, total, total, created, updated)
+    msg = f"CPO-выгрузка: обновлено {updated}, добавлено {created}, пропущено {skipped}"
+    if tests:
+        msg += f", тестовых исключено {tests}"
+    if pair_split:
+        msg += f", разведено пар AC/DC {pair_split}"
     return {"status": "success", "mode": mode, "created": created, "updated": updated,
-            "skipped": skipped, "errors": errors,
-            "message": f"CPO-выгрузка: обновлено {updated}, добавлено {created}, пропущено {skipped}"}
+            "skipped": skipped, "errors": errors, "tests": tests, "pair_split": pair_split,
+            "message": msg}
 
 
 async def ingest_stations(
@@ -534,6 +605,8 @@ async def ensure_stations_from_sessions(db: AsyncSession, company_id) -> dict[st
         code = str(r.code).strip()
         if not code or code in existing:
             continue
+        if _num_class(code) == "test":
+            continue   # тестовые станции в каталог не заводим — и их сессии не грузим
         conns = ",".join(sorted({str(c) for c in (r.conns or []) if c})) or None
         rid = await _region_id(r.region)
         canon = canon_region(r.region)
