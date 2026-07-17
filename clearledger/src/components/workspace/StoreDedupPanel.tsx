@@ -108,6 +108,11 @@ function GroupCard({ g }: { g: DedupGroup }) {
   const [canon, setCanon] = useState<string | null>(g.canonGuid ?? g.recommendedCanon)
   const [note, setNote] = useState(g.note ?? '')
   const sm = statusMeta(g.status)
+  // Выбор канона живёт в локальном state, пока не нажали «Сохранить». Радио сразу
+  // стоит на рекомендации — со стороны выбор выглядит сделанным, хотя в БД пусто.
+  // Поэтому «решение принято» = g.canonGuid из БД, а расхождение с ним — «не сохранено».
+  const savedCanon = g.canonGuid
+  const dirty = canon !== savedCanon || note !== (g.note ?? '')
 
   const mut = useMutation({
     mutationFn: (patch: { status?: string; canonGuid?: string | null; note?: string }) =>
@@ -150,6 +155,15 @@ function GroupCard({ g }: { g: DedupGroup }) {
         ) : (
           <Badge variant="outline" className="border-amber-400/50 text-amber-300/80 gap-1"><ShoppingCart className="size-3" />продаётся {g.sellingCount} ⚠</Badge>
         )}
+        {savedCanon ? (
+          <Badge variant="outline" className="gap-1 border-emerald-400/50 text-[10px] text-emerald-300/80"
+            title={`Канон выбран и сохранён: ${g.members.find((m) => m.guid === savedCanon)?.name ?? '—'}`}>
+            <Check className="size-3" />канон выбран
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="border-zinc-600 text-[10px] text-zinc-500"
+            title="Канон ещё не сохранён: раскройте группу, выберите карточку-хозяина и нажмите «Сохранить»">канон не выбран</Badge>
+        )}
         {!g.inScope208 && (
           <Badge variant="outline" className="border-zinc-600 text-[10px] text-zinc-500"
             title="Касса 208 через эту группу не работает: нет активных кодов склада 208 и нет продаж">вне контура 208</Badge>
@@ -178,7 +192,7 @@ function GroupCard({ g }: { g: DedupGroup }) {
                 </tr>
               </thead>
               <tbody>
-                {g.members.map((m) => <MemberRow key={m.guid} m={m} canon={canon} onCanon={setCanon} spread={g.priceSpread} recommended={g.recommendedCanon} />)}
+                {g.members.map((m) => <MemberRow key={m.guid} m={m} canon={canon} onCanon={setCanon} spread={g.priceSpread} recommended={g.recommendedCanon} savedCanon={savedCanon} />)}
               </tbody>
             </table>
           </div>
@@ -191,10 +205,12 @@ function GroupCard({ g }: { g: DedupGroup }) {
               </SelectContent>
             </Select>
             <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Заметка (что сделано / кем)…" className="h-8 max-w-xs flex-1 text-xs" />
-            <Button size="sm" variant="outline" className="h-8 text-xs"
-              onClick={() => mut.mutate({ canonGuid: canon, note })} disabled={mut.isPending}>
+            <Button size="sm" variant="outline" disabled={mut.isPending || !dirty}
+              className={cn('h-8 text-xs', dirty && 'border-emerald-400/50 text-emerald-300/90 hover:bg-emerald-500/10')}
+              onClick={() => mut.mutate({ canonGuid: canon, note })}
+              title={dirty ? 'Выбор ещё не записан в базу' : 'Всё сохранено'}>
               {mut.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <Check className="mr-1 size-3.5" />}
-              Сохранить {canon ? '(канон выбран)' : ''}
+              {dirty ? 'Сохранить выбор' : 'Сохранено'}
             </Button>
             <Button size="sm" variant="outline" className="h-8 border-violet-400/40 text-xs text-violet-300/90 hover:bg-violet-500/10"
               onClick={() => job.mutate()} disabled={job.isPending || !canon || dupCodes === 0}
@@ -214,20 +230,25 @@ function GroupCard({ g }: { g: DedupGroup }) {
   )
 }
 
-function MemberRow({ m, canon, onCanon, spread, recommended }: {
-  m: DedupMember; canon: string | null; onCanon: (g: string) => void; spread: number[]; recommended: string | null
+function MemberRow({ m, canon, onCanon, spread, recommended, savedCanon }: {
+  m: DedupMember; canon: string | null; onCanon: (g: string) => void; spread: number[]
+  recommended: string | null; savedCanon: string | null
 }) {
   const isCanon = canon === m.guid
   const isRec = recommended === m.guid
+  const isSaved = savedCanon === m.guid
   // при рассинхроне подсвечиваем цену, отличную от минимальной живой (переоценённый дубль)
   const desync = spread.length > 1 && m.price != null && !m.marked && m.price !== Math.min(...spread)
   return (
     <tr className={cn('border-b border-border/20', m.marked && 'opacity-55',
-      isRec && 'bg-emerald-500/5')}>
+      isSaved ? 'bg-emerald-500/10' : isRec && 'bg-emerald-500/5')}>
       <td className="py-1 pr-2">
-        <button onClick={() => onCanon(m.guid)} title="Сделать каноном (хозяином группы)"
+        <button onClick={() => onCanon(m.guid)}
+          title={isSaved ? 'Канон группы — выбор сохранён' : isCanon ? 'Выбрано каноном, но ещё не сохранено — нажмите «Сохранить»' : 'Сделать каноном (хозяином группы)'}
           className={cn('inline-flex size-4 items-center justify-center rounded-full border',
-            isCanon ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-border hover:border-emerald-400')}>
+            isCanon && isSaved ? 'border-emerald-500 bg-emerald-500 text-white'
+              : isCanon ? 'border-emerald-400/70 border-dashed text-emerald-300'
+              : 'border-border hover:border-emerald-400')}>
           {isCanon && <Check className="size-3" />}
         </button>
       </td>
@@ -245,7 +266,8 @@ function MemberRow({ m, canon, onCanon, spread, recommended }: {
             <ShoppingCart className="size-2.5" />продаётся {Math.round(m.soldQty ?? 0)}
           </span>
         )}
-        {isRec && <span className="ml-1 rounded bg-emerald-600/80 px-1 text-[9px] text-white">канон по продажам</span>}
+        {isSaved && <span className="ml-1 rounded bg-emerald-600/80 px-1 text-[9px] text-white" title="Выбор канона сохранён">канон · сохранён</span>}
+        {isRec && !isSaved && <span className="ml-1 rounded bg-emerald-500/15 px-1 text-[9px] text-emerald-300" title="Рекомендация по факту продаж — станет каноном после «Сохранить»">канон по продажам</span>}
       </td>
       <td className={cn('py-1 pr-2 text-right tabular-nums whitespace-nowrap', desync && 'font-semibold text-red-400')} title={desync ? 'Цена отличается от минимальной в группе' : undefined}>
         {fmtPrice(m.price)}
