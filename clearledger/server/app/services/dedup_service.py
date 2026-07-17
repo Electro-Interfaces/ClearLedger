@@ -134,6 +134,19 @@ async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
 
 
 # ── разрез «контур станции 208» ──────────────────────────────────────────────
+def cb_status(card: DedupCard, cb: dict) -> str:
+    """Связь карточки с центральной базой: ok (есть, код тот же) | missing (в ЦБ
+    нет — заведена локально и не уехала) | code_diff (код разошёлся по существу).
+    Пробелы в коде не считаем расхождением: они одинаково мусорят в обоих
+    источниках (« Cosmos») — это дефект самих данных, а не рассинхрон с ЦБ."""
+    c = cb.get(card.guid)
+    if c is None:
+        return "missing"
+    if (card.code or "").strip() != (c.code or "").strip():
+        return "code_diff"
+    return "ok"
+
+
 def in_scope_208(members, codes_by_card: dict[str, list[dict]]) -> bool:
     """Группа в контуре 208, если касса 208 через неё реально работает: активный
     код склада 208 на любой карточке либо продажи. Мёртвые карточки (кофе-напитки,
@@ -188,6 +201,12 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
                        if len({x.price for x in v if not x.marked and x.price}) > 1)
     updated = max((c.updated_at for c in cards if c.updated_at), default=None)
 
+    # связь с ЦБ: интересна не галочка «есть» (у 99,96%), а аномалии
+    cb_cards = {c.guid: c for c in (await db.execute(select(DedupCard).where(
+        DedupCard.company_id == cid, DedupCard.source == "cb"))).scalars().all()}
+    cb_missing = sum(1 for c in cards if cb_status(c, cb_cards) == "missing")
+    cb_code_diff = sum(1 for c in cards if cb_status(c, cb_cards) == "code_diff")
+
     # мост кассы
     binds = (await db.execute(select(DedupNsBinding).where(
         DedupNsBinding.company_id == cid, DedupNsBinding.active.is_(True)))).scalars().all()
@@ -205,8 +224,8 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         "priceDesyncGroups": price_desync,
         "assortmentCards": sum(1 for c in cards if c.is_assortment),
         "nsActive": len(binds), "nsOnMarked": on_marked, "multiCodeCards": multi_code_cards,
-        "cbLinked": (await db.execute(select(func.count()).select_from(DedupCard).where(
-            DedupCard.company_id == cid, DedupCard.source == "cb"))).scalar() or 0,
+        "cbLinked": len(cb_cards),
+        "cbMissing": cb_missing, "cbCodeDiff": cb_code_diff,
         "updatedAt": updated.isoformat() if updated else None,
     }
 
@@ -220,7 +239,9 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
         DedupCard.company_id == cid, DedupCard.source == "local208"))).scalars().all()
     # привязки кассы по карточке (для отметки «касса бьёт сюда»)
     codes_by_card = await _codes_by_card(db, cid)
-    # ЦБ-карточки по guid (гибрид)
+    # ЦБ-карточки по guid: база 208 — узел РИБ центральной, номенклатура общая,
+    # поэтому в ЦБ есть 7238 из 7241 (99,96%) и код совпадает у 7236. Галочка
+    # «есть в ЦБ» стоит почти у всех и не различает ничего — показываем аномалию.
     cb = {c.guid: c for c in (await db.execute(select(DedupCard).where(
         DedupCard.company_id == cid, DedupCard.source == "cb"))).scalars().all()}
     # статусы групп
@@ -263,7 +284,7 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
                 "price": m.price, "soldQty": m.sold_qty,
                 "sellsNow": bool(m.sold_qty and m.sold_qty > 0),
                 "nsCodes": mcodes, "nsActive": any(x["active"] for x in mcodes),
-                "inCb": m.guid in cb,
+                "inCb": m.guid in cb, "cbStatus": cb_status(m, cb),
             })
         # рекомендуемый канон = ЖИВАЯ карточка с макс. продажами (что реально бьёт касса)
         selling = [m for m in members if not m.marked and m.sold_qty and m.sold_qty > 0]

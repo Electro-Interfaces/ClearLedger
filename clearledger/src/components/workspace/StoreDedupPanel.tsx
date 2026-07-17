@@ -173,7 +173,7 @@ function GroupCard({ g }: { g: DedupGroup }) {
                   <th className="py-1 pr-2 font-medium">Наименование</th>
                   <th className="py-1 pr-2 font-medium text-right">Цена</th>
                   <th className="py-1 pr-2 font-medium">Коды кассы</th>
-                  <th className="py-1 pr-2 font-medium">ЦБ</th>
+                  <th className="py-1 pr-2 font-medium" title="Связь с центральной базой. База 208 — узел РИБ ЦБ, поэтому карточка есть в ЦБ почти всегда (7238 из 7241) и код совпадает — отмечаем только аномалии">Связь с ЦБ</th>
                   <th className="py-1 pr-2 font-medium">Статус карт.</th>
                 </tr>
               </thead>
@@ -261,7 +261,17 @@ function MemberRow({ m, canon, onCanon, spread, recommended }: {
         ))}
         {m.marked && m.nsActive && <span className="ml-1 rounded bg-red-500/20 px-1 text-[9px] text-red-300">касса бьёт удалённую!</span>}
       </td>
-      <td className="py-1 pr-2">{m.inCb ? <Check className="size-3.5 text-emerald-400" /> : <span className="text-muted-foreground/40">—</span>}</td>
+      <td className="py-1 pr-2 text-[11px]">
+        {m.cbStatus === 'missing' ? (
+          <Badge variant="outline" className="border-amber-400/50 text-[9px] text-amber-300/80"
+            title="Карточки нет в центральной базе: заведена локально на 208 и в ЦБ не уехала">нет в ЦБ</Badge>
+        ) : m.cbStatus === 'code_diff' ? (
+          <Badge variant="outline" className="border-amber-400/50 text-[9px] text-amber-300/80"
+            title="Код карточки в ЦБ отличается от локального — рассинхрон нумерации">код ≠ ЦБ</Badge>
+        ) : (
+          <Check className="size-3.5 text-muted-foreground/40" aria-label="есть в ЦБ, код тот же" />
+        )}
+      </td>
       <td className="py-1 pr-2 text-[11px] text-muted-foreground">{m.marked ? 'на удаление' : 'активна'}</td>
     </tr>
   )
@@ -521,12 +531,14 @@ export function StoreDedupPanel() {
 
       {/* KPI */}
       {sum && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8">
           <Kpi label="Карточек 208" value={fmt(sum.cardsTotal)} hint={`008:${fmt(sum.byPrefix['008'])} · 208:${fmt(sum.byPrefix['208'])} · ЦБ:${fmt(sum.byPrefix['ЦБ'])}`} />
           <Kpi label="Групп в контуре 208" value={fmt(sum.scopedGroups)} hint={`из ${fmt(sum.dupGroups)} · вне контура ${fmt(sum.outOfScopeGroups)}`} />
           <Kpi label="Рассинхрон цен" value={fmt(sum.priceDesyncGroups)} hint="разные цены, касса 208 бьёт" warn={(sum.priceDesyncGroups ?? 0) > 0} />
           <Kpi label="В ассортименте" value={fmt(sum.assortmentCards)} hint="не дубли (исключены)" />
-          <Kpi label="Привязок кассы" value={fmt(sum.nsActive)} hint={`с ЦБ-склейкой ${fmt(sum.cbLinked)}`} />
+          <Kpi label="Привязок кассы" value={fmt(sum.nsActive)} hint="активных кодов НС" />
+          <Kpi label="Нет в ЦБ" value={fmt(sum.cbMissing)} warn={(sum.cbMissing ?? 0) > 0}
+            hint={sum.cbCodeDiff ? `код разошёлся: ${fmt(sum.cbCodeDiff)}` : 'заведены локально'} />
           <Kpi label="Касса → удалён." value={fmt(sum.nsOnMarked)} hint="бьёт помеченную" warn={(sum.nsOnMarked ?? 0) > 0} />
           <Kpi label="Карт. ≥2 кодов" value={fmt(sum.multiCodeCards)} hint="несколько кодов кассы" />
         </div>

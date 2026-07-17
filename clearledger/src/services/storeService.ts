@@ -672,6 +672,8 @@ export interface DedupSummary {
   scopedGroups: number; outOfScopeGroups: number
   priceDesyncGroups: number
   nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
+  /** Аномалии связи с ЦБ: карточка заведена локально и не уехала / код разошёлся. */
+  cbMissing: number; cbCodeDiff: number
   updatedAt: string | null
 }
 /** Код кассы живёт в разрезе склада: один и тот же код на другом складе — другой товар. */
@@ -681,6 +683,9 @@ export interface DedupMember {
   marked: boolean; group: string | null; price: number | null
   soldQty: number | null; sellsNow: boolean
   nsCodes: DedupNsCode[]; nsActive: boolean; inCb: boolean
+  /** База 208 — узел РИБ центральной, поэтому «есть в ЦБ» верно для 99,96%.
+   *  Значение несёт только аномалия. */
+  cbStatus: 'ok' | 'missing' | 'code_diff'
 }
 export interface DedupGroup {
   key: string; title: string; count: number; live: number; assortment: boolean
