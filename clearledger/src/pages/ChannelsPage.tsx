@@ -70,7 +70,20 @@ function ChannelListItem({ channel, onDelete }: { channel: Channel; onDelete: ()
           </span>
           <span>{cuts} разрез{cuts === 1 ? '' : 'ов'} учёта</span>
           {reconcilable > 0 && <span className="text-emerald-500">{reconcilable} сверяемых</span>}
-          <span>Документов: {channel.docsLoaded}</span>
+          {/* docs_loaded накапливается ТОЛЬКО прогонами канала (channels_router:381).
+              Данные могли прийти импортом или переносом — тогда счётчик честно
+              нулевой, но «Документов: 0» рядом с непустой нормализацией читается
+              как «данных нет». Показываем происхождение числа, а не голый ноль. */}
+          {channel.docsLoaded > 0 ? (
+            <span>Принято прогонами: {channel.docsLoaded}</span>
+          ) : (
+            <span
+              className="text-muted-foreground/70"
+              title="Счётчик считает документы, принятые прогонами этого канала. Данные могли попасть в систему другим путём — импортом или переносом."
+            >
+              Прогонов не было
+            </span>
+          )}
           {channel.lastSync && (
             <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{format(new Date(channel.lastSync), 'dd.MM HH:mm')}</span>
           )}

@@ -118,7 +118,14 @@ function MockReconTable({ data }: { data: MockRecon }) {
 
 function EnergyCutView({ tab }: { tab: string }) {
   const cut = energyCut(tab)
-  if (!cut) return <DashboardView />
+  // Неизвестный ключ разреза — у energy обзор рисует EnergyDashboardView выше,
+  // сюда попадаем только при рассинхроне меню; показываем пустое состояние.
+  if (!cut) return (
+    <div className="flex h-full flex-col items-center justify-center gap-3">
+      <GitCompare className="h-10 w-10 text-muted-foreground/30" />
+      <p className="text-sm font-medium text-muted-foreground">Выберите разрез в меню слева</p>
+    </div>
+  )
   const channels = channelsForCut(cut.id)
   const statusMeta = PIPE_STATUS_META[cut.status]
   const mock = ENERGY_MOCK_RECON[cut.id]
@@ -163,14 +170,87 @@ function EnergyCutView({ tab }: { tab: string }) {
   )
 }
 
-function DashboardView() {
+/**
+ * Обзор разрезов для топливного профиля.
+ *
+ * Раньше здесь была заглушка «Выберите тип сверки в меню слева»: пункт «Обзор»
+ * подсвечен как активный, а холст пуст — экран выглядел сломанным. Теперь он
+ * отвечает на вопрос, ради которого сюда заходят: что уже сверяется, что нет
+ * и чего именно не хватает.
+ */
+function FuelDashboardView({ items, onSelect }: { items: CentralMenuItem[]; onSelect: (key: string) => void }) {
+  const cuts = items.filter((i) => i.key !== 'dashboard')
+  const ready = cuts.filter((c) => !c.disabled)
+  const pending = cuts.filter((c) => c.disabled)
+
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-3">
-      <GitCompare className="h-10 w-10 text-muted-foreground/30" />
-      <p className="text-sm font-medium text-muted-foreground">Сверка данных</p>
-      <p className="text-xs text-muted-foreground text-center max-w-md">
-        Выберите тип сверки в меню слева
-      </p>
+    <div className="space-y-5 p-6">
+      <div>
+        <h2 className="text-base font-semibold">Сверка данных · обзор разрезов</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Разрез — сопоставление потока канала с контрольным источником. Готов к сверке тот,
+          у которого есть и подключённый источник, и вид сверки.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-border/60 p-3">
+          <div className="text-xs text-muted-foreground">Всего разрезов</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums">{cuts.length}</div>
+        </div>
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+          <div className="text-xs text-muted-foreground">Готовы к сверке</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{ready.length}</div>
+        </div>
+        <div className="rounded-lg border border-border/60 p-3">
+          <div className="text-xs text-muted-foreground">Не настроены</div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums text-muted-foreground">{pending.length}</div>
+        </div>
+      </div>
+
+      {ready.length > 0 && (
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Можно сверять</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {ready.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => onSelect(c.key)}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{c.label}</span>
+                  {c.group ? <span className="block truncate text-[11px] text-muted-foreground">{c.group}</span> : null}
+                </span>
+                <GitCompare className="size-4 shrink-0 text-muted-foreground/50" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {pending.length > 0 && (
+        <div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Ждут настройки · {pending.length}
+          </div>
+          <div className="rounded-lg border border-border/60 divide-y divide-border/60">
+            {pending.map((c) => (
+              <div key={c.key} className="flex items-center justify-between gap-3 px-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm">{c.label}</span>
+                  {c.group ? <span className="block truncate text-[11px] text-muted-foreground">{c.group}</span> : null}
+                </span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">нет источника или вида сверки</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground/70">
+            Источник разреза подключается в карточке канала — «Коннекторы» → канал → «Настройки».
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -649,7 +729,7 @@ export function ReconciliationPanel() {
   const activeKey = menuKeys.includes(tab) ? tab : menuKeys[0]
 
   function renderFuelCut(key: string): React.ReactNode {
-    if (key === 'dashboard') return <DashboardView />
+    if (key === 'dashboard') return <FuelDashboardView items={menu} onSelect={setTab} />
     // Динамический ключ `${channelId}:${docType}` → вид по каналу/типу.
     if (key.includes(':')) {
       const [chId, docType] = key.split(':')
