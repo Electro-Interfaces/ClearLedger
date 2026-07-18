@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test'
  */
 
 async function goToCategoryAndOpenEntry(page: import('@playwright/test').Page) {
-  await page.goto('/')
+  await page.goto('./')
   await page.waitForLoadState('networkidle')
   await page.getByRole('link', { name: /Первичные документы/i }).first().click()
   await page.waitForLoadState('networkidle')
@@ -41,7 +41,7 @@ test.describe('Версионность документов', () => {
   })
 
   test('Чекбокс «Показать все версии» в DataCategoryPage', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     await page.waitForLoadState('networkidle')
 
     await page.getByRole('link', { name: /Первичные документы/i }).first().click()

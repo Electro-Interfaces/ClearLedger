@@ -35,3 +35,7 @@ nul
 
 # Локальные аудит-скрипты с секретами (.token) — не коммитить
 undefined/
+
+# Артефакты Playwright (скриншоты и трейсы падений)
+test-results/
+playwright-report/

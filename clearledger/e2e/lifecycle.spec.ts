@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test'
 
 // Хелпер: перейти в категорию и дождаться таблицы
 async function goToCategory(page: import('@playwright/test').Page) {
-  await page.goto('/')
+  await page.goto('./')
   await page.waitForLoadState('networkidle')
   await page.getByRole('link', { name: /Первичные документы/i }).first().click()
   await page.waitForLoadState('networkidle')

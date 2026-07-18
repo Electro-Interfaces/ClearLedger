@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Валидация документов', () => {
   test('Кнопка «Верифицировать» disabled при пустых обязательных полях', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     await page.waitForLoadState('networkidle')
 
     // Переходим в Inbox
@@ -33,7 +33,7 @@ test.describe('Валидация документов', () => {
   })
 
   test('Валидационный бейдж на DataDetailPage', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     await page.waitForLoadState('networkidle')
 
     // Переходим в категорию

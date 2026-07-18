@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test'
 // ---- Helpers ----
 
 async function goToCategory(page: import('@playwright/test').Page) {
-  await page.goto('/')
+  await page.goto('./')
   await page.waitForLoadState('networkidle')
   await page.getByRole('link', { name: /Первичные документы/i }).first().click()
   await page.waitForLoadState('networkidle')
@@ -24,7 +24,7 @@ async function openFirstEntry(page: import('@playwright/test').Page) {
 
 test.describe('Аудит-лог в MetadataPanel', () => {
   test('Журнал изменений появляется после верификации', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     await page.waitForLoadState('networkidle')
 
     // Перейти во Входящие и верифицировать запись
@@ -65,14 +65,14 @@ test.describe('Аудит-лог в MetadataPanel', () => {
 
 test.describe('Страница отчётов', () => {
   test('Маршрут /reports загружается', async ({ page }) => {
-    await page.goto('/reports')
+    await page.goto('reports')
     await page.waitForLoadState('networkidle')
 
     await expect(page.getByText(/Отчёты/i).first()).toBeVisible({ timeout: 5000 })
   })
 
   test('Селектор периода работает', async ({ page }) => {
-    await page.goto('/reports')
+    await page.goto('reports')
     await page.waitForLoadState('networkidle')
 
     // Кликнуть на селектор периода
@@ -89,7 +89,7 @@ test.describe('Страница отчётов', () => {
   })
 
   test('Ссылка «Отчёты» в сайдбаре', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('./')
     await page.waitForLoadState('networkidle')
 
     const reportsLink = page.getByRole('link', { name: /Отчёты/i })
@@ -99,7 +99,7 @@ test.describe('Страница отчётов', () => {
   })
 
   test('Кнопка экспорт открывает модальное окно', async ({ page }) => {
-    await page.goto('/reports')
+    await page.goto('reports')
     await page.waitForLoadState('networkidle')
 
     await page.getByRole('button', { name: /Экспорт/i }).click()
@@ -160,7 +160,7 @@ test.describe('PaginationWrapper', () => {
 
 test.describe('AdvancedFilters на SearchPage', () => {
   test('Фильтры сворачиваются/разворачиваются', async ({ page }) => {
-    await page.goto('/search')
+    await page.goto('search')
     await page.waitForLoadState('networkidle')
 
     // Кнопка «Фильтры»
@@ -179,7 +179,7 @@ test.describe('AdvancedFilters на SearchPage', () => {
   })
 
   test('Подсветка поисковых терминов', async ({ page }) => {
-    await page.goto('/search')
+    await page.goto('search')
     await page.waitForLoadState('networkidle')
 
     const searchInput = page.getByPlaceholder(/Поиск по документам/i)
