@@ -63,9 +63,16 @@ class NetServiceAnalytics:
         self.db = db
 
     async def network_health(self, f: NetServiceFilter) -> dict[str, Any]:
-        """Снимок состояния сети: открытые/просроченные + воронка + срезы + карта."""
+        """Снимок состояния сети: открытые/просроченные + воронка + срезы + карта.
+
+        Период НАМЕРЕННО не применяется к открытым заявкам: фильтр по ts_created
+        скрыл бы давно открытые (а именно они — проблема). Чтобы селектор периода
+        не выглядел работающим вхолостую, отдаём это явно в `period.applied=false`
+        и добавляем period-зависимую метрику `createdInPeriod`.
+        """
         where, p = _conds(f, period=False)
         base = f"FROM hubex_tasks t WHERE {where}"
+        where_p, p_period = _conds(f, period=True)
 
         kpi = (await self.db.execute(text(
             f"SELECT count(*) total, "
@@ -73,6 +80,9 @@ class NetServiceAnalytics:
             f"count(*) FILTER (WHERE t.ts_closed IS NULL AND t.ts_deadline < now()) overdue, "
             f"count(*) FILTER (WHERE t.ts_closed IS NULL AND t.assignee IS NULL) unassigned "
             f"{base}"), p)).mappings().one()
+
+        created_in_period = (await self.db.execute(text(
+            f"SELECT count(*) FROM hubex_tasks t WHERE {where_p}"), p_period)).scalar_one()
 
         funnel = (await self.db.execute(text(
             f"SELECT coalesce(t.stage,'—') stage, count(*) n {base} "
@@ -112,7 +122,15 @@ class NetServiceAnalytics:
             })
 
         return {
-            "kpi": dict(kpi),
+            # applied=false — все блоки ниже, кроме createdInPeriod, считаны «на сейчас».
+            "period": {
+                "from": f.date_from.isoformat(), "to": f.date_to.isoformat(),
+                "applied": False,
+                "note": "Снимок открытых заявок на текущий момент — период создания "
+                        "не применяется (иначе выпадут давно открытые). "
+                        "По периоду считается только «Создано за период».",
+            },
+            "kpi": {**dict(kpi), "createdInPeriod": int(created_in_period)},
             "funnel": [dict(r) for r in funnel],
             "byType": [dict(r) for r in by_type],
             "byCriticality": [dict(r) for r in by_crit],
@@ -187,8 +205,15 @@ class NetServiceAnalytics:
 
     async def tasks_list(self, f: NetServiceFilter, *, status: str = "all",
                          q: str | None = None, limit: int = 50, offset: int = 0) -> dict[str, Any]:
-        """Рабочий список заявок с фильтрами и пагинацией."""
-        where, p = _conds(f, period=False)
+        """Рабочий список заявок с фильтрами и пагинацией.
+
+        Период применяется по ts_created (раньше принимался и выбрасывался — селектор
+        периода не делал ничего). Исключение — status=open/overdue: незакрытая заявка
+        живёт вне периода создания, отсечь её по ts_created значило бы спрятать самое
+        проблемное. Что применено фактически — в `period.applied` ответа.
+        """
+        period_applied = status not in ("open", "overdue")
+        where, p = _conds(f, period=period_applied)
         extra = ""
         if status == "open":
             extra += " AND t.ts_closed IS NULL"
@@ -211,4 +236,14 @@ class NetServiceAnalytics:
             f"t.ts_created, t.ts_deadline, t.ts_closed, t.is_overdue "
             f"{base} ORDER BY t.ts_created DESC NULLS LAST LIMIT :lim OFFSET :off"),
             p)).mappings().all()
-        return {"total": total, "rows": [dict(r) for r in rows]}
+        return {
+            "period": {
+                "from": f.date_from.isoformat(), "to": f.date_to.isoformat(),
+                "applied": period_applied,
+                "note": None if period_applied else
+                        "Незакрытые заявки показаны вне периода создания — "
+                        "иначе давно открытые выпадут из списка.",
+            },
+            "total": total,
+            "rows": [dict(r) for r in rows],
+        }

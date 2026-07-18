@@ -20,6 +20,7 @@ from app.schemas import (
     RejectBody,
     TransferBody,
 )
+from app.utils import day_end, day_start
 
 router = APIRouter(prefix="/entries", tags=["Записи"])
 
@@ -160,12 +161,12 @@ async def list_entries(
         count_query = count_query.where(search_filter)
 
     if date_from:
-        query = query.where(DataEntry.created_at >= date_from)
-        count_query = count_query.where(DataEntry.created_at >= date_from)
+        query = query.where(DataEntry.created_at >= day_start(date_from))
+        count_query = count_query.where(DataEntry.created_at >= day_start(date_from))
 
     if date_to:
-        query = query.where(DataEntry.created_at <= date_to)
-        count_query = count_query.where(DataEntry.created_at <= date_to)
+        query = query.where(DataEntry.created_at <= day_end(date_to))
+        count_query = count_query.where(DataEntry.created_at <= day_end(date_to))
 
     # Общее количество
     total_result = await db.execute(count_query)

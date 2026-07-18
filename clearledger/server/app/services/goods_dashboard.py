@@ -1096,8 +1096,12 @@ class GoodsDashboardService:
             "summary": {"count": len(rows), "revenue": round(sum(r["revenue"] for r in rows), 2)},
         }
 
-    # ── Штрихкоды (справочник, не по периоду) ──
-    async def barcodes(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
+    # ── Штрихкоды (справочник-снимок, не по периоду) ──
+    async def barcodes(self) -> dict:
+        """Снимок справочника штрихкодов ЦБ (cb_barcode). У сущности нет ни даты, ни
+        станции — период/станции неприменимы и раньше принимались вхолостую
+        (разные периоды давали одинаковый ответ). Параметры убраны, чтобы UI не
+        показывал фильтр, который ничего не делает."""
         rows = (await self.session.execute(select(CbBarcode).where(
             CbBarcode.company_id == self.company_id))).scalars().all()
         by_type: dict[str, int] = defaultdict(int)
@@ -1611,16 +1615,41 @@ class GoodsDashboardService:
         agg: dict[str, dict] = defaultdict(lambda: {"rev": 0.0, "net": 0.0, "vat": 0.0, "qty": 0.0, "skus": set(), "label": ""})
         shifts = len(sale_metas)
 
+        # Что реально применено к выборке этого разреза (шапка UI не должна показывать
+        # фильтр активным, если разрез его не поддерживает).
+        applied = {"category": category, "marked": marked, "q": q}
+        ignored: list[str] = []
+
         # payment — по секции оплат, не по строкам товаров
         if group_by == "payment":
+            # Разрез «форма оплаты» товарного измерения не имеет: строка оплаты не несёт
+            # ни номенклатуры, ни категории. Товарные фильтры к нему неприменимы —
+            # раньше они молча игнорировались, но возвращались как применённые.
+            for name, val, default in (("category", category, "all"), ("marked", marked, "all"), ("q", ql, "")):
+                if val != default:
+                    ignored.append(name)
+            applied = {"category": "all", "marked": "all", "q": ""}
+
             for m in sale_metas:
-                for o in ((m.get("Секции") or {}).get("оплаты") or {}).get("строки") or []:
+                sec = m.get("Секции") or {}
+                pay_lines = (sec.get("оплаты") or {}).get("строки") or []
+                pay_sum = sum(float(o.get("Сумма") or 0) for o in pay_lines)
+                # НДС берём фактический — из товарных строк смены (СуммаНДС), не по
+                # фиксированной ставке 22%: у товаров бывает 10%/0%. Разносим НДС смены
+                # на формы оплаты пропорционально суммам → итог сходится с товарным разрезом.
+                shift_vat = sum(
+                    float(ln.get("СуммаНДС") or 0)
+                    for sec_key, _ in _SECTIONS
+                    for ln in (sec.get(sec_key) or {}).get("строки") or []
+                )
+                for o in pay_lines:
                     kanon = str(o.get("ФормаОплатыКанон") or o.get("ФормаОплаты") or "—")
                     amt = float(o.get("Сумма") or 0)
+                    vat = shift_vat * amt / pay_sum if pay_sum else 0.0
                     a = agg[kanon]
                     a["rev"] += amt
-                    a["net"] += amt * 100.0 / 122.0
-                    a["vat"] += amt - amt * 100.0 / 122.0
+                    a["net"] += amt - vat
+                    a["vat"] += vat
                     a["label"] = kanon
         else:
             for m in sale_metas:
@@ -1695,7 +1724,10 @@ class GoodsDashboardService:
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
             "group_by": group_by,
-            "filters": {"category": category, "marked": marked, "q": q},
+            # filters — что РЕАЛЬНО применено; filters_ignored — запрошенные, но
+            # неприменимые в этом разрезе (UI обязан показать их снятыми/недоступными).
+            "filters": applied,
+            "filters_ignored": ignored,
             "groups": groups,
             "summary": {
                 "revenue": round(sum(a["rev"] for a in agg.values()), 2),

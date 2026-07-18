@@ -7,7 +7,7 @@ import io
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from sqlalchemy import select
@@ -24,27 +24,47 @@ router = APIRouter(prefix="/export", tags=["Экспорт"])
 # Утилиты
 # ---------------------------------------------------------------------------
 
-async def _fetch_entries(
+async def _export_company_id(
     db: AsyncSession,
     current_user: User,
-    company_id: str | None = None,
-    status_filter: str | None = None,
-    fallback_company_id: uuid.UUID | None = None,
-) -> list[DataEntry]:
-    """Получает записи для экспорта."""
-    query = select(DataEntry)
+    company_id: str | None,
+) -> uuid.UUID:
+    """Компания выгрузки. Обязательна: user.company_id nullable, а раньше при NULL
+    фильтр не ставился вовсе и выгружались DataEntry ВСЕХ тенантов."""
     if company_id:
-        cid = await assert_company_member(company_id, current_user, db)
-    else:
-        cid = fallback_company_id
-    if cid:
-        query = query.where(DataEntry.company_id == cid)
+        return await assert_company_member(company_id, current_user, db)
+    if current_user.company_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Компания не определена: укажите company_id для выгрузки",
+        )
+    return current_user.company_id
+
+
+async def _fetch_entries(
+    db: AsyncSession,
+    cid: uuid.UUID,
+    status_filter: str | None = None,
+) -> list[DataEntry]:
+    """Получает записи для экспорта. Фильтр по компании — всегда."""
+    query = select(DataEntry).where(DataEntry.company_id == cid)
     if status_filter and status_filter != "all":
         query = query.where(DataEntry.status == status_filter)
 
     query = query.order_by(DataEntry.created_at.desc())
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+def _audit(db: AsyncSession, cid: uuid.UUID, current_user: User, details: str) -> None:
+    """Аудит выгрузки. Пишется всегда — раньше пропускался, когда company_id не передан."""
+    db.add(AuditEvent(
+        company_id=cid,
+        user_id=str(current_user.id),
+        user_name=current_user.name,
+        action="exported",
+        details=details,
+    ))
 
 
 def _entry_to_dict(entry: DataEntry) -> dict:
@@ -103,21 +123,10 @@ async def export_json(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в JSON (массив объектов)."""
-    entries = await _fetch_entries(db, current_user, company_id, status, current_user.company_id)
+    cid = await _export_company_id(db, current_user, company_id)
+    entries = await _fetch_entries(db, cid, status)
     data = [_entry_to_dict(e) for e in entries]
-
-    # Аудит экспорта
-    cid = await assert_company_member(company_id, current_user, db) if company_id else None
-    if cid:
-        event = AuditEvent(
-            company_id=cid,
-            user_id=str(current_user.id),
-            user_name=current_user.name,
-            action="exported",
-            details=f"Экспорт JSON: {len(data)} записей",
-        )
-        db.add(event)
-
+    _audit(db, cid, current_user, f"Экспорт JSON: {len(data)} записей")
     return data
 
 
@@ -133,7 +142,8 @@ async def export_excel(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в Excel (.xlsx)."""
-    entries = await _fetch_entries(db, current_user, company_id, status, current_user.company_id)
+    cid = await _export_company_id(db, current_user, company_id)
+    entries = await _fetch_entries(db, cid, status)
 
     wb = Workbook()
     ws = wb.active
@@ -166,17 +176,7 @@ async def export_excel(
     wb.save(buffer)
     buffer.seek(0)
 
-    # Аудит
-    cid = await assert_company_member(company_id, current_user, db) if company_id else None
-    if cid:
-        event = AuditEvent(
-            company_id=cid,
-            user_id=str(current_user.id),
-            user_name=current_user.name,
-            action="exported",
-            details=f"Экспорт Excel: {len(entries)} записей",
-        )
-        db.add(event)
+    _audit(db, cid, current_user, f"Экспорт Excel: {len(entries)} записей")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"clearledger_{timestamp}.xlsx"
@@ -200,7 +200,8 @@ async def export_csv(
     current_user: User = Depends(get_current_user),
 ):
     """Экспорт в CSV (UTF-8 с BOM для Excel)."""
-    entries = await _fetch_entries(db, current_user, company_id, status, current_user.company_id)
+    cid = await _export_company_id(db, current_user, company_id)
+    entries = await _fetch_entries(db, cid, status)
 
     buffer = io.StringIO()
     # BOM для корректного открытия кириллицы в Excel
@@ -218,17 +219,7 @@ async def export_csv(
     for entry in entries:
         writer.writerow(_entry_to_dict(entry))
 
-    # Аудит
-    cid = await assert_company_member(company_id, current_user, db) if company_id else None
-    if cid:
-        event = AuditEvent(
-            company_id=cid,
-            user_id=str(current_user.id),
-            user_name=current_user.name,
-            action="exported",
-            details=f"Экспорт CSV: {len(entries)} записей",
-        )
-        db.add(event)
+    _audit(db, cid, current_user, f"Экспорт CSV: {len(entries)} записей")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"clearledger_{timestamp}.csv"

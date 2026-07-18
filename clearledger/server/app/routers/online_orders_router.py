@@ -2,8 +2,8 @@
 
 Внешний источник входного контура для сверки ОНЛАЙН-КАНАЛА сменного отчёта.
 Данные тянет серверный прокси `reconciliation_proxy.msto_transactions`
-(креды MSTO — в settings, JWT кэшируется). Ingest идемпотентен по `external_id`
-(MSTO sessionId). Журнал отдаётся на вкладку «Данные» канала.
+(креды MSTO — в источнике КОМПАНИИ, JWT кэшируется). Ingest идемпотентен по
+`external_id` (MSTO sessionId). Журнал отдаётся на вкладку «Данные» канала.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -195,7 +195,8 @@ async def ingest_online_orders(
                     "page": page,
                     "size": size,
                 }
-                data = await reconciliation_proxy.msto_transactions(point_query, conn=conn)
+                data = await reconciliation_proxy.msto_transactions(
+                    point_query, conn=conn, company_id=company_id)
                 point_models = data.get("models") if isinstance(data, dict) else data
                 models = point_models if isinstance(point_models, list) else []
                 for tx in models:
@@ -218,7 +219,7 @@ async def ingest_online_orders(
                 raise first_error
         models = [tx for result in successful for tx in result]
     else:
-        data = await reconciliation_proxy.msto_transactions(query, conn=conn)
+        data = await reconciliation_proxy.msto_transactions(query, conn=conn, company_id=company_id)
         models = data.get("models") if isinstance(data, dict) else data
         models = models if isinstance(models, list) else []
     sp_to_station, fuel_to_code = await _build_resolvers(db, company_id)
@@ -336,6 +337,9 @@ async def refresh_online_orders(
 ):
     """Обновить локальный журнал из MSTO для монитора онлайн-заказов."""
     cid = await assert_company_member(company_id, user, db) if company_id else user.company_id
+    if cid is None:
+        # Без компании ingest писал бы заказы в неопределённый скоуп.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Компания не определена")
     selected_station_code = station_code if station_code and station_code != "all" else None
     service_point_ids = await _company_service_point_ids(db, cid, selected_station_code)
     if not service_point_ids:
@@ -365,7 +369,10 @@ async def refresh_online_orders(
         overlap = (latest - timedelta(days=2)).date().isoformat()
         sync_from = max(date_from, overlap) if date_from else overlap
 
-    result = await ingest_online_orders(db, cid, sync_from, date_to, service_point_ids)
+    try:
+        result = await ingest_online_orders(db, cid, sync_from, date_to, service_point_ids)
+    except reconciliation_proxy.MissingCompanyConnection as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     await db.commit()
     return {
         **result,
@@ -406,7 +413,8 @@ async def check_availability(
         sp_count = len(sp_models or [])
 
         data = await reconciliation_proxy.msto_transactions(
-            {"operationResult": "sw", "dateFrom": df, "dateTo": dt}, conn=conn
+            {"operationResult": "sw", "dateFrom": df, "dateTo": dt},
+            conn=conn, company_id=user.company_id,
         )
         models = data.get("models") if isinstance(data, dict) else (data if isinstance(data, list) else [])
         models = models or []

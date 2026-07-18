@@ -3,7 +3,6 @@ CRUD для коннекторов (интеграции с внешними с�
 """
 
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -148,26 +147,23 @@ async def poll_connector(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Запустить синхронизацию (poll) коннектора.
-    В текущей версии — обновляет статусы и last_sync_at.
-    Реальный polling внешних систем — TODO.
+    """Запустить опрос коннектора — НЕ реализовано.
+
+    Раньше эндпоинт имитировал успех: ставил sync_status='syncing'→'synced',
+    писал last_sync_at и возвращал пустой список записей. UI рапортовал
+    «синхронизировано», не загрузив ничего — учётные данные молча не приезжали.
+
+    Реальный конвейер загрузки живёт на связке Источник→Канал→Поток
+    (services/channel_orchestrator.run_channel, POST /channels/{id}/run).
+    Сущность Connector в него не входит: адаптера у неё нет. До появления
+    привязки честно отвечаем 501 и НЕ трогаем статусы синхронизации.
     """
     conn = await _get_connector_or_404(connector_id, current_user, db)
-
-    now = datetime.now(timezone.utc)
-    conn.sync_status = "syncing"
-    conn.last_sync_at = now
-    await db.flush()
-
-    # TODO: реальный polling внешнего источника
-    # Пока — имитация успешной синхронизации
-    conn.sync_status = "synced"
-    conn.last_sync = now.isoformat()
-    await db.flush()
-
-    return {
-        "entries": [],
-        "synced_at": now.isoformat(),
-        "connector_id": str(conn.id),
-    }
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=(
+            f"Опрос не поддерживается для коннектора типа «{conn.type}»: "
+            "механизм загрузки не подключён. Используйте канал "
+            "(Источник→Канал→Поток, POST /api/channels/{id}/run)."
+        ),
+    )

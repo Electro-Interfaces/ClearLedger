@@ -25,7 +25,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import and_, case, distinct, func, select
+from sqlalchemy import String, and_, case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -619,12 +619,22 @@ class AnalyticsService:
                 return None
         return None
 
-    def _cs_conds(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None):
+    def _cs_conds(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None,
+                  *, station_id=None):
         """Условия WHERE для сессий: период + сужение по станциям/регионам + точечный dim-фильтр."""
         S = ChargeSession
         lo = datetime.combine(date_from, datetime.min.time())
         hi = datetime.combine(date_to, datetime.max.time())
         conds = [S.company_id == company_id, S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+        if station_id is not None:
+            # Дрилл-даун в одну станцию. У сессии станция хранится кодом (station_code),
+            # а station_id — UUID объекта из реестра АЗС: резолвим кодом через подзапрос.
+            # Раньше параметр принимался и молча игнорировался → сетевые итоги под
+            # именем одной ЭЗС.
+            conds.append(S.station_code.in_(
+                select(func.cast(FuelStation.code, String)).where(
+                    FuelStation.id == station_id, FuelStation.company_id == company_id)
+            ))
         if station_codes:
             conds.append(S.station_code.in_(station_codes))
         if regions:
@@ -641,7 +651,8 @@ class AnalyticsService:
         return func.concat(func.coalesce(S.station_code, ""), "|", func.coalesce(S.connector_no, ""))
 
     async def _cs_aggregate(self, company_id, date_from, date_to, group_by: str,
-                            station_codes=None, regions=None, dim_by=None, dim_val=None) -> list[Any]:
+                            station_codes=None, regions=None, dim_by=None, dim_val=None,
+                            *, station_id=None) -> list[Any]:
         S = ChargeSession
         gcol = self._cs_group_col(group_by)
         stmt = select(
@@ -662,22 +673,27 @@ class AnalyticsService:
                 else_=0)), 0).label("paid"),
             func.count(distinct(self._port_key())).label("ports"),
             func.count(distinct(S.station_code)).label("stations"),
-        ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)).group_by(gcol)
+        ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
+                                station_id=station_id)).group_by(gcol)
         rows = list((await self.session.execute(stmt)).all())
         if group_by == "station":
             rows = await self._relabel_station_rows(company_id, rows, "g")
         return rows
 
-    async def _cs_ports(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None) -> int:
+    async def _cs_ports(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None,
+                        *, station_id=None) -> int:
         """Число физических портов сети (distinct станция+коннектор) за период/сужение."""
         stmt = select(func.count(distinct(self._port_key()))).where(
-            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val))
+            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
+                            station_id=station_id))
         return int((await self.session.execute(stmt)).scalar_one() or 0)
 
-    async def _cs_stations(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None) -> int:
+    async def _cs_stations(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None,
+                           *, station_id=None) -> int:
         """Число уникальных станций сети (distinct station_code) за период/сужение."""
         stmt = select(func.count(distinct(ChargeSession.station_code))).where(
-            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val))
+            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
+                            station_id=station_id))
         return int((await self.session.execute(stmt)).scalar_one() or 0)
 
     @staticmethod
@@ -743,7 +759,7 @@ class AnalyticsService:
 
     async def _cs_aggregate_2d(
         self, company_id, date_from, date_to, bucket_by: str, series_by: str | None,
-        station_codes=None, regions=None, dim_by=None, dim_val=None,
+        station_codes=None, regions=None, dim_by=None, dim_val=None, *, station_id=None,
     ) -> list[Any]:
         """Сырые суммы по (бакет [× серия]). series_by=None → только колонка бакета."""
         S = ChargeSession
@@ -764,7 +780,8 @@ class AnalyticsService:
             sel.insert(1, scol.label("s"))
             groups.append(scol)
         stmt = select(*sel).where(
-            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val)
+            *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
+                            station_id=station_id)
         ).group_by(*groups)
         rows = list((await self.session.execute(stmt)).all())
         station_fields = [f for f, dim in (("b", bucket_by), ("s", series_by)) if dim == "station"]
@@ -840,7 +857,8 @@ class AnalyticsService:
         (2 доп. скана). Для разрезов, где вызывающий читает только `lines`
         (доли/профиль в overview), это экономит 2 полнотабличных distinct-скана."""
         period_days = (f.date_to - f.date_from).days + 1
-        rows = await self._cs_aggregate(f.company_id, f.date_from, f.date_to, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        rows = await self._cs_aggregate(f.company_id, f.date_from, f.date_to, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val,
+                                        station_id=f.station_id)
         lines = [self._cs_metrics(group_by, r, period_days) for r in rows]
         total_amount = sum(l["amount"] for l in lines)
         for l in lines:
@@ -859,8 +877,10 @@ class AnalyticsService:
         # порты сети — distinct (не сумма строк: для нефизических разрезов порт делят
         # сегменты). 2 доп. distinct-скана; пропускаем, если totals не нужны.
         if with_totals:
-            net_ports = await self._cs_ports(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
-            net_stations = await self._cs_stations(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+            net_ports = await self._cs_ports(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val,
+                                             station_id=f.station_id)
+            net_stations = await self._cs_stations(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val,
+                                                   station_id=f.station_id)
         else:
             net_ports = net_stations = 0
         port_min = net_ports * period_days * 1440
@@ -931,7 +951,8 @@ class AnalyticsService:
         series_by: str | None = None, metric: str = "amount", top_n: int = 5,
     ) -> dict[str, Any]:
         """Динамика метрики по бакетам времени; series_by → multi-series (топ-N + «Прочие»)."""
-        rows = await self._cs_aggregate_2d(f.company_id, f.date_from, f.date_to, bucket, series_by, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        rows = await self._cs_aggregate_2d(f.company_id, f.date_from, f.date_to, bucket, series_by, f.station_codes, f.regions, f.dim_by, f.dim_val,
+                                           station_id=f.station_id)
         axis = self._cs_bucket_axis(f.date_from, f.date_to, bucket)
         empty = None if self._cs_is_ratio(metric) else 0
         base = {"bucket": bucket, "metric": metric,
@@ -972,7 +993,8 @@ class AnalyticsService:
     async def charge_heatmap(self, f: PeriodFilter, metric: str = "sessions") -> dict[str, Any]:
         """Матрица загрузки час (0–23) × день недели (1=Пн..7=Вс) для heatmap."""
         rows = await self._cs_aggregate_2d(
-            f.company_id, f.date_from, f.date_to, "hour", "weekday", f.station_codes, f.regions)
+            f.company_id, f.date_from, f.date_to, "hour", "weekday", f.station_codes, f.regions,
+            station_id=f.station_id)
         cells = []
         for r in rows:
             try:
@@ -1087,7 +1109,8 @@ class AnalyticsService:
     ) -> dict[str, Any]:
         """Нарезка периода на интервалы (bucket) и сравнение по разрезу (group_by).
         Строки = разрез (или «Вся сеть»), колонки = интервалы. Один SQL-проход."""
-        rows = await self._cs_aggregate_2d(f.company_id, f.date_from, f.date_to, bucket, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val)
+        rows = await self._cs_aggregate_2d(f.company_id, f.date_from, f.date_to, bucket, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val,
+                                           station_id=f.station_id)
         axis = self._cs_bucket_axis(f.date_from, f.date_to, bucket)
         # интервалы + пометка «неполный» (границы выходят за пределы заданного периода)
         intervals = []
@@ -1390,7 +1413,7 @@ class AnalyticsService:
         TIME_DIMS = ("hour", "weekday", "day", "week", "decade", "month", "quarter")
         raw = await self._cs_aggregate_2d(
             f.company_id, f.date_from, f.date_to, rows, cols,
-            f.station_codes, f.regions, f.dim_by, f.dim_val)
+            f.station_codes, f.regions, f.dim_by, f.dim_val, station_id=f.station_id)
 
         def zero() -> list[float]:
             return [0.0, 0.0, 0.0, 0.0, 0.0]  # cnt, energy, amount, dur, success
@@ -1465,7 +1488,8 @@ class AnalyticsService:
             S.client_name, S.energy_kwh, S.amount, S.client_amount, S.client_tariff,
             S.tariff, S.paid_at, S.cut_key,
         ).where(
-            *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val)
+            *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val,
+                            station_id=f.station_id)
         ).order_by(S.started_at).limit(limit + 1)
         res = (await self.session.execute(stmt)).all()
         truncated = len(res) > limit

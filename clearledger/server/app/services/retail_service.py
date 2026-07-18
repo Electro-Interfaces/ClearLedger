@@ -484,9 +484,12 @@ class RetailService:
         scope: dict[str, Any] = {"kind": None, "label": "Вся розница ФЛ"}
         if station:
             conds.append(S.location_id == station)
+            # company_id обязателен: station приходит из query — без него утекало
+            # имя/номер чужого объекта.
             sl = (await self.db.execute(select(
                 ServiceLocation.name, ServiceLocation.station_number).where(
-                ServiceLocation.id == station))).first()
+                ServiceLocation.id == station,
+                ServiceLocation.company_id == company_id))).first()
             scope = {"kind": "station", "value": station,
                      "label": (sl.name if sl else None) or station,
                      "number": (sl.station_number if sl else None)}

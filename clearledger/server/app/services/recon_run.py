@@ -137,13 +137,16 @@ async def run_rule(
 
     # external: TradeCorp | MSTO
     if ext_type == "tradecorp":
-        resp = await reconciliation_proxy.tradecorp_transactions(date_from, date_to, station_ids)
+        tc_conn = (await reconciliation_proxy.tradecorp_conn_for_company(db, company_id)
+                   if db is not None and company_id is not None else None)
+        resp = await reconciliation_proxy.tradecorp_transactions(
+            date_from, date_to, station_ids, conn=tc_conn)
         external = [_corp_record(t, fmap, smap) for t in (resp.get("transactions") or [])]
     else:
         conn = (await reconciliation_proxy.msto_conn_for_company(db, company_id)
                 if db is not None and company_id is not None else None)
         resp = await reconciliation_proxy.msto_transactions(
-            {"dt_beg": date_from, "dt_end": date_to}, conn=conn)
+            {"dt_beg": date_from, "dt_end": date_to}, conn=conn, company_id=company_id)
         items = resp if isinstance(resp, list) else (resp.get("transactions") or resp.get("items") or [])
         external = [_msto_record(t, fmap, smap) for t in items]
 

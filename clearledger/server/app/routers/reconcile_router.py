@@ -80,12 +80,17 @@ async def run_rule_endpoint(
     """
     cid = await assert_company_member(req.company_id, current_user, db) if req.company_id else None
     chid = uuid.UUID(req.channel_id) if req.channel_id else None
-    return await run_rule_live(
-        req.rule_id, req.date_from, req.date_to,
-        base_url=req.base_url, login=req.login, password=req.password,
-        system=req.system, station_ids=req.station_ids,
-        db=db, company_id=cid, channel_id=chid,
-    )
+    from app.services.reconciliation_proxy import MissingCompanyConnection
+    try:
+        return await run_rule_live(
+            req.rule_id, req.date_from, req.date_to,
+            base_url=req.base_url, login=req.login, password=req.password,
+            system=req.system, station_ids=req.station_ids,
+            db=db, company_id=cid, channel_id=chid,
+        )
+    except MissingCompanyConnection as exc:
+        # Внешний источник больше не берётся из глобальных кредов .env.
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/selfchecks")

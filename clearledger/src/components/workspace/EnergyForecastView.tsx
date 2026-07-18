@@ -25,6 +25,15 @@ function Head({ title, subtitle }: { title: string; subtitle: string }) {
         <Badge variant="secondary" className="text-[10px]">демо-данные</Badge>
       </div>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{subtitle}</p>
+      {/* Готовность закрытия и дебиторка считаются по синтетической модели
+          (DEMO_EZS), а не по данным компании — на такие цифры легко опереться
+          при решении «закрывать период», поэтому предупреждаем заметно. */}
+      <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <strong>Демонстрационные данные.</strong> Прогноз закрытия для этого профиля
+        считается по модельной сети, а не по фактическим начислениям: проценты
+        готовности, риски и суммы ниже иллюстративны. Не использовать для решения
+        о закрытии периода.
+      </div>
     </div>
   )
 }

@@ -13,6 +13,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import DataEntry, User
 from app.schemas import CounterpartyStat, ErrorStat, PeriodReport, SourceStat
+from app.utils import day_end, day_start
 
 router = APIRouter(prefix="/reports", tags=["Отчёты"])
 
@@ -45,8 +46,8 @@ async def report_period(
     query = (
         select(DataEntry)
         .where(DataEntry.company_id == cid)
-        .where(DataEntry.created_at >= date_from)
-        .where(DataEntry.created_at <= date_to)
+        .where(DataEntry.created_at >= day_start(date_from))
+        .where(DataEntry.created_at <= day_end(date_to))
     )
     result = await db.execute(query)
     entries = result.scalars().all()
@@ -79,9 +80,9 @@ async def report_counterparties(
 
     query = select(DataEntry).where(DataEntry.company_id == cid)
     if date_from:
-        query = query.where(DataEntry.created_at >= date_from)
+        query = query.where(DataEntry.created_at >= day_start(date_from))
     if date_to:
-        query = query.where(DataEntry.created_at <= date_to)
+        query = query.where(DataEntry.created_at <= day_end(date_to))
 
     result = await db.execute(query)
     entries = result.scalars().all()
@@ -124,9 +125,9 @@ async def report_sources(
 
     query = select(DataEntry).where(DataEntry.company_id == cid)
     if date_from:
-        query = query.where(DataEntry.created_at >= date_from)
+        query = query.where(DataEntry.created_at >= day_start(date_from))
     if date_to:
-        query = query.where(DataEntry.created_at <= date_to)
+        query = query.where(DataEntry.created_at <= day_end(date_to))
 
     result = await db.execute(query)
     entries = result.scalars().all()
@@ -162,9 +163,9 @@ async def report_errors(
         .where(DataEntry.status == "error")
     )
     if date_from:
-        query = query.where(DataEntry.created_at >= date_from)
+        query = query.where(DataEntry.created_at >= day_start(date_from))
     if date_to:
-        query = query.where(DataEntry.created_at <= date_to)
+        query = query.where(DataEntry.created_at <= day_end(date_to))
 
     result = await db.execute(query)
     entries = result.scalars().all()

@@ -430,6 +430,16 @@ async def store_bp_package_verify(
         raise HTTPException(400, f"Сверка: {e}")
 
 
+@router.get("/barcodes")
+async def store_barcodes(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Справочник штрихкодов — снимок НСИ. Периода/станций у сущности нет, поэтому
+    и параметров нет (раньше требовались роутером и молча игнорировались)."""
+    return await GoodsDashboardService(db, await scope_company_id(user, db)).barcodes()
+
+
 @router.get("/{report}")
 async def store_report(
     report: str,
@@ -439,11 +449,12 @@ async def store_report(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Отчёты раздела: receipts · suppliers · catering · categories · barcodes · recipes."""
+    """Отчёты раздела по периоду: receipts · suppliers · catering · categories · recipes.
+    barcodes — отдельный маршрут выше (справочник вне периода)."""
     svc = GoodsDashboardService(db, await scope_company_id(user, db))
     method = {"receipts": svc.receipts, "suppliers": svc.suppliers,
               "catering": svc.catering, "categories": svc.categories,
-              "barcodes": svc.barcodes, "recipes": svc.recipes}.get(report)
+              "recipes": svc.recipes}.get(report)
     if method is None:
         from fastapi import HTTPException
         raise HTTPException(404, f"Неизвестный отчёт: {report}")

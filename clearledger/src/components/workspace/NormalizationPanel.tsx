@@ -111,7 +111,7 @@ function PipelineView() {
 
       {/* Управление */}
       <div className="flex items-center gap-2">
-        <Button size="sm" className="gap-1.5">
+        <Button size="sm" className="gap-1.5" disabled title="Демонстрационные данные — действие недоступно">
           <Play className="h-3 w-3" />
           Запустить обработку
         </Button>
@@ -173,10 +173,10 @@ function PipelineView() {
                   <div className="flex items-center justify-end gap-1">
                     {doc.status === 'review' && (
                       <>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Принять">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" disabled title="Демонстрационные данные — действие недоступно">
                           <CheckCircle2 className="h-3 w-3 text-emerald-500" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Отклонить">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" disabled title="Демонстрационные данные — действие недоступно">
                           <XCircle className="h-3 w-3 text-red-500" />
                         </Button>
                       </>

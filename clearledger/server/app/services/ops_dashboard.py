@@ -549,15 +549,19 @@ async def ops_station(db: AsyncSession, company_id, location_id: str) -> dict[st
                 pass
     cp_names: dict[str, str] = {}
     if cp_ids:
+        # company_id обязателен: иначе в карточку станции попадало наименование
+        # контрагента чужого тенанта.
         for cp in (await db.execute(select(Counterparty).where(
-                Counterparty.id.in_(cp_ids)))).scalars().all():
+                Counterparty.id.in_(cp_ids),
+                Counterparty.company_id == company_id))).scalars().all():
             cp_names[str(cp.id)] = cp.name
     contracts_map: dict = {}
     contract_ids = [s.contract_id for s in settl if s.contract_id]
     if contract_ids:
         from app.models import Contract
         for c in (await db.execute(select(Contract).where(
-                Contract.id.in_(contract_ids)))).scalars().all():
+                Contract.id.in_(contract_ids),
+                Contract.company_id == company_id))).scalars().all():
             contracts_map[c.id] = c.number
     contours = [{
         "role": s.role,
@@ -758,7 +762,8 @@ async def ops_completeness(db: AsyncSession, company_id,
             pass
     if uu:
         cps = (await db.execute(select(Counterparty).where(
-            Counterparty.id.in_(uu)))).scalars().all()
+            Counterparty.id.in_(uu),
+            Counterparty.company_id == company_id))).scalars().all()
     no_inn = [{"locationId": "", "bu": None, "name": c.name, "region": None,
                "months": [], "note": "нет ИНН"} for c in cps if not (c.inn or "").strip()]
     no_contact = [{"locationId": "", "bu": None, "name": c.name, "region": None,

@@ -6,10 +6,10 @@
 import { useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  getStoreReport,
+  getStoreReport, getStoreBarcodes,
   type StoreReceiptsData, type StoreSuppliersData,
   type StoreCategoriesData,
-  type StoreBarcodesData, type StoreRecipesData,
+  type StoreRecipesData,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
@@ -116,7 +116,8 @@ export function StoreCategoriesPanel(p: PanelProps) {
 }
 
 export function StoreBarcodesPanel(p: PanelProps) {
-  const q = useReport<StoreBarcodesData>('barcodes', p)
+  // Справочник-снимок: период/станции к штрихкодам неприменимы — в ключ не входят.
+  const q = useQuery({ queryKey: ['store-report', 'barcodes', p.companyId], queryFn: getStoreBarcodes })
   const [search, setSearch] = useState('')
   // Смена контура обнуляет поиск по номенклатуре (CLAUDE.md, правило 5).
   useResetOnScopeChange(() => setSearch(''))
@@ -130,7 +131,7 @@ export function StoreBarcodesPanel(p: PanelProps) {
           : d.items
         return (
           <Shell title="Штрихкоды / EAN"
-            sub={`${d.total} штрихкодов · ${Object.entries(d.by_type).map(([t, n]) => `${t}: ${n}`).join(' · ')} · клик по товару — карточка`}>
+            sub={`${d.total} штрихкодов · ${Object.entries(d.by_type).map(([t, n]) => `${t}: ${n}`).join(' · ')} · справочник НСИ, вне периода · клик по товару — карточка`}>
             <div className="mb-3">
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="поиск по штрихкоду или товару…"
                 className="text-xs px-2.5 py-1.5 rounded-md border border-border/50 bg-background w-64" />

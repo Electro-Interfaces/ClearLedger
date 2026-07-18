@@ -13,7 +13,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Копируем исходники и билдим
+# Копируем исходники и билдим.
+# VITE_API_URL обязателен: без него isApiEnabled() = false, и приложение
+# молча собирается в офлайн-контур — работает на локальных демо-данных
+# вместо API, без единого предупреждения пользователю.
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=${VITE_API_URL}
 COPY . .
 ENV VITE_BASE_PATH=/
 RUN npm run build

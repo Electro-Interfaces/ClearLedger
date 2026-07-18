@@ -21,20 +21,18 @@ interface WorkPanelProps {
   onCollapse?: () => void
 }
 
-const DEMO_ITEMS: Record<string, WorkItem[]> = {
-  auditor: [
-    { id: '1', title: 'Аудит за февраль 2026', subtitle: 'Полный аудит', timestamp: '28.02.2026', unread: true },
-    { id: '2', title: 'Проверка дубликатов', subtitle: 'НПК — основная база', timestamp: '27.02.2026' },
-    { id: '3', title: 'Сверка сумм Q4 2025', subtitle: 'Расхождения найдены', timestamp: '25.02.2026' },
-    { id: '4', title: 'Качество данных — РТИ', subtitle: 'Завершён', timestamp: '20.02.2026' },
-    { id: '5', title: 'Нормализация ИНН', subtitle: 'Обработка данных', timestamp: '18.02.2026' },
-  ],
-}
+/**
+ * История сессий аудитора. Раньше здесь лежал выдуманный список («Сверка сумм
+ * Q4 2025 — расхождения найдены») без единой пометки: выглядело как результат
+ * реально проведённых проверок. Пока источника истории нет — честное пустое
+ * состояние; список наполнит бэкенд, когда появится эндпоинт сессий.
+ */
+const ITEMS: Record<string, WorkItem[]> = {}
 
 export function WorkPanel({ panelId, className, onCollapse }: WorkPanelProps) {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const items = DEMO_ITEMS[panelId] ?? []
+  const items = ITEMS[panelId] ?? []
 
   const filtered = search
     ? items.filter((i) => i.title.toLowerCase().includes(search.toLowerCase()))

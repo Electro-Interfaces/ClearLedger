@@ -89,6 +89,13 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="поиск товара…"
           className="text-xs px-2.5 py-1.5 rounded-md border border-border/50 bg-background w-48" />
       </div>
+      {/* Бэкенд вернул фильтры, которые к этому разрезу неприменимы — цифры по всей точке. */}
+      {!!data?.filters_ignored?.length && (
+        <div className="text-[11px] text-amber-300/80">
+          В разрезе «{GROUP_TABS.find((t) => t.key === groupBy)?.label}» не применены товарные фильтры
+          ({data.filters_ignored.join(', ')}) — цифры по всем продажам периода.
+        </div>
+      )}
 
       {isLoading && <div className="text-sm text-muted-foreground">Загрузка…</div>}
       {error && <div className="text-sm text-red-400/90">Ошибка загрузки продаж</div>}

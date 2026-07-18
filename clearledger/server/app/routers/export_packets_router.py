@@ -376,9 +376,9 @@ async def ack_packet(
         pid = uuid.UUID(packet_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Invalid id") from exc
-    p = (await db.execute(select(ExportPacket).where(ExportPacket.id == pid))).scalar_one_or_none()
-    if p is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Packet not found")
+    # 404 для чужого/несуществующего: иначе чужой тенант квитировал пакет и смена
+    # /ТТН не доходила до 1С.
+    p = await get_owned(ExportPacket, pid, _u, db)
 
     reject = body.get("reject_reason")
     if reject:

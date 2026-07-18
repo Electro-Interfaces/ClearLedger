@@ -32,6 +32,14 @@ function Head({ title, subtitle }: { title: string; subtitle: string }) {
         <Badge variant="secondary" className="text-[10px]">демо-данные</Badge>
       </div>
       <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{subtitle}</p>
+      {/* Раздел собран на синтетической модели сети (DEMO_EZS), а не на данных
+          компании. Бейджа у заголовка мало: проводки и суммы выглядят как
+          настоящие и могут уйти в работу — нужен заметный баннер. */}
+      <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+        <strong>Демонстрационные данные.</strong> Бухгалтерский контур для этого профиля
+        ещё не подключён к учётной системе: проводки, обороты и суммы ниже —
+        иллюстрация модели, а не факт. Не использовать для отчётности и сверок.
+      </div>
     </div>
   )
 }

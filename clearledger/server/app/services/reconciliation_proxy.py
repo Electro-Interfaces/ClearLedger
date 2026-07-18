@@ -8,6 +8,11 @@ server/services/mstoProxyService.js). Секреты TradeCorp/MSTO остают
 Токены кэшируются в памяти процесса: TradeCorp ~55 мин, MSTO ~23 ч. GET-ответы MSTO
 кэшируются с TTL по типу пути. Это отдельный домен от reconciliation_service.py
 (тот сверяет 1С-документы) — не пересекается.
+
+Мультитенантность: и TradeCorp, и MSTO ходят ТОЛЬКО под подключением компании
+(Source + SourceCredentials). Глобальные креды из .env как fallback не используются:
+раньше компания без своего источника получала чужие данные. Ключ кэша включает
+компанию и подключение.
 """
 from __future__ import annotations
 
@@ -19,8 +24,6 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-
-from app.config import get_settings
 
 logger = logging.getLogger("reconciliation_proxy")
 
@@ -66,68 +69,124 @@ def _msto_ttl(url_path: str) -> int:
     return _MSTO_CACHE_TTL_DEFAULT
 
 
-def _cache_key(url_path: str, params: dict[str, Any] | None) -> str:
+def _cache_key(url_path: str, params: dict[str, Any] | None,
+               conn: "MstoConn | None" = None, company_id: Any = None) -> str:
+    """Ключ кэша. ОБЯЗАТЕЛЬНО включает компанию и подключение: без них компания Б
+    за тот же период получала закешированный ответ компании А (кросс-тенантная утечка)."""
     params = params or {}
     sorted_params = "&".join(f"{k}={params[k]}" for k in sorted(params))
-    return f"msto:{url_path}?{sorted_params}"
+    scope = f"{company_id or '-'}|{_conn_key(conn) if conn else '-'}"
+    return f"msto:{scope}:{url_path}?{sorted_params}"
 
 
 def clear_cache() -> None:
     _cache.clear()
 
 
+class MissingCompanyConnection(RuntimeError):
+    """Для компании не настроено подключение к внешнему источнику.
+
+    Отдельный тип, чтобы роутеры отдавали 400 с понятным текстом, а не 500 и не
+    молча подставленные глобальные креды из .env (это давало чужие данные)."""
+
+
 # ─────────────────────────── TradeCorp (JSON-RPC 2.0) ───────────────────────────
-_tc_client: httpx.AsyncClient | None = None
-_tc_token: str | None = None
-_tc_token_expiry: float = 0.0
+@dataclass(frozen=True)
+class TcConn:
+    base_url: str
+    login: str
+    password: str
+    emitent_id: int
+
+
+# Клиенты/токены ПО ПОДКЛЮЧЕНИЮ: эмитент берётся из источника компании, а не из
+# .env — иначе все тенанты ходили под одним эмитентом и видели чужие карты.
+_tc_clients: dict[str, dict[str, Any]] = {}
 _tc_lock = asyncio.Lock()
 
 
-def _tc_emitent() -> int:
+def _tc_conn_key(conn: TcConn) -> str:
+    return f"{conn.base_url}|{conn.login}|{conn.emitent_id}"
+
+
+def _tc_resolve_conn(conn: TcConn | None) -> TcConn:
+    if conn is None:
+        raise MissingCompanyConnection(
+            "Источник TradeCorp (корп-карты) не настроен для этой компании"
+        )
+    return conn
+
+
+async def tradecorp_conn_for_company(db: Any, company_id: Any) -> TcConn | None:
+    """Подключение TradeCorp из источника компании (source_type=tradecorp):
+    api_url+логин+эмитент из connection_config, пароль из SourceCredentials (Fernet)."""
+    from sqlalchemy import select
+    from app.models import Source, SourceCredentials
+    from app.services.onec.crypto import decrypt_password
+    if company_id is None:
+        return None
+    src = (await db.execute(select(Source).where(
+        Source.company_id == company_id, Source.source_type == "tradecorp"
+    ))).scalars().first()
+    if src is None:
+        return None
+    cfg = src.connection_config or {}
+    base_url = cfg.get("api_url") or cfg.get("base_url") or cfg.get("url")
+    login = cfg.get("login") or cfg.get("username")
+    cr = (await db.execute(select(SourceCredentials).where(
+        SourceCredentials.source_id == src.id
+    ))).scalars().first()
+    enc = (cr.encrypted_values or {}) if cr else {}
+    pwd = decrypt_password(enc["password"]) if enc.get("password") else None
     try:
-        return int(get_settings().tradecorp_emitent_id)
+        emitent = int(cfg.get("emitent_id"))
     except (TypeError, ValueError):
-        return 15
+        return None  # без эмитента запрос ушёл бы под чужим — не подставляем дефолт
+    if base_url and login and pwd:
+        return TcConn(str(base_url), str(login), str(pwd), emitent)
+    return None
 
 
-async def _tc_refresh_token() -> None:
+async def _tc_refresh_token(conn: TcConn) -> None:
     """Авторизация на processing API → Bearer-токен (~1 ч, обновляем за 5 мин)."""
-    global _tc_token, _tc_token_expiry
-    assert _tc_client is not None
-    s = get_settings()
-    resp = await _tc_client.post(
+    entry = _tc_clients[_tc_conn_key(conn)]
+    client: httpx.AsyncClient = entry["client"]
+    resp = await client.post(
         "/v2",
         json={
             "jsonrpc": "2.0",
             "id": 0,
             "method": "login",
-            "params": {"login": s.tradecorp_login, "password": s.tradecorp_password},
+            "params": {"login": conn.login, "password": conn.password},
         },
     )
     resp.raise_for_status()
     data = resp.json()
     if data.get("error"):
         raise RuntimeError(data["error"].get("message", "Login failed"))
-    _tc_token = data.get("result")
-    _tc_token_expiry = time.time() + 55 * 60
-    _tc_client.headers["Authorization"] = f"Bearer {_tc_token}"
+    entry["token"] = data.get("result")
+    entry["expiry"] = time.time() + 55 * 60
+    client.headers["Authorization"] = f"Bearer {entry['token']}"
 
 
-async def _tc_get_client() -> httpx.AsyncClient:
-    global _tc_client
-    s = get_settings()
-    if not (s.tradecorp_api_url and s.tradecorp_login and s.tradecorp_password):
-        raise RuntimeError("Missing required TradeCorp API environment variables")
-    if _tc_client is None:
-        _tc_client = httpx.AsyncClient(
-            base_url=s.tradecorp_api_url,
-            timeout=60.0,
-            headers={"Content-Type": "application/json"},
-        )
+async def _tc_get_client(conn: TcConn | None = None) -> httpx.AsyncClient:
+    conn = _tc_resolve_conn(conn)
+    key = _tc_conn_key(conn)
+    entry = _tc_clients.get(key)
+    if entry is None:
+        entry = {
+            "client": httpx.AsyncClient(
+                base_url=conn.base_url, timeout=60.0,
+                headers={"Content-Type": "application/json"},
+            ),
+            "token": None,
+            "expiry": 0.0,
+        }
+        _tc_clients[key] = entry
     async with _tc_lock:
-        if not _tc_token or time.time() >= _tc_token_expiry:
-            await _tc_refresh_token()
-    return _tc_client
+        if not entry["token"] or time.time() >= entry["expiry"]:
+            await _tc_refresh_token(conn)
+    return entry["client"]
 
 
 def _tc_build_filter(date_from: str, date_to: str, station_ids: list | None) -> dict[str, Any]:
@@ -142,13 +201,16 @@ def _tc_build_filter(date_from: str, date_to: str, station_ids: list | None) -> 
     return flt
 
 
-async def _tc_fetch_transactions(date_from: str, date_to: str, station_ids: list | None) -> list[dict]:
-    client = await _tc_get_client()
+async def _tc_fetch_transactions(date_from: str, date_to: str, station_ids: list | None,
+                                 conn: TcConn | None = None) -> list[dict]:
+    conn = _tc_resolve_conn(conn)
+    client = await _tc_get_client(conn)
     body = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "transactions_get",
-        "params": {"emitent": _tc_emitent(), "filter": _tc_build_filter(date_from, date_to, station_ids), "calc": 1},
+        "params": {"emitent": conn.emitent_id,
+                   "filter": _tc_build_filter(date_from, date_to, station_ids), "calc": 1},
     }
     resp = await client.post("/v1", json=body)
     resp.raise_for_status()
@@ -163,8 +225,9 @@ def _num(value: Any) -> float:
     return (value or 0) / 100
 
 
-async def tradecorp_transactions(date_from: str, date_to: str, station_ids: list | None) -> dict[str, Any]:
-    txs = await _tc_fetch_transactions(date_from, date_to, station_ids)
+async def tradecorp_transactions(date_from: str, date_to: str, station_ids: list | None,
+                                 conn: TcConn | None = None) -> dict[str, Any]:
+    txs = await _tc_fetch_transactions(date_from, date_to, station_ids, conn=conn)
     normalized = [
         {
             "id": tx.get("id"),
@@ -193,8 +256,9 @@ async def tradecorp_transactions(date_from: str, date_to: str, station_ids: list
     return {"success": True, "count": len(normalized), "transactions": normalized}
 
 
-async def tradecorp_summary(date_from: str, date_to: str, station_ids: list | None) -> dict[str, Any]:
-    txs = await _tc_fetch_transactions(date_from, date_to, station_ids)
+async def tradecorp_summary(date_from: str, date_to: str, station_ids: list | None,
+                            conn: TcConn | None = None) -> dict[str, Any]:
+    txs = await _tc_fetch_transactions(date_from, date_to, station_ids, conn=conn)
     summary: dict[str, Any] = {"totalCount": len(txs), "totalCost": 0.0, "totalQuantity": 0.0, "byStation": {}}
     for tx in txs:
         station_num = (tx.get("station") or {}).get("number") or "unknown"
@@ -215,12 +279,14 @@ async def tradecorp_summary(date_from: str, date_to: str, station_ids: list | No
     return {"success": True, "summary": summary}
 
 
-async def tradecorp_health() -> dict[str, Any]:
-    await _tc_get_client()  # прогрев/проверка токена
+async def tradecorp_health(conn: TcConn | None = None) -> dict[str, Any]:
+    conn = _tc_resolve_conn(conn)
+    await _tc_get_client(conn)  # прогрев/проверка токена
+    entry = _tc_clients.get(_tc_conn_key(conn)) or {}
     return {
         "status": "ok",
-        "emitentId": _tc_emitent(),
-        "tokenValid": bool(_tc_token) and time.time() < _tc_token_expiry,
+        "emitentId": conn.emitent_id,
+        "tokenValid": bool(entry.get("token")) and time.time() < entry.get("expiry", 0.0),
     }
 
 
@@ -233,7 +299,7 @@ class MstoConn:
 
 
 # Кеш клиентов/токенов ПО ПОДКЛЮЧЕНИЮ (base_url|username): у каждого источника своё
-# подключение MSTO; .env остаётся fallback'ом (если у источника креды не заданы).
+# подключение MSTO. Глобальные креды из .env fallback'ом НЕ используются.
 _msto_clients: dict[str, dict[str, Any]] = {}
 _msto_lock = asyncio.Lock()
 
@@ -241,22 +307,15 @@ _sp_map: dict[str, dict[str, Any]] = {}        # conn_key → {name(lower): id}
 _sp_map_expiry: dict[str, float] = {}
 
 
-def _msto_settings_conn() -> MstoConn | None:
-    """Подключение MSTO из .env (settings) — fallback."""
-    s = get_settings()
-    if s.msto_api_url and s.msto_username and s.msto_password:
-        return MstoConn(s.msto_api_url, s.msto_username, s.msto_password)
-    return None
-
-
 def _conn_key(conn: MstoConn) -> str:
     return f"{conn.base_url}|{conn.username}"
 
 
 def _resolve_conn(conn: MstoConn | None) -> MstoConn:
-    conn = conn or _msto_settings_conn()
+    # Раньше здесь молча подставлялись глобальные креды из .env: компания без своего
+    # источника получала (и в /refresh — записывала себе) чужие заказы.
     if conn is None:
-        raise RuntimeError("Missing required MSTO credentials")
+        raise MissingCompanyConnection("Источник MSTO не настроен для этой компании")
     return conn
 
 
@@ -318,10 +377,12 @@ async def _msto_get_checked(url_path: str, params: dict[str, Any] | None = None,
 
 async def msto_conn_for_company(db: Any, company_id: Any) -> MstoConn | None:
     """Подключение MSTO из источника компании (source_type=msto): base_url+логин из
-    connection_config, пароль из SourceCredentials (Fernet). None → используется .env."""
+    connection_config, пароль из SourceCredentials (Fernet). None → доступа нет."""
     from sqlalchemy import select
     from app.models import Source, SourceCredentials
     from app.services.onec.crypto import decrypt_password
+    if company_id is None:
+        return None
     src = (await db.execute(select(Source).where(
         Source.company_id == company_id, Source.source_type == "msto"
     ))).scalars().first()
@@ -369,9 +430,10 @@ async def msto_service_points(conn: MstoConn | None = None) -> Any:
 
 
 async def msto_tariffs(params: dict[str, Any] | None = None,
-                       conn: MstoConn | None = None) -> Any:
+                       conn: MstoConn | None = None, company_id: Any = None) -> Any:
     url_path = "/private/tariffs"
-    key = _cache_key(url_path, params)
+    conn = _resolve_conn(conn)
+    key = _cache_key(url_path, params, conn, company_id)
     cached = _cache.get(key)
     if cached is not None:
         return cached
@@ -418,11 +480,13 @@ def convert_transaction_params(query: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in q.items() if v is not None}
 
 
-async def msto_transactions(query: dict[str, Any], conn: MstoConn | None = None) -> Any:
+async def msto_transactions(query: dict[str, Any], conn: MstoConn | None = None,
+                            company_id: Any = None) -> Any:
     """GET /private/transactions с конвертацией параметров, кэшем и обогащением servicePointId."""
     url_path = "/private/transactions"
+    conn = _resolve_conn(conn)
     params = convert_transaction_params(query)
-    key = _cache_key(url_path, params)
+    key = _cache_key(url_path, params, conn, company_id)
     cached = _cache.get(key)
     if cached is not None:
         return cached

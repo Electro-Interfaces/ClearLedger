@@ -3,12 +3,40 @@
 """
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Company
+
+
+def _parse_bound(value: str) -> datetime:
+    """'YYYY-MM-DD' или ISO-datetime → tz-aware datetime (UTC, как хранит БД)."""
+    s = (value or "").strip()
+    dt = datetime.fromisoformat(s[:10]) if len(s) == 10 else datetime.fromisoformat(s)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def day_start(date_from: str) -> datetime:
+    """Нижняя граница периода для сравнения с timestamp-колонкой."""
+    return _parse_bound(date_from)
+
+
+def day_end(date_to: str) -> datetime:
+    """Верхняя граница периода для сравнения с timestamp-колонкой.
+
+    Голая дата 'YYYY-MM-DD' задаёт полночь — весь последний день периода выпадает
+    (эталон services/analytics_service.py: _load_docs достраивает до конца суток).
+    Плюс сравнение timestamptz со строкой asyncpg вообще не выполняет
+    ('operator does not exist: timestamp with time zone >= character varying'),
+    поэтому возвращаем datetime, а не строку.
+    """
+    dt = _parse_bound(date_to)
+    if len((date_to or "").strip()) == 10:  # голая дата → конец суток
+        dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return dt
 
 
 async def resolve_company_id(

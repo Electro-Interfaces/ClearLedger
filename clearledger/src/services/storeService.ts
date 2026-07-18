@@ -145,6 +145,9 @@ export const getStoreReport = <T>(report: string, dateFrom: string, dateTo: stri
     stations: stations?.length ? stations.join(',') : undefined,
   })
 
+/** Штрихкоды — справочник-снимок НСИ: ни периода, ни станций у сущности нет. */
+export const getStoreBarcodes = () => get<StoreBarcodesData>('/api/store/barcodes')
+
 // ── Продажи: гибкая группировка (инструмент менеджера) ──
 export type SalesGroupBy = 'sku' | 'category' | 'kind' | 'marking' | 'vat' | 'day' | 'shift' | 'payment'
 export type SalesCategory = 'all' | 'soputka' | 'obshepit'
@@ -158,7 +161,10 @@ export interface StoreSalesGroup {
 export interface StoreSalesData {
   period: { from: string; to: string }
   group_by: SalesGroupBy
+  /** Что РЕАЛЬНО применено к выборке (может отличаться от запрошенного). */
   filters: { category: string; marked: string; q: string }
+  /** Запрошенные, но неприменимые в этом разрезе фильтры (напр. товарные в разрезе «форма оплаты»). */
+  filters_ignored?: string[]
   groups: StoreSalesGroup[]
   summary: {
     revenue: number; revenue_net: number; vat: number; qty: number
