@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
 
+import { initUiLevel } from './hooks/useUiLevel'
 import { initDefaults } from './services/initService'
 import { startScheduler } from './services/channelScheduler'
 import { isApiEnabled } from './services/apiClient'
@@ -46,6 +47,10 @@ if (!isApiEnabled()) {
   initDefaults()
   startScheduler()
 }
+
+// Режим работы (простой/расширенный) — до первого рендера, иначе простой
+// режим на мгновение мигнёт расширенным.
+initUiLevel()
 
 console.log('[TradeLedger] Starting...')
 

@@ -18,6 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { useFilters, type FilterState } from '@/contexts/FilterContext'
 import { activeFilterCount, clearFilterSelections, sameFilterState } from '@/contexts/filterState'
 import { useCompany } from '@/contexts/CompanyContext'
+import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import { useQuery } from '@tanstack/react-query'
 import { useLocations } from '@/hooks/useLocations'
 import { getStsStationsFromLocations } from '@/services/locationService'
@@ -442,6 +443,11 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
 
               {!isEnergy ? (
                 <>
+                  {/* Технический источник загрузки смен — нужен редко, в простом
+                      режиме убран с глаз. Область учёта и период остаются: это
+                      ежедневный контур, прятать его нельзя. */}
+                  <AdvancedHint count={1} what="настройка — источник онлайн-данных STS" />
+                  <AdvancedOnly>
                   <Separator />
                   <FilterSection
                     icon={Database}
@@ -467,6 +473,7 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                       </SelectContent>
                     </Select>
                   </FilterSection>
+                  </AdvancedOnly>
                 </>
               ) : null}
 

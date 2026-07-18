@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getSettings, saveSettings, type AppSettings } from '@/services/settingsService'
 import { stsTestConnection, clearToken } from '@/services/fuel/stsApiClient'
-import { Loader2, CheckCircle2, XCircle, Wifi } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Wifi, Gauge } from 'lucide-react'
 import { AdminSection } from '@/components/settings/AdminSection'
+import { UiLevelToggle } from '@/components/common/UiLevelToggle'
 import { useCompany } from '@/contexts/CompanyContext'
 
 export function SettingsPage() {
@@ -64,6 +65,25 @@ export function SettingsPage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <h1 className="text-2xl font-bold">Настройки</h1>
+
+      {/* Режим работы — первым: он определяет, что человек увидит на остальных экранах. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Gauge className="h-5 w-5" />
+            Режим работы
+          </CardTitle>
+          <CardDescription>
+            В простом режиме на экранах остаётся то, что нужно каждый день. Функции
+            никуда не пропадают: где что-то убрано, приложение показывает, сколько
+            именно и как открыть. Проверки корректности — профиль НДС, ключ привязки,
+            метод себестоимости, предупреждения о демо-данных — видны в любом режиме.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <UiLevelToggle />
+        </CardContent>
+      </Card>
 
       {/* Профиль организации + пользователи (по роли, API-режим) */}
       <AdminSection />
