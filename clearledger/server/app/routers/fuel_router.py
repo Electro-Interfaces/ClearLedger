@@ -2092,6 +2092,53 @@ async def allocate_purchase_batch(
     }
 
 
+async def _resolve_station_filter(
+    db: AsyncSession, cid: uuid.UUID, stations: str | None
+) -> list[uuid.UUID] | None:
+    """CSV станций из фильтра рабочей области -> список station_id.
+
+    Принимает и UUID станций, и КОДЫ («208»): фронт оперирует кодами, они же
+    лежат в fuel_stations.code. Раньше здесь стоял `except ValueError:
+    station_ids = None` — любой некорректный элемент молча превращал фильтр во
+    «всю сеть», и дашборд показывал сетевые цифры под заголовком с одной АЗС.
+    Теперь неразобранный идентификатор — ошибка 400, а не тихая подмена.
+
+    Возвращает None только если фильтр не задан. Если станции заданы, но ни
+    одна не найдена, возвращается пустой список — «данных нет» честнее, чем
+    «данные по всем».
+    """
+    if not stations:
+        return None
+    raw = [s.strip() for s in stations.split(",") if s.strip()]
+    if not raw:
+        return None
+
+    ids: list[uuid.UUID] = []
+    codes: list[int] = []
+    for item in raw:
+        try:
+            ids.append(uuid.UUID(item))
+            continue
+        except ValueError:
+            pass
+        if item.isdigit():
+            codes.append(int(item))
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Некорректный идентификатор станции: {item!r}. Ожидается UUID или код.",
+            )
+
+    if codes:
+        rows = await db.execute(
+            select(FuelStation.id).where(
+                FuelStation.company_id == cid, FuelStation.code.in_(codes)
+            )
+        )
+        ids.extend(rows.scalars().all())
+    return ids
+
+
 @router.get("/shift-dashboard")
 async def shift_dashboard(
     date_from: str = Query(...),
@@ -2104,12 +2151,7 @@ async def shift_dashboard(
     """Дашборд аналитики по сменным отчётам: виды топлива · способы оплаты · поступления ТТН ·
     движение наличных · инкассация · график по дням · тренды (сравнение периодов)."""
     cid = await _company_id(user, db)
-    station_ids = None
-    if stations:
-        try:
-            station_ids = [uuid.UUID(s.strip()) for s in stations.split(",") if s.strip()]
-        except ValueError:
-            station_ids = None
+    station_ids = await _resolve_station_filter(db, cid, stations)
     svc = FuelDashboardService(db, cid)
     return await svc.compute(
         date.fromisoformat(date_from), date.fromisoformat(date_to), station_ids, compare)

@@ -12,6 +12,9 @@
 
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useFilters } from '@/contexts/FilterContext'
+import { useLocations } from '@/hooks/useLocations'
+import { scopeStationCodes } from '@/services/locationService'
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, LineChart, Line, ReferenceLine, ComposedChart, Cell,
@@ -626,9 +629,33 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
 
+  /**
+   * Область учёта обязана доходить до цифр.
+   *
+   * Панель читала из контура только период: выбор станции применялся в шапке
+   * (чип, ограничение с ✕, счётчик «Фильтры 1»), а дашборд считал по всей сети —
+   * «АЗС: 13» и та же выручка. Для учётных цифр это хуже отсутствия фильтра:
+   * на экране заявлена одна станция, а числа сетевые.
+   *
+   * Отдаём КОДЫ станций — тем же scopeStationCodes, что и «Реализации»
+   * (FuelFillsPanel). Роутер их резолвит в station_id по fuel_stations.code;
+   * до правки он принимал только UUID и на «208» молча подставлял None, то
+   * есть тихо возвращал всю сеть.
+   */
+  const { locationIds, regionIds } = useFilters()
+  const locations = useLocations()
+  const scopeCodes = useMemo(
+    () => scopeStationCodes(locations, locationIds, regionIds),
+    [locations, locationIds, regionIds],
+  )
+  const scopeKey = scopeCodes.join(',')
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['fuel-overview', companyId, period.from, period.to],
-    queryFn: () => getShiftDashboard(period.from, period.to, { compare: true }),
+    queryKey: ['fuel-overview', companyId, period.from, period.to, scopeKey],
+    queryFn: () => getShiftDashboard(period.from, period.to, {
+      compare: true,
+      stations: scopeCodes.length ? scopeCodes.map(String) : undefined,
+    }),
   })
   const margin = useQuery({
     queryKey: ['fuel-overview-margin-kpi', companyId, period.from, period.to],
