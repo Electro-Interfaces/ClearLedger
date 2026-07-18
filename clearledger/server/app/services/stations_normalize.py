@@ -381,8 +381,18 @@ async def _ingest_compact(
                     loc.owner = row["owner"]
                 if not loc.address and row.get("address"):
                     loc.address = row["address"]
-                if not loc.name and row.get("name"):
-                    loc.name = row["name"]
+                # Подпись из справочника CPO — главнее имени из сессий: реестр
+                # ведёт сам оператор, а station_name в выгрузке сессий отстаёт и
+                # бывает мусорным (на карточке ID 3114 так держалось «Нартис С-60»,
+                # хотя по реестру это «Бистро Ням-Ням 1»). Прежнее имя не теряем.
+                reg_name = _s(row.get("name"), 255)
+                if reg_name and str(loc.name or "").strip() != reg_name:
+                    if loc.name:
+                        md_extra["nameHistory"] = [
+                            *((loc.extra_metadata or {}).get("nameHistory") or []), loc.name]
+                    loc.name = reg_name
+                if reg_name:
+                    md_extra["nameSource"] = "cpo_registry"
                 if not loc.station_number and num:
                     loc.station_number = num
                 if loc.region_id is None:
@@ -421,6 +431,7 @@ async def _ingest_compact(
                     extra_metadata={"number": num, "source": "stations_compact",
                                     "regionRaw": row.get("region"),
                                     "federalSubject": canon or row.get("region"),
+                                    **({"nameSource": "cpo_registry"} if row.get("name") else {}),
                                     **md_extra},
                 )
                 db.add(loc)
@@ -560,8 +571,17 @@ async def ingest_stations(
                 for k, v in typed.items():
                     setattr(loc, k, v)
                 loc.extra_metadata = {**(loc.extra_metadata or {}), **passport_extra}
-                if not loc.name and row.get("name"):
-                    loc.name = row["name"]
+                # Подпись из справочника CPO главнее имени из сессий (см. _ingest_compact).
+                reg_name = _s(row.get("name"), 255)
+                if reg_name and str(loc.name or "").strip() != reg_name:
+                    hist = [*((loc.extra_metadata or {}).get("nameHistory") or [])]
+                    if loc.name:
+                        hist.append(loc.name)
+                    loc.extra_metadata = {**loc.extra_metadata, "nameHistory": hist,
+                                          "nameSource": "cpo_registry"}
+                    loc.name = reg_name
+                elif reg_name:
+                    loc.extra_metadata = {**loc.extra_metadata, "nameSource": "cpo_registry"}
                 updated += 1
             else:
                 lid = _loc_id(company_id, ext)
@@ -713,13 +733,18 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
 
 
 async def refresh_location_names(db: AsyncSession, company_id) -> int:
-    """Имя объекта-станции = СВЕЖАЙШЕЕ имя из сессий (по последней сессии кода).
+    """Имя объекта-станции = свежайшее имя из сессий — но ТОЛЬКО если подпись не
+    подтверждена справочником CPO.
 
-    CPO переименовывает станции (волна 01.07.26: 611 «Новая Рига Аутлет
-    Вилладж»→«Новая Рига»), а каталог грузится из xlsx и отстаёт. Идентичность
-    станции = код; имя — только подпись, старое сохраняем в
-    extra_metadata.nameHistory (поиск по нему остаётся). Вызывается после
-    ingest сессий; идемпотентно. Возвращает число переименованных объектов."""
+    Правило приоритета: реестр оператора > выгрузка сессий. Реестр ведёт сам CPO,
+    а `station_name` в сессиях отстаёт и бывает мусорным — так карточка ID 3114
+    держала «Нартис С-60», хотя по реестру это «Бистро Ням-Ням 1», и правка
+    подписи откатывалась при каждой загрузке сессий. Карточки с
+    `extra_metadata.nameSource='cpo_registry'` этот проход не трогает.
+
+    Для станций, которых в реестре нет (заведены из сессий), поведение прежнее:
+    имя берётся из последней сессии, старое уходит в extra_metadata.nameHistory
+    (поиск по нему остаётся). Идемпотентно; возвращает число переименованных."""
     from sqlalchemy import text
     res = await db.execute(text(
         "WITH fresh AS ("
@@ -735,5 +760,6 @@ async def refresh_location_names(db: AsyncSession, company_id) -> int:
         "FROM fresh f "
         "WHERE f.location_id = sl.id AND sl.company_id = :cid "
         "  AND btrim(sl.name) IS DISTINCT FROM f.nm"
+        "  AND coalesce(sl.extra_metadata->>'nameSource', '') <> 'cpo_registry'"
     ), {"cid": str(company_id)})
     return int(res.rowcount or 0)
