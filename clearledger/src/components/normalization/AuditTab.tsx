@@ -134,10 +134,12 @@ export function AuditTab({ result, isAuditing, localDone }: {
   }, [])
 
   const handleCreateMissing = useCallback((entry: AuditMissingEntry) => {
+    if (!entry.proposedEntry) return  // кнопка уже disabled — страховка от программного вызова
+    const { title } = entry.proposedEntry
     createEntry.mutate(entry, {
       onSuccess: () => {
         setMissingStatuses((prev) => ({ ...prev, [entry.id]: 'applied' }))
-        toast.success(`Запись создана: ${entry.proposedEntry.title}`)
+        toast.success(`Запись создана: ${title}`)
       },
     })
   }, [createEntry])
@@ -495,14 +497,23 @@ export function AuditTab({ result, isAuditing, localDone }: {
                     <FilePlus className="size-3.5 text-red-400/80" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">{m.proposedEntry.title}</p>
+                    <p className="text-sm font-medium text-foreground">
+                      {m.proposedEntry?.title ?? `${m.accDocType} № ${m.accDocNumber}`}
+                    </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {m.counterpartyName} &middot; {m.amount.toLocaleString('ru-RU')} ₽ &middot; {m.accDocType}
+                      {!m.proposedEntry && ' · предложение не сформировано'}
                     </p>
                   </div>
                   {status === 'pending' ? (
                     <div className="flex items-center gap-1.5">
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => handleCreateMissing(m)}>
+                      {/* Без предложения категория неизвестна — создавать вслепую нельзя */}
+                      <Button
+                        size="sm" variant="outline" className="h-7 text-xs gap-1"
+                        disabled={!m.proposedEntry}
+                        title={m.proposedEntry ? undefined : 'Классификатор не предложил категорию — заведите запись вручную'}
+                        onClick={() => handleCreateMissing(m)}
+                      >
                         <FilePlus className="size-3" /> Создать запись
                       </Button>
                       <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => handleDismissMissing(m.id)}>

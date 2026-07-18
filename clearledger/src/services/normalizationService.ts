@@ -453,17 +453,25 @@ export async function createEntryFromAuditProposal(
   companyId: string,
   proposal: AuditMissingEntry,
 ): Promise<DataEntry> {
+  // Без предложения нет категории. Молча подставлять «прочее» нельзя —
+  // запись уйдёт в учёт с выдуманной классификацией.
+  const proposed = proposal.proposedEntry
+  if (!proposed) {
+    throw new Error(
+      `Для документа ${proposal.accDocType} № ${proposal.accDocNumber} не сформировано предложение — категорию нужно выбрать вручную`,
+    )
+  }
   return createEntry({
-    title: proposal.proposedEntry.title,
-    categoryId: proposal.proposedEntry.categoryId,
-    subcategoryId: proposal.proposedEntry.subcategoryId,
-    docTypeId: proposal.proposedEntry.docTypeId,
+    title: proposed.title,
+    categoryId: proposed.categoryId,
+    subcategoryId: proposed.subcategoryId,
+    docTypeId: proposed.docTypeId,
     companyId,
     source: 'api',
     sourceLabel: 'Аудит TSupport',
     status: 'recognized',
     docPurpose: 'accounting',
     syncStatus: 'confirmed',
-    metadata: { ...proposal.proposedEntry.metadata, _auditSource: 'tsupport' },
+    metadata: { ...proposed.metadata, _auditSource: 'tsupport' },
   })
 }

@@ -937,13 +937,18 @@ export interface AuditMissingEntry {
   accDocDate: string
   counterpartyName: string
   amount: number
+  /**
+   * null — расхождение зафиксировано, но классификатор не сформировал
+   * предложение (так строит список NormalizationPage из unmatchedDocs).
+   * Создать запись в этом случае нельзя: категорию не выдумываем.
+   */
   proposedEntry: {
     title: string
     categoryId: string
     subcategoryId: string
     docTypeId?: string
     metadata: Record<string, string>
-  }
+  } | null
 }
 
 export interface AuditorNormResult {
