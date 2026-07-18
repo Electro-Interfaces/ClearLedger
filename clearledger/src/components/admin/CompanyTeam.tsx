@@ -227,7 +227,10 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Mail className="h-5 w-5" /> Приглашения</CardTitle>
-        <CardDescription>Ожидают принятия</CardDescription>
+        <CardDescription>
+          Ожидают принятия. Если письмо не дошло — «Отправить снова»: выпустит
+          новую ссылку, её можно скопировать и передать мессенджером.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {q.isLoading && <Loading />}
@@ -236,8 +239,8 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
             <TableRow>
               <TableHead>Email</TableHead>
               <TableHead className="w-[140px]">Роль</TableHead>
-              <TableHead className="w-[120px]">Отправлено</TableHead>
-              <TableHead className="w-20"></TableHead>
+              <TableHead className="w-[150px]">Отправлено</TableHead>
+              <TableHead className="w-[230px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -250,17 +253,24 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
                 <TableCell><Badge variant="secondary" className="text-[10px]">{ROLE_LABEL[i.role] ?? i.role}</Badge></TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {new Date(i.created_at).toLocaleDateString('ru')}
+                  <span className="block">
+                    до {new Date(i.expires_at).toLocaleDateString('ru')}
+                  </span>
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7"
-                      title="Выпустить новую ссылку и отправить письмо повторно"
+                  <div className="flex items-center justify-end gap-1">
+                    {/* Явная кнопка, а не иконка: письмо теряется в спаме, и
+                        «отправить заново / взять ссылку» — самое частое действие
+                        в этой таблице. Прячась под пиктограммой, оно не находится. */}
+                    <Button variant="outline" size="sm" className="h-8"
+                      title="Выпустить новую ссылку: письмо уйдёт повторно, ссылку можно скопировать в мессенджер"
                       disabled={resend.isPending} onClick={() => resend.mutate(i.id)}>
                       {resend.isPending && resend.variables === i.id
-                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        : <RotateCw className="h-3.5 w-3.5" />}
+                        ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        : <RotateCw className="h-3.5 w-3.5 mr-1.5" />}
+                      Отправить снова
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       title="Отозвать" disabled={revoke.isPending} onClick={() => revoke.mutate(i.id)}>
                       <X className="h-3.5 w-3.5" />
                     </Button>
