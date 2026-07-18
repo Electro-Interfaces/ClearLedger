@@ -661,9 +661,13 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
     queryKey: ['fuel-overview-margin-kpi', companyId, period.from, period.to],
     queryFn: () => getCostingMargin(period.from, period.to, 'fuel'),
   })
+  // Готовность к 1С — тот же контур, иначе алерты в шапке считались бы по всей
+  // сети при выбранной одной АЗС.
   const readiness = useQuery({
-    queryKey: ['fuel-overview-readiness-alerts', companyId, period.from, period.to],
-    queryFn: () => getFuelReadiness(period.from, period.to),
+    queryKey: ['fuel-overview-readiness-alerts', companyId, period.from, period.to, scopeKey],
+    queryFn: () => getFuelReadiness(period.from, period.to, {
+      stations: scopeCodes.length ? scopeCodes.map(String) : undefined,
+    }),
   })
 
   const kpis: Kpi[] = useMemo(() => {

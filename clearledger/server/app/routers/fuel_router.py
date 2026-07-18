@@ -2221,12 +2221,9 @@ async def fuel_readiness(
 ):
     """Готовность к 1С за период: смены и ТТН (приёмка, корректировки) + очередь выгрузки."""
     cid = await _company_id(user, db)
-    station_ids = None
-    if stations:
-        try:
-            station_ids = [uuid.UUID(s.strip()) for s in stations.split(",") if s.strip()]
-        except ValueError:
-            station_ids = None
+    # Тот же разбор, что и у shift-dashboard: коды или UUID, ошибка вместо
+    # молчаливого «фильтра нет».
+    station_ids = await _resolve_station_filter(db, cid, stations)
     df = date.fromisoformat(date_from)
     dtt = date.fromisoformat(date_to)
     dt_from = datetime(df.year, df.month, df.day)
