@@ -31,7 +31,6 @@ import {
   INTERVAL_OPTIONS,
 } from '@/types/channel'
 import type { Channel, ScheduleConfig, ScheduleMode } from '@/types/channel'
-import { getNextSyncTime } from '@/services/channelScheduler'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
@@ -83,7 +82,6 @@ function ChannelCard({
   const chSources = sources.filter((s) => getChannelSourceIds(channel).includes(s.id))
   const stations = getChannelStations(channel)
   const enabledStreams = channel.streams.filter((s) => s.enabled)
-  const nextSync = getNextSyncTime(channel)
   const StatusIcon = STATUS_ICONS[channel.status] ?? Clock
 
   function patch(partial: Partial<ScheduleConfig>) {
@@ -95,7 +93,9 @@ function ChannelCard({
     updateChannel(channel.id, { schedule })
     setDirty(false)
     onUpdate()
-    toast.success(`Расписание «${channel.name}» сохранено`)
+    toast.success(`Расписание «${channel.name}» сохранено`, {
+      description: 'Автозапуск по расписанию ещё не активен — загрузка выполняется вручную.',
+    })
   }
 
   function modeLabel(mode: ScheduleMode) {
@@ -309,10 +309,8 @@ function ChannelCard({
                 {channel.lastSync && (
                   <span>Синхр: {format(new Date(channel.lastSync), 'dd.MM HH:mm')}</span>
                 )}
-                {nextSync && (
-                  <span className="text-primary">
-                    След: {format(nextSync, 'dd.MM HH:mm')}
-                  </span>
+                {schedule.mode !== 'manual' && (
+                  <span className="text-muted-foreground/70">Автозапуск не активен</span>
                 )}
               </div>
               {dirty && (
@@ -355,9 +353,14 @@ export function ScheduleOverview({ open, onOpenChange }: Props) {
             Расписание загрузки данных
           </SheetTitle>
           <p className="text-sm text-muted-foreground">
-            {channels.length} обработок, {autoCount} на автозагрузке
+            {channels.length} обработок, {autoCount} с настроенным расписанием
           </p>
         </SheetHeader>
+
+        <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          Автозапуск по расписанию ещё не реализован. Настройки ниже сохраняются на будущее,
+          но загрузка сейчас выполняется только вручную — кнопкой «Загрузить» в карточке обработки.
+        </div>
 
         <Separator className="my-4" />
 

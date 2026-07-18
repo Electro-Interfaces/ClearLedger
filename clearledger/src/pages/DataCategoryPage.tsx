@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getCategoryById } from '@/config/categories'
@@ -26,6 +26,20 @@ import type { EntryStatus } from '@/config/statuses'
 import { lazy, Suspense } from 'react'
 const DocumentTreeView = lazy(() => import('@/components/data/DocumentTreeView').then(m => ({ default: m.DocumentTreeView })))
 
+// last-used фильтров/вида/размера страницы (липкость §2): переживают навигацию,
+// чтобы эксперт не собирал выборку заново каждый заход. Персист per-company в
+// localStorage; при смене компании поддерево перемонтируется (TabsProvider key),
+// поэтому lazy-init перечитает корректное значение без reload-эффекта и гонок.
+const dataCatKey = (companyId: string) => `cl-datacat-${companyId}`
+function readDataCatPersist(companyId: string): { filters?: FilterState; viewMode?: ViewMode; pageSize?: number } {
+  try {
+    const raw = localStorage.getItem(dataCatKey(companyId))
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
 export function DataCategoryPage() {
   const { category } = useParams<{ category: string }>()
   const navigate = useNavigate()
@@ -34,19 +48,23 @@ export function DataCategoryPage() {
 
   const categoryConfig = category ? getCategoryById(company.profileId, category) : undefined
 
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    status: 'all',
-    source: 'all',
-    subcategory: 'all',
-  })
+  const [filters, setFilters] = useState<FilterState>(
+    () => readDataCatPersist(companyId).filters ?? { search: '', status: 'all', source: 'all', subcategory: 'all' },
+  )
 
-  const [viewMode, setViewMode] = useState<ViewMode>('list')
+  const [viewMode, setViewMode] = useState<ViewMode>(() => readDataCatPersist(companyId).viewMode ?? 'list')
   const [activeSubcategory, setActiveSubcategory] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
+  const [pageSize, setPageSize] = useState(() => readDataCatPersist(companyId).pageSize ?? 25)
   const [exportOpen, setExportOpen] = useState(false)
+
+  // Персист last-used выборки экрана (§2). companyId стабилен в рамках монтирования.
+  useEffect(() => {
+    try {
+      localStorage.setItem(dataCatKey(companyId), JSON.stringify({ filters, viewMode, pageSize }))
+    } catch { /* ignore */ }
+  }, [companyId, filters, viewMode, pageSize])
 
   const effectiveFilters = useMemo(
     () => ({ ...filters, subcategory: activeSubcategory }),

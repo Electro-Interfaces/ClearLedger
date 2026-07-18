@@ -21,11 +21,12 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from '@/components/ui/sheet'
-import { Package, Send, CheckCircle2, XCircle, Loader2, Trash2, RefreshCw, Inbox } from 'lucide-react'
+import { Package, Send, CheckCircle2, Loader2, Trash2, Inbox } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 
 import { useCompany } from '@/contexts/CompanyContext'
+import { PolicyVatBadge } from '@/components/onec/PolicyVatBadge'
 import { get, post, patch, del } from '@/services/apiClient'
 
 interface ExportPacket {
@@ -134,6 +135,7 @@ export function ExportPacketsPage() {
             Пакеты данных подготовленные TradeLedger для загрузки в БП ГИГ.
             Расширение TradeLedger.cfe тянет их через GET /queue и квитирует через POST /ack.
           </p>
+          <div className="mt-2"><PolicyVatBadge /></div>
         </div>
         <div className="flex items-center gap-2">
           <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}

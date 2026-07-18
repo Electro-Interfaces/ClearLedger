@@ -213,7 +213,7 @@ const DEMO_RULES: NormRule[] = [
   { id: '2', name: 'Пересчёт единиц', description: 'кг → литры по плотности партии', docTypes: ['ТТН'], active: true, auto: true },
   { id: '3', name: 'Каналы оплаты', description: 'Типы оплаты → виртуальные склады (Яндекс, Карты, Ведомости)', docTypes: ['Сменный отчёт'], active: true, auto: true },
   { id: '4', name: 'Сверка с 1С', description: 'Проверка по закрытым периодам — суммы, остатки, проводки', docTypes: ['Все'], active: true, auto: false },
-  { id: '5', name: 'Валидация сумм', description: 'Контроль: сумма = объём × цена, НДС = сумма × 22/122', docTypes: ['Все'], active: true, auto: true },
+  { id: '5', name: 'Валидация сумм', description: 'Контроль: сумма = объём × цена, НДС по ставке из учётной политики', docTypes: ['Все'], active: true, auto: true },
   { id: '6', name: 'Дедупликация', description: 'Проверка fingerprint — обнаружение дублей и обновлённых версий', docTypes: ['Все'], active: true, auto: true },
 ]
 

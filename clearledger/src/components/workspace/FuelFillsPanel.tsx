@@ -27,7 +27,7 @@ import {
   getFuelNewCards, getFuelNewCardsList,
   FUEL_METRIC_LABELS, fmtFuelMetric, fmtFuelMetricCompact, fuelChartFormat, isFuelRatio, fmtRub0,
   type FuelGroupBy, type FuelMetric, type FuelBucket, type FuelSegment, type FuelNarrow,
-  type FuelFillsLine, type FuelSliceResponse, type FuelTimeseriesResponse, type FuelNewCardsInterval,
+  type FuelFillsLine, type FuelTimeseriesResponse, type FuelNewCardsInterval,
 } from '@/services/fuelSalesService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })

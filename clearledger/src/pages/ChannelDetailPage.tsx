@@ -6,6 +6,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { BindingKeyBadge } from '@/components/onec/BindingKeyBadge'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -559,7 +560,7 @@ function ManualTableCard({ channel }: { channel: Channel }) {
 /** Пример enrichment-шага канала: подгрузка справочника + джойн в основную
  *  таблицу. Проставляет наименование корпоративного клиента (client_name)
  *  ЮЛ-сессиям по телефону. Идемпотентно, отдельно от загрузки сессий. */
-function OrgEnrichmentCard({ channel }: { channel: Channel }) {
+function OrgEnrichmentCard() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
@@ -966,7 +967,7 @@ function OverviewTab({ channel, onUpdate, isFuelApi, syncing, availableStations,
         // Для сессий — доп. карточка обогащения справочником организаций.
         <div className="grid gap-3 md:grid-cols-3">
           <ManualTableCard channel={channel} />
-          {isSessions && <OrgEnrichmentCard channel={channel} />}
+          {isSessions && <OrgEnrichmentCard />}
         </div>
       ) : (
         <LoadPanel channel={channel} onUpdate={onUpdate} syncing={syncing}
@@ -1225,12 +1226,15 @@ function ProcessingParametersCard({
 
   return (
     <div className="space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold">Параметры канала</h3>
-        <p className="text-xs text-muted-foreground">
-          Специфичные для этой загрузки. Применяются на этапах нормализации
-          и сохранения.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Параметры канала</h3>
+          <p className="text-xs text-muted-foreground">
+            Специфичные для этой загрузки. Применяются на этапах нормализации
+            и сохранения.
+          </p>
+        </div>
+        <BindingKeyBadge className="shrink-0" />
       </div>
 
       <Card>

@@ -23,9 +23,10 @@ export function useViewHistory() {
   useEffect(() => { setHistory(loadViewHistory(companyId)) }, [companyId])
   useEffect(() => { saveViewHistory(companyId, history) }, [companyId, history])
 
-  const saveCurrentView = useCallback(() => {
+  const saveCurrentView = useCallback((name?: string) => {
     const snap: ViewSnapshot = {
       id: nanoid(), at: Date.now(),
+      name: name?.trim() || undefined,
       mode: sp.get('mode') ?? 'management',
       sub: sp.get('sub') ?? '',
       section: state,
@@ -50,5 +51,10 @@ export function useViewHistory() {
     setHistory((prev) => prev.filter((s) => s.id !== id))
   }, [])
 
-  return { history, saveCurrentView, applyView, deleteView }
+  // Пометить вид «по умолчанию» (§6.4 точка входа) — снимает пометку с прочих; повторный клик снимает.
+  const setDefaultView = useCallback((id: string) => {
+    setHistory((prev) => prev.map((s) => ({ ...s, isDefault: s.id === id ? !s.isDefault : false })))
+  }, [])
+
+  return { history, saveCurrentView, applyView, deleteView, setDefaultView }
 }

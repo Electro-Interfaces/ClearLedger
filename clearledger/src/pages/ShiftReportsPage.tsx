@@ -15,7 +15,7 @@ import { getAllLoadedDocs } from '@/services/channelSyncService'
 import type { ShiftRecord } from '@/services/fuel/types'
 import { ShiftDetailModal } from '@/components/shift-reports/ShiftDetailModal'
 import {
-  Clock, CheckCircle, Filter, RefreshCw, ChevronDown, ChevronRight, FileText,
+  Clock, CheckCircle, Filter, ChevronDown, ChevronRight, FileText,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'

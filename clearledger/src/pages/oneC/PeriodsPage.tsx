@@ -125,7 +125,7 @@ export function PeriodsPage() {
         <Card className="py-3 gap-1">
           <CardHeader className="pb-0">
             <CardDescription className="text-[10px] uppercase tracking-wide">Открыто</CardDescription>
-            <CardTitle className="text-2xl font-bold tabular-nums text-emerald-500">{stats.open}</CardTitle>
+            <CardTitle className="text-2xl font-bold tabular-nums text-emerald-400/80">{stats.open}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="py-3 gap-1">

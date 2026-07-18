@@ -13,9 +13,10 @@ import { useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
+import { DisclosureSection } from '@/components/common/DisclosureSection'
 import {
-  Bot, Loader2, ExternalLink, CheckCircle, ChevronDown,
+  Bot, Loader2, ExternalLink, CheckCircle,
   AlertOctagon, AlertTriangle, Info, Check, Pencil, X,
   Sparkles, Link2, FilePlus, ShieldCheck,
 } from 'lucide-react'
@@ -31,53 +32,16 @@ import { useApplyAuditEnrichment, useCreateEntryFromAudit } from '@/hooks/useNor
 // ---- Конфиги ----
 
 const auditSeverityConfig = {
-  critical: { icon: AlertOctagon, iconBg: 'hsl(0 84% 60% / 0.15)', iconColor: 'text-red-500' },
-  warning: { icon: AlertTriangle, iconBg: 'hsl(45 100% 55% / 0.15)', iconColor: 'text-yellow-500' },
-  info: { icon: Info, iconBg: 'hsl(217 91% 60% / 0.15)', iconColor: 'text-blue-500' },
+  critical: { icon: AlertOctagon, iconBg: 'hsl(0 84% 60% / 0.12)', iconColor: 'text-red-400/80' },
+  warning: { icon: AlertTriangle, iconBg: 'hsl(45 100% 55% / 0.12)', iconColor: 'text-amber-400/80' },
+  info: { icon: Info, iconBg: 'hsl(217 91% 60% / 0.12)', iconColor: 'text-blue-400/80' },
 } as const
 
 const resolutionConfig: Record<AuditFindingResolution, { label: string; badgeClass: string } | null> = {
   pending: null,
-  accepted: { label: 'Принято', badgeClass: 'border-green-500 text-green-400' },
-  corrected: { label: 'Исправлено', badgeClass: 'border-blue-500 text-blue-400' },
+  accepted: { label: 'Принято', badgeClass: 'border-emerald-400/50 text-emerald-300/80' },
+  corrected: { label: 'Исправлено', badgeClass: 'border-blue-400/50 text-blue-300/80' },
   dismissed: { label: 'Пропущено', badgeClass: 'border-muted-foreground text-muted-foreground' },
-}
-
-// ---- Collapsible Section ----
-
-function CollapsibleSection({
-  title, icon: Icon, iconBg, iconColor, count, badge, defaultOpen, children,
-}: {
-  title: string
-  icon: React.ElementType
-  iconBg: string
-  iconColor: string
-  count: number
-  badge?: { label: string; className: string }
-  defaultOpen: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <Collapsible defaultOpen={defaultOpen}>
-      <CollapsibleTrigger className="flex items-center gap-3 w-full group py-2 cursor-pointer">
-        <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
-          style={{ background: iconBg }}
-        >
-          <Icon className={`size-3.5 ${iconColor}`} />
-        </div>
-        <span className="text-sm font-medium text-foreground">{title}</span>
-        <Badge variant="secondary" className="text-xs">{count}</Badge>
-        {badge && (
-          <Badge variant="outline" className={`text-xs ${badge.className}`}>{badge.label}</Badge>
-        )}
-        <ChevronDown className="size-4 ml-auto text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="mt-2 mb-4">
-        {children}
-      </CollapsibleContent>
-    </Collapsible>
-  )
 }
 
 // ---- Finding Card ----
@@ -269,7 +233,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
       {/* KPI Сводка */}
       <div className="flex items-center gap-4 text-sm flex-wrap">
         <div className="flex items-center gap-1.5">
-          <CheckCircle className="size-4 text-green-500" />
+          <CheckCircle className="size-4 text-emerald-400/80" />
           <span className="text-foreground font-medium">{result.totalChecked}</span>
           <span className="text-muted-foreground">проверено</span>
         </div>
@@ -295,10 +259,18 @@ export function AuditTab({ result, isAuditing, localDone }: {
           </Badge>
         )}
         {hasPendingActions && (
-          <Button size="sm" className="ml-auto h-7 text-xs gap-1.5" onClick={handleBulkApply}>
-            <Sparkles className="size-3" />
-            Применить все результаты
-          </Button>
+          <ConfirmActionDialog
+            trigger={
+              <Button size="sm" className="ml-auto h-7 text-xs gap-1.5">
+                <Sparkles className="size-3" />
+                Применить все результаты
+              </Button>
+            }
+            title="Применить все результаты аудита?"
+            description={`Будет применено обогащений: ${pendingEnrichments}, создано записей: ${pendingMissing}. Действие меняет поля записей и создаёт документы в 1С-контуре.`}
+            confirmLabel="Применить"
+            onConfirm={handleBulkApply}
+          />
         )}
         {!hasPendingActions && (
           <Link to="/partner/auditor" className="ml-auto">
@@ -311,11 +283,11 @@ export function AuditTab({ result, isAuditing, localDone }: {
       </div>
 
       {/* 1. Проверенные записи */}
-      <CollapsibleSection
+      <DisclosureSection
         title="Проверенные записи"
         icon={ShieldCheck}
         iconBg="hsl(120 60% 45% / 0.15)"
-        iconColor="text-green-500"
+        iconColor="text-emerald-400/80"
         count={result.verifiedEntries.length}
         defaultOpen={false}
       >
@@ -327,7 +299,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
                 <th className="text-left px-3 py-2 font-medium">Документ 1С</th>
                 <th className="text-left px-3 py-2 font-medium">Дата</th>
                 <th className="text-center px-3 py-2 font-medium w-12">
-                  <CheckCircle className="size-3.5 inline text-green-500" />
+                  <CheckCircle className="size-3.5 inline text-emerald-400/80" />
                 </th>
               </tr>
             </thead>
@@ -338,17 +310,17 @@ export function AuditTab({ result, isAuditing, localDone }: {
                   <td className="px-3 py-2 text-muted-foreground">{v.accDocNumber || '—'}</td>
                   <td className="px-3 py-2 text-muted-foreground">{v.accDocDate || '—'}</td>
                   <td className="px-3 py-2 text-center">
-                    <CheckCircle className="size-3.5 inline text-green-500" />
+                    <CheckCircle className="size-3.5 inline text-emerald-400/80" />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </CollapsibleSection>
+      </DisclosureSection>
 
       {/* 2. Предложения обогащения */}
-      <CollapsibleSection
+      <DisclosureSection
         title="Предложения обогащения"
         icon={Sparkles}
         iconBg="hsl(280 80% 55% / 0.15)"
@@ -363,9 +335,17 @@ export function AuditTab({ result, isAuditing, localDone }: {
         <div className="space-y-2">
           {pendingEnrichments > 1 && (
             <div className="flex justify-end">
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleAcceptAllEnrichments}>
-                <Check className="size-3" /> Принять все ({pendingEnrichments})
-              </Button>
+              <ConfirmActionDialog
+                trigger={
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
+                    <Check className="size-3" /> Принять все ({pendingEnrichments})
+                  </Button>
+                }
+                title="Принять все обогащения?"
+                description={`Будет применено обогащений: ${pendingEnrichments}. Значения полей записей будут перезаписаны предложенными.`}
+                confirmLabel="Принять все"
+                onConfirm={handleAcceptAllEnrichments}
+              />
             </div>
           )}
           <div className="rounded-lg border overflow-x-auto">
@@ -409,7 +389,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
                             </Button>
                           </div>
                         ) : (
-                          <Badge variant="outline" className={`text-[10px] ${status === 'applied' ? 'border-green-500 text-green-400' : 'border-muted-foreground text-muted-foreground'}`}>
+                          <Badge variant="outline" className={`text-[10px] ${status === 'applied' ? 'border-emerald-400/50 text-emerald-300/80' : 'border-muted-foreground text-muted-foreground'}`}>
                             {status === 'applied' ? 'Применено' : 'Пропущено'}
                           </Badge>
                         )}
@@ -421,10 +401,10 @@ export function AuditTab({ result, isAuditing, localDone }: {
             </table>
           </div>
         </div>
-      </CollapsibleSection>
+      </DisclosureSection>
 
       {/* 3. Соответствия CL↔1С */}
-      <CollapsibleSection
+      <DisclosureSection
         title="Соответствия CL↔1С"
         icon={Link2}
         iconBg="hsl(217 91% 60% / 0.15)"
@@ -455,13 +435,13 @@ export function AuditTab({ result, isAuditing, localDone }: {
                     <td className="px-3 py-2 text-muted-foreground">{c.accDocType}</td>
                     <td className="px-3 py-2 text-muted-foreground">{c.accDocDate}</td>
                     <td className="px-3 py-2 text-right text-foreground">{c.accDocAmount.toLocaleString('ru-RU')} ₽</td>
-                    <td className={`px-3 py-2 text-right ${diff !== 0 ? 'text-yellow-500' : 'text-muted-foreground'}`}>
+                    <td className={`px-3 py-2 text-right ${diff !== 0 ? 'text-amber-400/80' : 'text-muted-foreground'}`}>
                       {diff !== 0 ? `${diff > 0 ? '+' : ''}${diff.toLocaleString('ru-RU')} ₽` : '—'}
                     </td>
                     <td className="px-3 py-2 text-center">
                       <Badge
                         variant="outline"
-                        className={`text-[10px] ${c.matchScore >= 95 ? 'border-green-500 text-green-400' : c.matchScore >= 90 ? 'border-yellow-500 text-yellow-400' : 'border-orange-500 text-orange-400'}`}
+                        className={`text-[10px] ${c.matchScore >= 95 ? 'border-emerald-400/50 text-emerald-300/80' : c.matchScore >= 90 ? 'border-amber-400/50 text-amber-300/80' : 'border-orange-400/50 text-orange-300/80'}`}
                       >
                         {c.matchScore}%
                       </Badge>
@@ -472,17 +452,17 @@ export function AuditTab({ result, isAuditing, localDone }: {
             </tbody>
           </table>
         </div>
-      </CollapsibleSection>
+      </DisclosureSection>
 
       {/* 4. Не найдены в CL */}
-      <CollapsibleSection
+      <DisclosureSection
         title="Не найдены в TradeLedger"
         icon={FilePlus}
         iconBg="hsl(0 84% 60% / 0.15)"
-        iconColor="text-red-500"
+        iconColor="text-red-400/80"
         count={result.missingEntries.length}
         badge={pendingMissing > 0
-          ? { label: `${pendingMissing} ожидают`, className: 'border-red-500 text-red-400' }
+          ? { label: `${pendingMissing} ожидают`, className: 'border-red-400/50 text-red-300/80' }
           : undefined
         }
         defaultOpen={true}
@@ -490,9 +470,17 @@ export function AuditTab({ result, isAuditing, localDone }: {
         <div className="space-y-2">
           {pendingMissing > 1 && (
             <div className="flex justify-end">
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={handleCreateAllMissing}>
-                <FilePlus className="size-3" /> Создать все ({pendingMissing})
-              </Button>
+              <ConfirmActionDialog
+                trigger={
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
+                    <FilePlus className="size-3" /> Создать все ({pendingMissing})
+                  </Button>
+                }
+                title="Создать все недостающие записи?"
+                description={`Будет создано записей: ${pendingMissing} в 1С-контуре.`}
+                confirmLabel="Создать все"
+                onConfirm={handleCreateAllMissing}
+              />
             </div>
           )}
           {result.missingEntries.map((m) => {
@@ -504,7 +492,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
                     style={{ background: 'hsl(0 84% 60% / 0.15)' }}
                   >
-                    <FilePlus className="size-3.5 text-red-500" />
+                    <FilePlus className="size-3.5 text-red-400/80" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground">{m.proposedEntry.title}</p>
@@ -522,7 +510,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
                       </Button>
                     </div>
                   ) : (
-                    <Badge variant="outline" className={`text-[10px] ${status === 'applied' ? 'border-green-500 text-green-400' : 'border-muted-foreground text-muted-foreground'}`}>
+                    <Badge variant="outline" className={`text-[10px] ${status === 'applied' ? 'border-emerald-400/50 text-emerald-300/80' : 'border-muted-foreground text-muted-foreground'}`}>
                       {status === 'applied' ? 'Создана' : 'Пропущено'}
                     </Badge>
                   )}
@@ -531,19 +519,19 @@ export function AuditTab({ result, isAuditing, localDone }: {
             )
           })}
         </div>
-      </CollapsibleSection>
+      </DisclosureSection>
 
       {/* 5. Находки */}
-      <CollapsibleSection
+      <DisclosureSection
         title="Находки"
         icon={AlertTriangle}
         iconBg="hsl(45 100% 55% / 0.15)"
-        iconColor="text-yellow-500"
+        iconColor="text-amber-400/80"
         count={result.findings.length}
         badge={pendingFindings > 0
-          ? { label: `${pendingFindings} ожидают`, className: 'border-red-500 text-red-400' }
+          ? { label: `${pendingFindings} ожидают`, className: 'border-red-400/50 text-red-300/80' }
           : resolvedFindings > 0
-          ? { label: `${resolvedFindings} решено`, className: 'border-green-500 text-green-400' }
+          ? { label: `${resolvedFindings} решено`, className: 'border-emerald-400/50 text-emerald-300/80' }
           : undefined
         }
         defaultOpen={true}
@@ -558,7 +546,7 @@ export function AuditTab({ result, isAuditing, localDone }: {
             />
           ))}
         </div>
-      </CollapsibleSection>
+      </DisclosureSection>
 
       {/* Footer */}
       {result.finishedAt && (

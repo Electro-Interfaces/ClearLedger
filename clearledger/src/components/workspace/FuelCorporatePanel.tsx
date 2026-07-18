@@ -30,7 +30,7 @@ import { useTabParams } from '@/hooks/useTabParams'
 import { ExportButton } from './analytics/ExportButton'
 import {
   getFuelCorporateOverview, getFuelCorporateCounterparties, getFuelCorporateCards, getFuelTimeseries,
-  FUEL_METRIC_LABELS, fmtFuelMetric, fmtFuelMetricCompact, fmtFuelMetricShort, fuelChartFormat, fmtRub0,
+  FUEL_METRIC_LABELS, fmtFuelMetricCompact, fmtFuelMetricShort, fuelChartFormat, fmtRub0,
   type FuelMetric, type FuelBucket, type FuelGroupBy, type FuelCardsSort,
   type FuelCounterpartyRow, type FuelTimeseriesResponse,
 } from '@/services/fuelSalesService'

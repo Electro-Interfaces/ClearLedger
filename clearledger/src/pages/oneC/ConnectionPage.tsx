@@ -59,7 +59,7 @@ const MODE_META: Record<OneCConnectionMode, {
 
 const STATUS_META: Record<string, { label: string; color: string; icon: typeof CheckCircle2 }> = {
   inactive: { label: 'Не проверено', color: 'text-muted-foreground', icon: AlertCircle },
-  active:   { label: 'Подключено', color: 'text-emerald-500', icon: CheckCircle2 },
+  active:   { label: 'Подключено', color: 'text-emerald-400/80', icon: CheckCircle2 },
   error:    { label: 'Ошибка', color: 'text-destructive', icon: AlertCircle },
 }
 
@@ -444,9 +444,9 @@ export function ConnectionPage() {
                       {format(new Date(log.startedAt), 'dd.MM HH:mm:ss')}
                     </span>
                     <span className={
-                      log.status === 'success' || log.status === 'completed' ? 'text-emerald-500'
+                      log.status === 'success' || log.status === 'completed' ? 'text-emerald-400/80'
                         : log.status === 'error' ? 'text-destructive'
-                        : 'text-amber-500'
+                        : 'text-amber-400/80'
                     }>
                       {log.status}
                     </span>
@@ -478,7 +478,7 @@ export function ConnectionPage() {
               ['Pull-only', 'TradeLedger только читает. Запись в 1С — её расширение тянет данные из TradeLedger API'],
             ].map(([title, descr]) => (
               <li key={title} className="flex items-start gap-2">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400/80 mt-0.5 shrink-0" />
                 <div>
                   <span className="font-medium">{title}</span>
                   <span className="text-muted-foreground"> — {descr}</span>

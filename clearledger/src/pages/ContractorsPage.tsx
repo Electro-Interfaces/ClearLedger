@@ -488,8 +488,14 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
             <TableBody>
               {contracts.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={isEnergy ? 5 : 4} className="text-center text-muted-foreground h-20">
-                    У контрагента нет договоров
+                  <TableCell colSpan={isEnergy ? 5 : 4} className="text-center h-24">
+                    <p className="text-sm text-muted-foreground">Договоров пока нет</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground/70">
+                      Здесь появятся договоры контрагента — из 1С или добавленные вручную.
+                    </p>
+                    <ContractFormDialog counterpartyId={cp.externalRef || cp.id}>
+                      <Button size="sm" variant="outline" className="mt-2"><Plus className="size-4 mr-1.5" /> Добавить договор</Button>
+                    </ContractFormDialog>
                   </TableCell>
                 </TableRow>
               )}

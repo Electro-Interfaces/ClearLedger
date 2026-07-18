@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Tabs, TabsContent, TabsList, TabsTrigger,
 } from '@/components/ui/tabs'
+import { usePersistentState } from '@/hooks/usePersistentState'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -51,7 +52,7 @@ export function ReferencesPage() {
   const syncMutation = useSyncCatalogs()
   const connection = connections?.[0]
 
-  const [tab, setTab] = useState<TabKey>('counterparties')
+  const [tab, setTab] = usePersistentState<TabKey>('cl-1c-references-tab', 'counterparties')
 
   async function handleSync() {
     if (!connection) {

@@ -15,6 +15,7 @@ import {
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { Button } from '@/components/ui/button'
+import { PolicyVatBadge } from '@/components/onec/PolicyVatBadge'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
@@ -80,13 +81,16 @@ export function BpExportPanel({ companyId, dateFrom, dateTo }: { companyId: stri
 
   return (
     <div className="p-6 space-y-4">
-      <div>
-        <h3 className="text-base font-semibold">Выгрузка в БП ГИГ</h3>
-        <p className="text-xs text-muted-foreground mt-0.5 max-w-3xl">
-          Ledger — единый продюсер JSON-пакетов «смена → БП» (замена TL_ЭкспортБП). Приёмник
-          <code className="mx-1 text-[11px]">TL_СопуткаСервис.ОбработатьПакетИзСтроки</code>
-          не меняется. Выберите смену → анализ состава пакета → скачать JSON или выгрузить в каталог.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Выгрузка в БП ГИГ</h3>
+          <p className="text-xs text-muted-foreground mt-0.5 max-w-3xl">
+            Ledger — единый продюсер JSON-пакетов «смена → БП» (замена TL_ЭкспортБП). Приёмник
+            <code className="mx-1 text-[11px]">TL_СопуткаСервис.ОбработатьПакетИзСтроки</code>
+            не меняется. Выберите смену → анализ состава пакета → скачать JSON или выгрузить в каталог.
+          </p>
+        </div>
+        <PolicyVatBadge className="shrink-0" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(320px,420px)_1fr]">

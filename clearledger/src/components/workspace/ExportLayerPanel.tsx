@@ -19,6 +19,7 @@ import {
   GitBranch, RotateCcw, ListChecks,
 } from 'lucide-react'
 import { EnergyExportView } from './EnergyExportView'
+import { PolicyVatBadge } from '@/components/onec/PolicyVatBadge'
 
 type ExportTab = 'documents' | 'preview' | 'validation' | 'upload' | 'analysis'
 
@@ -201,18 +202,18 @@ function PreviewView() {
               <div className="flex justify-between"><span className="text-muted-foreground">ДТ (л)</span><span>2 100.00 л / 150 000.00 ₽</span></div>
               <div className="border-t border-border/30 pt-2" />
               <div className="flex justify-between font-bold"><span>Итого</span><span>287 450.00 ₽</span></div>
-              <div className="flex justify-between text-muted-foreground"><span>НДС (22%)</span><span>52 278.69 ₽</span></div>
+              <div className="flex justify-between text-muted-foreground"><span>НДС <span className="text-[10px]">(демо)</span></span><span>52 278.69 ₽</span></div>
             </div>
           </CardContent>
         </Card>
       </div>
 
       <div className="flex items-center gap-2">
-        <Button size="sm" className="h-7 text-xs gap-1.5">
+        <Button size="sm" disabled title="Демо — действие недоступно" className="h-7 text-xs gap-1.5">
           <CheckCircle2 className="h-3 w-3" />
           Подтвердить
         </Button>
-        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+        <Button size="sm" variant="outline" disabled title="Демо — действие недоступно" className="h-7 text-xs gap-1.5">
           <RotateCcw className="h-3 w-3" />
           Вернуть на корректировку
         </Button>
@@ -231,7 +232,7 @@ interface ValidationCheck {
 
 const DEMO_CHECKS: ValidationCheck[] = [
   { name: 'Арифметика сумм', status: 'pass', details: 'Объём × Цена = Сумма — совпадает по всем строкам' },
-  { name: 'НДС', status: 'pass', details: 'НДС = Сумма × 22/122 — расчёт корректен' },
+  { name: 'НДС', status: 'pass', details: 'Ставка НДС берётся из учётной политики организации (демо)' },
   { name: 'Номенклатура', status: 'pass', details: 'Все позиции имеют соответствие в справочнике 1С' },
   { name: 'Склад', status: 'pass', details: 'Склад «АЗС Витебский» существует в 1С' },
   { name: 'Период', status: 'pass', details: 'Апрель 2026 — открытый период' },
@@ -277,7 +278,7 @@ function ValidationView() {
         })}
       </div>
 
-      <Button size="sm" className="h-7 text-xs gap-1.5">
+      <Button size="sm" disabled title="Демо — действие недоступно" className="h-7 text-xs gap-1.5">
         <ListChecks className="h-3 w-3" />
         Запустить полную проверку
       </Button>
@@ -315,7 +316,7 @@ function UploadView() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">Загрузка подготовленных документов в 1С</p>
-        <Button size="sm" className="h-7 text-xs gap-1.5">
+        <Button size="sm" disabled title="Демо — действие недоступно" className="h-7 text-xs gap-1.5">
           <Upload className="h-3 w-3" />
           Загрузить в 1С
         </Button>
@@ -412,7 +413,7 @@ function AnalysisView() {
             <Shield className={`h-4 w-4 ${warnChecks > 0 ? 'text-amber-500' : 'text-emerald-500'}`} />
             <span className="text-sm font-medium">{okChecks}/{totalChecks}</span>
           </div>
-          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5">
+          <Button size="sm" variant="outline" disabled title="Демо — действие недоступно" className="h-7 text-xs gap-1.5">
             <Search className="h-3 w-3" />
             Запустить анализ
           </Button>
@@ -464,6 +465,17 @@ export function ExportLayerPanel() {
   return (
     <CentralPanelLayout items={EXPORT_MENU} activeKey={tab} onSelect={(k) => setTab(k as ExportTab)}>
       <ScrollArea className="h-full">
+        {/* Раздел выгрузки для этого профиля пока иллюстративный: документы, статусы
+            и проверки ниже — демонстрационные, а действия (подтверждение, загрузка в 1С,
+            запуск проверок) намеренно отключены, чтобы демо не читалось как реальный
+            статус выгрузки и оператор не принял решение «грузить» по фейковым цифрам. */}
+        <div className="mx-4 mt-4 flex flex-wrap items-center gap-2">
+          <PolicyVatBadge />
+        </div>
+        <div className="mx-4 mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <strong>Демонстрационные данные.</strong> Реальная выгрузка в 1С для этого профиля к разделу
+          ещё не подключена — документы, статусы и проверки ниже иллюстративны, действия отключены.
+        </div>
         {tab === 'documents' && <DocumentsView />}
         {tab === 'preview' && <PreviewView />}
         {tab === 'validation' && <ValidationView />}

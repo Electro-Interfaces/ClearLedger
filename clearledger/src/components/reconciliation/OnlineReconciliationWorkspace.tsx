@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import {
   Dialog,
   DialogContent,
@@ -467,10 +468,18 @@ export function OnlineReconciliationWorkspace({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <Button size="sm" onClick={apply} disabled={applying || data.unresolved_count > 0}>
-              <CheckCircle2 data-icon="inline-start" />
-              Применить в L2
-            </Button>
+            <ConfirmActionDialog
+              trigger={
+                <Button size="sm" disabled={applying || data.unresolved_count > 0}>
+                  <CheckCircle2 data-icon="inline-start" />
+                  Применить в L2
+                </Button>
+              }
+              title="Применить решения в слой L2?"
+              description="Все решённые расхождения будут записаны в слой L2 (нормализованные данные, используемые в отчётности и выгрузке). Действие затрагивает данные сверки."
+              confirmLabel="Применить в L2"
+              onConfirm={apply}
+            />
           </div>
 
           <Table>

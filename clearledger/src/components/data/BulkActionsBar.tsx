@@ -70,14 +70,31 @@ export function BulkActionsBar({
         </Button>
 
         {onExportTo1C && (
-          <Button variant="outline" size="sm" onClick={onExportTo1C}>
-            <Upload />
-            Выгрузить в 1С
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Upload />
+                Выгрузить в 1С
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Выгрузить {selectedCount} записей в 1С?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Готовые бухгалтерские документы (проверен/передан) будут переданы и помечены как
+                  выгруженные в 1С-контур. Проверьте выбор — действие меняет статус синхронизации.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Отмена</AlertDialogCancel>
+                <AlertDialogAction onClick={onExportTo1C}>Выгрузить в 1С</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
 
         {onAuditor && (
-          <Button variant="outline" size="sm" onClick={onAuditor} className="text-violet-500">
+          <Button variant="outline" size="sm" onClick={onAuditor} className="text-violet-400/80">
             <ShieldCheck />
             Аудитор
           </Button>
@@ -107,7 +124,7 @@ export function BulkActionsBar({
         )}
 
         {onExclude && (
-          <Button variant="outline" size="sm" className="text-yellow-500" onClick={onExclude}>
+          <Button variant="outline" size="sm" className="text-amber-400/80" onClick={onExclude}>
             <EyeOff />
             Исключить
           </Button>

@@ -5,7 +5,7 @@
 
 import { getSources, createSource, updateSource } from './sourceService'
 import { getChannels, createChannel, updateChannel } from './channelService'
-import { getSettings, saveSettings } from './settingsService'
+import { saveSettings } from './settingsService'
 import { stsLogin } from './fuel/stsApiClient'
 
 export interface QuickSetupParams {

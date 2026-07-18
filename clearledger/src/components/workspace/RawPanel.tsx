@@ -14,7 +14,6 @@ import { useFilters } from '@/contexts/FilterContext'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Loader2, RefreshCw, List, LayoutGrid, Search, GitBranchPlus, SlidersHorizontal,
   ChevronRight, ChevronDown, FolderOpen, Folder, FileText, ArrowUp, X,
@@ -435,9 +434,6 @@ export function RawPanel({ collapseButton }: { hideHeader?: boolean; collapseBut
     }
   }
 
-  function openFolder(name: string) {
-    navigateTo([...currentPath, name])
-  }
 
   function openFile(node: FsNode) {
     // Добавить вкладку

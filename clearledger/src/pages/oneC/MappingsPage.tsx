@@ -28,13 +28,14 @@ import {
 } from '@/components/ui/sheet'
 import {
   Plus, Pencil, Trash2, Loader2, Link2, Building2, Fuel, CreditCard, Package, Users,
-  Sparkles, CheckCircle2, AlertCircle, ArrowRight,
+  Sparkles, CheckCircle2, ArrowRight,
 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { post } from '@/services/apiClient'
 import { toast } from 'sonner'
 
 import { useCompany } from '@/contexts/CompanyContext'
+import { BindingKeyBadge } from '@/components/onec/BindingKeyBadge'
 import {
   listMappings, createMapping, updateMapping, deleteMapping, mappingStats,
   type MappingKind, type MappingMethod, type ReconcileMapping,
@@ -111,13 +112,20 @@ export function MappingsPage() {
     ),
     onSuccess: (data) => {
       setAutoData(data)
-      // По умолчанию выделяем все с confidence >= 90
+      // Критичные типы (АЗС/Топливо) задают счёт/склад в проводках — их привязку НЕ
+      // пред-выбираем: неверный авто-подбор по эвристике не должен уехать одним кликом.
+      // Для прочих справочников пред-выбираем очевидные совпадения (confidence >= 90).
+      const critical = kind === 'station' || kind === 'fuel'
       const sel = new Set<number>()
-      data.suggestions.forEach((s, i) => { if (s.confidence >= 90) sel.add(i) })
+      if (!critical) {
+        data.suggestions.forEach((s, i) => { if (s.confidence >= 90) sel.add(i) })
+      }
       setSelectedIdx(sel)
       setAutoOpen(true)
       toast.success(`Найдено ${data.total} предложений`, {
-        description: `Высокая уверенность: ${data.by_confidence.high}, средняя: ${data.by_confidence.medium}, низкая: ${data.by_confidence.low}`,
+        description: critical
+          ? 'Тип критичен для проводок — отметьте привязки вручную перед применением.'
+          : `Высокая уверенность: ${data.by_confidence.high}, средняя: ${data.by_confidence.medium}, низкая: ${data.by_confidence.low}`,
       })
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Ошибка анализа'),
@@ -212,6 +220,7 @@ export function MappingsPage() {
               <CardTitle className="text-sm flex items-center gap-2">
                 <Link2 className="h-4 w-4 text-muted-foreground" /> {meta.label}
                 <Badge variant="outline" className="text-[10px] font-mono ml-1">{rows.length}</Badge>
+                {kind === 'station' && <BindingKeyBadge className="ml-auto" />}
               </CardTitle>
               <CardDescription className="text-xs">{meta.hint}</CardDescription>
             </CardHeader>

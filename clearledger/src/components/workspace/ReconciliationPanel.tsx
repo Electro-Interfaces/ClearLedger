@@ -29,6 +29,7 @@ import { GitCompare, Play, Loader2, Settings2, CheckCircle2, AlertTriangle, Plug
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
 import { getSources, loadSources } from '@/services/sourceService'
 import { getChannels, loadChannels } from '@/services/channelService'
 import { isApiEnabled } from '@/services/apiClient'
@@ -446,6 +447,21 @@ function ReconcileParamsForm({ params, setParams, onRun, description, loading, c
         )}
 
       </div>
+
+      {/* Базис числа на поверхности (§5 «базис виден всегда»): опорный источник +
+          с чем сверяется. Полный состав/статус — в модалке «Настройка сверки». */}
+      {cutKey && RECON_CUT_SOURCES[cutKey] && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="font-medium text-foreground/80">Базис числа:</span>
+          <Badge variant="outline" className="border-primary/40 text-primary/90 text-[10px]">
+            {RECON_CUT_SOURCES[cutKey].find((d) => d.role === 'anchor')?.label ?? '—'}
+          </Badge>
+          <span>сверяется с</span>
+          {RECON_CUT_SOURCES[cutKey].filter((d) => d.role === 'control').map((c) => (
+            <Badge key={c.sourceType} variant="outline" className="border-zinc-600 text-zinc-400 text-[10px]">{c.label}</Badge>
+          ))}
+        </div>
+      )}
 
       {/* Разделитель */}
       <div className="border-b border-border/50 mt-3" />

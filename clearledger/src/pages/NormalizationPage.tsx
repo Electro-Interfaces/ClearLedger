@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge'
 import { ClipboardList, ShieldCheck, Sparkles, Scale, Play, Loader2, Bot } from 'lucide-react'
 import { toast } from 'sonner'
 import { NormalizationKpiCards } from '@/components/normalization/NormalizationKpiCards'
+import { PolicyCostingBadge } from '@/components/onec/PolicyCostingBadge'
+import { usePersistentState } from '@/hooks/usePersistentState'
 import { NormalizationProgress } from '@/components/normalization/NormalizationProgress'
 import { ValidationResultsTable } from '@/components/normalization/ValidationResultsTable'
 import { EnrichmentResultsTable } from '@/components/normalization/EnrichmentResultsTable'
@@ -42,6 +44,7 @@ export function NormalizationPage() {
   const [progress, setProgress] = useState<ProgressInfo | null>(null)
   const [auditResult, setAuditResult] = useState<AuditorNormResult | null>(null)
   const [isAuditing, setIsAuditing] = useState(false)
+  const [tab, setTab] = usePersistentState('cl-normalization-tab', 'overview')
 
   const handleRunAudit = useCallback(async () => {
     setIsAuditing(true)
@@ -152,6 +155,7 @@ export function NormalizationPage() {
           <p className="text-sm text-muted-foreground mt-1">
             Валидация, обогащение из справочников и контроль соответствия
           </p>
+          <div className="mt-2"><PolicyCostingBadge /></div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -191,7 +195,7 @@ export function NormalizationPage() {
       {summary && <NormalizationKpiCards summary={summary} />}
 
       {/* Tabs */}
-      <Tabs defaultValue="overview">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="overview" className="gap-1.5">
             <ClipboardList className="size-4" />
@@ -316,15 +320,15 @@ function OverviewTab({
           </div>
           <div className="rounded-lg border p-4">
             <p className="text-xs text-muted-foreground">Ожидают проверки</p>
-            <p className="text-2xl font-bold text-blue-500">{summary.pendingCount}</p>
+            <p className="text-2xl font-bold text-blue-400/80">{summary.pendingCount}</p>
           </div>
           <div className="rounded-lg border p-4">
             <p className="text-xs text-muted-foreground">Проблемы</p>
-            <p className="text-2xl font-bold text-yellow-500">{summary.issuesCount}</p>
+            <p className="text-2xl font-bold text-amber-400/80">{summary.issuesCount}</p>
           </div>
           <div className="rounded-lg border p-4">
             <p className="text-xs text-muted-foreground">Находки</p>
-            <p className="text-2xl font-bold text-red-500">{summary.complianceFindings}</p>
+            <p className="text-2xl font-bold text-red-400/80">{summary.complianceFindings}</p>
           </div>
         </div>
       </div>

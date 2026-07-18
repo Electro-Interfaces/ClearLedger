@@ -4,6 +4,7 @@
 
 import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
+import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { CheckCheck } from 'lucide-react'
@@ -56,16 +57,23 @@ export function EnrichmentResultsTable({ results, onApply, isPending }: Props) {
           className="max-w-sm"
         />
         {pendingApply.length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleApplyAll}
-            disabled={isPending}
-            className="shrink-0 gap-1.5"
-          >
-            <CheckCheck className="size-3.5" />
-            Принять все ({pendingApply.length})
-          </Button>
+          <ConfirmActionDialog
+            trigger={
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isPending}
+                className="shrink-0 gap-1.5"
+              >
+                <CheckCheck className="size-3.5" />
+                Принять все ({pendingApply.length})
+              </Button>
+            }
+            title="Принять все обогащения?"
+            description={`Будет применено обогащений: ${pendingApply.length}. Значения полей записей будут перезаписаны предложенными.`}
+            confirmLabel="Принять все"
+            onConfirm={handleApplyAll}
+          />
         )}
       </div>
 

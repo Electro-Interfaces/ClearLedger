@@ -24,6 +24,8 @@ import {
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { StatusBadge } from '@/components/data/StatusBadge'
+import { PolicyVatBadge } from '@/components/onec/PolicyVatBadge'
+import { usePersistentState } from '@/hooks/usePersistentState'
 import { formatDateTime } from '@/lib/formatDate'
 import { Download, AlertTriangle, CheckCircle2, History } from 'lucide-react'
 import { toast } from 'sonner'
@@ -39,7 +41,7 @@ const FORMAT_LABELS: Record<ExportFormat, string> = {
 
 export function ExportPage() {
   const { companyId } = useCompany()
-  const [format, setFormat] = useState<ExportFormat>('enterprise')
+  const [format, setFormat] = usePersistentState<ExportFormat>('cl-export-format', 'enterprise')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [isExporting, setIsExporting] = useState(false)
 
@@ -123,7 +125,10 @@ export function ExportPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold tracking-tight">Экспорт данных</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Экспорт данных</h1>
+        <PolicyVatBadge />
+      </div>
 
       {/* Формат + статистика */}
       <Card>

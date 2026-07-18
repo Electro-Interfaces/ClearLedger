@@ -80,11 +80,10 @@ npm run preview   # превью production-сборки
 components/
   ui/           — shadcn/ui примитивы (НЕ менять вручную, только через shadcn CLI)
   layout/       — MainLayout, Header, AppSidebar, MobileBottomNav
-  dashboard/    — KPI-карточки, виджеты, диаграммы
   inbox/        — верификация (split-view: документ + форма)
   intake/       — drag-n-drop, очередь обработки, дубликаты
   data/         — таблицы по категориям, карточки записей
-  settings/     — OneCConnectionForm, OneCSyncStatus, OneCSyncHistory
+  settings/     — OneCSyncStatus, OneCSyncHistory (форма подключения — pages/oneC/ConnectionPage)
   dev/          — DevPanel (только import.meta.env.DEV)
   normalization/ — NormalizationKpiCards, ValidationResultsTable, EnrichmentResultsTable, ComplianceReport, AuditTab
   common/       — переиспользуемые примитивы
@@ -168,7 +167,7 @@ lib/            — queryClient, cn() утилита
 
 | Компонент | Файл |
 |-----------|------|
-| Форма подключения | `src/components/settings/OneCConnectionForm.tsx` |
+| Форма подключения | `src/pages/oneC/ConnectionPage.tsx` |
 | Статус + кнопки sync | `src/components/settings/OneCSyncStatus.tsx` |
 | История синхронизаций | `src/components/settings/OneCSyncHistory.tsx` |
 

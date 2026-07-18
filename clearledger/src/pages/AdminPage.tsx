@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { usePersistentState } from '@/hooks/usePersistentState'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
@@ -44,6 +45,7 @@ export function AdminPage() {
   const companies = companiesQuery.data ?? []
 
   const [selectedId, setSelectedId] = useState<string>('')
+  const [tab, setTab] = usePersistentState('cl-admin-tab', 'members')
   const selected = useMemo(
     () => companies.find((c) => c.id === (selectedId || activeId)) ?? companies[0],
     [companies, selectedId, activeId],
@@ -98,7 +100,7 @@ export function AdminPage() {
       </div>
 
       {selected ? (
-        <Tabs defaultValue="members" className="w-full">
+        <Tabs value={tab} onValueChange={setTab} className="w-full">
           <TabsList>
             <TabsTrigger value="members" className="gap-1.5"><Users className="h-4 w-4" /> Сотрудники</TabsTrigger>
             <TabsTrigger value="roles" className="gap-1.5"><KeyRound className="h-4 w-4" /> Роли и доступ</TabsTrigger>

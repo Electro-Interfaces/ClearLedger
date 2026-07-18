@@ -1,12 +1,14 @@
 import { ManualEntryForm } from '@/components/manual/ManualEntryForm'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { usePersistentState } from '@/hooks/usePersistentState'
 
 export function ManualEntryPage() {
+  const [tab, setTab] = usePersistentState('cl-manualentry-tab', 'new')
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold tracking-tight">Ручной ввод</h1>
 
-      <Tabs defaultValue="new">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="new">Новая запись</TabsTrigger>
           <TabsTrigger value="correction">Корректировка</TabsTrigger>

@@ -59,7 +59,7 @@ export function useRawPanelState() {
   const [groupMode, setGroupMode] = useState<GroupMode>('default')
 
   const applyPreset = useCallback((preset: Partial<AdvancedFilters>) => {
-    setAdvancedFilters((prev) => ({ ...DEFAULT_ADVANCED_FILTERS, ...preset }))
+    setAdvancedFilters(() => ({ ...DEFAULT_ADVANCED_FILTERS, ...preset }))
   }, [])
 
   const clearAdvancedFilters = useCallback(() => {

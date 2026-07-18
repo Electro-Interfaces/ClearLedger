@@ -23,25 +23,7 @@ import { useLocations } from '@/hooks/useLocations'
 import { getStsStationsFromLocations } from '@/services/locationService'
 import { getChargeDimensions } from '@/services/analyticsService'
 import { todayISO, daysAgoISO, monthFirstISO, prevMonthBounds } from './analytics/periodPresets'
-
-const FUEL_DOC_TYPES = [
-  { id: 'shift_report', label: 'Сменные отчёты' },
-  { id: 'receipt', label: 'Поступления (ТТН)' },
-  { id: 'price', label: 'Цены' },
-  { id: 'sts_transactions', label: 'Операции отпуска' },
-  { id: 'sts_coupons', label: 'Купоны и талоны' },
-  { id: 'sts_tanks', label: 'Остатки резервуаров' },
-  { id: 'msto_transactions', label: 'MSTO транзакции' },
-  { id: 'corp_transactions', label: 'TradeCorp транзакции' },
-]
-
-const ENERGY_DOC_TYPES = [
-  { id: 'charge_sessions', label: 'Зарядные сессии' },
-  { id: 'ofd_z_reports', label: 'Z-отчёты ОФД' },
-  { id: 'energy_supply_invoices', label: 'Счета поставщика э/э' },
-  { id: 'maintenance_acts', label: 'Акты ТО' },
-  { id: 'rent_contracts', label: 'Договоры аренды' },
-]
+import { FUEL_DOC_TYPES, ENERGY_DOC_TYPES } from '@/config/docTypes'
 
 const PERIOD_PRESETS = [
   { label: '30 дней', value: () => ({ from: daysAgoISO(30), to: todayISO() }) },

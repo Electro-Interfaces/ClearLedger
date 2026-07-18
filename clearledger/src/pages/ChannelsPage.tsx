@@ -170,13 +170,14 @@ export function ChannelsPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 gap-3">
             <Radio className="h-10 w-10 text-muted-foreground/30" />
-            <p className="text-sm text-muted-foreground">Нет обработок</p>
-            <p className="text-xs text-muted-foreground">
-              Создайте канал из шаблона или настройте вручную
+            <p className="text-sm font-medium">Пока нет коннекторов</p>
+            <p className="max-w-md text-center text-xs text-muted-foreground">
+              Коннектор подключает источник данных (STS, ЦБ, файлы) и превращает его в готовые
+              документы. Создайте первый из шаблона или настройте вручную.
             </p>
             <Button variant="default" size="sm" className="gap-1.5 mt-2" onClick={() => setWizardOpen(true)}>
               <Plus className="h-4 w-4" />
-              Создать канал
+              Создать коннектор
             </Button>
           </CardContent>
         </Card>

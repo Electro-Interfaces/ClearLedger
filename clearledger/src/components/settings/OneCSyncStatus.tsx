@@ -80,7 +80,7 @@ export function OneCSyncStatus({ connectionId, exchangePath }: Props) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-              <RefreshCw className={`size-5 text-blue-500 ${isSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`size-5 text-blue-400/80 ${isSyncing ? 'animate-spin' : ''}`} />
             </div>
             <div>
               <CardTitle>Синхронизация</CardTitle>
@@ -178,9 +178,9 @@ export function OneCSyncStatus({ connectionId, exchangePath }: Props) {
               <p className="text-sm font-medium mb-2">Результат</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                 <StatBox label="Обработано" value={lastResult.stats.processed} />
-                <StatBox label="Создано" value={lastResult.stats.created} color="text-green-500" />
-                <StatBox label="Обновлено" value={lastResult.stats.updated} color="text-blue-500" />
-                <StatBox label="Ошибок" value={lastResult.stats.errors} color={lastResult.stats.errors > 0 ? 'text-red-500' : undefined} />
+                <StatBox label="Создано" value={lastResult.stats.created} color="text-emerald-400/80" />
+                <StatBox label="Обновлено" value={lastResult.stats.updated} color="text-blue-400/80" />
+                <StatBox label="Ошибок" value={lastResult.stats.errors} color={lastResult.stats.errors > 0 ? 'text-red-400/80' : undefined} />
               </div>
             </div>
           </>
@@ -192,14 +192,14 @@ export function OneCSyncStatus({ connectionId, exchangePath }: Props) {
 
 function SyncStatusBadge({ isSyncing, connectionStatus }: { isSyncing: boolean; connectionStatus?: string }) {
   if (isSyncing) {
-    return <Badge variant="default" className="bg-blue-500">Синхронизация...</Badge>
+    return <Badge variant="default" className="bg-blue-500/80">Синхронизация...</Badge>
   }
   if (connectionStatus === 'error') {
     return <Badge variant="destructive">Ошибка</Badge>
   }
   if (connectionStatus === 'active') {
     return (
-      <Badge variant="outline" className="border-green-500/30 text-green-600">
+      <Badge variant="outline" className="border-emerald-400/40 text-emerald-400/80">
         <CheckCircle2 className="mr-1 size-3" /> Подключено
       </Badge>
     )

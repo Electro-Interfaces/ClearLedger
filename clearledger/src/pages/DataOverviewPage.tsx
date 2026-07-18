@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  FileText, Wallet, Activity, Image, Users, Scale, ShieldCheck,
+  FileText, Wallet, Activity, Image, Users, Scale, ShieldCheck, Upload,
   type LucideIcon,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -71,6 +72,31 @@ export function DataOverviewPage() {
   if (entriesLoading) return <OverviewSkeleton />
 
   const totalDocs = entries.length
+
+  // Обучающее пустое состояние (§6.8): не «нет данных», а что появится + первое действие.
+  if (totalDocs === 0) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold tracking-tight">Данные</h1>
+        <div className="rounded-lg border border-dashed border-border/60 p-10 text-center">
+          <FileText className="mx-auto mb-3 size-10 text-muted-foreground/40" />
+          <h2 className="text-lg font-semibold">Здесь появятся ваши документы</h2>
+          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+            Данные группируются по категориям и типам — смены, ТТН, выписки, акты. Загрузите
+            первые документы вручную или подключите коннектор, и они появятся здесь.
+          </p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <Button asChild size="sm">
+              <Link to="/intake"><Upload className="mr-1.5 size-4" />Загрузить данные</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/connectors">Настроить коннектор</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

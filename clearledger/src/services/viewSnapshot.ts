@@ -17,6 +17,8 @@ function tabPrefix(companyId: string): string {
 export interface ViewSnapshot {
   id: string
   at: number
+  name?: string  // имя вида (§6.4 «имя = описание данных»); нет → авто-подпись
+  isDefault?: boolean  // вид по умолчанию (§6.4 «точка входа») — визуально выделен и наверху
   mode: string   // ?mode=
   sub: string    // ?sub=
   section: FilterState

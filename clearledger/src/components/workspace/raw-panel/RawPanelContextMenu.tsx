@@ -2,7 +2,7 @@ import {
   ContextMenu, ContextMenuContent, ContextMenuItem,
   ContextMenuSeparator, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { FileText, ExternalLink, Copy, RefreshCw, Info } from 'lucide-react'
+import { FileText, Copy, RefreshCw, Info } from 'lucide-react'
 import { toast } from 'sonner'
 import type { FsNode } from './raw-panel-types'
 

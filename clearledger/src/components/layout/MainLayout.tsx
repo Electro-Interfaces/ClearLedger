@@ -13,6 +13,22 @@ import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
 
+// Состояние левого сайдбара сохраняется между запусками. По умолчанию (первый
+// запуск, нет сохранённого значения) — свёрнут: рабочая область получает
+// максимум ширины, навигация доступна по иконкам с тултипами. Выбор пользователя
+// (развернул/свернул) уважается при перезагрузке.
+// NB: ui-Sidebar (shadcn) пишет cookie, но НЕ читает её при инициализации
+// (SSR-паттерн Next.js), поэтому персистим сами через localStorage.
+const SIDEBAR_STORAGE_KEY = 'clearledger-sidebar-open'
+
+function readSidebarOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true' // null/иное → свёрнут
+  } catch {
+    return false
+  }
+}
+
 /**
  * Layout с скроллящимся sidebar — паттерн из shadcn issue #6651:
  *   SidebarProvider [flex flex-col min-h-svh]   ← перекрываем дефолт flex-row
@@ -24,6 +40,11 @@ import { routeAllowed } from '@/config/accessModules'
  */
 export function MainLayout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  // Свёрнут/развёрнут сайдбар (десктоп). Инициализация из localStorage, дефолт — свёрнут.
+  const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
+  useEffect(() => {
+    try { localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarOpen)) } catch { /* ignore */ }
+  }, [sidebarOpen])
   // ≤1024: компактный shell (гамбургер-меню в drawer, без десктопных вкладок) —
   // чтобы планшеты не теряли ширину под inline-сайдбар (согласовано с WorkspaceLayout).
   const isMobile = useMaxWidth(1024)
@@ -34,6 +55,19 @@ export function MainLayout() {
   useEffect(() => {
     if (!routeAllowed(location.pathname, companyModules)) navigate('/', { replace: true })
   }, [location.pathname, companyModules, navigate])
+  // «Открытие приложения» → рабочий стол. Холодный старт вкладки (нет метки сессии)
+  // сбрасывает запомненный браузером экран на рабочий стол. F5 и переходы внутри
+  // сессии метку сохраняют (sessionStorage переживает reload, но не закрытие вкладки),
+  // поэтому текущий экран и deep-link в рамках сессии не теряются.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('cl-booted')) return
+      sessionStorage.setItem('cl-booted', '1')
+      if (location.pathname !== '/') navigate('/', { replace: true })
+    } catch { /* ignore */ }
+    // читаем стартовый путь один раз при монтировании — deps намеренно пустые
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // Рабочие области с фиксированной высотой (без скролла страницы, h-full внутри):
   // рабочий стол, разрезы «Сверка данных», нормализация и хранилище «Документы».
   // На десктопе overflow решает per-tab KeepAliveOutlet; здесь — только для мобильной ветки.
@@ -41,6 +75,8 @@ export function MainLayout() {
 
   return (
     <SidebarProvider
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
       className="flex flex-col h-dvh max-h-dvh overflow-hidden"
       style={{ '--header-height': '5rem' } as React.CSSProperties}
     >

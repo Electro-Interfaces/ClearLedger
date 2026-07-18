@@ -11,6 +11,7 @@ import {
   createContext, useCallback, useContext, useEffect, useMemo, useState,
   type ReactNode,
 } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { nanoid } from 'nanoid'
 import { useCompany } from './CompanyContext'
 import { clearFilterSelections, sameFilterState } from './filterState'
@@ -110,6 +111,27 @@ function coerceState(parsed: unknown): FilterState {
   }
 }
 
+// URL-персист фильтра (§11): выборка кодируется в query-параметр `f`, чтобы
+// состояние переживало F5 и ссылку на выборку можно было скопировать/поделиться.
+// URL читается ОДИН раз при первом монтировании приложения (флаг ниже) — при
+// перемонтировании (смена компании) берётся localStorage, а не чужой фильтр из
+// старого URL. Запись — merge-safe, не затирает ?mode/?sub.
+const URL_FILTER_PARAM = 'f'
+let urlFilterConsumed = false
+function consumeUrlFilter(): FilterState | null {
+  if (urlFilterConsumed) return null
+  urlFilterConsumed = true
+  try {
+    const raw = new URLSearchParams(window.location.search).get(URL_FILTER_PARAM)
+    return raw ? coerceState(JSON.parse(decodeURIComponent(raw))) : null
+  } catch {
+    return null
+  }
+}
+function encodeFilterParam(state: FilterState): string {
+  return encodeURIComponent(JSON.stringify(state))
+}
+
 function loadFilters(companyId: string): FilterState {
   try {
     const raw = localStorage.getItem(storageKey(companyId))
@@ -161,21 +183,28 @@ function savePresets(companyId: string, list: NamedPreset[]): void {
 
 export function FilterProvider({ children }: { children: ReactNode }) {
   const { companyId } = useCompany()
-  const [state, setState] = useState<FilterState>(() => loadFilters(companyId))
+  const [, setSearchParams] = useSearchParams()
+  const [state, setState] = useState<FilterState>(() => consumeUrlFilter() ?? loadFilters(companyId))
   const [history, setHistory] = useState<FilterState[]>(() => loadHistory(companyId))
   const [presets, setPresets] = useState<NamedPreset[]>(() => loadPresets(companyId))
 
-  // При смене компании — перезагрузить фильтры/историю/пресеты из её хранилища
-  useEffect(() => {
-    setState(loadFilters(companyId))
-    setHistory(loadHistory(companyId))
-    setPresets(loadPresets(companyId))
-  }, [companyId])
+  // Смена компании перемонтирует провайдер (TabsProvider key={companyId} в App),
+  // поэтому init перечитает хранилище новой компании — отдельный reload-эффект не нужен.
 
   // Персист
   useEffect(() => { saveFilters(companyId, state) }, [companyId, state])
   useEffect(() => { saveHistory(companyId, history) }, [companyId, history])
   useEffect(() => { savePresets(companyId, presets) }, [companyId, presets])
+
+  // URL-персист текущей выборки: merge-safe (не затирает ?mode/?sub), replace — без спама history.
+  useEffect(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set(URL_FILTER_PARAM, encodeFilterParam(state))
+      return next
+    }, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state])
 
   const setPeriod = useCallback((p: Period) => {
     setState((prev) => ({ ...prev, period: p }))

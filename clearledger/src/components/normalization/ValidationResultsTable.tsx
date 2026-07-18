@@ -165,7 +165,7 @@ function IssueRow({
         </td>
         <td className="p-3">
           {r.warningCount > 0 ? (
-            <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-400">{r.warningCount}</Badge>
+            <Badge variant="outline" className="text-xs border-amber-400/50 text-amber-300/80">{r.warningCount}</Badge>
           ) : (
             <span className="text-xs text-muted-foreground">0</span>
           )}

@@ -55,9 +55,9 @@ const DEMO_RESULT: AuditorNormResult = {
 }
 
 const severityConfig = {
-  critical: { icon: AlertOctagon, iconBg: 'hsl(0 84% 60% / 0.15)', iconColor: 'text-red-500', badgeClass: 'border-red-500 text-red-400' },
-  warning: { icon: AlertTriangle, iconBg: 'hsl(45 100% 55% / 0.15)', iconColor: 'text-yellow-500', badgeClass: 'border-yellow-500 text-yellow-400' },
-  info: { icon: Info, iconBg: 'hsl(217 91% 60% / 0.15)', iconColor: 'text-blue-500', badgeClass: 'border-blue-500 text-blue-400' },
+  critical: { icon: AlertOctagon, iconBg: 'hsl(0 84% 60% / 0.12)', iconColor: 'text-red-400/80', badgeClass: 'border-red-400/50 text-red-300/80' },
+  warning: { icon: AlertTriangle, iconBg: 'hsl(45 100% 55% / 0.12)', iconColor: 'text-amber-400/80', badgeClass: 'border-amber-400/50 text-amber-300/80' },
+  info: { icon: Info, iconBg: 'hsl(217 91% 60% / 0.12)', iconColor: 'text-blue-400/80', badgeClass: 'border-blue-400/50 text-blue-300/80' },
 } as const
 
 interface Props {
@@ -141,7 +141,7 @@ export function AuditorNormSection({ localDone }: Props) {
               </Badge>
             )}
             {result.findings.length > 0 && (
-              <Badge variant="outline" className="text-xs border-red-500 text-red-400">
+              <Badge variant="outline" className="text-xs border-red-400/50 text-red-300/80">
                 {result.findings.length} находок
               </Badge>
             )}
