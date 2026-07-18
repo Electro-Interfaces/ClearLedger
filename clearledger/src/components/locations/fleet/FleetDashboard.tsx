@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
-  CircleSlash, Wrench, AlertTriangle, Unlink, ShieldCheck, ChevronRight,
+  CircleSlash, Wrench, AlertTriangle, Unlink, ShieldCheck, ChevronRight, WifiOff, PowerOff,
 } from 'lucide-react'
 import { FleetDistributionBars } from './FleetDistributionBars'
 import {
@@ -18,6 +18,10 @@ import { m } from './locationFleetService'
 import type { ServiceLocation } from '@/types/location'
 
 const ATTENTION_ICON: Record<AttentionKey, typeof Wrench> = {
+  // «Нет связи» и «Отключены» — отдельные категории CPO (см. ATTENTION_META);
+  // иконки при их добавлении не завели. ATTENTION_KEYS ниже не трогаем — состав
+  // блока «Требуют внимания» остаётся прежним.
+  noLink: WifiOff, disabled: PowerOff,
   notWorking: CircleSlash, onRepair: Wrench, linkConflict: AlertTriangle, noBinding: Unlink,
 }
 const ATTENTION_KEYS: AttentionKey[] = ['notWorking', 'onRepair', 'linkConflict', 'noBinding']

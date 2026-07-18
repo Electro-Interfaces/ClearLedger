@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/select'
 import {
   Search, X, Layers, Activity, CircleDot, MapPin, Building2, Radio,
-  CircleSlash, Wrench, AlertTriangle, Unlink, Link as LinkIcon, Cog,
+  CircleSlash, Wrench, AlertTriangle, Unlink, Link as LinkIcon, Cog, WifiOff, PowerOff,
 } from 'lucide-react'
 import { MultiSelectFilter } from './MultiSelectFilter'
 import {
@@ -21,6 +21,9 @@ import {
 import type { LocationStatus } from '@/types/location'
 
 const ATTENTION_ICON: Record<AttentionKey, typeof Wrench> = {
+  // Иконки для отдельных категорий CPO «Нет связи»/«Отключены» (см. ATTENTION_META).
+  // ATTENTION_KEYS ниже не трогаем — состав фильтр-чипов остаётся прежним.
+  noLink: WifiOff, disabled: PowerOff,
   notWorking: CircleSlash, onRepair: Wrench, linkConflict: AlertTriangle, noBinding: Unlink,
 }
 const ATTENTION_KEYS: AttentionKey[] = ['notWorking', 'onRepair', 'linkConflict', 'noBinding']
