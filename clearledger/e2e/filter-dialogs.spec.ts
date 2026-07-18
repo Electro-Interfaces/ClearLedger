@@ -55,21 +55,44 @@ test.describe('Выбор периода', () => {
     expect((await chip.textContent())?.trim()).toBe(before)
   })
 
-  test('Незавершённый диапазон не применяется', async ({ page }) => {
+  test('Календарь на русском и показывает выбранный период', async ({ page }) => {
     await ready(page)
     await page.getByRole('button', { name: /^Период:/ }).click()
 
-    // Один клик по дате = выбрано только начало. Раньше это схлопывало период
-    // в один день; теперь подтверждение недоступно, пока нет второй границы.
-    // Ищем строго внутри поповера: на фоне есть таблицы данных с числами.
     const popover = page.locator('[data-radix-popper-content-wrapper]')
     await expect(popover).toBeVisible({ timeout: 10_000 })
-    const day = popover.locator('button', { hasText: /^15$/ }).first()
-    await expect(day).toBeVisible({ timeout: 10_000 })
-    await day.click()
 
-    await expect(page.getByText('Укажите конец периода')).toBeVisible({ timeout: 10_000 })
-    await expect(page.getByRole('button', { name: /^(Применить|Готово)$/ })).toBeDisabled()
+    // Дни недели по-русски и неделя начинается с понедельника.
+    await expect(popover.getByText('пн', { exact: true }).first()).toBeVisible()
+    await expect(popover.getByText('Su', { exact: true })).toHaveCount(0)
+
+    // Пресет перематывает календарь к началу периода: раньше можно было
+    // набрать «1–23 июня» и смотреть при этом на июль с августом.
+    // Проверяем по полю «Начало» — заголовок месяца живёт в скрытом <select>
+    // (react-day-picker держит его для доступности), видимую подпись рисует сам.
+    await page.getByRole('button', { name: 'Прошлый квартал' }).click()
+    const from = popover.locator('input[type="date"]').first()
+    await expect(from).toHaveValue(/-04-01$/, { timeout: 10_000 })
+  })
+
+  test('Клик по дате правит границу, а не сбрасывает период', async ({ page }) => {
+    await ready(page)
+    await page.getByRole('button', { name: /^Период:/ }).click()
+
+    // Главный дефект, на который указал МАГ: раньше первый клик схлопывал
+    // интервал в один день ({from: X, to: X}), и выбор «слетал». Теперь
+    // диапазон отдаётся календарю как есть — клик двигает границу, а период
+    // остаётся периодом.
+    const popover = page.locator('[data-radix-popper-content-wrapper]')
+    await expect(popover).toBeVisible({ timeout: 10_000 })
+
+    const days = popover.locator('button').filter({ hasText: /^\d{1,2}$/ })
+    await expect(days.first()).toBeVisible({ timeout: 10_000 })
+    await days.nth(10).click()
+
+    // В подвале — по-прежнему интервал из двух дат, а не «одна дата».
+    const selected = popover.getByText(/\d{1,2} \S+ – \d{1,2} \S+ \d{4}/)
+    await expect(selected).toBeVisible({ timeout: 10_000 })
   })
 })
 

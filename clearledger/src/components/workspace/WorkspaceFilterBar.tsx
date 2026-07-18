@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ru } from 'date-fns/locale'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays, ChevronDown, Database, RefreshCw, RotateCcw,
@@ -83,11 +84,29 @@ function PeriodControl() {
     from: parseLocal(period.from),
     to: parseLocal(period.to),
   }))
+  /**
+   * Показываемый месяц — управляемый.
+   *
+   * С `defaultMonth` календарь вставал на месяц первого рендера и больше не
+   * реагировал: можно было набрать в полях «1–23 июня» и смотреть при этом на
+   * июль с августом, не видя собственного выбора. Теперь листание месяца —
+   * состояние: пресет и ввод даты перематывают календарь к началу периода,
+   * а ручное листание пользователя не перебивается.
+   */
+  const [viewMonth, setViewMonth] = useState<Date>(() => parseLocal(period.from))
+
+  function setRange(next: { from?: Date; to?: Date }, scrollTo?: Date) {
+    setDraft(next)
+    if (scrollTo) setViewMonth(scrollTo)
+  }
 
   function openChange(next: boolean) {
     // При каждом открытии черновик берётся из текущего контура: незавершённый
     // выбор прошлого раза не должен «залипать».
-    if (next) setDraft({ from: parseLocal(period.from), to: parseLocal(period.to) })
+    if (next) {
+      setDraft({ from: parseLocal(period.from), to: parseLocal(period.to) })
+      setViewMonth(parseLocal(period.from))
+    }
     setOpen(next)
   }
 
@@ -134,7 +153,10 @@ function PeriodControl() {
                   variant={isActive ? 'default' : 'ghost'}
                   size="sm"
                   className="h-8 w-full justify-start text-xs font-medium"
-                  onClick={() => setDraft({ from: parseLocal(val.from), to: parseLocal(val.to) })}
+                  onClick={() => setRange(
+                    { from: parseLocal(val.from), to: parseLocal(val.to) },
+                    parseLocal(val.from),
+                  )}
                 >
                   {preset.label}
                 </Button>
@@ -152,7 +174,12 @@ function PeriodControl() {
                   type="date"
                   value={draft.from ? isoLocal(draft.from) : ''}
                   max={draft.to ? isoLocal(draft.to) : undefined}
-                  onChange={(e) => { if (e.target.value) setDraft((d) => ({ ...d, from: parseLocal(e.target.value) })) }}
+                  onChange={(e) => {
+                    if (!e.target.value) return
+                    const d = parseLocal(e.target.value)
+                    setDraft((prev) => ({ ...prev, from: d }))
+                    setViewMonth(d)  // перемотать календарь к введённой дате
+                  }}
                   className="h-9 text-sm font-medium text-foreground"
                 />
               </label>
@@ -163,7 +190,12 @@ function PeriodControl() {
                   type="date"
                   value={draft.to ? isoLocal(draft.to) : ''}
                   min={draft.from ? isoLocal(draft.from) : undefined}
-                  onChange={(e) => { if (e.target.value) setDraft((d) => ({ ...d, to: parseLocal(e.target.value) })) }}
+                  onChange={(e) => {
+                    if (!e.target.value) return
+                    const d = parseLocal(e.target.value)
+                    setDraft((prev) => ({ ...prev, to: d }))
+                    setViewMonth(d)
+                  }}
                   className="h-9 text-sm font-medium text-foreground"
                 />
               </label>
@@ -174,10 +206,18 @@ function PeriodControl() {
                 именно это раньше схлопывало интервал в один день. */}
             <Calendar
               mode="range"
+              locale={ru}          // дни недели по-русски, неделя с понедельника
               captionLayout="dropdown"
               startMonth={new Date(2023, 0)}
               endMonth={new Date(new Date().getFullYear() + 1, 11)}
-              defaultMonth={draft.from ?? parseLocal(period.from)}
+              month={viewMonth}
+              onMonthChange={setViewMonth}
+              // ui/calendar.tsx форматирует месяц через toLocaleString('default'),
+              // то есть локалью браузера мимо `locale` — в шапке получался «Jul».
+              // Компоненты ui/ правим не руками, поэтому переопределяем пропом.
+              formatters={{
+                formatMonthDropdown: (date) => date.toLocaleString('ru-RU', { month: 'long' }),
+              }}
               selected={{ from: draft.from, to: draft.to }}
               onSelect={(range) => setDraft({ from: range?.from, to: range?.to })}
               numberOfMonths={2}
