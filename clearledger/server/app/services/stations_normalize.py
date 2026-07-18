@@ -133,6 +133,14 @@ def _num_class(number) -> str:
     return "legacy"   # «72-1», «73-1» — старая нумерация
 
 
+def _is_real_name(v: str | None) -> bool:
+    """Подпись ли это вообще. В выгрузке CPO колонка «Название» иногда содержит
+    номер станции («230», «268») — принимать такое за имя нельзя: осмысленная
+    подпись («ЭЗС StarCharge») информативнее и терять её нельзя."""
+    t = str(v or "").strip()
+    return bool(t) and not _re.fullmatch(r"[\d\W_]+", t)
+
+
 def _owner_by_class(num_class: str | None) -> str | None:
     """Класс номера → владелец сети (фолбэк, когда колонка «Владелец» пуста)."""
     return {"snk": "СНК", "rushydro": "РусГидро", "legacy": "РусГидро"}.get(num_class or "")
@@ -386,10 +394,13 @@ async def _ingest_compact(
                 # бывает мусорным (на карточке ID 3114 так держалось «Нартис С-60»,
                 # хотя по реестру это «Бистро Ням-Ням 1»). Прежнее имя не теряем.
                 reg_name = _s(row.get("name"), 255)
+                if reg_name and not _is_real_name(reg_name) and _is_real_name(loc.name):
+                    reg_name = None      # «230» вместо названия — оставляем свою подпись
                 if reg_name and str(loc.name or "").strip() != reg_name:
-                    if loc.name:
-                        md_extra["nameHistory"] = [
-                            *((loc.extra_metadata or {}).get("nameHistory") or []), loc.name]
+                    hist = [*((loc.extra_metadata or {}).get("nameHistory") or [])]
+                    if loc.name and (not hist or hist[-1] != loc.name):
+                        hist.append(loc.name)
+                    md_extra["nameHistory"] = hist
                     loc.name = reg_name
                 if reg_name:
                     md_extra["nameSource"] = "cpo_registry"
@@ -573,9 +584,11 @@ async def ingest_stations(
                 loc.extra_metadata = {**(loc.extra_metadata or {}), **passport_extra}
                 # Подпись из справочника CPO главнее имени из сессий (см. _ingest_compact).
                 reg_name = _s(row.get("name"), 255)
+                if reg_name and not _is_real_name(reg_name) and _is_real_name(loc.name):
+                    reg_name = None      # «230» вместо названия — оставляем свою подпись
                 if reg_name and str(loc.name or "").strip() != reg_name:
                     hist = [*((loc.extra_metadata or {}).get("nameHistory") or [])]
-                    if loc.name:
+                    if loc.name and (not hist or hist[-1] != loc.name):
                         hist.append(loc.name)
                     loc.extra_metadata = {**loc.extra_metadata, "nameHistory": hist,
                                           "nameSource": "cpo_registry"}
