@@ -21,6 +21,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { getFuelColor } from '@/utils/fuelColors'
 import { getShiftDashboard, getFuelReadiness, type ShiftDashboardData } from '@/services/fuel/fuelMappingService'
+import { useCompany } from '@/contexts/CompanyContext'
 
 const rub = (v: number) => (v ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const rub0 = (v: number) => (v ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 })
@@ -61,13 +62,14 @@ const TH = 'py-1.5 text-[11px] font-medium text-muted-foreground'
 const TD = 'py-1.5 tabular-nums'
 
 export function ShiftDashboardPanel() {
+  const { companyId } = useCompany()
   const [preset, setPreset] = useState<Preset>('month')
   const [compare, setCompare] = useState(false)
   const { from, to } = presetDates(preset)
   const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1
 
   const { data, isLoading } = useQuery({
-    queryKey: ['shift-dashboard', from, to, compare],
+    queryKey: ['shift-dashboard', companyId, from, to, compare],
     queryFn: () => getShiftDashboard(from, to, { compare }),
   })
 
@@ -145,8 +147,9 @@ function TrendMini({ t }: { t: { percent: number; direction: string } }) {
 
 /* ── Готовность к 1С ── */
 function ReadinessBlock({ from, to }: { from: string; to: string }) {
+  const { companyId } = useCompany()
   const { data: r } = useQuery({
-    queryKey: ['fuel-readiness', from, to],
+    queryKey: ['fuel-readiness', companyId, from, to],
     queryFn: () => getFuelReadiness(from, to),
   })
   if (!r) return null

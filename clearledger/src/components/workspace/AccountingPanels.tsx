@@ -461,7 +461,7 @@ export function AccountingPanel() {
         {tab === 'ttn' && <ReceiptsSection />}
         {tab === 'margin' && (
           <div className="p-4 space-y-4">
-            <FifoMarginView dateFrom={period.from} dateTo={period.to} />
+            <FifoMarginView companyId={companyId} dateFrom={period.from} dateTo={period.to} />
             <div>
               <p className="mb-2 text-xs text-muted-foreground">
                 Бухгалтерская маржа (COGS из проводок 1С 90.02, постфактум):
@@ -471,7 +471,7 @@ export function AccountingPanel() {
           </div>
         )}
         {tab === 'reports' && <ShiftDashboardPanel />}
-        {tab === 'cash' && <AccountingCashPanel dateFrom={period.from} dateTo={period.to} />}
+        {tab === 'cash' && <AccountingCashPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {tab === 'export' && <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />}
         {(tab === 'cb_load' || tab === 'cb_shifts' || tab === 'cb_recon') && (
           <AccountingStreamsPanel tab={tab} companyId={companyId} dateFrom={period.from} dateTo={period.to} />
@@ -482,10 +482,10 @@ export function AccountingPanel() {
 }
 
 /* Управленческая маржа по FIFO-себестоимости партий (по разрезам). */
-function FifoMarginView({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+function FifoMarginView({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [groupBy, setGroupBy] = useState('fuel')
   const { data, isLoading } = useQuery({
-    queryKey: ['costing-margin', dateFrom, dateTo, groupBy],
+    queryKey: ['costing-margin', companyId, dateFrom, dateTo, groupBy],
     queryFn: () => getCostingMargin(dateFrom, dateTo, groupBy),
   })
   const fmt = (v: number, d = 0) => (v ?? 0).toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d })
@@ -565,7 +565,14 @@ function FifoMarginView({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
 /* Смены — журнал загруженных смен; клик открывает детали с вкладкой «Корректировка»
    (правка значений реализации перед выгрузкой в 1С, персист в L2). */
 function ShiftsPanel() {
-  const { data } = useQuery({ queryKey: ['fuel-shifts-acc'], queryFn: () => getLoadedShifts() })
+  const { companyId } = useCompany()
+  const { period } = useFilters()
+  // Период обязателен: без него бэкенд отдавал последние 200 смен по номеру,
+  // и период месячной давности показывал «нет смен» при загруженных данных.
+  const { data } = useQuery({
+    queryKey: ['fuel-shifts-acc', companyId, period.from, period.to],
+    queryFn: () => getLoadedShifts({ dateFrom: period.from, dateTo: period.to, limit: 20000 }),
+  })
   const shifts: LoadedShift[] = data ?? []
   const [openShift, setOpenShift] = useState<string | null>(null)
   const [onlyCorrected, setOnlyCorrected] = useState(false)

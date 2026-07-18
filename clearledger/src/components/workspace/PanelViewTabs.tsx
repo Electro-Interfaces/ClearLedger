@@ -27,7 +27,7 @@ export function PanelViewTabs({
   ariaLabel?: string
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 py-2">
+    <div data-zone="Вид раздела" className="flex min-w-0 items-center gap-2 py-2">
       {label ? (
         <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {label}

@@ -25,7 +25,7 @@ const SEGMENTS: { key: PriceCategory; label: string }[] = [
 
 type SortKey = 'qty' | 'revenue' | 'cost_net' | 'margin' | 'margin_pct' | 'markup_pct'
 
-export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+export function StorePricingPanel({ companyId, dateFrom, dateTo, stations }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }) {
   const [category, setCategory] = useState<PriceCategory>('all')
   const [groupBy, setGroupBy] = useState<'category' | 'kind'>('category')
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
@@ -35,8 +35,8 @@ export function StorePricingPanel({ companyId, dateFrom, dateTo }: { companyId: 
   const ref = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-pricing', companyId, dateFrom, dateTo, category],
-    queryFn: () => getStorePricing(dateFrom, dateTo, category),
+    queryKey: ['store-pricing', companyId, dateFrom, dateTo, category, stations],
+    queryFn: () => getStorePricing(dateFrom, dateTo, category, stations),
   })
 
   const skus = useMemo(() => {

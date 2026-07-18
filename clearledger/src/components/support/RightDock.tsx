@@ -82,7 +82,7 @@ export function RightDock() {
   // ── Десктоп: свёрнутый рейл (док закрыт) ──
   if (!dockOpen) {
     return (
-      <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-l border-border/50 bg-card py-2">
+      <div data-zone="Взаимодействие: чат, заявки, инфо" data-zone-side className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-l border-border/50 bg-card py-2">
         {TABS.map((t) => {
           const active = section === t.key   // подсвечиваем, если открыт модалкой
           const badge = badgeOf(t.key)

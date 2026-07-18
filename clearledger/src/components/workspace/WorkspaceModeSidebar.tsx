@@ -94,7 +94,7 @@ export function WorkspaceModeSidebar() {
   // Свёрнутый рельс: только иконки разделов, клик — активировать раздел.
   if (collapsed) {
     return (
-      <nav className="flex flex-col items-center gap-1 py-3 px-1 border-r border-border bg-card shrink-0 w-14 overflow-y-auto">
+      <nav data-zone="Разделы" data-zone-side className="flex flex-col items-center gap-1 py-3 px-1 border-r border-border bg-card shrink-0 w-14 overflow-y-auto">
         <button
           onClick={toggleCollapsed}
           title="Развернуть меню"
@@ -126,7 +126,7 @@ export function WorkspaceModeSidebar() {
   }
 
   return (
-    <nav className="flex flex-col gap-0.5 py-3 px-2.5 border-r border-border bg-card shrink-0 w-56 overflow-y-auto">
+    <nav data-zone="Разделы учёта" data-zone-side className="flex flex-col gap-0.5 py-3 px-2.5 border-r border-border bg-card shrink-0 w-56 overflow-y-auto">
       <div className="flex justify-end px-1 pb-1">
         <button
           onClick={toggleCollapsed}

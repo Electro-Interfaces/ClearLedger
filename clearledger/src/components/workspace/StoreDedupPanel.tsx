@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { useCompany } from '@/contexts/CompanyContext'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -301,8 +302,9 @@ function MemberRow({ m, canon, onCanon, spread, recommended, savedCanon }: {
 
 // ── мост касса ↔ карточка ─────────────────────────────────────────────────────
 function BridgeTab() {
+  const { companyId } = useCompany()
   const [kind, setKind] = useState<'on_marked' | 'multi' | 'price_split'>('on_marked')
-  const { data = [], isLoading } = useQuery({ queryKey: ['dedup-bridge', kind], queryFn: () => getDedupBridge(kind) })
+  const { data = [], isLoading } = useQuery({ queryKey: ['dedup-bridge', companyId, kind], queryFn: () => getDedupBridge(kind) })
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1.5">
@@ -422,6 +424,7 @@ function JobsTab({ jobs, isLoading }: { jobs: DedupJob[]; isLoading: boolean }) 
 // ── корневой ──────────────────────────────────────────────────────────────────
 export function StoreDedupPanel() {
   const qc = useQueryClient()
+  const { companyId } = useCompany()
   const [tab, setTab] = useState<'groups' | 'bridge' | 'jobs'>('groups')
   const [q, setQ] = useState('')
   const [onlyLive, setOnlyLive] = useState(true)
@@ -436,15 +439,15 @@ export function StoreDedupPanel() {
   // Задания опрашиваем в корне (а не во вкладке): пока станция собирает срез,
   // менеджер обычно смотрит на группы — и витрина должна обновиться сама.
   const { data: jobs = [], isLoading: jobsLoading } = useQuery({
-    queryKey: ['dedup-jobs'], queryFn: getDedupJobs,
+    queryKey: ['dedup-jobs', companyId], queryFn: getDedupJobs,
     refetchInterval: (q) =>
       (q.state.data ?? []).some((j) => ['pending', 'running'].includes(j.status)) ? 5000 : 30000,
   })
   const seenRefresh = useRef<string | null | undefined>(undefined)
 
-  const { data: sum } = useQuery({ queryKey: ['dedup-summary'], queryFn: getDedupSummary })
+  const { data: sum } = useQuery({ queryKey: ['dedup-summary', companyId], queryFn: getDedupSummary })
   const { data: groups = [], isLoading } = useQuery({
-    queryKey: ['dedup-groups', q, onlyLive, inclAssort, priceDesync, onlyScope, statusFilter],
+    queryKey: ['dedup-groups', companyId, q, onlyLive, inclAssort, priceDesync, onlyScope, statusFilter],
     queryFn: () => getDedupGroups({ q, onlyLive, includeAssortment: inclAssort, priceDesync, onlyScope208: onlyScope, status: statusFilter === 'all' ? undefined : statusFilter }),
     enabled: tab === 'groups',
   })

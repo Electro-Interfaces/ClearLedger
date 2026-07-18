@@ -1,8 +1,9 @@
-import { User, Menu, Sun, Moon, BookText, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle, Video } from 'lucide-react'
+import { User, Menu, Sun, Moon, BookText, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle, Video, Lightbulb } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
+import { useGuideMode } from '@/hooks/useGuideMode'
 import { Button } from '@/components/ui/button'
 import { createMeeting } from '@/services/conferenceService'
 import {
@@ -25,6 +26,7 @@ interface HeaderProps {
 export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const navigate = useNavigate()
   const { theme, toggle } = useTheme()
+  const guide = useGuideMode()
   const { company } = useCompany()
   const { user, logout } = useAuth()
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
@@ -142,6 +144,17 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
                 {unreadCounts.chat}
               </span>
             )}
+          </Button>
+          {/* Обучающая подсветка зон интерфейса — «что здесь есть и за что отвечает». */}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-pressed={guide.on}
+            className={`h-10 w-10 rounded-xl ${guide.on ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground hover:text-foreground'}`}
+            onClick={guide.toggle}
+            title={guide.on ? 'Скрыть структуру экрана' : 'Показать структуру экрана'}
+          >
+            <Lightbulb className="h-[18px] w-[18px]" />
           </Button>
           <Button
             variant="ghost"

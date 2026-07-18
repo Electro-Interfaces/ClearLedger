@@ -55,11 +55,12 @@ const CHANNEL_BADGE: Record<string, string> = {
 
 export function FuelMappingsPanel() {
   const qc = useQueryClient()
+  const { companyId } = useCompany()
   const [pattern, setPattern] = useState('')
   const [channel, setChannel] = useState('cards')
 
   const { data, isLoading } = useQuery<FuelMappingsAll>({
-    queryKey: ['fuel-mappings'],
+    queryKey: ['fuel-mappings', companyId],
     queryFn: getFuelMappings,
     enabled: isApiEnabled(),
   })
@@ -89,7 +90,6 @@ export function FuelMappingsPanel() {
   // Сохранение вида топлива (привязка номенклатуры 1С / плотность). PUT требует
   // полный объект (FuelMappingIn) — мержим существующий + правку. На бэке при
   // сохранении reconcile-fuel выводится из fuel_mappings (единый источник).
-  const { companyId } = useCompany()
   const saveFuelMut = useMutation({
     mutationFn: ({ id, body }: { id: string; body: Partial<FuelMapping> }) => updateFuelMapping(id, body),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['fuel-mappings'] }); toast.success('Сохранено') },

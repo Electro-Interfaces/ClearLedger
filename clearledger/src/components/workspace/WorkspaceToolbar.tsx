@@ -10,7 +10,7 @@ import { WorkspaceFilterBar } from './WorkspaceFilterBar'
 
 export function WorkspaceToolbar() {
   return (
-    <div className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-3">
+    <div data-zone="Фильтр: что входит в данные" className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-3">
       {/* Якорь-метка зоны — фильтр важен для каждой рабочей области, обозначаем явно */}
       <div className="hidden shrink-0 items-center gap-2 self-stretch border-r border-border/60 pr-3 md:flex">
         <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">

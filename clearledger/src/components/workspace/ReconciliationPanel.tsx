@@ -3,7 +3,7 @@
  * STS (смены) vs MSTO (онлайн-заказы) vs TradeCorp (корп. карты).
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useFilters } from '@/contexts/FilterContext'
 import {
   ENERGY_CUTS, ENERGY_CHANNELS, ENERGY_SOURCES, PIPE_STATUS_META,
   energyCut, channelsForCut, energySource,
@@ -34,7 +35,6 @@ import { getSources, loadSources } from '@/services/sourceService'
 import { getChannels, loadChannels } from '@/services/channelService'
 import { isApiEnabled } from '@/services/apiClient'
 import { toast } from 'sonner'
-import { format } from 'date-fns'
 
 type ReconcileTab = 'dashboard' | 'online' | 'corporate' | 'acquiring' | 'receipts' | 'depots' | 'drains' | 'transport'
   | 'orders' | 'corp' | 'rfid' | 'eacq' | 'ofd' | 'suppliers' | 'rent'
@@ -224,18 +224,28 @@ interface ReconcileParams {
   allShifts: boolean
 }
 
+/**
+ * Параметры формы сверки. Стартуют от КОНТУРА рабочей области (период сверху),
+ * а не от собственных «последних 7 дней»: иначе на экране два источника правды —
+ * шапка говорит «июнь», а сверка молча считает неделю (CLAUDE.md, правило 1).
+ * Дальше пользователь может сузить период прямо в форме — это её параметр.
+ */
 function useReconcileParams(): [ReconcileParams, React.Dispatch<React.SetStateAction<ReconcileParams>>] {
-  return useState<ReconcileParams>(() => {
-    const today = new Date()
-    const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
-    return {
-      dateFrom: format(weekAgo, 'yyyy-MM-dd'),
-      dateTo: format(today, 'yyyy-MM-dd'),
-      allStations: true,
-      selectedStations: [],
-      allShifts: false,
-    }
-  })
+  const { period } = useFilters()
+  const [params, setParams] = useState<ReconcileParams>(() => ({
+    dateFrom: period.from,
+    dateTo: period.to,
+    allStations: true,
+    selectedStations: [],
+    allShifts: false,
+  }))
+
+  // Смена периода наверху переносится в форму: контур — единственный источник.
+  useEffect(() => {
+    setParams((cur) => ({ ...cur, dateFrom: period.from, dateTo: period.to }))
+  }, [period.from, period.to])
+
+  return [params, setParams]
 }
 
 // ── Источники сверки по разрезу ──────────────────────────────────────────
@@ -537,7 +547,7 @@ function AcquiringView() {
       <ReconcileParamsForm
         params={params}
         setParams={setParams}
-        onRun={() => {}}
+        onRun={() => toast.info('Сверка эквайринга пока не подключена — нужен источник выписок банка-эквайера.')}
         description="Включая смены без эквайринговых операций"
         cutKey="acquiring"
       />
@@ -552,7 +562,7 @@ function ReceiptsView() {
       <ReconcileParamsForm
         params={params}
         setParams={setParams}
-        onRun={() => {}}
+        onRun={() => toast.info('Сверка чеков пока не подключена — нужен источник данных ОФД.')}
         description="Включая смены без чеков"
         cutKey="receipts"
       />

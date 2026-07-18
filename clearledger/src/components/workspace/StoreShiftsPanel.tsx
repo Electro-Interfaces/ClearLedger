@@ -15,12 +15,12 @@ import { ShiftDetailModal } from './ShiftDetailModal'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreShiftsPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }) {
   const ref = useRef<HTMLDivElement>(null)
   const [openKey, setOpenKey] = useState<string | null>(null)
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-shifts', companyId, dateFrom, dateTo],
-    queryFn: () => getStoreShifts(dateFrom, dateTo),
+    queryKey: ['store-shifts', companyId, dateFrom, dateTo, stations],
+    queryFn: () => getStoreShifts(dateFrom, dateTo, stations),
   })
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка смен…</div>

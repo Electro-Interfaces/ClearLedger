@@ -13,9 +13,7 @@
 import { X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useFilters } from '@/contexts/FilterContext'
-import { useCompany } from '@/contexts/CompanyContext'
 import { useLocations } from '@/hooks/useLocations'
-import { docTypeLabel } from '@/config/docTypes'
 
 interface Chip {
   key: string
@@ -25,7 +23,6 @@ interface Chip {
 
 export function ActiveFilterChips({ className }: { className?: string }) {
   const f = useFilters()
-  const { company } = useCompany()
   const locations = useLocations()
 
   const chips: Chip[] = []
@@ -42,10 +39,6 @@ export function ActiveFilterChips({ className }: { className?: string }) {
   for (const c of f.stationCodes) {
     chips.push({ key: `st:${c}`, label: `ЭЗС ${c}`, onRemove: () => f.toggleStationCode(c) })
   }
-  for (const id of f.docTypeIds) {
-    chips.push({ key: `dt:${id}`, label: docTypeLabel(id, company.profileId), onRemove: () => f.toggleDocType(id) })
-  }
-
   if (chips.length === 0) return null
 
   return (

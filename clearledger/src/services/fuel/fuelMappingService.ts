@@ -164,8 +164,14 @@ export const getLoadedStations = () =>
 
 // typeof-guard обязателен: эти функции передают напрямую как queryFn,
 // и React Query подставляет QueryFunctionContext первым аргументом.
-export const getLoadedShifts = (limit?: number) =>
-  get<LoadedShift[]>('/api/fuel/shifts', typeof limit === 'number' ? { limit } : undefined)
+/** Журнал смен. Без периода бэкенд отдаёт последние `limit` смен — для экрана,
+ *  привязанного к периоду рабочей области, период передавать обязательно. */
+export const getLoadedShifts = (opts?: { limit?: number; dateFrom?: string; dateTo?: string }) =>
+  get<LoadedShift[]>('/api/fuel/shifts', {
+    ...(typeof opts?.limit === 'number' ? { limit: opts.limit } : {}),
+    ...(opts?.dateFrom ? { date_from: opts.dateFrom } : {}),
+    ...(opts?.dateTo ? { date_to: opts.dateTo } : {}),
+  })
 export const getLoadedReceipts = (limit?: number) =>
   get<LoadedReceipt[]>('/api/fuel/receipts', typeof limit === 'number' ? { limit } : undefined)
 /** Реальное число загруженных смен/ТТН (без limit) — для карточки «Загружено». */

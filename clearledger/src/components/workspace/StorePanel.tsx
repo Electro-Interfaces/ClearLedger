@@ -10,9 +10,12 @@
  * иначе меню задвоится).
  */
 
+import { useMemo } from 'react'
 import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useLocations } from '@/hooks/useLocations'
+import { scopeStationCodes } from '@/services/locationService'
 import { StoreOverviewPanel } from './StoreOverviewPanel'
 import { StoreSalesPanel } from './StoreSalesPanel'
 import { StoreNomenclaturePanel } from './StoreNomenclaturePanel'
@@ -102,8 +105,15 @@ function ViewScaffold({ view }: { view: StoreView }) {
 
 export function StorePanel() {
   const [sub] = useWorkspaceSubView(STORE_DEFAULT_KEY, STORE_KEYS)
-  const { period } = useFilters()
+  const { period, locationIds, regionIds } = useFilters()
   const { companyId, company } = useCompany()
+  const locations = useLocations()
+
+  // Область учёта → коды АЗС для API магазина. Пустой массив = вся сеть (не сужаем).
+  const scopeStations = useMemo(
+    () => scopeStationCodes(locations, locationIds, regionIds).map(String),
+    [locations, locationIds, regionIds],
+  )
 
   // Магазин (сопутка/общепит) — витрина топливного профиля (ГИГ). У energy-компаний
   // (РусГидро) магазина нет — раздел появится после подключения интернет-магазина.
@@ -125,21 +135,21 @@ export function StorePanel() {
   if (sub === 'overview') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreOverviewPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreOverviewPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
   if (sub === 'sales') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreSalesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreSalesPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
   if (sub === 'nomenclature') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreNomenclaturePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreNomenclaturePanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
@@ -181,21 +191,21 @@ export function StorePanel() {
   if (sub === 'menu') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreCateringPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreCateringPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
   if (sub === 'pricing') {
     return (
       <div className="h-full overflow-y-auto">
-        <StorePricingPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StorePricingPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
   if (sub === 'assortment') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreAssortmentPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreAssortmentPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
@@ -209,7 +219,7 @@ export function StorePanel() {
   if (sub === 'shifts') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreShiftsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <StoreShiftsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }
@@ -231,7 +241,7 @@ export function StorePanel() {
   if (skuMode) {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreSkuPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} mode={skuMode} />
+        <StoreSkuPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} mode={skuMode} />
       </div>
     )
   }
@@ -239,7 +249,7 @@ export function StorePanel() {
   if (Report) {
     return (
       <div className="h-full overflow-y-auto">
-        <Report companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+        <Report companyId={companyId} dateFrom={period.from} dateTo={period.to} stations={scopeStations} />
       </div>
     )
   }

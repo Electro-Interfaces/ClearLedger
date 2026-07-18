@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getLoadedReceipts, type LoadedReceipt } from '@/services/fuel/fuelMappingService'
 import { ReceiptDetailsModal } from './ReceiptDetailsModal'
+import { useCompany } from '@/contexts/CompanyContext'
 
 type CostStatus = 'all' | 'costed' | 'missing' | 'invalid'
 
@@ -40,7 +41,8 @@ function CostBadge({ receipt }: { receipt: LoadedReceipt }) {
 }
 
 export function ReceiptCostRegistry() {
-  const query = useQuery({ queryKey: ['fuel-receipts-journal'], queryFn: () => getLoadedReceipts() })
+  const { companyId } = useCompany()
+  const query = useQuery({ queryKey: ['fuel-receipts-journal', companyId], queryFn: () => getLoadedReceipts() })
   const receipts = query.data ?? EMPTY_RECEIPTS
   const [status, setStatus] = useState<CostStatus>('all')
   const [fuel, setFuel] = useState('all')

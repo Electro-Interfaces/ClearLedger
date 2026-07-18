@@ -17,12 +17,12 @@ import { NomenclatureCardModal } from './NomenclatureCardModal'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
-interface PanelProps { companyId: string; dateFrom: string; dateTo: string }
+interface PanelProps { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }
 
 function useReport<T>(report: string, p: PanelProps) {
   return useQuery({
-    queryKey: ['store-report', report, p.companyId, p.dateFrom, p.dateTo],
-    queryFn: () => getStoreReport<T>(report, p.dateFrom, p.dateTo),
+    queryKey: ['store-report', report, p.companyId, p.dateFrom, p.dateTo, p.stations],
+    queryFn: () => getStoreReport<T>(report, p.dateFrom, p.dateTo, p.stations),
   })
 }
 

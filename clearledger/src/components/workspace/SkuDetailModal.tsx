@@ -8,14 +8,16 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip, CartesianGrid } fro
 import { getStoreSkuDetail, type SkuDetailData } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
+import { useCompany } from '@/contexts/CompanyContext'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const pctStr = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${nf(v, d)}%`)
 const marginCls = (v: number | null | undefined) => (v == null ? '' : v < 0 ? 'text-red-400/80' : v < 10 ? 'text-amber-300/90' : 'text-emerald-300/80')
 
 export function SkuDetailModal({ guid, dateFrom, dateTo, onClose }: { guid: string; dateFrom: string; dateTo: string; onClose: () => void }) {
+  const { companyId } = useCompany()
   const { data: d, isLoading } = useQuery({
-    queryKey: ['store-sku', guid, dateFrom, dateTo],
+    queryKey: ['store-sku', companyId, guid, dateFrom, dateTo],
     queryFn: () => getStoreSkuDetail(guid, dateFrom, dateTo),
   })
 

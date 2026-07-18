@@ -390,8 +390,11 @@ export interface PricingData {
   skus: PricingSku[]
 }
 
-export const getStorePricing = (dateFrom: string, dateTo: string, category: PriceCategory = 'all') =>
-  get<PricingData>('/api/store/pricing', { date_from: dateFrom, date_to: dateTo, category })
+export const getStorePricing = (dateFrom: string, dateTo: string, category: PriceCategory = 'all', stations?: string[]) =>
+  get<PricingData>('/api/store/pricing', {
+    date_from: dateFrom, date_to: dateTo, category,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
 
 export type PriceCategory = 'all' | 'soputka' | 'obshepit'
 
@@ -419,8 +422,11 @@ export interface AssortmentData {
   skus: AssortmentSku[]
 }
 
-export const getStoreAssortment = (dateFrom: string, dateTo: string, category: PriceCategory = 'all') =>
-  get<AssortmentData>('/api/store/assortment', { date_from: dateFrom, date_to: dateTo, category })
+export const getStoreAssortment = (dateFrom: string, dateTo: string, category: PriceCategory = 'all', stations?: string[]) =>
+  get<AssortmentData>('/api/store/assortment', {
+    date_from: dateFrom, date_to: dateTo, category,
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
 
 export interface SkuDetailData {
   guid: string; name: string; article: string | null; vat: string | null

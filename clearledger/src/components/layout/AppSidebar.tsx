@@ -208,7 +208,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-border/40 pt-[var(--header-height)] pb-12">
-      <SidebarContent className="px-1.5 py-1">
+      <SidebarContent data-zone="Навигация приложения" data-zone-side className="px-1.5 py-1">
         {/* Toggle button */}
         <div className={`flex ${collapsed ? 'justify-center' : 'justify-end'} px-1 py-1.5`}>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={toggleSidebar}

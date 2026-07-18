@@ -36,7 +36,7 @@ const WEIGH_TABS: { key: 'all' | 'weighed'; label: string }[] = [
   { key: 'all', label: 'Любые' }, { key: 'weighed', label: 'Весовые' },
 ]
 
-export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }) {
   const [kind, setKind] = useState('all')
   const [marked, setMarked] = useState<SalesMarked>('all')
   const [weighed, setWeighed] = useState<'all' | 'weighed'>('all')
@@ -45,8 +45,8 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo }: { compan
   const [openGuid, setOpenGuid] = useState<string | null>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-nom', companyId, dateFrom, dateTo, kind, marked, weighed, hasSales, q],
-    queryFn: () => getStoreNomenclature(dateFrom, dateTo, { kind, marked, weighed, hasSales, q }),
+    queryKey: ['store-nom', companyId, dateFrom, dateTo, kind, marked, weighed, hasSales, q, stations],
+    queryFn: () => getStoreNomenclature(dateFrom, dateTo, { kind, marked, weighed, hasSales, q, stations }),
   })
 
   return (

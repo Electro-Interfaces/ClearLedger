@@ -38,7 +38,7 @@ const STATUS_META: Record<StockStatus, { label: string; cls: string } | null> = 
 type SortKey = 'revenue' | 'qty' | 'stock_qty' | 'stock_cost' | 'days_of_supply' | 'gmroi'
 type StatusFilter = 'all' | StockStatus | 'loss'
 
-export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }) {
   const [category, setCategory] = useState<PriceCategory>('all')
   const [cell, setCell] = useState<string | null>(null)
   const [statusF, setStatusF] = useState<StatusFilter>('all')
@@ -49,8 +49,8 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo }: { companyI
   const ref = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-assortment', companyId, dateFrom, dateTo, category],
-    queryFn: () => getStoreAssortment(dateFrom, dateTo, category),
+    queryKey: ['store-assortment', companyId, dateFrom, dateTo, category, stations],
+    queryFn: () => getStoreAssortment(dateFrom, dateTo, category, stations),
   })
 
   const skus = useMemo(() => {

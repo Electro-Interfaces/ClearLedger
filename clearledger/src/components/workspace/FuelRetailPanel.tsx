@@ -639,7 +639,7 @@ export function FuelRetailPanel({ companyId, dateFrom, dateTo }: {
   const [st, patch] = useTabParams('fuel_retail', { sub: 'overview' })
   const v = subView(st.sub, { companyId, dateFrom, dateTo })
   const ref = useRef<HTMLDivElement>(null)
-  const scopeSub = useScopeSubtitle()
+  const scopeSub = useScopeSubtitle({ scopeApplied: false })  // панель не сужает по сети: API не принимает станции
   return (
     <>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">

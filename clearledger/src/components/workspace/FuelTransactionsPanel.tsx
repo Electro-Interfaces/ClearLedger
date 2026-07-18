@@ -136,7 +136,7 @@ function SummaryMetric({ label, value, className }: { label: string; value: stri
   )
 }
 
-export function FuelTransactionsPanel({ dateFrom, dateTo }: {
+export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
   const qc = useQueryClient()
@@ -162,7 +162,7 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
 
   // статус фоновой загрузки реализаций
   const syncStatus = useQuery({
-    queryKey: ['fuel-tx-sync-status'], queryFn: getFuelTxSyncStatus,
+    queryKey: ['fuel-tx-sync-status', companyId], queryFn: getFuelTxSyncStatus,
     enabled: syncing, refetchInterval: syncing ? 2500 : false,
   })
   useEffect(() => {
@@ -181,12 +181,14 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
   }
 
   const filtersQ = useQuery({
-    queryKey: ['fuel-tx-filters', dateFrom, dateTo],
+    // companyId в ключе обязателен: запрос скоупится заголовком X-Company-Id,
+    // без него смена компании отдаёт кеш предыдущей (чужой реестр операций).
+    queryKey: ['fuel-tx-filters', companyId, dateFrom, dateTo],
     queryFn: () => getFuelTxFilters(dateFrom, dateTo),
   })
   const stationCode = station === ALL ? undefined : Number(station)
   const overviewQ = useQuery({
-    queryKey: ['fuel-tx-overview', dateFrom, dateTo, station],
+    queryKey: ['fuel-tx-overview', companyId, dateFrom, dateTo, station],
     queryFn: () => getFuelTxOverview(dateFrom, dateTo, stationCode),
   })
 
@@ -198,7 +200,7 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
   }), [dateFrom, dateTo, stationCode, fuelCodes, payTypes, search, sort, order])
 
   const { data, isLoading, isFetching, isPlaceholderData } = useQuery({
-    queryKey: ['fuel-tx-rows', params, page],
+    queryKey: ['fuel-tx-rows', companyId, params, page],
     queryFn: () => getFuelTxRows({ ...params, limit: PAGE, offset: page * PAGE }),
     placeholderData: keepPreviousData,
   })

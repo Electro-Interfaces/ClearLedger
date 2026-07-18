@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompany } from '@/contexts/CompanyContext'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
 import { Input } from '@/components/ui/input'
@@ -184,9 +185,10 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
   onMessageUser: (uid: string) => void
   presenceMap: Map<string, ChatPresence>
 }) {
+  const { companyId } = useCompany()
   const [q, setQ] = useState('')
   const { data: found = [] } = useQuery({
-    queryKey: ['chat-user-search', q],
+    queryKey: ['chat-user-search', companyId, q],
     queryFn: () => chat.searchUsers(q),
     enabled: canManage,
   })
@@ -245,12 +247,13 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
 function CreateChatDialog({ open, onOpenChange, onCreated }: {
   open: boolean; onOpenChange: (o: boolean) => void; onCreated: (roomId: string) => void
 }) {
+  const { companyId } = useCompany()
   const [q, setQ] = useState('')
   const [picked, setPicked] = useState<Record<string, string>>({})
   const [groupName, setGroupName] = useState('')
   const [busy, setBusy] = useState(false)
   const { data: users = [] } = useQuery({
-    queryKey: ['chat-user-search', q],
+    queryKey: ['chat-user-search', companyId, q],
     queryFn: () => chat.searchUsers(q),
     enabled: open,
   })
@@ -500,6 +503,7 @@ function PendingThumb({ file, onRemove }: { file: File; onRemove: () => void }) 
 // ── корневой компонент ────────────────────────────────────────────────────────
 export function ChatPanel({ compact }: { compact?: boolean } = {}) {
   const { user } = useAuth()
+  const { companyId } = useCompany()
   const isMobile = useIsMobile()
   // Узкий контейнер (правый док) — одна колонка список↔переписка + папки-чипы,
   // даже на десктопе: 3 колонки в ~420px не помещаются.
@@ -537,7 +541,7 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
 
   // ── данные ──
   const { data: rooms = [] } = useQuery({
-    queryKey: ['chat-rooms', showArchived],
+    queryKey: ['chat-rooms', companyId, showArchived],
     queryFn: () => chat.getRooms(showArchived),
     refetchInterval: 60000,
   })
@@ -553,11 +557,11 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
     enabled: !!selectedRoom,
   })
   const { data: folders = [] } = useQuery({
-    queryKey: ['chat-folders'],
+    queryKey: ['chat-folders', companyId],
     queryFn: () => chat.getFolders(),
   })
   const { data: presence = [] } = useQuery({
-    queryKey: ['chat-presence'],
+    queryKey: ['chat-presence', companyId],
     queryFn: () => chat.getPresence(),
     refetchInterval: 60000,
   })

@@ -64,7 +64,7 @@ export function WorkspaceTabBar() {
   }
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3 shadow-soft">
+    <div data-zone="Экраны: закрепить и переключить" className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3 shadow-soft">
       {/* Метка зоны — лента экранов: сервис закрепления и переключения между экранами */}
       <div className="hidden shrink-0 items-center gap-1.5 text-muted-foreground/70 md:flex">
         <LayoutGrid className="size-3.5" aria-hidden="true" />

@@ -472,9 +472,11 @@ function ReceiptsBlock({ receipts }: { receipts: ShiftDashboardData['receipts'] 
 }
 
 // ─── FIFO-маржа (mini) ───────────────────────────────────────────────
-function MarginMini({ from, to }: { from: string; to: string }) {
+function MarginMini({ companyId, from, to }: { companyId: string; from: string; to: string }) {
   const { data } = useQuery({
-    queryKey: ['fuel-overview-margin', from, to],
+    // companyId обязателен в ключе: запрос скоупится заголовком X-Company-Id,
+    // без него при смене компании отдаётся кеш предыдущей.
+    queryKey: ['fuel-overview-margin', companyId, from, to],
     queryFn: () => getCostingMargin(from, to, 'fuel'),
   })
   if (!data) return null
@@ -502,9 +504,9 @@ function MarginMini({ from, to }: { from: string; to: string }) {
 }
 
 // ─── готовность к 1С / обработка смен (mini-полоса) ──────────────────
-function ReadinessStrip({ from, to }: { from: string; to: string }) {
+function ReadinessStrip({ companyId, from, to }: { companyId: string; from: string; to: string }) {
   const { data } = useQuery({
-    queryKey: ['fuel-overview-readiness', from, to],
+    queryKey: ['fuel-overview-readiness', companyId, from, to],
     queryFn: () => getFuelReadiness(from, to),
   })
   if (!data) return null
@@ -794,8 +796,8 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
 
             {/* FIFO-маржа + готовность к 1С */}
             <SectionTitle hint="управленческая себестоимость и подготовка к 1С"><span className="inline-flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" />Маржинальность и обработка</span></SectionTitle>
-            <MarginMini from={period.from} to={period.to} />
-            <ReadinessStrip from={period.from} to={period.to} />
+            <MarginMini companyId={companyId} from={period.from} to={period.to} />
+            <ReadinessStrip companyId={companyId} from={period.from} to={period.to} />
           </div>
         )}
     </div>

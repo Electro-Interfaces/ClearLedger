@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  CalendarDays, ChevronDown, Database, FileText, RefreshCw, RotateCcw,
+  CalendarDays, ChevronDown, Database, RefreshCw, RotateCcw,
   SlidersHorizontal, type LucideIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -194,7 +194,7 @@ function SummaryControl({
 
 export function WorkspaceFilterBar() {
   const filters = useFilters()
-  const { stationCode, docTypeIds, clearAll } = filters
+  const { stationCode, clearAll } = filters
   const { company } = useCompany()
   const isEnergy = company.profileId === 'energy'
   const stations = getStsStationsFromLocations()
@@ -209,7 +209,6 @@ export function WorkspaceFilterBar() {
     return stations.find((s) => String(s.code) === stationCode)?.name ?? `Станция ${stationCode}`
   }, [stationCode, stations])
 
-  const docLabel = docTypeIds.length === 0 ? 'Все типы данных' : `Типов: ${docTypeIds.length}`
 
   function handleRefresh() {
     queryClient.invalidateQueries({ queryKey: ['sts-shifts'] })
@@ -235,13 +234,6 @@ export function WorkspaceFilterBar() {
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
         <PeriodControl />
         <WorkspaceScopeControl />
-        <SummaryControl
-          icon={FileText}
-          label="Данные"
-          value={docLabel}
-          active={docTypeIds.length > 0}
-          onClick={() => setOpen(true)}
-        />
         {!isEnergy ? (
           <SummaryControl
             icon={Database}

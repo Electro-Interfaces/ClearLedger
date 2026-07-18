@@ -133,7 +133,7 @@ function StationMarkers({ pts, metric, th, dark, maxVal }: {
   )
 }
 
-export function FuelMapPanel({ dateFrom, dateTo }: {
+export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
   const dark = useIsDark()
@@ -142,7 +142,7 @@ export function FuelMapPanel({ dateFrom, dateTo }: {
   const [syncing, setSyncing] = useState(false)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-map', dateFrom, dateTo],
+    queryKey: ['fuel-map', companyId, dateFrom, dateTo],
     queryFn: () => getFuelStationsMap(dateFrom, dateTo),
   })
   const pts = useMemo(() => (data?.stations ?? []).filter((s) => s.latitude != null && s.longitude != null), [data])

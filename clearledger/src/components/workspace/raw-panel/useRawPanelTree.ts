@@ -163,7 +163,7 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
   const shiftsQ = useQuery({
     queryKey: ['raw-docs-shifts', company.id],
     enabled: apiFuel,
-    queryFn: () => getLoadedShifts(20000),
+    queryFn: () => getLoadedShifts({ limit: 20000 }),
     staleTime: 60_000,
   })
   const receiptsQ = useQuery({

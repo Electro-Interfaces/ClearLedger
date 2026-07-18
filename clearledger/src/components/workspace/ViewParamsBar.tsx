@@ -26,6 +26,7 @@ export function ViewParamsBar({
   return (
     <div
       data-export-ignore
+      data-zone="Параметры: как показано"
       className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2.5"
     >
       {label ? (

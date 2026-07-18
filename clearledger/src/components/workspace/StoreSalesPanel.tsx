@@ -51,7 +51,7 @@ function Seg<T extends string>({ tabs, value, onChange }: { tabs: { key: T; labe
   )
 }
 
-export function StoreSalesPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }) {
   const [groupBy, setGroupBy] = useState<SalesGroupBy>('sku')
   const [category, setCategory] = useState<SalesCategory>('all')
   const [marked, setMarked] = useState<SalesMarked>('all')
@@ -60,8 +60,8 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const scopeSub = useScopeSubtitle()
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-sales', companyId, dateFrom, dateTo, groupBy, category, marked, q],
-    queryFn: () => getStoreSales(dateFrom, dateTo, { groupBy, category, marked, q }),
+    queryKey: ['store-sales', companyId, dateFrom, dateTo, groupBy, category, marked, q, stations],
+    queryFn: () => getStoreSales(dateFrom, dateTo, { groupBy, category, marked, q, stations }),
   })
 
   const isPayment = groupBy === 'payment'

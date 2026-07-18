@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
-  Bookmark, CalendarDays, Check, Database, FileText, History,
+  Bookmark, CalendarDays, Check, Database, History,
   MapPinned, Plus, RotateCcw, X, type LucideIcon,
 } from 'lucide-react'
 import {
@@ -24,7 +24,6 @@ import { useLocations } from '@/hooks/useLocations'
 import { getStsStationsFromLocations } from '@/services/locationService'
 import { getChargeDimensions } from '@/services/analyticsService'
 import { todayISO, daysAgoISO, monthFirstISO, prevMonthBounds } from './analytics/periodPresets'
-import { FUEL_DOC_TYPES, ENERGY_DOC_TYPES } from '@/config/docTypes'
 
 const PERIOD_PRESETS = [
   { label: '30 дней', value: () => ({ from: daysAgoISO(30), to: todayISO() }) },
@@ -33,7 +32,7 @@ const PERIOD_PRESETS = [
   { label: 'С начала года', value: () => ({ from: `${new Date().getFullYear()}-01-01`, to: todayISO() }) },
 ]
 
-type ArrayFilterKey = 'locationIds' | 'regionIds' | 'stationCodes' | 'docTypeIds'
+type ArrayFilterKey = 'locationIds' | 'regionIds' | 'stationCodes'
 
 function cloneState(state: FilterState): FilterState {
   return {
@@ -42,7 +41,6 @@ function cloneState(state: FilterState): FilterState {
     locationIds: [...state.locationIds],
     regionIds: [...state.regionIds],
     stationCodes: [...state.stationCodes],
-    docTypeIds: [...state.docTypeIds],
   }
 }
 
@@ -55,7 +53,6 @@ function describeState(state: FilterState): string {
   const scopeCount = state.locationIds.length + state.regionIds.length + state.stationCodes.length
   const parts = [`${fmtShort(state.period.from)}–${fmtShort(state.period.to)}`]
   if (scopeCount > 0) parts.push(`область: ${scopeCount}`)
-  if (state.docTypeIds.length > 0) parts.push(`данные: ${state.docTypeIds.length}`)
   if (state.stationCode !== 'all') parts.push(`STS: ${state.stationCode}`)
   return parts.join(' · ')
 }
@@ -117,11 +114,9 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
     enabled: isEnergy && open,
   })
 
-  const docTypes = isEnergy ? ENERGY_DOC_TYPES : FUEL_DOC_TYPES
   const locationSet = useMemo(() => new Set(draft.locationIds), [draft.locationIds])
   const regionSet = useMemo(() => new Set(draft.regionIds), [draft.regionIds])
   const stationCodeSet = useMemo(() => new Set(draft.stationCodes), [draft.stationCodes])
-  const docTypeSet = useMemo(() => new Set(draft.docTypeIds), [draft.docTypeIds])
   const locationRegions = useMemo(
     () => new Map(locations.map((location) => [location.id, locationRegion(location)])),
     [locations],
@@ -477,30 +472,6 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                 </>
               ) : null}
 
-              <Separator />
-
-              <FilterSection
-                icon={FileText}
-                title="Типы данных"
-                description="Ограничение действует только в разделах, которые поддерживают выбранные типы."
-                action={draft.docTypeIds.length > 0 ? (
-                  <Button variant="ghost" size="xs" onClick={() => setDraft((current) => ({ ...current, docTypeIds: [] }))}>
-                    Все типы
-                  </Button>
-                ) : undefined}
-              >
-                <fieldset>
-                  <legend className="sr-only">Типы данных</legend>
-                  <div className="grid grid-cols-1 gap-0.5 rounded-md border p-1.5 sm:grid-cols-2">
-                    {docTypes.map((docType) => (
-                      <label key={docType.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
-                        <Checkbox checked={docTypeSet.has(docType.id)} onCheckedChange={() => toggleValue('docTypeIds', docType.id)} />
-                        <span className="truncate">{docType.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-              </FilterSection>
             </div>
           </ScrollArea>
         </div>

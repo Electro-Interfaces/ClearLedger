@@ -298,19 +298,14 @@ async function extractImageViaApi(file: File): Promise<ExtractResult> {
 }
 
 async function extractImage(file: File): Promise<ExtractResult> {
-  // Если API доступен — используем серверный OCR (Tesseract CLI, быстрее)
-  if (isApiEnabled()) {
-    try {
-      return await extractImageViaApi(file)
-    } catch (err) {
-      console.warn('Server OCR failed, falling back to browser:', err)
-    }
+  // OCR только серверный (Tesseract CLI на /api/ocr). Браузерный fallback на
+  // tesseract.js удалён вместе с зависимостью при переходе на fuel-only (f00968c):
+  // код парсера остался сиротой и молча падал в catch, создавая иллюзию запасного пути.
+  if (!isApiEnabled()) {
+    return { text: '', metadata: { _ocrError: 'OCR недоступен: нужен серверный API' } }
   }
-  // Fallback: browser-side Tesseract.js
   try {
-    const { parseImage } = await import('./parsers/ocrParser')
-    const result = await parseImage(file)
-    return { text: result.text, metadata: { ...result.metadata, _ocrSource: 'browser' } }
+    return await extractImageViaApi(file)
   } catch (err) {
     console.error('OCR extraction error:', err)
     return { text: '', metadata: { _ocrError: `OCR: ${String(err)}` } }

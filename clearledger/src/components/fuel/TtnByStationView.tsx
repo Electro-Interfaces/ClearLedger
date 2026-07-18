@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { getLoadedReceipts, type LoadedReceipt } from '@/services/fuel/fuelMappingService'
 import { fmtLiters } from '@/services/analyticsService'
+import { useCompany } from '@/contexts/CompanyContext'
 
 // Цвет отклонения по модулю процента: >3% — красный, >1% — амбер, иначе нейтральный.
 const devCls = (pct: number) =>
@@ -18,7 +19,8 @@ const devCls = (pct: number) =>
 const fmtPct = (pct: number) => `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`
 
 export function TtnByStationView({ onStationClick }: { onStationClick?: (code: number) => void }) {
-  const { data } = useQuery({ queryKey: ['fuel-receipts-by-station'], queryFn: () => getLoadedReceipts() })
+  const { companyId } = useCompany()
+  const { data } = useQuery({ queryKey: ['fuel-receipts-by-station', companyId], queryFn: () => getLoadedReceipts() })
   const receipts: LoadedReceipt[] = data ?? []
 
   const byStation = useMemo(() => {

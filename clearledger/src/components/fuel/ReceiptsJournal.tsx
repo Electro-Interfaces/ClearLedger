@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils'
 import { getFuelColor } from '@/utils/fuelColors'
 import { FuelBadge } from '@/components/common/FuelBadge'
 import { useFuelName } from '@/hooks/useFuelName'
+import { useCompany } from '@/contexts/CompanyContext'
 import {
   getLoadedReceipts, setReceiptStatus, bulkReceiptStatus,
   type LoadedReceipt, type ReceiptStatus,
@@ -45,8 +46,9 @@ export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
   stationFilter?: number | null
   onClearStation?: () => void
 } = {}) {
+  const { companyId } = useCompany()
   const { data } = useQuery({
-    queryKey: ['fuel-receipts-journal'],
+    queryKey: ['fuel-receipts-journal', companyId],
     queryFn: () => getLoadedReceipts(),
   })
   const receipts = data ?? []

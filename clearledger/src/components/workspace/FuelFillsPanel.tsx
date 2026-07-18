@@ -23,6 +23,8 @@ import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
 import { ExportButton } from './analytics/ExportButton'
 import { useScopeSubtitle } from '@/hooks/useScopeReset'
+import { useLocations } from '@/hooks/useLocations'
+import { scopeStationCodes } from '@/services/locationService'
 import { PanelViewTabs } from './PanelViewTabs'
 import { ViewParamsBar } from './ViewParamsBar'
 import { HorizonControl } from './HorizonControl'
@@ -76,15 +78,34 @@ function SegmentToggle({ value, onChange }: { value: SegmentSel; onChange: (v: S
   )
 }
 
-/** Сужение всех запросов панели: сегмент (тумблер) + станция из фильтра раздела. */
+/**
+ * Сужение всех запросов панели: сегмент (тумблер) + КОНТУР рабочей области.
+ *
+ * Контур для профиля fuel — это выбранные точки и регионы («Область учёта»),
+ * их резолвим в коды станций STS. Источник STS (`stationCode`) — отдельное
+ * измерение: если он задан вместе с областью, берём пересечение, иначе тот из
+ * двух, что задан. Раньше читался только `stationCode`, поэтому выбор точек и
+ * регионов на «Реализации» не влиял вообще.
+ */
 function useFuelNarrow(): FuelNarrow & { key: string } {
-  const { stationCode } = useFilters()
+  const { stationCode, locationIds, regionIds } = useFilters()
+  const locations = useLocations()
   const seg = useContext(FuelSegmentCtx)
   const segment = SEGMENT_VAL[seg]
-  // 'all' = фильтр станции не выбран; код станции числовой (STS)
+
+  const scopeCodes = useMemo(
+    () => scopeStationCodes(locations, locationIds, regionIds),
+    [locations, locationIds, regionIds],
+  )
+
   const codeNum = stationCode && stationCode !== 'all' ? Number(stationCode) : NaN
-  const stationCodes = Number.isFinite(codeNum) ? [codeNum] : undefined
-  return { stationCodes, segment, key: `${stationCode ?? ''}|${seg}` }
+  const srcCode = Number.isFinite(codeNum) ? codeNum : null
+
+  const stationCodes = srcCode != null
+    ? (scopeCodes.length === 0 || scopeCodes.includes(srcCode) ? [srcCode] : [])
+    : (scopeCodes.length > 0 ? scopeCodes : undefined)
+
+  return { stationCodes, segment, key: `${stationCode ?? ''}|${scopeCodes.join(',')}|${seg}` }
 }
 type Narrow = ReturnType<typeof useFuelNarrow>
 

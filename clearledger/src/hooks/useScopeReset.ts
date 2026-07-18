@@ -17,7 +17,7 @@ import { useFilters } from '@/contexts/FilterContext'
 
 /** Строковый отпечаток контура: меняется при любой правке верхнего фильтра. */
 export function useScopeKey(): string {
-  const { period, stationCode, locationIds, regionIds, stationCodes, docTypeIds } = useFilters()
+  const { period, stationCode, locationIds, regionIds, stationCodes } = useFilters()
   return [
     period.from,
     period.to,
@@ -25,7 +25,6 @@ export function useScopeKey(): string {
     locationIds.join(','),
     regionIds.join(','),
     stationCodes.join(','),
-    docTypeIds.join(','),
   ].join('|')
 }
 
@@ -37,10 +36,18 @@ export function useScopeKey(): string {
  * (CLAUDE.md, правило 7). Пример:
  * `Период: 2026-06-30 — 2026-07-18 · Регион: Москва · Типов данных: 2`
  */
-export function useScopeSubtitle(): string {
-  const { period, stationCode, locationIds, regionIds, stationCodes, docTypeIds } = useFilters()
+export function useScopeSubtitle(opts?: { scopeApplied?: boolean }): string {
+  const { period, stationCode, locationIds, regionIds, stationCodes } = useFilters()
 
   const parts = [`Период: ${period.from} — ${period.to}`]
+
+  // Панель не умеет сужать выборку по сети (нет параметра в API) — тогда в шапке
+  // файла НЕЛЬЗЯ заявлять сужение: цифры-то по всей сети. Лучше отсутствие
+  // информации, чем ложная. Убрать флаг, когда сужение будет реализовано.
+  if (opts?.scopeApplied === false) {
+    parts.push('Вся сеть')
+    return parts.join(' · ')
+  }
 
   if (stationCodes.length > 0) parts.push(`ЭЗС: ${stationCodes.length}`)
   else if (locationIds.length > 0) parts.push(`Точек: ${locationIds.length}`)
@@ -48,7 +55,6 @@ export function useScopeSubtitle(): string {
   else if (regionIds.length > 1) parts.push(`Регионов: ${regionIds.length}`)
   else parts.push('Вся сеть')
 
-  if (docTypeIds.length > 0) parts.push(`Типов данных: ${docTypeIds.length}`)
   if (stationCode !== 'all') parts.push(`Источник STS: ${stationCode}`)
 
   return parts.join(' · ')

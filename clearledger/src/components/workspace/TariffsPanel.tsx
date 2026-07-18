@@ -279,7 +279,7 @@ export function TariffsPanel({ companyId, dateFrom, dateTo }: TabProps) {
   const p: TabProps = { companyId, dateFrom, dateTo }
   const ref = useRef<HTMLDivElement>(null)
   const curLabel = TARIFF_TABS.find((x) => x.k === t.sub)?.label ?? 'Тарифы'
-  const scopeSub = useScopeSubtitle()
+  const scopeSub = useScopeSubtitle({ scopeApplied: false })  // панель не сужает по сети: API не принимает станции
   return (
     <div>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">

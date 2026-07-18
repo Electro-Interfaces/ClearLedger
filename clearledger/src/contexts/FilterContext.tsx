@@ -33,8 +33,6 @@ export interface FilterState {
   regionIds: string[]
   /** Коды ЭЗС-станций (energy) для сужения аналитики сессий. Пусто = «все». */
   stationCodes: string[]
-  /** Выбранные типы документов (shift_report, receipt, price, ...). Пусто = «все». */
-  docTypeIds: string[]
 }
 
 /** Именованный предустановленный набор фильтра. */
@@ -53,8 +51,6 @@ interface FilterContextType extends FilterState {
   toggleRegion: (id: string) => void
   setStationCodes: (codes: string[]) => void
   toggleStationCode: (code: string) => void
-  setDocTypeIds: (ids: string[]) => void
-  toggleDocType: (id: string) => void
   clearAll: () => void
   /** Целиком заменить состояние фильтра (для истории/пресетов). */
   applyState: (s: FilterState) => void
@@ -107,7 +103,6 @@ function coerceState(parsed: unknown): FilterState {
     locationIds: Array.isArray(o.locationIds) ? (o.locationIds as string[]) : [],
     regionIds: Array.isArray(o.regionIds) ? (o.regionIds as string[]) : [],
     stationCodes: Array.isArray(o.stationCodes) ? (o.stationCodes as string[]) : [],
-    docTypeIds: Array.isArray(o.docTypeIds) ? (o.docTypeIds as string[]) : [],
   }
 }
 
@@ -282,19 +277,6 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const setDocTypeIds = useCallback((ids: string[]) => {
-    setState((prev) => ({ ...prev, docTypeIds: ids }))
-  }, [])
-
-  const toggleDocType = useCallback((id: string) => {
-    setState((prev) => {
-      const set = new Set(prev.docTypeIds)
-      if (set.has(id)) set.delete(id)
-      else set.add(id)
-      return { ...prev, docTypeIds: [...set] }
-    })
-  }, [])
-
   const clearAll = useCallback(() => {
     setState(clearFilterSelections)
   }, [])
@@ -325,11 +307,9 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     toggleRegion,
     setStationCodes,
     toggleStationCode,
-    setDocTypeIds,
-    toggleDocType,
     clearAll,
     filterByLocation,
-  }), [state, setPeriod, setStationCode, applyState, history, commitToHistory, presets, savePreset, deletePreset, setLocationIds, toggleLocation, setRegionIds, toggleRegion, setStationCodes, toggleStationCode, setDocTypeIds, toggleDocType, clearAll, filterByLocation])
+  }), [state, setPeriod, setStationCode, applyState, history, commitToHistory, presets, savePreset, deletePreset, setLocationIds, toggleLocation, setRegionIds, toggleRegion, setStationCodes, toggleStationCode, clearAll, filterByLocation])
 
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>
 }

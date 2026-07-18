@@ -95,12 +95,12 @@ const TITLES: Record<SkuMode, string> = {
   marked: 'Маркированные товары (Честный Знак)',
 }
 
-export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode }: {
-  companyId: string; dateFrom: string; dateTo: string; mode: SkuMode
+export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode, stations }: {
+  companyId: string; dateFrom: string; dateTo: string; mode: SkuMode; stations?: string[]
 }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-skus', companyId, dateFrom, dateTo],
-    queryFn: () => getStoreSkus(dateFrom, dateTo),
+    queryKey: ['store-skus', companyId, dateFrom, dateTo, stations],
+    queryFn: () => getStoreSkus(dateFrom, dateTo, { stations }),
   })
   const [q, setQ] = useState('')
   const [markedOnly, setMarkedOnly] = useState(false)

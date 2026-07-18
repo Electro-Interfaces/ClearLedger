@@ -56,7 +56,7 @@ export function SyncWith1CPanel() {
   const to = format(new Date(), 'yyyy-MM-dd')
   const api = isApiEnabled()
 
-  const readiness = useQuery({ queryKey: ['fuel-readiness', from, to], queryFn: () => getFuelReadiness(from, to) })
+  const readiness = useQuery({ queryKey: ['fuel-readiness', companyId, from, to], queryFn: () => getFuelReadiness(from, to) })
   const pk = useQuery({
     queryKey: ['export-packets-stats', companyId],
     queryFn: () => get<PacketStats>('/api/export-packets/stats', { company_id: companyId }),

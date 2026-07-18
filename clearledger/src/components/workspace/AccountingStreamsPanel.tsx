@@ -20,14 +20,14 @@ export function AccountingStreamsPanel({ tab, companyId, dateFrom, dateTo }: {
   tab: StreamTab; companyId: string; dateFrom: string; dateTo: string
 }) {
   if (tab === 'cb_shifts') return <StoreShiftsPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-  if (tab === 'cb_load') return <CbLoadPanel dateFrom={dateFrom} dateTo={dateTo} />
-  return <CbReconPanel dateFrom={dateFrom} dateTo={dateTo} />
+  if (tab === 'cb_load') return <CbLoadPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+  return <CbReconPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
 }
 
 /* Загрузка из ЦБ — что принято из 1С ЭЛСИ.АЗК за период (сводка ingest). */
-function CbLoadPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+function CbLoadPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-shifts', dateFrom, dateTo],
+    queryKey: ['store-shifts', companyId, dateFrom, dateTo],
     queryFn: () => getStoreShifts(dateFrom, dateTo),
   })
 
@@ -76,14 +76,14 @@ function CbLoadPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string })
 }
 
 /* Сверка сопутки — самосогласованность пакета + готовность к загрузке (по смене). */
-function CbReconPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+function CbReconPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [key, setKey] = useState<string | null>(null)
   const shiftsQ = useQuery({
-    queryKey: ['store-shifts', dateFrom, dateTo],
+    queryKey: ['store-shifts', companyId, dateFrom, dateTo],
     queryFn: () => getStoreShifts(dateFrom, dateTo),
   })
   const verifyQ = useQuery({
-    queryKey: ['bp-verify', key],
+    queryKey: ['bp-verify', companyId, key],
     queryFn: () => getBpPackageVerify(key!),
     enabled: !!key,
   })

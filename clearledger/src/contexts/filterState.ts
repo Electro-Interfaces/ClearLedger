@@ -12,7 +12,6 @@ export function sameFilterState(a: FilterState, b: FilterState): boolean {
     && sameStringSet(a.locationIds, b.locationIds)
     && sameStringSet(a.regionIds, b.regionIds)
     && sameStringSet(a.stationCodes, b.stationCodes)
-    && sameStringSet(a.docTypeIds, b.docTypeIds)
 }
 
 export function activeFilterCount(state: FilterState): number {
@@ -20,7 +19,6 @@ export function activeFilterCount(state: FilterState): number {
     + state.locationIds.length
     + state.regionIds.length
     + state.stationCodes.length
-    + state.docTypeIds.length
 }
 
 export function clearFilterSelections(state: FilterState): FilterState {
@@ -30,6 +28,5 @@ export function clearFilterSelections(state: FilterState): FilterState {
     locationIds: [],
     regionIds: [],
     stationCodes: [],
-    docTypeIds: [],
   }
 }

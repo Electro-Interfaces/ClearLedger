@@ -42,13 +42,13 @@ function ShareBars({ rows }: { rows: { name: string; value: number; percent?: nu
   )
 }
 
-export function StoreOverviewPanel({ companyId, dateFrom, dateTo }: {
-  companyId: string; dateFrom: string; dateTo: string
+export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-overview', companyId, dateFrom, dateTo],
-    queryFn: () => getStoreOverview(dateFrom, dateTo, { compare: true }),
+    queryKey: ['store-overview', companyId, dateFrom, dateTo, stations],
+    queryFn: () => getStoreOverview(dateFrom, dateTo, { compare: true, stations }),
   })
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка обзора…</div>

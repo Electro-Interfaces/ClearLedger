@@ -558,7 +558,8 @@ export async function getChargeTimeseries(p: PeriodParams & {
 
 export async function getChargeCompareMulti(p: {
   companyId: string; periods: { from: string; to: string }[]; groupBy?: ChargeSeriesBy; metric?: ChargeMetric
-  stations?: string[]; regions?: string[]
+  // dim/dimVal — точечный фильтр по разрезу (ФЛ/ЮЛ); narrowParams шлёт их как dim/dim_val
+  stations?: string[]; regions?: string[]; dim?: string; dimVal?: string
 }): Promise<ChargeCompareMultiResponse> {
   return get<ChargeCompareMultiResponse>('/api/analytics/charge-sessions/compare', {
     company_id: p.companyId, group_by: p.groupBy ?? 'station', metric: p.metric ?? 'amount',

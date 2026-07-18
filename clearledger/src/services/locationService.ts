@@ -290,3 +290,51 @@ export interface HubexTasksResult {
 export async function getHubexTasks(id: string): Promise<HubexTasksResult> {
   return get<HubexTasksResult>(`/api/locations/${id}/hubex-tasks`)
 }
+
+/**
+ * Регион точки обслуживания (канон — metadata.federalSubject).
+ * Вынесено сюда, чтобы «Область учёта» одинаково резолвилась во всех панелях.
+ */
+export function locationRegion(location: ServiceLocation): string {
+  return String((location.metadata as Record<string, unknown> | undefined)?.federalSubject ?? '').trim()
+}
+
+/**
+ * Точки области учёта → коды станций STS.
+ *
+ * Точка может быть привязана к источнику через sourceBindings (station/code),
+ * иначе берём её собственный код. Нужно для сужения топливных запросов:
+ * пользователь выбирает точки и регионы, а API принимает коды станций.
+ */
+export function locationStationCodes(locations: ServiceLocation[], selectedIds: string[]): number[] {
+  if (selectedIds.length === 0) return []
+  const selected = new Set(selectedIds)
+  const codes = new Set<number>()
+  for (const location of locations) {
+    if (!selected.has(location.id)) continue
+    let bound = false
+    for (const binding of location.sourceBindings) {
+      const code = Number(binding.config.station ?? binding.config.code ?? location.code)
+      if (Number.isFinite(code) && code > 0) { codes.add(code); bound = true }
+    }
+    if (!bound) {
+      const code = Number(location.code)
+      if (Number.isFinite(code) && code > 0) codes.add(code)
+    }
+  }
+  return [...codes].sort((a, b) => a - b)
+}
+
+/** Коды станций для выбранной области учёта: точки + все точки выбранных регионов. */
+export function scopeStationCodes(
+  locations: ServiceLocation[],
+  locationIds: string[],
+  regionIds: string[],
+): number[] {
+  const ids = new Set(locationIds)
+  if (regionIds.length > 0) {
+    const regions = new Set(regionIds)
+    for (const l of locations) if (regions.has(locationRegion(l))) ids.add(l.id)
+  }
+  return locationStationCodes(locations, [...ids])
+}

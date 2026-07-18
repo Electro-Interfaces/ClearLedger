@@ -28,7 +28,7 @@ const ORDER: MenuClass[] = ['star', 'plowhorse', 'puzzle', 'dog']
 
 type SortKey = 'qty' | 'popularity_pct' | 'revenue' | 'share' | 'avg_price' | 'food_cost_pct' | 'margin_pct'
 
-export function StoreCateringPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { companyId: string; dateFrom: string; dateTo: string; stations?: string[] }) {
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [classFilter, setClassFilter] = useState<MenuClass | null>(null)
@@ -36,8 +36,8 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo }: { companyId:
   const ref = useRef<HTMLDivElement>(null)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['store-catering', companyId, dateFrom, dateTo],
-    queryFn: () => getStoreCateringMenu(dateFrom, dateTo),
+    queryKey: ['store-catering', companyId, dateFrom, dateTo, stations],
+    queryFn: () => getStoreCateringMenu(dateFrom, dateTo, stations),
   })
 
   const dishes = useMemo(() => {

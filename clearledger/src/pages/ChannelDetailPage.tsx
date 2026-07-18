@@ -1686,7 +1686,7 @@ function DataTab({ channel }: { channel: Channel }) {
   // Применяются ПОВЕРХ локальных фильтров вкладки (AND-логика):
   // если в шапке выбраны точки A,B,C — даже при «Все станции» локально
   // мы видим только их.
-  const { locationIds: globalLocIds, docTypeIds: globalDocTypes } = useFilters()
+  const { locationIds: globalLocIds } = useFilters()
 
   // Перевод выбранных точек обслуживания (ID) в коды станций для матча
   // с doc.stationId. Если ничего не выбрано — null (фильтр выключен).
@@ -1702,10 +1702,6 @@ function DataTab({ channel }: { channel: Channel }) {
     return set.size > 0 ? set : null
   }, [globalLocIds])
 
-  const globalDocTypeSet = useMemo<Set<string> | null>(() => {
-    return globalDocTypes.length > 0 ? new Set(globalDocTypes) : null
-  }, [globalDocTypes])
-
   // Состояние фильтров (локально для вкладки)
   const [query, setQuery] = useState('')
   const [stationFilter, setStationFilter] = useState<number[]>([])
@@ -1716,12 +1712,9 @@ function DataTab({ channel }: { channel: Channel }) {
   // прошедших глобальный фильтр (иначе в селекте «Станция 208» при
   // глобально выбранной АЗС 5 — пустота).
   const docsForLocalFilters = useMemo(() => {
-    if (!globalStationCodes && !globalDocTypeSet) return allDocs
-    return allDocs.filter((d) =>
-      (!globalStationCodes || globalStationCodes.has(d.stationId)) &&
-      (!globalDocTypeSet || globalDocTypeSet.has(d.docType)),
-    )
-  }, [allDocs, globalStationCodes, globalDocTypeSet])
+    if (!globalStationCodes) return allDocs
+    return allDocs.filter((d) => globalStationCodes.has(d.stationId))
+  }, [allDocs, globalStationCodes])
 
   const allStations = useMemo(() => {
     const set = new Set<number>()
@@ -1748,7 +1741,6 @@ function DataTab({ channel }: { channel: Channel }) {
     let out = allDocs.filter((d) => {
       // Глобальные фильтры (из шапки)
       if (globalStationCodes && !globalStationCodes.has(d.stationId)) return false
-      if (globalDocTypeSet && !globalDocTypeSet.has(d.docType)) return false
       // Локальные фильтры (вкладки)
       if (q && !d.title.toLowerCase().includes(q)) return false
       if (stationSet && !stationSet.has(d.stationId)) return false
@@ -1779,7 +1771,7 @@ function DataTab({ channel }: { channel: Channel }) {
       }
     })
     return out
-  }, [allDocs, query, stationFilter, monthFilter, sortKey, globalStationCodes, globalDocTypeSet])
+  }, [allDocs, query, stationFilter, monthFilter, sortKey, globalStationCodes])
 
   // Группировка после фильтра — по типу документа
   const grouped = useMemo(() => {
@@ -1890,22 +1882,17 @@ function DataTab({ channel }: { channel: Channel }) {
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <p className="text-sm text-muted-foreground">
-          {hasFilters || globalStationCodes || globalDocTypeSet
+          {hasFilters || globalStationCodes
             ? `Показано ${filteredDocs.length} из ${allDocs.length}`
             : `Загружено ${allDocs.length} документов`}
         </p>
-        {(globalStationCodes || globalDocTypeSet) && (
+        {globalStationCodes && (
           <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <Filter className="h-3 w-3" />
             <span>Действует глобальный фильтр</span>
             {globalStationCodes && (
               <Badge variant="outline" className="text-[9px] h-4 px-1">
                 точек {globalStationCodes.size}
-              </Badge>
-            )}
-            {globalDocTypeSet && (
-              <Badge variant="outline" className="text-[9px] h-4 px-1">
-                типов {globalDocTypeSet.size}
               </Badge>
             )}
           </div>

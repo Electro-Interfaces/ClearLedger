@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getFuelOpeningBalances, recalculateFuelOpeningBalances } from '@/services/fuel/fuelMappingService'
+import { useCompany } from '@/contexts/CompanyContext'
 
 const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 })
 const money = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -15,8 +16,9 @@ const compact = new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFra
 
 export function OpeningBalancesPanel() {
   const queryClient = useQueryClient()
+  const { companyId } = useCompany()
   const query = useQuery({
-    queryKey: ['fuel-opening-balances'],
+    queryKey: ['fuel-opening-balances', companyId],
     queryFn: getFuelOpeningBalances,
   })
   const recalculate = useMutation({

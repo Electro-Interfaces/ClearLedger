@@ -44,9 +44,9 @@ interface CashStationDetail {
 /** Раскрытие строки кассы: money-операции последних смен по рабочим местам (POS).
  *  Состояние купюроприёмника по номиналам STS TMS не отдаёт (терминальный
  *  уровень) — до подключения такого источника показываем разрез по POS. */
-function StationCashDetail({ stationCode }: { stationCode: number }) {
+function StationCashDetail({ companyId, stationCode }: { companyId: string; stationCode: number }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-cash-station', stationCode],
+    queryKey: ['fuel-cash-station', companyId, stationCode],
     queryFn: () => get<CashStationDetail>('/api/fuel/cash-collections/station', { station_code: stationCode, shifts: 2 }),
     staleTime: 60_000,
   })
@@ -101,12 +101,12 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
   )
 }
 
-export function AccountingCashPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+export function AccountingCashPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [openStation, setOpenStation] = useState<number | null>(null)
-  const scopeSub = useScopeSubtitle()
+  const scopeSub = useScopeSubtitle({ scopeApplied: false })  // панель не сужает по сети: API не принимает станции
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-cash-collections', dateFrom, dateTo],
+    queryKey: ['fuel-cash-collections', companyId, dateFrom, dateTo],
     queryFn: () => get<CashCollections>('/api/fuel/cash-collections', { date_from: dateFrom, date_to: dateTo }),
     staleTime: 60_000,
   })
@@ -182,7 +182,7 @@ export function AccountingCashPanel({ dateFrom, dateTo }: { dateFrom: string; da
               {openStation === s.station_code && (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={8} className="p-0">
-                    <StationCashDetail stationCode={s.station_code} />
+                    <StationCashDetail companyId={companyId} stationCode={s.station_code} />
                   </TableCell>
                 </TableRow>
               )}

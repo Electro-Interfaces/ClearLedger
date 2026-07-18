@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Boxes, Trash2, Split, Plus } from 'lucide-react'
+import { useCompany } from '@/contexts/CompanyContext'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -27,9 +28,10 @@ const todayStr = () => {
 
 export function PurchaseBatchesPanel({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient()
-  const { data: batches } = useQuery({ queryKey: ['purchase-batches'], queryFn: getPurchaseBatches })
-  const { data: stations } = useQuery({ queryKey: ['fuel-stations-ref'], queryFn: getFuelStations })
-  const { data: fuelTypes } = useQuery({ queryKey: ['fuel-types-ref'], queryFn: getFuelTypes })
+  const { companyId } = useCompany()
+  const { data: batches } = useQuery({ queryKey: ['purchase-batches', companyId], queryFn: getPurchaseBatches })
+  const { data: stations } = useQuery({ queryKey: ['fuel-stations-ref', companyId], queryFn: getFuelStations })
+  const { data: fuelTypes } = useQuery({ queryKey: ['fuel-types-ref', companyId], queryFn: getFuelTypes })
 
   const [supplier, setSupplier] = useState('')
   const [fuelCode, setFuelCode] = useState<number | ''>('')

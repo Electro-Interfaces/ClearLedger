@@ -300,6 +300,8 @@ async def fuel_count(
 @router.get("/shifts", response_model=list[ShiftOut])
 async def list_shifts(
     station_code: int | None = Query(None),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
     limit: int = Query(200, le=20000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -308,7 +310,15 @@ async def list_shifts(
     q = select(FuelShift).where(FuelShift.company_id == company_id)
     if station_code is not None:
         q = q.join(FuelStation).where(FuelStation.code == station_code)
-    q = q.order_by(FuelShift.shift_number.desc()).limit(limit)
+    # Отбор по периоду рабочей области. Без него срабатывал limit по номеру
+    # смены: журнал отдавал последние 200 смен, и период месячной давности
+    # показывал «нет смен», хотя они загружены.
+    if date_from:
+        q = q.where(func.date(FuelShift.opened_at) >= date_from)
+    if date_to:
+        q = q.where(func.date(FuelShift.opened_at) <= date_to)
+    # Внутри периода — свежие сверху (по дате открытия, номер как tie-breaker).
+    q = q.order_by(FuelShift.opened_at.desc(), FuelShift.shift_number.desc()).limit(limit)
     shifts = list((await db.execute(q)).scalars())
     st_ids = {s.station_id for s in shifts}
     stations = {st.id: st for st in (await db.execute(
