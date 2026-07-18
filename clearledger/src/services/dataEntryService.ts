@@ -6,7 +6,7 @@
  * - Demo mode: localStorage через storage.ts
  */
 
-import type { DataEntry, OcrResult, DocPurpose, SyncStatus } from '@/types'
+import type { DataEntry, OcrResult } from '@/types'
 import type { EntryStatus } from '@/config/statuses'
 import { isApiEnabled, get, post, patch, del } from './apiClient'
 import { getItem, setItem, nextId, entriesKey } from './storage'
@@ -14,7 +14,6 @@ import { getItemIDB, setItemIDB } from './idbStorage'
 import { deleteSource } from './sourceStore'
 import { mockEntries } from './mockData'
 import { apiToEntry, type ApiEntry } from './apiMappers'
-import { getAllDocumentTypes } from '@/config/categories'
 
 // ============================================================
 // IndexedDB helpers (async, лимит сотни МБ)
@@ -32,35 +31,6 @@ async function saveEntries(companyId: string, entries: DataEntry[]): Promise<voi
 
 const SEED_KEY = 'clearledger-seeded'
 const SEED_V2_KEY = 'clearledger-seeded-v2'
-const SEED_GENERATED_COUNT = 200
-
-const SEED_COUNTERPARTIES = [
-  'ООО "Лукойл"', 'ПАО "Газпром нефть"', 'АО "Роснефть"',
-  'ООО "Башнефть"', 'АО "Сургутнефтегаз"', 'ПАО "Татнефть"',
-]
-
-const SEED_SOURCES: DataEntry['source'][] = [
-  'upload', 'photo', 'manual', 'api', 'email', 'oneC', 'whatsapp', 'telegram', 'paste',
-]
-
-const SEED_SOURCE_LABELS: Record<string, string> = {
-  upload: 'Загрузка', photo: 'Фото', manual: 'Ручной ввод', api: 'API',
-  email: 'Email', oneC: '1С', whatsapp: 'WhatsApp', telegram: 'Telegram', paste: 'Вставка',
-}
-
-function seedRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]
-}
-
-function seedRandomInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min
-}
-
-function seedGenerateInn(): string {
-  let inn = ''
-  for (let i = 0; i < 10; i++) inn += String(Math.floor(Math.random() * 10))
-  return inn
-}
 
 export async function seedIfNeeded(): Promise<void> {
   if (isApiEnabled()) return // seed делается на сервере
@@ -96,76 +66,6 @@ export async function seedIfNeeded(): Promise<void> {
   }
 }
 
-/** Синхронная генерация 200 записей для НПК (fuel профиль) */
-function seedGenerateNpkEntries(): void {
-  const docTypes = getAllDocumentTypes('fuel')
-  if (docTypes.length === 0) return
-
-  const npkEntries = loadEntries('npk')
-  let counter = getItem<number>('clearledger-entry-counter', 0)
-  const now = Date.now()
-
-  for (let i = 0; i < SEED_GENERATED_COUNT; i++) {
-    counter++
-    const dt = seedRandom(docTypes)
-    const source = seedRandom(SEED_SOURCES)
-    const docNumber = `${seedRandomInt(100, 9999)}`
-    const amount = `${seedRandomInt(1000, 500000)}`
-    const daysBack = Math.random() * 60
-    const entryDate = new Date(now - daysBack * 24 * 60 * 60 * 1000)
-    const createdAt = entryDate.toISOString()
-    const docDate = createdAt.slice(0, 10)
-
-    // docPurpose: 80% accounting, 10% reference, 10% context
-    const purposeRoll = Math.random()
-    const docPurpose: DocPurpose = purposeRoll < 0.8 ? 'accounting' : purposeRoll < 0.9 ? 'reference' : 'context'
-
-    // syncStatus зависит от docPurpose
-    let syncStatus: SyncStatus = 'not_applicable'
-    if (docPurpose === 'accounting') {
-      const syncRoll = Math.random()
-      syncStatus = syncRoll < 0.4 ? 'not_applicable'
-        : syncRoll < 0.6 ? 'pending'
-        : syncRoll < 0.8 ? 'exported'
-        : syncRoll < 0.95 ? 'confirmed'
-        : 'rejected_1c'
-    }
-
-    // status: 25% verified, 25% recognized, 20% new, 15% transferred, 15% error
-    const statusRoll = Math.random()
-    const status: EntryStatus = statusRoll < 0.25 ? 'verified'
-      : statusRoll < 0.50 ? 'recognized'
-      : statusRoll < 0.70 ? 'new'
-      : statusRoll < 0.85 ? 'transferred'
-      : 'error'
-
-    npkEntries.push({
-      id: String(counter),
-      title: `${dt.label} №${docNumber}`,
-      categoryId: dt.categoryId,
-      subcategoryId: dt.subcategoryId,
-      docTypeId: dt.id,
-      companyId: 'npk',
-      status,
-      docPurpose,
-      syncStatus,
-      source,
-      sourceLabel: SEED_SOURCE_LABELS[source] ?? source,
-      metadata: {
-        docNumber,
-        docDate,
-        counterparty: seedRandom(SEED_COUNTERPARTIES),
-        amount,
-        inn: seedGenerateInn(),
-      },
-      createdAt,
-      updatedAt: createdAt,
-    })
-  }
-
-  saveEntries('npk', npkEntries)
-  setItem('clearledger-entry-counter', counter)
-}
 
 // ============================================================
 // CRUD (dual-mode)
