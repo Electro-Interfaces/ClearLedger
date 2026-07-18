@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import re as _re
 import uuid as _uuid
 from typing import Any
@@ -31,6 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChannelSyncLog, ChargeSession, Region, ServiceLocation
 from app.services.mapping import canon_region
+
+logger = logging.getLogger("clearledger.stations")
 
 
 def _s(v, maxlen: int | None = None) -> str | None:
@@ -338,6 +341,24 @@ async def _ingest_compact(
             if loc is not None and loc.id in touched:
                 pair_split += 1
                 loc = None
+            # Карточка могла быть заведена ПРОШЛЫМ прогоном по тому же
+            # детерминированному ключу и при этом выпасть из индексов: у соседних
+            # карточек бывают загрязнённые code/ocppId (при замене железки OCPP новой
+            # станции записывали старой), и by_key уводит ключ на чужой объект.
+            # Без этой проверки db.add ронял flush по service_locations_pkey — и одна
+            # такая строка обрушивала ВЕСЬ накат, а не только себя.
+            if loc is None and (ocpp or num):
+                lid = _loc_id(company_id, f"ocpp:{ocpp or num}")
+                present = await db.get(ServiceLocation, lid)
+                if present is not None:
+                    if present.id in touched:
+                        skipped += 1
+                        logger.warning(
+                            "stations_compact: строка %s (№%s / OCPP %s) — дубль ключа "
+                            "внутри файла, карточка %s уже занята", idx + 1, num, ocpp, lid,
+                        )
+                        continue
+                    loc = present
             oper = _oper_status(row.get("status_dev"))
             md_extra = {k: v for k, v in {
                 "ocppId": ocpp,
@@ -414,8 +435,14 @@ async def _ingest_compact(
             if (idx + 1) % 200 == 0:
                 await db.flush()
                 await _bump(db, log_id, idx + 1, total, created, updated)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            # Молчаливый счётчик ошибок не даёт понять, ЧТО не загрузилось:
+            # строка выпадает из справочника, а накат рапортует «success».
             errors += 1
+            logger.warning(
+                "stations_compact: строка %s (№%s / OCPP %s) не загружена: %s: %s",
+                idx + 1, row.get("number"), row.get("ocpp_id"), type(exc).__name__, exc,
+            )
 
     await db.flush()
     await _bump(db, log_id, total, total, created, updated)
@@ -549,8 +576,12 @@ async def ingest_stations(
             if (idx + 1) % 200 == 0:
                 await db.flush()
                 await _bump(db, log_id, idx + 1, total, created, updated)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             errors += 1
+            logger.warning(
+                "stations_passport: строка %s (№%s / ext %s) не загружена: %s: %s",
+                idx + 1, row.get("number"), row.get("ext_id"), type(exc).__name__, exc,
+            )
 
     await db.flush()
     # Защита: боевая станция (имя «ЭЗС №…») не может быть тестовой — мусорные тест-строки
