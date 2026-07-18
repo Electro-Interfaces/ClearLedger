@@ -30,9 +30,11 @@ test.describe('Рабочая область', () => {
 
   test('Уровень 2: чипы фильтра рабочей области видны', async ({ page }) => {
     // Двухслойный фильтр: на Слое 0 — период, область учёта, типы данных.
-    await expect(page.getByText('ПЕРИОД').first()).toBeVisible({ timeout: 15_000 })
+    // По aria-label, а не по видимому тексту: подписи чипов меняются при
+    // перекомпоновке тулбара, смысл — нет. Чип «Данные» снят вместе с
+    // заглушками в 613d26b, поэтому здесь его больше нет.
+    await expect(page.getByRole('button', { name: /^Период:/ })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('ОБЛАСТЬ УЧЁТА').first()).toBeVisible()
-    await expect(page.getByText('ДАННЫЕ').first()).toBeVisible()
   })
 
   test('Глубина фильтра открывается по «Фильтры» и закрывается', async ({ page }) => {
@@ -60,7 +62,8 @@ test.describe('Рабочая область', () => {
     await page.goto('settings')
     await page.waitForLoadState('networkidle')
 
-    await expect(page).toHaveURL(/\/settings$/)
+    // ?f=... дописывает URL-персист фильтра — на путь это не влияет.
+    await expect(page).toHaveURL(/\/settings(\?|$)/)
     await expect(page.getByRole('heading', { name: 'Настройки' })).toBeVisible({ timeout: 10_000 })
   })
 

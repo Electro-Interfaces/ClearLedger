@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { useNavigate, Link } from 'react-router-dom'
 import { useTheme } from '@/hooks/useTheme'
 import { useGuideMode } from '@/hooks/useGuideMode'
+import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
 import { Button } from '@/components/ui/button'
 import { createMeeting } from '@/services/conferenceService'
 import {
@@ -145,6 +146,9 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
               </span>
             )}
           </Button>
+          {/* Режим работы: простой ⇄ расширенный. Стоит рядом с лампочкой —
+              та объясняет, ГДЕ что находится, этот убирает лишнее с глаз. */}
+          <UiLevelHeaderButton />
           {/* Обучающая подсветка зон интерфейса — «что здесь есть и за что отвечает». */}
           <Button
             variant="ghost"

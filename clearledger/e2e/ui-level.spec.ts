@@ -27,9 +27,27 @@ test.describe('Режим работы', () => {
     await expect(page.locator('html')).toHaveClass(/cl-simple/)
   })
 
+  test('Переключатель доступен из шапки', async ({ page }) => {
+    // Главное требование к месту: режим меняется в один клик с любого экрана,
+    // без похода в настройки.
+    await setLevel(page, 'simple')
+    const btn = page.getByRole('button', { name: 'Простой режим включён' })
+    await expect(btn).toBeVisible({ timeout: 15_000 })
+
+    await btn.click()
+    await expect(page.getByRole('button', { name: 'Расширенный режим включён' })).toBeVisible()
+    await expect(page.locator('html')).not.toHaveClass(/cl-simple/)
+
+    // И обратно — тем же кликом.
+    await page.getByRole('button', { name: 'Расширенный режим включён' }).click()
+    await expect(page.locator('html')).toHaveClass(/cl-simple/)
+  })
+
   test('Простой режим убирает редкую настройку, но помечает её', async ({ page }) => {
     await setLevel(page, 'simple')
-    await page.getByRole('button', { name: /Настроить фильтры/ }).click()
+    const openFilters = page.getByRole('button', { name: /Настроить фильтры/ })
+    await expect(openFilters).toBeVisible({ timeout: 15_000 })
+    await openFilters.click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -42,7 +60,9 @@ test.describe('Режим работы', () => {
 
   test('Ежедневный контур в простом режиме не прячется', async ({ page }) => {
     await setLevel(page, 'simple')
-    await page.getByRole('button', { name: /Настроить фильтры/ }).click()
+    const openFilters = page.getByRole('button', { name: /Настроить фильтры/ })
+    await expect(openFilters).toBeVisible({ timeout: 15_000 })
+    await openFilters.click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
@@ -55,7 +75,9 @@ test.describe('Режим работы', () => {
     await setLevel(page, 'advanced')
     await expect(page.locator('html')).not.toHaveClass(/cl-simple/)
 
-    await page.getByRole('button', { name: /Настроить фильтры/ }).click()
+    const openFilters = page.getByRole('button', { name: /Настроить фильтры/ })
+    await expect(openFilters).toBeVisible({ timeout: 15_000 })
+    await openFilters.click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
     await expect(dialog.getByText('Источник онлайн-данных STS', { exact: true })).toBeVisible()
@@ -63,7 +85,9 @@ test.describe('Режим работы', () => {
 
   test('Переключение из подсказки работает и обратимо', async ({ page }) => {
     await setLevel(page, 'simple')
-    await page.getByRole('button', { name: /Настроить фильтры/ }).click()
+    const openFilters = page.getByRole('button', { name: /Настроить фильтры/ })
+    await expect(openFilters).toBeVisible({ timeout: 15_000 })
+    await openFilters.click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
