@@ -19,7 +19,7 @@ export function useStationLastShift(stationId: number | null) {
     (acc, s) => (!acc || s.shift > acc.shift ? s : acc),
     null,
   )
-  const reportQ = useShiftReport(stationId ?? 0, lastShift?.shift ?? 0)
+  const reportQ = useShiftReport(stationId ?? 0, lastShift?.shift ?? 0, lastShift?.dt_open, lastShift?.dt_close)
   return { shiftsQ, closedCount: closed.length, lastShift, reportQ }
 }
 

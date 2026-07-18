@@ -23,16 +23,22 @@ export function useShifts(stationId?: number) {
   })
 }
 
-/** Детальный сменный отчёт */
-export function useShiftReport(stationId: number, shiftNumber: number) {
+/**
+ * Детальный сменный отчёт.
+ *
+ * Границы смены (dtOpen/dtClose) не приходят в shift_report — они живут в
+ * списке смен (StsShift). Нормализатор кладёт их в openedAt/closedAt и по
+ * dtClose определяет status, поэтому вызывающий обязан их прокинуть.
+ */
+export function useShiftReport(stationId: number, shiftNumber: number, dtOpen?: string, dtClose?: string | null) {
   const settings = getSettings()
-  const enabled = !!settings.stsLogin && !!settings.stsPassword && stationId > 0 && shiftNumber > 0
+  const enabled = !!settings.stsLogin && !!settings.stsPassword && stationId > 0 && shiftNumber > 0 && !!dtOpen
 
   return useQuery<ShiftRecord>({
     queryKey: ['sts-shift-report', stationId, shiftNumber],
     queryFn: async () => {
       const report = await stsGetShiftReport(stationId, shiftNumber)
-      return normalizeShift(stationId, report)
+      return normalizeShift(stationId, shiftNumber, dtOpen ?? '', dtClose ?? null, report)
     },
     enabled,
     staleTime: 2 * 60 * 1000,
@@ -77,18 +83,18 @@ export function useAllReceipts(stationId?: number) {
         for (let j = 0; j < reports.length; j++) {
           const report = reports[j]
           if (!report) continue
-          const receipts = (report as Record<string, unknown>).receipt as Array<Record<string, unknown>> | undefined
+          // StsShiftReceipt типизирован (types.ts:73) — касты не нужны.
+          // String()/Number() остаются как runtime-защита: секции приходят
+          // из внешнего API STS и бывают неполными.
+          const receipts = report.receipt
           if (!receipts) continue
           for (const r of receipts) {
-            const svc = r.service as Record<string, unknown> | undefined
-            const doc = r.doc as Record<string, unknown> | undefined
-            const fact = r.fact as Record<string, unknown> | undefined
             results.push({
               shift: batch[j].shift,
               ttn: String(r.ttn ?? ''),
-              fuel: String(svc?.service_name ?? ''),
-              docVolume: Number(doc?.volume ?? 0),
-              factVolume: Number(fact?.volume ?? 0),
+              fuel: String(r.service?.service_name ?? ''),
+              docVolume: Number(r.doc?.volume ?? 0),
+              factVolume: Number(r.fact?.volume ?? 0),
               dt: String(r.dt ?? batch[j].dt_open ?? ''),
             })
           }
