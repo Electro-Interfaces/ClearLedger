@@ -444,7 +444,7 @@ export function ConnectionPage() {
                       {format(new Date(log.startedAt), 'dd.MM HH:mm:ss')}
                     </span>
                     <span className={
-                      log.status === 'success' || log.status === 'completed' ? 'text-emerald-400/80'
+                      log.status === 'success' ? 'text-emerald-400/80'
                         : log.status === 'error' ? 'text-destructive'
                         : 'text-amber-400/80'
                     }>
