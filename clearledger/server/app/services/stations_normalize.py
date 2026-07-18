@@ -598,13 +598,30 @@ async def ingest_stations(
 
 async def build_station_index(db: AsyncSession, company_id) -> dict[str, str]:
     """Индекс № станции → ServiceLocation.id (конформная размерность) для резолва
-    сессий/оплат на объект. Ключ — station_number (типизир.) или extra_metadata.number."""
+    сессий/оплат на объект. Ключ — station_number (типизир.) или extra_metadata.number.
+
+    Учитываются и ПРЕЖНИЕ номера карточки (`numberHistory`). Номер станции не
+    вечен: при замене оборудования CPO меняет его, а выгрузка сессий ещё какое-то
+    время присылает старый («580-1» против «580» в справочнике). Без алиасов такая
+    сессия не находит свой объект, и конвейер заводит станцию-дубль заново —
+    ровно то, что мы только что развели вручную.
+    """
     idx: dict[str, str] = {}
+    aliases: dict[str, str] = {}
     for loc in (await db.execute(select(ServiceLocation).where(
         ServiceLocation.company_id == company_id, ServiceLocation.type == "ev_charging"))).scalars():
-        num = loc.station_number or (loc.extra_metadata or {}).get("number")
+        md = loc.extra_metadata or {}
+        num = loc.station_number or md.get("number")
         if num is not None and str(num).strip():
             idx.setdefault(str(num).strip(), loc.id)
+        for h in (md.get("numberHistory") or []):
+            old = str((h or {}).get("было") or "").strip()
+            if old:
+                aliases.setdefault(old, loc.id)
+    # Действующие номера приоритетнее прежних: алиас не должен перехватить номер,
+    # который сегодня принадлежит другой станции.
+    for old, lid in aliases.items():
+        idx.setdefault(old, lid)
     return idx
 
 
