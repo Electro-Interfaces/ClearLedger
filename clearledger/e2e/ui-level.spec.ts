@@ -87,9 +87,9 @@ test.describe('Режим работы', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
 
-    // Редкая секция убрана...
-    await expect(dialog.getByText('Источник онлайн-данных STS', { exact: true })).toBeHidden()
-    // ...но человек видит, что она существует — скрытие не тихое.
+    // Редкий раздел убран из навигации окна...
+    await expect(dialog.getByRole('button', { name: /Источник STS/ })).toHaveCount(0)
+    // ...но человек видит, что он существует — скрытие не тихое.
     await expect(dialog.getByText(/Ещё 1 .* в расширенном режиме/)).toBeVisible()
   })
 
@@ -132,6 +132,8 @@ test.describe('Режим работы', () => {
     await openFilters.click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 10_000 })
+    // «Источник STS» — отдельный раздел в навигации окна (мастер-детейл).
+    await dialog.getByRole('button', { name: /Источник STS/ }).click()
     await expect(dialog.getByText('Источник онлайн-данных STS', { exact: true })).toBeVisible()
   })
 
@@ -146,7 +148,8 @@ test.describe('Режим работы', () => {
 
     // «Включить» прямо из подсказки — без похода в настройки.
     await dialog.getByRole('button', { name: 'Включить' }).click()
-    await expect(dialog.getByText('Источник онлайн-данных STS', { exact: true })).toBeVisible({ timeout: 10_000 })
+    // Раздел появляется в навигации окна сразу же.
+    await expect(dialog.getByRole('button', { name: /Источник STS/ })).toBeVisible({ timeout: 10_000 })
     await expect(page.locator('html')).not.toHaveClass(/cl-simple/)
   })
 })

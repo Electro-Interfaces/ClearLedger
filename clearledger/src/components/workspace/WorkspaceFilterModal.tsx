@@ -19,6 +19,8 @@ import { useFilters, type FilterState } from '@/contexts/FilterContext'
 import { activeFilterCount, clearFilterSelections, sameFilterState } from '@/contexts/filterState'
 import { useCompany } from '@/contexts/CompanyContext'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
+import { cn } from '@/lib/utils'
+import { useUiLevel } from '@/hooks/useUiLevel'
 import { useQuery } from '@tanstack/react-query'
 import { useLocations } from '@/hooks/useLocations'
 import { getStsStationsFromLocations } from '@/services/locationService'
@@ -107,6 +109,16 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
   const [stationQuery, setStationQuery] = useState('')
   const [savingPreset, setSavingPreset] = useState(false)
   const [presetName, setPresetName] = useState('')
+  /**
+   * Раздел слева — один экран справа.
+   *
+   * Раньше все секции лежали в одном скролле, а внутри «Области учёта» были ещё
+   * два своих (регионы и станции): три уровня прокрутки на одном окне, и глазу
+   * не за что зацепиться. Теперь раздел выбирается слева, справа только он —
+   * прокрутка одна.
+   */
+  const [section, setSection] = useState<'period' | 'scope' | 'source'>('period')
+  const { isAdvanced } = useUiLevel()
 
   const { data: dimensions } = useQuery({
     queryKey: ['charge-dimensions', companyId],
@@ -123,8 +135,12 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
   )
 
   const regions = useMemo(() => {
-    if (isEnergy) return [...(dimensions?.regions ?? [])].map((region) => region.region).sort((a, b) => a.localeCompare(b, 'ru'))
-    return Array.from(new Set(locations.map(locationRegion).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'))
+    // Отсекаем записи без букв («12» и подобные) — это не регион, а мусор в
+    // справочнике. Тот же фильтр стоит в WorkspaceScopePopover; здесь его не
+    // было, и «12» висел первым пунктом списка.
+    const clean = (list: string[]) => list.filter((r) => /[а-яёa-z]/i.test(r)).sort((a, b) => a.localeCompare(b, 'ru'))
+    if (isEnergy) return clean([...(dimensions?.regions ?? [])].map((region) => region.region))
+    return clean(Array.from(new Set(locations.map(locationRegion).filter(Boolean))))
   }, [dimensions?.regions, isEnergy, locations])
 
   const filteredLocations = useMemo(() => {
@@ -144,6 +160,34 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
 
   const count = activeFilterCount(draft)
   const dirty = !sameFilterState(draft, state)
+
+  // Подписи разделов в левой колонке: видно текущее значение, не заходя внутрь.
+  const scopePicked = draft.regionIds.length + draft.locationIds.length + draft.stationCodes.length
+  const scopeSummary = scopePicked === 0
+    ? 'Вся сеть'
+    : [
+        draft.regionIds.length ? `регионов: ${draft.regionIds.length}` : null,
+        draft.locationIds.length ? `точек: ${draft.locationIds.length}` : null,
+        draft.stationCodes.length ? `станций: ${draft.stationCodes.length}` : null,
+      ].filter(Boolean).join(' · ')
+  const periodSummary = `${fmtShort(draft.period.from)} – ${fmtShort(draft.period.to)}`
+  const sourceSummary = draft.stationCode === 'all'
+    ? 'Все станции STS'
+    : stations.find((s) => String(s.code) === draft.stationCode)?.name ?? draft.stationCode
+
+  // «Типы данных» здесь нет намеренно: секцию сняли вместе с заглушками
+  // (613d26b), и пункт меню вёл бы в пустой экран.
+  // «Источник STS» — только в расширенном режиме: в простом его содержимое
+  // скрыто, и пункт меню вёл бы туда же, в пустоту.
+  const showSource = !isEnergy && isAdvanced
+  const SECTIONS = [
+    { key: 'period' as const, label: 'Период', value: periodSummary, icon: CalendarDays },
+    { key: 'scope' as const, label: 'Область учёта', value: scopeSummary, icon: MapPinned },
+    ...(showSource ? [{ key: 'source' as const, label: 'Источник STS', value: sourceSummary, icon: Database }] : []),
+  ]
+
+  // Раздел исчез при переключении в простой режим — возвращаемся к периоду.
+  if (section === 'source' && !showSource) setSection('period')
 
   function toggleValue(key: ArrayFilterKey, value: string) {
     setDraft((current) => {
@@ -217,7 +261,45 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
         </DialogHeader>
 
         <div className="grid min-h-0 flex-1 md:grid-cols-[230px_minmax(0,1fr)]">
-          <aside className="flex max-h-48 flex-col gap-4 overflow-y-auto border-b bg-muted/20 p-3 md:max-h-none md:border-r md:border-b-0 md:p-4">
+          <aside className="flex max-h-56 flex-col gap-4 overflow-y-auto border-b bg-muted/20 p-3 md:max-h-none md:border-r md:border-b-0 md:p-4">
+            {/* Разделы контура с текущими значениями — можно окинуть взглядом
+                всю выборку, не открывая каждый. */}
+            <nav className="flex flex-col gap-0.5" aria-label="Разделы фильтра">
+              {SECTIONS.map((s) => {
+                const Icon = s.icon
+                const active = section === s.key
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    aria-current={active ? 'true' : undefined}
+                    onClick={() => setSection(s.key)}
+                    className={cn(
+                      'flex items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors',
+                      active ? 'bg-primary/10 text-primary' : 'hover:bg-background/70',
+                    )}
+                  >
+                    <Icon className={cn('mt-0.5 size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-semibold">{s.label}</span>
+                      <span className={cn('block truncate text-[11px]', active ? 'text-primary/80' : 'text-muted-foreground')}>
+                        {s.value}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+              {/* Скрытый раздел обозначен прямо в навигации — «тихо пропало»
+                  недопустимо (см. useUiLevel, правило 2). */}
+              {!isEnergy && !isAdvanced ? (
+                <div className="px-2.5 pt-1">
+                  <AdvancedHint count={1} what="раздел — источник онлайн-данных STS" />
+                </div>
+              ) : null}
+            </nav>
+
+            <Separator />
+
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 <h3
@@ -311,6 +393,7 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
 
           <ScrollArea className="min-h-0">
             <div className="flex flex-col gap-6 p-4 sm:p-5">
+              {section === 'period' && (
               <FilterSection
                 icon={CalendarDays}
                 title="Период"
@@ -352,9 +435,9 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                   </div>
                 </div>
               </FilterSection>
+              )}
 
-              <Separator />
-
+              {section === 'scope' && (
               <FilterSection
                 icon={MapPinned}
                 title="Область учёта"
@@ -435,15 +518,15 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                   </fieldset>
                 )}
               </FilterSection>
+              )}
 
-              {!isEnergy ? (
+              {/* Технический источник загрузки смен — нужен редко. В простом
+                  режиме раздела нет ни в меню, ни здесь; подсказка о нём стоит
+                  в навигации слева. Период и область учёта не прячем никогда:
+                  это ежедневный контур. */}
+              {section === 'source' && showSource ? (
                 <>
-                  {/* Технический источник загрузки смен — нужен редко, в простом
-                      режиме убран с глаз. Область учёта и период остаются: это
-                      ежедневный контур, прятать его нельзя. */}
-                  <AdvancedHint count={1} what="настройка — источник онлайн-данных STS" />
                   <AdvancedOnly>
-                  <Separator />
                   <FilterSection
                     icon={Database}
                     title="Источник онлайн-данных STS"
@@ -488,7 +571,13 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
             <span className="hidden sm:inline">Сбросить ограничения</span>
             <span className="sm:hidden">Сбросить</span>
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-3">
+            {/* Итог набранного — чтобы применять, не проверяя каждый раздел. */}
+            <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:block">
+              Выбрано: <span className="font-medium text-foreground">{periodSummary}</span>
+              {' · '}
+              <span className="font-medium text-foreground">{scopeSummary}</span>
+            </span>
             <Button variant="outline" size="sm" className="h-9 rounded-lg" onClick={() => onOpenChange(false)}>
               Отмена
             </Button>
