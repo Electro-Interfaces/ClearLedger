@@ -22,7 +22,8 @@ import {
   getLoadedShifts, getLoadedReceipts,
   type LoadedShift, type LoadedReceipt,
 } from '@/services/fuel/fuelMappingService'
-import { loadChannels, getChannelRuns, type Channel, type ChannelRun } from '@/services/channelService'
+import { loadChannels, getChannelRuns, type ChannelRun } from '@/services/channelService'
+import type { Channel } from '@/types/channel'
 import { format } from 'date-fns'
 import type { ShiftRecord } from '@/services/fuel/types'
 import type { FsNode, RawPanelFilters, SortConfig } from './raw-panel-types'
