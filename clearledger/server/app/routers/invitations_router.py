@@ -38,10 +38,22 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _resp(inv: Invitation) -> InvitationResponse:
+def _resp(
+    inv: Invitation,
+    raw_token: str | None = None,
+    email_sent: bool | None = None,
+) -> InvitationResponse:
+    """Ответ по приглашению.
+
+    `raw_token` передаётся только при создании и перевыпуске — тогда в ответ
+    кладём готовую ссылку. В списке приглашений ссылки нет и быть не может:
+    в базе лежит хеш токена.
+    """
     return InvitationResponse(
         id=str(inv.id), email=inv.email, role=inv.role, position=inv.position,
         status=inv.status, created_at=inv.created_at, expires_at=inv.expires_at,
+        invite_url=email_service.invite_link(raw_token) if raw_token else None,
+        email_sent=email_sent,
     )
 
 
@@ -52,15 +64,19 @@ async def _company(cid: uuid.UUID, db: AsyncSession) -> Company:
     return c
 
 
-async def _send(inv: Invitation, raw_token: str, company: Company, inviter: User | None):
+async def _send(inv: Invitation, raw_token: str, company: Company, inviter: User | None) -> bool:
+    """Отправляет письмо. Возвращает, ушло ли оно на самом деле: при
+    незаконфигурированном SMTP или сбое — False, и тогда интерфейс предложит
+    передать ссылку вручную вместо ложного «письмо отправлено»."""
     try:
-        await email_service.send_invite(
+        return await email_service.send_invite(
             inv.email, raw_token, company.name,
             inviter.name if inviter else None, inv.role,
         )
     except Exception as exc:  # не валим запрос, если SMTP недоступен
         import logging
         logging.getLogger("clearledger.email").error("send_invite failed: %s", exc)
+        return False
 
 
 # ─── Управление (админ компании) ────────────────────────────────────────────
@@ -109,8 +125,8 @@ async def create_invitation(
     await db.flush()
 
     company = await _company(cid, db)
-    await _send(inv, raw, company, current_user)
-    return _resp(inv)
+    sent = await _send(inv, raw, company, current_user)
+    return _resp(inv, raw_token=raw, email_sent=sent)
 
 
 @router.get("", response_model=list[InvitationResponse])
@@ -167,8 +183,8 @@ async def resend_invitation(
     inv.expires_at = datetime.now(timezone.utc) + INVITE_TTL
     await db.flush()
     company = await _company(inv.company_id, db)
-    await _send(inv, raw, company, current_user)
-    return _resp(inv)
+    sent = await _send(inv, raw, company, current_user)
+    return _resp(inv, raw_token=raw, email_sent=sent)
 
 
 # ─── Принятие приглашения (публичное, без авторизации) ──────────────────────

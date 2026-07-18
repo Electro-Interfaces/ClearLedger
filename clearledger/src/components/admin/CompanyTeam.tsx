@@ -24,6 +24,7 @@ import {
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
 import * as invitationService from '@/services/invitationService'
+import { InviteLinkPanel } from './InviteLinkPanel'
 import * as roleService from '@/services/roleService'
 import type { CompanyRole } from '@/services/roleService'
 import { ACCESS_MODULES, ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
@@ -199,9 +200,15 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
     queryKey: ['team-invites', companyId],
     queryFn: () => invitationService.listInvitations(companyId),
   })
+  // Перевыпуск: единственный способ получить ссылку по существующему
+  // приглашению — в базе хранится хеш токена, старую ссылку не достать.
+  const [linkFor, setLinkFor] = useState<invitationService.Invitation | null>(null)
   const resend = useMutation({
     mutationFn: (id: string) => invitationService.resendInvitation(id),
-    onSuccess: () => { toast.success('Приглашение отправлено повторно') },
+    onSuccess: (inv) => {
+      setLinkFor(inv)
+      qc.invalidateQueries({ queryKey: ['team-invites', companyId] })
+    },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
   const revoke = useMutation({
@@ -246,9 +253,12 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" title="Отправить повторно"
+                    <Button variant="ghost" size="icon" className="h-7 w-7"
+                      title="Выпустить новую ссылку и отправить письмо повторно"
                       disabled={resend.isPending} onClick={() => resend.mutate(i.id)}>
-                      <RotateCw className="h-3.5 w-3.5" />
+                      {resend.isPending && resend.variables === i.id
+                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        : <RotateCw className="h-3.5 w-3.5" />}
                     </Button>
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
                       title="Отозвать" disabled={revoke.isPending} onClick={() => revoke.mutate(i.id)}>
@@ -261,6 +271,23 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
           </TableBody>
         </Table>
       </CardContent>
+
+      <Dialog open={linkFor !== null} onOpenChange={(v) => { if (!v) setLinkFor(null) }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Новая ссылка приглашения</DialogTitle></DialogHeader>
+          {linkFor && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {linkFor.email} · выпущена новая ссылка, предыдущая больше не работает.
+              </p>
+              <InviteLinkPanel invitation={linkFor} />
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setLinkFor(null)}>Готово</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }
@@ -271,55 +298,81 @@ function InviteDialog({ companyId }: { companyId: string }) {
   const [email, setEmail] = useState('')
   const [position, setPosition] = useState('')
   const [role, setRole] = useState<'user' | 'admin'>('user')
+  // Созданное приглашение со ссылкой. Диалог после успеха НЕ закрывается:
+  // ссылку отдают один раз, закрыть его до копирования — потерять её.
+  const [created, setCreated] = useState<invitationService.Invitation | null>(null)
+
+  const reset = () => { setEmail(''); setPosition(''); setRole('user'); setCreated(null) }
 
   const invite = useMutation({
     mutationFn: () => invitationService.createInvitation(companyId, email, role, position),
-    onSuccess: () => {
-      toast.success(`Приглашение отправлено на ${email}`)
-      setEmail(''); setPosition(''); setRole('user'); setOpen(false)
+    onSuccess: (inv) => {
+      setCreated(inv)
       qc.invalidateQueries({ queryKey: ['team-invites', companyId] })
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset() }}>
       <DialogTrigger asChild>
         <Button size="sm"><Send className="h-4 w-4 mr-2" /> Пригласить</Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader><DialogTitle>Пригласить сотрудника</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <Label>Email сотрудника</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="employee@company.ru" />
+        <DialogHeader>
+          <DialogTitle>{created ? 'Приглашение создано' : 'Пригласить сотрудника'}</DialogTitle>
+        </DialogHeader>
+
+        {created ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {created.email}
+              {created.position ? ` · ${created.position}` : ''} · {ROLE_LABEL[created.role] ?? created.role}
+            </p>
+            <InviteLinkPanel invitation={created} />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        ) : (
+          <div className="space-y-3">
             <div className="space-y-2">
-              <Label>Должность</Label>
-              <Input value={position} onChange={(e) => setPosition(e.target.value)}
-                placeholder="напр. Бухгалтер" />
+              <Label>Email сотрудника</Label>
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="employee@company.ru" />
             </div>
-            <div className="space-y-2">
-              <Label>Роль</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as 'user' | 'admin')}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">Сотрудник</SelectItem>
-                  <SelectItem value="admin">Администратор</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Должность</Label>
+                <Input value={position} onChange={(e) => setPosition(e.target.value)}
+                  placeholder="напр. Бухгалтер" />
+              </div>
+              <div className="space-y-2">
+                <Label>Роль</Label>
+                <Select value={role} onValueChange={(v) => setRole(v as 'user' | 'admin')}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">Сотрудник</SelectItem>
+                    <SelectItem value="admin">Администратор</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Сотруднику придёт письмо со ссылкой — по ней он задаст ФИО и пароль.
+              Ссылку можно скопировать и отправить мессенджером.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">
-            На указанный email придёт ссылка-приглашение; сотрудник сам задаст ФИО и пароль.
-          </p>
-        </div>
+        )}
+
         <DialogFooter>
-          <Button disabled={!email || invite.isPending} onClick={() => invite.mutate()}>
-            {invite.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Отправить приглашение
-          </Button>
+          {created ? (
+            <>
+              <Button variant="outline" onClick={reset}>Пригласить ещё</Button>
+              <Button onClick={() => { setOpen(false); reset() }}>Готово</Button>
+            </>
+          ) : (
+            <Button disabled={!email || invite.isPending} onClick={() => invite.mutate()}>
+              {invite.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Создать приглашение
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

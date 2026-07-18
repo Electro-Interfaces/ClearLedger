@@ -13,6 +13,11 @@ export interface Invitation {
   status: string
   created_at: string
   expires_at: string
+  /** Готовая ссылка регистрации. Приходит ТОЛЬКО в ответ на создание и
+   *  перевыпуск — в базе лежит хеш токена, позже ссылку не восстановить. */
+  invite_url?: string | null
+  /** Ушло ли письмо на самом деле (false — SMTP не настроен или сбой). */
+  email_sent?: boolean | null
 }
 
 export interface AcceptPreview {

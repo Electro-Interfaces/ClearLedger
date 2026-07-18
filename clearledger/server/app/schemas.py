@@ -185,6 +185,13 @@ class InvitationResponse(BaseModel):
     status: str
     created_at: datetime
     expires_at: datetime
+    # Ссылка отдаётся ТОЛЬКО в ответ на создание и перевыпуск: токен хранится
+    # хешем, восстановить его позже нельзя. Нужна, чтобы админ мог передать
+    # приглашение мессенджером, не полагаясь на почту.
+    invite_url: str | None = None
+    # Честный признак: ушло письмо или SMTP не сконфигурирован. Без него
+    # интерфейс рапортовал «отправлено» даже когда почта не настроена.
+    email_sent: bool | None = None
 
 
 class AcceptPreview(BaseModel):
