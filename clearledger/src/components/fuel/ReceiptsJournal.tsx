@@ -47,7 +47,7 @@ export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
 } = {}) {
   const { data } = useQuery({
     queryKey: ['fuel-receipts-journal'],
-    queryFn: getLoadedReceipts,
+    queryFn: () => getLoadedReceipts(),
   })
   const receipts = data ?? []
   const fuelName = useFuelName()

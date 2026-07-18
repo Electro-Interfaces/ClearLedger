@@ -565,7 +565,7 @@ function FifoMarginView({ dateFrom, dateTo }: { dateFrom: string; dateTo: string
 /* Смены — журнал загруженных смен; клик открывает детали с вкладкой «Корректировка»
    (правка значений реализации перед выгрузкой в 1С, персист в L2). */
 function ShiftsPanel() {
-  const { data } = useQuery({ queryKey: ['fuel-shifts-acc'], queryFn: getLoadedShifts })
+  const { data } = useQuery({ queryKey: ['fuel-shifts-acc'], queryFn: () => getLoadedShifts() })
   const shifts: LoadedShift[] = data ?? []
   const [openShift, setOpenShift] = useState<string | null>(null)
   const [onlyCorrected, setOnlyCorrected] = useState(false)

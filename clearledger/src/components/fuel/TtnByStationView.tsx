@@ -18,7 +18,7 @@ const devCls = (pct: number) =>
 const fmtPct = (pct: number) => `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`
 
 export function TtnByStationView({ onStationClick }: { onStationClick?: (code: number) => void }) {
-  const { data } = useQuery({ queryKey: ['fuel-receipts-by-station'], queryFn: getLoadedReceipts })
+  const { data } = useQuery({ queryKey: ['fuel-receipts-by-station'], queryFn: () => getLoadedReceipts() })
   const receipts: LoadedReceipt[] = data ?? []
 
   const byStation = useMemo(() => {

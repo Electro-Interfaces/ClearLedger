@@ -40,7 +40,7 @@ function CostBadge({ receipt }: { receipt: LoadedReceipt }) {
 }
 
 export function ReceiptCostRegistry() {
-  const query = useQuery({ queryKey: ['fuel-receipts-journal'], queryFn: getLoadedReceipts })
+  const query = useQuery({ queryKey: ['fuel-receipts-journal'], queryFn: () => getLoadedReceipts() })
   const receipts = query.data ?? EMPTY_RECEIPTS
   const [status, setStatus] = useState<CostStatus>('all')
   const [fuel, setFuel] = useState('all')
