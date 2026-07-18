@@ -426,8 +426,24 @@ export interface AccountingDocSummary {
   periodStatus?: 'open' | 'closed'    // период открыт/закрыт
   discrepancyStatus?: string          // pending|none|rounding|minor|material|critical|unmatched
   discrepancySummary?: string | null  // короткая свёртка расхождений
+  discrepancyDetails?: AccountingDocDiscrepancy[] | null  // построчные расхождения
+  matchedEntryId?: string | null      // id связанной записи TradeLedger
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * Построчное расхождение сверки. Форма зафиксирована на бэкенде:
+ * reconciliation_service пишет в JSONB `discrepancy_details` массив таких
+ * объектов (или null), роутер отдаёт его как `discrepancyDetails`.
+ */
+export interface AccountingDocDiscrepancy {
+  field: string
+  source?: number | null
+  target?: number | null
+  delta?: number | null
+  severity: string
+  method?: string
 }
 
 export interface AccountingDocsPageResp {
