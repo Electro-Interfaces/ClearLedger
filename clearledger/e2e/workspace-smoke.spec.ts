@@ -14,6 +14,9 @@ test.describe('Рабочая область', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('./')
     await page.waitForLoadState('domcontentloaded')
+    // Дождаться готовности приложения, а не только разметки: иначе следующая
+    // навигация в тесте стартует посреди проверки сессии и попадает на /login.
+    await expect(page.getByRole('button', { name: /режим включён/i })).toBeVisible({ timeout: 20_000 })
   })
 
   test('Старт приложения — рабочий стол, а не список документов', async ({ page }) => {
@@ -34,7 +37,7 @@ test.describe('Рабочая область', () => {
     // перекомпоновке тулбара, смысл — нет. Чип «Данные» снят вместе с
     // заглушками в 613d26b, поэтому здесь его больше нет.
     await expect(page.getByRole('button', { name: /^Период:/ })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('ОБЛАСТЬ УЧЁТА').first()).toBeVisible()
+    await expect(page.getByText('Область учёта').first()).toBeVisible()
   })
 
   test('Глубина фильтра открывается по «Фильтры» и закрывается', async ({ page }) => {
@@ -58,7 +61,9 @@ test.describe('Рабочая область', () => {
     // Сброс на рабочий стол должен касаться только экранов рабочей области.
     // Раньше он подменял ЛЮБОЙ путь, ломая ссылки из писем и открытие в новой
     // вкладке (там sessionStorage всегда пуст → любой переход «холодный»).
-    await page.evaluate(() => sessionStorage.removeItem('cl-booted'))
+    // Метка снимается ДО загрузки — иначе это не холодный старт, а второй
+    // переход в уже прогретом приложении (и гонка с проверкой сессии).
+    await page.addInitScript(() => sessionStorage.removeItem('cl-booted'))
     await page.goto('settings')
     await page.waitForLoadState('domcontentloaded')
 

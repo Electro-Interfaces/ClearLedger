@@ -7,6 +7,7 @@
  * (CLAUDE.md, «Иерархия управления рабочей области», правило 2).
  */
 import { Gauge, Sparkles } from 'lucide-react'
+import { toast } from 'sonner'
 import { useUiLevel, type UiLevel } from '@/hooks/useUiLevel'
 import { cn } from '@/lib/utils'
 
@@ -39,12 +40,24 @@ export function UiLevelHeaderButton() {
   const { isAdvanced, toggle } = useUiLevel()
   const Icon = isAdvanced ? Sparkles : Gauge
 
+  // Без подтверждения переключатель кажется сломанным: на экранах, где скрывать
+  // нечего, видимых изменений нет, и человек жмёт кнопку впустую.
+  function handleToggle() {
+    const next = isAdvanced ? 'простой' : 'расширенный'
+    toggle()
+    toast.success(`Режим: ${next}`, {
+      description: isAdvanced
+        ? 'Редкие настройки убраны с глаз. Там, где что-то скрыто, стоит пометка.'
+        : 'Показаны все функции, включая экспертные настройки.',
+    })
+  }
+
   return (
     <button
       type="button"
       aria-pressed={isAdvanced}
       aria-label={isAdvanced ? 'Расширенный режим включён' : 'Простой режим включён'}
-      onClick={toggle}
+      onClick={handleToggle}
       title={isAdvanced
         ? 'Расширенный режим: показаны все функции. Нажмите, чтобы упростить экран'
         : 'Простой режим: на экранах только ежедневное. Нажмите, чтобы открыть все функции'}

@@ -14,8 +14,13 @@ import { test, expect } from '@playwright/test'
  * признак применённого режима.
  */
 async function setLevel(page: import('@playwright/test').Page, level: 'simple' | 'advanced') {
-  await page.evaluate((l) => localStorage.setItem('clearledger-ui-level', l), level)
-  await page.reload({ waitUntil: 'domcontentloaded' })
+  // Без reload: режим реактивный (как при клике по кнопке в шапке), а
+  // перезагрузка на этом стенде теряет сессию и выбрасывает на экран входа.
+  await page.evaluate((l) => {
+    localStorage.setItem('clearledger-ui-level', l)
+    document.documentElement.classList.toggle('cl-simple', l === 'simple')
+    window.dispatchEvent(new Event('cl-uilevel-change'))
+  }, level)
   const html = page.locator('html')
   if (level === 'simple') await expect(html).toHaveClass(/cl-simple/, { timeout: 15_000 })
   else await expect(html).not.toHaveClass(/cl-simple/, { timeout: 15_000 })
@@ -25,13 +30,18 @@ test.describe('Режим работы', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('./')
     await page.waitForLoadState('domcontentloaded')
+    // Готовность приложения, а не только разметки: следующая навигация в тесте
+    // иначе стартует посреди проверки сессии и попадает на /login.
+    await expect(page.getByRole('button', { name: /режим включён/i })).toBeVisible({ timeout: 20_000 })
   })
 
   test('По умолчанию — простой режим', async ({ page }) => {
+    // Проверяется поведение при пустом хранилище — единственный тест, которому
+    // нужен реальный старт приложения.
     await page.evaluate(() => localStorage.removeItem('clearledger-ui-level'))
-    await page.reload()
+    await page.goto('./')
     await page.waitForLoadState('domcontentloaded')
-    await expect(page.locator('html')).toHaveClass(/cl-simple/)
+    await expect(page.locator('html')).toHaveClass(/cl-simple/, { timeout: 15_000 })
   })
 
   test('Переключатель доступен из шапки', async ({ page }) => {
@@ -48,6 +58,24 @@ test.describe('Режим работы', () => {
     // И обратно — тем же кликом.
     await page.getByRole('button', { name: 'Расширенный режим включён' }).click()
     await expect(page.locator('html')).toHaveClass(/cl-simple/)
+  })
+
+  test('Эффект виден прямо на рабочем столе', async ({ page }) => {
+    // Раньше переключатель выглядел мёртвым: на главном экране скрывать было
+    // нечего, и клик не давал видимого отклика.
+    await setLevel(page, 'simple')
+    await expect(page.getByText('Источник STS')).toBeHidden()
+
+    await setLevel(page, 'advanced')
+    await expect(page.getByText('Источник STS')).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('Ежедневный контур на рабочем столе не прячется', async ({ page }) => {
+    // Период и область учёта — то, чем пользуются каждый день, и то, чем
+    // подписаны цифры на экране. В простом режиме они обязаны остаться.
+    await setLevel(page, 'simple')
+    await expect(page.getByRole('button', { name: /^Период:/ })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Область учёта')).toBeVisible()
   })
 
   test('Простой режим убирает редкую настройку, но помечает её', async ({ page }) => {
@@ -79,9 +107,12 @@ test.describe('Режим работы', () => {
   })
 
   test('Загрузка: служебные параметры убраны, дата документа остаётся', async ({ page }) => {
-    await setLevel(page, 'simple')
+    // Режим ставится ДО загрузки страницы: так проверяется и то, что он
+    // применяется на старте, а не только при клике.
+    await page.addInitScript(() => localStorage.setItem('clearledger-ui-level', 'simple'))
     await page.goto('intake')
     await page.waitForLoadState('domcontentloaded')
+    await expect(page.locator('html')).toHaveClass(/cl-simple/, { timeout: 15_000 })
 
     // Канал / тип / точка имеют безопасные умолчания — убраны.
     await expect(page.getByText('Точка обслуживания')).toBeHidden()

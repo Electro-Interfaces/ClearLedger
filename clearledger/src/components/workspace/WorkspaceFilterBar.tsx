@@ -19,6 +19,7 @@ import { WorkspaceFilterModal } from './WorkspaceFilterModal'
 import { WorkspaceScopeControl } from './WorkspaceScopePopover'
 import { ViewHistoryMenu } from './ViewHistoryMenu'
 import { ActiveFilterChips } from '@/components/common/ActiveFilterChips'
+import { AdvancedOnly } from '@/components/common/AdvancedOnly'
 import { cn } from '@/lib/utils'
 
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
@@ -234,14 +235,32 @@ export function WorkspaceFilterBar() {
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
         <PeriodControl />
         <WorkspaceScopeControl />
+        {/* Технический источник загрузки смен: в простом режиме убран — как и
+            одноимённая секция внутри модалки фильтра. Период и область учёта
+            рядом остаются всегда: это ежедневный контур.
+            Исключение: если источник СУЖЕН (выбрана конкретная станция), чип
+            виден в любом режиме — иначе цифры на экране молча считались бы по
+            одной станции, а признака этого не было бы. */}
         {!isEnergy ? (
-          <SummaryControl
-            icon={Database}
-            label="Источник STS"
-            value={sourceLabel}
-            active={stationCode !== 'all'}
-            onClick={() => setOpen(true)}
-          />
+          stationCode !== 'all' ? (
+            <SummaryControl
+              icon={Database}
+              label="Источник STS"
+              value={sourceLabel}
+              active
+              onClick={() => setOpen(true)}
+            />
+          ) : (
+            <AdvancedOnly>
+              <SummaryControl
+                icon={Database}
+                label="Источник STS"
+                value={sourceLabel}
+                active={false}
+                onClick={() => setOpen(true)}
+              />
+            </AdvancedOnly>
+          )
         ) : null}
       </div>
 
