@@ -52,6 +52,9 @@ function parseLocal(iso: string): Date {
 }
 
 /** Быстрые пресеты периода — понятные подписи для поповера. */
+/** Заливка дней внутри интервала — одинаковая в обоих календарях периода. */
+const RANGE_CLASSNAMES = { inRange: 'bg-primary/10 rounded-none' }
+
 const PERIOD_QUICK: { label: string; value: () => { from: string; to: string } }[] = [
   { label: 'Текущий месяц', value: () => ({ from: monthFirstISO(), to: todayISO() }) },
   { label: 'Прошлый месяц', value: prevMonthBounds },
@@ -85,27 +88,31 @@ function PeriodControl() {
     to: parseLocal(period.to),
   }))
   /**
-   * Показываемый месяц — управляемый.
+   * Два независимых календаря: левый задаёт начало, правый — конец.
    *
-   * С `defaultMonth` календарь вставал на месяц первого рендера и больше не
-   * реагировал: можно было набрать в полях «1–23 июня» и смотреть при этом на
-   * июль с августом, не видя собственного выбора. Теперь листание месяца —
-   * состояние: пресет и ввод даты перематывают календарь к началу периода,
-   * а ручное листание пользователя не перебивается.
+   * Единый range-календарь на два месяца показывал их подряд (май + июнь), и
+   * при периоде «4 июня – 18 июля» конец не попадал на экран вообще. Теперь у
+   * каждой границы свой календарь со своим месяцем — обе границы видно всегда,
+   * листать можно порознь.
    */
-  const [viewMonth, setViewMonth] = useState<Date>(() => parseLocal(period.from))
+  const [viewFrom, setViewFrom] = useState<Date>(() => parseLocal(period.from))
+  const [viewTo, setViewTo] = useState<Date>(() => parseLocal(period.to))
 
-  function setRange(next: { from?: Date; to?: Date }, scrollTo?: Date) {
+  function setBoth(next: { from?: Date; to?: Date }) {
     setDraft(next)
-    if (scrollTo) setViewMonth(scrollTo)
+    if (next.from) setViewFrom(next.from)
+    if (next.to) setViewTo(next.to)
   }
 
   function openChange(next: boolean) {
     // При каждом открытии черновик берётся из текущего контура: незавершённый
     // выбор прошлого раза не должен «залипать».
     if (next) {
-      setDraft({ from: parseLocal(period.from), to: parseLocal(period.to) })
-      setViewMonth(parseLocal(period.from))
+      const f = parseLocal(period.from)
+      const t = parseLocal(period.to)
+      setDraft({ from: f, to: t })
+      setViewFrom(f)
+      setViewTo(t)
     }
     setOpen(next)
   }
@@ -113,6 +120,13 @@ function PeriodControl() {
   const complete = !!draft.from && !!draft.to
   const changed = complete
     && (isoLocal(draft.from!) !== period.from || isoLocal(draft.to!) !== period.to)
+
+  // Дни внутри выбранного интервала — подсвечиваем в ОБОИХ календарях, иначе
+  // при границах в разных месяцах не видно, что именно охвачено.
+  const inRange = useMemo(
+    () => ({ inRange: draft.from && draft.to ? { from: draft.from, to: draft.to } : [] }),
+    [draft.from, draft.to],
+  )
 
   function apply() {
     if (!complete) return
@@ -153,10 +167,7 @@ function PeriodControl() {
                   variant={isActive ? 'default' : 'ghost'}
                   size="sm"
                   className="h-8 w-full justify-start text-xs font-medium"
-                  onClick={() => setRange(
-                    { from: parseLocal(val.from), to: parseLocal(val.to) },
-                    parseLocal(val.from),
-                  )}
+                  onClick={() => setBoth({ from: parseLocal(val.from), to: parseLocal(val.to) })}
                 >
                   {preset.label}
                 </Button>
@@ -178,7 +189,7 @@ function PeriodControl() {
                     if (!e.target.value) return
                     const d = parseLocal(e.target.value)
                     setDraft((prev) => ({ ...prev, from: d }))
-                    setViewMonth(d)  // перемотать календарь к введённой дате
+                    setViewFrom(d)  // перемотать левый календарь к введённой дате
                   }}
                   className="h-9 text-sm font-medium text-foreground"
                 />
@@ -194,34 +205,71 @@ function PeriodControl() {
                     if (!e.target.value) return
                     const d = parseLocal(e.target.value)
                     setDraft((prev) => ({ ...prev, to: d }))
-                    setViewMonth(d)
+                    setViewTo(d)
                   }}
                   className="h-9 text-sm font-medium text-foreground"
                 />
               </label>
             </div>
 
-            {/* Диапазон отдаётся календарю как есть, включая незавершённый
-                («выбрано начало»). Ничего не достраиваем за пользователя —
-                именно это раньше схлопывало интервал в один день. */}
-            <Calendar
-              mode="range"
-              locale={ru}          // дни недели по-русски, неделя с понедельника
-              captionLayout="dropdown"
-              startMonth={new Date(2023, 0)}
-              endMonth={new Date(new Date().getFullYear() + 1, 11)}
-              month={viewMonth}
-              onMonthChange={setViewMonth}
-              // ui/calendar.tsx форматирует месяц через toLocaleString('default'),
-              // то есть локалью браузера мимо `locale` — в шапке получался «Jul».
-              // Компоненты ui/ правим не руками, поэтому переопределяем пропом.
-              formatters={{
-                formatMonthDropdown: (date) => date.toLocaleString('ru-RU', { month: 'long' }),
-              }}
-              selected={{ from: draft.from, to: draft.to }}
-              onSelect={(range) => setDraft({ from: range?.from, to: range?.to })}
-              numberOfMonths={2}
-            />
+            {/* Два независимых календаря: слева начало, справа конец.
+                Диапазон между ними подсвечен в обоих — видно, что именно
+                охвачено, даже когда границы в разных месяцах. */}
+            <div className="flex max-sm:flex-col">
+              <div className="sm:border-r sm:border-border">
+                <div className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Начало периода
+                </div>
+                <Calendar
+                  mode="single"
+                  locale={ru}          // дни недели по-русски, неделя с понедельника
+                  captionLayout="dropdown"
+                  startMonth={new Date(2023, 0)}
+                  endMonth={new Date(new Date().getFullYear() + 1, 11)}
+                  month={viewFrom}
+                  onMonthChange={setViewFrom}
+                  // ui/calendar.tsx форматирует месяц через toLocaleString('default'),
+                  // то есть локалью браузера мимо locale — в шапке получался «Jul».
+                  // Компоненты ui/ правим не руками, поэтому переопределяем пропом.
+                  formatters={{
+                    formatMonthDropdown: (date) => date.toLocaleString('ru-RU', { month: 'long' }),
+                  }}
+                  selected={draft.from}
+                  onSelect={(d) => {
+                    if (!d) return
+                    // Начало позже конца — сдвигаем конец, иначе период пустой.
+                    setDraft((prev) => (prev.to && d > prev.to ? { from: d, to: d } : { ...prev, from: d }))
+                  }}
+                  modifiers={inRange}
+                  modifiersClassNames={RANGE_CLASSNAMES}
+                />
+              </div>
+              <div>
+                <div className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Конец периода
+                </div>
+                <Calendar
+                  mode="single"
+                  locale={ru}
+                  captionLayout="dropdown"
+                  startMonth={new Date(2023, 0)}
+                  endMonth={new Date(new Date().getFullYear() + 1, 11)}
+                  month={viewTo}
+                  onMonthChange={setViewTo}
+                  formatters={{
+                    formatMonthDropdown: (date) => date.toLocaleString('ru-RU', { month: 'long' }),
+                  }}
+                  selected={draft.to}
+                  onSelect={(d) => {
+                    if (!d) return
+                    // Конец раньше начала — сдвигаем начало.
+                    setDraft((prev) => (prev.from && d < prev.from ? { from: d, to: d } : { ...prev, to: d }))
+                  }}
+                  modifiers={inRange}
+                  modifiersClassNames={RANGE_CLASSNAMES}
+                />
+              </div>
+            </div>
 
             <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2.5">
               <div className="min-w-0">

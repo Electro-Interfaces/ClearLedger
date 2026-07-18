@@ -75,6 +75,24 @@ test.describe('Выбор периода', () => {
     await expect(from).toHaveValue(/-04-01$/, { timeout: 10_000 })
   })
 
+  test('Два независимых календаря: начало и конец видно одновременно', async ({ page }) => {
+    await ready(page)
+    await page.getByRole('button', { name: /^Период:/ }).click()
+
+    const popover = page.locator('[data-radix-popper-content-wrapper]')
+    await expect(popover).toBeVisible({ timeout: 10_000 })
+
+    // Единый range-календарь показывал два месяца подряд, и при периоде
+    // «4 июня – 18 июля» конец не попадал на экран. Теперь у каждой границы
+    // свой календарь со своим месяцем.
+    await expect(popover.getByText('Начало периода')).toBeVisible()
+    await expect(popover.getByText('Конец периода')).toBeVisible()
+
+    // Два независимых переключателя месяца — по одному на календарь.
+    await expect(popover.getByRole('button', { name: /Go to the Previous Month|Предыдущий/i }))
+      .toHaveCount(2)
+  })
+
   test('Клик по дате правит границу, а не сбрасывает период', async ({ page }) => {
     await ready(page)
     await page.getByRole('button', { name: /^Период:/ }).click()
