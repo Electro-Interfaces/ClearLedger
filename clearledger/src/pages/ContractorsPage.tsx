@@ -39,6 +39,7 @@ import * as refs from '@/services/referenceService'
 import { getCorporateClients } from '@/services/corporateService'
 import { ROLE_LABEL, PAYMENT_META, paidThroughLabel } from '@/types/settlement'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
+import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
 
 const TYPE_COLOR: Record<string, string> = {
@@ -753,8 +754,13 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
               <SelectContent>{orgs.map((o) => <SelectItem key={o.id} value={o.externalRef || o.id}>{o.name}</SelectItem>)}</SelectContent>
             </Select></div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <div className="space-y-1.5"><Label>Валюта</Label>
-              <Input value={f.currency} onChange={(e) => setF((s) => ({ ...s, currency: e.target.value }))} /></div>
+            {/* Валюта почти всегда рублёвая и правится редко — в простом режиме убрана.
+                Ставка НДС и «Сумма включает НДС» ниже остаются всегда: они
+                определяют суммы, которые уйдут в бухгалтерию. */}
+            <AdvancedOnly>
+              <div className="space-y-1.5"><Label>Валюта</Label>
+                <Input value={f.currency} onChange={(e) => setF((s) => ({ ...s, currency: e.target.value }))} /></div>
+            </AdvancedOnly>
             <div className="space-y-1.5"><Label>Срок действия</Label>
               <Input type="date" value={f.validUntil} onChange={(e) => setF((s) => ({ ...s, validUntil: e.target.value }))} /></div>
             <div className="space-y-1.5"><Label>Сумма</Label>
@@ -772,9 +778,12 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
                   <SelectItem value="false">Нет</SelectItem>
                 </SelectContent>
               </Select></div>
-            <div className="space-y-1.5"><Label>Вид взаиморасчётов</Label>
-              <Input value={f.settlementKind} onChange={(e) => setF((s) => ({ ...s, settlementKind: e.target.value }))} /></div>
+            <AdvancedOnly>
+              <div className="space-y-1.5"><Label>Вид взаиморасчётов</Label>
+                <Input value={f.settlementKind} onChange={(e) => setF((s) => ({ ...s, settlementKind: e.target.value }))} /></div>
+            </AdvancedOnly>
           </div>
+          <AdvancedHint count={2} what="поля — валюта и вид взаиморасчётов" />
           <div className="space-y-1.5"><Label>Комментарий</Label>
             <Textarea value={f.comment} onChange={(e) => setF((s) => ({ ...s, comment: e.target.value }))} rows={2} /></div>
           <label className="flex items-center gap-2 text-sm cursor-pointer">

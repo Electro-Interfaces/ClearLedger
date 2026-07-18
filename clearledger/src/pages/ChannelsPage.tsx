@@ -19,6 +19,7 @@ import { FuelMappingsPanel } from '@/components/fuel/FuelMappingsPanel'
 import { format } from 'date-fns'
 import { ConnectorWizard } from '@/components/channels/ConnectorWizard'
 import { ScheduleOverview } from '@/components/channels/ScheduleOverview'
+import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 
 const STATUS_MAP: Record<string, { label: string; cls: string; Icon: ComponentType<{ className?: string }> }> = {
   active: { label: 'Активен', cls: 'text-emerald-500', Icon: CheckCircle2 },
@@ -129,10 +130,15 @@ export function ChannelsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setScheduleOpen(true)}>
-            <Clock className="h-4 w-4" />
-            Расписание
-          </Button>
+          {/* Периодичность автозагрузки настраивают один раз — в простом режиме
+              убрана. «Создать коннектор» остаётся: без неё раздел бессмыслен. */}
+          <AdvancedHint count={1} what="настройка — расписание загрузок" />
+          <AdvancedOnly>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setScheduleOpen(true)}>
+              <Clock className="h-4 w-4" />
+              Расписание
+            </Button>
+          </AdvancedOnly>
           <Button size="sm" className="gap-1.5" onClick={() => setWizardOpen(true)}>
             <Plus className="h-4 w-4" />
             Создать коннектор
