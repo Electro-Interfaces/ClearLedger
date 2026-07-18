@@ -130,10 +130,11 @@ export function ChargeTrendPanel({ companyId }: {
             <XAxis dataKey="period" tick={{ fontSize: 10 }} interval={2} />
             <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => nf(v / 1000) + 'к'} width={44} />
             <Tooltip
-              formatter={(v: number, name: string) => [`${nf(v)} кВт·ч`, DIM_LABEL[name] ?? name]}
-              labelFormatter={(l: string) => {
-                const m = months.find((x) => x.period.slice(0, 7) === l)
-                return `${l} · ${m?.source === 'file' ? 'сводная контрагента' : 'зарядные сессии'}`
+              formatter={(v, name) => [`${nf(Number(v))} кВт·ч`, DIM_LABEL[String(name)] ?? String(name)]}
+              labelFormatter={(l) => {
+                const key = String(l)
+                const m = months.find((x) => x.period.slice(0, 7) === key)
+                return `${key} · ${m?.source === 'file' ? 'сводная контрагента' : 'зарядные сессии'}`
               }}
               contentStyle={{ fontSize: 12 }}
             />
