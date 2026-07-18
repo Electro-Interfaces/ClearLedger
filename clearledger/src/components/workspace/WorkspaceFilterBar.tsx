@@ -150,10 +150,18 @@ function PeriodControl() {
           <ChevronDown className="size-4 shrink-0 opacity-60 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} className="w-auto p-0">
-        <div className="flex max-sm:flex-col">
+      {/* Потолок по высоте + внутренний скролл: на телефоне (844 px) окно
+          разворачивалось на 1059 px, и подвал с «Применить» уезжал за экран —
+          период было невозможно сменить вообще. Ширину на мобиле сажаем на
+          вьюпорт, иначе календари распирают попап. */}
+      <PopoverContent
+        align="start"
+        sideOffset={6}
+        className="max-h-[85dvh] w-[calc(100vw-2rem)] overflow-hidden p-0 sm:w-auto"
+      >
+        <div className="flex max-h-[85dvh] max-sm:flex-col">
           {/* Быстрые пресеты — столбцом слева */}
-          <div className="flex flex-col gap-0.5 border-border p-2 max-sm:border-b sm:w-44 sm:border-r">
+          <div className="flex shrink-0 flex-col gap-0.5 border-border p-2 max-sm:max-h-40 max-sm:overflow-y-auto max-sm:border-b sm:w-44 sm:border-r">
             {/* Пресет заполняет черновик и НЕ закрывает окно: часто нужно взять
                 «прошлый месяц» и подвинуть одну границу. Подсветка — по
                 черновику, чтобы было видно, что именно набрано. */}
@@ -175,10 +183,12 @@ function PeriodControl() {
             })}
           </div>
 
-          {/* Прямой ввод дат + календарь диапазоном + итог интервала */}
-          <div className="flex flex-col">
+          {/* Прямой ввод дат + календарь диапазоном + итог интервала.
+              min-h-0 обязателен: без него flex-ребёнок не даёт вложенному
+              блоку скроллиться и высота снова уходит за экран. */}
+          <div className="flex min-h-0 flex-1 flex-col">
             {/* Быстрый ввод любой даты без листания — для длинных диапазонов */}
-            <div className="flex items-end gap-2 border-b border-border p-3">
+            <div className="flex shrink-0 items-end gap-2 border-b border-border p-3">
               <label className="flex flex-1 flex-col gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Начало
                 <Input
@@ -215,7 +225,8 @@ function PeriodControl() {
             {/* Два независимых календаря: слева начало, справа конец.
                 Диапазон между ними подсвечен в обоих — видно, что именно
                 охвачено, даже когда границы в разных месяцах. */}
-            <div className="flex max-sm:flex-col">
+            {/* Календари скроллятся, подвал с кнопками остаётся на месте */}
+            <div className="flex min-h-0 flex-1 overflow-y-auto max-sm:flex-col">
               <div className="sm:border-r sm:border-border">
                 <div className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   Начало периода
@@ -271,7 +282,7 @@ function PeriodControl() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2.5">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-popover px-3 py-2.5">
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Выбрано</div>
                 <div className="truncate text-sm font-semibold text-foreground">

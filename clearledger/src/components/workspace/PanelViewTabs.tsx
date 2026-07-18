@@ -48,7 +48,9 @@ export function PanelViewTabs({
               role="tab"
               aria-selected={on}
               onClick={() => onChange(t.k)}
-              className={`whitespace-nowrap rounded-md px-3.5 py-2 text-[13px] transition-colors ${
+              // На мобиле цель пальца: 28 px по высоте — промах через раз.
+              // Ниже sm поднимаем до 40 px, на десктопе компактность сохраняем.
+              className={`min-h-10 whitespace-nowrap rounded-md px-3.5 py-2 text-[13px] transition-colors sm:min-h-0 ${
                 on
                   ? 'bg-primary font-semibold text-primary-foreground shadow-soft'
                   : 'text-muted-foreground hover:bg-card/70 hover:text-foreground'

@@ -142,7 +142,9 @@ function MobileWorkspace() {
               return (
                 <button key={it.key} onClick={() => setSub(it.key)}
                   ref={(el) => { if (on && el) el.scrollIntoView({ inline: 'nearest', block: 'nearest' }) }}
-                  className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors ${on ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'}`}>
+                  // 28 px по высоте — мимо пальца. Ниже sm поднимаем цель до 40 px,
+                  // на десктопе строка остаётся компактной.
+                  className={`min-h-10 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs transition-colors sm:min-h-0 ${on ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground'}`}>
                   {it.label}
                 </button>
               )

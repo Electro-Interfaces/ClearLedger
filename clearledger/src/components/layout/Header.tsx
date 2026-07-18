@@ -154,16 +154,19 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             variant="ghost"
             size="icon"
             aria-pressed={guide.on}
-            className={`h-10 w-10 rounded-xl ${guide.on ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`hidden h-10 w-10 rounded-xl sm:inline-flex ${guide.on ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground hover:text-foreground'}`}
             onClick={guide.toggle}
             title={guide.on ? 'Скрыть структуру экрана' : 'Показать структуру экрана'}
           >
             <Lightbulb className="h-[18px] w-[18px]" />
           </Button>
+          {/* Ниже sm скрыта: то же переключение есть в меню профиля, а место в
+              шапке нужнее названию компании — в мультитенантной системе видеть,
+              в чьих данных работаешь, важнее быстрой смены темы. */}
           <Button
             variant="ghost"
             size="icon"
-            className="h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground"
+            className="hidden h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground sm:inline-flex"
             onClick={toggle}
             title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
           >
