@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import {
   Upload, FileText, Image, FileSpreadsheet, File, Trash2, Wand2, Radio,
   Play, Clock, CheckCircle2, AlertCircle, Pause, Loader2, Settings2, ExternalLink,
@@ -215,9 +216,17 @@ function FilesUploadTab() {
             Применяются к следующим добавленным файлам. Канал можно оставить «Автоподбор» —
             система определит его по формату и имени файла.
           </CardDescription>
+          <AdvancedHint count={3} what="параметра — канал, тип документа, точка обслуживания" />
         </CardHeader>
         <CardContent className="pt-0 pb-0">
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Канал, тип и точка имеют безопасные умолчания: канал подбирается
+                по формату файла, тип — лишь подсказка классификатору (он
+                определяет тип сам), точка — «без привязки». В простом режиме убраны.
+                Дата документа ниже остаётся всегда: её умолчание — сегодня, и для
+                документа, где дату распознать не удалось, скрытое поле молча
+                проставило бы неверный период. */}
+            <AdvancedOnly>
             <div className="space-y-1.5">
               <Label className="text-xs flex items-center gap-1"><Radio className="h-3 w-3" /> Канал</Label>
               <Select value={pendingChannel} onValueChange={setPendingChannel}>
@@ -265,6 +274,7 @@ function FilesUploadTab() {
                 </SelectContent>
               </Select>
             </div>
+            </AdvancedOnly>
 
             <div className="space-y-1.5">
               <Label className="text-xs flex items-center gap-1"><Calendar className="h-3 w-3" /> Дата документа</Label>

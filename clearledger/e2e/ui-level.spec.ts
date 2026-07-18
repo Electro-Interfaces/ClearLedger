@@ -8,22 +8,29 @@ import { test, expect } from '@playwright/test'
  * видно всегда (см. useUiLevel, правило 1).
  */
 
+/**
+ * networkidle здесь не годится: в приложении живут поллинг и фоновые запросы,
+ * сеть не затихает и ожидание упирается в таймаут. Ждём разметку и конкретный
+ * признак применённого режима.
+ */
 async function setLevel(page: import('@playwright/test').Page, level: 'simple' | 'advanced') {
   await page.evaluate((l) => localStorage.setItem('clearledger-ui-level', l), level)
-  await page.reload()
-  await page.waitForLoadState('networkidle')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  const html = page.locator('html')
+  if (level === 'simple') await expect(html).toHaveClass(/cl-simple/, { timeout: 15_000 })
+  else await expect(html).not.toHaveClass(/cl-simple/, { timeout: 15_000 })
 }
 
 test.describe('Режим работы', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('./')
-    await page.waitForLoadState('networkidle')
+    await page.waitForLoadState('domcontentloaded')
   })
 
   test('По умолчанию — простой режим', async ({ page }) => {
     await page.evaluate(() => localStorage.removeItem('clearledger-ui-level'))
     await page.reload()
-    await page.waitForLoadState('networkidle')
+    await page.waitForLoadState('domcontentloaded')
     await expect(page.locator('html')).toHaveClass(/cl-simple/)
   })
 
@@ -69,6 +76,20 @@ test.describe('Режим работы', () => {
     // Период и область учёта — то, чем пользуются каждый день. Прятать нельзя.
     await expect(dialog.getByText('Период', { exact: false }).first()).toBeVisible()
     await expect(dialog.getByText('Область учёта', { exact: false }).first()).toBeVisible()
+  })
+
+  test('Загрузка: служебные параметры убраны, дата документа остаётся', async ({ page }) => {
+    await setLevel(page, 'simple')
+    await page.goto('intake')
+    await page.waitForLoadState('domcontentloaded')
+
+    // Канал / тип / точка имеют безопасные умолчания — убраны.
+    await expect(page.getByText('Точка обслуживания')).toBeHidden()
+    await expect(page.getByText(/Ещё 3 параметра/)).toBeVisible({ timeout: 10_000 })
+
+    // А дата остаётся: её умолчание — сегодня, и для документа с нераспознанной
+    // датой скрытое поле молча проставило бы неверный период.
+    await expect(page.getByText('Дата документа').first()).toBeVisible()
   })
 
   test('Расширенный режим открывает всё', async ({ page }) => {

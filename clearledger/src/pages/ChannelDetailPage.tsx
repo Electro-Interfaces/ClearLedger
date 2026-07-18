@@ -7,6 +7,8 @@ import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BindingKeyBadge } from '@/components/onec/BindingKeyBadge'
+import { AdvancedHint } from '@/components/common/AdvancedOnly'
+import { useUiLevel } from '@/hooks/useUiLevel'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -2135,6 +2137,16 @@ export function ChannelDetailPage() {
   const qc = useQueryClient()
   const [channel, setChannel] = useState<Channel | undefined>(() => id ? getChannel(id) : undefined)
   const [activeTab, setActiveTab] = useState<TabId>('overview')
+  // «Настройки» — конфигурация канала (источники, станции, расписание,
+  // конвейер). По собственному описанию вкладки — редко используемая, поэтому
+  // в простом режиме её нет. «Маппинг» остаётся всегда: он определяет, куда
+  // лягут данные, а сигнала о незакрытых сопоставлениях на вкладках нет —
+  // спрятать его значило бы спрятать вопрос корректности.
+  const { isSimple } = useUiLevel()
+  const visibleTabs = isSimple ? TABS.filter((t) => t.id !== 'settings') : TABS
+  useEffect(() => {
+    if (isSimple && activeTab === 'settings') setActiveTab('overview')
+  }, [isSimple, activeTab])
   const [syncing, setSyncing] = useState(false)
   const [syncProgress, setSyncProgress] = useState('')
   const [syncPercent, setSyncPercent] = useState<number | null>(null)
@@ -2502,7 +2514,7 @@ export function ChannelDetailPage() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-border/40 pb-px">
-        {TABS.map((tab) => {
+        {visibleTabs.map((tab) => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
           return (
@@ -2520,6 +2532,7 @@ export function ChannelDetailPage() {
             </button>
           )
         })}
+        <AdvancedHint count={1} what="вкладка — настройки канала" />
       </div>
 
       {/* Content */}

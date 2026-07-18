@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test'
 test.describe('Рабочая область', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('./')
-    await page.waitForLoadState('networkidle')
+    await page.waitForLoadState('domcontentloaded')
   })
 
   test('Старт приложения — рабочий стол, а не список документов', async ({ page }) => {
@@ -60,7 +60,7 @@ test.describe('Рабочая область', () => {
     // вкладке (там sessionStorage всегда пуст → любой переход «холодный»).
     await page.evaluate(() => sessionStorage.removeItem('cl-booted'))
     await page.goto('settings')
-    await page.waitForLoadState('networkidle')
+    await page.waitForLoadState('domcontentloaded')
 
     // ?f=... дописывает URL-персист фильтра — на путь это не влияет.
     await expect(page).toHaveURL(/\/settings(\?|$)/)
