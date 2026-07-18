@@ -224,9 +224,12 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
           <aside className="flex max-h-48 flex-col gap-4 overflow-y-auto border-b bg-muted/20 p-3 md:max-h-none md:border-r md:border-b-0 md:p-4">
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
-                <h3 className="flex items-center gap-1.5 text-xs font-semibold">
+                <h3
+                  className="flex items-center gap-1.5 text-xs font-semibold"
+                  title="Применяются к черновику — можно донастроить перед «Применить». Полные виды (раздел + пункт + параметры) сохраняются в меню «Виды»."
+                >
                   <Bookmark className="size-3.5" aria-hidden="true" />
-                  Сохранённые наборы
+                  Быстрые наборы
                 </h3>
                 {!savingPreset ? (
                   <Button variant="ghost" size="icon-xs" onClick={() => setSavingPreset(true)} aria-label="Сохранить текущий набор">
