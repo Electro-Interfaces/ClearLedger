@@ -52,6 +52,18 @@ test.describe('Рабочая область', () => {
     await expect(dialog).toBeHidden({ timeout: 10_000 })
   })
 
+  test('Прямая ссылка на служебную страницу переживает холодный старт', async ({ page }) => {
+    // Сброс на рабочий стол должен касаться только экранов рабочей области.
+    // Раньше он подменял ЛЮБОЙ путь, ломая ссылки из писем и открытие в новой
+    // вкладке (там sessionStorage всегда пуст → любой переход «холодный»).
+    await page.evaluate(() => sessionStorage.removeItem('cl-booted'))
+    await page.goto('settings')
+    await page.waitForLoadState('networkidle')
+
+    await expect(page).toHaveURL(/\/settings$/)
+    await expect(page.getByRole('heading', { name: 'Настройки' })).toBeVisible({ timeout: 10_000 })
+  })
+
   test('Разделы рабочей области доступны', async ({ page }) => {
     for (const name of ['Продажи', 'Магазин', 'Управленческий', 'Бухгалтерский', 'Выгрузка']) {
       await expect(page.getByText(name, { exact: true }).first()).toBeVisible({ timeout: 15_000 })

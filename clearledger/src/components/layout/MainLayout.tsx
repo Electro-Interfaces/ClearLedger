@@ -59,11 +59,19 @@ export function MainLayout() {
   // сбрасывает запомненный браузером экран на рабочий стол. F5 и переходы внутри
   // сессии метку сохраняют (sessionStorage переживает reload, но не закрытие вкладки),
   // поэтому текущий экран и deep-link в рамках сессии не теряются.
+  //
+  // Сбрасывается ТОЛЬКО экран рабочей области (её браузер и восстанавливает
+  // «продолжить с того же места»). Прямая ссылка на служебную страницу —
+  // /settings, /connectors/:id, /admin — уважается: иначе ломаются ссылки из
+  // писем и открытие в новой вкладке, где sessionStorage всегда пуст и любой
+  // переход выглядит холодным стартом.
   useEffect(() => {
     try {
       if (sessionStorage.getItem('cl-booted')) return
       sessionStorage.setItem('cl-booted', '1')
-      if (location.pathname !== '/') navigate('/', { replace: true })
+      if (location.pathname !== '/' && isWorkspacePath(location.pathname)) {
+        navigate('/', { replace: true })
+      }
     } catch { /* ignore */ }
     // читаем стартовый путь один раз при монтировании — deps намеренно пустые
     // eslint-disable-next-line react-hooks/exhaustive-deps
