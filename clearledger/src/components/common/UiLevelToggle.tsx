@@ -25,6 +25,41 @@ const OPTIONS: { value: UiLevel; label: string; icon: typeof Gauge; hint: string
   },
 ]
 
+/**
+ * Компактный вариант для шапки — одна иконка рядом с лампочкой гид-режима.
+ *
+ * Два родственных инструмента стоят рядом осознанно: лампочка объясняет,
+ * ГДЕ что находится, режим убирает лишнее с глаз. Первое лечит непонимание,
+ * второе — перегрузку.
+ *
+ * Подсветка активного состояния повторяет лампочку (bg-primary/10 text-primary),
+ * чтобы «включённый режим» читался одинаково у обоих.
+ */
+export function UiLevelHeaderButton() {
+  const { isAdvanced, toggle } = useUiLevel()
+  const Icon = isAdvanced ? Sparkles : Gauge
+
+  return (
+    <button
+      type="button"
+      aria-pressed={isAdvanced}
+      aria-label={isAdvanced ? 'Расширенный режим включён' : 'Простой режим включён'}
+      onClick={toggle}
+      title={isAdvanced
+        ? 'Расширенный режим: показаны все функции. Нажмите, чтобы упростить экран'
+        : 'Простой режим: на экранах только ежедневное. Нажмите, чтобы открыть все функции'}
+      className={cn(
+        'inline-flex h-10 w-10 items-center justify-center rounded-xl transition-colors',
+        isAdvanced
+          ? 'bg-primary/10 text-primary hover:bg-primary/15'
+          : 'text-muted-foreground hover:text-foreground',
+      )}
+    >
+      <Icon className="h-[18px] w-[18px]" />
+    </button>
+  )
+}
+
 export function UiLevelToggle({ className }: { className?: string }) {
   const { level, setLevel } = useUiLevel()
 
