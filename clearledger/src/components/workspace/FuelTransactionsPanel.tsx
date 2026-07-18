@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { FuelBadge } from '@/components/common/FuelBadge'
 import { cn } from '@/lib/utils'
 import { fmtMoney, fmtLiters } from '@/services/analyticsService'
+import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import {
   getFuelTxRows, getFuelTxFilters, getFuelTxOverview, syncFuelTransactions, getFuelTxSyncStatus,
   type FuelTxRow,
@@ -144,6 +145,8 @@ export function FuelTransactionsPanel({ dateFrom, dateTo }: {
   const [payTypes, setPayTypes] = useState<Set<string>>(new Set())
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  // Смена контура делает поиск и страницу бессмысленными (CLAUDE.md, правило 5).
+  useResetOnScopeChange(() => { setSearchInput(''); setSearch(''); setPage(0) })
   const [sort, setSort] = useState<SortKey>('dt')
   const [order, setOrder] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(0)

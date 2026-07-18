@@ -12,6 +12,7 @@ import {
   type StoreBarcodesData, type StoreRecipesData,
 } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { NomenclatureCardModal } from './NomenclatureCardModal'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -117,6 +118,8 @@ export function StoreCategoriesPanel(p: PanelProps) {
 export function StoreBarcodesPanel(p: PanelProps) {
   const q = useReport<StoreBarcodesData>('barcodes', p)
   const [search, setSearch] = useState('')
+  // Смена контура обнуляет поиск по номенклатуре (CLAUDE.md, правило 5).
+  useResetOnScopeChange(() => setSearch(''))
   const [openGuid, setOpenGuid] = useState<string | null>(null)
   return (
     <>

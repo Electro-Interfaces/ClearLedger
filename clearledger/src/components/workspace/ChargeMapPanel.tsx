@@ -18,6 +18,8 @@ import { loadLocations } from '@/services/locationService'
 import type { ServiceLocation } from '@/types/location'
 import { getStationMetrics, type StationMetric } from '@/services/overviewService'
 import { fmtMoneyShort } from '@/services/analyticsService'
+import { useResetOnScopeChange } from '@/hooks/useScopeReset'
+import { ApplyToScope } from './ApplyToScope'
 
 const ALL = '__all__'
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -315,6 +317,8 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
     queryFn: () => getStationMetrics({ companyId, dateFrom, dateTo }),
   })
   const [search, setSearch] = useState('')
+  // Смена контура обнуляет поиск по карте (CLAUDE.md, правило 5).
+  useResetOnScopeChange(() => setSearch(''))
   const [region, setRegion] = useState(ALL)
   const [status, setStatus] = useState(ALL)
   const [link, setLink] = useState(ALL)
@@ -415,6 +419,8 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: станция, город, адрес…" className="h-8 w-[210px] pl-8 text-xs" />
         </div>
         <FSelect value={region} onChange={setRegion} all="Все регионы" options={regions.map((r) => ({ v: r, label: r }))} w="w-[170px]" />
+        {/* Мостик: поднять выбранный регион в контур рабочей области. */}
+        <ApplyToScope kind="regions" values={region !== ALL ? [region] : []} />
         <FSelect value={status} onChange={setStatus} all="Все статусы" options={statuses.map((s) => ({ v: s, label: opMeta(s).label }))} w="w-[140px]" />
         <FSelect value={link} onChange={setLink} all="Связь: все" options={links.map((s) => ({ v: s, label: linkMeta(s).label }))} w="w-[170px]" />
         <FSelect value={power} onChange={setPower} all="Мощность: все" options={[...POWER_BUCKETS, POWER_NA].map((b) => ({ v: b.key, label: b.label }))} w="w-[160px]" />

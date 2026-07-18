@@ -4,7 +4,7 @@
  * динамика (тренд) · сравнение периодов. Данные — /api/analytics/charge-sessions(/timeseries|/compare).
  */
 
-import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -13,13 +13,17 @@ import { Button } from '@/components/ui/button'
 import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { seriesColor } from './analytics/palette'
-import { PeriodRangePicker, MultiPeriodPicker } from './analytics/PeriodRangePicker'
+import { MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
 import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChart'
 import { type Period, buildMoM, isoLocal } from './analytics/periodPresets'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
+import { PanelViewTabs } from './PanelViewTabs'
+import { ViewParamsBar } from './ViewParamsBar'
+import { HorizonControl } from './HorizonControl'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
@@ -76,7 +80,6 @@ function ClientTypeToggle({ value, onChange }: { value: ClientType; onChange: (v
     </div>
   )
 }
-const periodSub = (from: string, to: string) => `Период: ${from} — ${to}`
 
 /** Атрибуты на <table> с сырыми ЧИСЛАМИ для выгрузки в Excel (формулы/сортировка). */
 function exportRows(name: string, columns: string[], rows: (string | number | null)[][]) {
@@ -138,30 +141,6 @@ function BucketSelect({ value, onChange, only }: { value: ChargeBucket; onChange
       <SelectTrigger className="h-7 w-[120px] text-xs"><SelectValue /></SelectTrigger>
       <SelectContent>{opts.map((o) => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
     </Select>
-  )
-}
-
-/** Период пункта: по умолчанию — период раздела; кнопка «Свой период» включает локальный override. */
-function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
-  override: Period | null
-  sectionFrom: string
-  sectionTo: string
-  onChange: (p: Period | null) => void
-}) {
-  if (override) {
-    return (
-      <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
-        <PeriodRangePicker period={override} onChange={(p) => onChange(p)} />
-        <Button variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => onChange(null)}>← период раздела</Button>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-      <span className="text-xs text-muted-foreground">Период раздела: <span className="font-mono">{sectionFrom} — {sectionTo}</span></span>
-      <Button variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => onChange({ from: sectionFrom, to: sectionTo })}>Свой период</Button>
-    </div>
   )
 }
 
@@ -241,13 +220,14 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   companyId: string; dateFrom: string; dateTo: string; groupBy: ChargeGroupBy; firstCol: string
   withKpis?: boolean; controls?: boolean; tabKey?: string
 }) {
-  // Свой период + метрика распределения + топ-N (когда controls); иначе — период раздела.
-  const [p, patch] = useTabParams(tabKey, { override: null as Period | null, metric: 'amount' as ChargeMetric, rows: 0 })
+  // Только представление (метрика распределения + топ-N). Период — из контура
+  // рабочей области: вид-срез не имеет своего периода (см. CLAUDE.md, ур. 2/4).
+  const [p, patch] = useTabParams(tabKey, { metric: 'amount' as ChargeMetric, rows: 0 })
   // Разрез — ЛОКАЛЬНО (не в useTabParams): всегда стартует от groupBy таба. Иначе при
   // переиспользовании экземпляра между табами (станции↔коннекторы) разрез залипал.
   const [group, setGroup] = useState<ChargeGroupBy>(groupBy)
   const gb = (controls ? group : groupBy) as ChargeGroupBy
-  const period = controls && p.override ? p.override : { from: dateFrom, to: dateTo }
+  const period = { from: dateFrom, to: dateTo }
   const distMetric = controls ? p.metric : 'amount'
   const col = controls ? (GROUP_LABELS[gb] ?? firstCol) : firstCol
   const { data, isLoading, error } = useCS(companyId, period.from, period.to, gb)
@@ -308,8 +288,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   return (
     <div className="p-4 space-y-4">
       {controls && (
-        <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-          <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+        <ViewParamsBar>
           <Field label="Разрез"><SeriesSelect value={group} onChange={(v) => setGroup(v as ChargeGroupBy)} /></Field>
           <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
           <Field label="Строк">
@@ -318,7 +297,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
               <SelectContent>{ROWS_OPTS.map((o) => <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
-        </div>
+        </ViewParamsBar>
       )}
       {withKpis && <SessionKpis t={t} />}
       {data.lines.length >= 3 && (
@@ -397,8 +376,8 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
 
 /** Обзор: KPI + доли коннекторов и клиентов. */
 function Overview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const [ov, setOv] = useTabParams('cs_overview', { override: null as Period | null })
-  const period = ov.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const st = useCS(companyId, period.from, period.to, 'station')
   const conn = useCS(companyId, period.from, period.to, 'connector')
   const usr = useCS(companyId, period.from, period.to, 'user_type')
@@ -412,9 +391,6 @@ function Overview({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   if (t.unpaid_pct > 3) alerts.push(`Без оплаты ${t.unpaid_pct.toFixed(1)}% сессий`)
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
-      </div>
       <SessionKpis t={t} />
       {alerts.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -558,17 +534,14 @@ function ChargeHeatmap({ companyId, dateFrom, dateTo }: { companyId: string; dat
 
 /** Время и загрузка — heatmap час×день + профиль по часам суток. */
 function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const [ov, setOv] = useTabParams('cs_time', { override: null as Period | null })
-  const period = ov.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useCS(companyId, period.from, period.to, 'hour')
   if (isLoading) return <Loading />
   if (!data || data.lines.length === 0) return <Empty />
   const max = Math.max(...data.lines.map((l) => l.sessions), 1)
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
-      </div>
       <SessionKpis t={data.totals} />
       {data.lines.length >= 3 && (
         <div className="space-y-1.5">
@@ -597,7 +570,7 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
   )
 }
 
-const DYN_DEFAULTS = { metric: 'amount' as ChargeMetric, seriesSel: '__net__', bucket: 'month' as ChargeBucket, override: null as Period | null, yoy: false }
+const DYN_DEFAULTS = { metric: 'amount' as ChargeMetric, seriesSel: '__net__', bucket: 'month' as ChargeBucket, yoy: false }
 const shiftYearISO = (iso: string, delta: number): string => {
   const d = new Date(iso); d.setFullYear(d.getFullYear() + delta); return isoLocal(d)
 }
@@ -606,7 +579,10 @@ const shiftYearISO = (iso: string, delta: number): string => {
 function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [p, patch] = useTabParams('cs_dynamics', DYN_DEFAULTS)
   const [view, setView] = useChartView({ type: 'line' })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
+  const [horizon, setHorizon] = useState<Period | null>(null)
+  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const period = horizon ?? { from: dateFrom, to: dateTo }
   const seriesBy = p.seriesSel === '__net__' ? undefined : (p.seriesSel as ChargeSeriesBy)
   const n = useNarrow()
 
@@ -633,8 +609,8 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
 
   return (
     <div className="p-4 space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
+        <HorizonControl horizon={horizon} scopeFrom={dateFrom} scopeTo={dateTo} onChange={setHorizon} />
         <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
         <Field label="Разрез"><SeriesSelect value={p.seriesSel} onChange={(v) => patch({ seriesSel: v })} withNet /></Field>
         <Field label="Шаг"><BucketSelect value={p.bucket} onChange={(b) => patch({ bucket: b })} /></Field>
@@ -643,7 +619,7 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
             Год к году
           </Button>
         )}
-      </div>
+      </ViewParamsBar>
       {hasData && !isLoading && (
         <PeriodSummaryKpis
           points={data!.data.map((row) => ({
@@ -721,7 +697,7 @@ function Compare({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom:
   )
 }
 
-const SLICE_DEFAULTS = { bucket: 'month' as ChargeBucket, metric: 'amount' as ChargeMetric, seriesSel: '__net__', override: null as Period | null, topN: 1000 }
+const SLICE_DEFAULTS = { bucket: 'month' as ChargeBucket, metric: 'amount' as ChargeMetric, seriesSel: '__net__', topN: 1000 }
 const ROWS_OPTS: { value: number; label: string }[] = [
   { value: 10, label: 'Топ-10' }, { value: 25, label: 'Топ-25' },
   { value: 50, label: 'Топ-50' }, { value: 1000, label: 'Все' },
@@ -730,7 +706,10 @@ const ROWS_OPTS: { value: number; label: string }[] = [
 /** Нарезка одного периода на интервалы (неделя/декада/месяц/квартал) → сравнение. */
 function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [p, patch] = useTabParams('cs_compare/slice', SLICE_DEFAULTS)
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
+  const [horizon, setHorizon] = useState<Period | null>(null)
+  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const period = horizon ?? { from: dateFrom, to: dateTo }
   const groupBy = p.seriesSel === '__net__' ? undefined : (p.seriesSel as ChargeSeriesBy)
   const n = useNarrow()
 
@@ -743,8 +722,8 @@ function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; date
 
   return (
     <div className="space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
+        <HorizonControl horizon={horizon} scopeFrom={dateFrom} scopeTo={dateTo} onChange={setHorizon} />
         <Field label="Нарезка"><BucketSelect value={p.bucket} onChange={(b) => patch({ bucket: b })} only={['day', 'week', 'decade', 'month', 'quarter']} /></Field>
         <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
         <Field label="Разрез"><SeriesSelect value={p.seriesSel} onChange={(v) => patch({ seriesSel: v })} withNet /></Field>
@@ -756,7 +735,7 @@ function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; date
             </Select>
           </Field>
         )}
-      </div>
+      </ViewParamsBar>
       {isLoading ? <Loading /> : !hasData || error ? <Empty text="Нет данных за период" />
         : <SliceView data={data} metric={p.metric} companyId={companyId} dateFrom={period.from} dateTo={period.to} bucket={p.bucket} narrow={n} />}
       {hasData && !error && (
@@ -1344,10 +1323,10 @@ function ManualCompare({ companyId, dateFrom, dateTo }: { companyId: string; dat
   return (
     <div className="space-y-4">
       <MultiPeriodPicker periods={periods} onChange={(np) => patch({ periods: np })} anchor={anchor} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
         <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
         <Field label="Разрез"><SeriesSelect value={p.groupBy} onChange={(v) => patch({ groupBy: v as ChargeSeriesBy })} /></Field>
-      </div>
+      </ViewParamsBar>
       {!ready ? <Empty text="Задайте минимум 2 периода" />
         : isLoading ? <Loading />
         : (error || !data) ? <Empty text="Нет данных для сравнения" />
@@ -1489,8 +1468,8 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
 
 /** Надёжность: успех сессий, исходы, худшие станции (кандидаты на ТО), тренд. */
 function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const [ov, setOv] = useTabParams('cs_reliability', { override: null as Period | null })
-  const period = ov.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const outcomes = useCS(companyId, period.from, period.to, 'result')
   const byConn = useCS(companyId, period.from, period.to, 'connector')
   const byStation = useCS(companyId, period.from, period.to, 'station')
@@ -1510,9 +1489,6 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
 
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
-      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} hint={`${nf0.format(complete)} из ${nf0.format(t.sessions)}`} />
         <KpiCard label="С ошибкой" value={nf0.format(errors)} accent="danger" hint={`${(errors / t.sessions * 100).toFixed(1)}% сессий`} />
@@ -1647,17 +1623,7 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
       {/* Единая шапка-таббар: underline-табы слева + фильтр/экспорт справа. Общий
           нижний бордер связывает активный таб с содержимым панели под ним. */}
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
-        <div className="flex items-stretch gap-0.5 overflow-x-auto">
-          {SUB_TABS.map((x) => {
-            const on = st.sub === x.k
-            return (
-              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                {x.label}
-              </button>
-            )
-          })}
-        </div>
+        <PanelViewTabs tabs={SUB_TABS} value={st.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Сессии»" />
         <div className="flex items-center gap-2 shrink-0">
           <ClientTypeToggle value={clientType} onChange={setClientType} />
           <ExportButton title={`Сессии ЭЗС · ${v.title}`} subtitle={subtitle} getEl={() => ref.current} />
@@ -1675,7 +1641,7 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
 export function SessionsPanel({ tab, companyId, dateFrom, dateTo }: {
   tab: string; companyId: string; dateFrom: string; dateTo: string
 }) {
-  const sub = periodSub(dateFrom, dateTo)
+  const sub = useScopeSubtitle()
   const [clientType, setClientType] = useState<ClientType>('all')
   // «Надёжность» — отдельный подраздел (ТОиР: приоритет РусГидро), не 3-й уровень.
   if (tab === 'cs_reliability') {

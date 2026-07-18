@@ -11,7 +11,7 @@
  * выведена как точка расширения.
  */
 
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,12 +22,15 @@ import {
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
-import { PeriodRangePicker } from './analytics/PeriodRangePicker'
 import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChart'
 import { CHART_SERIES } from './analytics/palette'
 import { type Period } from './analytics/periodPresets'
 import { useTabParams } from '@/hooks/useTabParams'
+import { useResetOnScopeChange, useScopeSubtitle } from '@/hooks/useScopeReset'
 import { ExportButton } from './analytics/ExportButton'
+import { PanelViewTabs } from './PanelViewTabs'
+import { ViewParamsBar } from './ViewParamsBar'
+import { HorizonControl } from './HorizonControl'
 import {
   getFuelCorporateOverview, getFuelCorporateCounterparties, getFuelCorporateCards, getFuelTimeseries,
   FUEL_METRIC_LABELS, fmtFuelMetricCompact, fmtFuelMetricShort, fuelChartFormat, fmtRub0,
@@ -54,30 +57,6 @@ function exportRows(name: string, columns: string[], rows: (string | number | nu
 }
 function ExportOnlyTable({ name, columns, rows }: { name: string; columns: string[]; rows: (string | number | null)[][] }) {
   return <table hidden aria-hidden {...exportRows(name, columns, rows)} />
-}
-
-/** Период пункта: по умолчанию — период раздела; «Свой период» — локальный override. */
-function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
-  override: Period | null
-  sectionFrom: string
-  sectionTo: string
-  onChange: (p: Period | null) => void
-}) {
-  if (override) {
-    return (
-      <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
-        <PeriodRangePicker period={override} onChange={(p) => onChange(p)} />
-        <Button variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => onChange(null)}>← период раздела</Button>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-      <span className="text-xs text-muted-foreground">Период раздела: <span className="font-mono">{sectionFrom} — {sectionTo}</span></span>
-      <Button variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => onChange({ from: sectionFrom, to: sectionTo })}>Свой период</Button>
-    </div>
-  )
 }
 
 /** Мини-график тренда в строке таблицы (SVG-полилиния). */
@@ -135,8 +114,8 @@ const fmtMonth = (m: string): string => (m.length >= 7 ? `${m.slice(5, 7)}.${m.s
 /* ────────────────────────── Обзор ────────────────────────── */
 
 function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_corp/overview', { override: null as Period | null })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-corp-overview', companyId, period.from, period.to],
     queryFn: () => getFuelCorporateOverview({ companyId, dateFrom: period.from, dateTo: period.to }),
@@ -149,8 +128,6 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
   const maxFuelShare = Math.max(0.01, ...data.by_fuel.map((f) => f.share_pct))
   return (
     <div className="p-4 space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-
       {/* KPI-сетка сегмента */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Выручка" value={fmtRub0(k.amount)} accent="success" />
@@ -260,8 +237,8 @@ type CpSortKey = keyof Pick<FuelCounterpartyRow,
   'name' | 'channel' | 'fills' | 'liters' | 'amount' | 'share_pct' | 'avg_fill' | 'avg_price' | 'stations' | 'cards'>
 
 function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_corp/counterparties', { override: null as Period | null })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-corp-counterparties', companyId, period.from, period.to],
     queryFn: () => getFuelCorporateCounterparties({ companyId, dateFrom: period.from, dateTo: period.to }),
@@ -301,7 +278,6 @@ function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
   ]
   return (
     <div className="p-4 space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Контрагентов" value={nf0.format(data.rows.length)} hint="процессоры + ведомости" />
         <KpiCard label="Выручка сегмента" value={fmtRub0(t.amount)} accent="success" />
@@ -389,13 +365,15 @@ function CardsSortHead({ label, k, sort, order, onSort }: {
 }
 
 function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_corp/cards', { override: null as Period | null })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const [sort, setSort] = useState<FuelCardsSort>('amount')
   const [order, setOrder] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(0)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  // Смена контура делает поиск и страницу бессмысленными (CLAUDE.md, правило 5).
+  useResetOnScopeChange(() => { setSearchInput(''); setSearch(''); setPage(0) })
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['fuel-corp-cards', companyId, period.from, period.to, sort, order, page, search],
@@ -429,8 +407,7 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
   const orgTitle = 'НСИ «карта → организация» появится позже'
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => { patch({ override: o }); setPage(0) }} />
+      <ViewParamsBar>
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
@@ -444,7 +421,7 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
           </Button>
         )}
         {isFetching && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-      </div>
+      </ViewParamsBar>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Карт всего" value={nf0.format(t.cards)} hint={search ? `по поиску «${search}»` : 'в корп-сегменте за период'} />
@@ -528,7 +505,7 @@ const DYN_SERIES: { value: string; label: string }[] = [
 const DYN_BUCKETS: { value: FuelBucket; label: string }[] = [
   { value: 'week', label: 'Неделя' }, { value: 'month', label: 'Месяц' },
 ]
-const DYN_DEFAULTS = { metric: 'amount' as FuelMetric, seriesSel: '__net__', bucket: 'week' as FuelBucket, override: null as Period | null }
+const DYN_DEFAULTS = { metric: 'amount' as FuelMetric, seriesSel: '__net__', bucket: 'week' as FuelBucket }
 
 function DynTrendTable({ data, metric }: { data: FuelTimeseriesResponse; metric: FuelMetric }) {
   const name = (s: string) => (s === 'value' ? FUEL_METRIC_LABELS[metric] : chanLabel(s))
@@ -563,7 +540,10 @@ function DynTrendTable({ data, metric }: { data: FuelTimeseriesResponse; metric:
 function CorpDynamics({ companyId, dateFrom, dateTo }: TabProps) {
   const [p, patch] = useTabParams('fuel_corp/dynamics', DYN_DEFAULTS)
   const [view, setView] = useChartView({ type: 'line' })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
+  const [horizon, setHorizon] = useState<Period | null>(null)
+  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const period = horizon ?? { from: dateFrom, to: dateTo }
   const seriesBy = p.seriesSel === '__net__' ? undefined : (p.seriesSel as FuelGroupBy)
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-corp-timeseries', companyId, period.from, period.to, p.bucket, p.metric, p.seriesSel],
@@ -576,8 +556,8 @@ function CorpDynamics({ companyId, dateFrom, dateTo }: TabProps) {
   const format = fuelChartFormat(p.metric)
   return (
     <div className="p-4 space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
+        <HorizonControl horizon={horizon} scopeFrom={dateFrom} scopeTo={dateTo} onChange={setHorizon} />
         <Field label="Метрика">
           <Select value={p.metric} onValueChange={(v) => patch({ metric: v as FuelMetric })}>
             <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
@@ -596,7 +576,7 @@ function CorpDynamics({ companyId, dateFrom, dateTo }: TabProps) {
             <SelectContent>{DYN_BUCKETS.map((o) => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
-      </div>
+      </ViewParamsBar>
       <Card>
         <CardContent className="pt-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -639,24 +619,15 @@ export function FuelCorporatePanel({ companyId, dateFrom, dateTo }: {
   const [st, patch] = useTabParams('fuel_corp', { sub: 'overview' })
   const v = subView(st.sub, { companyId, dateFrom, dateTo })
   const ref = useRef<HTMLDivElement>(null)
+  const scopeSub = useScopeSubtitle()
   return (
     <div>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
         <div className="flex min-w-0 items-center gap-3">
           <span className="my-2 shrink-0 rounded-md border border-primary/40 px-2 py-0.5 text-[11px] text-primary/80">Карты + ведомости</span>
-          <div className="flex items-stretch gap-0.5 overflow-x-auto">
-            {SUB_TABS.map((x) => {
-              const on = st.sub === x.k
-              return (
-                <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                  className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                  {x.label}
-                </button>
-              )
-            })}
-          </div>
+          <PanelViewTabs tabs={SUB_TABS} value={st.sub} onChange={(k) => patch({ sub: k })} label={null} ariaLabel="Виды раздела «Корпоратив»" />
         </div>
-        <ExportButton title={`Корпоратив · ${v.title}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
+        <ExportButton title={`Корпоратив · ${v.title}`} subtitle={scopeSub} getEl={() => ref.current} />
       </div>
       {/* key={st.sub} — ремаунт под-вида при смене таба (чистое локальное состояние). */}
       <div ref={ref} key={st.sub}>{v.node}</div>

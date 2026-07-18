@@ -8,6 +8,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Kpi } from './analytics/Kpi'
+import { PanelViewTabs } from './PanelViewTabs'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Download, AlertTriangle, Info, ArrowUp, ArrowDown, ChevronsUpDown, FileSpreadsheet } from 'lucide-react'
@@ -389,17 +390,7 @@ export function CorporatePanel({ companyId, dateFrom, dateTo }: TabProps) {
     <div>
       <div className="flex items-center gap-3 border-b border-border px-4">
         <span className="text-[11px] rounded-md border border-primary/40 px-2 py-0.5 text-primary/80 shrink-0 my-2">Только ЮЛ</span>
-        <div className="flex items-stretch gap-0.5 overflow-x-auto">
-          {CORP_TABS.map((x) => {
-            const on = t.sub === x.k
-            return (
-              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                {x.label}
-              </button>
-            )
-          })}
-        </div>
+        <PanelViewTabs tabs={CORP_TABS} value={t.sub} onChange={(k) => patch({ sub: k })} label={null} ariaLabel="Виды раздела «Корпоратив»" />
       </div>
       <div className="p-4">
         {t.sub === 'overview' && <CorpOverview {...p} />}

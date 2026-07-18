@@ -1,18 +1,14 @@
 /**
- * 4-панельный рабочий стол.
- * Панели resizable + collapsible через react-resizable-panels.
+ * Рабочий стол.
+ * Вертикальное меню разделов + единая рабочая область (core) на всю ширину.
  */
 
-import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { usePanelRef } from 'react-resizable-panels'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useWorkspace, WorkspaceProvider } from '@/contexts/WorkspaceContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getSettings } from '@/services/settingsService'
 import { modeAllowed } from '@/config/accessModules'
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
-import { Button } from '@/components/ui/button'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -21,21 +17,14 @@ import { ReconciliationPanel } from './ReconciliationPanel'
 import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
 import { StorePanel } from './StorePanel'
 import { ExportLayerPanel } from './ExportLayerPanel'
-import { ExportPanel } from './ExportPanel'
 import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 import { WorkspaceModeSidebar } from './WorkspaceModeSidebar'
-import { EnergyExportDocsPanel } from './EnergySidePanels'
 import { useWorkspaceSections } from './workspaceSections'
-import {
-  Database, FileOutput,
-  PanelLeftClose, PanelLeftOpen,
-  PanelRightClose, PanelRightOpen,
-} from 'lucide-react'
 
 function WorkspaceContent() {
   // Компактная раскладка (горизонтальные полосы, без вертикального меню режимов)
-  // для телефонов И планшетов ≤1024px — на десктопе два боковых меню + resizable.
+  // для телефонов И планшетов ≤1024px — на десктопе вертикальное меню + core.
   const compact = useMaxWidth(1024)
   const settings = getSettings()
   const hasCredentials = !!settings.stsLogin && !!settings.stsPassword
@@ -48,150 +37,59 @@ function WorkspaceContent() {
 }
 
 function DesktopWorkspace() {
-  const coreRef = usePanelRef()
-  const exportRef = usePanelRef()
-
-  // Панель «Для 1С» по умолчанию свёрнута; core занимает почти всю ширину.
-  const [coreSize, setCoreSize] = useState(97)
-  const [exportSize, setExportSize] = useState(3)
-
-  const ICON = 5
-  const CORE_SIZE = '70%' as const
-  const EXPORT_SIZE = '30%' as const
-  const COLLAPSED_SIZE = '3%' as const
-
-  const { company } = useCompany()
-  const isEnergy = company.profileId === 'energy'
-
-  const { exportDocs, coreMode, lastReconcileResult } = useWorkspace()
+  const { coreMode, lastReconcileResult } = useWorkspace()
   const reconResult = lastReconcileResult as { summary: { totalMstoVolume: number; totalMstoSum: number; totalMstoCount: number; totalTfVolume: number; totalTfSum: number; totalShiftNonCashVolume: number; mstoVsTfVolumeDiff: number; matched: number; mismatch: number; hasErrors: boolean } } | null
   const fmtN = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(n)
 
   return (
-    <div className="h-full min-h-0 overflow-hidden flex flex-col">
-      <WorkspaceToolbar />
+    <div className="h-full min-h-0 overflow-hidden flex">
+      {/* Вертикальное меню разделов — во всю высоту рабочего стола, слева от строки фильтров */}
+      <WorkspaceModeSidebar />
 
-      <div className="flex-1 min-h-0 flex">
-        {/* Вертикальное меню разделов рабочей области (виды учёта + Выгрузка) */}
-        <WorkspaceModeSidebar />
+      {/* === Правая колонка === — строка фильтров сверху, над рабочей областью */}
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+        <WorkspaceToolbar />
 
-        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-w-0">
-        {/* === Core Panel === — первый слой («Документы») вынесен в отдельный раздел /files */}
-        <ResizablePanel
-          panelRef={coreRef}
-          defaultSize="97%"
-          minSize="3%"
-          onResize={(s) => setCoreSize(s.asPercentage)}
-          className="bg-background"
-        >
-          {coreSize <= ICON ? (
-            <div className="h-full flex flex-col items-center py-3 gap-3">
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => coreRef.current?.resize(CORE_SIZE)} title="Развернуть">
-                <PanelLeftOpen className="h-3.5 w-3.5" />
-              </Button>
-              <Database className="h-4 w-4 text-muted-foreground" />
-              <span className="text-xs text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
-                Данные
-              </span>
-            </div>
-          ) : (
-            <div className="h-full flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-                <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  {{ normalize: 'Нормализация', reconcile: 'Сверка данных', management: 'Продажи', operations: 'Управленческий', store: 'Магазин', financial: 'Финансовый учёт', accounting: 'Бухгалтерский учёт', tax: 'Налоговый учёт', export: isEnergy ? 'Выгрузка' : 'Выгрузка в 1С' }[coreMode]}
-                </h2>
-
-                {/* KPI результатов сверки */}
-                {coreMode === 'reconcile' && reconResult && (
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
-                      <span className="text-xs text-muted-foreground">MSTO</span>
-                      <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalMstoVolume)} л</span>
-                      <span className="text-xs text-muted-foreground">{fmtN(reconResult.summary.totalMstoSum)} ₽</span>
-                    </div>
-                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
-                      <span className="text-xs text-muted-foreground">TF</span>
-                      <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalTfVolume)} л</span>
-                    </div>
-                    <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
-                      <span className="text-xs text-muted-foreground">Смены</span>
-                      <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalShiftNonCashVolume)} л</span>
-                    </div>
-                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded border ${reconResult.summary.hasErrors ? 'bg-red-500/5 border-red-500/30' : 'bg-emerald-500/5 border-emerald-500/30'}`}>
-                      <span className="text-xs text-muted-foreground">Δ</span>
-                      <span className={`text-sm font-bold ${Math.abs(reconResult.summary.mstoVsTfVolumeDiff) > 1 ? 'text-red-500' : 'text-emerald-500'}`}>
-                        {reconResult.summary.mstoVsTfVolumeDiff > 0 ? '+' : ''}{fmtN(reconResult.summary.mstoVsTfVolumeDiff)} л
-                      </span>
-                      <span className="text-xs text-muted-foreground">{reconResult.summary.matched}✓{reconResult.summary.mismatch > 0 ? ` ${reconResult.summary.mismatch}✗` : ''}</span>
-                    </div>
-                  </div>
-                )}
-
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => coreRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
-                  <PanelLeftClose className="h-3.5 w-3.5" />
-                </Button>
+        {/* === Рабочая область === — единый слой на всю ширину */}
+        <div className="flex-1 min-h-0 bg-background flex flex-col overflow-hidden">
+          {/* Полоса KPI сверки — показывается только в режиме сверки.
+              Заголовок раздела убран: активный раздел и так виден в меню слева. */}
+          {coreMode === 'reconcile' && reconResult && (
+            <div className="flex items-center justify-end gap-1.5 px-4 py-2.5 border-b border-border">
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
+                <span className="text-xs text-muted-foreground">MSTO</span>
+                <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalMstoVolume)} л</span>
+                <span className="text-xs text-muted-foreground">{fmtN(reconResult.summary.totalMstoSum)} ₽</span>
               </div>
-              <div className="flex-1 overflow-hidden">
-                {coreMode === 'normalize' && <NormalizationPanel />}
-                {coreMode === 'reconcile' && <ReconciliationPanel />}
-                {coreMode === 'management' && <ManagementPanel />}
-                {coreMode === 'operations' && <ManagementPanel mode="operations" />}
-                {coreMode === 'store' && <StorePanel />}
-                {coreMode === 'financial' && <FinancialPanel />}
-                {coreMode === 'accounting' && <AccountingPanel />}
-                {coreMode === 'tax' && <TaxPanel />}
-                {coreMode === 'export' && <ExportLayerPanel />}
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
+                <span className="text-xs text-muted-foreground">TF</span>
+                <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalTfVolume)} л</span>
+              </div>
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-card/50 border border-border/30">
+                <span className="text-xs text-muted-foreground">Смены</span>
+                <span className="text-sm font-semibold">{fmtN(reconResult.summary.totalShiftNonCashVolume)} л</span>
+              </div>
+              <div className={`flex items-center gap-1 px-2 py-0.5 rounded border ${reconResult.summary.hasErrors ? 'bg-red-500/5 border-red-500/30' : 'bg-emerald-500/5 border-emerald-500/30'}`}>
+                <span className="text-xs text-muted-foreground">Δ</span>
+                <span className={`text-sm font-bold ${Math.abs(reconResult.summary.mstoVsTfVolumeDiff) > 1 ? 'text-red-500' : 'text-emerald-500'}`}>
+                  {reconResult.summary.mstoVsTfVolumeDiff > 0 ? '+' : ''}{fmtN(reconResult.summary.mstoVsTfVolumeDiff)} л
+                </span>
+                <span className="text-xs text-muted-foreground">{reconResult.summary.matched}✓{reconResult.summary.mismatch > 0 ? ` ${reconResult.summary.mismatch}✗` : ''}</span>
               </div>
             </div>
           )}
-        </ResizablePanel>
-
-        {/* === Export Panel === — слой ДОКУМЕНТОВ ДЛЯ ЗАГРУЗКИ (фуел: «Для 1С»; energy: «Для учётной системы») */}
-        <>
-          <ResizableHandle withHandle />
-
-          <ResizablePanel
-            panelRef={exportRef}
-            defaultSize="3%"
-            minSize="3%"
-            onResize={(s) => setExportSize(s.asPercentage)}
-            className="bg-muted/60"
-          >
-            {exportSize <= ICON ? (
-              <div className="h-full flex flex-col items-center py-3 gap-3">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => exportRef.current?.resize(EXPORT_SIZE)} title="Развернуть">
-                  <PanelRightOpen className="h-3.5 w-3.5" />
-                </Button>
-                <div className="relative">
-                  <FileOutput className="h-4 w-4 text-muted-foreground" />
-                  {exportDocs.length > 0 && (
-                    <span className="absolute -top-1.5 -right-2 bg-primary text-primary-foreground text-[8px] rounded-full h-3.5 min-w-[14px] flex items-center justify-center px-0.5">
-                      {exportDocs.length}
-                    </span>
-                  )}
-                </div>
-                <span className="text-xs text-muted-foreground font-medium" style={{ writingMode: 'vertical-lr' }}>
-                  {isEnergy ? 'Для учёта' : 'Для 1С'}
-                </span>
-              </div>
-            ) : (
-              <div className="h-full flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-border/50">
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                    {isEnergy ? 'Для учётной системы' : 'Для 1С'}
-                  </h2>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => exportRef.current?.resize(COLLAPSED_SIZE)} title="Свернуть">
-                    <PanelRightClose className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  {isEnergy ? <EnergyExportDocsPanel hideHeader /> : <ExportPanel hideHeader />}
-                </div>
-              </div>
-            )}
-          </ResizablePanel>
-        </>
-        </ResizablePanelGroup>
+          <div className="flex-1 overflow-hidden">
+            {coreMode === 'normalize' && <NormalizationPanel />}
+            {coreMode === 'reconcile' && <ReconciliationPanel />}
+            {coreMode === 'management' && <ManagementPanel />}
+            {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+            {coreMode === 'store' && <StorePanel />}
+            {coreMode === 'financial' && <FinancialPanel />}
+            {coreMode === 'accounting' && <AccountingPanel />}
+            {coreMode === 'tax' && <TaxPanel />}
+            {coreMode === 'export' && <ExportLayerPanel />}
+          </div>
+        </div>
       </div>
     </div>
   )

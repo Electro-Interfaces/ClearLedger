@@ -20,11 +20,7 @@ import {
   Loader2, AlertTriangle, Info, Fuel, TrendingUp, Droplet, FileCheck2, CreditCard, Clock,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { useTabParams } from '@/hooks/useTabParams'
 import { ExportButton } from './analytics/ExportButton'
-import { PeriodRangePicker } from './analytics/PeriodRangePicker'
-import { type Period } from './analytics/periodPresets'
 import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
 import { fmtMoney, fmtMoneyShort, fmtLiters } from '@/services/analyticsService'
 import {
@@ -611,27 +607,6 @@ function TopCards({ cards }: { cards: DashCard[] }) {
   )
 }
 
-// ─── период пункта ───────────────────────────────────────────────────
-function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
-  override: Period | null; sectionFrom: string; sectionTo: string; onChange: (p: Period | null) => void
-}) {
-  if (override) {
-    return (
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
-        <PeriodRangePicker period={override} onChange={onChange} />
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onChange(null)}>← период раздела</Button>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-muted-foreground">Период раздела: <span className="font-mono">{sectionFrom} — {sectionTo}</span></span>
-      <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => onChange({ from: sectionFrom, to: sectionTo })}>Свой период</Button>
-    </div>
-  )
-}
-
 function SectionTitle({ children, hint }: { children: ReactNode; hint?: string }) {
   return (
     <div className="flex items-baseline gap-2 pt-1">
@@ -646,8 +621,8 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [ov, setOv] = useTabParams('overview', { override: null as Period | null })
-  const period = ov.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['fuel-overview', companyId, period.from, period.to],
@@ -714,7 +689,6 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3" data-export-ignore>
         <div className="space-y-1.5">
           <h2 className="flex items-center gap-2 text-base font-semibold"><Fuel className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор продаж топлива</h2>
-          <PeriodOverride override={ov.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => setOv({ override: o })} />
           {data && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
               <span>АЗС: <b className="text-foreground">{nf0.format(data.operational.stations_count ?? 0)}</b></span>

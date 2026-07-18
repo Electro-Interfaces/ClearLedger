@@ -8,7 +8,7 @@
  * прокидывается контекстом во все запросы панели.
  */
 
-import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -16,12 +16,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button'
 import { Loader2, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
-import { PeriodRangePicker, MultiPeriodPicker } from './analytics/PeriodRangePicker'
+import { MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChart'
 import { type Period, buildMoM, isoLocal } from './analytics/periodPresets'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
+import { PanelViewTabs } from './PanelViewTabs'
+import { ViewParamsBar } from './ViewParamsBar'
+import { HorizonControl } from './HorizonControl'
 import {
   getFuelFills, getFuelTimeseries, getFuelSlice, getFuelCompareMulti, getFuelHeatmap,
   getFuelNewCards, getFuelNewCardsList,
@@ -153,30 +157,6 @@ function BucketSelect({ value, onChange }: { value: FuelBucket; onChange: (v: Fu
   )
 }
 
-/** Период пункта: по умолчанию — период раздела; «Свой период» — локальный override. */
-function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
-  override: Period | null
-  sectionFrom: string
-  sectionTo: string
-  onChange: (p: Period | null) => void
-}) {
-  if (override) {
-    return (
-      <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
-        <PeriodRangePicker period={override} onChange={(p) => onChange(p)} />
-        <Button variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => onChange(null)}>← период раздела</Button>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-      <span className="text-xs text-muted-foreground">Период раздела: <span className="font-mono">{sectionFrom} — {sectionTo}</span></span>
-      <Button variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => onChange({ from: sectionFrom, to: sectionTo })}>Свой период</Button>
-    </div>
-  )
-}
-
 /** Мини-график тренда в строке таблицы (SVG-полилиния). */
 function Sparkline({ values }: { values: (number | null)[] }) {
   const w = 60, h = 16
@@ -223,9 +203,10 @@ const SPARK_GROUPS: FuelGroupBy[] = ['station', 'fuel', 'channel', 'pay_type', '
 
 function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [p, patch] = useTabParams('fuel_fills/breakdown', {
-    override: null as Period | null, group: 'station' as FuelGroupBy, rows: 1000,
+    group: 'station' as FuelGroupBy, rows: 1000,
   })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useFills(companyId, period.from, period.to, p.group)
   const n = useFuelNarrow()
   const withSpark = SPARK_GROUPS.includes(p.group)
@@ -275,8 +256,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
   const maxShare = Math.max(...data.lines.map((l) => l.share_pct), 0.01)
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+      <ViewParamsBar>
         <Field label="Разрез"><GroupSelect value={p.group} onChange={(g) => patch({ group: g })} /></Field>
         <Field label="Строк">
           <Select value={String(p.rows)} onValueChange={(v) => patch({ rows: Number(v) })}>
@@ -284,7 +264,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
             <SelectContent>{ROWS_OPTS.map((o) => <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
-      </div>
+      </ViewParamsBar>
       <FillKpis t={t} />
       {data.truncated > 0 && (
         <div className="text-[11px] text-muted-foreground">Показан топ по обороту; ещё {nf0.format(data.truncated)} строк не выведено (сузьте период или фильтры).</div>
@@ -392,23 +372,23 @@ function FuelHeatmap({ companyId, dateFrom, dateTo, metric }: {
 }
 
 function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  const [p, patch] = useTabParams('fuel_fills/time', { override: null as Period | null, metric: 'fills' as FuelMetric })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  const [p, patch] = useTabParams('fuel_fills/time', { metric: 'fills' as FuelMetric })
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useFills(companyId, period.from, period.to, 'hour')
   if (isLoading) return <Loading />
   if (!data || data.lines.length === 0) return <Empty />
   const max = Math.max(...data.lines.map((l) => l.fills), 1)
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+      <ViewParamsBar>
         <Field label="Метрика">
           <Select value={p.metric} onValueChange={(v) => patch({ metric: v as FuelMetric })}>
             <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>{HEAT_METRICS.map((m) => <SelectItem key={m} value={m} className="text-xs">{FUEL_METRIC_LABELS[m]}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
-      </div>
+      </ViewParamsBar>
       <FillKpis t={data.totals} />
       <FuelHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} metric={p.metric} />
       <Card>
@@ -434,7 +414,7 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
 
 /* ────────────────────────── Динамика ────────────────────────── */
 
-const DYN_DEFAULTS = { metric: 'amount' as FuelMetric, seriesSel: '__net__', bucket: 'week' as FuelBucket, override: null as Period | null, yoy: false }
+const DYN_DEFAULTS = { metric: 'amount' as FuelMetric, seriesSel: '__net__', bucket: 'week' as FuelBucket, yoy: false }
 const shiftYearISO = (iso: string, delta: number): string => {
   const d = new Date(iso); d.setFullYear(d.getFullYear() + delta); return isoLocal(d)
 }
@@ -467,7 +447,10 @@ const BUCKET_UNIT: Record<string, string> = { day: 'день', week: 'недел
 function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [p, patch] = useTabParams('fuel_fills/dynamics', DYN_DEFAULTS)
   const [view, setView] = useChartView({ type: 'line' })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
+  const [horizon, setHorizon] = useState<Period | null>(null)
+  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const period = horizon ?? { from: dateFrom, to: dateTo }
   const seriesBy = p.seriesSel === '__net__' ? undefined : (p.seriesSel as FuelGroupBy)
   const n = useFuelNarrow()
 
@@ -491,8 +474,8 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
 
   return (
     <div className="p-4 space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
+        <HorizonControl horizon={horizon} scopeFrom={dateFrom} scopeTo={dateTo} onChange={setHorizon} />
         <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
         <Field label="Разрез"><SeriesSelect value={p.seriesSel} onChange={(v) => patch({ seriesSel: v })} withNet /></Field>
         <Field label="Шаг"><BucketSelect value={p.bucket} onChange={(b) => patch({ bucket: b })} /></Field>
@@ -501,7 +484,7 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
             Год к году
           </Button>
         )}
-      </div>
+      </ViewParamsBar>
       {hasData && !isLoading && (
         <PeriodSummaryKpis
           points={data!.data.map((row) => ({
@@ -580,12 +563,15 @@ function Compare({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom:
   )
 }
 
-const SLICE_DEFAULTS = { bucket: 'month' as FuelBucket, metric: 'amount' as FuelMetric, seriesSel: '__net__', override: null as Period | null, topN: 8 }
+const SLICE_DEFAULTS = { bucket: 'month' as FuelBucket, metric: 'amount' as FuelMetric, seriesSel: '__net__', topN: 8 }
 const SLICE_CHART_MAX = 12
 
 function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [p, patch] = useTabParams('fuel_fills/compare_slice', SLICE_DEFAULTS)
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
+  const [horizon, setHorizon] = useState<Period | null>(null)
+  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const period = horizon ?? { from: dateFrom, to: dateTo }
   const groupBy = p.seriesSel === '__net__' ? undefined : (p.seriesSel as FuelGroupBy)
   const n = useFuelNarrow()
   const [view, setView] = useChartView()
@@ -599,12 +585,12 @@ function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; date
 
   return (
     <div className="space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
+        <HorizonControl horizon={horizon} scopeFrom={dateFrom} scopeTo={dateTo} onChange={setHorizon} />
         <Field label="Нарезка"><BucketSelect value={p.bucket} onChange={(b) => patch({ bucket: b })} /></Field>
         <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
         <Field label="Разрез"><SeriesSelect value={p.seriesSel} onChange={(v) => patch({ seriesSel: v })} withNet /></Field>
-      </div>
+      </ViewParamsBar>
       {isLoading ? <Loading /> : !hasData ? <Empty text="Нет данных за период" /> : (
         <>
           <PeriodSummaryKpis
@@ -659,10 +645,10 @@ function ManualCompare({ companyId, dateFrom, dateTo }: { companyId: string; dat
   return (
     <div className="space-y-4">
       <MultiPeriodPicker periods={periods} onChange={(np) => patch({ periods: np })} anchor={anchor} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
         <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
         <Field label="Разрез"><SeriesSelect value={p.groupBy} onChange={(v) => patch({ groupBy: v as FuelGroupBy })} /></Field>
-      </div>
+      </ViewParamsBar>
       {!ready ? <Empty text="Задайте минимум 2 периода" />
         : isLoading ? <Loading />
         : (error || !data) ? <Empty text="Нет данных для сравнения" />
@@ -951,23 +937,14 @@ export function FuelFillsPanel({ companyId, dateFrom, dateTo }: {
   const [segment, setSegment] = useState<SegmentSel>('all')
   const v = subView(st.sub, { companyId, dateFrom, dateTo })
   const ref = useRef<HTMLDivElement>(null)
+  const scopeSub = useScopeSubtitle()
   return (
     <FuelSegmentCtx.Provider value={segment}>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
-        <div className="flex items-stretch gap-0.5 overflow-x-auto">
-          {SUB_TABS.map((x) => {
-            const on = st.sub === x.k
-            return (
-              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                {x.label}
-              </button>
-            )
-          })}
-        </div>
+        <PanelViewTabs tabs={SUB_TABS} value={st.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Наливы»" />
         <div className="flex items-center gap-2 shrink-0">
           <SegmentToggle value={segment} onChange={setSegment} />
-          <ExportButton title={`Реализация · ${v.title}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
+          <ExportButton title={`Реализация · ${v.title}`} subtitle={scopeSub} getEl={() => ref.current} />
         </div>
       </div>
       {/* key={st.sub} — ремаунт под-вида при смене таба (чистое локальное состояние). */}

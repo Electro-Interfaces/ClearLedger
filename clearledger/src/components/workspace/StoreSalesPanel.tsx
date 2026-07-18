@@ -13,6 +13,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { Kpi } from './analytics/Kpi'
 import { seriesColor } from './analytics/palette'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import {
   getStoreSales, type SalesGroupBy, type SalesCategory, type SalesMarked,
 } from '@/services/storeService'
@@ -56,6 +57,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const [marked, setMarked] = useState<SalesMarked>('all')
   const [q, setQ] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  const scopeSub = useScopeSubtitle()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-sales', companyId, dateFrom, dateTo, groupBy, category, marked, q],
@@ -74,7 +76,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo }: { companyId: st
             Крутите продажи сопутки/общепита по любой группировке. НДС-разрез — для сверки с учётной политикой.
           </p>
         </div>
-        <ExportButton title="Продажи магазина" subtitle={`${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
+        <ExportButton title="Продажи магазина" subtitle={scopeSub} getEl={() => ref.current} />
       </div>
 
       {/* группировки */}

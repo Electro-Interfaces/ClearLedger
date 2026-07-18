@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Kpi } from './analytics/Kpi'
+import { PanelViewTabs } from './PanelViewTabs'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command'
@@ -18,6 +19,8 @@ import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown
 import { exportChargePdf } from '@/services/chargeExport'
 import { BarChart, Bar, LineChart, Line, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useTabParams } from '@/hooks/useTabParams'
+import { useResetOnScopeChange } from '@/hooks/useScopeReset'
+import { ApplyToScope } from './ApplyToScope'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
   getRetailAccounts, getRetailDimensions, getRetailProfile, getRetailAccount, getRetailMarketing, getRetailDashboard,
@@ -713,6 +716,8 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo, initialSegment }: TabP
   const [station, setStation] = useState('all')
   const [minSessions, setMinSessions] = useState('')
   const [search, setSearch] = useState('')
+  // Смена контура обнуляет поиск по клиентам (CLAUDE.md, правило 5).
+  useResetOnScopeChange(() => setSearch(''))
   const [sort, setSort] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'revenue', order: 'desc' })
   const [detail, setDetail] = useState<string | null>(null)
   const p = { companyId, dateFrom, dateTo }
@@ -744,6 +749,11 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo, initialSegment }: TabP
         </Select>
         <SearchableSelect value={region} onChange={setRegion} options={regionOpts} placeholder="Регион" triggerWidth="w-[200px]" />
         <SearchableSelect value={station} onChange={setStation} options={stationOpts} placeholder="Станция" triggerWidth="w-[220px]" />
+        {/* Мостик: поднять сужение в контур — приоритет более узкому (станция). */}
+        <ApplyToScope
+          kind={station !== 'all' ? 'stations' : 'regions'}
+          values={station !== 'all' ? [station] : region !== 'all' ? [region] : []}
+        />
         <input value={minSessions} onChange={(e) => setMinSessions(e.target.value.replace(/\D/g, ''))} placeholder="мин. сессий"
           className="h-8 w-[110px] rounded-md border bg-background px-2 text-xs" inputMode="numeric" />
         <div className="relative">
@@ -917,17 +927,7 @@ export function RetailPanel({ companyId, dateFrom, dateTo }: TabProps) {
         <span className="inline-flex items-center gap-1 text-[11px] rounded-md border border-primary/40 px-2 py-0.5 text-primary/80 shrink-0 my-2" title="Телефоны маскированы, аккаунт = псевдоним">
           <ShieldCheck className="h-3 w-3" />ФЛ · псевдонимы
         </span>
-        <div className="flex items-stretch gap-0.5 overflow-x-auto">
-          {RETAIL_TABS.map((x) => {
-            const on = tab === x.k
-            return (
-              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                {x.label}
-              </button>
-            )
-          })}
-        </div>
+        <PanelViewTabs tabs={RETAIL_TABS} value={tab} onChange={(k) => patch({ sub: k })} label={null} ariaLabel="Виды раздела «Розница»" />
       </div>
       <div className="p-4">
         {tab === 'overview' && <RetailOverviewTab {...p} />}

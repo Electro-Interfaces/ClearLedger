@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
+import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import {
   getLoadedOnlineOrders,
   refreshOnlineOrders,
@@ -106,6 +107,8 @@ export function OnlineOrdersPanel({ companyId, dateFrom, dateTo, stationCode }: 
   const [aggregator, setAggregator] = useState('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
+  // Смена контура делает поиск и страницу бессмысленными (CLAUDE.md, правило 5).
+  useResetOnScopeChange(() => { setSearch(''); setPage(0) })
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const queryParams = useMemo(() => ({ companyId, dateFrom, dateTo, stationCode, limit: 5000 }), [companyId, dateFrom, dateTo, stationCode])

@@ -8,17 +8,19 @@
  * живут в сменных отчётах и приходят готовым блоком discounts_by_channel.
  */
 
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Button } from '@/components/ui/button'
 import { Loader2, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { Kpi } from './analytics/Kpi'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChart'
-import { PeriodRangePicker } from './analytics/PeriodRangePicker'
 import { type Period } from './analytics/periodPresets'
+import { PanelViewTabs } from './PanelViewTabs'
+import { ViewParamsBar } from './ViewParamsBar'
+import { HorizonControl } from './HorizonControl'
 import { useTabParams } from '@/hooks/useTabParams'
 import {
   getFuelTariffGrid, getFuelFills, getFuelPriceDeviations, getFuelPriceTimeseries,
@@ -43,30 +45,6 @@ function exportRows(name: string, columns: string[], rows: (string | number | nu
 }
 function ExportOnlyTable({ name, columns, rows }: { name: string; columns: string[]; rows: (string | number | null)[][] }) {
   return <table hidden aria-hidden {...exportRows(name, columns, rows)} />
-}
-
-/** Период пункта: по умолчанию — период раздела; «Свой период» — локальный override. */
-function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
-  override: Period | null
-  sectionFrom: string
-  sectionTo: string
-  onChange: (p: Period | null) => void
-}) {
-  if (override) {
-    return (
-      <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
-        <PeriodRangePicker period={override} onChange={(p) => onChange(p)} />
-        <Button variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => onChange(null)}>← период раздела</Button>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-      <span className="text-xs text-muted-foreground">Период раздела: <span className="font-mono">{sectionFrom} — {sectionTo}</span></span>
-      <Button variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => onChange({ from: sectionFrom, to: sectionTo })}>Свой период</Button>
-    </div>
-  )
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -131,8 +109,8 @@ function SortTable<T>({ rows, cols, initial, rowKey, exp }: {
 /* ────────────────────── Таб: Прайс-лист (сетка) ────────────────────── */
 
 function PriceGridTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_tariffs/grid', { override: null as Period | null })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-tariff-grid', companyId, period.from, period.to],
     queryFn: () => getFuelTariffGrid({ companyId, dateFrom: period.from, dateTo: period.to }),
@@ -153,9 +131,6 @@ function PriceGridTab({ companyId, dateFrom, dateTo }: TabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      </div>
       <div className="text-xs text-muted-foreground">
         Номинальная цена стеллы ₽/л по реализациям за период. «~» — цена в периоде менялась (диапазон и факт-цена — в подсказке ячейки).
       </div>
@@ -222,8 +197,9 @@ const AVG_CUTS: { v: FuelGroupBy; label: string }[] = [
 ]
 
 function AvgPricesTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_tariffs/avg', { override: null as Period | null, cut: 'station' as FuelGroupBy })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  const [p, patch] = useTabParams('fuel_tariffs/avg', { cut: 'station' as FuelGroupBy })
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-tariff-avg', companyId, period.from, period.to, p.cut],
     queryFn: () => getFuelFills({ companyId, dateFrom: period.from, dateTo: period.to, groupBy: p.cut }),
@@ -243,15 +219,14 @@ function AvgPricesTab({ companyId, dateFrom, dateTo }: TabProps) {
   ]
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+      <ViewParamsBar>
         <Field label="Разрез">
           <Select value={p.cut} onValueChange={(v) => patch({ cut: v as FuelGroupBy })}>
             <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>{AVG_CUTS.map((o) => <SelectItem key={o.v} value={o.v} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
-      </div>
+      </ViewParamsBar>
       <div className="text-xs text-muted-foreground">Факт-цена = Σвыручка / Σлитры за период — где дорого/дёшево продаётся литр.</div>
       {isLoading ? <Loading /> : !data || data.lines.length === 0 ? <Empty text="Нет реализаций за период" /> : (
         <>
@@ -278,8 +253,9 @@ function AvgPricesTab({ companyId, dateFrom, dateTo }: TabProps) {
 /* ────────────────────── Таб: Отклонения цен ────────────────────── */
 
 function DeviationsTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_tariffs/dev', { override: null as Period | null, fuel: 'all' })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  const [p, patch] = useTabParams('fuel_tariffs/dev', { fuel: 'all' })
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-tariff-dev', companyId, period.from, period.to],
     queryFn: () => getFuelPriceDeviations({ companyId, dateFrom: period.from, dateTo: period.to }),
@@ -306,8 +282,7 @@ function DeviationsTab({ companyId, dateFrom, dateTo }: TabProps) {
   ]
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+      <ViewParamsBar>
         <Field label="Топливо">
           <Select value={p.fuel} onValueChange={(v) => patch({ fuel: v })}>
             <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
@@ -317,7 +292,7 @@ function DeviationsTab({ companyId, dateFrom, dateTo }: TabProps) {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </ViewParamsBar>
       <div className="text-xs text-muted-foreground">
         Цена станции vs средняя по сети (по тому же топливу): Δ &gt; 0 — станция дороже сети, Δ &lt; 0 — дешевле.
       </div>
@@ -374,9 +349,12 @@ const DYN_BUCKETS: { v: 'week' | 'month'; label: string }[] = [
 ]
 
 function PriceDynamicsTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_tariffs/dyn', { override: null as Period | null, bucket: 'week' as 'week' | 'month' })
+  const [p, patch] = useTabParams('fuel_tariffs/dyn', { bucket: 'week' as 'week' | 'month' })
   const [view, setView] = useChartView({ type: 'line' })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
+  const [horizon, setHorizon] = useState<Period | null>(null)
+  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const period = horizon ?? { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-tariff-dyn', companyId, period.from, period.to, p.bucket],
     queryFn: () => getFuelPriceTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket }),
@@ -385,8 +363,8 @@ function PriceDynamicsTab({ companyId, dateFrom, dateTo }: TabProps) {
   const format = fuelChartFormat('avg_price')
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+      <ViewParamsBar>
+        <HorizonControl horizon={horizon} scopeFrom={dateFrom} scopeTo={dateTo} onChange={setHorizon} />
         <Field label="Шаг">
           <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
             {DYN_BUCKETS.map((o) => (
@@ -397,7 +375,7 @@ function PriceDynamicsTab({ companyId, dateFrom, dateTo }: TabProps) {
             ))}
           </div>
         </Field>
-      </div>
+      </ViewParamsBar>
       <Card>
         <CardContent className="pt-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -450,21 +428,12 @@ export function FuelTariffsPanel({ companyId, dateFrom, dateTo }: { companyId: s
   const p: TabProps = { companyId, dateFrom, dateTo }
   const ref = useRef<HTMLDivElement>(null)
   const curLabel = FUEL_TARIFF_TABS.find((x) => x.k === t.sub)?.label ?? 'Тарифы'
+  const scopeSub = useScopeSubtitle()
   return (
     <div>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
-        <div className="flex items-stretch gap-0.5 overflow-x-auto">
-          {FUEL_TARIFF_TABS.map((x) => {
-            const on = t.sub === x.k
-            return (
-              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                {x.label}
-              </button>
-            )
-          })}
-        </div>
-        <ExportButton title={`Тарифы АЗС · ${curLabel}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
+        <PanelViewTabs tabs={FUEL_TARIFF_TABS} value={t.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Цены»" />
+        <ExportButton title={`Тарифы АЗС · ${curLabel}`} subtitle={scopeSub} getEl={() => ref.current} />
       </div>
       {/* key={t.sub} — ремаунт под-вида при смене таба (чистое локальное состояние). */}
       <div ref={ref} className="p-4" key={t.sub}>

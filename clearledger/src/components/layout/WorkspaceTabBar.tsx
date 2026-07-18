@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Pin, X } from 'lucide-react'
+import { LayoutGrid, Pin, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
@@ -8,8 +8,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useTabs } from '@/contexts/TabsContext'
 import { resolveTab, describeView } from '@/config/tabRegistry'
 import { cn } from '@/lib/utils'
-
-const HOME = '/'
 
 export function WorkspaceTabBar() {
   const { tabs, pinTab, closeTab, isPinned } = useTabs()
@@ -21,7 +19,9 @@ export function WorkspaceTabBar() {
   const currentPinned = current ? isPinned(current.key) : false
   const canPin = !!current && !currentPinned
 
-  if (tabs.length === 1 && tabs[0].key === HOME && activeKey === HOME) return null
+  // Лента экранов — выделенный постоянный сервис переключения и закрепления
+  // экранов: видна всегда, даже когда открыт единственный «Рабочий стол».
+  if (tabs.length === 0) return null
 
   function close(key: string, isActive: boolean) {
     const nextKey = closeTab(key)
@@ -64,7 +64,13 @@ export function WorkspaceTabBar() {
   }
 
   return (
-    <div className="flex h-10 shrink-0 items-center border-b border-border/60 bg-muted/25 px-2">
+    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card px-3 shadow-soft">
+      {/* Метка зоны — лента экранов: сервис закрепления и переключения между экранами */}
+      <div className="hidden shrink-0 items-center gap-1.5 text-muted-foreground/70 md:flex">
+        <LayoutGrid className="size-3.5" aria-hidden="true" />
+        <span className="text-[11px] font-medium uppercase tracking-wider">Экраны</span>
+      </div>
+      <div className="hidden h-5 w-px shrink-0 bg-border md:block" />
       <ScrollArea className="h-9 min-w-0 flex-1">
         <div role="tablist" aria-label="Закреплённые экраны" className="flex h-9 min-w-max items-center gap-1 pr-2">
           {tabs.map((tab, index) => {

@@ -8,23 +8,25 @@
  * наличные анонимны и в лояльности не участвуют.
  */
 
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Button } from '@/components/ui/button'
 import { Loader2 } from 'lucide-react'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip as RTooltip,
   BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
-import { PeriodRangePicker } from './analytics/PeriodRangePicker'
 import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChart'
 import { type Period } from './analytics/periodPresets'
 import { seriesColor, CHART_SERIES } from './analytics/palette'
 import { useTabParams } from '@/hooks/useTabParams'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
+import { PanelViewTabs } from './PanelViewTabs'
+import { ViewParamsBar } from './ViewParamsBar'
+import { HorizonControl } from './HorizonControl'
 import {
   getFuelRetailOverview, getFuelRetailLoyalty, getFuelHeatmap, getFuelTimeseries,
   FUEL_METRIC_LABELS, fmtFuelMetric, fmtFuelMetricCompact, fmtFuelMetricShort, fuelChartFormat, fmtRub0,
@@ -52,30 +54,6 @@ function ExportOnlyTable({ name, columns, rows }: { name: string; columns: strin
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="flex items-center gap-1.5 text-xs text-muted-foreground">{label}:{children}</label>
-}
-
-/** Период пункта: по умолчанию — период раздела; «Свой период» — локальный override. */
-function PeriodOverride({ override, sectionFrom, sectionTo, onChange }: {
-  override: Period | null
-  sectionFrom: string
-  sectionTo: string
-  onChange: (p: Period | null) => void
-}) {
-  if (override) {
-    return (
-      <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-        <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
-        <PeriodRangePicker period={override} onChange={(p) => onChange(p)} />
-        <Button variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => onChange(null)}>← период раздела</Button>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-      <span className="text-xs text-muted-foreground">Период раздела: <span className="font-mono">{sectionFrom} — {sectionTo}</span></span>
-      <Button variant="outline" size="sm" className="h-7 text-xs px-2" onClick={() => onChange({ from: sectionFrom, to: sectionTo })}>Свой период</Button>
-    </div>
-  )
 }
 
 interface TabProps { companyId: string; dateFrom: string; dateTo: string }
@@ -198,17 +176,14 @@ function WeeklyTooltip({ active, payload, label }: {
 }
 
 function Overview({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_retail/overview', { override: null as Period | null })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useRetailOverview(companyId, period.from, period.to)
   if (isLoading) return <Loading />
   if (!data || data.kpi.fills === 0) return <Empty />
   const k = data.kpi
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Выручка" value={fmtFuelMetricCompact('amount', k.amount) + ' ₽'} accent="success" />
         <KpiCard label="Объём" value={nf0.format(k.liters) + ' л'} accent="info" />
@@ -284,8 +259,9 @@ function FreqTooltip({ active, payload }: { active?: boolean; payload?: readonly
 }
 
 function Loyalty({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_retail/loyalty', { override: null as Period | null, fm: 'cards' as FreqMetric })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  const [p, patch] = useTabParams('fuel_retail/loyalty', { fm: 'cards' as FreqMetric })
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-retail-loyalty', companyId, period.from, period.to],
     queryFn: () => getFuelRetailLoyalty({ companyId, dateFrom: period.from, dateTo: period.to }),
@@ -296,9 +272,6 @@ function Loyalty({ companyId, dateFrom, dateTo }: TabProps) {
   const meta = FREQ_META[p.fm]
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         <KpiCard label="Карт" value={nf0.format(k.cards)} accent="info" hint="уникальных за период" />
         <KpiCard label="Повторных" value={pct1(k.repeat_share_pct)} accent="success" hint={`${nf0.format(k.repeat_cards)} карт с 2+ визитами`} />
@@ -403,8 +376,8 @@ function CheckTooltip({ active, payload }: { active?: boolean; payload?: readonl
 }
 
 function Checks({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_retail/checks', { override: null as Period | null })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useRetailOverview(companyId, period.from, period.to)
   if (isLoading) return <Loading />
   if (!data || data.check_histogram.length === 0) return <Empty />
@@ -413,9 +386,6 @@ function Checks({ companyId, dateFrom, dateTo }: TabProps) {
   const totalCount = hist.reduce((s, b) => s + b.count, 0) || 1
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard label="Чеков" value={nf0.format(k.fills)} />
         <KpiCard label="Медиана чека" value={fmtRub0(k.check_median)} accent="info" hint="половина чеков ниже" />
@@ -533,19 +503,19 @@ function RetailHeatmap({ companyId, dateFrom, dateTo, metric }: TabProps & { met
 }
 
 function TimeTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const [p, patch] = useTabParams('fuel_retail/time', { override: null as Period | null, metric: 'fills' as FuelMetric })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  const [p, patch] = useTabParams('fuel_retail/time', { metric: 'fills' as FuelMetric })
+  // Вид-срез: период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
-        <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
+      <ViewParamsBar>
         <Field label="Метрика">
           <Select value={p.metric} onValueChange={(v) => patch({ metric: v as FuelMetric })}>
             <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>{HEAT_METRICS.map((m) => <SelectItem key={m} value={m} className="text-xs">{FUEL_METRIC_LABELS[m]}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
-      </div>
+      </ViewParamsBar>
       <RetailHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} metric={p.metric} />
     </div>
   )
@@ -557,12 +527,15 @@ const DYN_METRICS: FuelMetric[] = ['amount', 'fills', 'avg_check']
 const DYN_BUCKETS: { value: FuelBucket; label: string }[] = [
   { value: 'day', label: 'День' }, { value: 'week', label: 'Неделя' }, { value: 'month', label: 'Месяц' },
 ]
-const DYN_DEFAULTS = { override: null as Period | null, metric: 'amount' as FuelMetric, bucket: 'week' as FuelBucket }
+const DYN_DEFAULTS = { metric: 'amount' as FuelMetric, bucket: 'week' as FuelBucket }
 
 function Dynamics({ companyId, dateFrom, dateTo }: TabProps) {
   const [p, patch] = useTabParams('fuel_retail/dynamics', DYN_DEFAULTS)
   const [view, setView] = useChartView({ type: 'line' })
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Горизонт анализа: не персистится и сбрасывается при смене периода наверху.
+  const [horizon, setHorizon] = useState<Period | null>(null)
+  useEffect(() => { setHorizon(null) }, [dateFrom, dateTo])
+  const period = horizon ?? { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-retail-timeseries', companyId, period.from, period.to, p.bucket, p.metric],
     queryFn: () => getFuelTimeseries({
@@ -574,8 +547,8 @@ function Dynamics({ companyId, dateFrom, dateTo }: TabProps) {
   const format = fuelChartFormat(p.metric)
   return (
     <div className="p-4 space-y-4">
-      <PeriodOverride override={p.override} sectionFrom={dateFrom} sectionTo={dateTo} onChange={(o) => patch({ override: o })} />
-      <div className="flex flex-wrap items-center gap-3" data-export-ignore>
+      <ViewParamsBar>
+        <HorizonControl horizon={horizon} scopeFrom={dateFrom} scopeTo={dateTo} onChange={setHorizon} />
         <Field label="Метрика">
           <Select value={p.metric} onValueChange={(v) => patch({ metric: v as FuelMetric })}>
             <SelectTrigger className="h-7 w-[170px] text-xs"><SelectValue /></SelectTrigger>
@@ -588,7 +561,7 @@ function Dynamics({ companyId, dateFrom, dateTo }: TabProps) {
             <SelectContent>{DYN_BUCKETS.map((o) => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
-      </div>
+      </ViewParamsBar>
       <Card>
         <CardContent className="pt-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -666,22 +639,13 @@ export function FuelRetailPanel({ companyId, dateFrom, dateTo }: {
   const [st, patch] = useTabParams('fuel_retail', { sub: 'overview' })
   const v = subView(st.sub, { companyId, dateFrom, dateTo })
   const ref = useRef<HTMLDivElement>(null)
+  const scopeSub = useScopeSubtitle()
   return (
     <>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
-        <div className="flex items-stretch gap-0.5 overflow-x-auto">
-          {SUB_TABS.map((x) => {
-            const on = st.sub === x.k
-            return (
-              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                {x.label}
-              </button>
-            )
-          })}
-        </div>
+        <PanelViewTabs tabs={SUB_TABS} value={st.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды раздела «Розница»" />
         <div className="flex items-center gap-2 shrink-0">
-          <ExportButton title={`Частные лица · ${v.title}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
+          <ExportButton title={`Частные лица · ${v.title}`} subtitle={scopeSub} getEl={() => ref.current} />
         </div>
       </div>
       {/* key={st.sub} — ремаунт под-вида при смене таба (чистое локальное состояние). */}

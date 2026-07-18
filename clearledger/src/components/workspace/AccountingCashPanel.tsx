@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Banknote, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { get } from '@/services/apiClient'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }).format(n)
@@ -103,6 +104,7 @@ function Kpi({ label, value, sub, accent }: { label: string; value: string; sub?
 export function AccountingCashPanel({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [openStation, setOpenStation] = useState<number | null>(null)
+  const scopeSub = useScopeSubtitle()
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-cash-collections', dateFrom, dateTo],
     queryFn: () => get<CashCollections>('/api/fuel/cash-collections', { date_from: dateFrom, date_to: dateTo }),
@@ -126,7 +128,7 @@ export function AccountingCashPanel({ dateFrom, dateTo }: { dateFrom: string; da
         <Banknote className="h-5 w-5 text-primary" />
         <h1 className="text-xl font-semibold">Касса и инкассация</h1>
         <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
-        <ExportButton title="Касса и инкассация" subtitle={`${dateFrom} — ${dateTo}`} getEl={() => rootRef.current} />
+        <ExportButton title="Касса и инкассация" subtitle={scopeSub} getEl={() => rootRef.current} />
       </div>
       <p className="max-w-3xl text-sm text-muted-foreground">
         Наличный контур из money-секции сменных отчётов. «Выручка» — вся наличка ККТ

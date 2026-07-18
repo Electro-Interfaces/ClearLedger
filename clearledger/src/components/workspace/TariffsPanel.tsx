@@ -9,6 +9,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Kpi } from './analytics/Kpi'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
+import { PanelViewTabs } from './PanelViewTabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { useTabParams } from '@/hooks/useTabParams'
@@ -277,21 +279,12 @@ export function TariffsPanel({ companyId, dateFrom, dateTo }: TabProps) {
   const p: TabProps = { companyId, dateFrom, dateTo }
   const ref = useRef<HTMLDivElement>(null)
   const curLabel = TARIFF_TABS.find((x) => x.k === t.sub)?.label ?? 'Тарифы'
+  const scopeSub = useScopeSubtitle()
   return (
     <div>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
-        <div className="flex items-stretch gap-0.5 overflow-x-auto">
-          {TARIFF_TABS.map((x) => {
-            const on = t.sub === x.k
-            return (
-              <button key={x.k} type="button" onClick={() => patch({ sub: x.k })}
-                className={`whitespace-nowrap border-b-2 -mb-px px-3 py-2.5 text-[13px] transition-colors ${on ? 'border-primary text-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}`}>
-                {x.label}
-              </button>
-            )
-          })}
-        </div>
-        <ExportButton title={`Тарифы ЭЗС · ${curLabel}`} subtitle={`Период: ${dateFrom} — ${dateTo}`} getEl={() => ref.current} />
+        <PanelViewTabs tabs={TARIFF_TABS} value={t.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Тарифы»" />
+        <ExportButton title={`Тарифы ЭЗС · ${curLabel}`} subtitle={scopeSub} getEl={() => ref.current} />
       </div>
       <div ref={ref} className="p-4" key={t.sub}>
         {t.sub === 'grid' && <PriceGrid {...p} />}

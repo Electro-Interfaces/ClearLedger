@@ -14,9 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DualScrollX } from '@/components/common/DualScrollX'
 import { PaginationWrapper } from '@/components/common/PaginationWrapper'
-import { PeriodRangePicker } from './analytics/PeriodRangePicker'
-import { type Period } from './analytics/periodPresets'
 import { useTabParams } from '@/hooks/useTabParams'
+import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { loadXlsx } from '@/utils/xlsxLoader'
 import { getChargeSessionRows, fmtMoney, type ChargeSessionRow } from '@/services/analyticsService'
 
@@ -59,7 +58,6 @@ function rowVal(r: ChargeSessionRow, k: SortKey): string | number {
 }
 
 const DEFAULTS = {
-  override: null as Period | null,
   userType: 'all', region: ALL, connector: ALL, result: ALL, paid: 'all',
   sortKey: 'started_at' as SortKey, sortDir: 'desc' as 'asc' | 'desc',
 }
@@ -105,10 +103,13 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
   const [p, patch] = useTabParams('cs_list', DEFAULTS)
-  const period = p.override ?? { from: dateFrom, to: dateTo }
+  // Вид-срез (реестр за период): период — только из контура рабочей области.
+  const period = { from: dateFrom, to: dateTo }
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  // Смена контура делает поиск и страницу бессмысленными (CLAUDE.md, правило 5).
+  useResetOnScopeChange(() => { setSearchInput(''); setSearch(''); setPage(1) })
   const [pageSize, setPageSize] = useState(50)
   const [exporting, setExporting] = useState(false)
 
@@ -215,18 +216,6 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
     <div className="space-y-3 p-4">
       {/* тулбар */}
       <div className="flex flex-wrap items-center gap-2" data-export-ignore>
-        {p.override ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wider text-amber-600/70 dark:text-amber-400/70">Свой период</span>
-            <PeriodRangePicker period={p.override} onChange={(o) => patch({ override: o })} />
-            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => patch({ override: null })}>← период раздела</Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Период: <span className="font-mono">{dateFrom} — {dateTo}</span></span>
-            <Button variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => patch({ override: { from: dateFrom, to: dateTo } })}>Свой период</Button>
-          </div>
-        )}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} aria-label="Поиск транзакций" placeholder="Поиск: станция, клиент, ID…" className="h-8 w-[240px] pl-8 text-xs" />
