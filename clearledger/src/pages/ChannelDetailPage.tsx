@@ -1941,10 +1941,13 @@ function DocumentsTable({ type, items, tankThreshold = 10 }: { type: string; ite
   }, [])
 
   function docSize(doc: ReturnType<typeof getAllLoadedDocs>[number]): string | null {
-    // Литры топлива из data — для ТТН и аналогов
+    // Литры топлива из data — для ТТН и аналогов.
+    // Ноль НЕ показываем: у сменных отчётов totalLiters пустой (объём лежит в
+    // psm.total), и колонка «Размер» выдавала «0 л» на смену, где по факту
+    // тысячи литров. Лучше честный размер документа, чем ложный ноль.
     const d = doc.data as any
-    if (typeof d?.totalLiters === 'number') return `${d.totalLiters.toFixed(0)} л`
-    if (typeof d?.fact?.volume === 'number') return `${Number(d.fact.volume).toFixed(0)} л`
+    if (typeof d?.totalLiters === 'number' && d.totalLiters > 0) return `${d.totalLiters.toFixed(0)} л`
+    if (typeof d?.fact?.volume === 'number' && Number(d.fact.volume) > 0) return `${Number(d.fact.volume).toFixed(0)} л`
     // Размер JSON как фолбэк
     try {
       const bytes = JSON.stringify(doc.data).length
