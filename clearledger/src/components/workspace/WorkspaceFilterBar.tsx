@@ -63,16 +63,46 @@ const PERIOD_QUICK: { label: string; value: () => { from: string; to: string } }
 ]
 
 /**
- * Чип «Период» — при нажатии открывает компактный поповер ТОЛЬКО с функциями
- * периода (быстрые пресеты + календарь диапазоном), а не весь фильтр. Изменения
- * применяются сразу через setPeriod.
+ * Чип «Период» — поповер только с функциями периода.
+ *
+ * Работает по модели диалога «Настройка периода» в 1С: пользователь набирает
+ * период в ЧЕРНОВИКЕ и подтверждает кнопкой. До подтверждения контур не
+ * меняется, поэтому таблицы под окном не перезапрашиваются на каждый клик, а
+ * «Отмена» действительно отменяет.
+ *
+ * Раньше период применялся на каждое действие, и в режиме диапазона это давало
+ * эффект «выбор слетает»: первый клик по дате отдаёт {from, to: undefined},
+ * старый код записывал его как {from: X, to: X} — интервал схлопывался в один
+ * день, а следующий клик начинал новый диапазон.
  */
 function PeriodControl() {
   const { period, setPeriod } = useFilters()
   const [open, setOpen] = useState(false)
+  // Черновик: undefined-конец = «начало выбрано, ждём вторую дату».
+  const [draft, setDraft] = useState<{ from?: Date; to?: Date }>(() => ({
+    from: parseLocal(period.from),
+    to: parseLocal(period.to),
+  }))
+
+  function openChange(next: boolean) {
+    // При каждом открытии черновик берётся из текущего контура: незавершённый
+    // выбор прошлого раза не должен «залипать».
+    if (next) setDraft({ from: parseLocal(period.from), to: parseLocal(period.to) })
+    setOpen(next)
+  }
+
+  const complete = !!draft.from && !!draft.to
+  const changed = complete
+    && (isoLocal(draft.from!) !== period.from || isoLocal(draft.to!) !== period.to)
+
+  function apply() {
+    if (!complete) return
+    setPeriod({ from: isoLocal(draft.from!), to: isoLocal(draft.to!) })
+    setOpen(false)
+  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={openChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -91,16 +121,20 @@ function PeriodControl() {
         <div className="flex max-sm:flex-col">
           {/* Быстрые пресеты — столбцом слева */}
           <div className="flex flex-col gap-0.5 border-border p-2 max-sm:border-b sm:w-44 sm:border-r">
+            {/* Пресет заполняет черновик и НЕ закрывает окно: часто нужно взять
+                «прошлый месяц» и подвинуть одну границу. Подсветка — по
+                черновику, чтобы было видно, что именно набрано. */}
             {PERIOD_QUICK.map((preset) => {
               const val = preset.value()
-              const isActive = val.from === period.from && val.to === period.to
+              const isActive = complete
+                && val.from === isoLocal(draft.from!) && val.to === isoLocal(draft.to!)
               return (
                 <Button
                   key={preset.label}
                   variant={isActive ? 'default' : 'ghost'}
                   size="sm"
                   className="h-8 w-full justify-start text-xs font-medium"
-                  onClick={() => { setPeriod(preset.value()); setOpen(false) }}
+                  onClick={() => setDraft({ from: parseLocal(val.from), to: parseLocal(val.to) })}
                 >
                   {preset.label}
                 </Button>
@@ -116,9 +150,9 @@ function PeriodControl() {
                 Начало
                 <Input
                   type="date"
-                  value={period.from}
-                  max={period.to}
-                  onChange={(e) => { if (e.target.value) setPeriod({ ...period, from: e.target.value }) }}
+                  value={draft.from ? isoLocal(draft.from) : ''}
+                  max={draft.to ? isoLocal(draft.to) : undefined}
+                  onChange={(e) => { if (e.target.value) setDraft((d) => ({ ...d, from: parseLocal(e.target.value) })) }}
                   className="h-9 text-sm font-medium text-foreground"
                 />
               </label>
@@ -127,30 +161,53 @@ function PeriodControl() {
                 Конец
                 <Input
                   type="date"
-                  value={period.to}
-                  min={period.from}
-                  onChange={(e) => { if (e.target.value) setPeriod({ ...period, to: e.target.value }) }}
+                  value={draft.to ? isoLocal(draft.to) : ''}
+                  min={draft.from ? isoLocal(draft.from) : undefined}
+                  onChange={(e) => { if (e.target.value) setDraft((d) => ({ ...d, to: parseLocal(e.target.value) })) }}
                   className="h-9 text-sm font-medium text-foreground"
                 />
               </label>
             </div>
 
+            {/* Диапазон отдаётся календарю как есть, включая незавершённый
+                («выбрано начало»). Ничего не достраиваем за пользователя —
+                именно это раньше схлопывало интервал в один день. */}
             <Calendar
               mode="range"
               captionLayout="dropdown"
               startMonth={new Date(2023, 0)}
               endMonth={new Date(new Date().getFullYear() + 1, 11)}
-              defaultMonth={parseLocal(period.from)}
-              selected={{ from: parseLocal(period.from), to: parseLocal(period.to) }}
-              onSelect={(range) => {
-                if (range?.from) setPeriod({ from: isoLocal(range.from), to: isoLocal(range.to ?? range.from) })
-              }}
+              defaultMonth={draft.from ?? parseLocal(period.from)}
+              selected={{ from: draft.from, to: draft.to }}
+              onSelect={(range) => setDraft({ from: range?.from, to: range?.to })}
               numberOfMonths={2}
             />
 
             <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2.5">
-              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Выбрано</span>
-              <span className="text-sm font-semibold text-foreground">{fmtPeriod(period.from, period.to)}</span>
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Выбрано</div>
+                <div className="truncate text-sm font-semibold text-foreground">
+                  {complete
+                    ? fmtPeriod(isoLocal(draft.from!), isoLocal(draft.to!))
+                    : draft.from
+                      ? 'Укажите конец периода'
+                      : 'Период не выбран'}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setOpen(false)}>
+                  Отмена
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={!complete}
+                  onClick={apply}
+                  title={complete ? undefined : 'Выберите обе границы периода'}
+                >
+                  {changed ? 'Применить' : 'Готово'}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

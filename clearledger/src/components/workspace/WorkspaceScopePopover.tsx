@@ -1,6 +1,6 @@
 /**
  * Селектор «Область учёта» (сеть для анализа) — отдельное модальное окно.
- * Идеологически как выбор периода: только функции выбора сети, применяется
+ * Идеологически как выбор периода: только функции выбора сети, выбор
  * сразу через контекст фильтров (без общей модалки настроек).
  *
  * Три зоны: Регионы · Станции/Точки · «Выбрано» (наглядная сводка отобранного).
@@ -52,11 +52,56 @@ export function WorkspaceScopeControl() {
   const { company, companyId } = useCompany()
   const isEnergy = company.profileId === 'energy'
   const {
-    regionIds, toggleRegion, setRegionIds,
-    stationCodes, toggleStationCode, setStationCodes,
-    locationIds, toggleLocation, setLocationIds,
+    regionIds, setRegionIds,
+    stationCodes, setStationCodes,
+    locationIds, setLocationIds,
   } = useFilters()
   const locations = useLocations()
+
+  /**
+   * Черновик выбора (модель диалога 1С: набрал — подтвердил).
+   *
+   * Раньше каждый чекбокс писался прямо в контур: при 400+ станциях это
+   * означало перезапрос данных на каждый клик и невозможность отменить —
+   * «Готово» лишь закрывало окно, а изменения уже произошли.
+   */
+  const [draftRegions, setDraftRegions] = useState<string[]>(regionIds)
+  const [draftStations, setDraftStations] = useState<string[]>(stationCodes)
+  const [draftLocations, setDraftLocations] = useState<string[]>(locationIds)
+
+  function openChange(next: boolean) {
+    // Открытие всегда начинается от текущего контура — незавершённый выбор
+    // прошлого раза не «залипает».
+    if (next) {
+      setDraftRegions(regionIds)
+      setDraftStations(stationCodes)
+      setDraftLocations(locationIds)
+      setRegionQuery('')
+      setStationQuery('')
+    }
+    setOpen(next)
+  }
+
+  function apply() {
+    setRegionIds(draftRegions)
+    setStationCodes(draftStations)
+    setLocationIds(draftLocations)
+    setOpen(false)
+  }
+
+  const draftDirty = draftRegions.length !== regionIds.length
+    || draftStations.length !== stationCodes.length
+    || draftLocations.length !== locationIds.length
+    || draftRegions.some((r) => !regionIds.includes(r))
+    || draftStations.some((s) => !stationCodes.includes(s))
+    || draftLocations.some((l) => !locationIds.includes(l))
+
+  const toggleDraftRegion = (name: string) =>
+    setDraftRegions((prev) => (prev.includes(name) ? prev.filter((r) => r !== name) : [...prev, name]))
+  const toggleDraftStation = (code: number | string) =>
+    setDraftStations((prev) => { const k = String(code); return prev.includes(k) ? prev.filter((c) => c !== k) : [...prev, k] })
+  const toggleDraftLocation = (id: string) =>
+    setDraftLocations((prev) => (prev.includes(id) ? prev.filter((l) => l !== id) : [...prev, id]))
 
   const { data: dimensions } = useQuery({
     queryKey: ['charge-dimensions', companyId],
@@ -64,9 +109,10 @@ export function WorkspaceScopeControl() {
     enabled: isEnergy && open,
   })
 
-  const regionSet = useMemo(() => new Set(regionIds), [regionIds])
-  const stationCodeSet = useMemo(() => new Set(stationCodes), [stationCodes])
-  const locationSet = useMemo(() => new Set(locationIds), [locationIds])
+  // Внутри окна всё считается по черновику; чип снаружи — по контуру.
+  const regionSet = useMemo(() => new Set(draftRegions), [draftRegions])
+  const stationCodeSet = useMemo(() => new Set(draftStations), [draftStations])
+  const locationSet = useMemo(() => new Set(draftLocations), [draftLocations])
 
   // Регионы со счётчиком (сессии для energy; число точек для fuel).
   // Отсекаем мусорные записи без букв (напр. «12») — это не регион.
@@ -108,37 +154,41 @@ export function WorkspaceScopeControl() {
   const filteredLocations = useMemo(() => {
     const q = stationQuery.trim().toLowerCase()
     return locations
-      .filter((l) => regionIds.length === 0 || regionSet.has(locationRegion(l)))
+      .filter((l) => draftRegions.length === 0 || regionSet.has(locationRegion(l)))
       .filter((l) => !q || l.name.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
-  }, [locations, stationQuery, regionIds.length, regionSet])
+  }, [locations, stationQuery, draftRegions.length, regionSet])
 
-  const selectedCount = isEnergy ? stationCodes.length : locationIds.length
-  const scopeCount = regionIds.length + selectedCount
+  const selectedCount = isEnergy ? draftStations.length : draftLocations.length
+  const scopeCount = draftRegions.length + selectedCount
 
-  const scopeLabel = useMemo(() => {
-    if (isEnergy && stationCodes.length > 0) return stationCodes.length === 1 ? '1 ЭЗС' : `ЭЗС: ${stationCodes.length}`
-    if (locationIds.length === 1) return locations.find((l) => l.id === locationIds[0])?.name ?? '1 точка'
-    if (locationIds.length > 1) return `Точек: ${locationIds.length}`
-    if (regionIds.length === 1) return regionIds[0]
-    if (regionIds.length > 1) return `Регионов: ${regionIds.length}`
+  function describeScope(regions: string[], stations: string[], locs: string[]): string {
+    if (isEnergy && stations.length > 0) return stations.length === 1 ? '1 ЭЗС' : `ЭЗС: ${stations.length}`
+    if (locs.length === 1) return locations.find((l) => l.id === locs[0])?.name ?? '1 точка'
+    if (locs.length > 1) return `Точек: ${locs.length}`
+    if (regions.length === 1) return regions[0]
+    if (regions.length > 1) return `Регионов: ${regions.length}`
     return 'Вся сеть'
-  }, [isEnergy, stationCodes, locationIds, regionIds, locations])
+  }
+
+  // Чип снаружи — применённый контур; подвал окна — черновик.
+  const scopeLabel = describeScope(regionIds, stationCodes, locationIds)
+  const draftScopeLabel = describeScope(draftRegions, draftStations, draftLocations)
 
   function resetAll() {
-    setRegionIds([]); setStationCodes([]); setLocationIds([])
+    setDraftRegions([]); setDraftStations([]); setDraftLocations([])
   }
   function selectAllVisible() {
-    if (isEnergy) setStationCodes([...new Set([...stationCodes, ...energyStations.map((s) => s.code)])])
-    else setLocationIds([...new Set([...locationIds, ...filteredLocations.map((l) => l.id)])])
+    if (isEnergy) setDraftStations([...new Set([...draftStations, ...energyStations.map((s) => s.code)])])
+    else setDraftLocations([...new Set([...draftLocations, ...filteredLocations.map((l) => l.id)])])
   }
   function clearVisible() {
     if (isEnergy) {
       const visible = new Set(energyStations.map((s) => s.code))
-      setStationCodes(stationCodes.filter((c) => !visible.has(c)))
+      setDraftStations(draftStations.filter((c) => !visible.has(c)))
     } else {
       const visible = new Set(filteredLocations.map((l) => l.id))
-      setLocationIds(locationIds.filter((id) => !visible.has(id)))
+      setDraftLocations(draftLocations.filter((id) => !visible.has(id)))
     }
   }
 
@@ -164,7 +214,7 @@ export function WorkspaceScopeControl() {
         </span>
       </button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={openChange}>
         <DialogContent
           showCloseButton={false}
           className="flex h-[min(680px,calc(100vh-2rem))] w-[calc(100vw-2rem)] max-w-4xl flex-col gap-0 overflow-hidden rounded-xl p-0"
@@ -177,7 +227,7 @@ export function WorkspaceScopeControl() {
               <div>
                 <DialogTitle className="text-base">Область учёта — сеть для анализа</DialogTitle>
                 <DialogDescription className="text-xs">
-                  Ограничьте анализ регионами и/или конкретными {isEnergy ? 'станциями ЭЗС' : 'точками'}. Изменения применяются сразу.
+                  Ограничьте анализ регионами и/или конкретными {isEnergy ? 'станциями ЭЗС' : 'точками'}. Выбор применяется по кнопке — до неё цифры на экране не меняются.
                 </DialogDescription>
               </div>
             </div>
@@ -202,7 +252,7 @@ export function WorkspaceScopeControl() {
                     <p className="px-2 py-6 text-center text-xs text-muted-foreground">{dimensions || !isEnergy ? 'Регионы не найдены' : 'Загрузка…'}</p>
                   ) : filteredRegions.map((region) => (
                     <label key={region.name} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted/70">
-                      <Checkbox checked={regionSet.has(region.name)} onCheckedChange={() => toggleRegion(region.name)} />
+                      <Checkbox checked={regionSet.has(region.name)} onCheckedChange={() => toggleDraftRegion(region.name)} />
                       <span className="min-w-0 flex-1 truncate">{region.name}</span>
                     </label>
                   ))}
@@ -241,7 +291,7 @@ export function WorkspaceScopeControl() {
                       <p className="px-2 py-8 text-center text-xs text-muted-foreground">{dimensions ? 'Станции не найдены' : 'Загрузка…'}</p>
                     ) : energyStations.map((station) => (
                       <label key={station.code} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm hover:bg-muted/70">
-                        <Checkbox checked={stationCodeSet.has(station.code)} onCheckedChange={() => toggleStationCode(station.code)} />
+                        <Checkbox checked={stationCodeSet.has(station.code)} onCheckedChange={() => toggleDraftStation(station.code)} />
                         <span className="min-w-0 flex-1 truncate">{station.name}</span>
                         <span className="w-16 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">№{station.code}</span>
                       </label>
@@ -251,7 +301,7 @@ export function WorkspaceScopeControl() {
                       <p className="px-2 py-8 text-center text-xs text-muted-foreground">Точки не найдены</p>
                     ) : filteredLocations.map((location) => (
                       <label key={location.id} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm hover:bg-muted/70">
-                        <Checkbox checked={locationSet.has(location.id)} onCheckedChange={() => toggleLocation(location.id)} />
+                        <Checkbox checked={locationSet.has(location.id)} onCheckedChange={() => toggleDraftLocation(location.id)} />
                         <span className="min-w-0 flex-1 truncate">{location.name}</span>
                         {locationRegion(location) ? (
                           <span className="shrink-0 text-[11px] text-muted-foreground">{locationRegion(location)}</span>
@@ -284,7 +334,7 @@ export function WorkspaceScopeControl() {
                           <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Регионы · {regionIds.length}</span>
                           <div className="flex flex-wrap gap-1.5">
                             {regionIds.map((r) => (
-                              <SelectedChip key={r} label={r} onRemove={() => toggleRegion(r)} />
+                              <SelectedChip key={r} label={r} onRemove={() => toggleDraftRegion(r)} />
                             ))}
                           </div>
                         </div>
@@ -294,7 +344,7 @@ export function WorkspaceScopeControl() {
                           <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Станции · {stationCodes.length}</span>
                           <div className="flex flex-wrap gap-1.5">
                             {stationCodes.map((c) => (
-                              <SelectedChip key={c} label={stationNameByCode.get(c) ?? `№${c}`} sub={`№${c}`} onRemove={() => toggleStationCode(c)} />
+                              <SelectedChip key={c} label={stationNameByCode.get(c) ?? `№${c}`} sub={`№${c}`} onRemove={() => toggleDraftStation(c)} />
                             ))}
                           </div>
                         </div>
@@ -304,7 +354,7 @@ export function WorkspaceScopeControl() {
                           <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Точки · {locationIds.length}</span>
                           <div className="flex flex-wrap gap-1.5">
                             {locationIds.map((id) => (
-                              <SelectedChip key={id} label={locations.find((l) => l.id === id)?.name ?? id} onRemove={() => toggleLocation(id)} />
+                              <SelectedChip key={id} label={locations.find((l) => l.id === id)?.name ?? id} onRemove={() => toggleDraftLocation(id)} />
                             ))}
                           </div>
                         </div>
@@ -323,11 +373,16 @@ export function WorkspaceScopeControl() {
             </Button>
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground">
-                Выбрано: <span className="font-semibold text-foreground">{scopeLabel}</span>
+                {/* Счёт по черновику: показываем то, что человек набрал сейчас,
+                    а не то, что применено. */}
+                Выбрано: <span className="font-semibold text-foreground">{draftScopeLabel}</span>
               </span>
-              <Button size="sm" className="h-9 rounded-lg" onClick={() => setOpen(false)}>
+              <Button variant="ghost" size="sm" className="h-9 rounded-lg" onClick={() => setOpen(false)}>
+                Отмена
+              </Button>
+              <Button size="sm" className="h-9 rounded-lg" onClick={apply}>
                 <Check data-icon="inline-start" />
-                Готово
+                {draftDirty ? 'Применить' : 'Готово'}
               </Button>
             </div>
           </DialogFooter>
