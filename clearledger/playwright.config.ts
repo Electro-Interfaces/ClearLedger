@@ -21,7 +21,14 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' } },
+    // Логинится один раз и складывает сессию в e2e/.auth/admin.json.
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    {
+      name: 'chromium',
+      testIgnore: /auth\.setup\.ts/,
+      use: { browserName: 'chromium', storageState: 'e2e/.auth/admin.json' },
+      dependencies: ['setup'],
+    },
   ],
   webServer: {
     command: 'npm run dev',

@@ -39,3 +39,5 @@ undefined/
 # Артефакты Playwright (скриншоты и трейсы падений)
 test-results/
 playwright-report/
+# Сохранённая сессия e2e — содержит токен, не коммитить
+e2e/.auth/
