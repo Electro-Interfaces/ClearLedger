@@ -480,6 +480,9 @@ export interface ShiftDashboardData {
   averages?: { tx_count: number; avg_check: number; avg_fill_liters: number; ops_per_day: number }
   charts: { daily: DashDaily[]; by_fuel: DashFuelItem[] }
   trends?: { revenue: DashTrend; volume: DashTrend; shifts: DashTrend }
+  /** Границы базы сравнения — период той же длины перед текущим. Приходит
+   *  вместе с trends: Δ% без явной базы читать нельзя. */
+  prev_period?: { from: string; to: string }
 }
 export const getShiftDashboard = (dateFrom: string, dateTo: string, opts?: { stations?: string[]; compare?: boolean }) =>
   get<ShiftDashboardData>('/api/fuel/shift-dashboard', {

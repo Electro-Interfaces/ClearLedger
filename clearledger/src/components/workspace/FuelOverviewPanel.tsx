@@ -26,6 +26,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ExportButton } from './analytics/ExportButton'
 import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
 import { fmtMoney, fmtMoneyShort, fmtLiters } from '@/services/analyticsService'
+import { formatPeriod } from '@/lib/formatDate'
 import {
   getShiftDashboard, getFuelReadiness, getCostingMargin,
   type ShiftDashboardData, type DashTrend, type DashStation, type DashOnboarding,
@@ -109,7 +110,7 @@ function CountCard({ label, value, hint }: { label: string; value: string; hint?
 }
 
 /** KPI-плитка с Δ% к прошлому периоду + спарклайн (контракт data-kpi: первые 3 ребёнка). */
-function KpiCard({ k }: { k: Kpi }) {
+function KpiCard({ k, baseline }: { k: Kpi; baseline?: string }) {
   const showDelta = k.delta_pct != null && Math.abs(k.delta_pct) <= 500
   const up = (k.delta_pct ?? 0) >= 0
   return (
@@ -118,7 +119,10 @@ function KpiCard({ k }: { k: Kpi }) {
       <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight">{kpiText(k)}</div>
       <div className="mt-0.5 text-xs text-muted-foreground">{k.hint ?? ''}</div>
       {showDelta && (
-        <span className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-red-600/90 dark:text-red-400/90'}`}>
+        // База сравнения — на самом проценте: она относится только к нему, а не
+        // ко всей строке карточек (у части KPI своего Δ нет вовсе).
+        <span title={baseline && `Изменение к предыдущему периоду: ${baseline}`}
+          className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-red-600/90 dark:text-red-400/90'}`}>
           {up ? '▲' : '▼'}{Math.abs(k.delta_pct!).toFixed(1)}%
         </span>
       )}
@@ -717,22 +721,17 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
   const topStations = stations.slice(0, 5)
   const bottomStations = stations.length > 5 ? stations.filter((s) => s.revenue > 0).slice(-5).reverse() : []
 
+  // Период, с которым сравниваются Δ% на карточках — в подсказку самих Δ.
+  const baseline = data?.prev_period
+    ? formatPeriod(data.prev_period.from, data.prev_period.to)
+    : undefined
+
   return (
     <div className="p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3" data-export-ignore>
-        <div className="space-y-1.5">
-          <h2 className="flex items-center gap-2 text-base font-semibold"><Fuel className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор продаж топлива</h2>
-          {data && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              <span>АЗС: <b className="text-foreground">{nf0.format(data.operational.stations_count ?? 0)}</b></span>
-              <span>Смен: <b className="text-foreground">{nf0.format(data.operational.shifts_count)}</b></span>
-              <span>Дней: <b className="text-foreground">{nf0.format(data.period.days)}</b></span>
-              <span className="text-muted-foreground/70">{data.trends
-                ? 'сравнение с предыдущим периодом той же длины'
-                : 'без сравнения с прошлым периодом'}</span>
-            </div>
-          )}
-        </div>
+        {/* Счётчики (АЗС, смены, дни) не дублируем: они ниже карточками.
+            База сравнения переехала к строке KPI — там, где живут её Δ%. */}
+        <h2 className="flex items-center gap-2 text-base font-semibold"><Fuel className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор продаж топлива</h2>
         <ExportButton title="Обзор продаж топлива" subtitle={`Период: ${period.from} — ${period.to}`} getEl={() => ref.current} />
       </div>
 
@@ -762,9 +761,10 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
               <CountCard label="ТТН принято" value={nf0.format(data.receipts.ttn_count)} hint="сливов топлива" />
             </div>
 
-            {/* ключевые KPI с Δ% + спарклайн */}
+            {/* ключевые KPI с Δ% + спарклайн. База сравнения — в подсказке
+                самого Δ (см. KpiCard). */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-              {kpis.map((k) => <KpiCard key={k.label} k={k} />)}
+              {kpis.map((k) => <KpiCard key={k.label} k={k} baseline={baseline} />)}
             </div>
 
             {/* средние показатели АЗС (по реализациям) */}

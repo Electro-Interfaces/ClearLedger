@@ -123,6 +123,9 @@ class FuelDashboardService:
             c_shifts, c_sales, c_cash, c_receipts = await self._load(cmp_from, cmp_to, station_ids)
             c_kpis = self._kpis(c_shifts, c_sales, c_cash, c_receipts, fuel_name)
             result["trends"] = self._trends(kpis, c_kpis)
+            # Границы базы сравнения отдаём наружу: Δ% без явной базы — скрытое
+            # состояние, а фронт иначе повторял бы эту же арифметику у себя.
+            result["prev_period"] = {"from": cmp_from.isoformat(), "to": cmp_to.isoformat()}
         return result
 
     async def sales_channels(self, date_from: date, date_to: date,

@@ -21,19 +21,8 @@ import { WorkspaceScopeControl } from './WorkspaceScopePopover'
 import { ViewHistoryMenu } from './ViewHistoryMenu'
 import { ActiveFilterChips } from '@/components/common/ActiveFilterChips'
 import { AdvancedOnly } from '@/components/common/AdvancedOnly'
+import { formatPeriod as fmtPeriod } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
-
-const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
-
-/** «30 июн – 17 июл 2026» — месяц словом, год один раз (или у каждой даты, если разные). */
-function fmtPeriod(fromIso: string, toIso: string): string {
-  const [fy, fm, fd] = fromIso.split('-').map(Number)
-  const [ty, tm, td] = toIso.split('-').map(Number)
-  if (!fd || !td) return `${fromIso} – ${toIso}`
-  const from = `${fd} ${MONTHS_SHORT[fm - 1]}`
-  const to = `${td} ${MONTHS_SHORT[tm - 1]}`
-  return fy === ty ? `${from} – ${to} ${ty}` : `${from} ${fy} – ${to} ${ty}`
-}
 
 /** Границы квартала со сдвигом: 0 — текущий, -1 — прошлый. */
 function quarterBounds(offset: number): { from: string; to: string } {

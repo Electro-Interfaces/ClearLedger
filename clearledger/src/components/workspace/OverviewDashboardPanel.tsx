@@ -30,6 +30,7 @@ import {
   type ShareRow, type StationRow, type Accent, type OverviewCorporate,
   type HourPoint, type OverviewWeekday,
 } from '@/services/overviewService'
+import { formatPeriod } from '@/lib/formatDate'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -104,7 +105,7 @@ function Sparkline({ data }: { data: (number | null)[] }) {
 /** KPI-плитка с Δ% к прошлому периоду (абс. в углу) + мини-спарклайн.
  * Контракт экспорта сохранён: первые три ребёнка — label/value/hint;
  * Δ-бейдж и спарклайн идут ПОСЛЕ (экспорт читает детей по индексу 0..2). */
-function KpiCard({ k, hint }: { k: OverviewKpi; hint?: string }) {
+function KpiCard({ k, hint, baseline }: { k: OverviewKpi; hint?: string; baseline?: string }) {
   const showDelta = k.delta_pct != null && Math.abs(k.delta_pct) <= 500  // абсурдные % (пустая база) прячем
   const up = (k.delta_pct ?? 0) >= 0
   return (
@@ -113,7 +114,10 @@ function KpiCard({ k, hint }: { k: OverviewKpi; hint?: string }) {
       <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight">{kpiDisplay(k)}</div>
       <div className="mt-0.5 text-xs text-muted-foreground">{hint ?? ''}</div>
       {showDelta && (
-        <span className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-red-600/90 dark:text-red-400/90'}`}>
+        // База сравнения — на самом проценте: она относится только к нему, а не
+        // ко всей строке карточек (у части KPI своего Δ нет вовсе).
+        <span title={baseline && `Изменение к предыдущему периоду: ${baseline}`}
+          className={`absolute right-3 top-3 text-[11px] font-medium tabular-nums ${up ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-red-600/90 dark:text-red-400/90'}`}>
           {up ? '▲' : '▼'}{Math.abs(k.delta_pct!).toFixed(1)}%
         </span>
       )}
@@ -433,22 +437,17 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
     queryFn: () => getChargeSessions({ companyId, dateFrom: period.from, dateTo: period.to, groupBy: 'region' }),
   })
 
+  // Период, с которым сравниваются Δ% на карточках — в подсказку самих Δ.
+  const baseline = data?.has_baseline
+    ? formatPeriod(data.prev_period.from, data.prev_period.to)
+    : undefined
+
   return (
     <div className="p-4">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3" data-export-ignore>
-        <div className="space-y-1.5">
-          <h2 className="flex items-center gap-2 text-base font-semibold"><Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор сети ЭЗС</h2>
-          {data && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-              <span>Активных ЭЗС: <b className="text-foreground">{nf0.format(data.meta.active_stations)}</b></span>
-              <span>Портов: <b className="text-foreground">{nf0.format(data.meta.ports)}</b></span>
-              <span>Сессий: <b className="text-foreground">{nf0.format(data.meta.sessions)}</b></span>
-              <span className="text-muted-foreground/70">{data.has_baseline
-                ? `сравнение с ${data.prev_period.from} — ${data.prev_period.to}`
-                : 'нет данных за прошлый период — Δ не рассчитывается'}</span>
-            </div>
-          )}
-        </div>
+        {/* Счётчики сети (ЭЗС, порты, сессии) не дублируем: они ниже карточками.
+            База сравнения — в подсказке Δ% на карточках KPI. */}
+        <h2 className="flex items-center gap-2 text-base font-semibold"><Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />Обзор сети ЭЗС</h2>
         <ExportButton title="Обзор сети ЭЗС" subtitle={`Период: ${period.from} — ${period.to}`} getEl={() => ref.current} />
       </div>
 
@@ -479,11 +478,12 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
               <CountCard label="Коннекторов в сети" value={nf0.format(data.meta.ports)} hint="физических портов" />
             </div>
 
-            {/* ключевые KPI с Δ% к прошлому периоду + спарклайн — под статистикой */}
+            {/* ключевые KPI с Δ% к прошлому периоду + спарклайн — под статистикой.
+                База сравнения — в подсказке самого Δ (см. KpiCard). */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-              {(['revenue', 'sessions', 'energy_kwh', 'price_per_kwh', 'success_pct'] as const).map((key) => {
+              {(['revenue', 'sessions', 'energy_kwh', 'price_per_kwh', 'visit_success_pct'] as const).map((key) => {
                 const k = data.kpis.find((x) => x.key === key)
-                return k ? <KpiCard key={key} k={k} hint={KPI_HINTS[key]} /> : null
+                return k ? <KpiCard key={key} k={k} hint={KPI_HINTS[key]} baseline={baseline} /> : null
               })}
             </div>
 
