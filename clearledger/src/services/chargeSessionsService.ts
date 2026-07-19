@@ -82,3 +82,32 @@ export async function exportChargeSessionsXlsx(p: {
   a.remove()
   URL.revokeObjectURL(url)
 }
+
+/**
+ * Сессии за период + ГОТОВАЯ сводная Excel (станция × коннектор). Сводную
+ * пересчитывает Excel при открытии (refreshOnLoad) — в LibreOffice/веб-Excel она
+ * останется пустой, но лист «Транзакции» полноценный и читается везде. Период
+ * необязателен: без него выгружаются все сессии (до limit на бэке).
+ */
+export async function exportChargeSessionsPivotXlsx(p: {
+  companyId: string; dateFrom?: string; dateTo?: string
+}): Promise<void> {
+  const qs = new URLSearchParams({ company_id: p.companyId })
+  if (p.dateFrom) qs.set('date_from', p.dateFrom)
+  if (p.dateTo) qs.set('date_to', p.dateTo)
+  const token = getToken()
+  const res = await fetch(`${API_BASE}/api/charge-sessions/export/pivot?${qs.toString()}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`Выгрузка не удалась (${res.status})`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const span = p.dateFrom && p.dateTo ? `${p.dateFrom} — ${p.dateTo}` : 'весь период'
+  a.download = `Сессии ЭЗС со сводной ${span}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}

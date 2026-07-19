@@ -13,9 +13,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Download, FileSpreadsheet, Loader2, Table2, ReceiptText } from 'lucide-react'
+import { Download, FileSpreadsheet, Loader2, Table2, ReceiptText, LayoutGrid } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
-import { exportChargeSessionsXlsx, exportMonthlyMatrixXlsx } from '@/services/chargeSessionsService'
+import { exportChargeSessionsXlsx, exportChargeSessionsPivotXlsx, exportMonthlyMatrixXlsx } from '@/services/chargeSessionsService'
 import { exportCorporateBillingUpd } from '@/services/corporateService'
 
 /** Последние 18 месяцев для выбора периода выгрузки (значение = 'YYYY-MM'). */
@@ -98,7 +98,7 @@ export function EnergyExportView() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <ExportCard
           icon={FileSpreadsheet}
           title="Реестр зарядных сессий"
@@ -118,6 +118,16 @@ export function EnergyExportView() {
           onRun={() => run('upd',
             () => exportCorporateBillingUpd({ companyId, dateFrom: range.from, dateTo: range.to }),
             'Реестр под УПД выгружен')}
+        />
+        <ExportCard
+          icon={LayoutGrid}
+          title="Сессии со сводной (Excel)"
+          desc="Все сессии периода одним файлом + ГОТОВАЯ сводная «станция × коннектор». Excel пересчитывает её при открытии; в LibreOffice/веб-Excel сводная пустая — но лист «Транзакции» с полными данными читается везде."
+          action="Выгрузить со сводной (xlsx)"
+          busy={busy === 'pivot'}
+          onRun={() => run('pivot',
+            () => exportChargeSessionsPivotXlsx({ companyId, dateFrom: range.from, dateTo: range.to }),
+            'Сессии со сводной выгружены')}
         />
         <ExportCard
           icon={Table2}
