@@ -7,17 +7,18 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Search, Download, AlertTriangle, ChevronsUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Loader2, Search, Download, AlertTriangle, ChevronsUpDown, ArrowUp, ArrowDown, Layers } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DualScrollX } from '@/components/common/DualScrollX'
 import { PaginationWrapper } from '@/components/common/PaginationWrapper'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { loadXlsx } from '@/utils/xlsxLoader'
-import { getChargeSessionRows, fmtMoney, type ChargeSessionRow } from '@/services/analyticsService'
+import { getChargeSessionRows, getChargeGroupCatalog, fmtMoney, type ChargeSessionRow } from '@/services/analyticsService'
+import { ChargeGroupedView } from './ChargeGroupedView'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -60,6 +61,15 @@ function rowVal(r: ChargeSessionRow, k: SortKey): string | number {
 const DEFAULTS = {
   userType: 'all', region: ALL, connector: ALL, result: ALL, paid: 'all',
   sortKey: 'started_at' as SortKey, sortDir: 'desc' as 'asc' | 'desc',
+  // Разрез реестра ('none' — плоский список). Это «представление», а не
+  // контур, поэтому персистится по (компания × пункт) вместе с сортировкой.
+  groupBy: 'none',
+}
+
+/** Подписи разделов селектора группировки — порядок задаёт бэкенд (GROUPS). */
+const FAMILY_LABEL: Record<string, string> = {
+  'сеть': 'Сеть', 'клиент': 'Клиент', 'процесс': 'Процесс',
+  'время': 'Время', 'визит': 'Визиты',
 }
 
 function Loading() {
@@ -119,6 +129,15 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
     return () => clearTimeout(t)
   }, [searchInput])
 
+  const grouped = p.groupBy !== 'none'
+  const { data: catalog } = useQuery({
+    queryKey: ['charge-group-catalog'],
+    queryFn: getChargeGroupCatalog,
+    staleTime: Infinity,   // справочник разрезов не меняется в рантайме
+  })
+  // Плоский список грузим всегда: из него берутся опции фильтров (регионы,
+  // коннекторы, исходы), которые нужны и в разрезе. React Query кеширует его,
+  // поэтому переключение вида не перезапрашивает.
   const { data, isLoading } = useQuery({
     queryKey: ['charge-rows', companyId, period.from, period.to],
     queryFn: () => getChargeSessionRows({ companyId, dateFrom: period.from, dateTo: period.to, limit: 200000 }),
@@ -239,22 +258,60 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
             <SelectItem value="unpaid" className="text-xs">Не оплачено</SelectItem>
           </SelectContent>
         </Select>
+        {/* Разрез: тот же набор данных под разными углами. Считает БД —
+            свернуть 117 тыс. строк в браузере нечем. */}
+        <Select value={p.groupBy} onValueChange={(v) => patch({ groupBy: v })}>
+          <SelectTrigger className={`h-8 w-[210px] text-xs ${grouped ? 'border-primary/60 text-foreground' : ''}`}>
+            <Layers className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none" className="text-xs">Без группировки (список)</SelectItem>
+            {Object.entries(
+              (catalog ?? []).reduce<Record<string, typeof catalog>>((acc, g) => {
+                (acc[g.family] ??= []).push(g); return acc
+              }, {}),
+            ).map(([family, defs]) => (
+              <SelectGroup key={family}>
+                <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {FAMILY_LABEL[family] ?? family}
+                </SelectLabel>
+                {(defs ?? []).map((g) => (
+                  <SelectItem key={g.key} value={g.key} className="text-xs">{g.label}</SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="outline" size="sm" className="ml-auto h-8 gap-1 px-2 text-xs" onClick={doExport} disabled={exporting || sorted.length === 0}>
           {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}Выгрузить в Excel
         </Button>
       </div>
 
-      {/* счётчик + truncated */}
-      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground" data-export-ignore>
-        <span>Показано <b className="text-foreground">{nf0.format(filtered.length)}</b> из {nf0.format(rows.length)} транзакций{filtered.length !== rows.length ? ' (после фильтров)' : ''}</span>
-        {data?.truncated && (
-          <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="h-3.5 w-3.5" />Показаны не все строки — сузьте период
-          </span>
-        )}
-      </div>
+      {/* В разрезе счётчик строк списка не показываем: там свои итоги. */}
+      {!grouped && (
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground" data-export-ignore>
+          <span>Показано <b className="text-foreground">{nf0.format(filtered.length)}</b> из {nf0.format(rows.length)} транзакций{filtered.length !== rows.length ? ' (после фильтров)' : ''}</span>
+          {data?.truncated && (
+            <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="h-3.5 w-3.5" />Показаны не все строки — сузьте период
+            </span>
+          )}
+        </div>
+      )}
 
-      {isLoading ? <Loading /> : rows.length === 0 ? (
+      {grouped ? (
+        <ChargeGroupedView
+          companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy={p.groupBy}
+          filters={{
+            userType: p.userType === 'fl' ? 'ФЛ' : p.userType === 'ul' ? 'ЮЛ' : null,
+            region: p.region === ALL ? null : p.region,
+            connector: p.connector === ALL ? null : p.connector,
+            result: p.result === ALL ? null : p.result,
+            paid: p.paid === 'all' ? null : p.paid,
+            search: search || null,
+          }} />
+      ) : isLoading ? <Loading /> : rows.length === 0 ? (
         <div className="p-8 text-center text-sm text-muted-foreground">Нет транзакций за период</div>
       ) : (
         <>

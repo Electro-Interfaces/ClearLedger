@@ -171,6 +171,85 @@ async def get_charge_sessions(
     return await svc.charge_sessions(f, group_by=group_by)
 
 
+@router.get("/charge-sessions/group-catalog")
+async def get_charge_group_catalog(
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, str]]:
+    """Список разрезов реестра сессий для селектора группировки."""
+    from app.services.charge_grouping import group_catalog
+
+    return group_catalog()
+
+
+@router.get("/charge-sessions/grouped")
+async def get_charge_sessions_grouped(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    group_by: str = "station",
+    stations: str | None = None,
+    user_type: str | None = None,
+    region: str | None = None,
+    connector: str | None = None,
+    result: str | None = None,
+    paid: str | None = None,
+    search: str | None = None,
+    # Не заданы → разрез сам выбирает осмысленный порядок (DEFAULT_SORT):
+    # время — хронологически, визиты — от самых многопопыточных.
+    sort: str | None = None,
+    sort_dir: str | None = None,
+    limit: int = Query(500, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Реестр сессий, свёрнутый в выбранный разрез, с итогами по каждой группе.
+
+    Группировка считается в БД: 117 тыс. строк реестра браузеру не свернуть.
+    Фильтры те же, что у списка, — иначе итоги группы не сойдутся со списком."""
+    from app.services.charge_grouping import ChargeGroupingService
+
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    try:
+        return await ChargeGroupingService(db).grouped(
+            f.company_id, f.date_from, f.date_to, group_by,
+            station_codes=_csv(stations), user_type=user_type, region=region,
+            connector=connector, result=result, paid=paid, search=search,
+            sort=sort, sort_dir=sort_dir, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/charge-sessions/grouped/detail")
+async def get_charge_group_detail(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    group_by: str,
+    key: str = "",
+    stations: str | None = None,
+    user_type: str | None = None,
+    region: str | None = None,
+    connector: str | None = None,
+    result: str | None = None,
+    paid: str | None = None,
+    search: str | None = None,
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сессии внутри одной группы — раскрытие строки итога до первички."""
+    from app.services.charge_grouping import ChargeGroupingService
+
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    try:
+        return await ChargeGroupingService(db).group_detail(
+            f.company_id, f.date_from, f.date_to, group_by, key,
+            station_codes=_csv(stations), user_type=user_type, region=region,
+            connector=connector, result=result, paid=paid, search=search, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/charge-sessions/visits")
 async def get_charge_visits(
     company_id: str,

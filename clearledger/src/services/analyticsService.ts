@@ -453,6 +453,111 @@ export async function getChargeSessionRows(p: {
   })
 }
 
+// ── группировки реестра сессий ────────────────────────────────────────
+/** Разрез реестра. `family` — раздел в селекторе: сеть · клиент · процесс · время · визит. */
+export interface ChargeGroupDef { key: string; label: string; family: string }
+
+export interface ChargeGroupRow {
+  key: string
+  label: string
+  sessions: number
+  energy_kwh: number
+  revenue: number
+  avg_tariff: number
+  avg_check: number
+  avg_duration: number
+  success_pct: number
+  /** Доля сессий, отпустивших энергию. Отличается от success_pct: часть
+   *  Complete отдала 0 кВтч, часть CompleteError — отдала. */
+  charged_pct: number
+  stations: number
+  users: number
+  first_at: string | null
+  last_at: string | null
+}
+
+export interface ChargeGroupedResponse {
+  group_by: string
+  label: string
+  period: { from: string; to: string }
+  groups: ChargeGroupRow[]
+  shown: number
+  /** Групп больше, чем показано (limit) — итог при этом полный. */
+  truncated: boolean
+  totals: {
+    groups: number; sessions: number; energy_kwh: number; revenue: number
+    avg_tariff: number; avg_check: number; success_pct: number
+  }
+}
+
+/** Фильтры реестра — те же, что у плоского списка (иначе итоги разойдутся). */
+export interface ChargeGroupFilters {
+  userType?: string | null
+  region?: string | null
+  connector?: string | null
+  result?: string | null
+  paid?: string | null
+  search?: string | null
+  stations?: string[] | null
+}
+
+const groupFilterParams = (f: ChargeGroupFilters) => ({
+  user_type: f.userType || undefined,
+  region: f.region || undefined,
+  connector: f.connector || undefined,
+  result: f.result || undefined,
+  paid: f.paid || undefined,
+  search: f.search || undefined,
+  stations: f.stations?.length ? f.stations.join(',') : undefined,
+})
+
+export async function getChargeGroupCatalog(): Promise<ChargeGroupDef[]> {
+  return get<ChargeGroupDef[]>('/api/analytics/charge-sessions/group-catalog', {})
+}
+
+export async function getChargeGrouped(p: {
+  companyId: string; dateFrom: string; dateTo: string; groupBy: string
+  sort?: string; sortDir?: string; limit?: number
+} & ChargeGroupFilters): Promise<ChargeGroupedResponse> {
+  return get<ChargeGroupedResponse>('/api/analytics/charge-sessions/grouped', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    group_by: p.groupBy, sort: p.sort, sort_dir: p.sortDir, limit: p.limit ?? 500,
+    ...groupFilterParams(p),
+  })
+}
+
+export interface ChargeGroupDetailRow {
+  session_ext_id: string
+  started_at: string | null
+  station_code: string | null
+  station_name: string | null
+  region: string | null
+  connector_type: string | null
+  user_type: string | null
+  client_name: string | null
+  user_id: string | null
+  charge_type: string | null
+  energy_kwh: number
+  duration_min: number | null
+  tariff: number
+  revenue: number
+  result: string | null
+  paid_at: string | null
+  visit_seq: number | null
+  visit_size: number | null
+}
+
+export async function getChargeGroupDetail(p: {
+  companyId: string; dateFrom: string; dateTo: string; groupBy: string; key: string
+  limit?: number
+} & ChargeGroupFilters): Promise<{ rows: ChargeGroupDetailRow[] }> {
+  return get<{ rows: ChargeGroupDetailRow[] }>('/api/analytics/charge-sessions/grouped/detail', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    group_by: p.groupBy, key: p.key, limit: p.limit ?? 100,
+    ...groupFilterParams(p),
+  })
+}
+
 export interface ChargeHeatmapResponse {
   metric: ChargeMetric
   cells: { hour: number; weekday: number; value: number }[]
