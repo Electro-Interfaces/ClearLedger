@@ -25,10 +25,11 @@ from typing import Any
 from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChargeSession
+from app.models import ChargeSession, ServiceLocation
 from app.services.analytics_cache import cached_report
 
 S = ChargeSession
+L = ServiceLocation
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,116 @@ def _month(col):
 def _week(col):
     # ISO-неделя: «2026-W03». Понедельник — начало, как в отчётности.
     return func.to_char(func.date_trunc("week", col), "IYYY-\"W\"IW")
+
+
+def _band(col, bounds: list[tuple[float, str]]):
+    """Непрерывную величину — в полосы. Ключ группы: «1»…«N», подпись — из
+    `_labels()`.
+
+    Ключ числовой намеренно: полосы сортируются по границе, а не по выручке и
+    не по алфавиту — иначе «100+ кВт» встаёт перед «23–49 кВт». Пустое значение
+    (NULL) уходит в NULL-ключ и показывается группой «не заполнено», а не
+    молча выпадает из выборки.
+    """
+    whens = [(col < b, str(i + 1)) for i, (b, _) in enumerate(bounds)]
+    return case(*whens, else_=str(len(bounds) + 1))
+
+
+def _labels(bounds: list[tuple[float, str]], last: str) -> dict[str, str]:
+    """Ключ полосы → подпись (последняя полоса — всё, что выше верхней границы)."""
+    out = {str(i + 1): lbl for i, (_, lbl) in enumerate(bounds)}
+    out[str(len(bounds) + 1)] = last
+    return out
+
+
+# Полосы паспортной мощности станции: 40 уникальных значений разрезом не
+# читаются, а границы 22/50/100/150 — это классы AC → быстрый DC → мощный DC.
+_POWER_BANDS = [(23, "≤ 22 кВт"), (50, "23–49 кВт"), (100, "50–99 кВт"),
+                (150, "100–149 кВт")]
+_POWER_LAST = "150+ кВт"
+
+# Энергия за сессию. Нулевая полоса отдельно: это пробы подключения, а не
+# «маленькая зарядка» — смешивать их с 1–5 кВт значит прятать отказы.
+_ENERGY_BANDS = [(0.001, "0 кВтч (проба)"), (5, "0–5 кВтч"), (10, "5–10 кВтч"),
+                 (20, "10–20 кВтч"), (40, "20–40 кВтч")]
+_ENERGY_LAST = "40+ кВтч"
+
+_DURATION_BANDS = [(5, "< 5 мин"), (15, "5–15 мин"), (30, "15–30 мин"),
+                   (60, "30–60 мин"), (120, "60–120 мин")]
+_DURATION_LAST = "120+ мин"
+
+# Фактическая мощность = кВтч / (мин / 60). Деление защищено NULLIF: сессии
+# нулевой длительности дают деление на ноль, а не бесконечную мощность.
+_ACTUAL_KW = S.energy_kwh / func.nullif(S.duration_min / 60.0, 0)
+
+# Доля фактической мощности от паспортной. Ради этого разреза всё и делалось:
+# станция, заявленная как 150 кВт и выдающая 40, ничем не отличается от честной
+# 50-киловаттной — обе «работают».
+#
+# ⚠ `power_kwt` — мощность ВСЕЙ станции, а сессия идёт через ОДИН порт:
+# у «Площадь Ленина 15» это 150 кВт на 3 коннектора, то есть 50 на порт.
+# Сравнение сессии с полным паспортом дало бы «10% от паспорта» там, где порт
+# физически не может больше — и разрез превратился бы в генератор ложных
+# тревог. Поэтому делим на число коннекторов, а станции, где оно неизвестно
+# (21% парка), уводим в отдельную группу «паспорт не сопоставим»: лучше
+# честно меньшая выборка, чем правдоподобная неправда.
+_PORT_POWER = L.power_kwt / func.nullif(L.connectors_count, 0)
+_POWER_RATIO = _ACTUAL_KW / func.nullif(_PORT_POWER, 0) * 100
+_RATIO_BANDS = [(30, "< 30% от паспорта"), (60, "30–60%"), (85, "60–85%")]
+_RATIO_LAST = "85%+ (норма)"
+
+# Сессия без отпуска или без длительности мощность не характеризует: деление
+# даёт ноль, и проба подключения молча падала бы в «< 30% от паспорта», раздувая
+# полосу до 68% выборки. Такие строки — отдельной группой, а не выброшены:
+# сумма групп обязана сходиться с итогом реестра.
+_NO_POWER_DATA = or_(S.energy_kwh <= 0, S.duration_min <= 0)
+
+# Бренды в справочнике записаны вразнобой: «PSS» и «ПСС», «REWATT»/«Rewatt»/
+# «Реватт», «StarCharge» и «StarСharge» (русская «С» — гомоглиф). Сам по себе
+# разрез «сравнение надёжности вендоров» на таких данных бессмыслен: один
+# вендор размазан по трём строкам, и ни одна не отражает его парк.
+# Канонизируем ОТОБРАЖЕНИЕ, справочник не трогаем — чистка НСИ отдельная
+# задача, а разрез нужен уже сейчас. Ключ группы = канон, поэтому раскрытие
+# строки соберёт сессии всех написаний.
+_BRAND_CANON = {
+    "FORA": "Fora", "ФОРА": "Fora",
+    "PSS": "ПСС",
+    "REWATT": "Rewatt", "РЕВАТТ": "Rewatt",
+    "KOSTAD": "Kostad",
+    "EPROM": "E-PROM",
+    "ПАРУС": "Парус",
+    "STARCHARGE": "StarCharge", "STARСHARGE": "StarCharge",  # 2-й — с гомоглифом
+    "TOUCH": "Touch", "ABB": "ABB", "ENEL": "Enel", "NSP": "NSP",
+    "SCHNEIDER": "Schneider", "SETEC": "Setec", "WALLBOX": "Wallbox",
+    "НАРТИС": "Нартис", "ONDER": "ONDER", "GRPZ": "GRPZ",
+}
+_BRAND_EXPR = case(
+    *[(func.upper(func.btrim(L.brand)) == k, v) for k, v in _BRAND_CANON.items()],
+    else_=func.btrim(L.brand),
+)
+
+# Задержка оплаты = paid_at − finished_at, в минутах.
+_PAY_DELAY_MIN = func.extract("epoch", S.paid_at - S.finished_at) / 60.0
+_DELAY_BANDS = [(5, "сразу (< 5 мин)"), (60, "< 1 часа"), (1440, "< 1 суток")]
+_DELAY_LAST = "> 1 суток"
+
+# «Не оплачено» — три РАЗНЫЕ вещи, и складывать их в одну строку нельзя
+# (CLAUDE.md, п. 15): у ЮЛ paid_at пуст штатно (постоплата по счёту), проба без
+# энергии вообще не подлежит оплате, и только розница с отпуском — это долг.
+# Ключи 7–9 идут после оплаченных полос 1–4, поэтому сортировка по ключу
+# ставит их в конец списка.
+_PAY_DELAY_EXPR = case(
+    (S.paid_at.is_not(None), _band(_PAY_DELAY_MIN, _DELAY_BANDS)),
+    (S.energy_kwh <= 0, "7"),
+    (S.client_name.is_not(None), "8"),
+    else_="9",
+)
+_DELAY_LABELS = {
+    **_labels(_DELAY_BANDS, _DELAY_LAST),
+    "7": "не оплачено: проба без энергии",
+    "8": "не оплачено: постоплата ЮЛ (счёт)",
+    "9": "не оплачено: долг розницы",
+}
 
 
 #: Определения разрезов. label_expr = None → подпись равна значению группы.
@@ -85,6 +196,59 @@ GROUPS: dict[str, dict[str, Any]] = {
     # по «где и когда», а не по идентификатору.
     "visit": {"label": "Визит (приезд клиента)", "family": "визит", "expr": S.visit_key,
               "label_expr": func.coalesce(S.station_name, S.station_code)},
+    # ── оборудование (join к справочнику станций) ──────────────────────
+    # ⚠ Join ТОЛЬКО по location_id: сравнение service_locations.code с
+    # station_code даёт 90 совпадений из 557 — у CPO код обрастает суффиксами
+    # блоков («584-1») и ведущими пробелами (CLAUDE.md, п. 12).
+    "brand": {"label": "Бренд оборудования", "family": "оборудование",
+              "expr": _BRAND_EXPR, "join": True},
+    "owner": {"label": "Владелец станции", "family": "оборудование",
+              "expr": L.owner, "join": True},
+    "power_band": {"label": "Мощность станции (паспорт)", "family": "оборудование",
+                   "expr": _band(L.power_kwt, _POWER_BANDS), "join": True,
+                   "labels": _labels(_POWER_BANDS, _POWER_LAST), "ordinal": True},
+    "speed_class": {"label": "Класс скорости", "family": "оборудование",
+                    "expr": L.speed_class, "join": True},
+    "location_class": {"label": "Тип площадки", "family": "оборудование",
+                       "expr": L.location_class, "join": True},
+    "ocpp": {"label": "Протокол OCPP", "family": "оборудование",
+             "expr": L.ocpp_protocol, "join": True},
+    "city": {"label": "Город", "family": "оборудование", "expr": L.city, "join": True},
+    # Порт = станция + разъём. Сейчас видно, что сбоит станция, но не видно,
+    # что сбоит конкретный разъём — а меняют и обслуживают именно разъём.
+    "port": {"label": "Порт (станция + разъём)", "family": "оборудование",
+             "expr": func.concat(func.coalesce(S.station_code, "—"), "|",
+                                 func.coalesce(S.connector_no, "—")),
+             "label_expr": func.concat(
+                 func.coalesce(S.station_name, S.station_code), " · порт ",
+                 func.coalesce(S.connector_no, "—"))},
+    # ── распределения (binning непрерывных величин) ────────────────────
+    # Отвечают на вопрос «как устроена масса», а не «сколько всего».
+    "energy_band": {"label": "Энергия за сессию", "family": "распределения",
+                    "expr": _band(S.energy_kwh, _ENERGY_BANDS),
+                    "labels": _labels(_ENERGY_BANDS, _ENERGY_LAST), "ordinal": True},
+    "duration_band": {"label": "Длительность сессии", "family": "распределения",
+                      "expr": _band(S.duration_min, _DURATION_BANDS),
+                      "labels": _labels(_DURATION_BANDS, _DURATION_LAST), "ordinal": True},
+    "actual_power": {"label": "Фактическая мощность", "family": "распределения",
+                     "expr": case((_NO_POWER_DATA, "9"),
+                                  else_=_band(_ACTUAL_KW, _POWER_BANDS)),
+                     "labels": {**_labels(_POWER_BANDS, _POWER_LAST),
+                                "9": "нет отпуска (проба)"}, "ordinal": True},
+    # Главный разрез семейства: станция заявлена как 150 кВт, а выдаёт 40 —
+    # по отдельности обе цифры выглядят нормально, вместе показывают проблему.
+    "power_ratio": {"label": "Факт против паспорта порта", "family": "распределения",
+                    "expr": case((_NO_POWER_DATA, "9"),
+                                 (or_(L.power_kwt.is_(None),
+                                      L.connectors_count.is_(None),
+                                      L.connectors_count == 0), "8"),
+                                 else_=_band(_POWER_RATIO, _RATIO_BANDS)),
+                    "join": True,
+                    "labels": {**_labels(_RATIO_BANDS, _RATIO_LAST),
+                               "8": "паспорт не сопоставим (нет числа портов)",
+                               "9": "нет отпуска (проба)"}, "ordinal": True},
+    "pay_delay": {"label": "Задержка оплаты", "family": "распределения",
+                  "expr": _PAY_DELAY_EXPR, "labels": _DELAY_LABELS, "ordinal": True},
 }
 
 WEEKDAY_RU = {"1": "Понедельник", "2": "Вторник", "3": "Среда", "4": "Четверг",
@@ -95,9 +259,26 @@ CHANNEL_RU = {"USER": "Приложение", "RFID": "Карта RFID", "AUTO":
 
 #: Разрезы, у которых осмысленная сортировка по умолчанию — не выручка.
 #: Визиты разбирают с самых тяжёлых: 6 попыток подряд — это жалоба, а не строка.
+#: Полосы (`ordinal`) читаются по возрастанию границы: распределение смотрят
+#: как шкалу, и «100+ кВт» перед «23–49» ломает картину.
 DEFAULT_SORT = {"visit": ("sessions", "desc"), "day": ("label", "asc"),
                 "week": ("label", "asc"), "month": ("label", "asc"),
                 "weekday": ("label", "asc"), "hour": ("label", "asc")}
+DEFAULT_SORT.update({k: ("label", "asc") for k, v in GROUPS.items() if v.get("ordinal")})
+
+
+def _needs_join(group_by: str) -> bool:
+    """Разрезу нужен справочник станций (join по location_id)."""
+    return bool(GROUPS.get(group_by, {}).get("join"))
+
+
+def _with_join(stmt: Select, group_by: str) -> Select:
+    """Подключить справочник станций. LEFT JOIN намеренно: сессия станции-сироты
+    не должна исчезать из выборки — иначе итог разреза «по бренду» окажется
+    меньше итога реестра, и это прочтётся как потеря данных."""
+    if _needs_join(group_by):
+        return stmt.join(L, S.location_id == L.id, isouter=True)
+    return stmt
 
 
 def _apply_filters(stmt: Select, *, user_type: str | None, region: str | None,
@@ -173,7 +354,7 @@ class ChargeGroupingService:
             func.min(S.started_at).label("first_at"),
             func.max(S.started_at).label("last_at"),
         ]
-        stmt = select(*cols).where(
+        stmt = _with_join(select(*cols), group_by).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -198,7 +379,11 @@ class ChargeGroupingService:
         # Время читается по порядку, а не по величине: у разрезов времени
         # «по подписи» = хронология (ключи YYYY-MM, HH — лексикографически
         # совпадают с ней), иначе часы идут «03, 17, 09» вместо суток подряд.
-        order = expr if sort == "label" and g["family"] == "время" else SORTS.get(sort, SORTS["revenue"])
+        # Время и полосы читаются по порядку ключа, а не по величине показателя:
+        # ключи YYYY-MM/HH и «1»…«N» лексикографически совпадают с нужным
+        # порядком, тогда как сортировка по подписи дала бы «03, 17, 09».
+        by_key = sort == "label" and (g["family"] == "время" or g.get("ordinal"))
+        order = expr if by_key else SORTS.get(sort, SORTS["revenue"])
         stmt = stmt.order_by(order.desc() if sort_dir == "desc" else order.asc())
 
         rows = (await self.db.execute(stmt.limit(limit))).all()
@@ -221,6 +406,9 @@ class ChargeGroupingService:
             elif group_by == "visit" and r.first_at:
                 # «Гоголя 1 · 14.03 09:21» — визит опознают по месту и времени.
                 label = f"{label or '—'} · {r.first_at.strftime('%d.%m %H:%M')}"
+            elif g.get("labels"):
+                # Полоса: ключ «3» сам по себе ничего не значит.
+                label = g["labels"].get(key, label)
             groups.append({
                 "key": key,
                 "label": label or "— не заполнено",
@@ -240,13 +428,13 @@ class ChargeGroupingService:
 
         # Итог считаем отдельным запросом по всей выборке, а не суммой строк:
         # при limit сумма показанных групп не равна итогу, и цифра бы врала.
-        tot_stmt = select(
+        tot_stmt = _with_join(select(
             func.count().label("sessions"),
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy_kwh"),
             func.coalesce(func.sum(S.amount), 0).label("revenue"),
             func.coalesce(func.sum(success), 0).label("success"),
             func.count(func.distinct(expr)).label("groups"),
-        ).where(
+        ), group_by).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -298,12 +486,12 @@ class ChargeGroupingService:
 
         lo = datetime.combine(date_from, datetime.min.time())
         hi = datetime.combine(date_to, datetime.max.time())
-        stmt = select(
+        stmt = _with_join(select(
             S.session_ext_id, S.started_at, S.station_code, S.station_name, S.region,
             S.connector_type, S.user_type, S.client_name, S.user_id, S.charge_type,
             S.energy_kwh, S.duration_min, S.tariff, S.amount, S.result, S.paid_at,
             S.visit_seq, S.visit_size,
-        ).where(
+        ), group_by).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
