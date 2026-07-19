@@ -164,6 +164,38 @@ export async function getSilentStations(p: {
   })
 }
 
+/** Качество использования портов: занятость ≠ работа.
+ * idle — порт занят, но не заряжает; считается только по быстрым (DC) портам,
+ * где 3 кВт означают проблему, а не паспортную скорость. */
+export interface PortEfficiencyResponse {
+  thresholds: { idle_kw: number; idle_min: number; dc_connectors: string[] }
+  totals: {
+    sessions: number; port_hours: number; dc_port_hours: number
+    idle_sessions: number; idle_hours: number; idle_time_pct: number
+    kwh: number; median_min: number
+  }
+  connectors: {
+    label: string; is_dc: boolean; sessions: number
+    median_kw: number | null; p90_kw: number | null; median_min: number
+    idle_sessions: number; idle_hours: number; port_hours: number
+    kwh: number; idle_time_pct: number | null
+  }[]
+  stations: {
+    label: string; station_code: string; idle_sessions: number
+    idle_hours: number; dc_port_hours: number; median_kw: number | null
+    idle_time_pct: number
+  }[]
+  bands: { band: number; label: string; sessions: number; port_hours: number; kwh: number }[]
+}
+export async function getPortEfficiency(p: {
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]
+}): Promise<PortEfficiencyResponse> {
+  return get<PortEfficiencyResponse>('/api/analytics/charge-sessions/port-efficiency', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+  })
+}
+
 export interface OverviewResponse {
   period: { from: string; to: string }
   prev_period: { from: string; to: string }

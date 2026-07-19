@@ -17,6 +17,7 @@ import { MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
 import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChart'
 import { type Period, buildMoM, isoLocal } from './analytics/periodPresets'
+import { getPortEfficiency } from '@/services/overviewService'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
 import { ExportButton } from './analytics/ExportButton'
@@ -1969,6 +1970,151 @@ function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; da
   )
 }
 
+/** Использование портов: занятость ≠ работа.
+ *
+ * «Загрузка» отвечает, сколько времени порт был занят, и не отличает работу от
+ * простоя. Отраслевые дашборды CPO считают это отдельно (idle time share): порт,
+ * занятый три часа под 2 кВт, — это не медленная зарядка, а недоступный порт.
+ * Метрика применяется только к быстрым (DC) портам: на Schuko и Type 1 три
+ * киловатта — паспортная скорость, и общий порог показал бы им «простой 97%». */
+function PortEfficiency({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  const n = useNarrow()
+  const q = useQuery({
+    queryKey: ['port-efficiency', companyId, dateFrom, dateTo, n.key],
+    queryFn: () => getPortEfficiency({ companyId, dateFrom, dateTo, stations: n.stations }),
+  })
+  if (q.isLoading) return <Loading />
+  if (!q.data || !q.data.totals.sessions) return <Empty text="Нет сессий с отпуском энергии за период" />
+  const { totals: t, connectors, stations, bands, thresholds } = q.data
+  const maxBand = Math.max(...bands.map((b) => b.port_hours), 1)
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+        <span className="font-semibold text-foreground">Простой</span> — порт занят, но не заряжает:
+        сессия дольше <span className="font-mono">{thresholds.idle_min}</span> мин при мощности ниже{' '}
+        <span className="font-mono">{thresholds.idle_kw}</span> кВт. Считается только для быстрых портов
+        ({thresholds.dc_connectors.join(', ')}): на медленных AC такая мощность — паспортная норма.
+        Мощность — по медиане: короткая сессия даёт арифметический выброс в сотни кВт.
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiCard label="Порт-часов" value={nf0.format(t.port_hours)} hint={`из них DC — ${nf0.format(t.dc_port_hours)}`} />
+        <KpiCard label="Простой DC" value={t.idle_time_pct.toFixed(1) + '%'}
+          accent={t.idle_time_pct >= 15 ? 'danger' : t.idle_time_pct >= 8 ? 'warning' : 'success'}
+          hint={`${nf0.format(t.idle_hours)} ч занято без зарядки`} />
+        <KpiCard label="Сессий простоя" value={nf0.format(t.idle_sessions)} hint="долго стоят, мало берут" />
+        <KpiCard label="Медиана сессии" value={nf1.format(t.median_min) + ' мин'} hint="dwell time" />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              Коннекторы: фактическая мощность и простой
+            </div>
+            <table className="w-full text-xs" {...exportRows('Мощность коннекторов', ['Коннектор', 'Тип', 'Сессий', 'Медиана, кВт', 'p90, кВт', 'Dwell, мин', 'Простой, %'],
+              connectors.map((r) => [r.label, r.is_dc ? 'DC' : 'AC', r.sessions,
+                r.median_kw ?? 0, r.p90_kw ?? 0, r.median_min, r.idle_time_pct ?? '']))}>
+              <thead>
+                <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="text-left p-2 font-medium">Коннектор</th>
+                  <th className="text-right p-2 font-medium" title="Медианная фактическая мощность">кВт</th>
+                  <th className="text-right p-2 font-medium" title="Медианная длительность сессии">Dwell</th>
+                  <th className="text-right p-2 font-medium">Простой</th>
+                </tr>
+              </thead>
+              <tbody>
+                {connectors.map((r) => (
+                  <tr key={r.label} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-medium">
+                      {r.label}
+                      <span className="ml-1.5 text-[10px] text-muted-foreground">{r.is_dc ? 'DC' : 'AC'}</span>
+                    </td>
+                    <td className="p-2 text-right font-mono">
+                      {nf1.format(r.median_kw ?? 0)}
+                      <span className="ml-1 text-[10px] text-muted-foreground">p90 {nf0.format(r.p90_kw ?? 0)}</span>
+                    </td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.median_min)} м</td>
+                    {/* null ≠ 0: для AC простой не измеряется, а не «отсутствует». */}
+                    <td className={`p-2 text-right font-mono ${r.idle_time_pct == null ? 'text-muted-foreground/50'
+                      : r.idle_time_pct >= 15 ? 'text-red-600 dark:text-red-400'
+                      : r.idle_time_pct >= 8 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                      {r.idle_time_pct == null ? '—' : `${r.idle_time_pct}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              Распределение по фактической мощности
+            </div>
+            <table className="w-full text-xs" {...exportRows('Мощность сессий', ['Диапазон', 'Сессий', 'Порт-часов', 'кВтч'],
+              bands.map((b) => [b.label, b.sessions, b.port_hours, b.kwh]))}>
+              <tbody>
+                {bands.map((b) => (
+                  <tr key={b.band} className="border-b border-border/30">
+                    <td className="p-2 font-medium">{b.label}</td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(b.sessions)} сес.</td>
+                    <td className="p-2 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className={`h-1.5 rounded-full ${b.band <= 2 ? 'bg-amber-400/70' : 'bg-primary/60'}`}
+                          style={{ width: `${Math.max(2, b.port_hours / maxBand * 80)}px` }} />
+                        <span className="w-14 text-right font-mono text-muted-foreground">{nf0.format(b.port_hours)} ч</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-baseline justify-between gap-2">
+            <span>Станции, где быстрые порты простаивают занятыми</span>
+            <span className="text-[10px] font-normal normal-case">кандидаты на разметку, тариф за простой или информирование</span>
+          </div>
+          {stations.length === 0
+            ? <div className="p-3 text-xs text-muted-foreground">Простоя быстрых портов за период не зафиксировано</div>
+            : (
+              <table className="w-full text-xs" {...exportRows('Простой портов по станциям', ['Станция', 'Сессий простоя', 'Часов простоя', 'DC порт-часов', 'Доля, %', 'Медиана, кВт'],
+                stations.map((r) => [r.label, r.idle_sessions, r.idle_hours, r.dc_port_hours, r.idle_time_pct, r.median_kw ?? 0]))}>
+                <thead>
+                  <tr className="border-b bg-muted/20 text-muted-foreground">
+                    <th className="text-left p-2 font-medium">Станция</th>
+                    <th className="text-right p-2 font-medium">Часов впустую</th>
+                    <th className="text-right p-2 font-medium">Доля времени DC</th>
+                    <th className="text-right p-2 font-medium">Медиана</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stations.map((r) => (
+                    <tr key={r.station_code} className="border-b border-border/30 hover:bg-muted/30">
+                      <td className="p-2 font-medium truncate max-w-[240px]" title={r.label}>{r.label}</td>
+                      <td className="p-2 text-right font-mono text-red-600 dark:text-red-400">{nf0.format(r.idle_hours)} ч</td>
+                      <td className={`p-2 text-right font-mono ${r.idle_time_pct >= 30 ? 'text-red-600 dark:text-red-400' : r.idle_time_pct >= 15 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                        {r.idle_time_pct}%
+                      </td>
+                      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.median_kw ?? 0)} кВт</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 /** Надёжность: успех сессий, исходы, худшие станции (кандидаты на ТО), тренд. */
 function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   // Вид-срез: период — только из контура рабочей области.
@@ -2147,6 +2293,7 @@ const RELIABILITY_TABS: { k: string; label: string }[] = [
   { k: 'overview', label: 'Обзор' },
   { k: 'retries', label: 'Повторные попытки' },
   { k: 'unpaid', label: 'Без оплаты' },
+  { k: 'ports', label: 'Использование портов' },
 ]
 
 function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType, setClientType }: {
@@ -2169,6 +2316,7 @@ function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType,
       <div ref={ref} className="pt-3" key={st.sub}>
         {st.sub === 'retries' ? <RetryAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
           : st.sub === 'unpaid' ? <UnpaidAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+          : st.sub === 'ports' ? <PortEfficiency companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
           : <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />}
       </div>
     </ChargeClientCtx.Provider>

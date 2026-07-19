@@ -28,6 +28,28 @@ def _d(s: str, field: str) -> date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Invalid {field}: {s}") from exc
 
 
+@router.get("/port-efficiency")
+async def port_efficiency_report(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = None,
+    top: int = Query(15, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Качество использования портов: idle (занят без зарядки), фактическая
+    мощность против номинала, dwell time. Занятость ≠ работа — на быстрых
+    портах простой стоит дороже всего (см. services/port_efficiency.py)."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.port_efficiency import port_efficiency
+
+    codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    return await port_efficiency(
+        db, cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
+        stations=codes, top=top)
+
+
 @router.get("/overview/silent-stations")
 async def silent_stations_list(
     company_id: str,
