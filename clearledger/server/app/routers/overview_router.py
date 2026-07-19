@@ -28,6 +28,26 @@ def _d(s: str, field: str) -> date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Invalid {field}: {s}") from exc
 
 
+@router.get("/overview/silent-stations")
+async def silent_stations_list(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Станции парка без единой сессии за период — раскрывается с карточки обзора.
+
+    Разделены на «не работали никогда» (вопрос запуска) и «замолчали» (вопрос
+    поломки или демонтажа): это разные задачи для разных служб."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.overview_insights import silent_stations
+
+    return await silent_stations(
+        db, cid, _d(date_from, "date_from"), _d(date_to, "date_to"), limit=limit)
+
+
 @router.get("/overview")
 async def charge_overview(
     company_id: str,

@@ -26,9 +26,9 @@ import {
   getChargeSessions, getStationsLinkage, getChargeTimeseries, fmtMoney, fmtMoneyShort,
 } from '@/services/analyticsService'
 import {
-  getChargeOverview, type OverviewKpi,
+  getChargeOverview, getSilentStations, type OverviewKpi,
   type ShareRow, type StationRow, type Accent, type OverviewCorporate,
-  type HourPoint, type OverviewWeekday,
+  type HourPoint, type OverviewWeekday, type OverviewNetwork,
 } from '@/services/overviewService'
 import { formatPeriod } from '@/lib/formatDate'
 
@@ -86,6 +86,245 @@ function CountCard({ label, value, hint }: { label: string; value: string; hint?
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight">{value}</div>
       {hint && <div className="mt-0.5 text-xs text-muted-foreground">{hint}</div>}
+    </div>
+  )
+}
+
+/** Карточка простаивающих ЭЗС + раскрытие списка.
+ *
+ * Счётчик «активных ЭЗС» говорит, сколько станций работало, и умалчивает,
+ * сколько простаивало. На сети РусГидро это четверть парка — самая крупная
+ * потеря, которую обзор до сих пор не показывал. Клик даёт список: простой —
+ * это не справка, а перечень работ. */
+function SilentCard({ companyId, period, silent }: {
+  companyId: string; period: { from: string; to: string }
+  silent: OverviewNetwork['silent']
+}) {
+  const [open, setOpen] = useState(false)
+  const q = useQuery({
+    queryKey: ['silent-stations', companyId, period.from, period.to],
+    queryFn: () => getSilentStations({ companyId, dateFrom: period.from, dateTo: period.to }),
+    enabled: open,
+  })
+  if (!silent.silent) {
+    return <CountCard label="Молчат ЭЗС" value="0" hint="весь парк работал" />
+  }
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+        className="rounded-xl border border-amber-400/40 bg-card/50 p-3.5 text-left shadow-sm transition-colors hover:bg-amber-400/5"
+        title="Показать станции без сессий за период">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Молчат ЭЗС</div>
+        <div className="mt-1 text-2xl font-semibold tabular-nums leading-tight text-amber-600 dark:text-amber-400">
+          {nf0.format(silent.silent)}
+        </div>
+        <div className="mt-0.5 text-xs text-muted-foreground">
+          {silent.silent_pct.toFixed(0)}% парка · без сессий
+        </div>
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setOpen(false)}>
+          <div className="max-h-[85dvh] w-full max-w-3xl overflow-hidden rounded-xl border bg-card shadow-xl"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold">Молчащие ЭЗС — {nf0.format(silent.silent)} из {nf0.format(silent.total)}</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  {silent.never_worked > 0 && `${silent.never_worked} не работали никогда (вопрос запуска)`}
+                  {silent.never_worked > 0 && silent.went_quiet > 0 && ' · '}
+                  {silent.went_quiet > 0 && `${silent.went_quiet} замолчали (поломка или демонтаж)`}
+                </div>
+              </div>
+              <button type="button" onClick={() => setOpen(false)}
+                className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted">Закрыть</button>
+            </div>
+            <div className="max-h-[70dvh] overflow-auto">
+              {q.isLoading ? <Loading /> : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-card">
+                    <tr className="border-b text-muted-foreground">
+                      <th className="p-2 text-left font-medium">Станция</th>
+                      <th className="p-2 text-left font-medium">Город</th>
+                      <th className="p-2 text-left font-medium">Статус</th>
+                      <th className="p-2 text-left font-medium">Последняя сессия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(q.data?.stations ?? []).map((s) => (
+                      <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30">
+                        <td className="p-2 font-medium">{s.name} <span className="text-muted-foreground">({s.code})</span></td>
+                        <td className="p-2 text-muted-foreground">{s.city ?? '—'}</td>
+                        <td className="p-2 text-muted-foreground">{s.operational_status ?? '—'}</td>
+                        <td className="p-2 font-mono text-muted-foreground">
+                          {s.last_at ? s.last_at.slice(0, 10) : <span className="text-amber-600 dark:text-amber-400">никогда</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+/** Состояние сети: концентрация выручки, ядро клиентов, регионы, деньги в пути.
+ * Отвечает на вопрос «что с активом», которого в KPI выручки нет. */
+function NetworkHealth({ net }: { net: OverviewNetwork }) {
+  const maxQ = Math.max(...net.concentration.map((c) => c.revenue), 1)
+  const seg = net.segments
+  const recon = net.energy_recon
+  return (
+    <div className="grid gap-3 lg:grid-cols-3">
+      {/* 1. Концентрация: средняя загрузка по сети смешивает станции с выручкой
+             188 тыс. и 247 ₽ — полюса видны только в разбивке. */}
+      <Card>
+        <CardContent className="pt-4">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">Где сеть зарабатывает</div>
+          <div className="mt-1 mb-3 text-[11px] text-muted-foreground">станции по выручке, пятая часть парка в группе</div>
+          <div className="space-y-1.5">
+            {net.concentration.map((c) => (
+              <div key={c.bucket} className="flex items-center gap-2 text-xs">
+                <span className="w-20 shrink-0 text-muted-foreground">{c.label}</span>
+                <div className="h-2 flex-1 overflow-hidden rounded bg-muted">
+                  <div className={`h-full ${c.bucket === 1 ? 'bg-emerald-500/70' : c.bucket >= 4 ? 'bg-red-500/60' : 'bg-primary/60'}`}
+                    style={{ width: `${Math.max(1, (c.revenue / maxQ) * 100)}%` }} />
+                </div>
+                <span className="w-12 shrink-0 text-right font-mono tabular-nums">{c.share_pct}%</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 text-[11px] text-muted-foreground">
+            Нижние {net.concentration.at(-1)?.stations ?? 0} станций дали{' '}
+            {fmtMoney(net.concentration.at(-1)?.avg_per_station ?? 0)} ₽ каждая за период.
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 2. Ядро клиентов: приоритет «удерживать или привлекать». */}
+      <Card>
+        <CardContent className="pt-4">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">Кто приносит выручку</div>
+          <div className="mt-1 mb-3 text-[11px] text-muted-foreground">розница по числу визитов за период</div>
+          <div className="space-y-1.5">
+            {seg.tiers.map((t) => (
+              <div key={t.tier} className="flex items-center gap-2 text-xs">
+                <span className="w-28 shrink-0 truncate text-muted-foreground" title={t.label}>{t.label}</span>
+                <div className="h-2 flex-1 overflow-hidden rounded bg-muted">
+                  <div className={`h-full ${t.tier === 5 ? 'bg-emerald-500/70' : t.tier === 1 ? 'bg-muted-foreground/40' : 'bg-primary/60'}`}
+                    style={{ width: `${Math.max(1, t.rev_share)}%` }} />
+                </div>
+                <span className="w-11 shrink-0 text-right font-mono tabular-nums">{t.rev_share}%</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 text-[11px] text-muted-foreground">
+            Ядро — {nf0.format(seg.core_clients)} человек ({(seg.core_clients / (seg.clients || 1) * 100).toFixed(1)}% базы)
+            даёт {seg.core_rev_share}% выручки. Разовых {nf0.format(seg.once_clients)} — {seg.once_rev_share}%.
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 3. Деньги между отпуском и счётом + прогноз темпа. */}
+      <Card>
+        <CardContent className="pt-4">
+          <div className="text-xs uppercase tracking-wider text-muted-foreground">Деньги в пути</div>
+          <div className="mt-1 mb-3 text-[11px] text-muted-foreground">отпущено, но ещё не получено</div>
+          <div className="space-y-3">
+            <div>
+              <div className="text-lg font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                {fmtMoney(net.receivable.amount)} ₽
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                дебиторка ЮЛ · {nf0.format(net.receivable.sessions)} сессий · {nf0.format(net.receivable.kwh)} кВтч
+              </div>
+            </div>
+            {net.receivable.retail_debt > 0 && (
+              <div>
+                <div className="text-sm font-semibold tabular-nums text-red-600 dark:text-red-400">
+                  {fmtMoney(net.receivable.retail_debt)} ₽
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  долг розницы · {nf0.format(net.receivable.retail_debt_sessions)} случаев — энергия ушла без оплаты
+                </div>
+              </div>
+            )}
+            {net.run_rate && (
+              <div className="border-t pt-2">
+                <div className="text-sm font-semibold tabular-nums">
+                  ≈ {fmtMoneyShort(net.run_rate.projected_revenue)} ₽
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  прогноз месяца при текущем темпе ({net.run_rate.days_done} из {net.run_rate.days_in_month} дн.)
+                </div>
+              </div>
+            )}
+            {recon && (
+              <div className="border-t pt-2">
+                <div className={`text-sm font-semibold tabular-nums ${Math.abs(recon.diff_pct ?? 0) > 10 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                  {recon.diff_pct != null ? `${recon.diff_pct > 0 ? '+' : ''}${recon.diff_pct}%` : '—'}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  расхождение сессий с реестром ({nf0.format(recon.session_kwh)} против {nf0.format(recon.registry_kwh)} кВтч)
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/** Регионы: где выручка и где хуже всего заряжаются. 42 региона в сети — на
+ * обзоре нужны полюса, полный список живёт в разрезах. */
+function RegionExtremes({ regions }: { regions: OverviewNetwork['regions'] }) {
+  if (!regions.top_revenue.length) return null
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <Card>
+        <CardContent className="p-0">
+          <div className="border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
+            Регионы по выручке
+          </div>
+          <table className="w-full text-xs">
+            <tbody>
+              {regions.top_revenue.map((r) => (
+                <tr key={r.label} className="border-b border-border/30">
+                  <td className="p-2 font-medium">{r.label}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.visits)} виз.</td>
+                  <td className="p-2 text-right font-mono">{fmtMoneyShort(r.revenue)} ₽</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent className="p-0">
+          <div className="border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
+            Регионы, где хуже заряжаются
+          </div>
+          <table className="w-full text-xs">
+            <tbody>
+              {regions.worst_success.map((r) => (
+                <tr key={r.label} className="border-b border-border/30">
+                  <td className="p-2 font-medium">{r.label}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.visits)} виз.</td>
+                  <td className={`p-2 text-right font-mono ${r.success_pct >= 85 ? 'text-emerald-600 dark:text-emerald-400' : r.success_pct >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {r.success_pct}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
     </div>
   )
 }
@@ -479,14 +718,19 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
               </div>
             )}
 
-            {/* статистика по объектам сети */}
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            {/* статистика по объектам сети. «Молчат» — кликабельная: простой
+                парка это не справочная цифра, а список работ. */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
               <CountCard label="ЭЗС (всего в сети)" value={nf0.format(linkage.data?.objects || data.meta.active_stations)} hint="боевых (без тест/выведенных)" />
               <CountCard label="Активных ЭЗС" value={nf0.format(data.meta.active_stations)} hint="с сессиями за период" />
+              <SilentCard companyId={companyId} period={period} silent={data.network.silent} />
               <CountCard label="Регионов" value={nf0.format(regQ.data?.lines.length ?? 0)} hint="за период" />
               <CountCard label="Коннекторов (типов)" value={nf0.format(connQ.data?.lines.length ?? 0)} hint="за период" />
               <CountCard label="Коннекторов в сети" value={nf0.format(data.meta.ports)} hint="физических портов" />
             </div>
+
+            <NetworkHealth net={data.network} />
+            <RegionExtremes regions={data.network.regions} />
 
             {/* ключевые KPI с Δ% к прошлому периоду + спарклайн — под статистикой.
                 База сравнения — в подсказке самого Δ (см. KpiCard). */}

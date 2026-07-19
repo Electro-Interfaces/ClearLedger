@@ -310,8 +310,66 @@ class OverviewService:
             "worst": min(_nz, key=lambda x: x["amount"])["weekday"] if _nz else None,
         }
 
+        # ─── состояние сети: где не работает и где лежат деньги ───
+        # Эти блоки отвечают не «сколько заработали», а «что с активом»:
+        # простаивающие станции, концентрация выручки, ядро клиентов, регионы,
+        # сходимость с реестрами. Данные те же, вывод — другой.
+        from app.services.charge_unpaid import unpaid_report
+        from app.services.overview_insights import (
+            client_segments, energy_reconciliation, region_extremes,
+            revenue_concentration, silent_stations,
+        )
+        silent = await silent_stations(self.db, company_id, df, dt)
+        concentration = await revenue_concentration(self.db, company_id, df, dt)
+        segments = await client_segments(self.db, company_id, df, dt)
+        regions_x = await region_extremes(self.db, company_id, df, dt)
+        energy_recon = await energy_reconciliation(self.db, company_id, df, dt)
+        unpaid = await unpaid_report(self.db, company_id, df.isoformat(), dt.isoformat(), top=1)
+
+        # Run-rate: линейная экстраполяция темпа на полный месяц. Честна только
+        # внутри незакрытого месяца — за прошедший период прогнозировать нечего.
+        run_rate = None
+        today = date.today()
+        if df.year == dt.year and df.month == dt.month and dt >= today:
+            days_done = (min(dt, today) - df).days + 1
+            days_in_month = (date(df.year + (df.month // 12), df.month % 12 + 1, 1)
+                             - date(df.year, df.month, 1)).days
+            if 0 < days_done < days_in_month:
+                run_rate = {
+                    "days_done": days_done, "days_in_month": days_in_month,
+                    "projected_revenue": round(tc["amount"] / days_done * days_in_month, 2),
+                    "current_revenue": round(tc["amount"], 2),
+                }
+
+        network = {
+            "silent": {k: v for k, v in silent.items() if k != "stations"},
+            "concentration": concentration,
+            "segments": segments,
+            "regions": regions_x,
+            "energy_recon": energy_recon,
+            # Дебиторка ЮЛ — деньги между отпуском и счётом. Живёт в «Без оплаты»,
+            # но руководителю нужна на первом экране.
+            "receivable": {
+                "amount": unpaid["totals"]["postpaid"]["amount"],
+                "sessions": unpaid["totals"]["postpaid"]["sessions"],
+                "kwh": unpaid["totals"]["postpaid"]["kwh"],
+                "retail_debt": unpaid["totals"]["debt"]["amount"],
+                "retail_debt_sessions": unpaid["totals"]["debt"]["sessions"],
+            },
+            "run_rate": run_rate,
+        }
+
         # ─── алерты (пороги сети + корпоратив) ───
         alerts: list[dict[str, str]] = []
+        # Простой парка — самая крупная потеря, поэтому первым алертом.
+        if silent["silent"]:
+            alerts.append({
+                "level": "warn",
+                "message": (f"Молчат {silent['silent']} ЭЗС из {silent['total']} "
+                            f"({silent['silent_pct']:.0f}% парка) — ни одной сессии за период"
+                            + (f"; из них {silent['never_worked']} не работали никогда"
+                               if silent["never_worked"] else "")),
+            })
         if vc["success_pct"] < 85:
             alerts.append({"level": "warn",
                            "message": f"Зарядились {vc['success_pct']:.1f}% клиентов — "
@@ -368,6 +426,7 @@ class OverviewService:
                 "top_clients": corp["top_clients"],
             },
             "alerts": alerts,
+            "network": network,
             "meta": {
                 "active_stations": active_cur,
                 "ports": int(tc["ports"]),
