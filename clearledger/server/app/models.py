@@ -3346,6 +3346,21 @@ class ChargeSession(Base):
     # Разрез учёта (placeholder — привяжем к разрезам сверки позже)
     cut_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
 
+    # --- ВИЗИТ: склейка смежных попыток одного клиента на одной станции ---------
+    # CPO пишет каждую попытку подключения отдельной сессией. Клиент, у которого
+    # разъём схватился с третьего раза, даёт 3 строки: две «CompleteError» и одну
+    # рабочую — по сырым сессиям это «67% брака», по факту человек зарядился.
+    # Визит = (company, user_id, station_code) + разрыв со следующей ≤ порога
+    # (по умолчанию 15 мин, см. charge_visits.VISIT_GAP_MIN). Поля проставляет
+    # recompute_visits() после каждой загрузки — вручную не заполнять.
+    visit_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    visit_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)    # № попытки в визите, 1..N
+    visit_size: Mapped[int | None] = mapped_column(Integer, nullable=True)   # всего попыток в визите
+    # Визит завершился отпуском энергии (по любой из своих сессий). Именно это, а
+    # не result='Complete': 12 749 сессий Complete отпустили 0 кВтч, а 5 768
+    # CompleteError — отпустили. Флаг CPO отвечает на другой вопрос.
+    visit_charged: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

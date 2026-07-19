@@ -27,7 +27,7 @@ import { HorizonControl } from './HorizonControl'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
-  getChargeNewClients, getChargeNewClientsList,
+  getChargeNewClients, getChargeNewClientsList, getChargeVisits,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
   type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket,
   type ChargeSeriesBy, type ChargeTimeseriesResponse, type ChargeSliceResponse, type ChargeSessionsResponse,
@@ -46,22 +46,6 @@ function Loading() {
 }
 function Empty({ text = 'Нет сессий за период' }: { text?: string }) {
   return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div>
-}
-
-/** Обёртка пункта: кнопка экспорта (Excel/PDF) + ref на содержимое для снимка.
- * Padding даёт сам пункт; здесь — только строка с кнопкой и ref вокруг содержимого. */
-function PanelExport({ title, subtitle, toolbar, children }: { title: string; subtitle?: string; toolbar?: ReactNode; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  return (
-    <div>
-      {/* toolbar (напр. фильтр ФЛ/ЮЛ) слева, экспорт справа — вне ref, в снимок не попадают */}
-      <div className="flex items-center justify-between gap-2 px-4 pt-2">
-        <div className="min-w-0">{toolbar}</div>
-        <ExportButton title={title} subtitle={subtitle} getEl={() => ref.current} />
-      </div>
-      <div ref={ref}>{children}</div>
-    </div>
-  )
 }
 
 /** Сегмент-переключатель типа клиента (Все / ФЛ / ЮЛ) — общий для пунктов сессий. */
@@ -1466,6 +1450,188 @@ function ComparisonTable({ columns, lines, totalsValues, metric, firstCol, onRow
   )
 }
 
+/** Повторные попытки: разбор составных визитов.
+ *
+ * CPO пишет каждое касание разъёма отдельной сессией, поэтому «31% сессий с
+ * ошибкой» смешивает два разных факта: человек не смог зарядиться (потеря) и
+ * человек зарядился с третьего раза (проблема качества, но не потеря). Здесь
+ * они разведены: успех считается по визиту, а повторные попытки показаны как
+ * самостоятельный показатель — с адресами, где именно они происходят. */
+function RetryAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  const n = useNarrow()
+  const q = useQuery({
+    queryKey: ['charge-visits', companyId, dateFrom, dateTo, n.key],
+    queryFn: () => getChargeVisits({
+      companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, top: 15,
+    }),
+  })
+  if (q.isLoading) return <Loading />
+  if (!q.data || q.data.totals.visits === 0) return <Empty text="Нет визитов за период" />
+  const { totals: t, distribution, stations, connectors, clients, worst, gap_min } = q.data
+
+  const dimTable = (title: string, rows: typeof stations, dimLabel: string, note?: string) => (
+    <Card>
+      <CardContent className="p-0">
+        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-baseline justify-between gap-2">
+          <span>{title}</span>
+          {note ? <span className="text-[10px] font-normal normal-case">{note}</span> : null}
+        </div>
+        {rows.length === 0
+          ? <div className="p-3 text-xs text-muted-foreground">Недостаточно данных за период</div>
+          : (
+            <table className="w-full text-xs" {...exportRows(title, [dimLabel, 'Визитов', 'Зарядились', 'С повторами', 'Доля повторов, %', 'Ср. попыток', 'Впустую сессий'],
+              rows.map((r) => [r.label, r.visits, r.charged, r.retried,
+                +(r.retried / r.visits * 100).toFixed(1), r.avg_attempts, r.wasted]))}>
+              <thead>
+                <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="text-left p-2 font-medium">{dimLabel}</th>
+                  <th className="text-right p-2 font-medium">Визитов</th>
+                  <th className="text-right p-2 font-medium" title="Визиты, где зарядка получилась не с первой попытки">С повторами</th>
+                  <th className="text-right p-2 font-medium">Ср. попыток</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const share = r.retried / r.visits * 100
+                  return (
+                    <tr key={r.label} className="border-b border-border/30 hover:bg-muted/30">
+                      <td className="p-2 font-medium truncate max-w-[220px]" title={r.label}>{r.label}</td>
+                      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.visits)}</td>
+                      <td className={`p-2 text-right font-mono ${share >= 40 ? 'text-red-600 dark:text-red-400' : share >= 25 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                        {nf0.format(r.retried)} <span className="opacity-60">({share.toFixed(0)}%)</span>
+                      </td>
+                      <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(r.avg_attempts)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+      </CardContent>
+    </Card>
+  )
+
+  const maxDist = Math.max(...distribution.map((d) => d.visits), 1)
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Метод склейки — не прячем: от порога зависят все цифры ниже. */}
+      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+        <span className="font-semibold text-foreground">Визит</span> — попытки одного клиента на одной станции
+        с разрывом до <span className="font-mono">{gap_min}</span> мин. Успех визита = отпущена энергия
+        (а не флаг <span className="font-mono">Complete</span> от CPO).
+        {' '}Сырых сессий за период: <span className="font-mono">{nf0.format(t.sessions)}</span> → визитов: <span className="font-mono">{nf0.format(t.visits)}</span>.
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KpiCard label="Визитов" value={nf0.format(t.visits)} hint={`из ${nf0.format(t.sessions)} сессий`} />
+        <KpiCard label="Зарядились" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)}
+          hint={`${nf0.format(t.charged)} визитов`} />
+        <KpiCard label="С повторами" value={nf0.format(t.retried)} accent={t.retried_pct >= 25 ? 'warning' : 'info'}
+          hint={`${t.retried_pct.toFixed(1)}% успешных — зарядились не сразу`} />
+        <KpiCard label="Не зарядились" value={nf0.format(t.failed)} accent="danger"
+          hint={`${(100 - t.success_pct).toFixed(1)}% визитов брошено`} />
+        <KpiCard label="Впустую" value={nf0.format(t.wasted_sessions)} accent="warning"
+          hint="сессий без отпуска энергии" />
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              Сколько попыток потребовалось
+            </div>
+            <table className="w-full text-xs" {...exportRows('Попытки в визите', ['Попыток', 'Визитов', 'Зарядились', 'Доля успеха, %'],
+              distribution.map((d) => [d.attempts >= 6 ? '6+' : d.attempts, d.visits, d.charged,
+                +(d.charged / d.visits * 100).toFixed(1)]))}>
+              <thead>
+                <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="text-left p-2 font-medium">Попыток</th>
+                  <th className="text-right p-2 font-medium">Визитов</th>
+                  <th className="text-right p-2 font-medium">Зарядились</th>
+                </tr>
+              </thead>
+              <tbody>
+                {distribution.map((d) => (
+                  <tr key={d.attempts} className="border-b border-border/30">
+                    <td className="p-2 font-medium">
+                      {d.attempts === 1 ? 'с первой' : d.attempts >= 6 ? '6 и более' : `${d.attempts}`}
+                    </td>
+                    <td className="p-2 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {/* Полоса — чтобы хвост «борьбы с разъёмом» читался глазом, а не вычислялся. */}
+                        <div className="h-1.5 rounded-full bg-primary/60" style={{ width: `${Math.max(2, d.visits / maxDist * 90)}px` }} />
+                        <span className="font-mono text-muted-foreground">{nf0.format(d.visits)}</span>
+                      </div>
+                    </td>
+                    <td className={`p-2 text-right font-mono ${succTxt(d.charged / d.visits * 100)}`}>
+                      {(d.charged / d.visits * 100).toFixed(0)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        {dimTable('Коннекторы', connectors, 'Коннектор')}
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-3">
+        {dimTable('Станции с повторными попытками', stations, 'Станция', 'топ по доле, ≥10 визитов')}
+        {dimTable('Клиенты, которым тяжелее всех', clients, 'Клиент', 'топ по доле, ≥10 визитов')}
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+            Самые тяжёлые визиты — конкретные случаи для разбора
+          </div>
+          <table className="w-full text-xs" {...exportRows('Тяжёлые визиты', ['Дата', 'Станция', 'Регион', 'Коннектор', 'Клиент', 'Попыток', 'Впустую', 'кВтч', 'Итог'],
+            worst.map((r) => [r.first_at.slice(0, 16).replace('T', ' '), r.station, r.region, r.connector_type,
+              r.client, r.attempts, r.wasted, r.kwh, r.charged ? 'зарядился' : 'не зарядился']))}>
+            <thead>
+              <tr className="border-b bg-muted/20 text-muted-foreground">
+                <th className="text-left p-2 font-medium">Дата</th>
+                <th className="text-left p-2 font-medium">Станция</th>
+                <th className="text-left p-2 font-medium">Коннектор</th>
+                <th className="text-right p-2 font-medium">Попыток</th>
+                <th className="text-right p-2 font-medium">кВтч</th>
+                <th className="text-left p-2 font-medium">Итог</th>
+              </tr>
+            </thead>
+            <tbody>
+              {worst.map((r) => (
+                <tr key={r.visit_key} className="border-b border-border/30 hover:bg-muted/30">
+                  <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.first_at.slice(0, 16).replace('T', ' ')}</td>
+                  <td className="p-2 font-medium truncate max-w-[200px]" title={`${r.station} · ${r.region ?? ''}`}>{r.station}</td>
+                  <td className="p-2 text-muted-foreground">{r.connector_type ?? '—'}</td>
+                  <td className="p-2 text-right font-mono text-red-600 dark:text-red-400">{r.attempts}</td>
+                  <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(r.kwh)}</td>
+                  <td className="p-2">
+                    {r.charged
+                      ? <span className="text-[11px] rounded border border-emerald-400/50 px-1.5 py-0.5 text-emerald-600 dark:text-emerald-300/80">зарядился</span>
+                      : <span className="text-[11px] rounded border border-red-400/50 px-1.5 py-0.5 text-red-600 dark:text-red-300/80">не зарядился</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      {t.unpaid > 0 && (
+        <div className="rounded-lg border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-[11px] text-muted-foreground">
+          <span className="font-semibold text-amber-600 dark:text-amber-400">Без оплаты:</span>{' '}
+          {nf0.format(t.unpaid)} визитов с отпуском энергии не имеют отметки оплаты
+          ({(t.unpaid / t.charged * 100).toFixed(1)}% успешных). Это отдельный контур —
+          энергия отпущена, деньги не подтверждены.
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Надёжность: успех сессий, исходы, худшие станции (кандидаты на ТО), тренд. */
 function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   // Вид-срез: период — только из контура рабочей области.
@@ -1636,6 +1802,41 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
   )
 }
 
+// Виды пункта «Надёжность». «Обзор» отвечает на вопрос «что со станциями»,
+// «Повторные попытки» — «что с клиентским опытом»: одни и те же сессии, но
+// разные единицы счёта (сессия против визита), поэтому это разные виды, а не
+// один экран с переключателем метрики.
+const RELIABILITY_TABS: { k: string; label: string }[] = [
+  { k: 'overview', label: 'Обзор' },
+  { k: 'retries', label: 'Повторные попытки' },
+]
+
+function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType, setClientType }: {
+  companyId: string; dateFrom: string; dateTo: string; subtitle?: string
+  clientType: ClientType; setClientType: (v: ClientType) => void
+}) {
+  const [st, patch] = useTabParams('cs_reliability', { sub: 'overview' })
+  const title = st.sub === 'retries' ? 'Повторные попытки' : 'Обзор'
+  const ref = useRef<HTMLDivElement>(null)
+  return (
+    <ChargeClientCtx.Provider value={clientType}>
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4">
+        <PanelViewTabs tabs={RELIABILITY_TABS} value={st.sub} onChange={(k) => patch({ sub: k })}
+          ariaLabel="Виды пункта «Надёжность»" />
+        <div className="flex items-center gap-2 shrink-0">
+          <ClientTypeToggle value={clientType} onChange={setClientType} />
+          <ExportButton title={`Сессии ЭЗС · Надёжность · ${title}`} subtitle={subtitle} getEl={() => ref.current} />
+        </div>
+      </div>
+      <div ref={ref} className="pt-3" key={st.sub}>
+        {st.sub === 'retries'
+          ? <RetryAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+          : <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />}
+      </div>
+    </ChargeClientCtx.Provider>
+  )
+}
+
 /** Подразделы, которым нужен общий стейт типа клиента (ФЛ/ЮЛ): «Сессии»
  * (внутренние табы) и «Надёжность». Остальные пункты раздаёт ChargeSalesRouter. */
 export function SessionsPanel({ tab, companyId, dateFrom, dateTo }: {
@@ -1645,14 +1846,8 @@ export function SessionsPanel({ tab, companyId, dateFrom, dateTo }: {
   const [clientType, setClientType] = useState<ClientType>('all')
   // «Надёжность» — отдельный подраздел (ТОиР: приоритет РусГидро), не 3-й уровень.
   if (tab === 'cs_reliability') {
-    return (
-      <ChargeClientCtx.Provider value={clientType}>
-        <PanelExport title="Сессии ЭЗС · Надёжность" subtitle={sub}
-          toolbar={<ClientTypeToggle value={clientType} onChange={setClientType} />}>
-          <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
-        </PanelExport>
-      </ChargeClientCtx.Provider>
-    )
+    return <ReliabilitySection companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+      subtitle={sub} clientType={clientType} setClientType={setClientType} />
   }
   return (
     <SessionsTabbed companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} subtitle={sub}

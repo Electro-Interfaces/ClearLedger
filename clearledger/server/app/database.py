@@ -377,6 +377,17 @@ async def create_all() -> None:
             "CREATE INDEX IF NOT EXISTS idx_cs_corp_started "
             "ON charge_sessions (company_id, client_name, started_at) "
             "WHERE client_name IS NOT NULL",
+            # v4.0: ВИЗИТ — склейка смежных попыток одного клиента на одной станции.
+            # CPO отдаёт каждую попытку подключения отдельной строкой: клиент тыкает
+            # разъём 3-4 раза, первые попытки падают, последняя заряжает. Сырой
+            # «успех сессий» = 69% описывает не сеть, а поведение разъёма; успех
+            # ВИЗИТА (зарядился ли человек) = 88,9%. Поля считает charge_visits.py.
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS visit_key VARCHAR(80)",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS visit_seq INTEGER",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS visit_size INTEGER",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS visit_charged BOOLEAN",
+            "CREATE INDEX IF NOT EXISTS idx_cs_visit "
+            "ON charge_sessions (company_id, visit_key)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

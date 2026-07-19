@@ -513,6 +513,69 @@ export async function getChargeSessions(p: PeriodParams & { groupBy?: ChargeGrou
   })
 }
 
+/** Составные визиты: смежные попытки одного клиента на одной станции, склеенные
+ * в одно событие. Сырая сессия ≠ попытка зарядки — CPO пишет каждое касание
+ * разъёма отдельной строкой, поэтому «успех сессий» и «человек зарядился» —
+ * разные показатели. Разбор в разделе Надёжность → «Повторные попытки». */
+export interface VisitTotals {
+  visits: number
+  sessions: number
+  charged: number
+  failed: number
+  retried: number
+  unpaid: number
+  wasted_sessions: number
+  max_attempts: number
+  amount: number
+  kwh: number
+  success_pct: number
+  session_success_pct: number
+  retried_pct: number
+}
+export interface VisitDimRow {
+  label: string
+  visits: number
+  charged: number
+  retried: number
+  failed: number
+  sessions: number
+  wasted: number
+  amount: number
+  avg_attempts: number
+}
+export interface VisitWorstRow {
+  visit_key: string
+  first_at: string
+  attempts: number
+  charged: boolean
+  wasted: number
+  station: string
+  station_code: string
+  region: string | null
+  connector_type: string | null
+  client: string | null
+  kwh: number
+  amount: number
+  duration_min: number
+}
+export interface ChargeVisitsResponse {
+  gap_min: number
+  totals: VisitTotals
+  distribution: { attempts: number; visits: number; charged: number; kwh: number }[]
+  stations: VisitDimRow[]
+  connectors: VisitDimRow[]
+  regions: VisitDimRow[]
+  clients: VisitDimRow[]
+  worst: VisitWorstRow[]
+}
+export async function getChargeVisits(p: PeriodParams & { top?: number }): Promise<ChargeVisitsResponse> {
+  return get<ChargeVisitsResponse>('/api/analytics/charge-sessions/visits', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.top ? { top: String(p.top) } : {}),
+    ...narrowParams(p),
+  })
+}
+
 /** Длинный горизонт отпуска (2024→сейчас): сводная контрагента + сессии (склейка). */
 export interface ChargeLongTrendMonth {
   period: string

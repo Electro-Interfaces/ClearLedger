@@ -171,6 +171,29 @@ async def get_charge_sessions(
     return await svc.charge_sessions(f, group_by=group_by)
 
 
+@router.get("/charge-sessions/visits")
+async def get_charge_visits(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = None,
+    top: int = Query(15, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Составные визиты: успех на уровне «человек зарядился» + разбор повторных
+    попыток по станциям, коннекторам, регионам и клиентам.
+
+    Сырая сессия ≠ попытка зарядки: CPO пишет отдельной строкой каждое касание
+    разъёма. Здесь смежные попытки одного клиента на одной станции склеены в
+    визит (см. services/charge_visits.py)."""
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    from app.services.charge_visits import visits_report
+
+    return await visits_report(
+        db, f.company_id, date_from, date_to, stations=_csv(stations), top=top)
+
+
 @router.get("/charge-sessions/timeseries")
 async def get_charge_timeseries(
     company_id: str,

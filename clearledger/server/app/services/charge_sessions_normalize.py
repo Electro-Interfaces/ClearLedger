@@ -245,6 +245,12 @@ async def ingest_charge_sessions(
     # extra_metadata.nameHistory) — каталог не отстаёт от загрузок.
     renamed = await refresh_location_names(db, company_id)
 
+    # Визиты: склейка смежных попыток одного клиента на одной станции. Считаем
+    # по всей компании, а не только по загруженным строкам — новая сессия может
+    # примкнуть к визиту, который уже лежит в базе, и изменить его исход.
+    from app.services.charge_visits import recompute_visits
+    visits = await recompute_visits(db, company_id)
+
     if mode == "replace":
         message = f"переписано: удалено {deleted}, загружено {created}"
     else:
@@ -255,10 +261,15 @@ async def ingest_charge_sessions(
         message += f"; станций заведено из сессий: {heal['stations_created']}"
     if renamed:
         message += f"; объектов переименовано по свежим сессиям: {renamed}"
+    if visits.get("visits"):
+        message += (f"; визитов {visits['visits']:,}".replace(",", " ")
+                    + f", успешных {visits['success_pct']}%"
+                    + f", с повторными попытками {visits['retried']:,}".replace(",", " "))
     await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
             "errors": errors, "deleted": deleted, "tests": tests,
             "stations_created": heal.get("stations_created", 0),
+            "visits": visits,
             "message": message}
 
 
