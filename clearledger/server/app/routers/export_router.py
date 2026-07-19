@@ -17,6 +17,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import DataEntry, User
 from app.services.export_audit import log_export
+from app.services.export_files import CSV_MIME, XLSX_MIME, content_disposition
 
 router = APIRouter(prefix="/export", tags=["Экспорт"])
 
@@ -168,13 +169,11 @@ async def export_excel(
 
     log_export(db, cid, current_user, f"Экспорт Excel: {len(entries)} записей")
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"clearledger_{timestamp}.xlsx"
-
+    timestamp = datetime.now().strftime("%d.%m.%Y %H-%M")
     return StreamingResponse(
         buffer,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type=XLSX_MIME,
+        headers={"Content-Disposition": content_disposition(f"Выгрузка TradeLedger {timestamp}.xlsx")},
     )
 
 
@@ -211,12 +210,10 @@ async def export_csv(
 
     log_export(db, cid, current_user, f"Экспорт CSV: {len(entries)} записей")
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"clearledger_{timestamp}.csv"
-
+    timestamp = datetime.now().strftime("%d.%m.%Y %H-%M")
     content = buffer.getvalue().encode("utf-8")
     return StreamingResponse(
         io.BytesIO(content),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type=CSV_MIME,
+        headers={"Content-Disposition": content_disposition(f"Выгрузка TradeLedger {timestamp}.csv")},
     )

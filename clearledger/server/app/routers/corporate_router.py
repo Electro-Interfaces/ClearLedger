@@ -3,7 +3,6 @@ KPI-обзор, рентабельность (розница vs договор),
 """
 from __future__ import annotations
 
-import io
 from datetime import date, datetime
 from typing import Any
 
@@ -16,9 +15,9 @@ from app.database import get_db
 from app.models import ChargeSession, User
 from app.services.corporate_service import CorporateService
 from app.services.export_audit import log_export
+from app.services.export_files import xlsx_response
 
 router = APIRouter(prefix="/corporate", tags=["Корпоратив"])
-_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _d(s: str, field: str) -> date:
@@ -138,9 +137,6 @@ async def corporate_billing_export(
                     round(float(s.energy_kwh or 0), 3), float(s.client_tariff or 0),
                     round(gross - vat, 2), vat, round(gross, 2)])
 
-    buf = io.BytesIO()
-    wb.save(buf)
-
     # След выгрузки: основание для выставления УПД — сумма отсюда уходит клиенту.
     total = round(sum(s["gross"] for s in data["summary"]), 2) if data["summary"] else 0.0
     log_export(db, cid, current_user,
@@ -149,8 +145,7 @@ async def corporate_billing_export(
                f"период {date_from[:10]}…{date_to[:10]}"
                + (f", клиент «{client}»" if client else ""))
 
-    # Имя файла — ASCII (кириллица не лезет в latin-1 заголовок Content-Disposition).
-    tag = "client" if client else "all"
-    fname = f"billing_upd_{tag}_{date_from[:10]}_{date_to[:10]}.xlsx"
-    return Response(content=buf.getvalue(), media_type=_XLSX_MIME,
-                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+    fname = f"Реестр под УПД {date_from[:10]} — {date_to[:10]}"
+    if client:
+        fname += f" · {client}"
+    return xlsx_response(wb, f"{fname}.xlsx")

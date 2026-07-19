@@ -17,6 +17,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import ChargeSession, User
 from app.services.export_audit import log_export
+from app.services.export_files import xlsx_response
 
 router = APIRouter(prefix="/charge-sessions", tags=["Зарядные сессии"])
 
@@ -107,9 +108,6 @@ async def count_sessions(
     return {"count": int(n)}
 
 
-_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-
 @router.get("/export")
 async def export_sessions(
     company_id: str,
@@ -176,9 +174,10 @@ async def export_sessions(
     log_export(db, cid, current_user,
                f"Реестр сессий ЭЗС (xlsx): {len(rows)} строк, период {scope}")
 
-    fname = f"sessions_{company_id}_{date_from[:10]}_{date_to[:10]}.xlsx"
-    return Response(content=buf.getvalue(), media_type=_XLSX_MIME,
-                    headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+    fname = f"Реестр сессий ЭЗС {date_from[:10]} — {date_to[:10]}"
+    if client:
+        fname += f" · {client}"
+    return xlsx_response(wb, f"{fname}.xlsx")
 
 
 @router.get("/export/monthly-matrix")
@@ -282,5 +281,5 @@ async def export_monthly_matrix(
                f"Матрица «станция × месяц» (xlsx): {len(order)} станций, "
                f"{len(months)} мес. ({span}), склейка с {cutoff}")
 
-    return Response(content=buf.getvalue(), media_type=_XLSX_MIME,
-                    headers={"Content-Disposition": 'attachment; filename="station_monthly_matrix.xlsx"'})
+    period = f" {months[0][:7]} — {months[-1][:7]}" if months else ""
+    return xlsx_response(wb, f"Матрица станция-месяц{period}.xlsx")
