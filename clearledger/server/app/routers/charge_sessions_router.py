@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import ChargeSession, User
+from app.services.export_audit import log_export
 
 router = APIRouter(prefix="/charge-sessions", tags=["Зарядные сессии"])
 
@@ -165,6 +166,16 @@ async def export_sessions(
         ])
     buf = io.BytesIO()
     wb.save(buf)
+
+    # След выгрузки: в файле — персональные данные клиентов и обе выручки.
+    scope = f"{date_from[:10]}…{date_to[:10]}"
+    if user_type:
+        scope += f", тип {user_type}"
+    if client:
+        scope += f", клиент «{client}»"
+    log_export(db, cid, current_user,
+               f"Реестр сессий ЭЗС (xlsx): {len(rows)} строк, период {scope}")
+
     fname = f"sessions_{company_id}_{date_from[:10]}_{date_to[:10]}.xlsx"
     return Response(content=buf.getvalue(), media_type=_XLSX_MIME,
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
@@ -264,5 +275,12 @@ async def export_monthly_matrix(
 
     buf = io.BytesIO()
     wb.save(buf)
+
+    # След выгрузки: свод по всей сети — заменяет ручной Excel и уходит наружу.
+    span = f"{months[0]}…{months[-1]}" if months else "нет данных"
+    log_export(db, cid, current_user,
+               f"Матрица «станция × месяц» (xlsx): {len(order)} станций, "
+               f"{len(months)} мес. ({span}), склейка с {cutoff}")
+
     return Response(content=buf.getvalue(), media_type=_XLSX_MIME,
                     headers={"Content-Disposition": 'attachment; filename="station_monthly_matrix.xlsx"'})

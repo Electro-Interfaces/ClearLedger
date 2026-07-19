@@ -18,6 +18,7 @@ from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import User
+from app.services.export_audit import log_export
 from app.services.goods_dashboard import GoodsDashboardService
 
 # Каталог выгрузки пакетов БП — ТОЛЬКО из окружения сервера (не из клиентского
@@ -405,12 +406,22 @@ async def store_bp_package_emit(
     """Выгрузить пакет в серверный каталог BP_EXPORT_DIR (клиент путь НЕ задаёт).
     Файл АЗС{код}_{дата}_смена-{номер}_{uuid}.json."""
     from app.services.bp_export import BpPackageEmitter
+    cid = await scope_company_id(user, db)
     try:
-        return await BpPackageEmitter(db, await scope_company_id(user, db)).emit_to_dir(shift_key, BP_EXPORT_DIR)
+        res = await BpPackageEmitter(db, cid).emit_to_dir(shift_key, BP_EXPORT_DIR)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(400, f"Выгрузка в каталог: {e}")
+
+    # След выгрузки: единственное действие раздела, меняющее состояние снаружи —
+    # файл ложится в каталог обмена и уходит в БП. Хеш нужен, чтобы потом
+    # опознать, какой именно пакет приёмник забрал (идемпотентность по ХешПакета).
+    docs = sum(res.get("documents", {}).values())
+    log_export(db, cid, user,
+               f"Пакет ЦБ→БП, смена {shift_key}: {res.get('file')}, "
+               f"{docs} документов, НСИ {res.get('nsi')}, хеш {res.get('hash')}")
+    return res
 
 
 @router.get("/bp-package/verify")

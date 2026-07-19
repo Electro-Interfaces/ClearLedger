@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import AuditEvent, DataEntry, User
+from app.models import DataEntry, User
+from app.services.export_audit import log_export
 
 router = APIRouter(prefix="/export", tags=["Экспорт"])
 
@@ -54,17 +55,6 @@ async def _fetch_entries(
     query = query.order_by(DataEntry.created_at.desc())
     result = await db.execute(query)
     return list(result.scalars().all())
-
-
-def _audit(db: AsyncSession, cid: uuid.UUID, current_user: User, details: str) -> None:
-    """Аудит выгрузки. Пишется всегда — раньше пропускался, когда company_id не передан."""
-    db.add(AuditEvent(
-        company_id=cid,
-        user_id=str(current_user.id),
-        user_name=current_user.name,
-        action="exported",
-        details=details,
-    ))
 
 
 def _entry_to_dict(entry: DataEntry) -> dict:
@@ -126,7 +116,7 @@ async def export_json(
     cid = await _export_company_id(db, current_user, company_id)
     entries = await _fetch_entries(db, cid, status)
     data = [_entry_to_dict(e) for e in entries]
-    _audit(db, cid, current_user, f"Экспорт JSON: {len(data)} записей")
+    log_export(db, cid, current_user, f"Экспорт JSON: {len(data)} записей")
     return data
 
 
@@ -176,7 +166,7 @@ async def export_excel(
     wb.save(buffer)
     buffer.seek(0)
 
-    _audit(db, cid, current_user, f"Экспорт Excel: {len(entries)} записей")
+    log_export(db, cid, current_user, f"Экспорт Excel: {len(entries)} записей")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"clearledger_{timestamp}.xlsx"
@@ -219,7 +209,7 @@ async def export_csv(
     for entry in entries:
         writer.writerow(_entry_to_dict(entry))
 
-    _audit(db, cid, current_user, f"Экспорт CSV: {len(entries)} записей")
+    log_export(db, cid, current_user, f"Экспорт CSV: {len(entries)} записей")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"clearledger_{timestamp}.csv"

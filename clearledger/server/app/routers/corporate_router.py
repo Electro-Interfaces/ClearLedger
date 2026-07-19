@@ -15,6 +15,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import ChargeSession, User
 from app.services.corporate_service import CorporateService
+from app.services.export_audit import log_export
 
 router = APIRouter(prefix="/corporate", tags=["Корпоратив"])
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -139,6 +140,15 @@ async def corporate_billing_export(
 
     buf = io.BytesIO()
     wb.save(buf)
+
+    # След выгрузки: основание для выставления УПД — сумма отсюда уходит клиенту.
+    total = round(sum(s["gross"] for s in data["summary"]), 2) if data["summary"] else 0.0
+    log_export(db, cid, current_user,
+               f"Реестр под УПД (xlsx): {len(data['summary'])} клиентов, "
+               f"{len(sessions)} сессий, {total} ₽ с НДС {vr}%, "
+               f"период {date_from[:10]}…{date_to[:10]}"
+               + (f", клиент «{client}»" if client else ""))
+
     # Имя файла — ASCII (кириллица не лезет в latin-1 заголовок Content-Disposition).
     tag = "client" if client else "all"
     fname = f"billing_upd_{tag}_{date_from[:10]}_{date_to[:10]}.xlsx"
