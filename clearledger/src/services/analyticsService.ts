@@ -586,11 +586,16 @@ export interface UnpaidResponse {
     probes: { sessions: number }
   }
   stations: {
-    label: string; debt_sessions: number; debt_amount: number
+    station_code: string; label: string; debt_sessions: number; debt_amount: number
     corp_sessions: number; corp_kwh: number; probe_sessions: number
   }[]
   clients: { label: string; sessions: number; kwh: number; amount: number }[]
   trend: { month: string; debt_sessions: number; debt_amount: number; corp_sessions: number; corp_kwh: number }[]
+  /** Аккаунты-должники: разовый сбой или повторяющийся клиент (cases > 1). */
+  accounts: {
+    account: string; cases: number; kwh: number; amount: number
+    stations: number; first_at: string; last_at: string
+  }[]
   cases: {
     session_ext_id: string; started_at: string; station_name: string | null; station_code: string
     region: string | null; connector_type: string | null; client: string
@@ -602,6 +607,24 @@ export async function getChargeUnpaid(p: PeriodParams & { top?: number }): Promi
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     ...(p.top ? { top: String(p.top) } : {}),
     ...narrowParams(p),
+  })
+}
+
+/** Детали неоплаты по одной станции — раскрывается кликом по строке. */
+export interface UnpaidStationDetail {
+  station_code: string
+  retail: {
+    session_ext_id: string; started_at: string; connector_type: string | null
+    client: string; energy_kwh: number; tariff: number; result: string | null; amount: number
+  }[]
+  corp: { label: string; sessions: number; kwh: number; amount: number }[]
+  probes: number
+}
+export async function getChargeUnpaidStation(p: {
+  companyId: string; dateFrom: string; dateTo: string; code: string
+}): Promise<UnpaidStationDetail> {
+  return get<UnpaidStationDetail>('/api/analytics/charge-sessions/unpaid/station', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, code: p.code,
   })
 }
 

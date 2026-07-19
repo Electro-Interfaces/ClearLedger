@@ -325,9 +325,9 @@ async def visit_success(
 async def visit_success_series(
     db: AsyncSession, company_id, date_from, date_to, bucket: str,
     stations: list[str] | None = None,
-) -> dict[str, float]:
-    """Успех визитов по бакетам → спарклайн обзора. Ключи совпадают с осью
-    `_cs_bucket_axis`, пустые бакеты заполняет вызывающий (ratio → null)."""
+) -> dict[str, dict[str, float]]:
+    """Визиты и их успех по бакетам → спарклайны обзора. Ключи совпадают с осью
+    `_cs_bucket_axis`, пустые бакеты заполняет вызывающий."""
     expr = _BUCKET_EXPR.get(bucket)
     if expr is None:
         return {}
@@ -337,7 +337,8 @@ async def visit_success_series(
                count(*) FILTER (WHERE charged) AS charged
           FROM v GROUP BY 1
     """)
-    return {r["b"]: round(int(r["charged"]) / int(r["visits"]) * 100, 1)
+    return {r["b"]: {"visits": int(r["visits"]),
+                     "success_pct": round(int(r["charged"]) / int(r["visits"]) * 100, 1)}
             for r in rows if int(r["visits"] or 0) > 0}
 
 

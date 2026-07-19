@@ -127,7 +127,8 @@ async def unpaid_report(
     }
 
     by_station = await q("""
-        SELECT coalesce(station_name, station_code) || ' (' || station_code || ')' AS label,
+        SELECT station_code,
+               coalesce(max(station_name), station_code) || ' (' || station_code || ')' AS label,
                count(*) FILTER (WHERE has_energy AND seg <> 'corp') AS debt_sessions,
                coalesce(sum(CASE WHEN has_energy AND seg <> 'corp'
                                  THEN CASE WHEN revenue > 0 THEN revenue ELSE energy_kwh * tariff END ELSE 0 END), 0) AS debt_amount,
@@ -160,6 +161,23 @@ async def unpaid_report(
           FROM s GROUP BY 1 ORDER BY 1
     """)
 
+    # Реестр аккаунтов: разовый сбой оплаты или клиент, который делает так
+    # регулярно? Второе — уже не техника, а работа с клиентом, поэтому в списке
+    # есть частота, разброс станций и давность.
+    accounts = [
+        {**_row(r, drop=("user_id",)), "account": mask_phone(r["user_id"]) if r["user_id"] else "без телефона"}
+        for r in await q("""
+        SELECT user_id,
+               count(*) AS cases,
+               coalesce(sum(energy_kwh), 0) AS kwh,
+               coalesce(sum(CASE WHEN revenue > 0 THEN revenue ELSE energy_kwh * tariff END), 0) AS amount,
+               count(DISTINCT station_code) AS stations,
+               min(started_at) AS first_at,
+               max(started_at) AS last_at
+          FROM s WHERE has_energy AND seg <> 'corp'
+         GROUP BY user_id ORDER BY amount DESC LIMIT :top
+    """)]
+
     # Поимённый реестр розничного долга — случаев мало, их разбирают руками.
     cases = [
         {**_row(r, drop=("user_id", "client_name")),
@@ -181,5 +199,49 @@ async def unpaid_report(
         "stations": [_row(r) for r in by_station],
         "clients": [_row(r) for r in by_client],
         "trend": [_row(r) for r in trend],
+        "accounts": accounts,
         "cases": cases,
+    }
+
+
+async def unpaid_station_detail(
+    db: AsyncSession, company_id, date_from: str, date_to: str, station_code: str,
+) -> dict[str, Any]:
+    """Детали одной станции: кто именно уехал не заплатив и какие ЮЛ ждут счёта.
+
+    Открывается кликом по строке станции: сводная цифра без имён не даёт что
+    делать дальше, а разбираются такие случаи поимённо."""
+    p = {"company_id": str(company_id),
+         "date_from": _as_date(date_from), "date_to": _as_date(date_to),
+         "charged_min": CHARGED_MIN_KWH, "code": station_code}
+
+    async def q(sql: str) -> list[Any]:
+        # Сужение задаём кодом станции, а не общим фильтром сети.
+        sql_full = _BASE.format(station_filter="AND station_code = :code") + sql
+        return list((await db.execute(text(sql_full), p)).mappings().all())
+
+    retail = [
+        {**_row(r, drop=("user_id", "client_name")),
+         "client": mask_phone(r["user_id"]) if r["user_id"] else "без телефона"}
+        for r in await q("""
+        SELECT session_ext_id, started_at, connector_type, user_id, client_name,
+               energy_kwh, tariff, result,
+               CASE WHEN revenue > 0 THEN revenue ELSE energy_kwh * tariff END AS amount
+          FROM s WHERE has_energy AND seg <> 'corp'
+         ORDER BY started_at DESC
+    """)]
+    corp = [_row(r) for r in await q("""
+        SELECT client_name AS label, count(*) AS sessions,
+               coalesce(sum(energy_kwh), 0) AS kwh,
+               coalesce(sum(CASE WHEN revenue > 0 THEN revenue ELSE energy_kwh * tariff END), 0) AS amount
+          FROM s WHERE has_energy AND seg = 'corp'
+         GROUP BY 1 ORDER BY amount DESC
+    """)]
+    probes = (await q("SELECT count(*) AS n FROM s WHERE NOT has_energy"))[0]["n"]
+
+    return {
+        "station_code": station_code,
+        "retail": retail,
+        "corp": corp,
+        "probes": int(probes or 0),
     }

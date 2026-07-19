@@ -67,11 +67,13 @@ function kpiDisplay(k: OverviewKpi): string {
 // Описательные подписи ключевых KPI (в стиле счётных карт, без дельт).
 const KPI_HINTS: Record<string, string> = {
   revenue: 'выручка сети за период',
-  sessions: 'зарядных сессий',
+  sessions: 'сессий CPO, включая попытки',
   energy_kwh: 'отпущено за период',
   price_per_kwh: 'средняя за период',
-  // Считается по ВИЗИТАМ: смежные попытки одного клиента на станции склеены.
-  // Клиент, зарядившийся с третьей попытки, — успех, а не 2/3 брака.
+  // Визит = приезд клиента: смежные попытки на одной станции склеены. Успех
+  // считается по нему, поэтому визит стоит рядом с сессией — иначе доля
+  // «Зарядились» не с чем соотнести.
+  visits: 'приездов клиентов',
   visit_success_pct: 'доля клиентов, зарядившихся',
   success_pct: 'доля успешных сессий',
 }
@@ -488,8 +490,8 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
 
             {/* ключевые KPI с Δ% к прошлому периоду + спарклайн — под статистикой.
                 База сравнения — в подсказке самого Δ (см. KpiCard). */}
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-              {(['revenue', 'sessions', 'energy_kwh', 'price_per_kwh', 'visit_success_pct'] as const).map((key) => {
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+              {(['revenue', 'visits', 'sessions', 'energy_kwh', 'price_per_kwh', 'visit_success_pct'] as const).map((key) => {
                 const k = data.kpis.find((x) => x.key === key)
                 return k ? <KpiCard key={key} k={k} hint={KPI_HINTS[key]} baseline={baseline} /> : null
               })}

@@ -156,8 +156,10 @@ class OverviewService:
         vp = await visit_success(self.db, company_id, prev_from, prev_to, f_prev.station_codes)
         v_by_bucket = await visit_success_series(
             self.db, company_id, df, dt, bucket, f_cur.station_codes)
-        # Пустой бакет → null: это доля, ноль в ней означал бы «все ушли ни с чем».
-        spark_success = [v_by_bucket.get(b) for b in cur_axis]
+        # Успех — доля: пустой бакет → null (ноль в ней читался бы как «все ушли
+        # ни с чем»). Визиты — счётчик: пустой бакет → 0, это честный ноль.
+        spark_success = [(v_by_bucket[b]["success_pct"] if b in v_by_bucket else None) for b in cur_axis]
+        spark_visits = [(v_by_bucket[b]["visits"] if b in v_by_bucket else 0) for b in cur_axis]
 
         def kpi(key, label, value, prev_value, fmt, unit, spark=None, accent=None):
             d = _dpct(float(value), float(prev_value)) if has_prev else None
@@ -176,6 +178,11 @@ class OverviewService:
 
         kpis = [
             kpi("revenue", "Выручка", tc["amount"], tp["amount"], "moneyShort", "₽", spark_amount),
+            # Визиты идут ПЕРЕД сессиями: визит — это приезд клиента (единица, в
+            # которой считается успех), сессия — техническая строка CPO. Без визита
+            # на экране «Зарядились 89,3%» не с чем соотнести: рядом стоит 122 336
+            # сессий, и доля выглядит взявшейся из воздуха.
+            kpi("visits", "Визиты", vc["visits"], vp["visits"], "int", "", spark_visits),
             kpi("sessions", "Сессии", tc["sessions"], tp["sessions"], "int", "", spark_sessions),
             kpi("energy_kwh", "Энергия", tc["energy_kwh"], tp["energy_kwh"], "kwh", "кВтч", spark_energy),
             kpi("utilization_pct", "Загрузка", tc["utilization_pct"], tp["utilization_pct"], "pct", "%",

@@ -4,7 +4,7 @@
  * динамика (тренд) · сравнение периодов. Данные — /api/analytics/charge-sessions(/timeseries|/compare).
  */
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -27,7 +27,7 @@ import { HorizonControl } from './HorizonControl'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
-  getChargeNewClients, getChargeNewClientsList, getChargeVisits, getChargeUnpaid,
+  getChargeNewClients, getChargeNewClientsList, getChargeVisits, getChargeUnpaid, getChargeUnpaidStation,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
   type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket,
   type ChargeSeriesBy, type ChargeTimeseriesResponse, type ChargeSliceResponse, type ChargeSessionsResponse,
@@ -1638,18 +1638,97 @@ function RetryAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dat
  * их путает. Долг розницы — настоящая дыра. Постоплата ЮЛ — ожидаемое состояние
  * (счёт за период), это дебиторка, а не убыток. Пробы без энергии — ноль в
  * деньгах, но именно они раздувают долю «неоплаченных» и пугают зря. */
+/** Раскрытая станция: кто именно уехал не заплатив и какие ЮЛ ждут счёта.
+ * Сводная цифра без имён не подсказывает, что делать дальше. */
+function UnpaidStationDetailRow({ companyId, dateFrom, dateTo, code, colSpan }: {
+  companyId: string; dateFrom: string; dateTo: string; code: string; colSpan: number
+}) {
+  const q = useQuery({
+    queryKey: ['charge-unpaid-station', companyId, dateFrom, dateTo, code],
+    queryFn: () => getChargeUnpaidStation({ companyId, dateFrom, dateTo, code }),
+  })
+  return (
+    <tr className="bg-muted/20">
+      <td colSpan={colSpan} className="p-3">
+        {q.isLoading ? <div className="text-[11px] text-muted-foreground">Загрузка…</div> : !q.data ? null : (
+          <div className="space-y-3">
+            {q.data.retail.length > 0 && (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-red-600 dark:text-red-400">
+                  Уехали не заплатив ({q.data.retail.length})
+                </div>
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-muted-foreground">
+                      <th className="text-left py-1 font-medium">Дата</th>
+                      <th className="text-left py-1 font-medium">Аккаунт</th>
+                      <th className="text-left py-1 font-medium">Коннектор</th>
+                      <th className="text-right py-1 font-medium">кВтч</th>
+                      <th className="text-right py-1 font-medium">Сумма</th>
+                      <th className="text-left py-1 font-medium">Исход</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {q.data.retail.map((r) => (
+                      <tr key={r.session_ext_id} className="border-t border-border/30">
+                        <td className="py-1 font-mono text-muted-foreground whitespace-nowrap">{r.started_at.slice(0, 16).replace('T', ' ')}</td>
+                        <td className="py-1 font-mono">{r.client}</td>
+                        <td className="py-1 text-muted-foreground">{r.connector_type ?? '—'}</td>
+                        <td className="py-1 text-right font-mono">{nf1.format(r.energy_kwh)}</td>
+                        <td className="py-1 text-right font-mono text-red-600 dark:text-red-400">{fmtMoney(r.amount)} ₽</td>
+                        <td className="py-1 text-muted-foreground">{r.result ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {q.data.corp.length > 0 && (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                  Ждут счёта (ЮЛ)
+                </div>
+                <table className="w-full text-[11px]">
+                  <tbody>
+                    {q.data.corp.map((c) => (
+                      <tr key={c.label} className="border-t border-border/30">
+                        <td className="py-1 font-medium">{c.label}</td>
+                        <td className="py-1 text-right font-mono text-muted-foreground">{nf0.format(c.sessions)} сес.</td>
+                        <td className="py-1 text-right font-mono text-muted-foreground">{nf0.format(c.kwh)} кВтч</td>
+                        <td className="py-1 text-right font-mono">{fmtMoney(c.amount)} ₽</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {q.data.retail.length === 0 && q.data.corp.length === 0 && (
+              <div className="text-[11px] text-muted-foreground">
+                На станции только пробы без отпуска энергии ({nf0.format(q.data.probes)}) — платить не за что.
+              </div>
+            )}
+          </div>
+        )}
+      </td>
+    </tr>
+  )
+}
+
 function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const n = useNarrow()
+  const [openStation, setOpenStation] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['charge-unpaid', companyId, dateFrom, dateTo, n.key],
     queryFn: () => getChargeUnpaid({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, top: 15 }),
   })
   if (q.isLoading) return <Loading />
   if (!q.data) return <Empty text="Нет данных за период" />
-  const { totals: t, stations, clients, trend, cases } = q.data
+  const { totals: t, stations, clients, trend, cases, accounts } = q.data
   const nothing = t.debt.sessions === 0 && t.postpaid.sessions === 0
   if (nothing) return <Empty text="За период весь отпуск энергии оплачен" />
   const maxTrend = Math.max(...trend.map((r) => r.corp_kwh), 1)
+  // Повторяющиеся аккаунты отделяют сбой оплаты от поведения клиента.
+  const repeaters = accounts.filter((a) => a.cases > 1).length
 
   return (
     <div className="p-4 space-y-4">
@@ -1730,6 +1809,51 @@ function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; da
         </Card>
       )}
 
+      {accounts.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-baseline justify-between gap-2">
+              <span>Аккаунты, заряжающиеся без оплаты</span>
+              <span className="text-[10px] font-normal normal-case">
+                {repeaters > 0
+                  ? `${repeaters} с повторными случаями — это уже не сбой оплаты`
+                  : 'все случаи разовые — похоже на сбой оплаты, а не на клиентов'}
+              </span>
+            </div>
+            <table className="w-full text-xs" {...exportRows('Аккаунты без оплаты', ['Аккаунт', 'Случаев', 'кВтч', 'Сумма, ₽', 'Станций', 'Первый', 'Последний'],
+              accounts.map((r) => [r.account, r.cases, r.kwh, r.amount, r.stations,
+                r.first_at.slice(0, 10), r.last_at.slice(0, 10)]))}>
+              <thead>
+                <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="text-left p-2 font-medium">Аккаунт</th>
+                  <th className="text-right p-2 font-medium" title="Сколько раз уехал без оплаты">Случаев</th>
+                  <th className="text-right p-2 font-medium">кВтч</th>
+                  <th className="text-right p-2 font-medium">Сумма</th>
+                  <th className="text-right p-2 font-medium" title="На скольких разных станциях">Станций</th>
+                  <th className="text-left p-2 font-medium">Последний раз</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.map((r) => (
+                  <tr key={r.account} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-mono font-medium whitespace-nowrap">{r.account}</td>
+                    {/* Повтор — другой разговор: разовый случай списывают на сбой,
+                        системный требует решения по клиенту. */}
+                    <td className={`p-2 text-right font-mono ${r.cases > 1 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-muted-foreground'}`}>
+                      {r.cases}
+                    </td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(r.kwh)}</td>
+                    <td className="p-2 text-right font-mono">{fmtMoney(r.amount)} ₽</td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">{r.stations}</td>
+                    <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.last_at.slice(0, 10)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid md:grid-cols-2 gap-3">
         <Card>
           <CardContent className="p-0">
@@ -1779,15 +1903,29 @@ function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; da
                 </tr>
               </thead>
               <tbody>
-                {stations.map((r) => (
-                  <tr key={r.label} className="border-b border-border/30 hover:bg-muted/30">
-                    <td className="p-2 font-medium truncate max-w-[200px]" title={r.label}>{r.label}</td>
-                    <td className={`p-2 text-right font-mono ${r.debt_amount > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                      {r.debt_amount > 0 ? `${fmtMoney(r.debt_amount)} ₽` : '—'}
-                    </td>
-                    <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.corp_kwh)}</td>
-                  </tr>
-                ))}
+                {stations.map((r) => {
+                  const open = openStation === r.station_code
+                  return (
+                    <Fragment key={r.station_code}>
+                      <tr className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => setOpenStation(open ? null : r.station_code)}
+                        title="Показать, кто заряжался без оплаты на этой станции">
+                        <td className="p-2 font-medium truncate max-w-[200px]">
+                          <span className="mr-1 inline-block w-3 text-muted-foreground">{open ? '▾' : '▸'}</span>
+                          {r.label}
+                        </td>
+                        <td className={`p-2 text-right font-mono ${r.debt_amount > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                          {r.debt_amount > 0 ? `${fmtMoney(r.debt_amount)} ₽` : '—'}
+                        </td>
+                        <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.corp_kwh)}</td>
+                      </tr>
+                      {open && (
+                        <UnpaidStationDetailRow companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+                          code={r.station_code} colSpan={3} />
+                      )}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </CardContent>

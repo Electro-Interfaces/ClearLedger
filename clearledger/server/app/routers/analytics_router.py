@@ -214,6 +214,23 @@ async def get_charge_unpaid(
         db, f.company_id, date_from, date_to, stations=_csv(stations), top=top)
 
 
+@router.get("/charge-sessions/unpaid/station")
+async def get_charge_unpaid_station(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    code: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Кто именно уехал со станции не заплатив + какие ЮЛ ждут счёта.
+    Раскрывается по клику на строку станции в разборе неоплаты."""
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    from app.services.charge_unpaid import unpaid_station_detail
+
+    return await unpaid_station_detail(db, f.company_id, date_from, date_to, code)
+
+
 @router.get("/charge-sessions/timeseries")
 async def get_charge_timeseries(
     company_id: str,
