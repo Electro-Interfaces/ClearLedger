@@ -266,12 +266,27 @@ function NetworkHealth({ net }: { net: OverviewNetwork }) {
             )}
             {recon && (
               <div className="border-t pt-2">
-                <div className={`text-sm font-semibold tabular-nums ${Math.abs(recon.diff_pct ?? 0) > 10 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                  {recon.diff_pct != null ? `${recon.diff_pct > 0 ? '+' : ''}${recon.diff_pct}%` : '—'}
-                </div>
-                <div className="text-[11px] text-muted-foreground">
-                  расхождение сессий с реестром ({nf0.format(recon.session_kwh)} против {nf0.format(recon.registry_kwh)} кВтч)
-                </div>
+                {/* Недогруженный месяц — не расхождение витрин, а дыра в данных.
+                    Смешивать их в один процент нельзя: реестр за июнь на 3%
+                    заполнения дал бы «расхождение +3193%». */}
+                {recon.compared_months > 0 ? (
+                  <>
+                    <div className={`text-sm font-semibold tabular-nums ${Math.abs(recon.diff_pct ?? 0) > 10 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                      {recon.diff_pct != null ? `${recon.diff_pct > 0 ? '+' : ''}${recon.diff_pct}%` : '—'}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      сессии против реестра за {recon.compared_months} мес.
+                      ({nf0.format(recon.session_kwh)} против {nf0.format(recon.registry_kwh)} кВтч)
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-[11px] text-muted-foreground">Реестр за период не догружен — сверять не с чем.</div>
+                )}
+                {recon.incomplete_months.length > 0 && (
+                  <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                    Реестр не догружен: {recon.incomplete_months.join(', ')} — эти месяцы в сверку не взяты.
+                  </div>
+                )}
               </div>
             )}
           </div>

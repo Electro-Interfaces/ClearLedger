@@ -124,8 +124,15 @@ export interface OverviewNetwork {
     regions: number
   }
   energy_recon: {
-    months: { period: string; session_kwh: number; registry_kwh: number; diff_kwh: number; diff_pct: number | null }[]
+    months: {
+      period: string; session_kwh: number; registry_kwh: number
+      diff_kwh: number; diff_pct: number | null
+      coverage_pct: number | null; incomplete: boolean
+    }[]
     session_kwh: number; registry_kwh: number; diff_kwh: number; diff_pct: number | null
+    /** Месяцы, где реестр недогружен — их не сверяют, а дозагружают. */
+    incomplete_months: string[]
+    compared_months: number
   } | null
   receivable: {
     amount: number; sessions: number; kwh: number

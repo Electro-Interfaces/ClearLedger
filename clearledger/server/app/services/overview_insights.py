@@ -246,10 +246,12 @@ async def energy_reconciliation(
              GROUP BY 1
         ),
         reg AS (
-            SELECT period, sum(intake_kwh) AS registry_kwh
+            -- period в реестре — первое число месяца ('2026-06-01'), а не 'YYYY-MM'.
+            -- Без обрезки джойн не находит ни одной пары и блок молча пустеет.
+            SELECT left(period, 7) AS period, sum(intake_kwh) AS registry_kwh
               FROM station_energy_periods
              WHERE company_id = :company_id
-             GROUP BY period
+             GROUP BY 1
         )
         SELECT m.period, m.session_kwh, r.registry_kwh
           FROM months m JOIN reg r ON r.period = m.period
@@ -259,16 +261,31 @@ async def energy_reconciliation(
         "company_id": str(company_id), "date_from": date_from, "date_to": date_to}))
     if not rows:
         return None
+
+    # Месяц, где реестр покрывает меньше 60% отпуска по сессиям, — это НЕ
+    # расхождение витрин, а недогруженный реестр: на проде за июнь загружено
+    # 6 МВт·ч против 198 МВт·ч по сессиям, и «расхождение +3193%» было бы
+    # прямой дезинформацией. Такие месяцы помечаем и исключаем из итога,
+    # иначе они утаскивают общую цифру в бессмыслицу.
+    INCOMPLETE_BELOW = 60.0
     for r in rows:
         s, g = r["session_kwh"] or 0, r["registry_kwh"] or 0
         r["diff_kwh"] = round(s - g, 1)
         r["diff_pct"] = round((s - g) / g * 100, 1) if g else None
-    ts = sum(r["session_kwh"] or 0 for r in rows)
-    tr = sum(r["registry_kwh"] or 0 for r in rows)
+        r["coverage_pct"] = round(g / s * 100, 1) if s else None
+        r["incomplete"] = bool(s and (g / s * 100) < INCOMPLETE_BELOW)
+
+    solid = [r for r in rows if not r["incomplete"]]
+    ts = sum(r["session_kwh"] or 0 for r in solid)
+    tr = sum(r["registry_kwh"] or 0 for r in solid)
+    incomplete = [r["period"] for r in rows if r["incomplete"]]
     return {
         "months": rows,
         "session_kwh": round(ts, 1),
         "registry_kwh": round(tr, 1),
         "diff_kwh": round(ts - tr, 1),
         "diff_pct": round((ts - tr) / tr * 100, 1) if tr else None,
+        # Месяцы, где реестр явно не догружен — их надо не сверять, а дозагрузить.
+        "incomplete_months": incomplete,
+        "compared_months": len(solid),
     }
