@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models import ChargeSession, User
 from app.services.export_audit import log_export
 from app.services.export_files import xlsx_response
+from app.services.pivot_export import build_sessions_pivot
 
 router = APIRouter(prefix="/charge-sessions", tags=["Зарядные сессии"])
 
@@ -178,6 +179,32 @@ async def export_sessions(
     if client:
         fname += f" · {client}"
     return xlsx_response(wb, f"{fname}.xlsx")
+
+
+@router.get("/export/pivot")
+async def export_sessions_pivot(
+    company_id: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    limit: int = Query(200000, ge=1, le=500000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Сессии + ГОТОВАЯ сводная таблица Excel (станция × коннектор).
+
+    Сводная пересчитывается при открытии файла средствами Excel. В других
+    редакторах (LibreOffice, Google Sheets, веб-Excel) она останется пустой —
+    там работает лист «Транзакции» с полными данными."""
+    cid = await assert_company_member(company_id, current_user, db)
+    wb, stats = await build_sessions_pivot(db, cid, date_from, date_to, limit)
+
+    span = (f"{date_from[:10]} — {date_to[:10]}" if date_from and date_to
+            else "весь период")
+    log_export(db, cid, current_user,
+               f"Сессии ЭЗС со сводной (xlsx): {stats['rows']} строк, период {span}"
+               + (" ⚠ обрезано по лимиту" if stats["truncated"] else ""))
+
+    return xlsx_response(wb, f"Сессии ЭЗС со сводной {span}.xlsx")
 
 
 @router.get("/export/monthly-matrix")
