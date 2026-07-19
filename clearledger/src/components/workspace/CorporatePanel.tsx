@@ -15,6 +15,7 @@ import { Loader2, Download, AlertTriangle, Info, ArrowUp, ArrowDown, ChevronsUpD
 import { toast } from 'sonner'
 import { useTabParams } from '@/hooks/useTabParams'
 import { getCorporateOverview, getCorporateClients, exportCorporateBillingUpd, type CorpClient } from '@/services/corporateService'
+import { CorpClientModal } from './CorpClientModal'
 import { exportChargeSessionsXlsx } from '@/services/chargeSessionsService'
 import { getChargeTimeseries, fmtMoneyShort } from '@/services/analyticsService'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
@@ -37,7 +38,9 @@ function Empty({ text }: { text: string }) { return <div className="p-6 text-sm 
 // ── Сортируемая таблица клиентов (общая для Клиенты/Тарифы/Биллинг) ──
 interface Col { key: string; label: string; left?: boolean; get: (c: CorpClient) => number | string; cell: (c: CorpClient) => ReactNode }
 
-function ClientsTable({ rows, cols, initial = 'corp_revenue' }: { rows: CorpClient[]; cols: Col[]; initial?: string }) {
+function ClientsTable({ rows, cols, initial = 'corp_revenue', onPick }: {
+  rows: CorpClient[]; cols: Col[]; initial?: string; onPick?: (name: string) => void
+}) {
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: initial, dir: 'desc' })
   const col = useMemo(() => cols.find((c) => c.key === sort.key) ?? cols[0], [cols, sort.key])
   const sorted = useMemo(() => {
@@ -72,7 +75,10 @@ function ClientsTable({ rows, cols, initial = 'corp_revenue' }: { rows: CorpClie
           </thead>
           <tbody>
             {sorted.map((c) => (
-              <tr key={c.phone + c.name} className="border-b border-border/30 hover:bg-muted/30">
+              <tr key={c.phone + c.name}
+                onClick={onPick ? () => onPick(c.name) : undefined}
+                title={onPick ? 'Открыть карточку клиента' : undefined}
+                className={`border-b border-border/30 hover:bg-muted/30 ${onPick ? 'cursor-pointer' : ''}`}>
                 {cols.map((col2, i) => (
                   <td key={col2.key} className={`p-2 ${col2.left ? 'text-left font-medium truncate max-w-[260px]' : 'text-right tabular-nums'} ${i === 0 ? '' : 'text-muted-foreground'}`}>
                     {col2.cell(c)}
@@ -229,6 +235,8 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
 function CorpClients({ companyId, dateFrom, dateTo }: TabProps) {
   const { data, isLoading } = useClients(companyId, dateFrom, dateTo)
   const [exporting, setExporting] = useState(false)
+  // Клик по строке → карточка клиента (помесячная реализация + профиль).
+  const [picked, setPicked] = useState<string | null>(null)
   if (isLoading) return <Loading />
   if (!data) return <Empty text="Нет данных" />
   async function dl() {
@@ -250,12 +258,19 @@ function CorpClients({ companyId, dateFrom, dateTo }: TabProps) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs text-muted-foreground">Реестр: {data.totals.clients} организаций ({data.totals.active_clients} с сессиями за период)</div>
+        <div className="text-xs text-muted-foreground">
+          Реестр: {data.totals.clients} организаций ({data.totals.active_clients} с сессиями за период)
+          <span className="ml-2 text-muted-foreground/70">— строка открывает карточку клиента</span>
+        </div>
         <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" disabled={exporting} onClick={dl}>
           {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}Выгрузить сессии (xlsx)
         </Button>
       </div>
-      <ClientsTable rows={data.clients} cols={cols} />
+      <ClientsTable rows={data.clients} cols={cols} onPick={setPicked} />
+      {picked && (
+        <CorpClientModal client={picked} companyId={companyId}
+          dateFrom={dateFrom} dateTo={dateTo} onClose={() => setPicked(null)} />
+      )}
     </div>
   )
 }

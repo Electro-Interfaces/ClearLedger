@@ -63,6 +63,62 @@ export async function getCorporateClients(p: P): Promise<CorpClientsResponse> {
   return get<CorpClientsResponse>('/api/corporate/clients', params(p))
 }
 
+// ── карточка одного ЮЛ ────────────────────────────────────────────────
+/** Месяц реализации. `partial` — период режет месяц по краю (18 дней из 31):
+ *  такой месяц нельзя сравнивать с полным, поэтому у него нет и delta. */
+export interface CorpMonth {
+  month: string
+  sessions: number
+  energy_kwh: number
+  corp_revenue: number
+  retail_revenue: number
+  discount: number
+  avg_tariff: number
+  drivers: number
+  stations: number
+  partial: boolean
+  days_covered: number
+  days_in_month: number
+  revenue_delta_pct: number | null
+}
+export interface CorpBreakdown {
+  label: string
+  sessions: number
+  energy_kwh: number
+  corp_revenue: number
+}
+export interface CorpClientCard {
+  client: string
+  period: { from: string; to: string }
+  /** Горизонт ряда `months`. Равен period, пока горизонт не расширен явно. */
+  months_period: { from: string; to: string }
+  history_months: number
+  profile: {
+    phone?: string | null; ext_id?: string | null; mode?: string | null
+    rate?: number | null; matrix?: Record<string, Record<string, number>> | null
+    contract_start?: string | null; status?: string | null
+    users?: number | null; in_registry: boolean
+  }
+  totals: CorpClient
+  averages: { avg_check: number; avg_kwh: number; sessions_per_month: number }
+  months: CorpMonth[]
+  stations: CorpBreakdown[]
+  regions: CorpBreakdown[]
+  connectors: CorpBreakdown[]
+  drivers: CorpBreakdown[]
+  when: { weekday: number; weekend: number; hours: { hour: number; sessions: number }[] }
+  /** За всю историю, не за период: «клиент с нами с…» и «последняя зарядка…». */
+  lifetime: { first_session: string | null; last_session: string | null; sessions: number; corp_revenue: number }
+}
+
+export async function getCorporateClientCard(
+  p: P & { client: string; historyMonths?: number },
+): Promise<CorpClientCard> {
+  return get<CorpClientCard>('/api/corporate/client-card', {
+    ...params(p), client: p.client, history_months: p.historyMonths ?? 0,
+  })
+}
+
 /**
  * Скачать реестр к выставлению под УПД (xlsx, 2 листа: Реестр + Детализация,
  * НДС выделен). Опц. фильтр по клиенту (один клиент = один УПД).

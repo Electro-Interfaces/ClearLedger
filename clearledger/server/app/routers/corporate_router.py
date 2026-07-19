@@ -53,6 +53,27 @@ async def corporate_clients(
     return await CorporateService(db).clients(cid, _d(date_from, "date_from"), _d(date_to, "date_to"))
 
 
+@router.get("/client-card")
+async def corporate_client_card(
+    company_id: str,
+    client: str,
+    date_from: str,
+    date_to: str,
+    history_months: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Карточка одного ЮЛ: помесячная реализация за период, разрезы потребления
+    (станции/регионы/коннекторы/карты), режим эксплуатации и срок отношений.
+
+    `history_months` > 0 удлиняет ТОЛЬКО ряд месяцев (динамика на коротком
+    контуре не читается); итоги и разрезы остаются по периоду."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await CorporateService(db).client_card(
+        cid, client, _d(date_from, "date_from"), _d(date_to, "date_to"),
+        max(0, min(history_months, 36)))
+
+
 @router.get("/billing")
 async def corporate_billing(
     company_id: str,
