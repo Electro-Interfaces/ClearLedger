@@ -70,6 +70,9 @@ const KPI_HINTS: Record<string, string> = {
   sessions: 'зарядных сессий',
   energy_kwh: 'отпущено за период',
   price_per_kwh: 'средняя за период',
+  // Считается по ВИЗИТАМ: смежные попытки одного клиента на станции склеены.
+  // Клиент, зарядившийся с третьей попытки, — успех, а не 2/3 брака.
+  visit_success_pct: 'доля клиентов, зарядившихся',
   success_pct: 'доля успешных сессий',
 }
 
@@ -375,7 +378,7 @@ function StationList({ title, rows, empty }: { title: string; rows: StationRow[]
         {rows.length === 0 ? <div className="p-4 text-xs text-muted-foreground">{empty}</div> : (
           <table className="w-full text-xs" data-export-name={title}
             data-export-rows={JSON.stringify({
-              columns: ['Станция', 'Сессий', 'Выручка, ₽', 'Загрузка, %', 'Успех, %'],
+              columns: ['Станция', 'Сессий', 'Выручка, ₽', 'Загрузка, %', 'Успех сессий, %'],
               rows: rows.map((r) => [r.label, r.sessions, r.amount, r.utilization_pct, r.success_pct]),
             })}>
             <tbody>
@@ -392,7 +395,12 @@ function StationList({ title, rows, empty }: { title: string; rows: StationRow[]
                       <span className="w-10 font-mono tabular-nums">{r.utilization_pct.toFixed(1)}%</span>
                     </div>
                   </td>
-                  <td className="p-2 text-right font-mono tabular-nums">{r.success_pct.toFixed(0)}%</td>
+                  {/* Здесь именно СЕССИИ (доля Complete), а не визиты — иначе цифра
+                      не сойдётся с KPI «Зарядились» наверху, и это надо подсказать. */}
+                  <td className="p-2 text-right font-mono tabular-nums"
+                    title="Доля успешных сессий станции. KPI «Зарядились» наверху считает визиты — там смежные попытки одного клиента склеены.">
+                    {r.success_pct.toFixed(0)}%
+                  </td>
                 </tr>
               ))}
             </tbody>

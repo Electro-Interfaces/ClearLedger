@@ -194,6 +194,26 @@ async def get_charge_visits(
         db, f.company_id, date_from, date_to, stations=_csv(stations), top=top)
 
 
+@router.get("/charge-sessions/unpaid")
+async def get_charge_unpaid(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = None,
+    top: int = Query(15, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Отпуск энергии без оплаты, разложенный по природе: долг розницы (потеря),
+    постоплата ЮЛ (дебиторка, нужен счёт) и неоплаченные пробы (в деньгах ноль).
+    Складывать их в один счётчик нельзя — см. services/charge_unpaid.py."""
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    from app.services.charge_unpaid import unpaid_report
+
+    return await unpaid_report(
+        db, f.company_id, date_from, date_to, stations=_csv(stations), top=top)
+
+
 @router.get("/charge-sessions/timeseries")
 async def get_charge_timeseries(
     company_id: str,

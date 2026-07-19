@@ -576,6 +576,35 @@ export async function getChargeVisits(p: PeriodParams & { top?: number }): Promi
   })
 }
 
+/** Отпуск энергии без оплаты. Три разные природы под одним ярлыком, складывать
+ * их нельзя: долг розницы (энергия ушла, денег нет), постоплата ЮЛ (счёт ещё не
+ * выставлен — дебиторка, не убыток) и неоплаченные пробы (энергии не было). */
+export interface UnpaidResponse {
+  totals: {
+    debt: { sessions: number; kwh: number; amount: number }
+    postpaid: { sessions: number; kwh: number; amount: number; estimated: boolean }
+    probes: { sessions: number }
+  }
+  stations: {
+    label: string; debt_sessions: number; debt_amount: number
+    corp_sessions: number; corp_kwh: number; probe_sessions: number
+  }[]
+  clients: { label: string; sessions: number; kwh: number; amount: number }[]
+  trend: { month: string; debt_sessions: number; debt_amount: number; corp_sessions: number; corp_kwh: number }[]
+  cases: {
+    session_ext_id: string; started_at: string; station_name: string | null; station_code: string
+    region: string | null; connector_type: string | null; client: string
+    energy_kwh: number; tariff: number; result: string | null; amount: number
+  }[]
+}
+export async function getChargeUnpaid(p: PeriodParams & { top?: number }): Promise<UnpaidResponse> {
+  return get<UnpaidResponse>('/api/analytics/charge-sessions/unpaid', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.top ? { top: String(p.top) } : {}),
+    ...narrowParams(p),
+  })
+}
+
 /** Длинный горизонт отпуска (2024→сейчас): сводная контрагента + сессии (склейка). */
 export interface ChargeLongTrendMonth {
   period: string

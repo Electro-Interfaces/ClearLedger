@@ -289,6 +289,90 @@ async def visits_report(
     }
 
 
+# Бакет визита = бакет его ПЕРВОЙ сессии (визит атрибутируется моменту, когда
+# клиент подъехал). Форматы строк совпадают с analytics_service._cs_bucket_axis,
+# иначе спарклайн не ляжет на ось обзора.
+_BUCKET_EXPR = {
+    "day": "to_char(first_at, 'YYYY-MM-DD')",
+    "week": "to_char(date_trunc('week', first_at), 'YYYY-MM-DD')",
+    "decade": ("to_char(first_at, 'YYYY-MM') || '-Д' || "
+               "CASE WHEN EXTRACT(day FROM first_at) <= 10 THEN 1 "
+               "WHEN EXTRACT(day FROM first_at) <= 20 THEN 2 ELSE 3 END"),
+    "month": "to_char(first_at, 'YYYY-MM')",
+    "quarter": "to_char(first_at, 'YYYY') || '-Q' || to_char(first_at, 'Q')",
+}
+
+
+async def visit_success(
+    db: AsyncSession, company_id, date_from, date_to,
+    stations: list[str] | None = None,
+) -> dict[str, Any]:
+    """Успех на уровне визитов за период — KPI обзора «Зарядились»."""
+    rows = await _q(db, company_id, date_from, date_to, stations, """
+        SELECT count(*) AS visits,
+               count(*) FILTER (WHERE charged) AS charged,
+               count(*) FILTER (WHERE charged AND attempts > 1) AS retried
+          FROM v
+    """)
+    r = rows[0]
+    visits, charged = int(r["visits"] or 0), int(r["charged"] or 0)
+    return {
+        "visits": visits, "charged": charged, "retried": int(r["retried"] or 0),
+        "success_pct": round(charged / visits * 100, 1) if visits else 0.0,
+    }
+
+
+async def visit_success_series(
+    db: AsyncSession, company_id, date_from, date_to, bucket: str,
+    stations: list[str] | None = None,
+) -> dict[str, float]:
+    """Успех визитов по бакетам → спарклайн обзора. Ключи совпадают с осью
+    `_cs_bucket_axis`, пустые бакеты заполняет вызывающий (ratio → null)."""
+    expr = _BUCKET_EXPR.get(bucket)
+    if expr is None:
+        return {}
+    rows = await _q(db, company_id, date_from, date_to, stations, f"""
+        SELECT {expr} AS b,
+               count(*) AS visits,
+               count(*) FILTER (WHERE charged) AS charged
+          FROM v GROUP BY 1
+    """)
+    return {r["b"]: round(int(r["charged"]) / int(r["visits"]) * 100, 1)
+            for r in rows if int(r["visits"] or 0) > 0}
+
+
+async def visit_success_by_station(
+    db: AsyncSession, company_id, date_from, date_to,
+    stations: list[str] | None = None, min_visits: int = 30,
+) -> list[dict[str, Any]]:
+    """Успех визитов по станциям — станции риска в алертах обзора. Порог
+    min_visits отсекает станции, где 2 визита из 3 дают «33% успеха»."""
+    rows = await _q(db, company_id, date_from, date_to, stations, f"""
+        SELECT station_code,
+               max(coalesce(station_name, station_code)) AS station_name,
+               count(*) AS visits,
+               count(*) FILTER (WHERE charged) AS charged
+          FROM v WHERE station_code IS NOT NULL
+         GROUP BY station_code HAVING count(*) >= {int(min_visits)}
+    """)
+    return [{
+        "code": r["station_code"],
+        "label": f"{r['station_name']} ({r['station_code']})",
+        "visits": int(r["visits"]),
+        "success_pct": round(int(r["charged"]) / int(r["visits"]) * 100, 1),
+    } for r in rows]
+
+
+async def _q(db: AsyncSession, company_id, date_from, date_to,
+             stations: list[str] | None, sql: str) -> list[Any]:
+    p = {"company_id": str(company_id),
+         "date_from": _as_date(date_from), "date_to": _as_date(date_to),
+         "charged_min": CHARGED_MIN_KWH}
+    if stations is not None:
+        p["stations"] = stations
+    return list((await db.execute(text(_scoped(sql, stations)), p)).mappings().all())
+
+
 async def recompute_visits(
     db: AsyncSession, company_id, gap_min: int = VISIT_GAP_MIN,
 ) -> dict[str, Any]:

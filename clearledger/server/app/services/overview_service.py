@@ -141,8 +141,23 @@ class OverviewService:
         spark_amount = self._series(cur_axis, cur_by, "amount")
         spark_sessions = self._series(cur_axis, cur_by, "sessions")
         spark_energy = self._series(cur_axis, cur_by, "energy")
-        spark_success = self._series(cur_axis, cur_by, "success_pct")
         spark_price = self._series(cur_axis, cur_by, "price_per_kwh")
+
+        # ─── успех на уровне ВИЗИТОВ (а не сырых сессий) ───
+        # CPO пишет каждое касание разъёма отдельной сессией, поэтому «успешных
+        # сессий» отвечает на вопрос «сколько раз сработал разъём», а не «сколько
+        # людей уехало заряженными». Для обзора сети верен второй вопрос: клиент,
+        # зарядившийся с третьей попытки, — успех, а не 2/3 брака.
+        # Разбор самих повторов — «Надёжность» → «Повторные попытки».
+        from app.services.charge_visits import (
+            visit_success, visit_success_by_station, visit_success_series,
+        )
+        vc = await visit_success(self.db, company_id, df, dt, f_cur.station_codes)
+        vp = await visit_success(self.db, company_id, prev_from, prev_to, f_prev.station_codes)
+        v_by_bucket = await visit_success_series(
+            self.db, company_id, df, dt, bucket, f_cur.station_codes)
+        # Пустой бакет → null: это доля, ноль в ней означал бы «все ушли ни с чем».
+        spark_success = [v_by_bucket.get(b) for b in cur_axis]
 
         def kpi(key, label, value, prev_value, fmt, unit, spark=None, accent=None):
             d = _dpct(float(value), float(prev_value)) if has_prev else None
@@ -165,8 +180,8 @@ class OverviewService:
             kpi("energy_kwh", "Энергия", tc["energy_kwh"], tp["energy_kwh"], "kwh", "кВтч", spark_energy),
             kpi("utilization_pct", "Загрузка", tc["utilization_pct"], tp["utilization_pct"], "pct", "%",
                 None, _util_accent(tc["utilization_pct"])),
-            kpi("success_pct", "Успешных", tc["success_pct"], tp["success_pct"], "pct", "%",
-                spark_success, _succ_accent(tc["success_pct"])),
+            kpi("visit_success_pct", "Зарядились", vc["success_pct"], vp["success_pct"], "pct", "%",
+                spark_success, _succ_accent(vc["success_pct"])),
             kpi("price_per_kwh", "Цена", tc["price_per_kwh"], tp["price_per_kwh"], "price", "₽/кВтч", spark_price),
             kpi("active_stations", "Активных ЭЗС", active_cur, active_prev, "int", ""),
         ]
@@ -182,8 +197,9 @@ class OverviewService:
             {"key": "utilization_pct", "label": "Загрузка портов", "value": tc["utilization_pct"],
              "unit": "%", "accent": _util_accent(tc["utilization_pct"]),
              "hint": f"{int(tc['ports'])} портов"},
-            {"key": "success_pct", "label": "Успешных сессий", "value": tc["success_pct"],
-             "unit": "%", "accent": _succ_accent(tc["success_pct"])},
+            {"key": "visit_success_pct", "label": "Клиенты зарядились", "value": vc["success_pct"],
+             "unit": "%", "accent": _succ_accent(vc["success_pct"]),
+             "hint": f"{vc['charged']:,} из {vc['visits']:,} визитов".replace(",", " ")},
             {"key": "corp_share", "label": "Доля ЮЛ (выручка)", "value": corp_share,
              "unit": "%", "accent": "info"},
         ]
@@ -289,9 +305,17 @@ class OverviewService:
 
         # ─── алерты (пороги сети + корпоратив) ───
         alerts: list[dict[str, str]] = []
-        if tc["success_pct"] < 85:
+        if vc["success_pct"] < 85:
             alerts.append({"level": "warn",
-                           "message": f"Успешных {tc['success_pct']:.1f}% — {100 - tc['success_pct']:.1f}% сессий с ошибкой"})
+                           "message": f"Зарядились {vc['success_pct']:.1f}% клиентов — "
+                                      f"{vc['visits'] - vc['charged']:,} визитов закончились ничем".replace(",", " ")})
+        # Повторные попытки — отдельный сигнал: клиент уехал заряженным, но
+        # боролся с оборудованием. В успех он попал, в качество сети — нет.
+        if vc["charged"] and vc["retried"] / vc["charged"] > 0.2:
+            alerts.append({"level": "warn",
+                           "message": f"{vc['retried']:,} клиентов зарядились не с первой попытки "
+                                      f"({vc['retried'] / vc['charged'] * 100:.0f}% успешных) — "
+                                      f"разбор в «Надёжность → Повторные попытки»".replace(",", " ")})
         if tc["utilization_pct"] < 15:
             alerts.append({"level": "warn",
                            "message": f"Загрузка сети {tc['utilization_pct']:.1f}% — ниже порога безубыточности (15%)"})
@@ -302,11 +326,15 @@ class OverviewService:
         noncorp_unpaid_pct = round((noncorp_sess - noncorp_paid) / noncorp_sess * 100, 1) if noncorp_sess else 0.0
         if noncorp_unpaid_pct > 3:
             alerts.append({"level": "warn", "message": f"Без оплаты {noncorp_unpaid_pct:.1f}% розничных сессий"})
-        risky = [l for l in stations_lines if l["sessions"] >= MIN_SESS and l["success_pct"] < 70]
+        # Станции риска — тоже по визитам: станция, где люди уезжают незаряженными,
+        # а не где сорвалось касание разъёма.
+        v_stations = await visit_success_by_station(
+            self.db, company_id, df, dt, f_cur.station_codes, min_visits=MIN_SESS)
+        risky = [s for s in v_stations if s["success_pct"] < 70]
         if risky:
-            names = ", ".join(l["label"] for l in sorted(risky, key=lambda l: l["success_pct"])[:3])
+            names = ", ".join(s["label"] for s in sorted(risky, key=lambda s: s["success_pct"])[:3])
             alerts.append({"level": "warn",
-                           "message": f"Станции риска (успех <70%): {len(risky)} — {names}"})
+                           "message": f"Станции риска (зарядились <70%): {len(risky)} — {names}"})
         alerts.extend(corp.get("alerts", []))
 
         return {

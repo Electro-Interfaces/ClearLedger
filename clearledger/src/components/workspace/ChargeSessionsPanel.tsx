@@ -27,7 +27,7 @@ import { HorizonControl } from './HorizonControl'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
-  getChargeNewClients, getChargeNewClientsList, getChargeVisits,
+  getChargeNewClients, getChargeNewClientsList, getChargeVisits, getChargeUnpaid,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
   type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket,
   type ChargeSeriesBy, type ChargeTimeseriesResponse, type ChargeSliceResponse, type ChargeSessionsResponse,
@@ -1632,6 +1632,205 @@ function RetryAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dat
   )
 }
 
+/** Без оплаты: отпуск энергии, за который не пришли деньги.
+ *
+ * «Сессия без отметки оплаты» — один ярлык на три разных факта, и общий счётчик
+ * их путает. Долг розницы — настоящая дыра. Постоплата ЮЛ — ожидаемое состояние
+ * (счёт за период), это дебиторка, а не убыток. Пробы без энергии — ноль в
+ * деньгах, но именно они раздувают долю «неоплаченных» и пугают зря. */
+function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  const n = useNarrow()
+  const q = useQuery({
+    queryKey: ['charge-unpaid', companyId, dateFrom, dateTo, n.key],
+    queryFn: () => getChargeUnpaid({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, top: 15 }),
+  })
+  if (q.isLoading) return <Loading />
+  if (!q.data) return <Empty text="Нет данных за период" />
+  const { totals: t, stations, clients, trend, cases } = q.data
+  const nothing = t.debt.sessions === 0 && t.postpaid.sessions === 0
+  if (nothing) return <Empty text="За период весь отпуск энергии оплачен" />
+  const maxTrend = Math.max(...trend.map((r) => r.corp_kwh), 1)
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+        Сессия без отметки оплаты — <span className="font-semibold text-foreground">не одно и то же</span> в
+        рознице и у корпоратива. У ЮЛ <span className="font-mono">paid_at</span> пуст штатно: они платят
+        по счёту за период. Поэтому суммы ниже разведены и не складываются.
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Card className="border-red-400/40">
+          <CardContent className="pt-4">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Долг розницы</div>
+            <div className="mt-1 text-2xl font-semibold text-red-600 dark:text-red-400">{fmtMoney(t.debt.amount)} ₽</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {nf0.format(t.debt.sessions)} сессий · {nf1.format(t.debt.kwh)} кВтч отпущено
+            </div>
+            <div className="mt-2 text-[11px] text-muted-foreground">Энергия ушла, оплаты нет и не будет — это потеря.</div>
+          </CardContent>
+        </Card>
+        <Card className="border-amber-400/40">
+          <CardContent className="pt-4">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Постоплата ЮЛ</div>
+            <div className="mt-1 text-2xl font-semibold text-amber-600 dark:text-amber-400">{fmtMoney(t.postpaid.amount)} ₽</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {nf0.format(t.postpaid.sessions)} сессий · {nf1.format(t.postpaid.kwh)} кВтч отпущено
+            </div>
+            <div className="mt-2 text-[11px] text-muted-foreground">
+              Дебиторка: должно превратиться в счёт.{t.postpaid.estimated ? ' Сумма оценена по прайсу — тарифная модель не отработала.' : ''}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Пробы без энергии</div>
+            <div className="mt-1 text-2xl font-semibold text-muted-foreground">{nf0.format(t.probes.sessions)}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">сессий без оплаты и без отпуска</div>
+            <div className="mt-2 text-[11px] text-muted-foreground">В деньгах ноль — платить не за что. Разбор в «Повторных попытках».</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {cases.length > 0 && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              Розничный долг поимённо — энергия отпущена, оплата не прошла
+            </div>
+            <table className="w-full text-xs" {...exportRows('Розничный долг', ['ID сессии', 'Дата', 'Станция', 'Регион', 'Коннектор', 'Клиент', 'кВтч', 'Тариф', 'Сумма, ₽', 'Результат'],
+              cases.map((r) => [r.session_ext_id, r.started_at.slice(0, 16).replace('T', ' '),
+                r.station_name, r.region, r.connector_type, r.client, r.energy_kwh, r.tariff, r.amount, r.result]))}>
+              <thead>
+                <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="text-left p-2 font-medium">Дата</th>
+                  <th className="text-left p-2 font-medium">Станция</th>
+                  <th className="text-left p-2 font-medium">Клиент</th>
+                  <th className="text-right p-2 font-medium">кВтч</th>
+                  <th className="text-right p-2 font-medium">Сумма</th>
+                  <th className="text-left p-2 font-medium">Исход</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cases.map((r) => (
+                  <tr key={r.session_ext_id} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.started_at.slice(0, 16).replace('T', ' ')}</td>
+                    <td className="p-2 font-medium truncate max-w-[200px]" title={`${r.station_name ?? ''} · ${r.region ?? ''}`}>
+                      {r.station_name ?? r.station_code}
+                    </td>
+                    <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.client}</td>
+                    <td className="p-2 text-right font-mono">{nf1.format(r.energy_kwh)}</td>
+                    <td className="p-2 text-right font-mono text-red-600 dark:text-red-400">{fmtMoney(r.amount)} ₽</td>
+                    <td className="p-2 text-muted-foreground">{r.result ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid md:grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              Корпоративная дебиторка по клиентам
+            </div>
+            {clients.length === 0
+              ? <div className="p-3 text-xs text-muted-foreground">Нет корпоративного отпуска без оплаты</div>
+              : (
+                <table className="w-full text-xs" {...exportRows('Дебиторка ЮЛ', ['Клиент', 'Сессий', 'кВтч', 'К выставлению, ₽'],
+                  clients.map((r) => [r.label, r.sessions, r.kwh, r.amount]))}>
+                  <thead>
+                    <tr className="border-b bg-muted/20 text-muted-foreground">
+                      <th className="text-left p-2 font-medium">Клиент</th>
+                      <th className="text-right p-2 font-medium">Сессий</th>
+                      <th className="text-right p-2 font-medium">кВтч</th>
+                      <th className="text-right p-2 font-medium">К выставлению</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clients.map((r) => (
+                      <tr key={r.label} className="border-b border-border/30 hover:bg-muted/30">
+                        <td className="p-2 font-medium truncate max-w-[200px]" title={r.label}>{r.label}</td>
+                        <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.sessions)}</td>
+                        <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.kwh)}</td>
+                        <td className="p-2 text-right font-mono">{fmtMoney(r.amount)} ₽</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              Станции — где отпускают без оплаты
+            </div>
+            <table className="w-full text-xs" {...exportRows('Станции без оплаты', ['Станция', 'Долг розницы, сессий', 'Долг, ₽', 'Корп. сессий', 'Корп. кВтч', 'Проб'],
+              stations.map((r) => [r.label, r.debt_sessions, r.debt_amount, r.corp_sessions, r.corp_kwh, r.probe_sessions]))}>
+              <thead>
+                <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="text-left p-2 font-medium">Станция</th>
+                  <th className="text-right p-2 font-medium">Долг</th>
+                  <th className="text-right p-2 font-medium">Корп. кВтч</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stations.map((r) => (
+                  <tr key={r.label} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-medium truncate max-w-[200px]" title={r.label}>{r.label}</td>
+                    <td className={`p-2 text-right font-mono ${r.debt_amount > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                      {r.debt_amount > 0 ? `${fmtMoney(r.debt_amount)} ₽` : '—'}
+                    </td>
+                    <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.corp_kwh)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+            Динамика по месяцам — разовый сбой или постоянная протечка
+          </div>
+          <table className="w-full text-xs" {...exportRows('Динамика без оплаты', ['Месяц', 'Долг розницы, сессий', 'Долг, ₽', 'Корп. сессий', 'Корп. кВтч'],
+            trend.map((r) => [r.month, r.debt_sessions, r.debt_amount, r.corp_sessions, r.corp_kwh]))}>
+            <thead>
+              <tr className="border-b bg-muted/20 text-muted-foreground">
+                <th className="text-left p-2 font-medium">Месяц</th>
+                <th className="text-right p-2 font-medium">Долг розницы</th>
+                <th className="text-right p-2 font-medium">Постоплата ЮЛ, кВтч</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trend.map((r) => (
+                <tr key={r.month} className="border-b border-border/30">
+                  <td className="p-2 font-medium">{r.month}</td>
+                  <td className={`p-2 text-right font-mono ${r.debt_amount > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                    {r.debt_sessions > 0 ? `${nf0.format(r.debt_sessions)} сес · ${fmtMoney(r.debt_amount)} ₽` : '—'}
+                  </td>
+                  <td className="p-2 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <div className="h-1.5 rounded-full bg-amber-400/60" style={{ width: `${Math.max(2, r.corp_kwh / maxTrend * 80)}px` }} />
+                      <span className="font-mono text-muted-foreground w-16 text-right">{nf0.format(r.corp_kwh)}</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 /** Надёжность: успех сессий, исходы, худшие станции (кандидаты на ТО), тренд. */
 function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   // Вид-срез: период — только из контура рабочей области.
@@ -1809,6 +2008,7 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
 const RELIABILITY_TABS: { k: string; label: string }[] = [
   { k: 'overview', label: 'Обзор' },
   { k: 'retries', label: 'Повторные попытки' },
+  { k: 'unpaid', label: 'Без оплаты' },
 ]
 
 function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType, setClientType }: {
@@ -1816,7 +2016,7 @@ function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType,
   clientType: ClientType; setClientType: (v: ClientType) => void
 }) {
   const [st, patch] = useTabParams('cs_reliability', { sub: 'overview' })
-  const title = st.sub === 'retries' ? 'Повторные попытки' : 'Обзор'
+  const title = RELIABILITY_TABS.find((t) => t.k === st.sub)?.label ?? 'Обзор'
   const ref = useRef<HTMLDivElement>(null)
   return (
     <ChargeClientCtx.Provider value={clientType}>
@@ -1829,8 +2029,8 @@ function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType,
         </div>
       </div>
       <div ref={ref} className="pt-3" key={st.sub}>
-        {st.sub === 'retries'
-          ? <RetryAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+        {st.sub === 'retries' ? <RetryAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+          : st.sub === 'unpaid' ? <UnpaidAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
           : <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />}
       </div>
     </ChargeClientCtx.Provider>
