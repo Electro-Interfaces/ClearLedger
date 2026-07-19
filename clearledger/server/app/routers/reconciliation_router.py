@@ -5,12 +5,12 @@ API сверки документов: авто-сверка, сводка, ру
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import AccountingDoc, DataEntry, User
+from app.models import AccountingDoc, Company, DataEntry, User
 from app.schemas import (
     AccountingDocResponse,
     DataEntryResponse,
@@ -19,6 +19,9 @@ from app.schemas import (
     UnmatchRequest,
 )
 from app.auth import assert_company_member, get_current_user
+from app.services.export_audit import log_export
+from app.services.export_files import xlsx_response
+from app.services.reconciliation_export import build_reconciliation_act
 from app.services.reconciliation_service import run_reconciliation
 
 router = APIRouter(prefix="/reconciliation", tags=["Сверка"])
@@ -83,6 +86,35 @@ def _entry_resp(e: DataEntry) -> DataEntryResponse:
 # ---------------------------------------------------------------------------
 # POST /reconciliation/run — запуск авто-сверки
 # ---------------------------------------------------------------------------
+
+@router.get("/export")
+async def export_reconciliation_act(
+    company_id: str = Query(...),
+    date_from: str | None = Query(None, description="ISO YYYY-MM-DD, по дате документа 1С"),
+    date_to: str | None = Query(None, description="ISO YYYY-MM-DD, включительно"),
+    limit: int = Query(20000, ge=1, le=100000, description="потолок строк на лист «без пары»"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Акт сверки TradeLedger ↔ 1С в xlsx: сводка, расхождения с расшифровкой,
+    документы без пары с обеих сторон. Заменяет ручной разбор расхождений в Excel."""
+    cid = await assert_company_member(company_id, current_user, db)
+    company = (await db.execute(select(Company).where(Company.id == cid))).scalars().first()
+
+    wb, stats = await build_reconciliation_act(
+        db, cid, company.name if company else "", date_from, date_to, limit,
+    )
+
+    span = f"{date_from[:10] if date_from else '…'} — {date_to[:10] if date_to else '…'}" \
+        if (date_from or date_to) else "весь период"
+    log_export(db, cid, current_user,
+               f"Акт сверки (xlsx): {stats['total_docs']} документов, "
+               f"расхождений {stats['discrepancies']}, "
+               f"без пары 1С/CL {stats['unmatched_1c']}/{stats['unmatched_cl']}, "
+               f"период {span}")
+
+    return xlsx_response(wb, f"Акт сверки {span}.xlsx")
+
 
 @router.post("/run")
 async def run_reconciliation_endpoint(
