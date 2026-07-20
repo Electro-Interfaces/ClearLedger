@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/select'
 import {
   getDedupSummary, getDedupGroups, getDedupBridge, setDedupStatus, getDedupExport, reloadDedup,
-  correctDedup, refreshDedup, getDedupJobs, cancelDedupJob, getDedupMergeMap,
+  correctDedup, refreshDedup, getDedupJobs, cancelDedupJob, getDedupMergeMap, getDedupDeactivationPlan,
   type DedupGroup, type DedupMember, type DedupJob,
 } from '@/services/storeService'
 
@@ -571,6 +571,24 @@ export function StoreDedupPanel() {
     } catch { toast.error('Не удалось выгрузить карту слияния') }
   }
 
+  // План «снять с продажи» по архивным группам: коды кассы 208 на деактивацию.
+  const exportDeactivation = async () => {
+    try {
+      const rows = await getDedupDeactivationPlan()
+      if (!rows.length) { toast.info('Нет архивных групп с активными кодами кассы 208'); return }
+      const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({
+        'Группа': r.group, 'Код карточки': r.cardCode, 'Наименование': r.cardName,
+        'Код кассы (на вывод)': r.nsCode, 'Цена': r.price, 'Остаток 208': r.ostatok,
+        'Эра': r.era ? (ERA[r.era]?.label ?? r.era) : '—',
+        'Помечена удал.': r.marked ? 'да' : '', 'Примечание оператора': r.note,
+      })))
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Снять с продажи 208')
+      XLSX.writeFile(wb, `deactivation_plan_208_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      toast.success(`План деактивации: ${rows.length} код(ов) кассы на вывод`)
+    } catch { toast.error('Не удалось выгрузить план деактивации') }
+  }
+
   const exportPlan = async () => {
     try {
       const rows = await getDedupExport()
@@ -636,6 +654,10 @@ export function StoreDedupPanel() {
         </Button>
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportMergeMap}
           title="Карта дубль→канон для .epf (ЗаменитьСсылки) — запускать в тихое окно, касса активна"><GitMerge className="mr-1 size-3.5" />Карта слияния</Button>
+        {(sum?.notUsedGroups ?? 0) > 0 && (
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportDeactivation}
+            title="План «снять с продажи» по архивным группам: активные коды кассы 208 на деактивацию (Актуальность=ЛОЖЬ). НЕ удаление — карточка и история остаются. ⚠ перед деактивацией остаток должен быть 0"><Archive className="mr-1 size-3.5" />План деактивации</Button>
+        )}
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportExcel}><FileSpreadsheet className="mr-1 size-3.5" />Excel</Button>
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportPlan}><Download className="mr-1 size-3.5" />JSON</Button>
       </div>

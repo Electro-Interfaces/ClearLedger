@@ -713,6 +713,27 @@ async def report_job(db: AsyncSession, cid: uuid.UUID, job_id: uuid.UUID, *,
     return True
 
 
+async def deactivation_plan(db: AsyncSession, cid: uuid.UUID) -> list[dict]:
+    """План «снять с продажи» по группам в архиве (status=not_used): активные коды
+    кассы склада 208 на карточках архивных групп — их надо деактивировать
+    (Актуальность=ЛОЖЬ), чтобы позиция перестала пробиваться. НЕ удаление: карточка
+    и история остаются. ⚠ Перед деактивацией у карточки остаток должен быть 0."""
+    gs = await groups(db, cid, include_assortment=True, only_scope_208=False, status="not_used")
+    plan = []
+    for g in gs:
+        for m in g["members"]:
+            for x in m["nsCodes"]:
+                if x.get("active") and str(x.get("wh") or "") == WH208:
+                    plan.append({
+                        "group": g["title"], "note": g.get("note"),
+                        "cardGuid": m["guid"], "cardCode": m["code"], "cardName": m["name"],
+                        "nsCode": x["nsCode"], "price": x.get("price"),
+                        "ostatok": m.get("ostatok"), "era": m.get("era"),
+                        "marked": m["marked"],
+                    })
+    return plan
+
+
 async def merge_map(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str] | None = None,
                     only_scope_208: bool = True) -> list[dict]:
     """Карта слияния дубль→канон для .epf (ОбщегоНазначения.ЗаменитьСсылки).

@@ -789,3 +789,14 @@ export const getDedupJobs = () => get<DedupJob[]>('/api/store/dedup/jobs')
 export const cancelDedupJob = (id: string) => post<{ ok: boolean }>(`/api/store/dedup/jobs/${id}/cancel`, {})
 export const getDedupMergeMap = (groupKeys?: string[]) =>
   get<DedupMergeRow[]>('/api/store/dedup/merge-map', groupKeys?.length ? { group_keys: groupKeys.join('|') } : undefined)
+
+/** Строка плана «снять с продажи»: код кассы 208 на деактивацию по архивной карточке. */
+export interface DedupDeactivationRow {
+  group: string; note: string | null
+  cardGuid: string; cardCode: string | null; cardName: string
+  nsCode: string; price: number | null
+  ostatok: number | null; era: 'gig' | 'nl' | 'never' | null
+  marked: boolean
+}
+export const getDedupDeactivationPlan = () =>
+  get<DedupDeactivationRow[]>('/api/store/dedup/deactivation-plan')

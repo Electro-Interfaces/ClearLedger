@@ -623,3 +623,10 @@ async def dedup_merge_map(
     """Карта слияния дубль→канон для .epf (ЗаменитьСсылки — запуск руками в тихое окно)."""
     keys = [k for k in group_keys.split("|") if k] if group_keys else None
     return await dedup_service.merge_map(db, await scope_company_id(user, db), group_keys=keys)
+
+
+@router.get("/dedup/deactivation-plan")
+async def dedup_deactivation_plan(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """План «снять с продажи»: активные коды кассы 208 на карточках архивных групп
+    (status=not_used) — на деактивацию. НЕ удаление (карточка/история остаются)."""
+    return await dedup_service.deactivation_plan(db, await scope_company_id(user, db))
