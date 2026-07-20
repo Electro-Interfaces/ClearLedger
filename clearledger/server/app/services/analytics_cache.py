@@ -55,11 +55,28 @@ def _json_default(o: Any) -> Any:
     return str(o)
 
 
-def _make_key(tag: str, company_id, params: tuple, ver: int) -> str:
+def _make_key(tag: str, company_id, params: tuple, ver: int, station_stamp: int = 0) -> str:
     """Детерминированный ключ строки-кэша. Версия в ключе → бамп делает прежние
-    ключи недостижимыми. repr стабилен для (args, sorted(kwargs)) из date/str/int/float."""
-    raw = f"{tag}|{company_id}|{ver}|{params!r}"
+    ключи недостижимыми. station_stamp → переучёт станций (region_id и пр.) тоже
+    инвалидирует кэши, зависящие от справочника (регион-разрезы, retail:geo), без
+    явного bump в ingest станций. repr стабилен для (args, sorted(kwargs))."""
+    raw = f"{tag}|{company_id}|{ver}|{station_stamp}|{params!r}"
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def _station_stamp(db: AsyncSession, company_id) -> int:
+    """Отпечаток справочника станций компании: max(updated_at) в секундах.
+    Меняется при любом переучёте станций (region_id, статусы) — так кэши, читающие
+    станции/регион через join, инвалидируются АВТОМАТИЧЕСКИ, без bump_version в
+    stations_normalize. Ошибка/отсутствие таблицы → 0 (кэш всё равно держит версия)."""
+    try:
+        v = await db.scalar(text(
+            "SELECT extract(epoch from max(updated_at))::bigint"
+            " FROM service_locations WHERE company_id = :c"
+        ), {"c": str(company_id)})
+        return int(v or 0)
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 async def _ensure_table() -> None:
@@ -90,7 +107,8 @@ async def cached(db: AsyncSession, company_id, tag: str, params: tuple,
     через factory и записать. Ключ включает версию данных компании → загрузка новых
     сессий (bump_version) автоматически делает все прежние ключи недостижимыми."""
     ver = await _version(db, company_id)
-    key = _make_key(tag, company_id, params, ver)
+    stamp = await _station_stamp(db, company_id)
+    key = _make_key(tag, company_id, params, ver, stamp)
     await _ensure_table()
     # Чтение из общего кэша — в сессии запроса (чистый SELECT).
     hit = await db.scalar(
