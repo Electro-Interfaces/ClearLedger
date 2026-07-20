@@ -516,7 +516,7 @@ async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source,
 async def _run_stations(db: AsyncSession, channel: Channel, src: Source,
                         mode: str = "append", log_id=None) -> dict[str, Any]:
     """Загруженный xlsx справочника станций (SourceFile из config.uploadFileId) → L1 →
-    нормализация паспорта → L2 (ServiceLocation type='charge_station' с region_id).
+    нормализация паспорта → L2 (ServiceLocation type='ev_charging' с region_id).
 
     mode: 'append' (только новые) | 'replace' (обновить существующие + добавить новые)."""
     cfg = channel.config or {}

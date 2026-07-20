@@ -2578,7 +2578,7 @@ class ServiceLocation(Base):
         nullable=True, index=True,
     )
     # ── Паспорт ЭЗС-станции (нормализованный L2 из справочника станций; заполнен
-    #    для type='charge_station', иначе NULL). Полный сырой паспорт — в extra_metadata.
+    #    для type='ev_charging', иначе NULL). Полный сырой паспорт — в extra_metadata.
     serial_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
     station_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
     city: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -3471,6 +3471,14 @@ class EzsEquipmentUnit(Base):
     purchase_doc: Mapped[str | None] = mapped_column(String(200), nullable=True)
     purchase_date: Mapped[str | None] = mapped_column(String(10), nullable=True)      # ISO YYYY-MM-DD
     warranty_until: Mapped[str | None] = mapped_column(String(10), nullable=True)     # ISO
+    # Привязка к документу поставки (слой оснований) + денежная оценка ОС:
+    # supply_id/supply_line_id — из какой поставки пришла единица (мягкие ссылки,
+    # без FK — как counterparty у движения); purchase_amount/vat_amount —
+    # первоначальная стоимость (счёт 07/08), нужна для выгрузки станции как ОС в БП.
+    supply_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    supply_line_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    purchase_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    vat_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     # Жизненный цикл: in_stock_new | in_stock_used | reserved | in_installation |
     # in_operation | in_repair | returned_to_vendor | written_off (терминальные два).
     # Переходы — словарь TRANSITIONS в services/ezs_equipment.py (валидация на бэке).
@@ -3497,6 +3505,7 @@ class EzsEquipmentUnit(Base):
     __table_args__ = (
         Index("ix_ezs_unit_company_state", "company_id", "state"),
         Index("ix_ezs_unit_company_loc", "company_id", "current_location_id"),
+        Index("ix_ezs_unit_supply", "company_id", "supply_id"),
         # Частично-уникальный индекс по lower(serial_number) — в миграции v2.15
         # (функциональный, декларативно не выразить).
     )
@@ -3526,7 +3535,11 @@ class EzsEquipmentMovement(Base):
     to_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
     counterparty: Mapped[str | None] = mapped_column(String(300), nullable=True)  # кому передано
     occurred_on: Mapped[str] = mapped_column(String(10), nullable=False)          # ISO дата операции
-    basis: Mapped[str | None] = mapped_column(String(300), nullable=True)         # документ-основание
+    basis: Mapped[str | None] = mapped_column(String(300), nullable=True)         # документ-основание (текст)
+    # Структурная привязка движения к документу поставки/возврата (receipt/to_vendor).
+    # Мягкие ссылки без FK; basis остаётся человекочитаемым дублем.
+    supply_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    supply_line_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -3609,6 +3622,9 @@ class EzsSparePartMovement(Base):
         String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
     occurred_on: Mapped[str] = mapped_column(String(10), nullable=False)
     basis: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Привязка движения ЗИП к документу поставки/возврата (мягкие ссылки, без FK).
+    supply_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    supply_line_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -3617,6 +3633,91 @@ class EzsSparePartMovement(Base):
     __table_args__ = (
         Index("ix_ezs_spmove_company_date", "company_id", "occurred_on"),
         Index("ix_ezs_spmove_part_created", "part_id", "created_at"),
+    )
+
+
+# ===========================================================================
+# Документы складского учёта оборудования (слой оснований поверх движений).
+# Документ поставки/возврата не заменяет поток движений железа — он его
+# ГРУППИРУЕТ и ОБОСНОВЫВАЕТ, храня план (спецификацию), против которого
+# сверяется факт. Факт (принято) — производное от привязанных единиц/движений
+# (COUNT единиц / SUM движений по supply_line_id), не хранимое поле.
+# Поставщик = существующий Counterparty (kind='external'); ссылка мягкая +
+# снимок имени (переживает пересинк/удаление справочника).
+# Модель сверена с 1С: станция = ОС (07→08→01), ЗИП = материалы (10.05).
+# ===========================================================================
+class EzsSupplyDocument(Base):
+    """Шапка документа поставки/возврата оборудования и ЗИП."""
+    __tablename__ = "ezs_supply_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # supply — поступление от поставщика (приход); return — возврат поставщику.
+    # Задел на transfer|writeoff|inventory (обёртки над существующими движениями).
+    doc_type: Mapped[str] = mapped_column(String(16), nullable=False, default="supply")
+    number: Mapped[str] = mapped_column(String(100), nullable=False)
+    doc_date: Mapped[str] = mapped_column(String(10), nullable=False)              # ISO YYYY-MM-DD
+    # Поставщик — мягкая ссылка на counterparties.id (без FK, как Contract.counterparty_id)
+    # + снимок имени (устойчив к пересинку/удалению справочника, как movement.counterparty).
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Рамочный договор (мягкая ссылка): «поставка по договору №…».
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # draft → ordered → partially_received/received (производные) → closed | cancelled.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # Склад-получатель по умолчанию для приёмки.
+    warehouse_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="RUB")
+    amount_total: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    vat_total: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_supply_company_status", "company_id", "status"),
+        Index("ix_ezs_supply_company_date", "company_id", "doc_date"),
+    )
+
+
+class EzsSupplyLine(Base):
+    """Строка спецификации документа: план (что и сколько заказано/возвращается).
+
+    line_kind=station — шаблон единицы (при приёмке копируется в N карточек);
+    line_kind=spare — количественная позиция ЗИП (part_id). qty_received НЕ
+    хранится — считается из привязанных единиц/движений по id строки."""
+    __tablename__ = "ezs_supply_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    supply_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_supply_documents.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    line_kind: Mapped[str] = mapped_column(String(10), nullable=False, default="station")  # station|spare
+    part_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_spare_parts.id", ondelete="SET NULL"), nullable=True)
+    # Шаблон станции (для line_kind=station) — копируется в единицы при приёмке.
+    vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    station_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    connectors_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    connector_types: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)          # свободная метка позиции
+    qty_planned: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
+    unit_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    vat_rate: Mapped[str | None] = mapped_column(String(20), nullable=True)       # канон bp_export._nds
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_supply_line_doc", "supply_id"),
     )
 
 
@@ -3828,7 +3929,9 @@ class DedupStatus(Base):
     )
     entity_type: Mapped[str] = mapped_column(String(10), nullable=False)   # group | card
     entity_key: Mapped[str] = mapped_column(String(500), nullable=False)   # name_norm | guid
-    # pending | not_duplicate | in_progress | repointed | merged | done
+    # pending | not_duplicate | not_used | in_progress | repointed | merged | done
+    # not_used — оператор пометил позицию «не используется / убрать» (вывод из НСИ,
+    # не слияние: в export_plan / merge_map такие группы не попадают)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     canon_guid: Mapped[str | None] = mapped_column(String(40), nullable=True)  # выбранный хозяин группы
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

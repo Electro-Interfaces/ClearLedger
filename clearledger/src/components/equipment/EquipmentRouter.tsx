@@ -5,6 +5,7 @@
  */
 import { EquipmentFleetPanel } from './EquipmentFleetPanel'
 import { EquipmentWarehousesPanel } from './EquipmentWarehousesPanel'
+import { EquipmentSuppliesPanel } from './EquipmentSuppliesPanel'
 import { EquipmentMovementsPanel } from './EquipmentMovementsPanel'
 import { EquipmentSparesPanel } from './EquipmentSparesPanel'
 
@@ -12,6 +13,7 @@ export function EquipmentRouter({ tab, companyId }: { tab: string; companyId: st
   switch (tab) {
     case 'eq_fleet':      return <EquipmentFleetPanel companyId={companyId} />
     case 'eq_warehouses': return <EquipmentWarehousesPanel companyId={companyId} />
+    case 'eq_supplies':   return <EquipmentSuppliesPanel companyId={companyId} />
     case 'eq_movements':  return <EquipmentMovementsPanel companyId={companyId} />
     case 'eq_spares':     return <EquipmentSparesPanel companyId={companyId} />
     default:              return null

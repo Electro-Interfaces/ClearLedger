@@ -54,10 +54,11 @@ export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 // Складской учёт оборудования ЭЗС (energy): станции-железки на складах/в ремонте,
 // движения жизненного цикла, ЗИП. Ядро раздела «Управленческий», группа «Оборудование».
 export const EQUIPMENT_MENU: CentralMenuItem[] = [
-  { key: 'eq_fleet',      label: 'Парк оборудования', group: 'Оборудование' },
-  { key: 'eq_warehouses', label: 'Склады и остатки',  group: 'Оборудование' },
-  { key: 'eq_movements',  label: 'Движения',          group: 'Оборудование' },
-  { key: 'eq_spares',     label: 'ЗИП и запчасти',    group: 'Оборудование' },
+  { key: 'eq_fleet',      label: 'Парк оборудования',  group: 'Оборудование' },
+  { key: 'eq_warehouses', label: 'Склады и остатки',   group: 'Оборудование' },
+  { key: 'eq_supplies',   label: 'Поставки и возвраты', group: 'Оборудование' },
+  { key: 'eq_movements',  label: 'Движения',           group: 'Оборудование' },
+  { key: 'eq_spares',     label: 'ЗИП и запчасти',     group: 'Оборудование' },
 ]
 export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 

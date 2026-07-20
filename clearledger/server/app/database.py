@@ -603,6 +603,25 @@ async def create_all() -> None:
         await conn.execute(__import__("sqlalchemy").text(
             "ALTER TABLE dedup_cards ADD COLUMN IF NOT EXISTS sold_qty DOUBLE PRECISION"))
 
+        # v2.21: документы поставки/возврата оборудования (слой оснований).
+        # Таблицы ezs_supply_documents/_lines — через metadata.create_all. Здесь —
+        # ссылки приход↔документ на существующих ezs-таблицах + денежная оценка ОС
+        # на единице (первоначальная стоимость 07/08 для выгрузки в БП) + индекс
+        # реестра «единицы поставки» (create_all не добавляет колонки к готовым таблицам).
+        for stmt in (
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS supply_id UUID",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS supply_line_id UUID",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS purchase_amount NUMERIC(14,2)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS vat_amount NUMERIC(14,2)",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS supply_id UUID",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
+            "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_id UUID",
+            "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_unit_supply "
+            "ON ezs_equipment_units (company_id, supply_id)",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

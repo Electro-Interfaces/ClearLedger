@@ -76,6 +76,8 @@ export interface EquipmentUnit {
   purchaseDoc: string | null
   purchaseDate: string | null
   warrantyUntil: string | null
+  purchaseAmount: number | null
+  vatAmount: number | null
   state: UnitState
   stateLabel: string
   isUsed: boolean
@@ -85,6 +87,9 @@ export interface EquipmentUnit {
   originLocation: LocBrief | null
   reservedFor: LocBrief | null
   notes: string | null
+  supplyId: string | null
+  supplyLineId: string | null
+  supplyNumber: string | null
   createdAt: string | null
   updatedAt: string | null
   allowedOps: UnitOp[]
@@ -105,6 +110,8 @@ export interface EquipmentMovement {
   occurredOn: string
   basis: string | null
   comment: string | null
+  supplyId: string | null
+  supplyNumber: string | null
   createdBy: string | null
   createdAt: string | null
   unit?: { serialNumber: string | null; vendor: string | null; model: string | null; inventoryNumber: string | null }
@@ -374,4 +381,180 @@ export async function listSpareMovements(p: {
     ...(p.dateTo ? { date_to: p.dateTo } : {}),
     page: p.page ?? 1, page_size: p.pageSize ?? 200,
   })
+}
+
+// ─── документы поставки/возврата (слой оснований поверх движений) ────────────
+
+export type SupplyDocType = 'supply' | 'return'
+export type SupplyStatus =
+  | 'draft' | 'ordered' | 'partially_received' | 'received' | 'closed' | 'cancelled'
+export type SupplyLineKind = 'station' | 'spare'
+
+export const SUPPLY_TYPE_META: Record<SupplyDocType, { label: string; cls: string }> = {
+  supply: { label: 'Поставка', cls: 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80' },
+  return: { label: 'Возврат', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80' },
+}
+
+export const SUPPLY_STATUS_META: Record<SupplyStatus, { label: string; cls: string }> = {
+  draft: { label: 'Черновик', cls: 'border-zinc-500/60 text-zinc-500' },
+  ordered: { label: 'Проведён', cls: 'border-blue-400/50 text-blue-600 dark:text-blue-300/80' },
+  partially_received: { label: 'Принят частично', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80' },
+  received: { label: 'Принят', cls: 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80' },
+  closed: { label: 'Закрыт', cls: 'border-emerald-500/50 text-emerald-700 dark:text-emerald-300' },
+  cancelled: { label: 'Отменён', cls: 'border-zinc-600 text-zinc-500' },
+}
+
+export interface SupplyLine {
+  id: string
+  lineKind: SupplyLineKind
+  partId: string | null
+  name: string | null
+  vendor: string | null
+  model: string | null
+  stationType: string | null
+  powerKwt: number | null
+  connectorsCount: number | null
+  connectorTypes: string | null
+  qtyPlanned: number
+  qtyReceived: number
+  unitPrice: number | null
+  vatRate: string | null
+  note: string | null
+}
+
+export interface SupplyHead {
+  id: string
+  docType: SupplyDocType
+  number: string
+  docDate: string
+  status: SupplyStatus
+  counterpartyId: string | null
+  counterpartyName: string | null
+  contractId: string | null
+  warehouseId: string | null
+  currency: string
+  amountTotal: number | null
+  vatTotal: number | null
+  note: string | null
+  createdByName: string | null
+}
+
+export interface SupplyDoc extends SupplyHead {
+  lines: SupplyLine[]
+  qtyPlanned: number
+  qtyReceived: number
+}
+
+export interface SupplyListRow extends SupplyHead {
+  linesCount: number
+  qtyPlanned: number
+  qtyReceived: number
+}
+
+export interface SupplierBrief { id: string; name: string; shortName: string | null; inn: string }
+
+export interface SupplyLinePayload {
+  lineKind: SupplyLineKind
+  partId?: string | null
+  name?: string | null
+  qtyPlanned: number
+  unitPrice?: number | null
+  vatRate?: string | null
+  note?: string | null
+  vendor?: string | null
+  model?: string | null
+  stationType?: string | null
+  powerKwt?: number | null
+  connectorsCount?: number | null
+  connectorTypes?: string | null
+}
+
+export interface SupplyPayload {
+  docType: SupplyDocType
+  number: string
+  docDate?: string | null
+  counterpartyId?: string | null
+  counterpartyName?: string | null
+  contractId?: string | null
+  warehouseId?: string | null
+  currency?: string
+  vatTotal?: number | null
+  note?: string | null
+  lines?: SupplyLinePayload[]
+}
+
+export interface ReceiveUnit { serial?: string | null; inventoryNumber?: string | null; warrantyUntil?: string | null }
+
+export interface SupplyReceivePayload {
+  warehouseId?: string | null
+  occurredOn?: string | null
+  basis?: string | null
+  comment?: string | null
+  qty?: number | null
+  units?: ReceiveUnit[]
+  unitIds?: string[]
+  allowOverage?: boolean
+}
+
+export async function listSupplies(p: {
+  companyId: string
+  docType?: SupplyDocType
+  status?: SupplyStatus
+  counterpartyId?: string
+  dateFrom?: string
+  dateTo?: string
+  q?: string
+  page?: number
+  pageSize?: number
+}): Promise<{ items: SupplyListRow[]; total: number }> {
+  return get('/api/equipment/supplies', {
+    company_id: p.companyId,
+    ...(p.docType ? { doc_type: p.docType } : {}),
+    ...(p.status ? { status: p.status } : {}),
+    ...(p.counterpartyId ? { counterparty_id: p.counterpartyId } : {}),
+    ...(p.dateFrom ? { date_from: p.dateFrom } : {}),
+    ...(p.dateTo ? { date_to: p.dateTo } : {}),
+    ...(p.q ? { q: p.q } : {}),
+    page: p.page ?? 1, page_size: p.pageSize ?? 100,
+  })
+}
+
+export async function getSupply(companyId: string, supplyId: string): Promise<SupplyDoc> {
+  return get(`/api/equipment/supplies/${supplyId}`, { company_id: companyId })
+}
+
+export async function createSupply(companyId: string, body: SupplyPayload): Promise<SupplyDoc> {
+  return post(`/api/equipment/supplies?company_id=${companyId}`, body)
+}
+
+export async function updateSupply(companyId: string, supplyId: string, body: Partial<SupplyPayload>): Promise<SupplyDoc> {
+  return patch(`/api/equipment/supplies/${supplyId}?company_id=${companyId}`, body)
+}
+
+export async function deleteSupply(companyId: string, supplyId: string): Promise<{ deleted: string }> {
+  return del(`/api/equipment/supplies/${supplyId}?company_id=${companyId}`)
+}
+
+export async function addSupplyLine(companyId: string, supplyId: string, body: SupplyLinePayload): Promise<SupplyDoc> {
+  return post(`/api/equipment/supplies/${supplyId}/lines?company_id=${companyId}`, body)
+}
+
+export async function updateSupplyLine(companyId: string, supplyId: string, lineId: string, body: SupplyLinePayload): Promise<SupplyDoc> {
+  return patch(`/api/equipment/supplies/${supplyId}/lines/${lineId}?company_id=${companyId}`, body)
+}
+
+export async function deleteSupplyLine(companyId: string, supplyId: string, lineId: string): Promise<SupplyDoc> {
+  return del(`/api/equipment/supplies/${supplyId}/lines/${lineId}?company_id=${companyId}`)
+}
+
+export async function setSupplyStatus(companyId: string, supplyId: string, action: 'confirm' | 'close' | 'cancel'): Promise<SupplyDoc> {
+  return post(`/api/equipment/supplies/${supplyId}/status?company_id=${companyId}`, { action })
+}
+
+export async function receiveSupplyLine(companyId: string, supplyId: string, lineId: string, body: SupplyReceivePayload): Promise<SupplyDoc> {
+  return post(`/api/equipment/supplies/${supplyId}/lines/${lineId}/receive?company_id=${companyId}`, body)
+}
+
+export async function listSuppliers(companyId: string): Promise<{ items: SupplierBrief[] }> {
+  return get('/api/equipment/suppliers', { company_id: companyId })
 }

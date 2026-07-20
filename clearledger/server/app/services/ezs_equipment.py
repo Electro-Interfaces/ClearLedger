@@ -213,16 +213,52 @@ async def _serial_conflict(db: AsyncSession, company_id, serial: str,
 def _movement(company_id, unit: EzsEquipmentUnit, op: str, *, user: User | None,
               from_location_id=None, to_location_id=None, from_state=None,
               to_state=None, counterparty=None, occurred_on=None, basis=None,
-              comment=None) -> EzsEquipmentMovement:
+              comment=None, supply_id=None, supply_line_id=None) -> EzsEquipmentMovement:
     return EzsEquipmentMovement(
         company_id=company_id, unit_id=unit.id, op=op,
         from_location_id=from_location_id, to_location_id=to_location_id,
         from_state=from_state, to_state=to_state, counterparty=counterparty,
         occurred_on=occurred_on or date.today().isoformat(),
         basis=basis, comment=comment,
+        supply_id=supply_id, supply_line_id=supply_line_id,
         created_by_id=str(user.id) if user else None,
         created_by_name=(user.name or user.email) if user else None,
     )
+
+
+async def _create_receipt_unit(
+    db: AsyncSession, company_id, user: User | None, *,
+    warehouse: ServiceLocation, serial: str | None, is_used: bool,
+    fields: dict[str, Any], supply_id=None, supply_line_id=None,
+    purchase_amount=None, vat_amount=None,
+    occurred_on=None, basis=None, comment=None,
+) -> EzsEquipmentUnit:
+    """Создать карточку единицы на складе + первое движение receipt.
+
+    Единый примитив прихода: зовётся из ручного create_unit и из приёмки по
+    документу поставки. Серийник и склад — обязанность вызывающего (проверка
+    коллизии/типа делается ДО вызова). fields — уже готовые паспортные поля
+    (vendor канонизирован вызывающим)."""
+    unit = EzsEquipmentUnit(
+        company_id=company_id,
+        serial_number=serial,
+        state="in_stock_used" if is_used else "in_stock_new",
+        is_used=is_used,
+        current_location_id=warehouse.id,
+        custodian="warehouse",
+        supply_id=supply_id, supply_line_id=supply_line_id,
+        purchase_amount=purchase_amount, vat_amount=vat_amount,
+        **fields,
+    )
+    db.add(unit)
+    await db.flush()
+    db.add(_movement(
+        company_id, unit, "receipt", user=user, to_location_id=warehouse.id,
+        from_state=None, to_state=unit.state,
+        supply_id=supply_id, supply_line_id=supply_line_id,
+        occurred_on=occurred_on, basis=basis, comment=comment,
+    ))
+    return unit
 
 
 async def create_unit(db: AsyncSession, company_id, user: User | None,
@@ -236,26 +272,15 @@ async def create_unit(db: AsyncSession, company_id, user: User | None,
         raise HTTPException(400, "Укажите склад поступления")
     wh = await _get_location(db, company_id, wh_id, want_type="warehouse")
 
-    is_used = bool(payload.get("is_used"))
-    unit = EzsEquipmentUnit(
-        company_id=company_id,
-        serial_number=serial,
-        vendor=canon_vendor(payload.get("vendor") or payload.get("vendor_raw")),
-        state="in_stock_used" if is_used else "in_stock_new",
-        is_used=is_used,
-        current_location_id=wh.id,
-        custodian="warehouse",
-        **{k: payload.get(k) for k in _UNIT_FIELDS if k not in ("serial_number",) and payload.get(k) is not None},
-    )
-    db.add(unit)
-    await db.flush()
-    db.add(_movement(
-        company_id, unit, "receipt", user=user, to_location_id=wh.id,
-        from_state=None, to_state=unit.state,
+    fields = {k: payload.get(k) for k in _UNIT_FIELDS
+              if k != "serial_number" and payload.get(k) is not None}
+    fields["vendor"] = canon_vendor(payload.get("vendor") or payload.get("vendor_raw"))
+    return await _create_receipt_unit(
+        db, company_id, user, warehouse=wh, serial=serial,
+        is_used=bool(payload.get("is_used")), fields=fields,
         occurred_on=payload.get("occurred_on"), basis=payload.get("basis"),
         comment=payload.get("comment"),
-    ))
-    return unit
+    )
 
 
 async def apply_movement(db: AsyncSession, company_id, user: User | None,
@@ -361,6 +386,7 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
         from_state=from_state, to_state=to_state, counterparty=counterparty,
         occurred_on=payload.get("occurred_on"), basis=payload.get("basis"),
         comment=payload.get("comment"),
+        supply_id=payload.get("supply_id"), supply_line_id=payload.get("supply_line_id"),
     )
     db.add(move)
 
@@ -642,6 +668,12 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
                     power = float(str(pw).replace(",", "."))
                 except ValueError:
                     power = None
+            # Терминальное состояние (списана/возврат) держателя на складе не
+            # имеет: current_location=None, custodian vendor|none (не «warehouse»).
+            terminal = state in TERMINAL_STATES
+            loc_id = None if terminal else (wh.id if wh else None)
+            custodian = ("vendor" if state == "returned_to_vendor" else "none") \
+                if terminal else "warehouse"
             unit = EzsEquipmentUnit(
                 company_id=company_id,
                 serial_number=serial, vendor=vendor, vendor_raw=vendor_raw,
@@ -650,13 +682,12 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
                 inventory_number=inv, supplier=cell(row, "supplier"),
                 purchase_date=cell(row, "purchase_date"), notes=cell(row, "notes"),
                 state=state, is_used=(state == "in_stock_used"),
-                current_location_id=wh.id if wh else None,
-                custodian="warehouse" if wh else ("none" if state in TERMINAL_STATES else "warehouse"),
+                current_location_id=loc_id, custodian=custodian,
             )
             db.add(unit)
             await db.flush()
             db.add(_movement(company_id, unit, "receipt", user=user,
-                             to_location_id=wh.id if wh else None,
+                             to_location_id=loc_id,
                              to_state=state, basis=f"импорт: {filename}"))
             if serial:
                 by_serial[serial.lower()] = unit
@@ -759,6 +790,7 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
         target_location_id=payload.get("target_location_id"),
         occurred_on=payload.get("occurred_on") or date.today().isoformat(),
         basis=payload.get("basis"), comment=payload.get("comment"),
+        supply_id=payload.get("supply_id"), supply_line_id=payload.get("supply_line_id"),
         created_by_id=str(user.id) if user else None,
         created_by_name=(user.name or user.email) if user else None,
     )

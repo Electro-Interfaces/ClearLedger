@@ -35,6 +35,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   operations: {
     ops_overview: 'Обзор', ops_balance: 'Баланс (факт)', ops_completeness: 'Полнота данных',
     eq_fleet: 'Парк оборудования', eq_warehouses: 'Склады и остатки',
+    eq_supplies: 'Поставки и возвраты',
     eq_movements: 'Движения', eq_spares: 'ЗИП и запчасти',
     procurement: 'Энергозакупка', rent: 'Аренда', balance: 'Баланс ЭЗС', contracts: 'Договоры и аренда',
   },

@@ -19,12 +19,13 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
     EzsEquipmentMovement, EzsEquipmentUnit, EzsSparePart, EzsSparePartMovement,
-    EzsSparePartStock, ServiceLocation, User,
+    EzsSparePartStock, EzsSupplyDocument, ServiceLocation, User,
 )
 from app.services.ezs_equipment import (
     OP_LABELS, STATE_LABELS, TERMINAL_STATES, allowed_ops, apply_movement,
     create_unit, dismantle_from_site, import_units_xlsx, spare_apply_movement,
 )
+from app.services import ezs_supply
 
 router = APIRouter(prefix="/equipment", tags=["Оборудование ЭЗС"])
 
@@ -122,7 +123,8 @@ def _loc_brief(loc: ServiceLocation | None) -> dict[str, Any] | None:
     return {"id": loc.id, "name": loc.name, "type": loc.type, "address": loc.address}
 
 
-def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation]) -> dict[str, Any]:
+def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation],
+              supplies: dict[Any, str] | None = None) -> dict[str, Any]:
     return {
         "id": str(u.id), "kind": u.kind,
         "serialNumber": u.serial_number, "vendor": u.vendor, "vendorRaw": u.vendor_raw,
@@ -131,6 +133,8 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation]) -> dict[str
         "inventoryNumber": u.inventory_number, "supplier": u.supplier,
         "purchaseDoc": u.purchase_doc, "purchaseDate": u.purchase_date,
         "warrantyUntil": u.warranty_until,
+        "purchaseAmount": float(u.purchase_amount) if u.purchase_amount is not None else None,
+        "vatAmount": float(u.vat_amount) if u.vat_amount is not None else None,
         "state": u.state, "stateLabel": STATE_LABELS.get(u.state, u.state),
         "isUsed": u.is_used,
         "custodian": u.custodian, "custodianName": u.custodian_name,
@@ -138,6 +142,9 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation]) -> dict[str
         "originLocation": _loc_brief(locs.get(u.origin_location_id or "")),
         "reservedFor": _loc_brief(locs.get(u.reserved_for_location_id or "")),
         "notes": u.notes,
+        "supplyId": str(u.supply_id) if u.supply_id else None,
+        "supplyLineId": str(u.supply_line_id) if u.supply_line_id else None,
+        "supplyNumber": (supplies or {}).get(u.supply_id) if u.supply_id else None,
         "createdAt": u.created_at.isoformat() if u.created_at else None,
         "updatedAt": u.updated_at.isoformat() if u.updated_at else None,
         "allowedOps": allowed_ops(u.state),
@@ -145,7 +152,8 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation]) -> dict[str
 
 
 def _move_out(m: EzsEquipmentMovement, locs: dict[str, ServiceLocation],
-              unit: EzsEquipmentUnit | None = None) -> dict[str, Any]:
+              unit: EzsEquipmentUnit | None = None,
+              supplies: dict[Any, str] | None = None) -> dict[str, Any]:
     out = {
         "id": str(m.id), "unitId": str(m.unit_id),
         "op": m.op, "opLabel": OP_LABELS.get(m.op, m.op),
@@ -156,6 +164,8 @@ def _move_out(m: EzsEquipmentMovement, locs: dict[str, ServiceLocation],
         "toStateLabel": STATE_LABELS.get(m.to_state or "", m.to_state),
         "counterparty": m.counterparty,
         "occurredOn": m.occurred_on, "basis": m.basis, "comment": m.comment,
+        "supplyId": str(m.supply_id) if m.supply_id else None,
+        "supplyNumber": (supplies or {}).get(m.supply_id) if m.supply_id else None,
         "createdBy": m.created_by_name,
         "createdAt": m.created_at.isoformat() if m.created_at else None,
     }
@@ -170,6 +180,18 @@ async def _locations_map(db: AsyncSession, company_id) -> dict[str, ServiceLocat
         select(ServiceLocation).where(ServiceLocation.company_id == company_id)
     )).scalars().all()
     return {l.id: l for l in rows}
+
+
+async def _supplies_map(db: AsyncSession, company_id, supply_ids) -> dict[Any, str]:
+    """{supply_id: number} для подписи «из поставки №» (join без N+1)."""
+    ids = [s for s in set(supply_ids) if s]
+    if not ids:
+        return {}
+    rows = (await db.execute(
+        select(EzsSupplyDocument.id, EzsSupplyDocument.number).where(
+            EzsSupplyDocument.company_id == company_id,
+            EzsSupplyDocument.id.in_(ids)))).all()
+    return {sid: num for sid, num in rows}
 
 
 def _payload_movement(body: MovementIn) -> dict[str, Any]:
@@ -256,8 +278,9 @@ async def get_unit(
         .order_by(EzsEquipmentMovement.created_at.desc())
     )).scalars().all()
     locs = await _locations_map(db, cid)
-    out = _unit_out(unit, locs)
-    out["movements"] = [_move_out(m, locs) for m in moves]
+    supplies = await _supplies_map(db, cid, [unit.supply_id, *(m.supply_id for m in moves)])
+    out = _unit_out(unit, locs, supplies)
+    out["movements"] = [_move_out(m, locs, supplies=supplies) for m in moves]
     return out
 
 
@@ -379,7 +402,8 @@ async def list_movements(
         .limit(page_size).offset((page - 1) * page_size)
     )).all()
     locs = await _locations_map(db, cid)
-    return {"items": [_move_out(m, locs, unit=u) for m, u in rows], "total": total}
+    supplies = await _supplies_map(db, cid, [m.supply_id for m, _ in rows])
+    return {"items": [_move_out(m, locs, unit=u, supplies=supplies) for m, u in rows], "total": total}
 
 
 # ─── склады и обзор ─────────────────────────────────────────────────────────
@@ -682,3 +706,221 @@ async def spare_movements_journal(
             "createdBy": m.created_by_name,
         })
     return {"items": items, "total": total}
+
+
+# ─── документы поставки/возврата (слой оснований поверх движений) ────────────
+
+class SupplyLineIn(BaseModel):
+    lineKind: str = "station"        # station | spare
+    partId: str | None = None        # для spare
+    name: str | None = None
+    qtyPlanned: float = Field(gt=0)
+    unitPrice: float | None = None
+    vatRate: str | None = None
+    note: str | None = None
+    # шаблон станции (для lineKind=station)
+    vendor: str | None = None
+    model: str | None = None
+    stationType: str | None = None
+    powerKwt: float | None = None
+    connectorsCount: int | None = None
+    connectorTypes: str | None = None
+
+
+class SupplyIn(BaseModel):
+    docType: str = "supply"          # supply | return
+    number: str
+    docDate: str | None = None
+    counterpartyId: str | None = None
+    counterpartyName: str | None = None
+    contractId: str | None = None
+    warehouseId: str | None = None
+    currency: str = "RUB"
+    vatTotal: float | None = None
+    note: str | None = None
+    lines: list[SupplyLineIn] = Field(default_factory=list)
+
+
+class SupplyPatch(BaseModel):
+    number: str | None = None
+    docDate: str | None = None
+    counterpartyId: str | None = None
+    counterpartyName: str | None = None
+    contractId: str | None = None
+    warehouseId: str | None = None
+    currency: str | None = None
+    vatTotal: float | None = None
+    note: str | None = None
+
+
+class SupplyStatusIn(BaseModel):
+    action: str                      # confirm | close | cancel
+
+
+class ReceiveUnitIn(BaseModel):
+    serial: str | None = None
+    inventoryNumber: str | None = None
+    warrantyUntil: str | None = None
+
+
+class ReceiveIn(BaseModel):
+    warehouseId: str | None = None
+    occurredOn: str | None = None
+    basis: str | None = None
+    comment: str | None = None
+    qty: float | None = None                       # ЗИП / безсерийные станции
+    units: list[ReceiveUnitIn] = Field(default_factory=list)   # станции с серийниками
+    unitIds: list[str] = Field(default_factory=list)           # станции к возврату
+    allowOverage: bool = False
+
+
+def _line_payload(ln: SupplyLineIn) -> dict[str, Any]:
+    return {
+        "line_kind": ln.lineKind, "part_id": ln.partId, "name": ln.name,
+        "qty_planned": ln.qtyPlanned, "unit_price": ln.unitPrice,
+        "vat_rate": ln.vatRate, "note": ln.note, "vendor": ln.vendor,
+        "model": ln.model, "station_type": ln.stationType, "power_kwt": ln.powerKwt,
+        "connectors_count": ln.connectorsCount, "connector_types": ln.connectorTypes,
+    }
+
+
+@router.get("/supplies")
+async def list_supplies_ep(
+    company_id: str = Query(...),
+    doc_type: str | None = Query(None), status: str | None = Query(None),
+    counterparty_id: str | None = Query(None),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
+    q: str | None = Query(None),
+    page: int = Query(1, ge=1), page_size: int = Query(100, le=500),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_supply.list_supplies(
+        db, cid, doc_type=doc_type, status=status, counterparty_id=counterparty_id,
+        date_from=date_from, date_to=date_to, q=q, page=page, page_size=page_size)
+
+
+@router.post("/supplies")
+async def create_supply_ep(
+    body: SupplyIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    doc = await ezs_supply.create_supply(db, cid, user, {
+        "doc_type": body.docType, "number": body.number, "doc_date": body.docDate,
+        "counterparty_id": body.counterpartyId, "counterparty_name": body.counterpartyName,
+        "contract_id": body.contractId, "warehouse_id": body.warehouseId,
+        "currency": body.currency, "vat_total": body.vatTotal, "note": body.note,
+        "lines": [_line_payload(ln) for ln in body.lines],
+    })
+    await db.flush()
+    return await ezs_supply.get_supply(db, cid, doc.id)
+
+
+@router.get("/supplies/{supply_id}")
+async def get_supply_ep(
+    supply_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_supply.get_supply(db, cid, supply_id)
+
+
+@router.patch("/supplies/{supply_id}")
+async def update_supply_ep(
+    supply_id: uuid.UUID, body: SupplyPatch, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    data = body.model_dump(exclude_unset=True)
+    payload = {
+        {"number": "number", "docDate": "doc_date", "counterpartyId": "counterparty_id",
+         "counterpartyName": "counterparty_name", "contractId": "contract_id",
+         "warehouseId": "warehouse_id", "currency": "currency", "vatTotal": "vat_total",
+         "note": "note"}[k]: v for k, v in data.items()
+    }
+    await ezs_supply.update_supply(db, cid, user, supply_id, payload)
+    await db.flush()
+    return await ezs_supply.get_supply(db, cid, supply_id)
+
+
+@router.delete("/supplies/{supply_id}")
+async def delete_supply_ep(
+    supply_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await ezs_supply.delete_supply(db, cid, supply_id)
+    return {"deleted": str(supply_id)}
+
+
+@router.post("/supplies/{supply_id}/lines")
+async def add_supply_line_ep(
+    supply_id: uuid.UUID, body: SupplyLineIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await ezs_supply.add_line(db, cid, supply_id, _line_payload(body))
+    await db.flush()
+    return await ezs_supply.get_supply(db, cid, supply_id)
+
+
+@router.patch("/supplies/{supply_id}/lines/{line_id}")
+async def update_supply_line_ep(
+    supply_id: uuid.UUID, line_id: uuid.UUID, body: SupplyLineIn,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await ezs_supply.update_line(db, cid, supply_id, line_id, _line_payload(body))
+    await db.flush()
+    return await ezs_supply.get_supply(db, cid, supply_id)
+
+
+@router.delete("/supplies/{supply_id}/lines/{line_id}")
+async def delete_supply_line_ep(
+    supply_id: uuid.UUID, line_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await ezs_supply.delete_line(db, cid, supply_id, line_id)
+    await db.flush()
+    return await ezs_supply.get_supply(db, cid, supply_id)
+
+
+@router.post("/supplies/{supply_id}/status")
+async def supply_status_ep(
+    supply_id: uuid.UUID, body: SupplyStatusIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await ezs_supply.set_status(db, cid, user, supply_id, body.action)
+    await db.flush()
+    return await ezs_supply.get_supply(db, cid, supply_id)
+
+
+@router.post("/supplies/{supply_id}/lines/{line_id}/receive")
+async def receive_supply_line_ep(
+    supply_id: uuid.UUID, line_id: uuid.UUID, body: ReceiveIn,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await ezs_supply.receive_line(db, cid, user, supply_id, line_id, {
+        "warehouse_id": body.warehouseId, "occurred_on": body.occurredOn,
+        "basis": body.basis, "comment": body.comment, "qty": body.qty,
+        "units": [{"serial": u.serial, "inventory_number": u.inventoryNumber,
+                   "warranty_until": u.warrantyUntil} for u in body.units],
+        "unit_ids": body.unitIds, "allow_overage": body.allowOverage,
+    })
+    await db.flush()
+    return await ezs_supply.get_supply(db, cid, supply_id)
+
+
+@router.get("/suppliers")
+async def list_suppliers_ep(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    return {"items": await ezs_supply.list_suppliers(db, cid)}

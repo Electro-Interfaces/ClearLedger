@@ -565,6 +565,8 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                   <KV label="Б/у" value={unit.isUsed ? 'Да' : 'Нет'} />
                   <KV label="Поставщик" value={unit.supplier ?? undefined} />
                   <KV label="Документ закупки" value={unit.purchaseDoc ?? undefined} />
+                  <KV label="Из поставки" value={unit.supplyNumber ? `№ ${unit.supplyNumber}` : undefined} />
+                  <KV label="Стоимость" value={unit.purchaseAmount != null ? `${nf0.format(unit.purchaseAmount)} ₽` : undefined} />
                   <KV label="Дата закупки" value={unit.purchaseDate ? fmtD(unit.purchaseDate) : undefined} />
                   <KV label="Гарантия до" value={unit.warrantyUntil ? fmtD(unit.warrantyUntil) : undefined} />
                   <KV label="Местонахождение" value={placeLabel(unit)} />

@@ -9,7 +9,7 @@
       несёт ОПЕРАТИВНЫЕ статусы и OCPP ID, обновляет только присутствующие поля.
   ingest_stations(db, company, rows, channel_id, mode) → нормализация + UPSERT в ServiceLocation
 
-Объект-станция = ServiceLocation (type='charge_station'). Паспорт разложен в
+Объект-станция = ServiceLocation (type='ev_charging'). Паспорт разложен в
 ТИПИЗИРОВАННЫЕ колонки L2 (широта/долгота/мощность/коннекторы/бренд/OCPP/HubEx…),
 неразложенный «хвост» — в extra_metadata. Регион канонизируется и резолвится в
 regions (get-or-create → region_id). Идемпотентно (UPSERT по стабильному id):
