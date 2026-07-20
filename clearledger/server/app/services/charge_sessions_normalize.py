@@ -18,6 +18,7 @@ import re
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import async_session_factory
 from app.models import ChannelSyncLog, ChargeSession, CorporateClient
 from app.services.analytics_cache import bump_version
 from app.services.mapping import apply, canon_region, load_kind_map
@@ -168,17 +169,23 @@ async def ingest_charge_sessions(
     total = len(rows)
 
     async def _bump(done: int) -> None:
-        """Промежуточный прогресс в лог (для %-индикатора UI) + commit, чтобы поллинг
-        увидел. done/total → проценты; loaded — фактически создано."""
+        """Прогресс в лог (для %-индикатора UI). Пишем в ОТДЕЛЬНОЙ транзакции, а НЕ
+        коммитим основную: раньше `db.commit()` здесь коммитил незавершённый ingest
+        (в replace — уже удалённые сессии, частично вставленные батчи) ДО финального
+        bump_version. Воркер, обслуживающий дашборд во время загрузки, видел эти
+        частичные данные под СТАРОЙ версией кэша и кэшировал их — источник «мигания»
+        и рассинхрона воркеров. Теперь данные+визиты+bump_version = один финальный
+        commit (атомарно), а прогресс поллинга идёт мимо основной транзакции."""
         if log_id is None:
             return
-        log = await db.get(ChannelSyncLog, log_id)
-        if log is not None:
-            log.loaded = created
-            log.events = [{"level": "info", "event": "run",
-                           "message": f"загрузка сессий: {done:,}/{total:,}".replace(",", " "),
-                           "stations_done": done, "stations_total": total, "loaded": created}]
-        await db.commit()
+        async with async_session_factory() as log_db:
+            log = await log_db.get(ChannelSyncLog, log_id)
+            if log is not None:
+                log.loaded = created
+                log.events = [{"level": "info", "event": "run",
+                               "message": f"загрузка сессий: {done:,}/{total:,}".replace(",", " "),
+                               "stations_done": done, "stations_total": total, "loaded": created}]
+                await log_db.commit()
 
     await _bump(0)
     for idx, row in enumerate(rows):

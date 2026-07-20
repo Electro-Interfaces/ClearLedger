@@ -1,32 +1,40 @@
-"""In-process TTL-кеш агрегатных ответов раздела «Продажи» ЭЗС с версионной
+"""ОБЩИЙ (в Postgres) TTL-кеш агрегатных ответов раздела «Продажи» ЭЗС с версионной
 инвалидацией.
 
 Дашборды (Обзор/Карта/Тарифы/Корпоратив/Частные лица) — чистые чтения тяжёлых
-агрегатов по `charge_sessions` (≈105k строк). Данные меняются ТОЛЬКО батч-
-ingest'ом/обогащением, поэтому кеш инвалидируется не по TTL-угадыванию, а по
-событию: при загрузке новых сессий версия компании инкрементируется
-(`bump_version`), и все её кеш-ключи (которые содержат версию) устаревают.
+агрегатов по `charge_sessions`. Данные меняются ТОЛЬКО батч-ingest'ом/обогащением,
+поэтому кеш инвалидируется не по TTL-угадыванию, а по событию: при загрузке новых
+сессий версия компании инкрементируется (`bump_version`), и все её кеш-ключи
+(которые содержат версию) устаревают.
 
-Кеш — per-process (у каждого gunicorn-воркера свой словарь); корректность
-держит версия, читаемая из БД (общая для всех воркеров). TTL — страховка на
-случай, если версию по какой-то ветке не бампнули.
+⚠ Раньше кеш был per-process (у каждого gunicorn-воркера свой словарь `_STORE`).
+Это раздваивало правду: при `-w 2` два воркера могли держать РАЗНЫЕ значения под
+одним ключом (если версия не поспевала за данными) и отдавать их по round-robin —
+цифры «мигали» при F5 без действий пользователя. Теперь кеш ОБЩИЙ — таблица
+`analytics_cache` в Postgres: все воркеры и все заходы видят ОДНО значение для
+(компания, версия, запрос). Мигание от рассинхрона воркеров архитектурно невозможно.
+
+Таблица создаётся лениво (`CREATE TABLE IF NOT EXISTS`) — без миграции в models/
+database, чтобы не пересекаться с параллельной работой над схемой.
 """
 from __future__ import annotations
 
 import functools
-import time
+import hashlib
+import json
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import async_session_factory
 from app.models import AnalyticsCacheVersion
 
-# key = (tag, company_id, params, version) → (expires_at, value)
-_STORE: dict[tuple, tuple[float, Any]] = {}
-_MAX_ENTRIES = 4000
 _DEFAULT_TTL = 900  # 15 мин — fallback поверх версионной инвалидации
+_table_ready = False
 
 
 async def _version(db: AsyncSession, company_id) -> int:
@@ -37,22 +45,77 @@ async def _version(db: AsyncSession, company_id) -> int:
     return int(v or 0)
 
 
+def _json_default(o: Any) -> Any:
+    """Сериализация значений, которые json не умеет: Decimal→float (правило проекта
+    NUMERIC→float), даты→ISO."""
+    if isinstance(o, Decimal):
+        return float(o)
+    if isinstance(o, (date, datetime)):
+        return o.isoformat()
+    return str(o)
+
+
+def _make_key(tag: str, company_id, params: tuple, ver: int) -> str:
+    """Детерминированный ключ строки-кэша. Версия в ключе → бамп делает прежние
+    ключи недостижимыми. repr стабилен для (args, sorted(kwargs)) из date/str/int/float."""
+    raw = f"{tag}|{company_id}|{ver}|{params!r}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def _ensure_table() -> None:
+    """Ленивое создание общей таблицы кэша (раз на процесс)."""
+    global _table_ready
+    if _table_ready:
+        return
+    async with async_session_factory() as w:
+        await w.execute(text(
+            "CREATE TABLE IF NOT EXISTS analytics_cache ("
+            " cache_key text PRIMARY KEY,"
+            " company_id uuid,"
+            " version integer NOT NULL,"
+            " payload text NOT NULL,"
+            " computed_at timestamptz NOT NULL DEFAULT now())"
+        ))
+        await w.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_analytics_cache_company_ver"
+            " ON analytics_cache (company_id, version)"
+        ))
+        await w.commit()
+    _table_ready = True
+
+
 async def cached(db: AsyncSession, company_id, tag: str, params: tuple,
                  factory: Callable[[], Awaitable[Any]], ttl: int = _DEFAULT_TTL) -> Any:
-    """Вернуть закешированный результат или посчитать через factory и закешировать.
-
-    Ключ включает версию данных компании → загрузка новых сессий автоматически
-    делает все прежние ключи недостижимыми (bump_version)."""
+    """Вернуть закешированный результат из ОБЩЕГО (в Postgres) кэша или посчитать
+    через factory и записать. Ключ включает версию данных компании → загрузка новых
+    сессий (bump_version) автоматически делает все прежние ключи недостижимыми."""
     ver = await _version(db, company_id)
-    key = (tag, str(company_id), params, ver)
-    now = time.time()
-    hit = _STORE.get(key)
-    if hit is not None and hit[0] > now:
-        return hit[1]
+    key = _make_key(tag, company_id, params, ver)
+    await _ensure_table()
+    # Чтение из общего кэша — в сессии запроса (чистый SELECT).
+    hit = await db.scalar(
+        text("SELECT payload FROM analytics_cache"
+             " WHERE cache_key = :k AND computed_at > now() - make_interval(secs => :ttl)"),
+        {"k": key, "ttl": ttl},
+    )
+    if hit is not None:
+        try:
+            return json.loads(hit)
+        except (ValueError, TypeError):
+            pass  # битый payload → пересчёт
     value = await factory()
-    if len(_STORE) >= _MAX_ENTRIES:
-        _STORE.clear()  # простой bound; версия и так инвалидирует старьё
-    _STORE[key] = (now + ttl, value)
+    payload = json.dumps(value, default=_json_default, ensure_ascii=False)
+    # Запись — в ОТДЕЛЬНОЙ сессии, чтобы не коммитить транзакцию запроса.
+    async with async_session_factory() as w:
+        await w.execute(
+            text("INSERT INTO analytics_cache (cache_key, company_id, version, payload, computed_at)"
+                 " VALUES (:k, :cid, :ver, :p, now())"
+                 " ON CONFLICT (cache_key) DO UPDATE SET payload = EXCLUDED.payload,"
+                 " computed_at = now(), version = EXCLUDED.version"),
+            {"k": key, "cid": str(company_id), "ver": ver, "p": payload},
+        )
+        await w.commit()
+    # Отдаём тот же объект, что положили (без лишнего round-trip через БД).
     return value
 
 
@@ -60,13 +123,9 @@ def cached_report(tag: str, ttl: int = _DEFAULT_TTL, copy_rows: bool = False):
     """Декоратор на публичный метод сервиса `async def m(self, company_id, *a, **kw)`.
 
     Кеширует результат по (tag, company_id, позиционные+именованные аргументы,
-    версия данных). Авторизация выполняется в роутере ДО вызова метода —
-    кеш её не обходит.
-
-    copy_rows=True — метод возвращает список строк-словарей, которые вызывающий
-    может МУТИРОВАТЬ (напр. `_accounts` → `_tag_segments` проставляет segment).
-    Тогда на каждый hit отдаём поверхностные копии строк, чтобы мутация не
-    портила закешированный оригинал (копия дешевле, чем повторный SQL-скан)."""
+    версия данных). Авторизация выполняется в роутере ДО вызова метода — кеш её
+    не обходит. С общим БД-кэшем каждый hit — свежий json.loads(), поэтому мутация
+    не портит кэш; copy_rows оставлен для совместимости интерфейса."""
     def deco(fn: Callable[..., Awaitable[Any]]):
         @functools.wraps(fn)
         async def wrapper(self, company_id, *args, **kwargs):
@@ -81,9 +140,10 @@ def cached_report(tag: str, ttl: int = _DEFAULT_TTL, copy_rows: bool = False):
 
 
 async def bump_version(db: AsyncSession, company_id) -> None:
-    """Инвалидировать все кеши компании. Вызывать в конце ingest/обогащения
-    сессий (после того как данные записаны) — делает собственный commit, чтобы
-    новая версия была видна всем воркерам."""
+    """Инвалидировать все кеши компании. Вызывать в конце ingest/обогащения сессий
+    (после того как данные записаны) — делает собственный commit, чтобы новая версия
+    была видна всем воркерам. Ключи со старой версией становятся недостижимы; их
+    строки в общем кэше подчищаем, чтобы таблица не пухла."""
     await db.execute(
         pg_insert(AnalyticsCacheVersion)
         .values(company_id=company_id, version=1)
@@ -93,3 +153,14 @@ async def bump_version(db: AsyncSession, company_id) -> None:
         )
     )
     await db.commit()
+    try:
+        await _ensure_table()
+        async with async_session_factory() as w:
+            await w.execute(
+                text("DELETE FROM analytics_cache WHERE company_id = :cid AND version <"
+                     " (SELECT version FROM analytics_cache_version WHERE company_id = :cid)"),
+                {"cid": str(company_id)},
+            )
+            await w.commit()
+    except Exception:  # noqa: BLE001 — чистка не критична для корректности
+        pass
