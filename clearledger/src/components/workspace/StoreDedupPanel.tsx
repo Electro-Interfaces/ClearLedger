@@ -13,7 +13,7 @@ import * as XLSX from 'xlsx'
 import {
   CopyCheck, Search, Download, ChevronDown, ChevronRight, AlertTriangle,
   Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw, ShoppingCart,
-  PlayCircle, GitMerge, Upload, Info,
+  PlayCircle, GitMerge, Upload, Info, Archive,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -35,7 +35,9 @@ const fmtPrice = (p: number | null | undefined) =>
 const STATUSES: { key: string; label: string; cls: string }[] = [
   { key: 'pending', label: 'Не разобрано', cls: 'border-zinc-600 text-zinc-400' },
   { key: 'not_duplicate', label: 'Не дубль', cls: 'border-sky-400/50 text-sky-300/80' },
-  { key: 'not_used', label: 'Не используется', cls: 'border-rose-400/40 text-rose-300/70' },
+  // Ключ БД остаётся not_used; UI-семантика — «архив»: карточка снята с продажи,
+  // но НЕ удаляется (история + GUID сохраняются). Цвет нейтральный, не тревожный.
+  { key: 'not_used', label: 'Архив (снята с продажи)', cls: 'border-slate-400/40 text-slate-300/70' },
   { key: 'in_progress', label: 'В работе', cls: 'border-amber-400/50 text-amber-300/80' },
   { key: 'repointed', label: 'Перецеплено', cls: 'border-violet-400/50 text-violet-300/80' },
   { key: 'merged', label: 'Слито', cls: 'border-emerald-400/50 text-emerald-300/80' },
@@ -231,12 +233,12 @@ function GroupCard({ g }: { g: DedupGroup }) {
             </Button>
             <Button size="sm" variant="ghost"
               className={cn('ml-auto h-8 text-xs', g.status === 'not_used'
-                ? 'text-rose-300/90' : 'text-muted-foreground hover:bg-rose-500/10 hover:text-rose-300/90')}
+                ? 'text-slate-300/90' : 'text-muted-foreground hover:bg-slate-500/10 hover:text-slate-200')}
               onClick={() => mut.mutate({ status: g.status === 'not_used' ? 'pending' : 'not_used' })}
               disabled={mut.isPending}
-              title="Позиция «не используется» — на вывод из НСИ (не слияние). Так фиксируются «убрать/не используется» из примечаний. Повторный клик — снять.">
-              <Tag className="mr-1 size-3.5" />
-              {g.status === 'not_used' ? 'На вывод ✓' : 'Не используется'}
+              title="Снять с продажи → в архив: карточка выводится из активного ассортимента 208 (деактивация кода кассы), но НЕ удаляется — история продаж и GUID сохраняются. Не слияние. Повторный клик — вернуть.">
+              <Archive className="mr-1 size-3.5" />
+              {g.status === 'not_used' ? 'В архиве ✓' : 'В архив'}
             </Button>
           </div>
           <div className="mt-1.5 text-[10px] text-muted-foreground/70">
@@ -636,7 +638,7 @@ export function StoreDedupPanel() {
             </Select>
             <span className="ml-auto text-xs text-muted-foreground">
               {groups.length} групп · разобрано {doneCount}
-              {(sum?.notUsedGroups ?? 0) > 0 && <> · <span className="text-rose-300/80">на вывод {fmt(sum?.notUsedGroups)}</span></>}
+              {(sum?.notUsedGroups ?? 0) > 0 && <> · <span className="text-slate-300/80">в архиве {fmt(sum?.notUsedGroups)}</span></>}
             </span>
           </div>
 

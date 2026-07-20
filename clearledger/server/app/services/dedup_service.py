@@ -259,7 +259,8 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
             per_card[b.card_guid] = per_card.get(b.card_guid, 0) + 1
     multi_code_cards = sum(1 for n in per_card.values() if n >= 2)
 
-    # группы, помеченные оператором «не используется / убрать» (на вывод из НСИ)
+    # группы в архиве (снята с продажи) — карточка выводится из активного
+    # ассортимента, но НЕ удаляется: история продаж и GUID сохраняются
     not_used_groups = (await db.execute(select(func.count()).select_from(DedupStatus).where(
         DedupStatus.company_id == cid, DedupStatus.entity_type == "group",
         DedupStatus.status == "not_used"))).scalar() or 0
@@ -455,7 +456,7 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID, *, only_scope_208: bool 
     gs = await groups(db, cid, include_assortment=False, only_scope_208=only_scope_208)
     plan = []
     for g in gs:
-        # «не дубль» и «не используется» (вывод из НСИ) — не сливаем на канон
+        # «не дубль» и «архив» (снята с продажи) — не сливаем на канон
         if g["status"] in ("not_duplicate", "not_used"):
             continue
         canon = g.get("canonGuid") or g.get("recommendedCanon")
@@ -624,7 +625,7 @@ async def merge_map(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str] |
         gs = [g for g in gs if g["key"] in keys]
     out = []
     for g in gs:
-        # «не дубль» и «не используется» (вывод) в карту слияния не идут
+        # «не дубль» и «архив» (снята с продажи) в карту слияния не идут
         if g["status"] in ("not_duplicate", "not_used"):
             continue
         canon = g.get("canonGuid") or g.get("recommendedCanon")

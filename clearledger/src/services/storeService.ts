@@ -686,7 +686,7 @@ export interface DedupSummary {
   nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
   /** Аномалии связи с ЦБ: карточка заведена локально и не уехала / код разошёлся. */
   cbMissing: number; cbCodeDiff: number
-  /** Групп помечено «не используется / убрать» (на вывод из НСИ). */
+  /** Групп в архиве (снята с продажи — не удаление, история сохраняется). Статус not_used. */
   notUsedGroups: number
   updatedAt: string | null
 }
