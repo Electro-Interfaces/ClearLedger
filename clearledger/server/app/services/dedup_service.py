@@ -15,6 +15,7 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DedupCard, DedupNsBinding, DedupStatus, DedupCorrectionJob, CbNomenclature
+from app.models_dedup import DedupCardFacts  # регистрирует таблицу dedup_card_facts в Base
 
 # ── нормализация имени (ключ группировки дублей) ─────────────────────────────
 _PUNCT = re.compile(r'[«»"\'`.,()\[\]{}/\\\-–—:;!?]+')
@@ -131,6 +132,77 @@ async def load_dump(db: AsyncSession, cid: uuid.UUID, dump_text: str) -> dict:
     await db.commit()
     return {"cards": len(cards), "bindings": len(binds), "prices": len(prices),
             "sales": len(sales), "cb": len(cb)}
+
+
+# ── факты эры продаж (День X) + остаток ──────────────────────────────────────
+# Живут в отдельной таблице dedup_card_facts, НЕ стираются при reload среза.
+# Формат файла: секции #GIG / #NEVER / #OST (guid|остаток) / #END.
+async def load_facts(db: AsyncSession, cid: uuid.UUID, text: str) -> dict:
+    text = text.lstrip("﻿")
+    section = None
+    gig: set[str] = set()
+    never: set[str] = set()
+    ost: dict[str, float] = {}
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        if ln.startswith("#GIG"):
+            section = "gig"; continue
+        if ln.startswith("#NEVER"):
+            section = "never"; continue
+        if ln.startswith("#OST"):
+            section = "ost"; continue
+        if ln.startswith("#END"):
+            break
+        if section == "gig":
+            gig.add(ln.lower())
+        elif section == "never":
+            never.add(ln.lower())
+        elif section == "ost":
+            p = ln.split("|")
+            if len(p) >= 2:
+                try:
+                    ost[p[0].strip().lower()] = float(str(p[1]).replace(",", "."))
+                except (ValueError, TypeError):
+                    pass
+
+    # Факт на каждую карточку среза: эра = gig (оборот с 11.06) | never (нет
+    # оборота) | nl (торговалось, но не в ГИГ-эру = наследие Норд-Лайн).
+    cards = (await db.execute(select(DedupCard.guid).where(
+        DedupCard.company_id == cid, DedupCard.source == "local208"))).scalars().all()
+    await db.execute(delete(DedupCardFacts).where(DedupCardFacts.company_id == cid))
+    n = 0
+    for g in cards:
+        g = (g or "").lower()
+        if not g:
+            continue
+        is_gig = g in gig
+        is_never = (not is_gig) and (g in never)
+        nl = (not is_gig) and (not is_never)   # торговалось, но не под ГИГ
+        db.add(DedupCardFacts(company_id=cid, guid=g, gig_traded=is_gig,
+                              nl_traded=nl, ostatok_208=ost.get(g)))
+        n += 1
+    await db.commit()
+    return {"cards": n, "gig": len(gig), "never": len(never), "ost": len(ost)}
+
+
+async def _facts_by_guid(db: AsyncSession, cid: uuid.UUID) -> dict[str, DedupCardFacts]:
+    rows = (await db.execute(select(DedupCardFacts).where(
+        DedupCardFacts.company_id == cid))).scalars().all()
+    return {f.guid: f for f in rows}
+
+
+def _era(f: DedupCardFacts | None) -> str | None:
+    """gig | nl | never — эра продаж относительно Дня X. None = факты не
+    загружены (не путать с never: «нет данных» ≠ «не торговалось»)."""
+    if f is None:
+        return None
+    if f.gig_traded:
+        return "gig"
+    if f.nl_traded:
+        return "nl"
+    return "never"
 
 
 # ── разрез «контур станции 208» ──────────────────────────────────────────────
@@ -265,6 +337,14 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         DedupStatus.company_id == cid, DedupStatus.entity_type == "group",
         DedupStatus.status == "not_used"))).scalar() or 0
 
+    # эра продаж (День X 11.06.2026): gig — торговалось при ГИГ, nl — только под
+    # Норд-Лайн (наследие), never — не торговалось (фантом РИБ)
+    facts = await _facts_by_guid(db, cid)
+    facts_loaded = bool(facts)
+    era_gig = sum(1 for c in cards if _era(facts.get(c.guid)) == "gig")
+    era_nl = sum(1 for c in cards if _era(facts.get(c.guid)) == "nl")
+    era_never = sum(1 for c in cards if _era(facts.get(c.guid)) == "never")
+
     return {
         "cardsTotal": total, "cardsMarked": marked, "byPrefix": by_prefix,
         "dupGroups": len(dup_groups), "excessCards": excess, "liveDupGroups": live_groups,
@@ -275,6 +355,8 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         "cbLinked": len(cb_cards),
         "cbMissing": cb_missing, "cbCodeDiff": cb_code_diff,
         "notUsedGroups": not_used_groups,
+        "factsLoaded": facts_loaded,
+        "eraGig": era_gig, "eraNl": era_nl, "eraNever": era_never,
         "updatedAt": updated.isoformat() if updated else None,
     }
 
@@ -283,10 +365,13 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
 async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
                  include_assortment: bool = False, only_live: bool = False,
                  status: str | None = None, price_desync: bool = False,
-                 only_scope_208: bool = False) -> list[dict]:
+                 only_scope_208: bool = False, era: str | None = None) -> list[dict]:
     cards = (await db.execute(select(DedupCard).where(
         DedupCard.company_id == cid, DedupCard.source == "local208"))).scalars().all()
     card_by_guid = {c.guid: c for c in cards}
+    # факты эры продаж (День X) + остаток по каждой карточке
+    facts = await _facts_by_guid(db, cid)
+    facts_loaded = bool(facts)
     # привязки кассы по карточке (для отметки «касса бьёт сюда»)
     codes_by_card = await _codes_by_card(db, cid)
     # ЦБ-карточки по guid: база 208 — узел РИБ центральной, номенклатура общая,
@@ -328,6 +413,7 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
         # карточки, которые ПРОДАЮТСЯ сейчас — сверху (кандидаты в канон)
         for m in sorted(members, key=lambda x: (-(x.sold_qty or 0), x.marked, x.code or "")):
             mcodes = codes_by_card.get(m.guid, [])
+            mf = facts.get(m.guid)
             mem.append({
                 "guid": m.guid, "code": m.code, "prefix": m.code_prefix,
                 "name": m.name, "marked": m.marked, "group": m.group_name,
@@ -335,6 +421,9 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
                 "sellsNow": bool(m.sold_qty and m.sold_qty > 0),
                 "nsCodes": mcodes, "nsActive": any(x["active"] for x in mcodes),
                 "inCb": m.guid in cb, "cbStatus": cb_status(m, cb),
+                "era": _era(mf),   # gig | nl | never | None(факты не загружены)
+                "ostatok": float(mf.ostatok_208) if (mf and mf.ostatok_208 is not None)
+                           else (0.0 if facts_loaded else None),
             })
         # рекомендуемый канон = ЖИВАЯ карточка с макс. продажами (что реально бьёт касса)
         selling = [m for m in members if not m.marked and m.sold_qty and m.sold_qty > 0]
@@ -352,6 +441,15 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
         member_guids = {m.guid for m in members}
         canon_external = bool(canon_guid and canon_guid not in member_guids)
         canon_name = card_by_guid[canon_guid].name if canon_guid in card_by_guid else None
+        # эра группы = самая «живая» среди карточек (gig > nl > never); остаток — сумма
+        m_eras = [_era(facts.get(m.guid)) for m in members]
+        group_era = ("gig" if "gig" in m_eras else "nl" if "nl" in m_eras
+                     else "never" if "never" in m_eras else None)
+        group_ost = (sum((float(f.ostatok_208) for m in members
+                          if (f := facts.get(m.guid)) and f.ostatok_208 is not None), 0.0)
+                     if facts_loaded else None)
+        if era and group_era != era:
+            continue
         out.append({
             "key": key, "title": title, "count": len(members), "live": len(live),
             "assortment": members[0].is_assortment, "prefixes": prefixes,
@@ -363,6 +461,8 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
             "canonGuid": canon_guid,
             "canonName": canon_name,
             "canonExternal": canon_external,
+            "era": group_era,        # gig | nl | never | None
+            "ostatok": group_ost,
             "note": st.note if st else None,
         })
     # сортировка: сначала с рассинхроном цен, потом по числу живых карточек

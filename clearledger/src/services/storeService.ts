@@ -688,6 +688,10 @@ export interface DedupSummary {
   cbMissing: number; cbCodeDiff: number
   /** Групп в архиве (снята с продажи — не удаление, история сохраняется). Статус not_used. */
   notUsedGroups: number
+  /** Факты эры/остатка загружены (иначе era/ostatok = null, бейджи скрыты). */
+  factsLoaded: boolean
+  /** Карточек по эре продаж (День X): при ГИГ / только Норд-Лайн / никогда (фантом). */
+  eraGig: number; eraNl: number; eraNever: number
   updatedAt: string | null
 }
 /** Код кассы живёт в разрезе склада: один и тот же код на другом складе — другой товар. */
@@ -700,6 +704,11 @@ export interface DedupMember {
   /** База 208 — узел РИБ центральной, поэтому «есть в ЦБ» верно для 99,96%.
    *  Значение несёт только аномалия. */
   cbStatus: 'ok' | 'missing' | 'code_diff'
+  /** Эра продаж относительно Дня X (11.06.2026): gig — при ГИГ, nl — только под
+   *  Норд-Лайн (наследие), never — не торговалось (фантом РИБ). null — факты не загружены. */
+  era: 'gig' | 'nl' | 'never' | null
+  /** Текущий остаток на складе 208. null — факты не загружены. */
+  ostatok: number | null
 }
 export interface DedupGroup {
   key: string; title: string; count: number; live: number; assortment: boolean
@@ -714,6 +723,10 @@ export interface DedupGroup {
   canonName?: string | null
   /** Канон-хозяин лежит вне этой группы (нормализация имени развела дубли). */
   canonExternal?: boolean
+  /** Эра группы = самая «живая» среди карточек (gig>nl>never). null — факты не загружены. */
+  era?: 'gig' | 'nl' | 'never' | null
+  /** Суммарный остаток карточек группы на складе 208. */
+  ostatok?: number | null
 }
 export interface DedupBridgeRow {
   nsCode?: string; warehouse?: string; cardGuid?: string; cardName?: string
@@ -728,7 +741,7 @@ export interface DedupExportRow {
 }
 
 export const getDedupSummary = () => get<DedupSummary>('/api/store/dedup/summary')
-export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; onlyLive?: boolean; priceDesync?: boolean; onlyScope208?: boolean; status?: string }) =>
+export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; onlyLive?: boolean; priceDesync?: boolean; onlyScope208?: boolean; status?: string; era?: string }) =>
   get<DedupGroup[]>('/api/store/dedup/groups', {
     q: p?.q || undefined,
     include_assortment: p?.includeAssortment ? 'true' : undefined,
@@ -737,7 +750,13 @@ export const getDedupGroups = (p?: { q?: string; includeAssortment?: boolean; on
     // бэкенд по умолчанию режет не-208 — гасим явно, когда менеджер снял галку
     only_scope_208: p?.onlyScope208 === false ? 'false' : undefined,
     status: p?.status || undefined,
+    era: p?.era || undefined,
   })
+export const loadDedupFacts = (file: File) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return upload<{ cards: number; gig: number; never: number; ost: number }>('/api/store/dedup/facts', fd)
+}
 export const reloadDedup = (file: File) => {
   const fd = new FormData()
   fd.append('file', file)

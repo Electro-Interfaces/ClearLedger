@@ -490,12 +490,13 @@ async def dedup_groups(
     price_desync: bool = Query(False),
     only_scope_208: bool = Query(True),
     status: str | None = Query(None),
+    era: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     cid = await scope_company_id(user, db)
     return await dedup_service.groups(db, cid, q=q, include_assortment=include_assortment,
                                       only_live=only_live, status=status, price_desync=price_desync,
-                                      only_scope_208=only_scope_208)
+                                      only_scope_208=only_scope_208, era=era)
 
 
 @router.post("/dedup/reload")
@@ -512,6 +513,23 @@ async def dedup_reload(
     if "#CARDS" not in text:
         raise HTTPException(400, "Не похоже на дамп 208 (нет секции #CARDS)")
     return await dedup_service.load_dump(db, cid, text)
+
+
+@router.post("/dedup/facts")
+async def dedup_facts(
+    file: UploadFile,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Загрузить факты эры продаж (День X 11.06.2026) + остаток по карточкам 208.
+    Файл: секции #GIG / #NEVER / #OST(guid|остаток) / #END."""
+    cid = await scope_company_id(user, db)
+    raw = await file.read()
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Файл слишком большой")
+    text = raw.decode("utf-8", "replace")
+    if "#GIG" not in text and "#NEVER" not in text and "#OST" not in text:
+        raise HTTPException(400, "Не похоже на файл фактов (нет секций #GIG/#NEVER/#OST)")
+    return await dedup_service.load_facts(db, cid, text)
 
 
 @router.get("/dedup/bridge")

@@ -31,6 +31,19 @@ import {
 
 const fmtPrice = (p: number | null | undefined) =>
   p == null ? '—' : new Intl.NumberFormat('ru-RU').format(p) + ' ₽'
+const fmtQty = (n: number | null | undefined) =>
+  n == null ? '—' : new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 }).format(n)
+
+// Эра продаж относительно Дня X (11.06.2026, НЛ→ГИГ): определяет, что можно
+// чистить по данным (фантом), а что только руками (наследие НЛ — ГИГ-эре ~6 нед).
+const ERA: Record<string, { label: string; cls: string; hint: string }> = {
+  gig: { label: 'ГИГ', cls: 'border-emerald-400/50 text-emerald-300/80',
+    hint: 'Продавалось при ГИГ (с 11.06.2026) — текущий ассортимент, держим' },
+  nl: { label: 'только НЛ', cls: 'border-amber-400/50 text-amber-300/80',
+    hint: 'Продавалось под Норд-Лайн, но НЕ под ГИГ — наследие. По данным не архивировать: ГИГ-эре ~6 недель, решает оператор' },
+  never: { label: 'фантом', cls: 'border-red-400/40 text-red-300/70',
+    hint: 'Не торговалось ни под НЛ, ни под ГИГ — фантом РИБ (общий справочник). Нулевая история — безопасный кандидат на вывод' },
+}
 
 const STATUSES: { key: string; label: string; cls: string }[] = [
   { key: 'pending', label: 'Не разобрано', cls: 'border-zinc-600 text-zinc-400' },
@@ -179,6 +192,12 @@ function GroupCard({ g }: { g: DedupGroup }) {
             title={PREFIX_HINT[p] ?? 'Префикс кода номенклатуры'}>код {p}</Badge>
         ))}
         <Badge variant="outline" className="text-[10px]">{g.count} карт. · {g.live} живых</Badge>
+        {g.era && (
+          <Badge variant="outline" className={cn('text-[10px]', ERA[g.era].cls)} title={ERA[g.era].hint}>{ERA[g.era].label}</Badge>
+        )}
+        {(g.ostatok ?? 0) > 0 && (
+          <Badge variant="outline" className="border-zinc-600 text-[10px] text-zinc-400" title="Суммарный остаток карточек группы на складе 208">ост {fmtQty(g.ostatok)}</Badge>
+        )}
         <Badge variant="outline" className={cn('text-[10px]', sm.cls)}>{sm.label}</Badge>
       </button>
 
@@ -198,6 +217,7 @@ function GroupCard({ g }: { g: DedupGroup }) {
                   <th className="py-1 pr-2 font-medium">Код</th>
                   <th className="py-1 pr-2 font-medium">Наименование</th>
                   <th className="py-1 pr-2 font-medium text-right">Цена</th>
+                  <th className="py-1 pr-2 font-medium text-right" title="Текущий остаток на складе 208 (перед архивом/слиянием должен быть 0)">Остаток</th>
                   <th className="py-1 pr-2 font-medium">Коды кассы</th>
                   <th className="py-1 pr-2 font-medium" title="Связь с центральной базой. База 208 — узел РИБ ЦБ, поэтому карточка есть в ЦБ почти всегда (7238 из 7241) и код совпадает — отмечаем только аномалии">Связь с ЦБ</th>
                   <th className="py-1 pr-2 font-medium">Статус карт.</th>
@@ -289,9 +309,14 @@ function MemberRow({ m, canon, onCanon, spread, recommended, savedCanon }: {
         )}
         {isSaved && <span className="ml-1 rounded bg-emerald-600/80 px-1 text-[9px] text-white" title="Выбор канона сохранён">канон · сохранён</span>}
         {isRec && !isSaved && <span className="ml-1 rounded bg-emerald-500/15 px-1 text-[9px] text-emerald-300" title="Рекомендация по факту продаж — станет каноном после «Сохранить»">канон по продажам</span>}
+        {m.era && <span className={cn('ml-1 rounded border px-1 text-[9px]', ERA[m.era].cls)} title={ERA[m.era].hint}>{ERA[m.era].label}</span>}
       </td>
       <td className={cn('py-1 pr-2 text-right tabular-nums whitespace-nowrap', desync && 'font-semibold text-red-400')} title={desync ? 'Цена отличается от минимальной в группе' : undefined}>
         {fmtPrice(m.price)}
+      </td>
+      <td className={cn('py-1 pr-2 text-right tabular-nums whitespace-nowrap', (m.ostatok ?? 0) > 0 ? 'text-foreground/80' : 'text-muted-foreground/50')}
+        title={(m.ostatok ?? 0) > 0 ? 'Есть остаток — перед выводом/слиянием обнулить' : undefined}>
+        {fmtQty(m.ostatok)}
       </td>
       <td className="py-1 pr-2 text-[11px]">
         {m.nsCodes.length === 0 ? <span className="text-muted-foreground/50">—</span> : m.nsCodes.map((c) => (
@@ -454,6 +479,7 @@ export function StoreDedupPanel() {
   // чужих складов — не наша зона, по умолчанию скрыты.
   const [onlyScope, setOnlyScope] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [eraFilter, setEraFilter] = useState<string>('all')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Задания опрашиваем в корне (а не во вкладке): пока станция собирает срез,
@@ -467,8 +493,8 @@ export function StoreDedupPanel() {
 
   const { data: sum } = useQuery({ queryKey: ['dedup-summary', companyId], queryFn: getDedupSummary })
   const { data: groups = [], isLoading } = useQuery({
-    queryKey: ['dedup-groups', companyId, q, onlyLive, inclAssort, priceDesync, onlyScope, statusFilter],
-    queryFn: () => getDedupGroups({ q, onlyLive, includeAssortment: inclAssort, priceDesync, onlyScope208: onlyScope, status: statusFilter === 'all' ? undefined : statusFilter }),
+    queryKey: ['dedup-groups', companyId, q, onlyLive, inclAssort, priceDesync, onlyScope, statusFilter, eraFilter],
+    queryFn: () => getDedupGroups({ q, onlyLive, includeAssortment: inclAssort, priceDesync, onlyScope208: onlyScope, status: statusFilter === 'all' ? undefined : statusFilter, era: eraFilter === 'all' ? undefined : eraFilter }),
     enabled: tab === 'groups',
   })
 
@@ -617,6 +643,15 @@ export function StoreDedupPanel() {
       {tab === 'jobs' ? <JobsTab jobs={jobs} isLoading={jobsLoading} /> : tab === 'groups' ? (
         <div className="space-y-2.5">
           {sum && <PrefixLegend byPrefix={sum.byPrefix} />}
+          {sum?.factsLoaded && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border/40 bg-card/30 px-3 py-2 text-[11px]">
+              <span className="text-muted-foreground">Каталог по эре продаж (День X 11.06.2026, НЛ→ГИГ):</span>
+              <span className="inline-flex items-center gap-1"><Badge variant="outline" className={cn('text-[9px]', ERA.gig.cls)} title={ERA.gig.hint}>ГИГ</Badge>{fmt(sum.eraGig)}</span>
+              <span className="inline-flex items-center gap-1"><Badge variant="outline" className={cn('text-[9px]', ERA.nl.cls)} title={ERA.nl.hint}>только НЛ</Badge>{fmt(sum.eraNl)}</span>
+              <span className="inline-flex items-center gap-1"><Badge variant="outline" className={cn('text-[9px]', ERA.never.cls)} title={ERA.never.hint}>фантом</Badge>{fmt(sum.eraNever)}</span>
+              <span className="text-muted-foreground/70">— фантомы безопасны к выводу (ноль истории); наследие НЛ — только вручную, ГИГ-эре ~6 нед</span>
+            </div>
+          )}
           {/* Фильтры */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[180px] flex-1 max-w-xs">
@@ -636,6 +671,17 @@ export function StoreDedupPanel() {
                 {STATUSES.map((s) => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}
               </SelectContent>
             </Select>
+            {sum?.factsLoaded && (
+              <Select value={eraFilter} onValueChange={setEraFilter}>
+                <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="Эра продаж" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">Все эры</SelectItem>
+                  <SelectItem value="gig" className="text-xs">ГИГ (с 11.06)</SelectItem>
+                  <SelectItem value="nl" className="text-xs">Только Норд-Лайн</SelectItem>
+                  <SelectItem value="never" className="text-xs">Фантомы (никогда)</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             <span className="ml-auto text-xs text-muted-foreground">
               {groups.length} групп · разобрано {doneCount}
               {(sum?.notUsedGroups ?? 0) > 0 && <> · <span className="text-slate-300/80">в архиве {fmt(sum?.notUsedGroups)}</span></>}
