@@ -58,7 +58,7 @@ function ClientTypeToggle({ value, onChange }: { value: ClientType; onChange: (v
     <div className="inline-flex w-fit rounded-md border border-border p-0.5 gap-0.5" title="Фильтр по типу клиента">
       {opts.map((o) => (
         <button key={o.v} type="button" onClick={() => onChange(o.v)}
-          className={`px-2.5 py-0.5 text-xs rounded-[5px] transition-colors ${value === o.v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+          className={`px-2.5 py-0.5 text-xs rounded-[5px] transition-colors max-sm:inline-flex max-sm:min-h-9 max-sm:min-w-11 max-sm:items-center max-sm:justify-center max-sm:px-3.5 max-sm:text-sm ${value === o.v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
           {o.label}
         </button>
       ))}

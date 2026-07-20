@@ -35,7 +35,7 @@ export function ExportButton({ title, subtitle, getEl }: {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 text-xs px-2 gap-1 shrink-0" title="Экспорт в Excel / PDF">
+        <Button variant="outline" size="sm" className="h-7 text-xs px-2 gap-1 shrink-0 max-sm:h-9 max-sm:px-3 max-sm:text-sm" title="Экспорт в Excel / PDF">
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           Экспорт
         </Button>

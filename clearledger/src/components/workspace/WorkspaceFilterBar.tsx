@@ -142,15 +142,20 @@ function PeriodControl() {
       {/* Потолок по высоте + внутренний скролл: на телефоне (844 px) окно
           разворачивалось на 1059 px, и подвал с «Применить» уезжал за экран —
           период было невозможно сменить вообще. Ширину на мобиле сажаем на
-          вьюпорт, иначе календари распирают попап. */}
+          вьюпорт, иначе календари распирают попап.
+          ⚠ Потолок = доступная под триггером высота (radix-переменная), а не
+          жёсткие 85dvh: попап открывается от top≈142 px, вниз остаётся ~702 px,
+          и 85dvh (717 px) уводил подвал «Готово» на самый край за экран. */}
       <PopoverContent
         align="start"
         sideOffset={6}
-        className="max-h-[85dvh] w-[calc(100vw-2rem)] overflow-hidden p-0 sm:w-auto"
+        className="max-h-[min(85dvh,var(--radix-popover-content-available-height,85dvh))] w-[calc(100vw-2rem)] overflow-hidden p-0 sm:w-auto"
       >
-        <div className="flex max-h-[85dvh] max-sm:flex-col">
-          {/* Быстрые пресеты — столбцом слева */}
-          <div className="flex shrink-0 flex-col gap-0.5 border-border p-2 max-sm:max-h-40 max-sm:overflow-y-auto max-sm:border-b sm:w-44 sm:border-r">
+        <div className="flex max-h-[min(85dvh,var(--radix-popover-content-available-height,85dvh))] max-sm:flex-col">
+          {/* Быстрые пресеты — столбцом слева на десктопе, а на телефоне
+              горизонтальной лентой сверху (высота ~48 px вместо блока 160 px),
+              чтобы не съедать вертикаль у календарей и не выглядеть обрезанными. */}
+          <div className="flex shrink-0 gap-0.5 border-border p-2 max-sm:flex-row max-sm:overflow-x-auto max-sm:border-b sm:w-44 sm:flex-col sm:border-r">
             {/* Пресет заполняет черновик и НЕ закрывает окно: часто нужно взять
                 «прошлый месяц» и подвинуть одну границу. Подсветка — по
                 черновику, чтобы было видно, что именно набрано. */}
@@ -163,7 +168,7 @@ function PeriodControl() {
                   key={preset.label}
                   variant={isActive ? 'default' : 'ghost'}
                   size="sm"
-                  className="h-8 w-full justify-start text-xs font-medium"
+                  className="h-8 w-full justify-start text-xs font-medium max-sm:w-auto max-sm:shrink-0 max-sm:justify-center max-sm:whitespace-nowrap"
                   onClick={() => setBoth({ from: parseLocal(val.from), to: parseLocal(val.to) })}
                 >
                   {preset.label}
