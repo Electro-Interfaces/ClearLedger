@@ -116,7 +116,8 @@ class OverviewService:
         return out
 
     @cached_report("ezs:overview")
-    async def overview(self, company_id: Any, df: date, dt: date, compare: str = "prev") -> dict[str, Any]:
+    async def overview(self, company_id: Any, df: date, dt: date, compare: str = "prev",
+                       today: date | None = None) -> dict[str, Any]:
         period_days = (dt - df).days + 1
         prev_to = df - timedelta(days=1)
         prev_from = prev_to - timedelta(days=period_days - 1)
@@ -329,7 +330,10 @@ class OverviewService:
         # Run-rate: линейная экстраполяция темпа на полный месяц. Честна только
         # внутри незакрытого месяца — за прошедший период прогнозировать нечего.
         run_rate = None
-        today = date.today()
+        # today — параметр (входит в ключ кэша через cached_report). Иначе run_rate
+        # застревал бы на прошлой дате в пределах TTL/версии при переходе через
+        # полночь: цифра прогноза «прыгала» бы без действий пользователя.
+        today = today or date.today()
         if df.year == dt.year and df.month == dt.month and dt >= today:
             days_done = (min(dt, today) - df).days + 1
             days_in_month = (date(df.year + (df.month // 12), df.month % 12 + 1, 1)

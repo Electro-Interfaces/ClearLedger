@@ -665,7 +665,8 @@ class FuelSalesAnalytics:
             .where(*conds, T.dt >= lo, T.dt <= hi,
                    first_sq.c.fa >= lo, first_sq.c.fa <= hi)
             .group_by(CARD, first_sq.c.fa)
-            .order_by(func.sum(T.amount).desc())
+            .order_by(func.sum(T.amount).desc(), CARD)  # tie-break: при равной выручке
+            # усечение rows[:limit] иначе давало разный состав между запросами
         )).all()
         cards = [{
             "card": r.k,
@@ -980,7 +981,9 @@ class FuelSalesAnalytics:
                    func.min(T.dt).label("first_dt"),
                    func.max(T.dt).label("last_dt"),
                    func.max(T.pay_type_name).label("pay_type"))
-            .where(*conds).group_by(CARD)
+            .where(*conds).group_by(CARD).order_by(CARD)  # стабильный исходный порядок:
+            # Python sorted() ниже стабилен, но БД без ORDER BY отдаёт ties в
+            # произвольном порядке → состав страницы «плавал» между запросами.
         )).all()
 
         def key(r):

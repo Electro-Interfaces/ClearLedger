@@ -135,7 +135,7 @@ async def port_efficiency(
          GROUP BY station_code
         HAVING coalesce(sum(duration_min) FILTER (
                    WHERE is_dc AND kw < :idle_kw AND duration_min > :idle_min), 0) > 0
-         ORDER BY idle_hours DESC LIMIT :top
+         ORDER BY idle_hours DESC, station_code LIMIT :top
     """)
     for r in by_station:
         r["idle_time_pct"] = round(r["idle_hours"] / r["dc_port_hours"] * 100, 1) if r["dc_port_hours"] else 0.0

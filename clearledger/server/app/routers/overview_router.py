@@ -81,8 +81,11 @@ async def charge_overview(
 ) -> dict[str, Any]:
     """Executive-сводка сети ЭЗС за период с дельтами к прошлому периоду."""
     cid = await assert_company_member(company_id, current_user, db)
+    # today передаём явно → входит в ключ кэша: run_rate пересчитывается при смене
+    # суток, а не застревает на прошлой дате в пределах TTL.
     return await OverviewService(db).overview(
-        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), compare)
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), compare,
+        today=date.today())
 
 
 @router.get("/station-metrics")

@@ -225,7 +225,7 @@ async def visits_report(
           FROM v WHERE {dim} IS NOT NULL
          GROUP BY 1 HAVING count(*) >= {min_visits}
          ORDER BY CAST(count(*) FILTER (WHERE charged AND attempts > 1) AS float)
-                  / NULLIF(count(*), 0) DESC, count(*) DESC
+                  / NULLIF(count(*), 0) DESC, count(*) DESC, label
          LIMIT :top
         """
 
@@ -251,7 +251,7 @@ async def visits_report(
                region, connector_type, client_name, user_id,
                kwh, amount, duration_min
           FROM v WHERE attempts > 1
-         ORDER BY attempts DESC, duration_min DESC LIMIT :top
+         ORDER BY attempts DESC, duration_min DESC, visit_key LIMIT :top
     """)]
 
     visits = int(totals["visits"] or 0)

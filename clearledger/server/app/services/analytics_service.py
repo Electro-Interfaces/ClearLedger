@@ -1537,7 +1537,7 @@ class AnalyticsService:
         ).where(
             *self._cs_conds(f.company_id, f.date_from, f.date_to, f.station_codes, f.regions, f.dim_by, f.dim_val,
                             station_id=f.station_id)
-        ).order_by(S.started_at).limit(limit + 1)
+        ).order_by(S.started_at, S.session_ext_id).limit(limit + 1)  # tie-break: started_at не уникален
         res = (await self.session.execute(stmt)).all()
         truncated = len(res) > limit
 
