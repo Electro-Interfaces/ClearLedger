@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session_factory
 from app.models import ChannelSyncLog, ChargeSession, CorporateClient
 from app.services.analytics_cache import bump_version
+from app.services.charge_mart import rebuild_mart
 from app.services.mapping import apply, canon_region, load_kind_map
 
 # Форматы дат в выгрузках сессий. Точки = DD.MM (RU), слэши = MM/DD (US, выгрузка
@@ -272,6 +273,7 @@ async def ingest_charge_sessions(
         message += (f"; визитов {visits['visits']:,}".replace(",", " ")
                     + f", успешных {visits['success_pct']}%"
                     + f", с повторными попытками {visits['retried']:,}".replace(",", " "))
+    await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
     await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
             "errors": errors, "deleted": deleted, "tests": tests,
@@ -401,6 +403,7 @@ async def enrich_sessions_with_orgs(
     await db.flush()
 
     named, priced, matched = await _apply_org_enrichment(db, company_id, orgs, matrix, channel_id)
+    await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
     await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)
 
@@ -483,5 +486,6 @@ async def enrich_from_registry(db: AsyncSession, company_id, channel_id=None) ->
             for c in clients]
     matrix = {c.name: c.matrix for c in clients if c.matrix}
     named, priced, matched = await _apply_org_enrichment(db, company_id, orgs, matrix, channel_id)
+    await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
     await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)
