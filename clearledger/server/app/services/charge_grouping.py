@@ -25,11 +25,15 @@ from typing import Any
 from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChargeSession, ServiceLocation
+from app.models import ChargeSession, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 
 S = ChargeSession
 L = ServiceLocation
+# Регион ЭЗС — из справочника (единый источник истины), а не из денорм-колонки
+# charge_sessions.region: резолв сессия→объект→регион (location_id → region_id →
+# regions.name). Переучёт станций отражается сразу, число совпадает во всех дашбордах.
+_REGION = func.coalesce(Region.name, "—")
 
 
 @dataclass(frozen=True)
@@ -168,7 +172,7 @@ GROUPS: dict[str, dict[str, Any]] = {
     "station": {"label": "Станция", "family": "сеть",
                 "expr": S.station_code,
                 "label_expr": func.coalesce(S.station_name, S.station_code)},
-    "region": {"label": "Регион", "family": "сеть", "expr": S.region},
+    "region": {"label": "Регион", "family": "сеть", "expr": _REGION},
     "connector": {"label": "Коннектор", "family": "сеть", "expr": S.connector_type},
     # ── клиент ─────────────────────────────────────────────────────────
     "user_type": {"label": "Тип клиента (ФЛ/ЮЛ)", "family": "клиент", "expr": S.user_type},
@@ -272,12 +276,20 @@ def _needs_join(group_by: str) -> bool:
     return bool(GROUPS.get(group_by, {}).get("join"))
 
 
-def _with_join(stmt: Select, group_by: str) -> Select:
-    """Подключить справочник станций. LEFT JOIN намеренно: сессия станции-сироты
-    не должна исчезать из выборки — иначе итог разреза «по бренду» окажется
-    меньше итога реестра, и это прочтётся как потеря данных."""
-    if _needs_join(group_by):
-        return stmt.join(L, S.location_id == L.id, isouter=True)
+def _needs_region_join(group_by: str, region: str | None = None) -> bool:
+    """Регион участвует в группировке или фильтре → нужен join к справочнику регионов."""
+    return group_by == "region" or bool(region)
+
+
+def _with_join(stmt: Select, group_by: str, region: str | None = None) -> Select:
+    """Подключить справочник станций (и регионов). LEFT JOIN намеренно: сессия
+    станции-сироты не должна исчезать из выборки — иначе итог разреза «по бренду»
+    окажется меньше итога реестра, и это прочтётся как потеря данных."""
+    need_reg = _needs_region_join(group_by, region)
+    if _needs_join(group_by) or need_reg:
+        stmt = stmt.join(L, S.location_id == L.id, isouter=True)
+    if need_reg:
+        stmt = stmt.join(Region, Region.id == L.region_id, isouter=True)
     return stmt
 
 
@@ -288,7 +300,9 @@ def _apply_filters(stmt: Select, *, user_type: str | None, region: str | None,
     if user_type:
         stmt = stmt.where(S.user_type == user_type)
     if region:
-        stmt = stmt.where(S.region == region)
+        # Регион — из справочника (совпадает с группировкой). Требует region-join
+        # у вызывающего запроса (см. _with_join(..., region=region)).
+        stmt = stmt.where(_REGION == region)
     if connector:
         stmt = stmt.where(S.connector_type == connector)
     if result:
@@ -354,7 +368,7 @@ class ChargeGroupingService:
             func.min(S.started_at).label("first_at"),
             func.max(S.started_at).label("last_at"),
         ]
-        stmt = _with_join(select(*cols), group_by).where(
+        stmt = _with_join(select(*cols), group_by, region=region).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -384,7 +398,10 @@ class ChargeGroupingService:
         # порядком, тогда как сортировка по подписи дала бы «03, 17, 09».
         by_key = sort == "label" and (g["family"] == "время" or g.get("ordinal"))
         order = expr if by_key else SORTS.get(sort, SORTS["revenue"])
-        stmt = stmt.order_by(order.desc() if sort_dir == "desc" else order.asc())
+        primary = order.desc() if sort_dir == "desc" else order.asc()
+        # tie-break по ключу группы (уникален в разрезе): при равной метрике состав
+        # усечённого LIMIT'ом «хвоста» иначе плавает между запросами.
+        stmt = stmt.order_by(primary, expr)
 
         rows = (await self.db.execute(stmt.limit(limit))).all()
 
@@ -434,7 +451,7 @@ class ChargeGroupingService:
             func.coalesce(func.sum(S.amount), 0).label("revenue"),
             func.coalesce(func.sum(success), 0).label("success"),
             func.count(func.distinct(expr)).label("groups"),
-        ), group_by).where(
+        ), group_by, region=region).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -491,7 +508,7 @@ class ChargeGroupingService:
             S.connector_type, S.user_type, S.client_name, S.user_id, S.charge_type,
             S.energy_kwh, S.duration_min, S.tariff, S.amount, S.result, S.paid_at,
             S.visit_seq, S.visit_size,
-        ), group_by).where(
+        ), group_by, region=region).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -502,7 +519,7 @@ class ChargeGroupingService:
         stmt = stmt.where(expr.is_(None) if key == "" else expr == key)
         stmt = _apply_filters(stmt, user_type=user_type, region=region,
                               connector=connector, result=result, paid=paid,
-                              search=search).order_by(S.started_at)
+                              search=search).order_by(S.started_at, S.session_ext_id)
 
         rows = (await self.db.execute(stmt.limit(limit))).all()
         return {"group_by": group_by, "key": key, "rows": [{

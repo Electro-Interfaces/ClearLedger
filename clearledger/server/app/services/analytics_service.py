@@ -40,6 +40,8 @@ from app.models import (
     FuelStation,
     FuelTank,
     Period,
+    Region,
+    ServiceLocation,
 )
 from app.services.mapping import normalize_default
 from app.services.fuel_balance import build_fuel_balance
@@ -518,10 +520,35 @@ class AnalyticsService:
 
     # ─── management (energy): зарядные сессии ЭЗС ──────────────────────
 
+    # Регион ЭЗС — ЕДИНЫЙ источник истины: справочник объектов, а не денорм-колонка
+    # charge_sessions.region (её CPO заполняет из сырой выгрузки — разные выгрузки
+    # дают разный набор регионов, отсюда «мигание»). Резолв: сессия→объект→регион
+    # (location_id → service_locations.region_id → regions.name). Так переучёт станций
+    # отражается сразу и число регионов совпадает во всех дашбордах (эталон retail geo).
+    @staticmethod
+    def _region_label():
+        return func.coalesce(Region.name, "—")
+
+    @staticmethod
+    def _uses_region(group_by=None, regions=None, dim_by=None) -> bool:
+        """Нужен ли join к справочнику: регион участвует в группировке/фильтре/dim."""
+        return group_by == "region" or bool(regions) or dim_by == "region"
+
+    @staticmethod
+    def _apply_region_join(stmt):
+        """LEFT JOIN сессия→объект→регион. Замер на проде: join 33 мс против
+        коррелированного подзапроса 1607 мс — только join."""
+        S = ChargeSession
+        return stmt.select_from(
+            S.__table__
+            .outerjoin(ServiceLocation.__table__, ServiceLocation.id == S.location_id)
+            .outerjoin(Region.__table__, Region.id == ServiceLocation.region_id)
+        )
+
     def _cs_group_col(self, group_by: str):
         S = ChargeSession
         if group_by == "region":
-            return func.coalesce(S.region, "—")
+            return self._region_label()
         if group_by == "connector":
             return func.coalesce(S.connector_type, "—")
         if group_by == "user_type":
@@ -601,13 +628,17 @@ class AnalyticsService:
             out.append(SimpleNamespace(**m))
         return out
 
-    @staticmethod
-    def _dim_cond(dim_by, dim_val):
+    @classmethod
+    def _dim_cond(cls, dim_by, dim_val):
         """Точечный фильтр по значению разреза (drill-down строки)."""
         if not dim_by or dim_val is None:
             return None
         S = ChargeSession
-        cols = {"station": S.station_code, "region": S.region, "connector": S.connector_type,
+        # Регион — из справочника (единый источник), не из денорм-колонки: фильтр
+        # должен совпадать с группировкой (иначе drill-down по региону не сойдётся).
+        if dim_by == "region":
+            return cls._region_label() == dim_val
+        cols = {"station": S.station_code, "connector": S.connector_type,
                 "user_type": S.user_type, "client": S.client_name,
                 "charge_type": S.charge_type, "result": S.result}
         if dim_by in cols:
@@ -638,7 +669,9 @@ class AnalyticsService:
         if station_codes:
             conds.append(S.station_code.in_(station_codes))
         if regions:
-            conds.append(S.region.in_(regions))
+            # Регион — из справочника (единый источник). Требует region-join у
+            # вызывающего запроса (см. _uses_region/_apply_region_join).
+            conds.append(self._region_label().in_(regions))
         dc = self._dim_cond(dim_by, dim_val)
         if dc is not None:
             conds.append(dc)
@@ -675,6 +708,8 @@ class AnalyticsService:
             func.count(distinct(S.station_code)).label("stations"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                                 station_id=station_id)).group_by(gcol)
+        if self._uses_region(group_by, regions, dim_by):
+            stmt = self._apply_region_join(stmt)
         rows = list((await self.session.execute(stmt)).all())
         if group_by == "station":
             rows = await self._relabel_station_rows(company_id, rows, "g")
@@ -686,6 +721,8 @@ class AnalyticsService:
         stmt = select(func.count(distinct(self._port_key()))).where(
             *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                             station_id=station_id))
+        if self._uses_region(None, regions, dim_by):
+            stmt = self._apply_region_join(stmt)
         return int((await self.session.execute(stmt)).scalar_one() or 0)
 
     async def _cs_stations(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None,
@@ -694,6 +731,8 @@ class AnalyticsService:
         stmt = select(func.count(distinct(ChargeSession.station_code))).where(
             *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                             station_id=station_id))
+        if self._uses_region(None, regions, dim_by):
+            stmt = self._apply_region_join(stmt)
         return int((await self.session.execute(stmt)).scalar_one() or 0)
 
     @staticmethod
@@ -783,6 +822,8 @@ class AnalyticsService:
             *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                             station_id=station_id)
         ).group_by(*groups)
+        if self._uses_region(bucket_by, regions, dim_by) or series_by == "region":
+            stmt = self._apply_region_join(stmt)
         rows = list((await self.session.execute(stmt)).all())
         station_fields = [f for f, dim in (("b", bucket_by), ("s", series_by)) if dim == "station"]
         if station_fields:
@@ -1172,11 +1213,17 @@ class AnalyticsService:
         st_rows = [SimpleNamespace(station_code=r.station_code,
                                    name=names.get(r.station_code) or r.station_code,
                                    cnt=r.cnt) for r in st_counts]
-        rg_rows = (await self.session.execute(
-            select(S.region, func.count().label("cnt"))
-            .where(S.company_id == company_id, S.region.is_not(None))
-            .group_by(S.region).order_by(S.region)
-        )).all()
+        # Регион — из справочника (единый источник), чтобы список фильтра совпадал
+        # с группировкой разреза (иначе фильтр по региону не сойдётся). Выражение —
+        # в переменную: _region_label() создаёт новый объект, а SELECT и GROUP BY
+        # должны ссылаться на ОДИН и тот же (иначе GroupingError).
+        reg = self._region_label()
+        rg_stmt = self._apply_region_join(
+            select(reg.label("region"), func.count().label("cnt"))
+            .where(S.company_id == company_id)
+            .group_by(reg).order_by(reg)
+        )
+        rg_rows = (await self.session.execute(rg_stmt)).all()
         return {
             "stations": [{"code": r.station_code, "name": r.name or r.station_code, "sessions": int(r.cnt)} for r in st_rows],
             "regions": [{"region": r.region, "sessions": int(r.cnt)} for r in rg_rows],

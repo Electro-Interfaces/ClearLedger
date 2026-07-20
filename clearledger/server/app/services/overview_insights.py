@@ -69,7 +69,7 @@ async def silent_stations(
     подключены или не запущены) и тех, кто раньше работал, а теперь замолчал —
     это разные истории: первая про запуск, вторая про поломку или демонтаж.
     """
-    sql = text(f"""
+    ctes = f"""
         WITH net AS ({_NET}),
         act AS (
             SELECT DISTINCT location_id FROM charge_sessions
@@ -83,29 +83,42 @@ async def silent_stations(
              WHERE company_id = :company_id AND location_id IS NOT NULL
              GROUP BY location_id
         )
+    """
+    params = {"company_id": str(company_id), "date_from": date_from, "date_to": date_to}
+    # Список для показа — усечён LIMIT; tie-break по коду для стабильного порядка
+    # среди станций с одинаковым last_at (иначе состав «хвоста» плавает).
+    rows = _rows(await db.execute(text(ctes + """
         SELECT n.id, n.code, n.name, n.city, n.operational_status,
                e.last_at, coalesce(e.sessions, 0) AS sessions_ever
           FROM net n
           LEFT JOIN act a ON a.location_id = n.id
           LEFT JOIN ever e ON e.location_id = n.id
          WHERE a.location_id IS NULL
-         ORDER BY e.last_at DESC NULLS LAST
+         ORDER BY e.last_at DESC NULLS LAST, n.code
          LIMIT :limit
-    """)
-    rows = _rows(await db.execute(sql, {
-        "company_id": str(company_id), "date_from": date_from,
-        "date_to": date_to, "limit": limit,
-    }))
+    """), {**params, "limit": limit}))
+    # Счётчики — по ПОЛНОМУ набору молчащих, не по усечённому списку: иначе при
+    # молчащих > limit доля silent_pct занижена и цифра врёт (это уже не «мигание»,
+    # а систематически неверное число).
+    st = (await db.execute(text(ctes + """
+        SELECT count(*) AS silent,
+               count(*) FILTER (WHERE coalesce(e.sessions, 0) = 0) AS never
+          FROM net n
+          LEFT JOIN act a ON a.location_id = n.id
+          LEFT JOIN ever e ON e.location_id = n.id
+         WHERE a.location_id IS NULL
+    """), params)).one()
+    silent = int(st.silent or 0)
+    never = int(st.never or 0)
     total = (await db.execute(text(f"SELECT count(*) FROM ({_NET}) t"),
                               {"company_id": str(company_id)})).scalar_one()
-    never = sum(1 for r in rows if not r["sessions_ever"])
     return {
         "stations": rows,
-        "silent": len(rows),
+        "silent": silent,
         "never_worked": never,
-        "went_quiet": len(rows) - never,
+        "went_quiet": silent - never,
         "total": int(total or 0),
-        "silent_pct": round(len(rows) / total * 100, 1) if total else 0.0,
+        "silent_pct": round(silent / total * 100, 1) if total else 0.0,
     }
 
 
@@ -197,14 +210,19 @@ async def region_extremes(
     """Регионы: выручка и доля зарядившихся. Успех — по визитам, как в KPI."""
     sql = text(f"""
         WITH v AS (
-            SELECT visit_key, min(region) AS region,
-                   max(visit_charged::int) AS charged,
+            -- Регион — из справочника (единый источник истины), а не из денорм
+            -- charge_sessions.region: сессия→объект→регион. company_id неоднозначен
+            -- при join трёх таблиц → префиксуем cs.
+            SELECT cs.visit_key, min(r.name) AS region,
+                   max(cs.visit_charged::int) AS charged,
                    sum({_REVENUE}) AS rev
-              FROM charge_sessions
-             WHERE company_id = :company_id AND visit_key IS NOT NULL
-               AND started_at >= CAST(:date_from AS date)
-               AND started_at < CAST(:date_to AS date) + 1
-             GROUP BY visit_key
+              FROM charge_sessions cs
+              LEFT JOIN service_locations sl ON sl.id = cs.location_id
+              LEFT JOIN regions r ON r.id = sl.region_id
+             WHERE cs.company_id = :company_id AND cs.visit_key IS NOT NULL
+               AND cs.started_at >= CAST(:date_from AS date)
+               AND cs.started_at < CAST(:date_to AS date) + 1
+             GROUP BY cs.visit_key
         )
         SELECT coalesce(region, '—') AS label,
                count(*) AS visits,
