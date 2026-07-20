@@ -35,6 +35,7 @@ const fmtPrice = (p: number | null | undefined) =>
 const STATUSES: { key: string; label: string; cls: string }[] = [
   { key: 'pending', label: 'Не разобрано', cls: 'border-zinc-600 text-zinc-400' },
   { key: 'not_duplicate', label: 'Не дубль', cls: 'border-sky-400/50 text-sky-300/80' },
+  { key: 'not_used', label: 'Не используется', cls: 'border-rose-400/40 text-rose-300/70' },
   { key: 'in_progress', label: 'В работе', cls: 'border-amber-400/50 text-amber-300/80' },
   { key: 'repointed', label: 'Перецеплено', cls: 'border-violet-400/50 text-violet-300/80' },
   { key: 'merged', label: 'Слито', cls: 'border-emerald-400/50 text-emerald-300/80' },
@@ -158,8 +159,10 @@ function GroupCard({ g }: { g: DedupGroup }) {
         )}
         {savedCanon ? (
           <Badge variant="outline" className="gap-1 border-emerald-400/50 text-[10px] text-emerald-300/80"
-            title={`Канон выбран и сохранён: ${g.members.find((m) => m.guid === savedCanon)?.name ?? '—'}`}>
-            <Check className="size-3" />канон выбран
+            title={g.canonExternal
+              ? `Канон-хозяин в соседней группе (нормализация имени развела дубли): ${g.canonName ?? '—'}`
+              : `Канон выбран и сохранён: ${g.canonName ?? g.members.find((m) => m.guid === savedCanon)?.name ?? '—'}`}>
+            <Check className="size-3" />{g.canonExternal ? 'канон ↗' : 'канон выбран'}
           </Badge>
         ) : (
           <Badge variant="outline" className="border-zinc-600 text-[10px] text-zinc-500"
@@ -179,6 +182,12 @@ function GroupCard({ g }: { g: DedupGroup }) {
 
       {open && (
         <div className="border-t border-border/40 px-3 py-2.5">
+          {g.canonExternal && (
+            <div className="mb-2 flex items-start gap-1.5 rounded border border-emerald-400/30 bg-emerald-500/[0.06] px-2 py-1.5 text-[11px] text-emerald-200/90">
+              <GitMerge className="mt-0.5 size-3.5 shrink-0" />
+              <span>Канон-хозяин — <b>{g.canonName ?? '—'}</b> — из другой карточки/группы (оператор указал кодом в примечании: нормализация имени развела реальные дубли). Дубли этой группы сливаются на него.</span>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-xs">
               <thead>
@@ -219,6 +228,15 @@ function GroupCard({ g }: { g: DedupGroup }) {
                 `Пробный прогон: нода 208 покажет план перецепа ${dupCodes} код(ов) кассы на канон, без записи в 1С`}>
               {job.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <PlayCircle className="mr-1 size-3.5" />}
               Перецеп пробно{dupCodes > 0 ? ` (${dupCodes})` : ''}
+            </Button>
+            <Button size="sm" variant="ghost"
+              className={cn('ml-auto h-8 text-xs', g.status === 'not_used'
+                ? 'text-rose-300/90' : 'text-muted-foreground hover:bg-rose-500/10 hover:text-rose-300/90')}
+              onClick={() => mut.mutate({ status: g.status === 'not_used' ? 'pending' : 'not_used' })}
+              disabled={mut.isPending}
+              title="Позиция «не используется» — на вывод из НСИ (не слияние). Так фиксируются «убрать/не используется» из примечаний. Повторный клик — снять.">
+              <Tag className="mr-1 size-3.5" />
+              {g.status === 'not_used' ? 'На вывод ✓' : 'Не используется'}
             </Button>
           </div>
           <div className="mt-1.5 text-[10px] text-muted-foreground/70">
@@ -616,7 +634,10 @@ export function StoreDedupPanel() {
                 {STATUSES.map((s) => <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>)}
               </SelectContent>
             </Select>
-            <span className="ml-auto text-xs text-muted-foreground">{groups.length} групп · разобрано {doneCount}</span>
+            <span className="ml-auto text-xs text-muted-foreground">
+              {groups.length} групп · разобрано {doneCount}
+              {(sum?.notUsedGroups ?? 0) > 0 && <> · <span className="text-rose-300/80">на вывод {fmt(sum?.notUsedGroups)}</span></>}
+            </span>
           </div>
 
           {isLoading ? <div className="flex justify-center py-10"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>

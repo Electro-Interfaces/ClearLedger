@@ -686,6 +686,8 @@ export interface DedupSummary {
   nsActive: number; nsOnMarked: number; multiCodeCards: number; cbLinked: number
   /** Аномалии связи с ЦБ: карточка заведена локально и не уехала / код разошёлся. */
   cbMissing: number; cbCodeDiff: number
+  /** Групп помечено «не используется / убрать» (на вывод из НСИ). */
+  notUsedGroups: number
   updatedAt: string | null
 }
 /** Код кассы живёт в разрезе склада: один и тот же код на другом складе — другой товар. */
@@ -708,6 +710,10 @@ export interface DedupGroup {
   sellingCount: number; recommendedCanon: string | null
   members: DedupMember[]
   status: string; canonGuid: string | null; note: string | null
+  /** Имя карточки-канона (в т.ч. если канон в соседней группе). */
+  canonName?: string | null
+  /** Канон-хозяин лежит вне этой группы (нормализация имени развела дубли). */
+  canonExternal?: boolean
 }
 export interface DedupBridgeRow {
   nsCode?: string; warehouse?: string; cardGuid?: string; cardName?: string

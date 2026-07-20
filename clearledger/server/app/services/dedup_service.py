@@ -173,6 +173,48 @@ async def _codes_by_card(db: AsyncSession, cid: uuid.UUID, *, active_only: bool 
     return out
 
 
+# ── распознавание канона, вписанного в примечание ────────────────────────────
+_NOTE_DIGITS = re.compile(r'\d+')
+
+
+async def _cards_by_code(db: AsyncSession, cid: uuid.UUID) -> dict[str, str]:
+    """guid по нормализованному (только цифры) коду карточки — для резолва канона
+    из примечания. Короткие коды (<9 цифр) отбрасываем: цена/код кассы иначе
+    ловятся как карточка."""
+    rows = (await db.execute(select(DedupCard.guid, DedupCard.code).where(
+        DedupCard.company_id == cid, DedupCard.source == "local208"))).all()
+    out: dict[str, str] = {}
+    for guid, code in rows:
+        c = re.sub(r"\D", "", code or "")
+        if len(c) >= 9:
+            out.setdefault(c, guid)
+    return out
+
+
+def resolve_canon_from_note(note: str | None, by_code: dict[str, str]) -> str | None:
+    """Админ вписывает код карточки-хозяина в примечание («…008000003904 720 р…»),
+    иногда слитно с ценой («008000003904720 р»). Ищем код карточки как ПОДСТРОКУ
+    в цифровых токенах примечания (точное равенство ломается о слипшуюся цену),
+    предпочитая самый длинный код — 12-значный надёжнее 9-значного.
+
+    Резолв — по ВСЕМ карточкам 208, не только по членам группы: жёсткая
+    нормализация имени разводит реальные дубли по разным группам
+    («Трос …5 т.» ↔ «Трос …(5т./5 м.)», «LD Blue» ↔ «LD Autograph Blue»),
+    и хозяин, на которого указывает оператор, обычно в соседней группе."""
+    if not note:
+        return None
+    tokens = _NOTE_DIGITS.findall(note)
+    if not tokens:
+        return None
+    best_guid, best_len = None, 0
+    for code, guid in by_code.items():
+        if len(code) <= best_len:
+            continue
+        if any(code in t for t in tokens):
+            best_guid, best_len = guid, len(code)
+    return best_guid
+
+
 # ── сводка (KPI) ─────────────────────────────────────────────────────────────
 async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     cards = (await db.execute(select(DedupCard).where(
@@ -217,6 +259,11 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
             per_card[b.card_guid] = per_card.get(b.card_guid, 0) + 1
     multi_code_cards = sum(1 for n in per_card.values() if n >= 2)
 
+    # группы, помеченные оператором «не используется / убрать» (на вывод из НСИ)
+    not_used_groups = (await db.execute(select(func.count()).select_from(DedupStatus).where(
+        DedupStatus.company_id == cid, DedupStatus.entity_type == "group",
+        DedupStatus.status == "not_used"))).scalar() or 0
+
     return {
         "cardsTotal": total, "cardsMarked": marked, "byPrefix": by_prefix,
         "dupGroups": len(dup_groups), "excessCards": excess, "liveDupGroups": live_groups,
@@ -226,6 +273,7 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         "nsActive": len(binds), "nsOnMarked": on_marked, "multiCodeCards": multi_code_cards,
         "cbLinked": len(cb_cards),
         "cbMissing": cb_missing, "cbCodeDiff": cb_code_diff,
+        "notUsedGroups": not_used_groups,
         "updatedAt": updated.isoformat() if updated else None,
     }
 
@@ -237,6 +285,7 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
                  only_scope_208: bool = False) -> list[dict]:
     cards = (await db.execute(select(DedupCard).where(
         DedupCard.company_id == cid, DedupCard.source == "local208"))).scalars().all()
+    card_by_guid = {c.guid: c for c in cards}
     # привязки кассы по карточке (для отметки «касса бьёт сюда»)
     codes_by_card = await _codes_by_card(db, cid)
     # ЦБ-карточки по guid: база 208 — узел РИБ центральной, номенклатура общая,
@@ -295,6 +344,13 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
         spread = live_prices if len(live_prices) > 1 else []
         if price_desync and not spread:
             continue
+        # канон-хозяин может лежать в СОСЕДНЕЙ группе (нормализация имени развела
+        # реальные дубли) — резолвим имя по всем карточкам и помечаем «внешний»,
+        # чтобы выбор оператора не потерялся при отображении.
+        canon_guid = st.canon_guid if st else None
+        member_guids = {m.guid for m in members}
+        canon_external = bool(canon_guid and canon_guid not in member_guids)
+        canon_name = card_by_guid[canon_guid].name if canon_guid in card_by_guid else None
         out.append({
             "key": key, "title": title, "count": len(members), "live": len(live),
             "assortment": members[0].is_assortment, "prefixes": prefixes,
@@ -303,7 +359,9 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
             "recommendedCanon": recommended,       # канон по факту продаж
             "members": mem,
             "status": st.status if st else "pending",
-            "canonGuid": st.canon_guid if st else None,
+            "canonGuid": canon_guid,
+            "canonName": canon_name,
+            "canonExternal": canon_external,
             "note": st.note if st else None,
         })
     # сортировка: сначала с рассинхроном цен, потом по числу живых карточек
@@ -372,10 +430,18 @@ async def set_status(db: AsyncSession, cid: uuid.UUID, *, entity_type: str, enti
         row.canon_guid = canon_guid or None
     if note is not None:
         row.note = note
+    # оператор вписал код хозяина в примечание, а канон явно не выбрал —
+    # распознаём канон из текста (подстрока кода по всем карточкам 208, cross-group)
+    auto_canon = None
+    if canon_guid is None and note is not None and not row.canon_guid:
+        auto_canon = resolve_canon_from_note(row.note, await _cards_by_code(db, cid))
+        if auto_canon:
+            row.canon_guid = auto_canon
     row.updated_by = user
     hist = list(row.history or [])
     hist.append({"at": now, "by": user, "from": prev, "to": row.status,
-                 "canon": row.canon_guid, "note": note})
+                 "canon": row.canon_guid, "note": note,
+                 **({"autoCanon": auto_canon} if auto_canon else {})})
     row.history = hist[-50:]
     await db.commit()
     return row
@@ -389,7 +455,8 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID, *, only_scope_208: bool 
     gs = await groups(db, cid, include_assortment=False, only_scope_208=only_scope_208)
     plan = []
     for g in gs:
-        if g["status"] in ("not_duplicate",):
+        # «не дубль» и «не используется» (вывод из НСИ) — не сливаем на канон
+        if g["status"] in ("not_duplicate", "not_used"):
             continue
         canon = g.get("canonGuid") or g.get("recommendedCanon")
         if not canon:
@@ -407,8 +474,9 @@ async def export_plan(db: AsyncSession, cid: uuid.UUID, *, only_scope_208: bool 
                 "dupGuid": m["guid"], "dupCode": m["code"], "dupName": m["name"],
                 "dupMarked": m["marked"], "dupPrice": m["price"],
                 "dupNsCodes": [x["nsCode"] for x in m["nsCodes"]],
+                # канон может быть в соседней группе — имя берём из g["canonName"]
                 "canonGuid": canon, "canonCode": canon_m["code"] if canon_m else None,
-                "canonName": canon_m["name"] if canon_m else None,
+                "canonName": canon_m["name"] if canon_m else g.get("canonName"),
                 "canonPrice": canon_m["price"] if canon_m else None,
             })
     return plan
@@ -556,6 +624,9 @@ async def merge_map(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str] |
         gs = [g for g in gs if g["key"] in keys]
     out = []
     for g in gs:
+        # «не дубль» и «не используется» (вывод) в карту слияния не идут
+        if g["status"] in ("not_duplicate", "not_used"):
+            continue
         canon = g.get("canonGuid") or g.get("recommendedCanon")
         if not canon:
             live = [m for m in g["members"] if not m["marked"]]
@@ -568,6 +639,6 @@ async def merge_map(db: AsyncSession, cid: uuid.UUID, *, group_keys: list[str] |
             out.append({
                 "dupGuid": m["guid"], "dupCode": m["code"], "dupName": m["name"],
                 "canonGuid": canon, "canonCode": canon_m["code"] if canon_m else None,
-                "canonName": canon_m["name"] if canon_m else None,
+                "canonName": canon_m["name"] if canon_m else g.get("canonName"),
             })
     return out
