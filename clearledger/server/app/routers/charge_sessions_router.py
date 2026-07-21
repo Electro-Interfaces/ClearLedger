@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models import ChargeSession, User
 from app.services.export_audit import log_export
 from app.services.export_files import xlsx_response
+from app.services.session_scope import session_scope_conds
 from app.services.pivot_export import build_sessions_pivot
 
 router = APIRouter(prefix="/charge-sessions", tags=["Зарядные сессии"])
@@ -116,13 +117,16 @@ async def export_sessions(
     date_to: str,
     user_type: str | None = None,
     client: str | None = None,
+    stations: str | None = None,
+    regions: str | None = None,
     limit: int = Query(60000, ge=1, le=200000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
     """Построчная выгрузка сессий в xlsx с ОБЕИМИ ценами: тариф станции (розница)
     и договорной тариф ЮЛ + обе выручки + разница. Фильтры: период (обяз.),
-    опц. тип клиента (ФЛ/ЮЛ) и конкретный клиент (client_name)."""
+    опц. тип клиента (ФЛ/ЮЛ), конкретный клиент (client_name), сужение по
+    станциям/регионам (контур рабочей области)."""
     cid = await assert_company_member(company_id, current_user, db)
     try:
         df = date.fromisoformat(date_from[:10])
@@ -132,9 +136,12 @@ async def export_sessions(
     lo = datetime.combine(df, datetime.min.time())
     hi = datetime.combine(dt, datetime.max.time())
 
+    st_codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     S = ChargeSession
     q = select(S).where(S.company_id == cid, S.started_at.is_not(None),
-                        S.started_at >= lo, S.started_at <= hi)
+                        S.started_at >= lo, S.started_at <= hi,
+                        *session_scope_conds(cid, st_codes, regs))
     if user_type:
         q = q.where(S.user_type == user_type)
     if client:
@@ -172,6 +179,10 @@ async def export_sessions(
         scope += f", тип {user_type}"
     if client:
         scope += f", клиент «{client}»"
+    if regs:
+        scope += f", регионов {len(regs)}"
+    if st_codes:
+        scope += f", станций {len(st_codes)}"
     log_export(db, cid, current_user,
                f"Реестр сессий ЭЗС (xlsx): {len(rows)} строк, период {scope}")
 

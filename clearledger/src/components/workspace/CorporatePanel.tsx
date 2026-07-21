@@ -18,6 +18,7 @@ import { getCorporateOverview, getCorporateClients, exportCorporateBillingUpd, t
 import { CorpClientModal } from './CorpClientModal'
 import { exportChargeSessionsXlsx } from '@/services/chargeSessionsService'
 import { getChargeTimeseries, fmtMoneyShort } from '@/services/analyticsService'
+import { useNetScope } from '@/hooks/useScopeReset'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -94,9 +95,10 @@ function ClientsTable({ rows, cols, initial = 'corp_revenue', onPick }: {
 }
 
 function useClients(companyId: string, dateFrom: string, dateTo: string) {
+  const sc = useNetScope()
   return useQuery({
-    queryKey: ['corp-clients', companyId, dateFrom, dateTo],
-    queryFn: () => getCorporateClients({ companyId, dateFrom, dateTo }),
+    queryKey: ['corp-clients', companyId, dateFrom, dateTo, sc.key],
+    queryFn: () => getCorporateClients({ companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }),
   })
 }
 
@@ -123,11 +125,12 @@ function Widget({ title, children }: { title: string; children: ReactNode }) {
 
 // ── Таб: Обзор (дашборд) ──
 function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
-  const ov = useQuery({ queryKey: ['corp-overview', companyId, dateFrom, dateTo], queryFn: () => getCorporateOverview({ companyId, dateFrom, dateTo }) })
+  const sc = useNetScope()
+  const ov = useQuery({ queryKey: ['corp-overview', companyId, dateFrom, dateTo, sc.key], queryFn: () => getCorporateOverview({ companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }) })
   const cl = useClients(companyId, dateFrom, dateTo)
   const trend = useQuery({
-    queryKey: ['corp-dyn', companyId, dateFrom, dateTo],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'month', metric: 'amount', dim: 'user_type', dimVal: 'ЮЛ' }),
+    queryKey: ['corp-dyn', companyId, dateFrom, dateTo, sc.key],
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'month', metric: 'amount', dim: 'user_type', dimVal: 'ЮЛ', stations: sc.stations, regions: sc.regions }),
   })
   if (ov.isLoading) return <Loading />
   if (!ov.data) return <Empty text="Нет данных" />
@@ -233,6 +236,7 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: Клиенты (реестр) ──
 function CorpClients({ companyId, dateFrom, dateTo }: TabProps) {
+  const sc = useNetScope()
   const { data, isLoading } = useClients(companyId, dateFrom, dateTo)
   const [exporting, setExporting] = useState(false)
   // Клик по строке → карточка клиента (помесячная реализация + профиль).
@@ -241,7 +245,7 @@ function CorpClients({ companyId, dateFrom, dateTo }: TabProps) {
   if (!data) return <Empty text="Нет данных" />
   async function dl() {
     setExporting(true)
-    try { await exportChargeSessionsXlsx({ companyId, dateFrom, dateTo, userType: 'ЮЛ' }) }
+    try { await exportChargeSessionsXlsx({ companyId, dateFrom, dateTo, userType: 'ЮЛ', stations: sc.stations, regions: sc.regions }) }
     catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
     finally { setExporting(false) }
   }
@@ -304,6 +308,7 @@ function CorpTariffs({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: Рентабельность и биллинг ──
 function CorpBilling({ companyId, dateFrom, dateTo }: TabProps) {
+  const sc = useNetScope()
   const { data, isLoading } = useClients(companyId, dateFrom, dateTo)
   const [exporting, setExporting] = useState(false)
   const [client, setClient] = useState('all')   // фильтр клиента для УПД (один клиент = один УПД)
@@ -313,7 +318,9 @@ function CorpBilling({ companyId, dateFrom, dateTo }: TabProps) {
   const withRev = data.clients.filter((c) => c.corp_revenue > 0)
   async function dlUpd() {
     setExporting(true)
-    try { await exportCorporateBillingUpd({ companyId, dateFrom, dateTo, client: client === 'all' ? undefined : client }) }
+    // УПД сужается контуром: при выбранных станциях реестр охватывает только их
+    // сессии (контур виден чипами наверху, экспорт печатает его в подписи).
+    try { await exportCorporateBillingUpd({ companyId, dateFrom, dateTo, client: client === 'all' ? undefined : client, stations: sc.stations, regions: sc.regions }) }
     catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
     finally { setExporting(false) }
   }
@@ -357,9 +364,10 @@ function CorpBilling({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: Динамика (месячный тренд договорной выручки ЮЛ) ──
 function CorpDynamics({ companyId, dateFrom, dateTo }: TabProps) {
+  const sc = useNetScope()
   const { data, isLoading } = useQuery({
-    queryKey: ['corp-dyn', companyId, dateFrom, dateTo],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'month', metric: 'amount', dim: 'user_type', dimVal: 'ЮЛ' }),
+    queryKey: ['corp-dyn', companyId, dateFrom, dateTo, sc.key],
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'month', metric: 'amount', dim: 'user_type', dimVal: 'ЮЛ', stations: sc.stations, regions: sc.regions }),
   })
   if (isLoading) return <Loading />
   const rows = (data?.data ?? []).map((r) => ({ bucket: String(r.bucket), value: Number(r['Вся сеть'] ?? r.value ?? 0) }))

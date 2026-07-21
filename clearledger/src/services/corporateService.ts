@@ -52,8 +52,13 @@ export interface CorpOverviewResponse {
   alerts: CorpAlert[]
 }
 
-type P = { companyId: string; dateFrom: string; dateTo: string }
-const params = (p: P) => ({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
+type P = { companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[] }
+/** Базовые query-параметры + контурное сужение сети (станции/регионы). */
+const params = (p: P) => ({
+  company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+  ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+  ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+})
 
 export async function getCorporateOverview(p: P): Promise<CorpOverviewResponse> {
   return get<CorpOverviewResponse>('/api/corporate/overview', params(p))
@@ -127,6 +132,8 @@ export async function exportCorporateBillingUpd(p: P & { client?: string; vatRat
   const qs = new URLSearchParams({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
   if (p.client) qs.set('client', p.client)
   if (p.vatRate != null) qs.set('vat_rate', String(p.vatRate))
+  if (p.stations?.length) qs.set('stations', p.stations.join(','))
+  if (p.regions?.length) qs.set('regions', p.regions.join(','))
   const token = getToken()
   const res = await fetch(`${API_BASE}/api/corporate/billing-export?${qs.toString()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

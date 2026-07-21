@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Calendar } from 'lucide-react'
 import { type Period, PERIOD_PRESETS, monthFirstISO, todayISO } from './periodPresets'
+import { MetricHint } from './MetricHint'
 
 export type { Period } from './periodPresets'
 
@@ -72,11 +73,12 @@ export function AnalyticsPeriodPicker({ period, onChange }: Props) {
   )
 }
 
-export function KpiCard({ label, value, hint, accent }: {
+export function KpiCard({ label, value, hint, accent, info }: {
   label: string
   value: React.ReactNode
   hint?: string
   accent?: 'success' | 'danger' | 'warning' | 'info'
+  info?: string   // пояснение «что это значит» — иконкой-подсказкой у подписи
 }) {
   const accentCls: Record<string, string> = {
     success: 'text-emerald-600 dark:text-emerald-400',
@@ -86,7 +88,9 @@ export function KpiCard({ label, value, hint, accent }: {
   }
   return (
     <div data-kpi className="rounded-md border bg-card/40 p-3">
-      <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+        {label}{info && <MetricHint text={info} />}
+      </div>
       <div className={`text-lg font-semibold mt-1 ${accent ? accentCls[accent] : ''}`}>{value}</div>
       {hint && <div className="text-xs text-muted-foreground mt-0.5">{hint}</div>}
     </div>

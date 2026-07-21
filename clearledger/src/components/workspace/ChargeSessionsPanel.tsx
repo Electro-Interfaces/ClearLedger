@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
+import { HINTS } from './analytics/MetricHint'
 import { seriesColor } from './analytics/palette'
 import { MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
@@ -159,8 +160,8 @@ function SessionKpis({ t }: { t: ChargeSessionLine }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <KpiCard label="Выручка" value={fmtMoneyShort(t.amount) + ' ₽'} accent="success" />
-      <KpiCard label="Загрузка (util)" value={t.utilization_pct.toFixed(1) + '%'} accent={utilAccent(t.utilization_pct)} hint={`${nf0.format(t.ports)} портов`} />
-      <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} />
+      <KpiCard label="Загрузка (util)" value={t.utilization_pct.toFixed(1) + '%'} accent={utilAccent(t.utilization_pct)} hint={`${nf0.format(t.ports)} портов`} info={HINTS.utilization} />
+      <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} info={HINTS.sessionSuccess} />
       <KpiCard label="Сессий" value={nf0.format(t.sessions)} />
       <KpiCard label="Энергия" value={kwh(t.energy_kwh)} accent="info" />
       <KpiCard label="Цена ₽/кВтч" value={fmtMoney(t.price_per_kwh)} />
@@ -1527,7 +1528,7 @@ function RetryAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dat
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KpiCard label="Визитов" value={nf0.format(t.visits)} hint={`из ${nf0.format(t.sessions)} сессий`} />
         <KpiCard label="Зарядились" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)}
-          hint={`${nf0.format(t.charged)} визитов`} />
+          hint={`${nf0.format(t.charged)} визитов`} info={HINTS.visitSuccess} />
         <KpiCard label="С повторами" value={nf0.format(t.retried)} accent={t.retried_pct >= 25 ? 'warning' : 'info'}
           hint={`${t.retried_pct.toFixed(1)}% успешных — зарядились не сразу`} />
         <KpiCard label="Не зарядились" value={nf0.format(t.failed)} accent="danger"
@@ -2002,7 +2003,7 @@ function PortEfficiency({ companyId, dateFrom, dateTo }: { companyId: string; da
         <KpiCard label="Порт-часов" value={nf0.format(t.port_hours)} hint={`из них DC — ${nf0.format(t.dc_port_hours)}`} />
         <KpiCard label="Простой DC" value={t.idle_time_pct.toFixed(1) + '%'}
           accent={t.idle_time_pct >= 15 ? 'danger' : t.idle_time_pct >= 8 ? 'warning' : 'success'}
-          hint={`${nf0.format(t.idle_hours)} ч занято без зарядки`} />
+          hint={`${nf0.format(t.idle_hours)} ч занято без зарядки`} info={HINTS.idleDc} />
         <KpiCard label="Сессий простоя" value={nf0.format(t.idle_sessions)} hint="долго стоят, мало берут" />
         <KpiCard label="Медиана сессии" value={nf1.format(t.median_min) + ' мин'} hint="dwell time" />
       </div>
@@ -2139,7 +2140,7 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   return (
     <div className="p-4 space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} hint={`${nf0.format(complete)} из ${nf0.format(t.sessions)}`} />
+        <KpiCard label="Успешных" value={t.success_pct.toFixed(1) + '%'} accent={succAccent(t.success_pct)} hint={`${nf0.format(complete)} из ${nf0.format(t.sessions)}`} info={HINTS.sessionSuccess} />
         <KpiCard label="С ошибкой" value={nf0.format(errors)} accent="danger" hint={`${(errors / t.sessions * 100).toFixed(1)}% сессий`} />
         <KpiCard label="Станций риска" value={nf0.format(risk.length)} accent={risk.length ? 'warning' : 'success'} hint="success < 70% (≥30 сессий)" />
         <KpiCard label="Без оплаты" value={t.unpaid_pct.toFixed(1) + '%'} accent={t.unpaid_pct >= 10 ? 'danger' : t.unpaid_pct >= 3 ? 'warning' : 'success'} hint="сессий без отметки оплаты" />

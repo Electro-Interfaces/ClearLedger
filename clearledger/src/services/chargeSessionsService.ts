@@ -63,10 +63,13 @@ export async function exportMonthlyMatrixXlsx(companyId: string): Promise<void> 
 
 export async function exportChargeSessionsXlsx(p: {
   companyId: string; dateFrom: string; dateTo: string; userType?: string; client?: string
+  stations?: string[]; regions?: string[]
 }): Promise<void> {
   const qs = new URLSearchParams({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
   if (p.userType) qs.set('user_type', p.userType)
   if (p.client) qs.set('client', p.client)
+  if (p.stations?.length) qs.set('stations', p.stations.join(','))
+  if (p.regions?.length) qs.set('regions', p.regions.join(','))
   const token = getToken()
   const res = await fetch(`${API_BASE}/api/charge-sessions/export?${qs.toString()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

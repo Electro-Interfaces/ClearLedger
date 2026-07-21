@@ -22,6 +22,7 @@ import { Loader2, AlertTriangle, Info, ArrowUpRight, ArrowDownRight, Zap } from 
 import { Card, CardContent } from '@/components/ui/card'
 import { ExportButton } from './analytics/ExportButton'
 import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
+import { MetricHint, HINTS } from './analytics/MetricHint'
 import {
   getChargeSessions, getStationsLinkage, getChargeTimeseries, fmtMoney, fmtMoneyShort,
 } from '@/services/analyticsService'
@@ -197,7 +198,9 @@ function NetworkHealth({ net }: { net: OverviewNetwork }) {
              188 тыс. и 247 ₽ — полюса видны только в разбивке. */}
       <Card>
         <CardContent className="pt-4">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground">Где сеть зарабатывает</div>
+          <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+            Где сеть зарабатывает<MetricHint text={HINTS.concentration} />
+          </div>
           <div className="mt-1 mb-3 text-[11px] text-muted-foreground">станции по выручке, пятая часть парка в группе</div>
           <div className="space-y-1.5">
             {net.concentration.map((c) => (
@@ -686,10 +689,10 @@ function StationList({ title, rows, empty }: { title: string; rows: StationRow[]
 }
 
 
-function SectionTitle({ children, hint }: { children: ReactNode; hint?: string }) {
+function SectionTitle({ children, hint, info }: { children: ReactNode; hint?: string; info?: string }) {
   return (
     <div className="flex items-baseline gap-2 pt-1">
-      <h3 className="text-sm font-semibold">{children}</h3>
+      <h3 className="text-sm font-semibold flex items-center gap-1">{children}{info && <MetricHint text={info} />}</h3>
       {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
     </div>
   )
@@ -798,7 +801,7 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
             </div>
 
             {/* станции топ/дно */}
-            <SectionTitle hint={`порт-нормировано · ≥ ${data.stations.min_sessions} сессий`}>Станции: лидеры и аутсайдеры по загрузке</SectionTitle>
+            <SectionTitle hint={`порт-нормировано · ≥ ${data.stations.min_sessions} сессий`} info={HINTS.throughputPort}>Станции: лидеры и аутсайдеры по загрузке</SectionTitle>
             <div className="grid gap-3 md:grid-cols-2">
               <StationList title="Топ по загрузке" rows={data.stations.top} empty="Недостаточно данных" />
               <StationList title="Аутсайдеры по загрузке" rows={data.stations.bottom} empty="Недостаточно данных" />
