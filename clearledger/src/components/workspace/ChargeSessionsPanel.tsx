@@ -10,9 +10,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, ChevronRight, ChevronDown } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, ChevronRight, ChevronDown, Search, X } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
-import { HINTS } from './analytics/MetricHint'
+import { HINTS, MetricHint } from './analytics/MetricHint'
 import { TzToggle, type Tz } from './analytics/TzToggle'
 import { seriesColor } from './analytics/palette'
 import { MultiPeriodPicker } from './analytics/PeriodRangePicker'
@@ -35,7 +36,7 @@ import {
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
   type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket,
   type ChargeSeriesBy, type ChargeTimeseriesResponse, type ChargeSliceResponse, type ChargeSessionsResponse,
-  type ChargeNewClientsInterval,
+  type ChargeNewClientsInterval, type StationReliabilityRow,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -2251,113 +2252,359 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   )
 }
 
-// Цвет доли «факт против паспорта»: ≥85% норма, 60–85 внимание, <60 деградация.
-const ratioTxt = (v: number | null) =>
-  v == null ? 'text-muted-foreground'
-    : v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
-      : v >= 60 ? 'text-amber-600 dark:text-amber-400'
-        : 'text-red-600 dark:text-red-400'
-const pct1 = (v: number | null) => (v == null ? '—' : nf1.format(v) + '%')
+// ── Надёжность по производителям (модель визитов) ──
+// Успех визита: сеть ~89%, поэтому <80 — красное, 80–90 — внимание, ≥90 — норма.
+const visitSuccTxt = (v: number) => (v >= 90 ? 'text-emerald-600 dark:text-emerald-400' : v >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
+const visitSuccAccent = (v: number): KpiAccent => (v >= 90 ? 'success' : v >= 80 ? 'warning' : 'danger')
 
-/** Надёжность станций в разрезе ПРОИЗВОДИТЕЛЯ оборудования (brand): вендор →
- *  его станции. Отвечает на «оборудование какого поставщика чаще сбоит» — по
- *  этому планируют ТОиР и предъявляют вендору. Успех считаем по ОТПУСКУ энергии
- *  (energy>0), а не по флагу Complete (см. HINTS.chargedEnergy). Строку бренда
- *  можно раскрыть до его станций (худшие сверху — кандидаты на выезд). */
+type RelSortKey = 'label' | 'brand' | 'visits' | 'visit_success_pct' | 'repeat_sessions' | 'wasted_sessions' | 'avg_attempts' | 'energy_kwh'
+const REL_ASC_DEFAULT: RelSortKey[] = ['label', 'brand']
+type RelSort = { key: RelSortKey; dir: 'asc' | 'desc' }
+
+/** Универсальный компаратор строк: строки — по алфавиту (ru), числа — по величине. */
+function relCmp(av: unknown, bv: unknown, dir: number): number {
+  if (typeof av === 'string' || typeof bv === 'string') return dir * String(av ?? '').localeCompare(String(bv ?? ''), 'ru')
+  return dir * (((av as number) ?? 0) - ((bv as number) ?? 0))
+}
+const relPick = (o: object, k: string): unknown => (o as Record<string, unknown>)[k]
+
+/** Итог по бренду: сырые счётчики суммируем, проценты пересчитываем (не усредняем). */
+interface BrandAgg {
+  brand: string; stations: number; visits: number; visit_success_pct: number
+  repeat_sessions: number; wasted_sessions: number; avg_attempts: number
+  energy_kwh: number; risk_stations: number; rows: StationReliabilityRow[]
+}
+function aggregateByBrand(stations: StationReliabilityRow[]): BrandAgg[] {
+  const m = new Map<string, StationReliabilityRow[]>()
+  for (const s of stations) { const a = m.get(s.brand); if (a) a.push(s); else m.set(s.brand, [s]) }
+  const out: BrandAgg[] = []
+  for (const [brand, rows] of m) {
+    const sum = (f: (r: StationReliabilityRow) => number) => rows.reduce((t, r) => t + f(r), 0)
+    const visits = sum((r) => r.visits); const sessions = sum((r) => r.sessions)
+    out.push({
+      brand, stations: rows.length, visits,
+      visit_success_pct: visits ? +(sum((r) => r.charged_visits) / visits * 100).toFixed(1) : 0,
+      repeat_sessions: sum((r) => r.repeat_sessions), wasted_sessions: sum((r) => r.wasted_sessions),
+      avg_attempts: visits ? +(sessions / visits).toFixed(2) : 0,
+      energy_kwh: +sum((r) => r.energy_kwh).toFixed(1), risk_stations: rows.filter((r) => r.risk).length, rows,
+    })
+  }
+  return out
+}
+
+/** Сортируемый заголовок столбца: клик — сорт по нему, повторный — смена направления. */
+function SortTh({ label, k, sort, onSort, align = 'right', info }: {
+  label: ReactNode; k: RelSortKey; sort: RelSort; onSort: (k: RelSortKey) => void
+  align?: 'left' | 'right'; info?: string
+}) {
+  const active = sort.key === k
+  return (
+    <th className={`p-2 font-medium cursor-pointer select-none whitespace-nowrap ${align === 'left' ? 'text-left' : 'text-right'} ${active ? 'text-foreground' : ''}`}
+      onClick={() => onSort(k)} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} title="Сортировать по столбцу">
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+        <span>{label}</span>
+        {info && <MetricHint text={info} />}
+        {active ? (sort.dir === 'desc' ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />) : <ChevronsUpDown className="h-3 w-3 opacity-25" />}
+      </span>
+    </th>
+  )
+}
+
+/** Числовые ячейки надёжности — общие для строки станции и итога бренда. */
+function RelNumCells({ r }: { r: { visits: number; visit_success_pct: number; repeat_sessions: number; wasted_sessions: number; avg_attempts: number; energy_kwh: number } }) {
+  return (
+    <>
+      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.visits)}</td>
+      <td className={`p-2 text-right font-mono ${visitSuccTxt(r.visit_success_pct)}`}>{nf1.format(r.visit_success_pct)}%</td>
+      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.repeat_sessions)}</td>
+      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.wasted_sessions)}</td>
+      <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(r.avg_attempts)}</td>
+      <td className="p-2 text-right font-mono text-muted-foreground">{kwh(r.energy_kwh)}</td>
+    </>
+  )
+}
+
+/** Надёжность станций в разрезе производителя оборудования — на модели визитов
+ *  (совпадает с «Повторными попытками»). Два разреза (по вендору / по станциям),
+ *  поиск, порог визитов, сортировка по любому столбцу, клик по станции → детали. */
 function BrandReliability({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const n = useNarrow()
   const q = useQuery({
     queryKey: ['charge-brand-reliability', companyId, dateFrom, dateTo, n.key],
     queryFn: () => getChargeBrandReliability({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
   })
+  // Представление (разрез + порог) персистим по (компания × пункт); поиск,
+  // сортировка, раскрытие — навигация, не персистятся (CLAUDE.md, слой 3).
+  const [view, setView] = useTabParams('cs_rel_brands', { mode: 'brand' as 'brand' | 'flat', minVisits: 0 })
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<RelSort>({ key: 'visits', dir: 'desc' })
   const [open, setOpen] = useState<Set<string>>(new Set())
-  const toggle = (b: string) => setOpen((s) => { const x = new Set(s); if (x.has(b)) x.delete(b); else x.add(b); return x })
-  if (q.isLoading) return <Loading />
-  if (!q.data || q.data.brands.length === 0) return <Empty />
-  const { totals, brands } = q.data
+  const [detail, setDetail] = useState<StationReliabilityRow | null>(null)
+  const onSort = (k: RelSortKey) => setSort((s) => s.key === k
+    ? { key: k, dir: s.dir === 'desc' ? 'asc' : 'desc' }
+    : { key: k, dir: REL_ASC_DEFAULT.includes(k) ? 'asc' : 'desc' })
 
-  const brandRows = brands.map((b): (string | number | null)[] =>
-    [b.brand, b.stations, b.sessions, b.charged_pct, b.complete_pct, b.avg_power_ratio, b.risk_stations, b.energy_kwh, b.amount])
-  const stationRows = brands.flatMap((b) => b.stations_list.map((s): (string | number | null)[] =>
-    [b.brand, s.label, s.sessions, s.charged_pct, s.complete_pct, s.power_ratio, s.port_power, s.risk ? 'риск' : '']))
+  const all = q.data?.stations ?? []
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    return all.filter((s) => s.visits >= view.minVisits
+      && (!term || s.label.toLowerCase().includes(term) || s.brand.toLowerCase().includes(term) || (s.code ?? '').toLowerCase().includes(term)))
+  }, [all, search, view.minVisits])
+  const dir = sort.dir === 'asc' ? 1 : -1
+  const sortedStations = useMemo(() => [...filtered].sort((a, b) => relCmp(relPick(a, sort.key), relPick(b, sort.key), dir)),
+    [filtered, sort, dir])
+  const brandAggs = useMemo(() => {
+    const bk = sort.key === 'label' ? 'brand' : sort.key   // «имя» в разрезе брендов = имя бренда
+    return aggregateByBrand(filtered).sort((a, b) => relCmp(relPick(a, bk), relPick(b, bk), dir))
+  }, [filtered, sort, dir])
+
+  if (q.isLoading) return <Loading />
+  if (!q.data) return <Empty />
+  const { totals: t, risk } = q.data
+  const searching = search.trim().length > 0
+
+  const nameHead = view.mode === 'flat'
+    ? <SortTh label="Станция" k="label" sort={sort} onSort={onSort} align="left" />
+    : <SortTh label="Производитель" k="label" sort={sort} onSort={onSort} align="left" />
+  const numHead = (
+    <>
+      <SortTh label="Визитов" k="visits" sort={sort} onSort={onSort} info={HINTS.visitDef} />
+      <SortTh label="Успех визита" k="visit_success_pct" sort={sort} onSort={onSort} info={HINTS.visitSuccess} />
+      <SortTh label="Повторных" k="repeat_sessions" sort={sort} onSort={onSort} info={HINTS.repeatSessions} />
+      <SortTh label="Неудачных" k="wasted_sessions" sort={sort} onSort={onSort} info={HINTS.failedSessions} />
+      <SortTh label="Ср. попыток" k="avg_attempts" sort={sort} onSort={onSort} info={HINTS.avgAttempts} />
+      <SortTh label="Энергия" k="energy_kwh" sort={sort} onSort={onSort} />
+    </>
+  )
+  const exportCols = ['Производитель', 'Станция', 'Код', 'Визитов', 'Успех визита, %', 'Повторных сессий', 'Неудачных сессий', 'Ср. попыток', 'Энергия, кВтч', 'Станция риска']
+  const exportData = sortedStations.map((s): (string | number | null)[] =>
+    [s.brand, s.label, s.code, s.visits, s.visit_success_pct, s.repeat_sessions, s.wasted_sessions, s.avg_attempts, s.energy_kwh, s.risk ? 'риск' : ''])
 
   return (
     <div className="p-4 space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiCard label="Производителей" value={nf0.format(totals.brands)} hint={`${nf0.format(totals.stations)} станций`} />
-        <KpiCard label="Отпустили энергию" value={nf1.format(totals.charged_pct) + '%'} accent={succAccent(totals.charged_pct)}
-          hint={`Complete (CPO): ${nf1.format(totals.complete_pct)}%`} info={HINTS.chargedEnergy} />
-        <KpiCard label="Станций риска" value={nf0.format(totals.risk_stations)} accent={totals.risk_stations ? 'warning' : 'success'}
-          hint="отпуск < 70% при ≥30 сессий" />
-        <KpiCard label="Энергия" value={kwh(totals.energy_kwh)} hint={`${fmtMoney(totals.amount)} ₽ выручка`} />
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KpiCard label="Визитов" value={nf0.format(t.visits)} hint={`из ${nf0.format(t.sessions)} сессий`} info={HINTS.visitDef} />
+        <KpiCard label="Успех визита" value={nf1.format(t.visit_success_pct) + '%'} accent={visitSuccAccent(t.visit_success_pct)}
+          hint={`${nf0.format(t.charged_visits)} зарядились`} info={HINTS.visitSuccess} />
+        <KpiCard label="Повторных сессий" value={nf0.format(t.repeat_sessions)} accent="warning" hint="переподключения разъёма" info={HINTS.repeatSessions} />
+        <KpiCard label="Неудачных сессий" value={nf0.format(t.wasted_sessions)} accent="warning" hint="без отпуска энергии" info={HINTS.failedSessions} />
+        <KpiCard label="Станций риска" value={nf0.format(t.risk_stations)} accent={t.risk_stations ? 'danger' : 'success'}
+          hint={`≥${risk.min_visits} виз. и успех <${risk.success_pct}%`} info={HINTS.riskStation} />
+      </div>
+
+      {/* Глоссарий: чтобы менеджер не гадал, что значит цифра. */}
+      <details className="rounded-lg border border-border bg-muted/20 text-[11px] text-muted-foreground">
+        <summary className="cursor-pointer px-3 py-2 font-medium text-foreground select-none">Как читать эти цифры</summary>
+        <div className="px-3 pb-3 space-y-1 leading-relaxed">
+          <p><b className="text-foreground">Визит</b> — попытки одного клиента на станции подряд (разрыв ≤ {q.data.gap_min} мин), склеенные в одно «человек приехал зарядиться». <b className="text-foreground">Сессия</b> — одна строка CPO = одно касание разъёма; в визите их может быть несколько.</p>
+          <p><b className="text-foreground">Успех визита %</b> = зарядившиеся визиты ÷ все визиты. «Человек уехал заряженным» (отпущена энергия, а не флаг Complete от CPO).</p>
+          <p><b className="text-foreground">Повторных сессий</b> = сессий − визитов (лишние переподключения). <b className="text-foreground">Неудачных сессий</b> = подключения без отпуска энергии (пробы, сорвы).</p>
+          <p><b className="text-foreground">Ср. попыток</b> = сессий ÷ визитов (1,0 — всегда с первой). <b className="text-foreground">Станция риска</b> = ≥ {risk.min_visits} визитов за период и успех визита &lt; {risk.success_pct}% — кандидат на ТОиР.</p>
+        </div>
+      </details>
+
+      {/* Управление: разрез · поиск · порог визитов. */}
+      <div className="flex flex-wrap items-center gap-2" data-export-ignore>
+        <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
+          {([['brand', 'По производителям'], ['flat', 'По станциям']] as const).map(([m, l]) => (
+            <button key={m} type="button" onClick={() => setView({ mode: m })}
+              className={`px-2.5 py-1 text-xs rounded-[5px] transition-colors ${view.mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>{l}</button>
+          ))}
+        </div>
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Станция или производитель"
+            className="h-8 w-[220px] pl-7 pr-7 text-xs" />
+          {search && <button type="button" onClick={() => setSearch('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
+        </div>
+        <Select value={String(view.minVisits)} onValueChange={(v) => setView({ minVisits: Number(v) })}>
+          <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {[[0, 'Все станции'], [10, '≥ 10 визитов'], [30, '≥ 30 визитов'], [100, '≥ 100 визитов']].map(([v, l]) => (
+              <SelectItem key={v} value={String(v)} className="text-xs">{l}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-[11px] text-muted-foreground">{nf0.format(filtered.length)} из {nf0.format(all.length)} станций</span>
       </div>
 
       <Card>
-        <CardContent className="p-0">
-          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-center gap-2">
-            Надёжность по производителям — клик по строке раскрывает станции вендора
-          </div>
-          <table className="w-full text-xs" {...exportRows('Надёжность по производителям',
-            ['Производитель', 'Станций', 'Сессий', 'Отпуск энергии, %', 'Complete, %', 'Факт/паспорт, %', 'Станций риска', 'Энергия, кВтч', 'Выручка, ₽'], brandRows)}>
+        <CardContent className="p-0 overflow-x-auto">
+          <table className="w-full text-xs" {...exportRows('Надёжность по производителям', exportCols, exportData)}>
             <thead>
               <tr className="border-b bg-muted/20 text-muted-foreground">
-                <th className="text-left p-2 font-medium">Производитель</th>
-                <th className="text-right p-2 font-medium">Станций</th>
-                <th className="text-right p-2 font-medium">Сессий</th>
-                <th className="text-right p-2 font-medium" title="Доля сессий с отпуском энергии (energy > 0)">Отпуск&nbsp;энергии</th>
-                <th className="text-right p-2 font-medium text-muted-foreground/70" title="Сырой флаг CPO result='Complete'">Complete</th>
-                <th className="text-right p-2 font-medium" title="Средняя выдаваемая мощность в долях от паспорта порта">Факт/паспорт</th>
-                <th className="text-right p-2 font-medium">Станций&nbsp;риска</th>
-                <th className="text-right p-2 font-medium">Энергия</th>
+                {nameHead}
+                {view.mode === 'flat' && <SortTh label="Производитель" k="brand" sort={sort} onSort={onSort} align="left" />}
+                {numHead}
               </tr>
             </thead>
             <tbody>
-              {brands.map((b) => {
-                const isOpen = open.has(b.brand)
-                return (
-                  <Fragment key={b.brand}>
-                    <tr className="border-b border-border/40 hover:bg-muted/30 cursor-pointer" onClick={() => toggle(b.brand)}>
-                      <td className="p-2 font-medium">
-                        <span className="inline-flex items-center gap-1">
-                          {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-                          {b.brand}
-                        </span>
-                      </td>
-                      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(b.stations)}</td>
-                      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(b.sessions)}</td>
-                      <td className={`p-2 text-right font-mono ${succTxt(b.charged_pct)}`}>{nf1.format(b.charged_pct)}%</td>
-                      <td className="p-2 text-right font-mono text-muted-foreground/70">{nf1.format(b.complete_pct)}%</td>
-                      <td className={`p-2 text-right font-mono ${ratioTxt(b.avg_power_ratio)}`}>{pct1(b.avg_power_ratio)}</td>
-                      <td className={`p-2 text-right font-mono ${b.risk_stations ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>{nf0.format(b.risk_stations)}</td>
-                      <td className="p-2 text-right font-mono text-muted-foreground">{kwh(b.energy_kwh)}</td>
-                    </tr>
-                    {isOpen && b.stations_list.map((s) => (
-                      <tr key={b.brand + '|' + (s.code ?? s.label)} className="border-b border-border/20 bg-muted/10">
-                        <td className="p-2 pl-7 truncate max-w-[260px]">
-                          {s.risk && <AlertTriangle className="inline h-3 w-3 mr-1 text-red-500 align-[-1px]" />}
-                          {s.label}
+              {filtered.length === 0 && (
+                <tr><td colSpan={view.mode === 'flat' ? 8 : 7} className="p-6 text-center text-muted-foreground">Ничего не найдено — смягчите поиск или порог визитов</td></tr>
+              )}
+              {view.mode === 'flat'
+                ? sortedStations.map((s) => (
+                  <tr key={s.code ?? s.label} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={() => setDetail(s)}>
+                    <td className="p-2 font-medium truncate max-w-[240px]" title={s.label}>
+                      {s.risk && <AlertTriangle className="inline h-3 w-3 mr-1 text-red-500 align-[-1px]" />}{s.label}
+                    </td>
+                    <td className="p-2 text-muted-foreground">{s.brand}</td>
+                    <RelNumCells r={s} />
+                  </tr>
+                ))
+                : brandAggs.map((b) => {
+                  const isOpen = open.has(b.brand) || searching
+                  const rows = [...b.rows].sort((x, y) => relCmp(relPick(x, sort.key), relPick(y, sort.key), dir))
+                  return (
+                    <Fragment key={b.brand}>
+                      <tr className="border-b border-border/40 hover:bg-muted/30 cursor-pointer" onClick={() => setOpen((o) => { const x = new Set(o); if (x.has(b.brand)) x.delete(b.brand); else x.add(b.brand); return x })}>
+                        <td className="p-2 font-semibold">
+                          <span className="inline-flex items-center gap-1">
+                            {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                            {b.brand}
+                            <span className="text-[10px] font-normal text-muted-foreground">· {nf0.format(b.stations)} ст.{b.risk_stations ? <span className="text-red-500"> · {b.risk_stations} риска</span> : null}</span>
+                          </span>
                         </td>
-                        <td className="p-2 text-right font-mono text-muted-foreground">—</td>
-                        <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(s.sessions)}</td>
-                        <td className={`p-2 text-right font-mono ${succTxt(s.charged_pct)}`}>{nf1.format(s.charged_pct)}%</td>
-                        <td className="p-2 text-right font-mono text-muted-foreground/70">{nf1.format(s.complete_pct)}%</td>
-                        <td className={`p-2 text-right font-mono ${ratioTxt(s.power_ratio)}`} title={s.port_power != null ? `паспорт порта ${nf0.format(s.port_power)} кВт` : 'паспорт не сопоставим'}>{pct1(s.power_ratio)}</td>
-                        <td className="p-2 text-right font-mono text-muted-foreground">{s.risk ? <span className="text-red-600 dark:text-red-400">риск</span> : ''}</td>
-                        <td className="p-2 text-right font-mono text-muted-foreground">{kwh(s.energy_kwh)}</td>
+                        <RelNumCells r={b} />
                       </tr>
-                    ))}
-                  </Fragment>
-                )
-              })}
+                      {isOpen && rows.map((s) => (
+                        <tr key={b.brand + '|' + (s.code ?? s.label)} className="border-b border-border/20 bg-muted/10 hover:bg-muted/30 cursor-pointer" onClick={() => setDetail(s)}>
+                          <td className="p-2 pl-7 truncate max-w-[280px]" title={s.label}>
+                            {s.risk && <AlertTriangle className="inline h-3 w-3 mr-1 text-red-500 align-[-1px]" />}{s.label}
+                          </td>
+                          <RelNumCells r={s} />
+                        </tr>
+                      ))}
+                    </Fragment>
+                  )
+                })}
             </tbody>
           </table>
         </CardContent>
       </Card>
-      {/* Полная разбивка «производитель × станция» — отдельным листом в выгрузке. */}
-      <ExportOnlyTable name="Станции по производителям"
-        columns={['Производитель', 'Станция', 'Сессий', 'Отпуск энергии, %', 'Complete, %', 'Факт/паспорт, %', 'Паспорт порта, кВт', 'Риск']}
-        rows={stationRows} />
+      <p className="text-[11px] text-muted-foreground">Клик по станции — детальный разбор её надёжности (визиты, попытки, коннекторы, тяжёлые случаи).</p>
+
+      {detail && <StationReliabilityModal station={detail} companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} onClose={() => setDetail(null)} />}
     </div>
+  )
+}
+
+/** Детали надёжности одной станции — раскрытие по клику. Тянет ту же склейку
+ *  визитов, что и «Повторные попытки», но сужённую до станции. */
+function StationReliabilityModal({ station, companyId, dateFrom, dateTo, onClose }: {
+  station: StationReliabilityRow; companyId: string; dateFrom: string; dateTo: string; onClose: () => void
+}) {
+  const q = useQuery({
+    queryKey: ['charge-visits-station', companyId, dateFrom, dateTo, station.code],
+    queryFn: () => getChargeVisits({ companyId, dateFrom, dateTo, stations: station.code ? [station.code] : undefined, top: 20 }),
+    enabled: !!station.code,
+  })
+  const d = q.data
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-4xl w-[94vw] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-base pr-6 flex flex-wrap items-center gap-2">
+            {station.label}
+            <span className="text-[11px] rounded border border-zinc-600 px-1.5 py-0.5 text-zinc-400 font-normal">{station.brand}</span>
+            {station.power_kwt != null && (
+              <span className="text-[11px] text-muted-foreground font-normal">паспорт {nf0.format(station.power_kwt)} кВт{station.connectors ? ` · ${station.connectors} разъёма` : ''}</span>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+        {q.isLoading ? <Loading /> : !d || d.totals.visits === 0 ? <Empty text="Нет визитов за период" /> : (() => {
+          const t = d.totals
+          const maxDist = Math.max(...d.distribution.map((x) => x.visits), 1)
+          return (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                Визит — попытки одного клиента подряд (разрыв ≤ <span className="font-mono">{d.gap_min}</span> мин) склеены. Успех = отпущена энергия. По всем типам клиентов.
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <KpiCard label="Визитов" value={nf0.format(t.visits)} hint={`из ${nf0.format(t.sessions)} сессий`} />
+                <KpiCard label="Успех визита" value={t.success_pct.toFixed(1) + '%'} accent={visitSuccAccent(t.success_pct)} hint={`${nf0.format(t.charged)} зарядились`} info={HINTS.visitSuccess} />
+                <KpiCard label="С повторами" value={nf0.format(t.retried)} accent={t.retried_pct >= 25 ? 'warning' : 'info'} hint={`${t.retried_pct.toFixed(1)}% успешных — не сразу`} />
+                <KpiCard label="Не зарядились" value={nf0.format(t.failed)} accent={t.failed ? 'danger' : 'success'} hint={`${(100 - t.success_pct).toFixed(1)}% визитов`} />
+                <KpiCard label="Впустую сессий" value={nf0.format(t.wasted_sessions)} accent="warning" hint="без отпуска энергии" info={HINTS.failedSessions} />
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-3">
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">Сколько попыток потребовалось</div>
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b bg-muted/20 text-muted-foreground"><th className="text-left p-2 font-medium">Попыток</th><th className="text-right p-2 font-medium">Визитов</th><th className="text-right p-2 font-medium">Зарядились</th></tr></thead>
+                      <tbody>
+                        {d.distribution.map((x) => (
+                          <tr key={x.attempts} className="border-b border-border/30">
+                            <td className="p-2 font-medium">{x.attempts === 1 ? 'с первой' : x.attempts >= 6 ? '6 и более' : `${x.attempts}`}</td>
+                            <td className="p-2 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <div className="h-1.5 rounded-full bg-primary/60" style={{ width: `${Math.max(2, x.visits / maxDist * 90)}px` }} />
+                                <span className="font-mono text-muted-foreground">{nf0.format(x.visits)}</span>
+                              </div>
+                            </td>
+                            <td className={`p-2 text-right font-mono ${succTxt(x.charged / x.visits * 100)}`}>{(x.charged / x.visits * 100).toFixed(0)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">Коннекторы станции</div>
+                    {d.connectors.length === 0 ? <div className="p-3 text-xs text-muted-foreground">Нет данных</div> : (
+                      <table className="w-full text-xs">
+                        <thead><tr className="border-b bg-muted/20 text-muted-foreground"><th className="text-left p-2 font-medium">Коннектор</th><th className="text-right p-2 font-medium">Визитов</th><th className="text-right p-2 font-medium" title="Успех визита по коннектору">Успех</th><th className="text-right p-2 font-medium">Ср. попыток</th></tr></thead>
+                        <tbody>
+                          {d.connectors.map((c) => {
+                            const succ = c.visits ? c.charged / c.visits * 100 : 0
+                            return (
+                              <tr key={c.label} className="border-b border-border/30">
+                                <td className="p-2 font-medium">{c.label}</td>
+                                <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(c.visits)}</td>
+                                <td className={`p-2 text-right font-mono ${visitSuccTxt(succ)}`}>{succ.toFixed(0)}%</td>
+                                <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(c.avg_attempts)}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardContent className="p-0">
+                  <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">Самые тяжёлые визиты — конкретные случаи для разбора</div>
+                  {d.worst.length === 0 ? <div className="p-3 text-xs text-muted-foreground">Повторных визитов нет</div> : (
+                    <table className="w-full text-xs">
+                      <thead><tr className="border-b bg-muted/20 text-muted-foreground"><th className="text-left p-2 font-medium">Дата</th><th className="text-left p-2 font-medium">Коннектор</th><th className="text-left p-2 font-medium">Клиент</th><th className="text-right p-2 font-medium">Попыток</th><th className="text-right p-2 font-medium">кВтч</th><th className="text-left p-2 font-medium">Итог</th></tr></thead>
+                      <tbody>
+                        {d.worst.map((r) => (
+                          <tr key={r.visit_key} className="border-b border-border/30 hover:bg-muted/30">
+                            <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.first_at.slice(0, 16).replace('T', ' ')}</td>
+                            <td className="p-2 text-muted-foreground">{r.connector_type ?? '—'}</td>
+                            <td className="p-2 text-muted-foreground truncate max-w-[160px]" title={r.client ?? ''}>{r.client ?? '—'}</td>
+                            <td className="p-2 text-right font-mono text-red-600 dark:text-red-400">{r.attempts}</td>
+                            <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(r.kwh)}</td>
+                            <td className="p-2">{r.charged
+                              ? <span className="text-[11px] rounded border border-emerald-400/50 px-1.5 py-0.5 text-emerald-600 dark:text-emerald-300/80">зарядился</span>
+                              : <span className="text-[11px] rounded border border-red-400/50 px-1.5 py-0.5 text-red-600 dark:text-red-300/80">не зарядился</span>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )
+        })()}
+      </DialogContent>
+    </Dialog>
   )
 }
 
