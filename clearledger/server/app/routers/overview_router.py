@@ -34,6 +34,7 @@ async def port_efficiency_report(
     date_from: str,
     date_to: str,
     stations: str | None = None,
+    regions: str | None = None,
     top: int = Query(15, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -45,9 +46,10 @@ async def port_efficiency_report(
     from app.services.port_efficiency import port_efficiency
 
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await port_efficiency(
         db, cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
-        stations=codes, top=top)
+        stations=codes, top=top, regions=regs)
 
 
 @router.get("/overview/silent-stations")
@@ -55,6 +57,8 @@ async def silent_stations_list(
     company_id: str,
     date_from: str,
     date_to: str,
+    stations: str | None = None,
+    regions: str | None = None,
     limit: int = Query(200, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -66,8 +70,11 @@ async def silent_stations_list(
     cid = await assert_company_member(company_id, current_user, db)
     from app.services.overview_insights import silent_stations
 
+    codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await silent_stations(
-        db, cid, _d(date_from, "date_from"), _d(date_to, "date_to"), limit=limit)
+        db, cid, _d(date_from, "date_from"), _d(date_to, "date_to"), limit=limit,
+        stations=codes, regions=regs)
 
 
 @router.get("/overview")
@@ -76,16 +83,20 @@ async def charge_overview(
     date_from: str,
     date_to: str,
     compare: str = Query("prev", pattern="^(prev)$"),
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Executive-сводка сети ЭЗС за период с дельтами к прошлому периоду."""
     cid = await assert_company_member(company_id, current_user, db)
+    codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     # today передаём явно → входит в ключ кэша: run_rate пересчитывается при смене
     # суток, а не застревает на прошлой дате в пределах TTL.
     return await OverviewService(db).overview(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), compare,
-        today=date.today())
+        today=date.today(), stations=codes, regions=regs)
 
 
 @router.get("/station-metrics")

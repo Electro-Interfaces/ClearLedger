@@ -128,10 +128,15 @@ export interface OverviewNetwork {
       period: string; session_kwh: number; registry_kwh: number
       diff_kwh: number; diff_pct: number | null
       coverage_pct: number | null; incomplete: boolean
+      /** Продажа (отпуск сессий) > закупки (вход по счётчикам) — физ. аномалия. */
+      anomaly: boolean
     }[]
     session_kwh: number; registry_kwh: number; diff_kwh: number; diff_pct: number | null
     /** Месяцы, где реестр недогружен — их не сверяют, а дозагружают. */
     incomplete_months: string[]
+    /** Месяцы «продажа > закупка» — физически невозможно, требует разбора. */
+    anomaly_months: string[]
+    has_anomaly: boolean
     compared_months: number
   } | null
   receivable: {
@@ -157,10 +162,12 @@ export interface SilentStationsResponse {
   total: number; silent_pct: number
 }
 export async function getSilentStations(p: {
-  companyId: string; dateFrom: string; dateTo: string
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[]
 }): Promise<SilentStationsResponse> {
   return get<SilentStationsResponse>('/api/analytics/charge-sessions/overview/silent-stations', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
   })
 }
 
@@ -188,11 +195,12 @@ export interface PortEfficiencyResponse {
   bands: { band: number; label: string; sessions: number; port_hours: number; kwh: number }[]
 }
 export async function getPortEfficiency(p: {
-  companyId: string; dateFrom: string; dateTo: string; stations?: string[]
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[]
 }): Promise<PortEfficiencyResponse> {
   return get<PortEfficiencyResponse>('/api/analytics/charge-sessions/port-efficiency', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
   })
 }
 
@@ -217,10 +225,13 @@ export interface OverviewResponse {
 
 export async function getChargeOverview(p: {
   companyId: string; dateFrom: string; dateTo: string; compare?: string
+  stations?: string[]; regions?: string[]
 }): Promise<OverviewResponse> {
   return get<OverviewResponse>('/api/analytics/charge-sessions/overview', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     compare: p.compare ?? 'prev',
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
   })
 }
 

@@ -72,6 +72,7 @@ def _rows(res: Any) -> list[dict[str, Any]]:
 async def port_efficiency(
     db: AsyncSession, company_id, date_from: date, date_to: date,
     stations: list[str] | None = None, top: int = 15,
+    regions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Idle, мощность и dwell по сети, коннекторам и станциям."""
     p = {
@@ -79,9 +80,16 @@ async def port_efficiency(
         "dc": list(DC_CONNECTORS), "min_dur": MIN_DURATION_MIN,
         "idle_kw": IDLE_KW_BELOW, "idle_min": IDLE_MIN_ABOVE, "top": top,
     }
+    flt = ""
     if stations is not None:
         p["stations"] = stations
-    flt = "AND station_code = ANY(:stations)" if stations is not None else ""
+        flt += " AND station_code = ANY(:stations)"
+    if regions is not None:
+        p["regions"] = regions
+        # Регион — из справочника (Ф1.3): location_id → region_id → regions.name.
+        flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
+                " JOIN regions r ON r.id = sl.region_id"
+                " WHERE sl.company_id = :company_id AND r.name = ANY(:regions))")
     base = _BASE.format(station_filter=flt)
 
     async def q(sql: str) -> list[dict[str, Any]]:

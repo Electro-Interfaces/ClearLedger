@@ -160,16 +160,24 @@ def _as_date(v: str | date) -> date:
     return date.fromisoformat(str(v)[:10])
 
 
-def _scoped(sql: str, stations: list[str] | None) -> str:
+def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None) -> str:
     """Подставить сужение по сети. Пустой список ≠ None: пустой означает «контур
-    выбран, но станций в нём нет» — тогда отчёт обязан быть пустым, а не сетевым."""
-    flt = "AND station_code = ANY(:stations)" if stations is not None else ""
+    выбран, но станций в нём нет» — тогда отчёт обязан быть пустым, а не сетевым.
+    Регион — из справочника (Ф1.3): через location_id → region_id → regions.name."""
+    flt = ""
+    if stations is not None:
+        flt += " AND station_code = ANY(:stations)"
+    if regions is not None:
+        flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
+                " JOIN regions r ON r.id = sl.region_id"
+                " WHERE sl.company_id = :company_id AND r.name = ANY(:regions))")
     return (_VISIT_CTE.format(station_filter=flt)) + sql
 
 
 async def visits_report(
     db: AsyncSession, company_id, date_from: str, date_to: str,
     stations: list[str] | None = None, top: int = 15,
+    regions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Разбор составных визитов для таба «Повторные попытки».
 
@@ -183,9 +191,11 @@ async def visits_report(
          "charged_min": CHARGED_MIN_KWH, "top": top}
     if stations is not None:
         p["stations"] = stations
+    if regions is not None:
+        p["regions"] = regions
 
     async def q(sql: str) -> list[Any]:
-        return list((await db.execute(text(_scoped(sql, stations)), p)).mappings().all())
+        return list((await db.execute(text(_scoped(sql, stations, regions)), p)).mappings().all())
 
     totals = (await q("""
         SELECT count(*)                                          AS visits,
@@ -232,7 +242,10 @@ async def visits_report(
     stations_rows = await q(by("station_code",
                                "coalesce(station_name, station_code) || ' (' || station_code || ')'"))
     connectors = await q(by("connector_type", "connector_type", min_visits=1))
-    regions = await q(by("region", "region", min_visits=1))
+    # ⚠ НЕ переприсваивать `regions` — это параметр-фильтр, который читает q()
+    # ниже (clients/worst). Иначе _scoped увидит truthy-список и добавит :regions
+    # в SQL, а params собраны со старым фильтром → «bind parameter regions».
+    regions_rows = await q(by("region", "region", min_visits=1))
     # Клиенты: у ЮЛ — название организации, у ФЛ — маскированный телефон.
     # Сырой номер за пределы бэкенда не отдаём (как в «Частных лицах»).
     clients = [
@@ -283,7 +296,7 @@ async def visits_report(
         "distribution": [dict(r) for r in dist],
         "stations": [dict(r) for r in stations_rows],
         "connectors": [dict(r) for r in connectors],
-        "regions": [dict(r) for r in regions],
+        "regions": [dict(r) for r in regions_rows],
         "clients": [dict(r) for r in clients],
         "worst": [dict(r) for r in worst],
     }
@@ -305,7 +318,7 @@ _BUCKET_EXPR = {
 
 async def visit_success(
     db: AsyncSession, company_id, date_from, date_to,
-    stations: list[str] | None = None,
+    stations: list[str] | None = None, regions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Успех на уровне визитов за период — KPI обзора «Зарядились»."""
     rows = await _q(db, company_id, date_from, date_to, stations, """
@@ -313,7 +326,7 @@ async def visit_success(
                count(*) FILTER (WHERE charged) AS charged,
                count(*) FILTER (WHERE charged AND attempts > 1) AS retried
           FROM v
-    """)
+    """, regions=regions)
     r = rows[0]
     visits, charged = int(r["visits"] or 0), int(r["charged"] or 0)
     return {
@@ -324,7 +337,7 @@ async def visit_success(
 
 async def visit_success_series(
     db: AsyncSession, company_id, date_from, date_to, bucket: str,
-    stations: list[str] | None = None,
+    stations: list[str] | None = None, regions: list[str] | None = None,
 ) -> dict[str, dict[str, float]]:
     """Визиты и их успех по бакетам → спарклайны обзора. Ключи совпадают с осью
     `_cs_bucket_axis`, пустые бакеты заполняет вызывающий."""
@@ -336,7 +349,7 @@ async def visit_success_series(
                count(*) AS visits,
                count(*) FILTER (WHERE charged) AS charged
           FROM v GROUP BY 1
-    """)
+    """, regions=regions)
     return {r["b"]: {"visits": int(r["visits"]),
                      "success_pct": round(int(r["charged"]) / int(r["visits"]) * 100, 1)}
             for r in rows if int(r["visits"] or 0) > 0}
@@ -345,6 +358,7 @@ async def visit_success_series(
 async def visit_success_by_station(
     db: AsyncSession, company_id, date_from, date_to,
     stations: list[str] | None = None, min_visits: int = 30,
+    regions: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Успех визитов по станциям — станции риска в алертах обзора. Порог
     min_visits отсекает станции, где 2 визита из 3 дают «33% успеха»."""
@@ -355,7 +369,7 @@ async def visit_success_by_station(
                count(*) FILTER (WHERE charged) AS charged
           FROM v WHERE station_code IS NOT NULL
          GROUP BY station_code HAVING count(*) >= {int(min_visits)}
-    """)
+    """, regions=regions)
     return [{
         "code": r["station_code"],
         "label": f"{r['station_name']} ({r['station_code']})",
@@ -365,13 +379,16 @@ async def visit_success_by_station(
 
 
 async def _q(db: AsyncSession, company_id, date_from, date_to,
-             stations: list[str] | None, sql: str) -> list[Any]:
+             stations: list[str] | None, sql: str,
+             regions: list[str] | None = None) -> list[Any]:
     p = {"company_id": str(company_id),
          "date_from": _as_date(date_from), "date_to": _as_date(date_to),
          "charged_min": CHARGED_MIN_KWH}
     if stations is not None:
         p["stations"] = stations
-    return list((await db.execute(text(_scoped(sql, stations)), p)).mappings().all())
+    if regions is not None:
+        p["regions"] = regions
+    return list((await db.execute(text(_scoped(sql, stations, regions)), p)).mappings().all())
 
 
 async def recompute_visits(

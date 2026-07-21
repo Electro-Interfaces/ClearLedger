@@ -31,6 +31,17 @@ import {
   type HourPoint, type OverviewWeekday, type OverviewNetwork,
 } from '@/services/overviewService'
 import { formatPeriod } from '@/lib/formatDate'
+import { useFilters } from '@/contexts/FilterContext'
+
+/** Сужение по сети из контура (регион/станции) для запросов обзора. */
+function useScope() {
+  const { stationCodes, regionIds } = useFilters()
+  return {
+    stations: stationCodes.length ? stationCodes.map(String) : undefined,
+    regions: regionIds.length ? regionIds : undefined,
+    key: `${stationCodes.join(',')}|${regionIds.join(',')}`,
+  }
+}
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -101,9 +112,10 @@ function SilentCard({ companyId, period, silent }: {
   silent: OverviewNetwork['silent']
 }) {
   const [open, setOpen] = useState(false)
+  const sc = useScope()
   const q = useQuery({
-    queryKey: ['silent-stations', companyId, period.from, period.to],
-    queryFn: () => getSilentStations({ companyId, dateFrom: period.from, dateTo: period.to }),
+    queryKey: ['silent-stations', companyId, period.from, period.to, sc.key],
+    queryFn: () => getSilentStations({ companyId, dateFrom: period.from, dateTo: period.to, stations: sc.stations, regions: sc.regions }),
     enabled: open,
   })
   if (!silent.silent) {
@@ -285,6 +297,12 @@ function NetworkHealth({ net }: { net: OverviewNetwork }) {
                 {recon.incomplete_months.length > 0 && (
                   <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
                     Реестр не догружен: {recon.incomplete_months.join(', ')} — эти месяцы в сверку не взяты.
+                  </div>
+                )}
+                {recon.has_anomaly && (
+                  <div className="mt-1 rounded bg-red-500/10 px-1.5 py-1 text-[11px] font-semibold text-red-600 dark:text-red-400">
+                    ⚠ Аномалия: продажа энергии больше закупки — {recon.anomaly_months.join(', ')}.
+                    Отпуск не может превышать вход по счётчикам (потери всегда ≥ 0) — проверить данные реестра/сессий.
                   </div>
                 )}
               </div>
@@ -684,21 +702,22 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
   const ref = useRef<HTMLDivElement>(null)
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
+  const sc = useScope()
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['charge-overview', companyId, period.from, period.to],
-    queryFn: () => getChargeOverview({ companyId, dateFrom: period.from, dateTo: period.to }),
+    queryKey: ['charge-overview', companyId, period.from, period.to, sc.key],
+    queryFn: () => getChargeOverview({ companyId, dateFrom: period.from, dateTo: period.to, stations: sc.stations, regions: sc.regions }),
   })
   // «Всего ЭЗС в сети» = объекты справочника станций (Нормализация → service_locations),
   // а не выведенное из сессий. Регионы/коннекторы за период — из разрезов.
   const linkage = useQuery({ queryKey: ['stations-linkage', companyId], queryFn: () => getStationsLinkage(companyId) })
   const connQ = useQuery({
-    queryKey: ['overview-dim', 'connector', companyId, period.from, period.to],
-    queryFn: () => getChargeSessions({ companyId, dateFrom: period.from, dateTo: period.to, groupBy: 'connector' }),
+    queryKey: ['overview-dim', 'connector', companyId, period.from, period.to, sc.key],
+    queryFn: () => getChargeSessions({ companyId, dateFrom: period.from, dateTo: period.to, groupBy: 'connector', stations: sc.stations, regions: sc.regions }),
   })
   const regQ = useQuery({
-    queryKey: ['overview-dim', 'region', companyId, period.from, period.to],
-    queryFn: () => getChargeSessions({ companyId, dateFrom: period.from, dateTo: period.to, groupBy: 'region' }),
+    queryKey: ['overview-dim', 'region', companyId, period.from, period.to, sc.key],
+    queryFn: () => getChargeSessions({ companyId, dateFrom: period.from, dateTo: period.to, groupBy: 'region', stations: sc.stations, regions: sc.regions }),
   })
 
   // Период, с которым сравниваются Δ% на карточках — в подсказку самих Δ.

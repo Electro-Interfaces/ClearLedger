@@ -18,6 +18,7 @@ import { useTabParams } from '@/hooks/useTabParams'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { loadXlsx } from '@/utils/xlsxLoader'
 import { getChargeSessionRows, getChargeGroupCatalog, fmtMoney, type ChargeSessionRow } from '@/services/analyticsService'
+import { useFilters } from '@/contexts/FilterContext'
 import { ChargeGroupedView } from './ChargeGroupedView'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -118,6 +119,12 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
   const [p, patch] = useTabParams('cs_list', DEFAULTS)
   // Вид-срез (реестр за период): период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
+  // Сужение по сети из контура (регион/станции) — реестр обязан ему подчиняться,
+  // иначе таблица показывает всю сеть при выбранной области (расхождение с шапкой).
+  const { stationCodes, regionIds } = useFilters()
+  const scopeStations = stationCodes.length ? stationCodes.map(String) : undefined
+  const scopeRegions = regionIds.length ? regionIds : undefined
+  const scopeKey = `${stationCodes.join(',')}|${regionIds.join(',')}`
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -142,8 +149,8 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
   // коннекторы, исходы), которые нужны и в разрезе. React Query кеширует его,
   // поэтому переключение вида не перезапрашивает.
   const { data, isLoading } = useQuery({
-    queryKey: ['charge-rows', companyId, period.from, period.to],
-    queryFn: () => getChargeSessionRows({ companyId, dateFrom: period.from, dateTo: period.to, limit: 200000 }),
+    queryKey: ['charge-rows', companyId, period.from, period.to, scopeKey],
+    queryFn: () => getChargeSessionRows({ companyId, dateFrom: period.from, dateTo: period.to, limit: 200000, stations: scopeStations, regions: scopeRegions }),
   })
   const rows = useMemo(() => data?.rows ?? [], [data])
 

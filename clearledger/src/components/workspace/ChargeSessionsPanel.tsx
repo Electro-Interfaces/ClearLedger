@@ -1981,7 +1981,7 @@ function PortEfficiency({ companyId, dateFrom, dateTo }: { companyId: string; da
   const n = useNarrow()
   const q = useQuery({
     queryKey: ['port-efficiency', companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getPortEfficiency({ companyId, dateFrom, dateTo, stations: n.stations }),
+    queryFn: () => getPortEfficiency({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions }),
   })
   if (q.isLoading) return <Loading />
   if (!q.data || !q.data.totals.sessions) return <Empty text="Нет сессий с отпуском энергии за период" />

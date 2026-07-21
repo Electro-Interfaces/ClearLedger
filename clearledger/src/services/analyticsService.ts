@@ -447,9 +447,11 @@ export interface ChargeSessionRow {
 export interface ChargeSessionRowsResponse { rows: ChargeSessionRow[]; total: number; truncated: boolean }
 export async function getChargeSessionRows(p: {
   companyId: string; dateFrom: string; dateTo: string; limit?: number
+  stations?: string[]; regions?: string[]
 }): Promise<ChargeSessionRowsResponse> {
   return get<ChargeSessionRowsResponse>('/api/analytics/charge-sessions/rows', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, limit: p.limit ?? 100000,
+    ...narrowParams(p),
   })
 }
 

@@ -52,6 +52,56 @@ _NET = """
 """
 
 
+def _scope(stations: list[str] | None, regions: list[str] | None) -> str:
+    """AND-фрагмент сужения по сети для WHERE над charge_sessions. Регион — из
+    справочника (Ф1.3): location_id → region_id → regions.name."""
+    s = ""
+    if stations is not None:
+        s += " AND station_code = ANY(:scope_stations)"
+    if regions is not None:
+        # Уникальные алиасы sl_sc/r_sc — некоторые запросы (region_extremes) уже
+        # джойнят service_locations/regions под sl/r, конфликт имён недопустим.
+        s += (" AND location_id IN (SELECT sl_sc.id FROM service_locations sl_sc"
+              " JOIN regions r_sc ON r_sc.id = sl_sc.region_id"
+              " WHERE sl_sc.company_id = :company_id AND r_sc.name = ANY(:scope_regions))")
+    return s
+
+
+def _scope_net(stations: list[str] | None, regions: list[str] | None) -> str:
+    """AND-фрагмент сужения для WHERE над service_locations (парк/net): по коду
+    станции и по региону напрямую (region_id → regions.name)."""
+    s = ""
+    if stations is not None:
+        s += " AND code = ANY(:scope_stations)"
+    if regions is not None:
+        s += (" AND region_id IN (SELECT id FROM regions"
+              " WHERE company_id = :company_id AND name = ANY(:scope_regions))")
+    return s
+
+
+def _scope_loc(stations: list[str] | None, regions: list[str] | None) -> str:
+    """scope через location_id — для таблиц с location_id, в т.ч. без station_code
+    (station_energy_periods). Станции резолвятся кодом через справочник."""
+    conds = []
+    if stations is not None:
+        conds.append("location_id IN (SELECT id FROM service_locations"
+                     " WHERE company_id = :company_id AND code = ANY(:scope_stations))")
+    if regions is not None:
+        conds.append("location_id IN (SELECT sl_sc.id FROM service_locations sl_sc"
+                     " JOIN regions r_sc ON r_sc.id = sl_sc.region_id"
+                     " WHERE sl_sc.company_id = :company_id AND r_sc.name = ANY(:scope_regions))")
+    return "".join(" AND " + c for c in conds)
+
+
+def _scope_params(stations: list[str] | None, regions: list[str] | None) -> dict[str, Any]:
+    p: dict[str, Any] = {}
+    if stations is not None:
+        p["scope_stations"] = stations
+    if regions is not None:
+        p["scope_regions"] = regions
+    return p
+
+
 def _f(v: Any) -> Any:
     return float(v) if isinstance(v, Decimal) else v
 
@@ -62,15 +112,19 @@ def _rows(res: Any) -> list[dict[str, Any]]:
 
 async def silent_stations(
     db: AsyncSession, company_id, date_from: date, date_to: date, limit: int = 200,
+    stations: list[str] | None = None, regions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Станции парка, не давшие ни одной сессии за период.
 
     Отдельно считаем тех, у кого сессий не было НИКОГДА (скорее всего не
     подключены или не запущены) и тех, кто раньше работал, а теперь замолчал —
     это разные истории: первая про запуск, вторая про поломку или демонтаж.
+
+    Сужение — по самому парку (net): при выбранной области считаем молчащие
+    только среди её станций.
     """
     ctes = f"""
-        WITH net AS ({_NET}),
+        WITH net AS ({_NET} {_scope_net(stations, regions)}),
         act AS (
             SELECT DISTINCT location_id FROM charge_sessions
              WHERE company_id = :company_id AND location_id IS NOT NULL
@@ -84,7 +138,8 @@ async def silent_stations(
              GROUP BY location_id
         )
     """
-    params = {"company_id": str(company_id), "date_from": date_from, "date_to": date_to}
+    params = {"company_id": str(company_id), "date_from": date_from, "date_to": date_to,
+              **_scope_params(stations, regions)}
     # Список для показа — усечён LIMIT; tie-break по коду для стабильного порядка
     # среди станций с одинаковым last_at (иначе состав «хвоста» плавает).
     rows = _rows(await db.execute(text(ctes + """
@@ -110,8 +165,9 @@ async def silent_stations(
     """), params)).one()
     silent = int(st.silent or 0)
     never = int(st.never or 0)
-    total = (await db.execute(text(f"SELECT count(*) FROM ({_NET}) t"),
-                              {"company_id": str(company_id)})).scalar_one()
+    total = (await db.execute(
+        text(f"SELECT count(*) FROM ({_NET} {_scope_net(stations, regions)}) t"),
+        {"company_id": str(company_id), **_scope_params(stations, regions)})).scalar_one()
     return {
         "stations": rows,
         "silent": silent,
@@ -124,6 +180,7 @@ async def silent_stations(
 
 async def revenue_concentration(
     db: AsyncSession, company_id, date_from: date, date_to: date,
+    stations: list[str] | None = None, regions: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Квинтили станций по выручке: где сеть зарабатывает, а где тратит ТОиР."""
     sql = text(f"""
@@ -135,6 +192,7 @@ async def revenue_concentration(
              WHERE company_id = :company_id AND location_id IS NOT NULL
                AND started_at >= CAST(:date_from AS date)
                AND started_at < CAST(:date_to AS date) + 1
+               {_scope(stations, regions)}
              GROUP BY location_id
         ),
         q AS (SELECT *, ntile(5) OVER (ORDER BY rev DESC) AS bucket FROM st)
@@ -145,7 +203,8 @@ async def revenue_concentration(
           FROM q GROUP BY bucket ORDER BY bucket
     """)
     rows = _rows(await db.execute(sql, {
-        "company_id": str(company_id), "date_from": date_from, "date_to": date_to}))
+        "company_id": str(company_id), "date_from": date_from, "date_to": date_to,
+        **_scope_params(stations, regions)}))
     total = sum(r["revenue"] for r in rows) or 1
     labels = {1: "Топ 20%", 2: "2-я пятая", 3: "Середина", 4: "4-я пятая", 5: "Нижние 20%"}
     for r in rows:
@@ -156,6 +215,7 @@ async def revenue_concentration(
 
 async def client_segments(
     db: AsyncSession, company_id, date_from: date, date_to: date,
+    stations: list[str] | None = None, regions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Розничная база по частоте визитов: ядро против разовых.
 
@@ -172,6 +232,7 @@ async def client_segments(
                AND user_id IS NOT NULL AND client_name IS NULL
                AND started_at >= CAST(:date_from AS date)
                AND started_at < CAST(:date_to AS date) + 1
+               {_scope(stations, regions)}
              GROUP BY user_id
         )
         SELECT CASE WHEN visits = 1 THEN 1 WHEN visits <= 3 THEN 2
@@ -182,7 +243,8 @@ async def client_segments(
           FROM c GROUP BY 1 ORDER BY 1
     """)
     rows = _rows(await db.execute(sql, {
-        "company_id": str(company_id), "date_from": date_from, "date_to": date_to}))
+        "company_id": str(company_id), "date_from": date_from, "date_to": date_to,
+        **_scope_params(stations, regions)}))
     labels = {1: "Разовые (1 визит)", 2: "2–3 визита", 3: "4–10", 4: "11–30", 5: "Ядро (31+)"}
     total_rev = sum(r["revenue"] for r in rows) or 1
     total_cl = sum(r["clients"] for r in rows) or 1
@@ -206,6 +268,7 @@ async def client_segments(
 
 async def region_extremes(
     db: AsyncSession, company_id, date_from: date, date_to: date, top: int = 5,
+    stations: list[str] | None = None, regions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Регионы: выручка и доля зарядившихся. Успех — по визитам, как в KPI."""
     sql = text(f"""
@@ -222,6 +285,7 @@ async def region_extremes(
              WHERE cs.company_id = :company_id AND cs.visit_key IS NOT NULL
                AND cs.started_at >= CAST(:date_from AS date)
                AND cs.started_at < CAST(:date_to AS date) + 1
+               {_scope(stations, regions).replace(' station_code', ' cs.station_code').replace(' location_id', ' cs.location_id')}
              GROUP BY cs.visit_key
         )
         SELECT coalesce(region, '—') AS label,
@@ -232,7 +296,8 @@ async def region_extremes(
          ORDER BY revenue DESC
     """)
     rows = _rows(await db.execute(sql, {
-        "company_id": str(company_id), "date_from": date_from, "date_to": date_to}))
+        "company_id": str(company_id), "date_from": date_from, "date_to": date_to,
+        **_scope_params(stations, regions)}))
     for r in rows:
         r["success_pct"] = round(r["charged"] / r["visits"] * 100, 1) if r["visits"] else 0.0
     by_success = sorted(rows, key=lambda r: r["success_pct"])
@@ -245,6 +310,7 @@ async def region_extremes(
 
 async def energy_reconciliation(
     db: AsyncSession, company_id, date_from: date, date_to: date,
+    stations: list[str] | None = None, regions: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Сессии против реестров РусГидро за пересекающиеся месяцы.
 
@@ -252,6 +318,9 @@ async def energy_reconciliation(
     транзакционный поток CPO. Они не обязаны совпадать до киловатта, но разрыв
     надо видеть: если он растёт, одна из витрин перестала отражать реальность.
     Возвращает None, когда реестров за период нет — блок тогда не рисуем.
+
+    Сужение — по location_id ОБЕИХ сторон (сессии и реестр), иначе при выбранной
+    области сравнивались бы разные наборы станций.
     """
     sql = text(f"""
         WITH months AS (
@@ -261,6 +330,7 @@ async def energy_reconciliation(
              WHERE company_id = :company_id
                AND started_at >= CAST(:date_from AS date)
                AND started_at < CAST(:date_to AS date) + 1
+               {_scope_loc(stations, regions)}
              GROUP BY 1
         ),
         reg AS (
@@ -269,6 +339,7 @@ async def energy_reconciliation(
             SELECT left(period, 7) AS period, sum(intake_kwh) AS registry_kwh
               FROM station_energy_periods
              WHERE company_id = :company_id
+               {_scope_loc(stations, regions)}
              GROUP BY 1
         )
         SELECT m.period, m.session_kwh, r.registry_kwh
@@ -276,7 +347,8 @@ async def energy_reconciliation(
          ORDER BY m.period
     """)
     rows = _rows(await db.execute(sql, {
-        "company_id": str(company_id), "date_from": date_from, "date_to": date_to}))
+        "company_id": str(company_id), "date_from": date_from, "date_to": date_to,
+        **_scope_params(stations, regions)}))
     if not rows:
         return None
 
@@ -292,11 +364,18 @@ async def energy_reconciliation(
         r["diff_pct"] = round((s - g) / g * 100, 1) if g else None
         r["coverage_pct"] = round(g / s * 100, 1) if s else None
         r["incomplete"] = bool(s and (g / s * 100) < INCOMPLETE_BELOW)
+        # АНОМАЛИЯ: продажа (отпуск по сессиям) превышает закупку (вход по счётчикам)
+        # в месяце с достаточно полным реестром. Физически невозможно — нельзя
+        # отпустить больше, чем поступило (потери в сети всегда ≥ 0). Значит либо
+        # ошибка данных, либо реестр всё же неполон: в любом случае это КРАСНЫЙ флаг,
+        # а не рядовой разрыв витрин. (Недогруженный реестр — отдельно, incomplete.)
+        r["anomaly"] = bool(not r["incomplete"] and s > g)
 
     solid = [r for r in rows if not r["incomplete"]]
     ts = sum(r["session_kwh"] or 0 for r in solid)
     tr = sum(r["registry_kwh"] or 0 for r in solid)
     incomplete = [r["period"] for r in rows if r["incomplete"]]
+    anomaly_months = [r["period"] for r in rows if r["anomaly"]]
     return {
         "months": rows,
         "session_kwh": round(ts, 1),
@@ -305,5 +384,8 @@ async def energy_reconciliation(
         "diff_pct": round((ts - tr) / tr * 100, 1) if tr else None,
         # Месяцы, где реестр явно не догружен — их надо не сверять, а дозагрузить.
         "incomplete_months": incomplete,
+        # Месяцы «продажа > закупка» — физическая аномалия, требует разбора.
+        "anomaly_months": anomaly_months,
+        "has_anomaly": bool(anomaly_months),
         "compared_months": len(solid),
     }

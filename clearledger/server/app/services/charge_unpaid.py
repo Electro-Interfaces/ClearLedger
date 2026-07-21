@@ -57,8 +57,15 @@ WITH s AS (
 """
 
 
-def _scoped(sql: str, stations: list[str] | None) -> str:
-    flt = "AND station_code = ANY(:stations)" if stations is not None else ""
+def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None) -> str:
+    flt = ""
+    if stations is not None:
+        flt += " AND station_code = ANY(:stations)"
+    if regions is not None:
+        # Регион — из справочника (Ф1.3): location_id → region_id → regions.name.
+        flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
+                " JOIN regions r ON r.id = sl.region_id"
+                " WHERE sl.company_id = :company_id AND r.name = ANY(:regions))")
     return _BASE.format(station_filter=flt) + sql
 
 
@@ -75,6 +82,7 @@ def _row(r: Any, drop: tuple[str, ...] = ()) -> dict[str, Any]:
 async def unpaid_report(
     db: AsyncSession, company_id, date_from: str, date_to: str,
     stations: list[str] | None = None, top: int = 15,
+    regions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Полный разбор неоплаченного отпуска: категории, станции, клиенты,
     динамика и поимённый реестр случаев розничного долга."""
@@ -83,9 +91,11 @@ async def unpaid_report(
          "charged_min": CHARGED_MIN_KWH, "top": top}
     if stations is not None:
         p["stations"] = stations
+    if regions is not None:
+        p["regions"] = regions
 
     async def q(sql: str) -> list[Any]:
-        return list((await db.execute(text(_scoped(sql, stations)), p)).mappings().all())
+        return list((await db.execute(text(_scoped(sql, stations, regions)), p)).mappings().all())
 
     cats = await q("""
         SELECT seg, has_energy,

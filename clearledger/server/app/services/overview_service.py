@@ -117,14 +117,20 @@ class OverviewService:
 
     @cached_report("ezs:overview")
     async def overview(self, company_id: Any, df: date, dt: date, compare: str = "prev",
-                       today: date | None = None) -> dict[str, Any]:
+                       today: date | None = None,
+                       stations: list[str] | None = None,
+                       regions: list[str] | None = None) -> dict[str, Any]:
         period_days = (dt - df).days + 1
         prev_to = df - timedelta(days=1)
         prev_from = prev_to - timedelta(days=period_days - 1)
         bucket = self._bucket_for(period_days)
 
-        f_cur = PeriodFilter(company_id=company_id, date_from=df, date_to=dt)
-        f_prev = PeriodFilter(company_id=company_id, date_from=prev_from, date_to=prev_to)
+        # Сужение по сети из контура (регион/станции) — обзор обязан ему подчиняться,
+        # иначе KPI и инсайты показывают всю сеть при выбранной области.
+        f_cur = PeriodFilter(company_id=company_id, date_from=df, date_to=dt,
+                             station_codes=stations, regions=regions)
+        f_prev = PeriodFilter(company_id=company_id, date_from=prev_from, date_to=prev_to,
+                              station_codes=stations, regions=regions)
 
         # ─── тоталы текущего/прошлого периода (разрез station → заодно активные ЭЗС) ───
         cur = await self.a.charge_sessions(f_cur, "station")
@@ -153,10 +159,10 @@ class OverviewService:
         from app.services.charge_visits import (
             visit_success, visit_success_by_station, visit_success_series,
         )
-        vc = await visit_success(self.db, company_id, df, dt, f_cur.station_codes)
-        vp = await visit_success(self.db, company_id, prev_from, prev_to, f_prev.station_codes)
+        vc = await visit_success(self.db, company_id, df, dt, f_cur.station_codes, regions=f_cur.regions)
+        vp = await visit_success(self.db, company_id, prev_from, prev_to, f_prev.station_codes, regions=f_prev.regions)
         v_by_bucket = await visit_success_series(
-            self.db, company_id, df, dt, bucket, f_cur.station_codes)
+            self.db, company_id, df, dt, bucket, f_cur.station_codes, regions=f_cur.regions)
         # Успех — доля: пустой бакет → null (ноль в ней читался бы как «все ушли
         # ни с чем»). Визиты — счётчик: пустой бакет → 0, это честный ноль.
         spark_success = [(v_by_bucket[b]["success_pct"] if b in v_by_bucket else None) for b in cur_axis]
@@ -320,12 +326,18 @@ class OverviewService:
             client_segments, energy_reconciliation, region_extremes,
             revenue_concentration, silent_stations,
         )
-        silent = await silent_stations(self.db, company_id, df, dt)
-        concentration = await revenue_concentration(self.db, company_id, df, dt)
-        segments = await client_segments(self.db, company_id, df, dt)
-        regions_x = await region_extremes(self.db, company_id, df, dt)
-        energy_recon = await energy_reconciliation(self.db, company_id, df, dt)
-        unpaid = await unpaid_report(self.db, company_id, df.isoformat(), dt.isoformat(), top=1)
+        silent = await silent_stations(self.db, company_id, df, dt,
+                                       stations=f_cur.station_codes, regions=f_cur.regions)
+        concentration = await revenue_concentration(self.db, company_id, df, dt,
+                                                    stations=f_cur.station_codes, regions=f_cur.regions)
+        segments = await client_segments(self.db, company_id, df, dt,
+                                         stations=f_cur.station_codes, regions=f_cur.regions)
+        regions_x = await region_extremes(self.db, company_id, df, dt,
+                                          stations=f_cur.station_codes, regions=f_cur.regions)
+        energy_recon = await energy_reconciliation(self.db, company_id, df, dt,
+                                                   stations=f_cur.station_codes, regions=f_cur.regions)
+        unpaid = await unpaid_report(self.db, company_id, df.isoformat(), dt.isoformat(), top=1,
+                                     stations=f_cur.station_codes, regions=f_cur.regions)
 
         # Run-rate: линейная экстраполяция темпа на полный месяц. Честна только
         # внутри незакрытого месяца — за прошедший период прогнозировать нечего.
@@ -398,7 +410,8 @@ class OverviewService:
         # Станции риска — тоже по визитам: станция, где люди уезжают незаряженными,
         # а не где сорвалось касание разъёма.
         v_stations = await visit_success_by_station(
-            self.db, company_id, df, dt, f_cur.station_codes, min_visits=MIN_SESS)
+            self.db, company_id, df, dt, f_cur.station_codes, min_visits=MIN_SESS,
+            regions=f_cur.regions)
         risky = [s for s in v_stations if s["success_pct"] < 70]
         if risky:
             names = ", ".join(s["label"] for s in sorted(risky, key=lambda s: s["success_pct"])[:3])

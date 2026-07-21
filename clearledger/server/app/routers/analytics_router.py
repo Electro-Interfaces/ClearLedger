@@ -256,6 +256,7 @@ async def get_charge_visits(
     date_from: str,
     date_to: str,
     stations: str | None = None,
+    regions: str | None = None,
     top: int = Query(15, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -270,7 +271,8 @@ async def get_charge_visits(
     from app.services.charge_visits import visits_report
 
     return await visits_report(
-        db, f.company_id, date_from, date_to, stations=_csv(stations), top=top)
+        db, f.company_id, date_from, date_to, stations=_csv(stations), top=top,
+        regions=_csv(regions))
 
 
 @router.get("/charge-sessions/unpaid")
@@ -279,6 +281,7 @@ async def get_charge_unpaid(
     date_from: str,
     date_to: str,
     stations: str | None = None,
+    regions: str | None = None,
     top: int = Query(15, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -290,7 +293,8 @@ async def get_charge_unpaid(
     from app.services.charge_unpaid import unpaid_report
 
     return await unpaid_report(
-        db, f.company_id, date_from, date_to, stations=_csv(stations), top=top)
+        db, f.company_id, date_from, date_to, stations=_csv(stations), top=top,
+        regions=_csv(regions))
 
 
 @router.get("/charge-sessions/unpaid/station")
