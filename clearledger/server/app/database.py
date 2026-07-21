@@ -622,6 +622,13 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # Часовой пояс региона (смещение от МСК, часов) — для анализа сессий ЭЗС
+        # «по местному времени». Заполняется tz_offsets.backfill_region_offsets.
+        for stmt in (
+            "ALTER TABLE regions ADD COLUMN IF NOT EXISTS msk_offset SMALLINT",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

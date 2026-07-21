@@ -17,6 +17,7 @@ import { TrendingDown, TrendingUp, Minus } from 'lucide-react'
 import { getCorporateClientCard, type CorpClientCard, type CorpBreakdown } from '@/services/corporateService'
 import { fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import { seriesColor } from './analytics/palette'
+import { TzToggle, type Tz } from './analytics/TzToggle'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -43,9 +44,10 @@ export function CorpClientModal({ client, companyId, dateFrom, dateTo, onClose }
   // useState и умирает с модалкой: персист заставил бы карточку через неделю
   // молча показывать чужой горизонт.
   const [horizon, setHorizon] = useState(0)
+  const [tz, setTz] = useState<Tz>('msk')   // часы активности: МСК по умолчанию
   const { data: d, isLoading, error } = useQuery({
-    queryKey: ['corp-client-card', companyId, client, dateFrom, dateTo, horizon],
-    queryFn: () => getCorporateClientCard({ companyId, client, dateFrom, dateTo, historyMonths: horizon }),
+    queryKey: ['corp-client-card', companyId, client, dateFrom, dateTo, horizon, tz],
+    queryFn: () => getCorporateClientCard({ companyId, client, dateFrom, dateTo, historyMonths: horizon, tz }),
   })
 
   return (
@@ -70,15 +72,16 @@ export function CorpClientModal({ client, companyId, dateFrom, dateTo, onClose }
         <div className="overflow-auto p-5 space-y-5">
           {isLoading ? <div className="text-sm text-muted-foreground py-10 text-center">Загрузка карточки…</div>
             : error || !d ? <div className="text-sm text-muted-foreground py-10 text-center">Не удалось загрузить карточку клиента</div>
-            : <Body d={d} horizon={horizon} setHorizon={setHorizon} />}
+            : <Body d={d} horizon={horizon} setHorizon={setHorizon} tz={tz} setTz={setTz} />}
         </div>
       </div>
     </div>
   )
 }
 
-function Body({ d, horizon, setHorizon }: {
+function Body({ d, horizon, setHorizon, tz, setTz }: {
   d: CorpClientCard; horizon: number; setHorizon: (n: number) => void
+  tz: Tz; setTz: (tz: Tz) => void
 }) {
   const t = d.totals
   const full = d.months.filter((m) => !m.partial)
@@ -229,7 +232,10 @@ function Body({ d, horizon, setHorizon }: {
       {/* режим эксплуатации: подсказка к переговорам о тарифе */}
       {(d.when.weekday + d.when.weekend) > 0 && (
         <section className="space-y-2">
-          <h4 className="text-sm font-medium">Когда заряжаются</h4>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h4 className="text-sm font-medium">Когда заряжаются <span className="text-[11px] font-normal text-muted-foreground">{tz === 'local' ? '· местное время' : '· МСК'}</span></h4>
+            <TzToggle value={tz} onChange={setTz} />
+          </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span>Будни: <b className="tabular-nums text-foreground">{nf(d.when.weekday)}</b></span>
             <span>Выходные: <b className="tabular-nums text-foreground">{nf(d.when.weekend)}</b></span>

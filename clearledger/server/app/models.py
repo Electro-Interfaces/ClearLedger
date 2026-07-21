@@ -2712,6 +2712,9 @@ class Region(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Сырое значение federalSubject для матчинга при бэкфилле/синке.
     federal_subject: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Смещение часового пояса от Москвы, часов (для анализа сессий по местному
+    # времени). Заполняется tz_offsets.backfill_region_offsets; NULL → МСК.
+    msk_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )

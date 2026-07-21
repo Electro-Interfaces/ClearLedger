@@ -225,13 +225,14 @@ export interface OverviewResponse {
 
 export async function getChargeOverview(p: {
   companyId: string; dateFrom: string; dateTo: string; compare?: string
-  stations?: string[]; regions?: string[]
+  stations?: string[]; regions?: string[]; tz?: 'msk' | 'local'
 }): Promise<OverviewResponse> {
   return get<OverviewResponse>('/api/analytics/charge-sessions/overview', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     compare: p.compare ?? 'prev',
     ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
     ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+    ...(p.tz ? { tz: p.tz } : {}),
   })
 }
 

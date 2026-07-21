@@ -99,6 +99,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with async_session_factory() as session:
         await seed_data(session)
 
+    # Часовые пояса регионов (смещение от МСК) — для анализа сессий ЭЗС по
+    # местному времени. Идемпотентно (~1с); самозаживление для новых регионов.
+    async with async_session_factory() as session:
+        try:
+            from app.services.tz_offsets import backfill_region_offsets
+            n = await backfill_region_offsets(session)
+            logger.info(f"Часовые пояса регионов проставлены: {n}")
+        except Exception as e:  # noqa: BLE001 — не валим старт из-за НСИ
+            logger.warning(f"backfill region offsets пропущен: {e}")
+
     # Сброс зависших прогонов: при рестарте фоновые задачи прерываются, их
     # ChannelSyncLog остаётся в 'running' навсегда — помечаем как прерванные.
     async with async_session_factory() as session:

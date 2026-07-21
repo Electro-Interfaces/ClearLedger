@@ -117,10 +117,11 @@ export interface CorpClientCard {
 }
 
 export async function getCorporateClientCard(
-  p: P & { client: string; historyMonths?: number },
+  p: P & { client: string; historyMonths?: number; tz?: 'msk' | 'local' },
 ): Promise<CorpClientCard> {
   return get<CorpClientCard>('/api/corporate/client-card', {
     ...params(p), client: p.client, history_months: p.historyMonths ?? 0,
+    ...(p.tz ? { tz: p.tz } : {}),
   })
 }
 

@@ -23,6 +23,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ExportButton } from './analytics/ExportButton'
 import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
 import { MetricHint, HINTS } from './analytics/MetricHint'
+import { TzToggle, type Tz } from './analytics/TzToggle'
 import {
   getChargeSessions, getStationsLinkage, getChargeTimeseries, fmtMoney, fmtMoneyShort,
 } from '@/services/analyticsService'
@@ -706,10 +707,12 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
   const sc = useScope()
+  // Часовой пояс профиля активности (часы/дни недели): МСК по умолчанию.
+  const [tz, setTz] = useState<Tz>('msk')
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['charge-overview', companyId, period.from, period.to, sc.key],
-    queryFn: () => getChargeOverview({ companyId, dateFrom: period.from, dateTo: period.to, stations: sc.stations, regions: sc.regions }),
+    queryKey: ['charge-overview', companyId, period.from, period.to, sc.key, tz],
+    queryFn: () => getChargeOverview({ companyId, dateFrom: period.from, dateTo: period.to, stations: sc.stations, regions: sc.regions, tz }),
   })
   // «Всего ЭЗС в сети» = объекты справочника станций (Нормализация → service_locations),
   // а не выведенное из сессий. Регионы/коннекторы за период — из разрезов.
@@ -794,7 +797,10 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
             </div>
 
             {/* профиль активности: часы + дни недели (в одну строку) */}
-            <SectionTitle hint="за выбранный период">Профиль активности</SectionTitle>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <SectionTitle hint={tz === 'local' ? 'по местному времени станций' : 'по московскому времени'}>Профиль активности</SectionTitle>
+              <TzToggle value={tz} onChange={setTz} />
+            </div>
             <div className="grid gap-3 lg:grid-cols-2">
               <HourlyBar hourly={data.hourly} />
               <WeekdayBar weekday={data.weekday} />

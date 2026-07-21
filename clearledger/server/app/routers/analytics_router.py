@@ -160,15 +160,17 @@ async def get_charge_sessions(
     regions: str | None = None,
     dim: str | None = None,
     dim_val: str | None = None,
+    tz: str = Query("msk", pattern="^(msk|local)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Зарядные сессии ЭЗС по разрезу: выручка/энергия/сессии/ср.чек/успех."""
+    """Зарядные сессии ЭЗС по разрезу: выручка/энергия/сессии/ср.чек/успех.
+    tz=local — почасовой разрез (group_by=hour) по местному времени станции."""
     f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
     f.dim_by = dim; f.dim_val = dim_val
     svc = AnalyticsService(db)
-    return await svc.charge_sessions(f, group_by=group_by)
+    return await svc.charge_sessions(f, group_by=group_by, tz=tz)
 
 
 @router.get("/charge-sessions/group-catalog")
@@ -454,13 +456,15 @@ async def get_charge_heatmap(
     station_id: str | None = None,
     stations: str | None = None,
     regions: str | None = None,
+    tz: str = Query("msk", pattern="^(msk|local)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Загрузка час × день недели (heatmap) для ToU-анализа."""
+    """Загрузка час × день недели (heatmap) для ToU-анализа.
+    tz=local — по местному времени станции (сдвиг на часовой пояс региона)."""
     f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
     f.station_codes = _csv(stations); f.regions = _csv(regions)
-    return await AnalyticsService(db).charge_heatmap(f, metric=metric)
+    return await AnalyticsService(db).charge_heatmap(f, metric=metric, tz=tz)
 
 
 @router.get("/charge-sessions/dimensions")

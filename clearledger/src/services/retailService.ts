@@ -151,12 +151,13 @@ export function getRetailAccounts(p: AccountsParams): Promise<RetailAccountsResp
 
 export const getRetailDimensions = (p: P) => get<RetailDimensions>('/api/retail/dimensions', params(p))
 
-export function getRetailProfile(p: P & { station?: string; region?: string }): Promise<RetailProfile> {
+export function getRetailProfile(p: P & { station?: string; region?: string; tz?: 'msk' | 'local' }): Promise<RetailProfile> {
   const q: Record<string, string> = { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo }
   if (p.stations?.length) q.stations = p.stations.join(',')
   if (p.regions?.length) q.regions = p.regions.join(',')
   if (p.station) q.station = p.station
   if (p.region) q.region = p.region
+  if (p.tz) q.tz = p.tz
   return get<RetailProfile>('/api/retail/profile', q)
 }
 

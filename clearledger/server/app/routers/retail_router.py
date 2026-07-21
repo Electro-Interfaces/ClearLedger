@@ -140,14 +140,16 @@ async def retail_profile(
     company_id: str, date_from: str, date_to: str,
     station: str | None = None, region: str | None = None,
     stations: str | None = None, regions: str | None = None,
+    tz: str = "msk",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Разрез по станции/региону: KPI + профиль по часам/дням недели + топ аккаунтов."""
+    """Разрез по станции/региону: KPI + профиль по часам/дням недели + топ аккаунтов.
+    tz=local — профиль по местному времени станции."""
     cid = await assert_company_member(company_id, current_user, db)
     return await RetailService(db).profile(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), station=station, region=region,
-        stations=_csv(stations), regions=_csv(regions))
+        stations=_csv(stations), regions=_csv(regions), tz=tz if tz in ("msk", "local") else "msk")
 
 
 @router.get("/account")

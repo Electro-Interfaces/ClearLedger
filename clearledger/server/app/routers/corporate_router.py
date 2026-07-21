@@ -78,6 +78,7 @@ async def corporate_client_card(
     history_months: int = 0,
     stations: str | None = None,
     regions: str | None = None,
+    tz: str = "msk",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -85,12 +86,14 @@ async def corporate_client_card(
     (станции/регионы/коннекторы/карты), режим эксплуатации и срок отношений.
 
     `history_months` > 0 удлиняет ТОЛЬКО ряд месяцев (динамика на коротком
-    контуре не читается); итоги и разрезы остаются по периоду."""
+    контуре не читается); итоги и разрезы остаются по периоду.
+    tz=local — часы активности по местному времени станции."""
     cid = await assert_company_member(company_id, current_user, db)
     return await CorporateService(db).client_card(
         cid, client, _d(date_from, "date_from"), _d(date_to, "date_to"),
         max(0, min(history_months, 36)),
-        stations=_csv(stations), regions=_csv(regions))
+        stations=_csv(stations), regions=_csv(regions),
+        tz=tz if tz in ("msk", "local") else "msk")
 
 
 @router.get("/billing")

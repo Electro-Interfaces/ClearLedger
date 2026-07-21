@@ -565,10 +565,11 @@ export interface ChargeHeatmapResponse {
   cells: { hour: number; weekday: number; value: number }[]
   period: { from: string; to: string }
 }
-export async function getChargeHeatmap(p: PeriodParams & { metric?: ChargeMetric }): Promise<ChargeHeatmapResponse> {
+export async function getChargeHeatmap(p: PeriodParams & { metric?: ChargeMetric; tz?: 'msk' | 'local' }): Promise<ChargeHeatmapResponse> {
   return get<ChargeHeatmapResponse>('/api/analytics/charge-sessions/heatmap', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     metric: p.metric ?? 'sessions',
+    ...(p.tz ? { tz: p.tz } : {}),
     ...narrowParams(p),
   })
 }
@@ -612,10 +613,11 @@ function narrowParams(p: { stations?: string[]; regions?: string[]; stationId?: 
   }
 }
 
-export async function getChargeSessions(p: PeriodParams & { groupBy?: ChargeGroupBy }): Promise<ChargeSessionsResponse> {
+export async function getChargeSessions(p: PeriodParams & { groupBy?: ChargeGroupBy; tz?: 'msk' | 'local' }): Promise<ChargeSessionsResponse> {
   return get<ChargeSessionsResponse>('/api/analytics/charge-sessions', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     group_by: p.groupBy ?? 'station',
+    ...(p.tz ? { tz: p.tz } : {}),
     ...narrowParams(p),
   })
 }

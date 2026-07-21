@@ -20,6 +20,7 @@ import { exportChargePdf } from '@/services/chargeExport'
 import { BarChart, Bar, LineChart, Line, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useResetOnScopeChange, useNetScope } from '@/hooks/useScopeReset'
+import { TzToggle, type Tz } from './analytics/TzToggle'
 import { ApplyToScope } from './ApplyToScope'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
@@ -806,6 +807,7 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
   const [value, setValue] = useState('')
   const [detail, setDetail] = useState<string | null>(null)
   const [scopeAll, setScopeAll] = useState(false)
+  const [tz, setTz] = useState<Tz>('msk')   // часы/дни недели: МСК по умолчанию
   const [sortAll, setSortAll] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'revenue', order: 'desc' })
   const sc = useNetScope()
   const p = { companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }
@@ -816,8 +818,8 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
     value: r.region, label: `${r.region} · ${r.accounts} акк` })), [dims.data])
   const q = useQuery({
     enabled: !!value,
-    queryKey: ['retail-profile', companyId, dateFrom, dateTo, sc.key, mode, value],
-    queryFn: () => getRetailProfile({ ...p, station: mode === 'station' ? value : undefined, region: mode === 'region' ? value : undefined }),
+    queryKey: ['retail-profile', companyId, dateFrom, dateTo, sc.key, mode, value, tz],
+    queryFn: () => getRetailProfile({ ...p, station: mode === 'station' ? value : undefined, region: mode === 'region' ? value : undefined, tz }),
   })
   const allQ = useQuery({
     enabled: !!value && scopeAll,
@@ -844,6 +846,7 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
         <SearchableSelect value={value} onChange={setValue}
           options={mode === 'station' ? stationOpts : regionOpts}
           placeholder={mode === 'station' ? 'Выберите станцию…' : 'Выберите регион…'} triggerWidth="w-[320px]" />
+        <div className="ml-auto"><TzToggle value={tz} onChange={setTz} /></div>
       </div>
       {!value ? <Empty text="Выберите станцию или регион — увидите клиентов и профиль зарядок (часы, дни, средние)" />
         : q.isLoading ? <Loading />

@@ -29,6 +29,7 @@ from app.models import ChargeSession, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 from app.services.pii_account import account_hash, mask_phone
 from app.services.session_scope import session_scope_conds
+from app.services.tz_offsets import shifted_started_at
 
 S = ChargeSession
 
@@ -507,9 +508,11 @@ class RetailService:
     async def profile(self, company_id, df: date, dt: date, *,
                       station: str | None = None, region: str | None = None,
                       stations: list[str] | None = None,
-                      regions: list[str] | None = None) -> dict[str, Any]:
+                      regions: list[str] | None = None,
+                      tz: str = "msk") -> dict[str, Any]:
         """Разрез по конкретной станции ИЛИ региону: KPI + профиль по часам суток и
-        дням недели + топ аккаунтов этого разреза."""
+        дням недели + топ аккаунтов этого разреза. tz='local' — профиль по местному
+        времени станции (сдвиг started_at на часовой пояс региона)."""
         lo, hi = _period(df, dt)
         conds = [*_retail_conds(company_id), S.started_at.is_not(None),
                  S.started_at >= lo, S.started_at <= hi,
@@ -542,20 +545,33 @@ class RetailService:
                   "avg_check": round(revenue / sessions, 2) if sessions else 0.0,
                   "avg_kwh": round(energy / sessions, 2) if sessions else 0.0}
 
-        he = func.extract("hour", S.started_at)
-        hrows = (await self.db.execute(select(
+        # tz='local' → час/день недели по местному времени станции. Нужен сдвиг
+        # started_at на regions.msk_offset → join сессия→объект→регион.
+        ts = shifted_started_at(S.started_at, Region.msk_offset, tz)
+        tz_join = (S.__table__
+                   .outerjoin(ServiceLocation.__table__, ServiceLocation.id == S.location_id)
+                   .outerjoin(Region.__table__, Region.id == ServiceLocation.region_id))
+
+        he = func.extract("hour", ts)
+        h_stmt = select(
             he.label("h"), func.count().label("sessions"),
             func.coalesce(func.sum(S.amount), 0).label("revenue"),
-        ).where(*conds).group_by(he))).all()
+        ).where(*conds).group_by(he)
+        if tz == "local":
+            h_stmt = h_stmt.select_from(tz_join)
+        hrows = (await self.db.execute(h_stmt)).all()
         hmap = {int(r.h): (int(r.sessions), float(r.revenue)) for r in hrows if r.h is not None}
         hourly = [{"hour": hh, "sessions": hmap.get(hh, (0, 0.0))[0],
                    "revenue": round(hmap.get(hh, (0, 0.0))[1], 2)} for hh in range(24)]
 
-        we = func.extract("isodow", S.started_at)   # 1=Пн … 7=Вс
-        wrows = (await self.db.execute(select(
+        we = func.extract("isodow", ts)   # 1=Пн … 7=Вс
+        w_stmt = select(
             we.label("d"), func.count().label("sessions"),
             func.coalesce(func.sum(S.amount), 0).label("revenue"),
-        ).where(*conds).group_by(we))).all()
+        ).where(*conds).group_by(we)
+        if tz == "local":
+            w_stmt = w_stmt.select_from(tz_join)
+        wrows = (await self.db.execute(w_stmt)).all()
         wmap = {int(r.d): (int(r.sessions), float(r.revenue)) for r in wrows if r.d is not None}
         weekday = [{"dow": i + 1, "label": self._WD[i],
                     "sessions": wmap.get(i + 1, (0, 0.0))[0],

@@ -13,9 +13,10 @@ from typing import Any
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChargeSession, CorporateClient
+from app.models import ChargeSession, CorporateClient, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 from app.services.session_scope import session_scope_conds
+from app.services.tz_offsets import shifted_started_at
 
 
 class CorporateService:
@@ -160,7 +161,7 @@ class CorporateService:
     @cached_report("corp:client-card")
     async def client_card(self, company_id, client: str, df: date, dt: date,
                           history_months: int = 0, stations: list[str] | None = None,
-                          regions: list[str] | None = None) -> dict[str, Any]:
+                          regions: list[str] | None = None, tz: str = "msk") -> dict[str, Any]:
         """Карточка одного ЮЛ: помесячная реализация за период + профиль потребления.
 
         Отвечает на вопрос «как развиваются отношения»: растёт ли выборка,
@@ -275,25 +276,36 @@ class CorporateService:
                      "energy_kwh": round(float(x.energy or 0), 1),
                      "corp_revenue": round(float(x.corp or 0), 2)} for x in res]
 
-        stations = await top(S.station_code,
-                             label=func.coalesce(S.station_name, S.station_code))
-        regions = await top(S.region, limit=6)
+        # ⚠ НЕ переприсваивать stations/regions — это параметры-фильтры контура,
+        # которые ниже читает _metrics_by_client (иначе session_scope получит
+        # список dict вместо кодов → DataError, карточка падает 500).
+        stations_bd = await top(S.station_code,
+                                label=func.coalesce(S.station_name, S.station_code))
+        regions_bd = await top(S.region, limit=6)
         connectors = await top(S.connector_type, limit=6)
         drivers = await top(S.user_id, limit=10)
 
         # ── когда заряжаются: будни/выходные и пиковый час ────────────────
         # Характер парка: развозной транспорт даёт будни-день, такси — круглые
         # сутки, служебный — утро и вечер. Это подсказка к переговорам о тарифе.
-        dow = func.extract("isodow", S.started_at)
-        wk = (await self.db.execute(
-            select(
-                func.coalesce(func.sum(case((dow <= 5, 1), else_=0)), 0).label("weekday"),
-                func.coalesce(func.sum(case((dow > 5, 1), else_=0)), 0).label("weekend"),
-            ).where(*scope))).one()
-        hour = func.extract("hour", S.started_at).label("hour")
-        hours = (await self.db.execute(
-            select(hour, func.count().label("sessions"))
-            .where(*scope).group_by(hour).order_by(hour))).all()
+        # tz='local' → час/день по местному времени станции (сдвиг + join региона).
+        ts = shifted_started_at(S.started_at, Region.msk_offset, tz)
+        tz_join = (S.__table__
+                   .outerjoin(ServiceLocation.__table__, ServiceLocation.id == S.location_id)
+                   .outerjoin(Region.__table__, Region.id == ServiceLocation.region_id))
+        dow = func.extract("isodow", ts)
+        wk_stmt = select(
+            func.coalesce(func.sum(case((dow <= 5, 1), else_=0)), 0).label("weekday"),
+            func.coalesce(func.sum(case((dow > 5, 1), else_=0)), 0).label("weekend"),
+        ).where(*scope)
+        if tz == "local":
+            wk_stmt = wk_stmt.select_from(tz_join)
+        wk = (await self.db.execute(wk_stmt)).one()
+        hour = func.extract("hour", ts).label("hour")
+        h_stmt = select(hour, func.count().label("sessions")).where(*scope).group_by(hour).order_by(hour)
+        if tz == "local":
+            h_stmt = h_stmt.select_from(tz_join)
+        hours = (await self.db.execute(h_stmt)).all()
 
         # ── история отношений: за пределами периода ───────────────────────
         life = (await self.db.execute(
@@ -345,8 +357,8 @@ class CorporateService:
                 "sessions_per_month": round(sessions_total / months_in_scope, 1) if months_in_scope else 0.0,
             },
             "months": months,
-            "stations": stations,
-            "regions": regions,
+            "stations": stations_bd,
+            "regions": regions_bd,
             "connectors": connectors,
             "drivers": drivers,
             "when": {

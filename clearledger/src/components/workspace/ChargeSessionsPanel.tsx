@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { HINTS } from './analytics/MetricHint'
+import { TzToggle, type Tz } from './analytics/TzToggle'
 import { seriesColor } from './analytics/palette'
 import { MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
@@ -193,11 +194,11 @@ function useNarrow() {
 }
 type Narrow = ReturnType<typeof useNarrow>
 
-function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: ChargeGroupBy) {
+function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: ChargeGroupBy, tz?: Tz) {
   const n = useNarrow()
   return useQuery({
-    queryKey: ['charge-sessions', groupBy, companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
+    queryKey: ['charge-sessions', groupBy, companyId, dateFrom, dateTo, n.key, tz ?? 'msk'],
+    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, tz }),
   })
 }
 
@@ -480,11 +481,11 @@ function ShareDonut({ title, rows }: { title: string; rows: ChargeSessionLine[] 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']  // isodow 1..7
 
 /** Heatmap загрузки: час × день недели (цвет = интенсивность). */
-function ChargeHeatmap({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+function ChargeHeatmap({ companyId, dateFrom, dateTo, tz }: { companyId: string; dateFrom: string; dateTo: string; tz?: Tz }) {
   const n = useNarrow()
   const { data, isLoading } = useQuery({
-    queryKey: ['charge-heatmap', companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getChargeHeatmap({ companyId, dateFrom, dateTo, metric: 'sessions', stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
+    queryKey: ['charge-heatmap', companyId, dateFrom, dateTo, n.key, tz ?? 'msk'],
+    queryFn: () => getChargeHeatmap({ companyId, dateFrom, dateTo, metric: 'sessions', stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, tz }),
   })
   if (isLoading) return <Loading />
   if (!data || data.cells.length === 0) return <Empty />
@@ -522,12 +523,23 @@ function ChargeHeatmap({ companyId, dateFrom, dateTo }: { companyId: string; dat
 function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
-  const { data, isLoading } = useCS(companyId, period.from, period.to, 'hour')
-  if (isLoading) return <Loading />
-  if (!data || data.lines.length === 0) return <Empty />
-  const max = Math.max(...data.lines.map((l) => l.sessions), 1)
+  // Часовой пояс анализа: по умолчанию МСК; «Местное» сдвигает час/день на пояс
+  // региона станции (сеть от Калининграда до Камчатки — до +9 ч от МСК).
+  const [tz, setTz] = useState<Tz>('msk')
+  const { data, isLoading } = useCS(companyId, period.from, period.to, 'hour', tz)
+  const tzNote = tz === 'local'
+    ? 'Час — по местному времени станции (сдвиг на часовой пояс региона).'
+    : 'Час — по московскому времени (как хранятся сессии).'
   return (
     <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-[11px] text-muted-foreground">{tzNote}</div>
+        <TzToggle value={tz} onChange={setTz} />
+      </div>
+      {isLoading || !data || data.lines.length === 0 ? (isLoading ? <Loading /> : <Empty />) : (() => {
+      const max = Math.max(...data.lines.map((l) => l.sessions), 1)
+      return (
+      <div className="space-y-4">
       <SessionKpis t={data.totals} />
       {data.lines.length >= 3 && (
         <div className="space-y-1.5">
@@ -535,7 +547,7 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
           <DistributionKpis lines={data.lines} metric="sessions" dimGen="час" topLabel="Пиковый час" bottomLabel="Тихий час" />
         </div>
       )}
-      <ChargeHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      <ChargeHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} tz={tz} />
       <Card>
         <CardContent className="pt-4">
           <div className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Профиль по часам суток (число сессий)</div>
@@ -552,6 +564,9 @@ function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
           </div>
         </CardContent>
       </Card>
+      </div>
+      )
+      })()}
     </div>
   )
 }

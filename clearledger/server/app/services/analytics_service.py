@@ -45,6 +45,7 @@ from app.models import (
 )
 from app.services.mapping import normalize_default
 from app.services.fuel_balance import build_fuel_balance
+from app.services.tz_offsets import shifted_started_at
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -535,6 +536,12 @@ class AnalyticsService:
         return group_by == "region" or bool(regions) or dim_by == "region"
 
     @staticmethod
+    def _needs_tz_join(tz, *dims) -> bool:
+        """При tz='local' почасовой/недельный разрез сдвигается на смещение
+        региона (`regions.msk_offset`) → нужен join сессия→объект→регион."""
+        return tz == "local" and any(d in ("hour", "weekday") for d in dims)
+
+    @staticmethod
     def _apply_region_join(stmt):
         """LEFT JOIN сессия→объект→регион. Замер на проде: join 33 мс против
         коррелированного подзапроса 1607 мс — только join."""
@@ -545,8 +552,14 @@ class AnalyticsService:
             .outerjoin(Region.__table__, Region.id == ServiceLocation.region_id)
         )
 
-    def _cs_group_col(self, group_by: str):
+    def _cs_group_col(self, group_by: str, tz: str = "msk"):
         S = ChargeSession
+        # tz='local' → час/день недели считаются по местному времени станции
+        # (started_at МСК + regions.msk_offset). Требует join региона (см.
+        # _needs_tz_join у вызывающего). Прочие бакеты — всегда в МСК.
+        if group_by in ("hour", "weekday"):
+            ts = shifted_started_at(S.started_at, Region.msk_offset, tz)
+            return func.extract("hour" if group_by == "hour" else "isodow", ts)
         if group_by == "region":
             return self._region_label()
         if group_by == "connector":
@@ -566,10 +579,6 @@ class AnalyticsService:
             return func.coalesce(S.cut_key, "—")
         if group_by == "tariff":
             return S.tariff
-        if group_by == "hour":
-            return func.extract("hour", S.started_at)
-        if group_by == "weekday":
-            return func.extract("isodow", S.started_at)  # 1=Пн .. 7=Вс
         if group_by == "day":
             return func.to_char(S.started_at, "YYYY-MM-DD")
         if group_by == "week":
@@ -685,9 +694,9 @@ class AnalyticsService:
 
     async def _cs_aggregate(self, company_id, date_from, date_to, group_by: str,
                             station_codes=None, regions=None, dim_by=None, dim_val=None,
-                            *, station_id=None) -> list[Any]:
+                            *, station_id=None, tz: str = "msk") -> list[Any]:
         S = ChargeSession
-        gcol = self._cs_group_col(group_by)
+        gcol = self._cs_group_col(group_by, tz)
         stmt = select(
             gcol.label("g"),
             func.count().label("cnt"),
@@ -708,7 +717,7 @@ class AnalyticsService:
             func.count(distinct(S.station_code)).label("stations"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                                 station_id=station_id)).group_by(gcol)
-        if self._uses_region(group_by, regions, dim_by):
+        if self._uses_region(group_by, regions, dim_by) or self._needs_tz_join(tz, group_by):
             stmt = self._apply_region_join(stmt)
         rows = list((await self.session.execute(stmt)).all())
         if group_by == "station":
@@ -799,10 +808,11 @@ class AnalyticsService:
     async def _cs_aggregate_2d(
         self, company_id, date_from, date_to, bucket_by: str, series_by: str | None,
         station_codes=None, regions=None, dim_by=None, dim_val=None, *, station_id=None,
+        tz: str = "msk",
     ) -> list[Any]:
         """Сырые суммы по (бакет [× серия]). series_by=None → только колонка бакета."""
         S = ChargeSession
-        bcol = self._cs_group_col(bucket_by)
+        bcol = self._cs_group_col(bucket_by, tz)
         sel = [
             bcol.label("b"),
             func.count().label("cnt"),
@@ -815,14 +825,15 @@ class AnalyticsService:
         ]
         groups = [bcol]
         if series_by:
-            scol = self._cs_group_col(series_by)
+            scol = self._cs_group_col(series_by, tz)
             sel.insert(1, scol.label("s"))
             groups.append(scol)
         stmt = select(*sel).where(
             *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                             station_id=station_id)
         ).group_by(*groups)
-        if self._uses_region(bucket_by, regions, dim_by) or series_by == "region":
+        if (self._uses_region(bucket_by, regions, dim_by) or series_by == "region"
+                or self._needs_tz_join(tz, bucket_by, series_by)):
             stmt = self._apply_region_join(stmt)
         rows = list((await self.session.execute(stmt)).all())
         station_fields = [f for f, dim in (("b", bucket_by), ("s", series_by)) if dim == "station"]
@@ -891,15 +902,17 @@ class AnalyticsService:
         return out
 
     async def charge_sessions(self, f: PeriodFilter, group_by: str = "station",
-                              with_totals: bool = True) -> dict[str, Any]:
+                              with_totals: bool = True, tz: str = "msk") -> dict[str, Any]:
         """Разрез зарядных сессий ЭЗС: выручка/энергия/сессии/ср.чек/успех по группе.
 
         with_totals=False — не считать сетевые distinct-тоталы портов/станций
         (2 доп. скана). Для разрезов, где вызывающий читает только `lines`
-        (доли/профиль в overview), это экономит 2 полнотабличных distinct-скана."""
+        (доли/профиль в overview), это экономит 2 полнотабличных distinct-скана.
+        tz='local' — час/день недели по местному времени станции (для профиля
+        активности); прочие разрезы игнорируют tz."""
         period_days = (f.date_to - f.date_from).days + 1
         rows = await self._cs_aggregate(f.company_id, f.date_from, f.date_to, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val,
-                                        station_id=f.station_id)
+                                        station_id=f.station_id, tz=tz)
         lines = [self._cs_metrics(group_by, r, period_days) for r in rows]
         total_amount = sum(l["amount"] for l in lines)
         for l in lines:
@@ -1031,11 +1044,13 @@ class AnalyticsService:
             data.append(row)
         return {**base, "series": series, "data": data}
 
-    async def charge_heatmap(self, f: PeriodFilter, metric: str = "sessions") -> dict[str, Any]:
-        """Матрица загрузки час (0–23) × день недели (1=Пн..7=Вс) для heatmap."""
+    async def charge_heatmap(self, f: PeriodFilter, metric: str = "sessions",
+                             tz: str = "msk") -> dict[str, Any]:
+        """Матрица загрузки час (0–23) × день недели (1=Пн..7=Вс) для heatmap.
+        tz='local' — час/день по местному времени станции (сдвиг на msk_offset)."""
         rows = await self._cs_aggregate_2d(
             f.company_id, f.date_from, f.date_to, "hour", "weekday", f.station_codes, f.regions,
-            station_id=f.station_id)
+            station_id=f.station_id, tz=tz)
         cells = []
         for r in rows:
             try:

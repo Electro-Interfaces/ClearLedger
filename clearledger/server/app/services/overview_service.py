@@ -120,7 +120,8 @@ class OverviewService:
     async def overview(self, company_id: Any, df: date, dt: date, compare: str = "prev",
                        today: date | None = None,
                        stations: list[str] | None = None,
-                       regions: list[str] | None = None) -> dict[str, Any]:
+                       regions: list[str] | None = None,
+                       tz: str = "msk") -> dict[str, Any]:
         period_days = (dt - df).days + 1
         prev_to = df - timedelta(days=1)
         prev_from = prev_to - timedelta(days=period_days - 1)
@@ -289,7 +290,8 @@ class OverviewService:
         }
 
         # ─── профиль активности: по часам суток (0-23) + по дням недели (1=Пн..7=Вс) ───
-        hourly_raw = await self.a.charge_sessions(f_cur, "hour", with_totals=False)
+        # tz='local' → профиль по местному времени станций (сдвиг на часовой пояс).
+        hourly_raw = await self.a.charge_sessions(f_cur, "hour", with_totals=False, tz=tz)
         hmap: dict[int, dict] = {}
         for l in hourly_raw["lines"]:
             try:
@@ -300,7 +302,7 @@ class OverviewService:
                    "sessions": hmap[h]["sessions"] if h in hmap else 0,
                    "amount": hmap[h]["amount"] if h in hmap else 0.0} for h in range(24)]
 
-        wd_raw = await self.a.charge_sessions(f_cur, "weekday", with_totals=False)
+        wd_raw = await self.a.charge_sessions(f_cur, "weekday", with_totals=False, tz=tz)
         _WD = {1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Вс"}
         wdm: dict[int, dict] = {}
         for l in wd_raw["lines"]:

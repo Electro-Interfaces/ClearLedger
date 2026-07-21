@@ -85,10 +85,12 @@ async def charge_overview(
     compare: str = Query("prev", pattern="^(prev)$"),
     stations: str | None = None,
     regions: str | None = None,
+    tz: str = Query("msk", pattern="^(msk|local)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Executive-сводка сети ЭЗС за период с дельтами к прошлому периоду."""
+    """Executive-сводка сети ЭЗС за период с дельтами к прошлому периоду.
+    tz=local — профиль активности (часы/дни недели) по местному времени станций."""
     cid = await assert_company_member(company_id, current_user, db)
     codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
     regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
@@ -96,7 +98,7 @@ async def charge_overview(
     # суток, а не застревает на прошлой дате в пределах TTL.
     return await OverviewService(db).overview(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"), compare,
-        today=date.today(), stations=codes, regions=regs)
+        today=date.today(), stations=codes, regions=regs, tz=tz)
 
 
 @router.get("/station-metrics")
