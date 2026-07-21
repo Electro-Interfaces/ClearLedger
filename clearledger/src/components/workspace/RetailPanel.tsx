@@ -19,7 +19,7 @@ import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown
 import { exportChargePdf } from '@/services/chargeExport'
 import { BarChart, Bar, LineChart, Line, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useTabParams } from '@/hooks/useTabParams'
-import { useResetOnScopeChange } from '@/hooks/useScopeReset'
+import { useResetOnScopeChange, useNetScope } from '@/hooks/useScopeReset'
 import { ApplyToScope } from './ApplyToScope'
 import {
   getRetailOverview, getRetailSegments, getRetailEconomics, getRetailGeo, getRetailCohorts,
@@ -260,11 +260,12 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
 // ── Таб: Обзор (собранный BI-дашборд частных клиентов) ──
 const AX = { tick: { fontSize: 10, fill: 'hsl(var(--muted-foreground))' } }
 function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const p = { companyId, dateFrom, dateTo }
-  const ov = useQuery({ queryKey: ['retail-ov', companyId, dateFrom, dateTo], queryFn: () => getRetailOverview(p) })
-  const seg = useQuery({ queryKey: ['retail-seg', companyId, dateFrom, dateTo], queryFn: () => getRetailSegments(p) })
-  const mk = useQuery({ queryKey: ['retail-mk', companyId, dateFrom, dateTo], queryFn: () => getRetailMarketing(p) })
-  const dash = useQuery({ queryKey: ['retail-dash', companyId, dateFrom, dateTo], queryFn: () => getRetailDashboard(p) })
+  const sc = useNetScope()
+  const p = { companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }
+  const ov = useQuery({ queryKey: ['retail-ov', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailOverview(p) })
+  const seg = useQuery({ queryKey: ['retail-seg', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailSegments(p) })
+  const mk = useQuery({ queryKey: ['retail-mk', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailMarketing(p) })
+  const dash = useQuery({ queryKey: ['retail-dash', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailDashboard(p) })
   const exportRef = useRef<HTMLDivElement>(null)
   const [exporting, setExporting] = useState(false)
   async function exportPdf() {
@@ -475,7 +476,8 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: Сегменты (RFM) ──
 function RetailSegmentsTab({ companyId, dateFrom, dateTo, onDrill }: TabProps & { onDrill?: (seg: string) => void }) {
-  const { data, isLoading } = useQuery({ queryKey: ['retail-seg', companyId, dateFrom, dateTo], queryFn: () => getRetailSegments({ companyId, dateFrom, dateTo }) })
+  const sc = useNetScope()
+  const { data, isLoading } = useQuery({ queryKey: ['retail-seg', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailSegments({ companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }) })
   if (isLoading) return <Loading />
   if (!data || data.segments.length === 0) return <Empty text="Нет данных за период" />
   const segs = data.segments
@@ -531,7 +533,8 @@ function RetailSegmentsTab({ companyId, dateFrom, dateTo, onDrill }: TabProps & 
 
 // ── Таб: Экономика (Pareto + распределение) ──
 function RetailEconomicsTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const { data, isLoading } = useQuery({ queryKey: ['retail-eco', companyId, dateFrom, dateTo], queryFn: () => getRetailEconomics({ companyId, dateFrom, dateTo }) })
+  const sc = useNetScope()
+  const { data, isLoading } = useQuery({ queryKey: ['retail-eco', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailEconomics({ companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }) })
   if (isLoading) return <Loading />
   if (!data || data.totals.accounts === 0) return <Empty text="Нет данных за период" />
   const maxBucketRev = Math.max(1, ...data.session_buckets.map((b) => b.revenue))
@@ -562,7 +565,8 @@ function RetailEconomicsTab({ companyId, dateFrom, dateTo }: TabProps) {
 // ── Таб: Гео (мобильность + регионы, нормализованный слой L2) ──
 const isOrphan = (label: string) => label === 'без привязки' || label.startsWith('—')
 function RetailGeoTab({ companyId, dateFrom, dateTo }: TabProps) {
-  const { data, isLoading } = useQuery({ queryKey: ['retail-geo', companyId, dateFrom, dateTo], queryFn: () => getRetailGeo({ companyId, dateFrom, dateTo }) })
+  const sc = useNetScope()
+  const { data, isLoading } = useQuery({ queryKey: ['retail-geo', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailGeo({ companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }) })
   if (isLoading) return <Loading />
   if (!data || data.totals.accounts === 0) return <Empty text="Нет данных за период" />
   const cov = data.coverage
@@ -613,7 +617,8 @@ function retColor(p: number): string {
   return `rgba(52, 211, 153, ${(0.08 + a * 0.5).toFixed(3)})`
 }
 function RetailCohortsTab({ companyId }: TabProps) {
-  const { data, isLoading } = useQuery({ queryKey: ['retail-coh', companyId], queryFn: () => getRetailCohorts({ companyId, months: 12 }) })
+  const sc = useNetScope()
+  const { data, isLoading } = useQuery({ queryKey: ['retail-coh', companyId, sc.key], queryFn: () => getRetailCohorts({ companyId, months: 12, stations: sc.stations, regions: sc.regions }) })
   if (isLoading) return <Loading />
   if (!data || data.cohorts.length === 0) return <Empty text="Недостаточно истории для когорт" />
   const cols = Array.from({ length: data.max_offset + 1 }, (_, i) => i)
@@ -720,14 +725,15 @@ function RetailAccountsTab({ companyId, dateFrom, dateTo, initialSegment }: TabP
   useResetOnScopeChange(() => setSearch(''))
   const [sort, setSort] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'revenue', order: 'desc' })
   const [detail, setDetail] = useState<string | null>(null)
-  const p = { companyId, dateFrom, dateTo }
-  const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo], queryFn: () => getRetailDimensions(p) })
+  const sc = useNetScope()
+  const p = { companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }
+  const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailDimensions(p) })
   const regionOpts: Opt[] = useMemo(() => [{ value: 'all', label: 'Все регионы' },
     ...(dims.data?.regions ?? []).map((r) => ({ value: r.region, label: `${r.region} · ${r.accounts}` }))], [dims.data])
   const stationOpts: Opt[] = useMemo(() => [{ value: 'all', label: 'Все станции' },
     ...(dims.data?.stations ?? []).map((s) => ({ value: s.location_id, label: `${s.name}${s.number ? ` (${s.number})` : ''} · ${s.accounts}`, keywords: `${s.region ?? ''} ${s.number ?? ''}` }))], [dims.data])
   const q = useQuery({
-    queryKey: ['retail-accts', companyId, dateFrom, dateTo, segment, region, station, minSessions, search, sort],
+    queryKey: ['retail-accts', companyId, dateFrom, dateTo, sc.key, segment, region, station, minSessions, search, sort],
     queryFn: () => getRetailAccounts({
       ...p,
       segment: segment === 'all' ? undefined : segment,
@@ -801,20 +807,21 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
   const [detail, setDetail] = useState<string | null>(null)
   const [scopeAll, setScopeAll] = useState(false)
   const [sortAll, setSortAll] = useState<{ key: string; order: 'asc' | 'desc' }>({ key: 'revenue', order: 'desc' })
-  const p = { companyId, dateFrom, dateTo }
-  const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo], queryFn: () => getRetailDimensions(p) })
+  const sc = useNetScope()
+  const p = { companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }
+  const dims = useQuery({ queryKey: ['retail-dims', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailDimensions(p) })
   const stationOpts: Opt[] = useMemo(() => (dims.data?.stations ?? []).map((s) => ({
     value: s.location_id, label: `${s.name}${s.number ? ` (${s.number})` : ''} · ${s.accounts} акк`, keywords: `${s.region ?? ''} ${s.number ?? ''}` })), [dims.data])
   const regionOpts: Opt[] = useMemo(() => (dims.data?.regions ?? []).map((r) => ({
     value: r.region, label: `${r.region} · ${r.accounts} акк` })), [dims.data])
   const q = useQuery({
     enabled: !!value,
-    queryKey: ['retail-profile', companyId, dateFrom, dateTo, mode, value],
+    queryKey: ['retail-profile', companyId, dateFrom, dateTo, sc.key, mode, value],
     queryFn: () => getRetailProfile({ ...p, station: mode === 'station' ? value : undefined, region: mode === 'region' ? value : undefined }),
   })
   const allQ = useQuery({
     enabled: !!value && scopeAll,
-    queryKey: ['retail-scope-accts', companyId, dateFrom, dateTo, mode, value, sortAll],
+    queryKey: ['retail-scope-accts', companyId, dateFrom, dateTo, sc.key, mode, value, sortAll],
     queryFn: () => getRetailAccounts({ ...p,
       station: mode === 'station' ? value : undefined,
       region: mode === 'region' ? value : undefined,

@@ -15,6 +15,28 @@
 import { useEffect, useRef } from 'react'
 import { useFilters } from '@/contexts/FilterContext'
 
+/**
+ * Контурное сужение сети для запросов панели: станции (коды) + регионы (имена).
+ *
+ * Единый способ прокинуть верхний фильтр в аналитические запросы (эталон —
+ * `useScope` из Волны 3 в OverviewDashboardPanel). `stations`/`regions` идут
+ * в `queryFn`, `key` — в `queryKey` (иначе смена фильтра не перезапросит).
+ * Регион на бэке резолвится нормализованно (session_scope), поэтому сюда
+ * отдаём именно имена регионов (`regionIds` в FilterContext = имена).
+ */
+export function useNetScope(): {
+  stations: string[] | undefined
+  regions: string[] | undefined
+  key: string
+} {
+  const { stationCodes, regionIds } = useFilters()
+  return {
+    stations: stationCodes.length ? stationCodes.map(String) : undefined,
+    regions: regionIds.length ? regionIds : undefined,
+    key: `${stationCodes.join(',')}|${regionIds.join(',')}`,
+  }
+}
+
 /** Строковый отпечаток контура: меняется при любой правке верхнего фильтра. */
 export function useScopeKey(): string {
   const { period, stationCode, locationIds, regionIds, stationCodes } = useFilters()

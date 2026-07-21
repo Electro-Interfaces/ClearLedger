@@ -19,6 +19,7 @@ import type { ServiceLocation } from '@/types/location'
 import { getStationMetrics, type StationMetric } from '@/services/overviewService'
 import { fmtMoneyShort } from '@/services/analyticsService'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
+import { useFilters } from '@/contexts/FilterContext'
 import { ApplyToScope } from './ApplyToScope'
 
 const ALL = '__all__'
@@ -311,10 +312,16 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
   const dark = useIsDark()
+  // Контур рабочей области: регионы (имена) · точки (location_id) · станции (коды).
+  // Метрики сужаем на бэке (station_code + region-join), видимые точки — здесь.
+  const { stationCodes, regionIds, locationIds } = useFilters()
+  const scopeStations = stationCodes.length ? stationCodes.map(String) : undefined
+  const scopeRegions = regionIds.length ? regionIds : undefined
+  const scopeKey = `${stationCodes.join(',')}|${regionIds.join(',')}|${locationIds.join(',')}`
   const { data, isLoading } = useQuery({ queryKey: ['locations', companyId], queryFn: () => loadLocations(companyId) })
   const { data: metricsData } = useQuery({
-    queryKey: ['station-metrics', companyId, dateFrom, dateTo],
-    queryFn: () => getStationMetrics({ companyId, dateFrom, dateTo }),
+    queryKey: ['station-metrics', companyId, dateFrom, dateTo, scopeKey],
+    queryFn: () => getStationMetrics({ companyId, dateFrom, dateTo, stations: scopeStations, regions: scopeRegions }),
   })
   const [search, setSearch] = useState('')
   // Смена контура обнуляет поиск по карте (CLAUDE.md, правило 5).
@@ -344,7 +351,15 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
 
   const points = useMemo(() => {
     const q = search.trim().toLowerCase()
+    // Внешняя граница — контур рабочей области (регион/точка/станция). Показываем
+    // точку, если она в выбранном множестве по любому измерению (union). Пусто =
+    // весь парк. Локальные фильтры карты сужают уже внутри контура.
+    const hasContour = stationCodes.length > 0 || regionIds.length > 0 || locationIds.length > 0
+    const codeSet = new Set(stationCodes.map(String))
+    const regSet = new Set(regionIds)
+    const locSet = new Set(locationIds)
     return allPoints.filter((p) => {
+      if (hasContour && !(regSet.has(p.region) || locSet.has(p.id) || codeSet.has(p.number))) return false
       if (region !== ALL && p.region !== region) return false
       if (status !== ALL && p.opStatus !== status) return false
       if (link !== ALL && p.linkStatus !== link) return false
@@ -360,7 +375,7 @@ export function ChargeMapPanel({ companyId, dateFrom, dateTo }: {
       if (q && !`${p.name} ${p.city} ${p.address} ${p.number}`.toLowerCase().includes(q)) return false
       return true
     })
-  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, lifecycle])
+  }, [allPoints, search, region, status, link, power, manuf, stage, owner, locClass, speed, lifecycle, scopeKey, stationCodes, regionIds, locationIds])
 
   // пороги раскраски по метрике (квантили над видимыми точками)
   const colorTh = useMemo(() => {

@@ -478,6 +478,8 @@ async def get_charge_dimensions(
 async def get_charge_long_trend(
     company_id: str,
     group_by: str = Query("none", pattern="^(none|connector|speed|location_class)$"),
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -485,9 +487,26 @@ async def get_charge_long_trend(
     сводная выработка контрагента (station_dispense_periods) до появления полных
     сессий, транзакционные charge_sessions — после. Точка склейки — первый месяц,
     где сессии дают ≥80% объёма сводной (либо сводной нет). Разрезы: тип
-    коннектора / Быстрая-Медленная / город-трасса (паспорт станции, слот obshaya)."""
+    коннектора / Быстрая-Медленная / город-трасса (паспорт станции, слот obshaya).
+
+    Контур сужается по региону (обе серии — через `sl.region_id`) и станциям
+    (сессии — `s.station_code`, сводная — `sl.code` объекта L2)."""
     from sqlalchemy import text as sa_text
     cid = await assert_company_module(company_id, current_user, db, "management")
+
+    scope_stations = _csv(stations)
+    scope_regions = _csv(regions)
+    file_scope = sess_scope = ""
+    scope_params: dict[str, Any] = {}
+    if scope_regions:
+        reg_sub = " AND sl.region_id IN (SELECT r.id FROM regions r WHERE r.name = ANY(:regions))"
+        file_scope += reg_sub
+        sess_scope += reg_sub
+        scope_params["regions"] = scope_regions
+    if scope_stations:
+        file_scope += " AND sl.code = ANY(:stations)"
+        sess_scope += " AND s.station_code = ANY(:stations)"
+        scope_params["stations"] = scope_stations
 
     dim_file = {
         "none": "''",
@@ -508,7 +527,8 @@ async def get_charge_long_trend(
         "FROM station_dispense_periods d "
         "JOIN service_locations sl ON sl.id = d.location_id "
         "WHERE d.company_id = :cid "
-        "GROUP BY 1, 2"), {"cid": str(cid)})).all()
+        f"{file_scope} "
+        "GROUP BY 1, 2"), {"cid": str(cid), **scope_params})).all()
     sess_rows = (await db.execute(sa_text(
         f"SELECT to_char(date_trunc('month', s.started_at), 'YYYY-MM-01') AS period, "
         f"       {dim_sess} AS dim, "
@@ -517,7 +537,8 @@ async def get_charge_long_trend(
         "FROM charge_sessions s "
         "LEFT JOIN service_locations sl ON sl.id = s.location_id "
         "WHERE s.company_id = :cid AND s.energy_kwh IS NOT NULL "
-        "GROUP BY 1, 2"), {"cid": str(cid)})).all()
+        f"{sess_scope} "
+        "GROUP BY 1, 2"), {"cid": str(cid), **scope_params})).all()
 
     # канонизация типа коннектора: сводная и ПК пишут по-разному
     # («CCS2»/«CCS Combo 2», «GBT_DC»/«GB/T DC») — иначе серии рвутся на склейке

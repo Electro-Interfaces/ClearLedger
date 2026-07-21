@@ -250,9 +250,11 @@ export interface StationMetricsResponse {
 }
 /** Агрегаты сессий по станции (location_id) за период — джойнится на фронте по id локации. */
 export async function getStationMetrics(p: {
-  companyId: string; dateFrom: string; dateTo: string
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[]
 }): Promise<StationMetricsResponse> {
   return get<StationMetricsResponse>('/api/analytics/charge-sessions/station-metrics', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
   })
 }

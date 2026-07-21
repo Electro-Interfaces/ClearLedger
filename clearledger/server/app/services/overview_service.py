@@ -20,6 +20,7 @@ from app.models import ChargeSession
 from app.services.analytics_cache import cached_report
 from app.services.analytics_service import AnalyticsService, PeriodFilter
 from app.services.corporate_service import CorporateService
+from app.services.session_scope import session_scope_conds
 
 
 def _dpct(cur: float, prev: float) -> float | None:
@@ -201,7 +202,8 @@ class OverviewService:
         ]
 
         # ─── корпоратив (ЮЛ) ───
-        corp = await self.corp.overview(company_id, df, dt)
+        corp = await self.corp.overview(company_id, df, dt,
+                                        stations=f_cur.station_codes, regions=f_cur.regions)
         corp_rev = corp["totals"]["corp_revenue"]
         total_rev = tc["amount"] or 0.0
         corp_share = round(corp_rev / total_rev * 100, 1) if total_rev else 0.0
@@ -452,7 +454,9 @@ class OverviewService:
         }
 
     @cached_report("ezs:station_metrics")
-    async def station_metrics(self, company_id: Any, df: date, dt: date) -> dict[str, Any]:
+    async def station_metrics(self, company_id: Any, df: date, dt: date,
+                              stations: list[str] | None = None,
+                              regions: list[str] | None = None) -> dict[str, Any]:
         """Агрегаты сессий по станции (location_id) за период — для раскраски/размера
         точек на карте. Джойн с координатами делает фронт по location_id (= ServiceLocation.id).
         Учитываются только сопоставленные сессии (location_id проставлен при загрузке)."""
@@ -471,6 +475,7 @@ class OverviewService:
         ).where(
             S.company_id == company_id, S.location_id.is_not(None),
             S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
+            *session_scope_conds(company_id, stations, regions),
         ).group_by(S.location_id)
         rows = (await self.db.execute(stmt)).all()
         metrics = []

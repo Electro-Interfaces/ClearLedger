@@ -111,15 +111,24 @@ export interface RetailProfile {
   top_accounts: RetailAccount[]
 }
 
-type P = { companyId: string; dateFrom: string; dateTo: string }
-const params = (p: P) => ({ company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo })
+type P = { companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[] }
+/** Базовые query-параметры + контурное сужение сети (станции/регионы). */
+const params = (p: P) => ({
+  company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+  ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+  ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+})
 
 export const getRetailOverview = (p: P) => get<RetailOverview>('/api/retail/overview', params(p))
 export const getRetailSegments = (p: P) => get<RetailSegmentsResponse>('/api/retail/segments', params(p))
 export const getRetailEconomics = (p: P) => get<RetailEconomics>('/api/retail/economics', params(p))
 export const getRetailGeo = (p: P) => get<RetailGeo>('/api/retail/geo', params(p))
-export const getRetailCohorts = (p: { companyId: string; months?: number }) =>
-  get<RetailCohorts>('/api/retail/cohorts', { company_id: p.companyId, months: p.months ?? 12 })
+export const getRetailCohorts = (p: { companyId: string; months?: number; stations?: string[]; regions?: string[] }) =>
+  get<RetailCohorts>('/api/retail/cohorts', {
+    company_id: p.companyId, months: p.months ?? 12,
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+  })
 
 export interface AccountsParams extends P {
   region?: string; station?: string; segment?: string
@@ -127,6 +136,8 @@ export interface AccountsParams extends P {
 }
 export function getRetailAccounts(p: AccountsParams): Promise<RetailAccountsResponse> {
   const q: Record<string, string> = { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo }
+  if (p.stations?.length) q.stations = p.stations.join(',')
+  if (p.regions?.length) q.regions = p.regions.join(',')
   if (p.region) q.region = p.region
   if (p.station) q.station = p.station
   if (p.segment) q.segment = p.segment
@@ -142,6 +153,8 @@ export const getRetailDimensions = (p: P) => get<RetailDimensions>('/api/retail/
 
 export function getRetailProfile(p: P & { station?: string; region?: string }): Promise<RetailProfile> {
   const q: Record<string, string> = { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo }
+  if (p.stations?.length) q.stations = p.stations.join(',')
+  if (p.regions?.length) q.regions = p.regions.join(',')
   if (p.station) q.station = p.station
   if (p.region) q.region = p.region
   return get<RetailProfile>('/api/retail/profile', q)
@@ -162,7 +175,11 @@ export interface RetailAccountDetail {
   recent?: AccountSession[]
 }
 export function getRetailAccount(p: P & { account: string }): Promise<RetailAccountDetail> {
-  return get<RetailAccountDetail>('/api/retail/account', { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, account: p.account })
+  return get<RetailAccountDetail>('/api/retail/account', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, account: p.account,
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+  })
 }
 
 export interface MarketingKpis {

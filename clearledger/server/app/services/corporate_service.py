@@ -15,13 +15,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, CorporateClient
 from app.services.analytics_cache import cached_report
+from app.services.session_scope import session_scope_conds
 
 
 class CorporateService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _metrics_by_client(self, company_id, df: date, dt: date) -> dict[str, Any]:
+    async def _metrics_by_client(self, company_id, df: date, dt: date,
+                                 stations: list[str] | None = None,
+                                 regions: list[str] | None = None) -> dict[str, Any]:
         """Агрегаты сессий по client_name (период). corp = client_amount (договор),
         retail = energy×tariff (розница-эквивалент)."""
         S = ChargeSession
@@ -37,6 +40,7 @@ class CorporateService:
         ).where(
             S.company_id == company_id, S.client_name.is_not(None),
             S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
+            *session_scope_conds(company_id, stations, regions),
         ).group_by(S.client_name)
         return {r.name: r for r in (await self.db.execute(stmt)).all()}
 
@@ -76,13 +80,19 @@ class CorporateService:
         }
 
     @cached_report("corp:clients")
-    async def clients(self, company_id, df: date, dt: date) -> dict[str, Any]:
+    async def clients(self, company_id, df: date, dt: date,
+                      stations: list[str] | None = None,
+                      regions: list[str] | None = None) -> dict[str, Any]:
         """Полная строка по каждому клиенту реестра: договор + метрики + гэп. Питает
-        табы Клиенты / Тарифы / Рентабельность / Биллинг."""
+        табы Клиенты / Тарифы / Рентабельность / Биллинг.
+
+        Сужение по станциям/регионам применяется к МЕТРИКАМ сессий (как период):
+        реестр клиентов остаётся полным, но выручка/энергия считаются только по
+        сессиям в контуре — клиент без сессий в регионе показывается с нулями."""
         regs = (await self.db.execute(
             select(CorporateClient).where(CorporateClient.company_id == company_id)
             .order_by(CorporateClient.name))).scalars().all()
-        metrics = await self._metrics_by_client(company_id, df, dt)
+        metrics = await self._metrics_by_client(company_id, df, dt, stations, regions)
         lines = [self._line(c, metrics.get(c.name)) for c in regs]
         lines.sort(key=lambda x: -x["corp_revenue"])
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
@@ -90,7 +100,8 @@ class CorporateService:
 
     @cached_report("corp:billing")
     async def billing(self, company_id, df: date, dt: date, client: str | None = None,
-                      vat_rate: float = 20.0) -> dict[str, Any]:
+                      vat_rate: float = 20.0, stations: list[str] | None = None,
+                      regions: list[str] | None = None) -> dict[str, Any]:
         """Данные под УПД: сводка на клиента + детализация-номенклатура (по договорному
         тарифу). Тариф «НДС в том числе» → выделяем НДС из суммы с НДС (gross)."""
         S = ChargeSession
@@ -100,6 +111,7 @@ class CorporateService:
             S.company_id == company_id, S.client_name.is_not(None),
             S.client_amount.is_not(None),
             S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
+            *session_scope_conds(company_id, stations, regions),
         ]
         if client:
             conds.append(S.client_name == client)
@@ -147,7 +159,8 @@ class CorporateService:
 
     @cached_report("corp:client-card")
     async def client_card(self, company_id, client: str, df: date, dt: date,
-                          history_months: int = 0) -> dict[str, Any]:
+                          history_months: int = 0, stations: list[str] | None = None,
+                          regions: list[str] | None = None) -> dict[str, Any]:
         """Карточка одного ЮЛ: помесячная реализация за период + профиль потребления.
 
         Отвечает на вопрос «как развиваются отношения»: растёт ли выборка,
@@ -168,8 +181,13 @@ class CorporateService:
         S = ChargeSession
         lo = datetime.combine(df, datetime.min.time())
         hi = datetime.combine(dt, datetime.max.time())
+        # Сужение сети применяется к периодным запросам карточки (метрики,
+        # разрезы, ряд месяцев). Lifetime (первая/последняя сессия) — по всей
+        # истории и без сужения: это факт об отношениях, а не о контуре.
+        net = session_scope_conds(company_id, stations, regions)
         scope = [S.company_id == company_id, S.client_name == client,
-                 S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+                 S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
+                 *net]
 
         # Горизонт помесячного ряда: либо контур, либо N месяцев до его конца.
         m_from = df
@@ -180,7 +198,8 @@ class CorporateService:
                           (first.month - back % 12 - 1) % 12 + 1, 1)
         m_lo = datetime.combine(m_from, datetime.min.time())
         m_scope = [S.company_id == company_id, S.client_name == client,
-                   S.started_at.is_not(None), S.started_at >= m_lo, S.started_at <= hi]
+                   S.started_at.is_not(None), S.started_at >= m_lo, S.started_at <= hi,
+                   *net]
 
         reg = (await self.db.execute(
             select(CorporateClient).where(CorporateClient.company_id == company_id,
@@ -286,7 +305,7 @@ class CorporateService:
                    S.started_at.is_not(None)))).one()
 
         totals = self._line(reg, None) if reg else {"name": client}
-        agg = await self._metrics_by_client(company_id, df, dt)
+        agg = await self._metrics_by_client(company_id, df, dt, stations, regions)
         if reg:
             totals = self._line(reg, agg.get(client))
         else:
@@ -343,9 +362,11 @@ class CorporateService:
         }
 
     @cached_report("corp:overview")
-    async def overview(self, company_id, df: date, dt: date) -> dict[str, Any]:
+    async def overview(self, company_id, df: date, dt: date,
+                       stations: list[str] | None = None,
+                       regions: list[str] | None = None) -> dict[str, Any]:
         """Стратегический слой ЮЛ: KPI + топ-клиенты + алерты."""
-        data = await self.clients(company_id, df, dt)
+        data = await self.clients(company_id, df, dt, stations, regions)
         lines: list[dict[str, Any]] = data["clients"]
         top = [x for x in lines if x["corp_revenue"] > 0][:5]
         alerts: list[dict[str, str]] = []

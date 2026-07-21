@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Kpi } from './analytics/Kpi'
 import { ExportButton } from './analytics/ExportButton'
-import { useScopeSubtitle } from '@/hooks/useScopeReset'
+import { useScopeSubtitle, useNetScope } from '@/hooks/useScopeReset'
 import { PanelViewTabs } from './PanelViewTabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
@@ -89,9 +89,10 @@ const CUT_OPTS = [
 // ── Таб: Прайс-лист (сетка регион|станция × коннектор) ──
 function PriceGrid({ companyId, dateFrom, dateTo }: TabProps) {
   const [g, patch] = useTabParams('tf_grid', { by: 'region' })
+  const sc = useNetScope()
   const { data, isLoading } = useQuery({
-    queryKey: ['tariff-grid', companyId, dateFrom, dateTo, g.by],
-    queryFn: () => getTariffGrid({ companyId, dateFrom, dateTo, by: g.by }),
+    queryKey: ['tariff-grid', companyId, dateFrom, dateTo, sc.key, g.by],
+    queryFn: () => getTariffGrid({ companyId, dateFrom, dateTo, by: g.by, stations: sc.stations, regions: sc.regions }),
   })
   const cell = (row: string, conn: string) => data?.cells.find((c) => c.row === row && c.connector === conn)
   return (
@@ -136,9 +137,10 @@ function PriceGrid({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: По тарифам (разрез по значению тарифа) ──
 function ByTariff({ companyId, dateFrom, dateTo }: TabProps) {
+  const sc = useNetScope()
   const { data, isLoading } = useQuery({
-    queryKey: ['tariff-by', companyId, dateFrom, dateTo],
-    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy: 'tariff' }),
+    queryKey: ['tariff-by', companyId, dateFrom, dateTo, sc.key],
+    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy: 'tariff', stations: sc.stations, regions: sc.regions }),
   })
   if (isLoading) return <Loading />
   if (!data || data.lines.length === 0) return <Empty text="Нет данных" />
@@ -160,10 +162,11 @@ function ByTariff({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: Средний тариф (карта цен по разрезу) ──
 function AvgTariff({ companyId, dateFrom, dateTo }: TabProps) {
+  const sc = useNetScope()
   const [cut, patch] = useTabParams('tf_avg', { by: 'region' })
   const { data, isLoading } = useQuery({
-    queryKey: ['tariff-avg', companyId, dateFrom, dateTo, cut.by],
-    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy: cut.by as never }),
+    queryKey: ['tariff-avg', companyId, dateFrom, dateTo, sc.key, cut.by],
+    queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy: cut.by as never, stations: sc.stations, regions: sc.regions }),
   })
   const cols: Col<ChargeSessionLine>[] = [
     { key: 'label', label: 'Разрез', left: true, get: (r) => r.label, cell: (r) => r.label },
@@ -197,10 +200,11 @@ function AvgTariff({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: Факт vs номинал ──
 function FactVsNominal({ companyId, dateFrom, dateTo }: TabProps) {
+  const sc = useNetScope()
   const [cut, patch] = useTabParams('tf_fvn', { by: 'region' })
   const { data, isLoading } = useQuery({
-    queryKey: ['tariff-fvn', companyId, dateFrom, dateTo, cut.by],
-    queryFn: () => getFactVsNominal({ companyId, dateFrom, dateTo, groupBy: cut.by }),
+    queryKey: ['tariff-fvn', companyId, dateFrom, dateTo, sc.key, cut.by],
+    queryFn: () => getFactVsNominal({ companyId, dateFrom, dateTo, groupBy: cut.by, stations: sc.stations, regions: sc.regions }),
   })
   const cols: Col<FvnLine>[] = [
     { key: 'label', label: 'Разрез', left: true, get: (r) => r.label, cell: (r) => r.label },
@@ -235,9 +239,10 @@ function FactVsNominal({ companyId, dateFrom, dateTo }: TabProps) {
 
 // ── Таб: Динамика (ср.тариф по месяцам) ──
 function TariffDynamics({ companyId, dateFrom, dateTo }: TabProps) {
+  const sc = useNetScope()
   const { data, isLoading } = useQuery({
-    queryKey: ['tariff-dyn', companyId, dateFrom, dateTo],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'month', metric: 'price_per_kwh' }),
+    queryKey: ['tariff-dyn', companyId, dateFrom, dateTo, sc.key],
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'month', metric: 'price_per_kwh', stations: sc.stations, regions: sc.regions }),
   })
   if (isLoading) return <Loading />
   const rows = (data?.data ?? []).map((r) => ({ bucket: String(r.bucket), value: Number(r['Вся сеть'] ?? r.value ?? 0) }))

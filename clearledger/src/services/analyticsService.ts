@@ -751,9 +751,12 @@ export interface ChargeLongTrendResponse {
 }
 export async function getChargeLongTrend(
   companyId: string, groupBy: 'none' | 'connector' | 'speed' | 'location_class',
+  opts?: { stations?: string[]; regions?: string[] },
 ): Promise<ChargeLongTrendResponse> {
   return get<ChargeLongTrendResponse>('/api/analytics/charge-sessions/long-trend', {
     company_id: companyId, group_by: groupBy,
+    ...(opts?.stations?.length ? { stations: opts.stations.join(',') } : {}),
+    ...(opts?.regions?.length ? { regions: opts.regions.join(',') } : {}),
   })
 }
 

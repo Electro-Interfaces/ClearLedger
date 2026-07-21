@@ -27,17 +27,29 @@ def _d(s: str, field: str) -> date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Invalid {field}: {s}") from exc
 
 
+def _csv(s: str | None) -> list[str] | None:
+    """Comma-separated query → список (пусто → None = без сужения)."""
+    if not s:
+        return None
+    vals = [x.strip() for x in s.split(",") if x.strip()]
+    return vals or None
+
+
 @router.get("/overview")
 async def corporate_overview(
     company_id: str,
     date_from: str,
     date_to: str,
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """KPI корп-направления + топ-клиенты + алерты."""
     cid = await assert_company_member(company_id, current_user, db)
-    return await CorporateService(db).overview(cid, _d(date_from, "date_from"), _d(date_to, "date_to"))
+    return await CorporateService(db).overview(
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
+        stations=_csv(stations), regions=_csv(regions))
 
 
 @router.get("/clients")
@@ -45,12 +57,16 @@ async def corporate_clients(
     company_id: str,
     date_from: str,
     date_to: str,
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Реестр клиентов + метрики/гэп/тариф за период (Клиенты/Тарифы/Рентабельность/Биллинг)."""
     cid = await assert_company_member(company_id, current_user, db)
-    return await CorporateService(db).clients(cid, _d(date_from, "date_from"), _d(date_to, "date_to"))
+    return await CorporateService(db).clients(
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
+        stations=_csv(stations), regions=_csv(regions))
 
 
 @router.get("/client-card")
@@ -60,6 +76,8 @@ async def corporate_client_card(
     date_from: str,
     date_to: str,
     history_months: int = 0,
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -71,7 +89,8 @@ async def corporate_client_card(
     cid = await assert_company_member(company_id, current_user, db)
     return await CorporateService(db).client_card(
         cid, client, _d(date_from, "date_from"), _d(date_to, "date_to"),
-        max(0, min(history_months, 36)))
+        max(0, min(history_months, 36)),
+        stations=_csv(stations), regions=_csv(regions))
 
 
 @router.get("/billing")
@@ -81,13 +100,16 @@ async def corporate_billing(
     date_to: str,
     client: str | None = None,
     vat_rate: float = 20.0,
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Данные к выставлению под УПД: сводка на клиента + номенклатура + разбивка НДС."""
     cid = await assert_company_member(company_id, current_user, db)
     return await CorporateService(db).billing(
-        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), client, vat_rate)
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), client, vat_rate,
+        stations=_csv(stations), regions=_csv(regions))
 
 
 @router.get("/billing-export")
@@ -97,6 +119,8 @@ async def corporate_billing_export(
     date_to: str,
     client: str | None = None,
     vat_rate: float = 20.0,
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
@@ -104,8 +128,10 @@ async def corporate_billing_export(
     НДС 20% выделен) + «Детализация» (номенклатура по договорному тарифу). Фильтры:
     период (обяз.), опц. конкретный клиент (один клиент = один УПД)."""
     cid = await assert_company_member(company_id, current_user, db)
+    st_codes, regs = _csv(stations), _csv(regions)
     data = await CorporateService(db).billing(
-        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), client, vat_rate)
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), client, vat_rate,
+        stations=st_codes, regions=regs)
 
     import openpyxl
     wb = openpyxl.Workbook()
@@ -136,11 +162,13 @@ async def corporate_billing_export(
                    d["net"], d["vat"], d["gross"]])
 
     # Лист «Транзакции» — приложение к УПД: список сессий, подтверждающих сумму.
+    from app.services.session_scope import session_scope_conds
     S = ChargeSession
     lo = datetime.combine(_d(date_from, "date_from"), datetime.min.time())
     hi = datetime.combine(_d(date_to, "date_to"), datetime.max.time())
     sc = [S.company_id == cid, S.client_name.is_not(None), S.client_amount.is_not(None),
-          S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+          S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
+          *session_scope_conds(cid, st_codes, regs)]
     if client:
         sc.append(S.client_name == client)
     sessions = (await db.execute(

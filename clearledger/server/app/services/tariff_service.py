@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession
 from app.services.analytics_cache import cached_report
+from app.services.session_scope import session_scope_conds
 
 _GROUP_COLS = {
     "region": ChargeSession.region,
@@ -32,17 +33,21 @@ class TariffService:
     def _range(df: date, dt: date):
         return datetime.combine(df, datetime.min.time()), datetime.combine(dt, datetime.max.time())
 
-    def _base_conds(self, company_id, lo, hi, user_type: str | None):
+    def _base_conds(self, company_id, lo, hi, user_type: str | None,
+                    stations: list[str] | None = None, regions: list[str] | None = None):
         S = ChargeSession
         conds = [S.company_id == company_id, S.started_at.is_not(None),
-                 S.started_at >= lo, S.started_at <= hi, S.energy_kwh > 0]
+                 S.started_at >= lo, S.started_at <= hi, S.energy_kwh > 0,
+                 *session_scope_conds(company_id, stations, regions)]
         if user_type:
             conds.append(S.user_type == user_type)
         return conds
 
     @cached_report("tariff:grid")
     async def price_grid(self, company_id, df: date, dt: date, by: str = "region",
-                         user_type: str | None = None) -> dict[str, Any]:
+                         user_type: str | None = None,
+                         stations: list[str] | None = None,
+                         regions: list[str] | None = None) -> dict[str, Any]:
         """Тарифная сетка: <разрез by> × коннектор → преобладающий тариф (mode),
         диапазон, сессии/энергия/факт.цена. by = region | station. Фронт пивотит в матрицу."""
         S = ChargeSession
@@ -64,7 +69,7 @@ class TariffService:
             func.min(S.tariff).label("tmin"),
             func.max(S.tariff).label("tmax"),
             func.mode().within_group(S.tariff.asc()).label("tmode"),
-        ).where(*self._base_conds(company_id, lo, hi, user_type)).group_by("row", "connector")
+        ).where(*self._base_conds(company_id, lo, hi, user_type, stations, regions)).group_by("row", "connector")
         raw = (await self.db.execute(stmt)).all()
 
         # подпись станции: свежайшее имя из сессий + код
@@ -104,7 +109,9 @@ class TariffService:
 
     @cached_report("tariff:fact_vs_nominal")
     async def fact_vs_nominal(self, company_id, df: date, dt: date, group_by: str = "region",
-                              user_type: str | None = None) -> dict[str, Any]:
+                              user_type: str | None = None,
+                              stations: list[str] | None = None,
+                              regions: list[str] | None = None) -> dict[str, Any]:
         """По разрезу: номинал (энерговзвеш. tariff) vs факт (выручка÷энергия) + отклонение."""
         S = ChargeSession
         gcol = _GROUP_COLS.get(group_by, S.region)
@@ -115,7 +122,7 @@ class TariffService:
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
             func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
             func.coalesce(func.sum(S.energy_kwh * S.tariff), 0).label("nominal_rev"),
-        ).where(*self._base_conds(company_id, lo, hi, user_type)).group_by("g")
+        ).where(*self._base_conds(company_id, lo, hi, user_type, stations, regions)).group_by("g")
         rows = (await self.db.execute(stmt)).all()
 
         lines: list[dict[str, Any]] = []

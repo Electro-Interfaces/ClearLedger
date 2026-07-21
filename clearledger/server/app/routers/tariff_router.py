@@ -24,6 +24,14 @@ def _d(s: str, field: str) -> date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Invalid {field}: {s}") from exc
 
 
+def _csv(s: str | None) -> list[str] | None:
+    """Comma-separated query → список (пусто → None = без сужения)."""
+    if not s:
+        return None
+    vals = [x.strip() for x in s.split(",") if x.strip()]
+    return vals or None
+
+
 @router.get("/grid")
 async def tariff_grid(
     company_id: str,
@@ -31,13 +39,16 @@ async def tariff_grid(
     date_to: str,
     by: str = Query("region", pattern="^(region|station)$"),
     user_type: str | None = None,
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Тарифная сетка: <region|station> × коннектор → преобладающий тариф + диапазон + объём."""
     cid = await assert_company_member(company_id, current_user, db)
     return await TariffService(db).price_grid(
-        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), by, user_type)
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), by, user_type,
+        stations=_csv(stations), regions=_csv(regions))
 
 
 @router.get("/fact-vs-nominal")
@@ -47,10 +58,13 @@ async def tariff_fact_vs_nominal(
     date_to: str,
     group_by: str = Query("region", pattern="^(region|station|connector|user_type)$"),
     user_type: str | None = None,
+    stations: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """По разрезу: номинал (энерговзвеш. tariff) vs факт (выручка÷энергия) + отклонение."""
     cid = await assert_company_member(company_id, current_user, db)
     return await TariffService(db).fact_vs_nominal(
-        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), group_by, user_type)
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), group_by, user_type,
+        stations=_csv(stations), regions=_csv(regions))

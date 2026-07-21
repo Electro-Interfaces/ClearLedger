@@ -39,10 +39,12 @@ export interface FvnResponse {
   totals: { energy_kwh: number; nominal: number; realized: number; delta: number }
 }
 
-type P = { companyId: string; dateFrom: string; dateTo: string; userType?: string }
+type P = { companyId: string; dateFrom: string; dateTo: string; userType?: string; stations?: string[]; regions?: string[] }
 function qp(p: P): Record<string, string> {
   const o: Record<string, string> = { company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo }
   if (p.userType) o.user_type = p.userType
+  if (p.stations?.length) o.stations = p.stations.join(',')
+  if (p.regions?.length) o.regions = p.regions.join(',')
   return o
 }
 

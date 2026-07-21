@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChargeSession, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 from app.services.pii_account import account_hash, mask_phone
+from app.services.session_scope import session_scope_conds
 
 S = ChargeSession
 
@@ -39,6 +40,12 @@ def _retail_conds(company_id) -> list:
         S.user_id.is_not(None),
         S.client_name.is_(None),
     ]
+
+
+def _net(company_id, stations: list[str] | None, regions: list[str] | None) -> list:
+    """Контурное сужение сети (станции/регионы) для ФЛ-запросов. Регион —
+    нормализованно через справочник (см. session_scope). Пусто = весь контур."""
+    return session_scope_conds(company_id, stations, regions)
 
 
 def _period(df: date, dt: date) -> tuple[datetime, datetime]:
@@ -53,13 +60,17 @@ class RetailService:
     # ── ядро: агрегат по аккаунтам за период ─────────────────────────────
     @cached_report("retail:_accounts", copy_rows=True)
     async def _accounts(self, company_id, df: date, dt: date, *,
-                        region: str | None = None, station: str | None = None) -> list[dict[str, Any]]:
+                        region: str | None = None, station: str | None = None,
+                        stations: list[str] | None = None,
+                        regions: list[str] | None = None) -> list[dict[str, Any]]:
         """Одна строка на аккаунт ФЛ за период. Отсюда питаются RFM/экономика/гео/
-        список аккаунтов/профиль. Опц. скоуп: region (канон S.region) / station
-        (location_id объекта L2) — тогда агрегируем только сессии этого разреза."""
+        список аккаунтов/профиль. Опц. drill-down: region (канон S.region) / station
+        (location_id объекта L2). Опц. контур: stations (коды) / regions (имена,
+        нормализованно) — общий фильтр рабочей области."""
         lo, hi = _period(df, dt)
         conds = [*_retail_conds(company_id),
-                 S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+                 S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
+                 *_net(company_id, stations, regions)]
         if region:
             conds.append(S.region == region)
         if station:
@@ -104,13 +115,16 @@ class RetailService:
 
     # ── overview: KPI розничной базы ─────────────────────────────────────
     @cached_report("retail:overview")
-    async def overview(self, company_id, df: date, dt: date) -> dict[str, Any]:
-        accts = await self._accounts(company_id, df, dt)
+    async def overview(self, company_id, df: date, dt: date,
+                       stations: list[str] | None = None,
+                       regions: list[str] | None = None) -> dict[str, Any]:
+        accts = await self._accounts(company_id, df, dt, stations=stations, regions=regions)
         lo, hi = _period(df, dt)
         # «Новые» = аккаунты, чья ПЕРВАЯ В ИСТОРИИ сессия попала в период.
         new_stmt = select(func.count()).select_from(
             select(S.user_id, func.min(S.started_at).label("f"))
-            .where(*_retail_conds(company_id), S.started_at.is_not(None))
+            .where(*_retail_conds(company_id), S.started_at.is_not(None),
+                   *_net(company_id, stations, regions))
             .group_by(S.user_id).having(func.min(S.started_at) >= lo)
             .having(func.min(S.started_at) <= hi).subquery()
         )
@@ -182,8 +196,10 @@ class RetailService:
         return accts
 
     @cached_report("retail:segments")
-    async def segments(self, company_id, df: date, dt: date) -> dict[str, Any]:
-        accts = await self._accounts(company_id, df, dt)
+    async def segments(self, company_id, df: date, dt: date,
+                       stations: list[str] | None = None,
+                       regions: list[str] | None = None) -> dict[str, Any]:
+        accts = await self._accounts(company_id, df, dt, stations=stations, regions=regions)
         if not accts:
             return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
                     "segments": [], "totals": {"accounts": 0}}
@@ -217,8 +233,10 @@ class RetailService:
 
     # ── economics: Pareto/концентрация ───────────────────────────────────
     @cached_report("retail:economics")
-    async def economics(self, company_id, df: date, dt: date) -> dict[str, Any]:
-        accts = await self._accounts(company_id, df, dt)
+    async def economics(self, company_id, df: date, dt: date,
+                        stations: list[str] | None = None,
+                        regions: list[str] | None = None) -> dict[str, Any]:
+        accts = await self._accounts(company_id, df, dt, stations=stations, regions=regions)
         n = len(accts)
         if not n:
             return {"period": {"from": df.isoformat(), "to": dt.isoformat()},
@@ -251,14 +269,17 @@ class RetailService:
 
     # ── geo: мобильность/привязка к станциям (НОРМАЛИЗОВАННЫЙ слой) ────────
     @cached_report("retail:geo")
-    async def geo(self, company_id, df: date, dt: date) -> dict[str, Any]:
+    async def geo(self, company_id, df: date, dt: date,
+                  stations: list[str] | None = None,
+                  regions: list[str] | None = None) -> dict[str, Any]:
         """Гео/мобильность на L2-слое: станции считаются по `location_id` (объект
         `service_locations`), регионы — канон `regions.name` (join по location_id).
         Сессии без привязки к объекту (location_id NULL — «сироты») показываются
         отдельной строкой, а не молча отбрасываются."""
         lo, hi = _period(df, dt)
         base = [*_retail_conds(company_id), S.started_at.is_not(None),
-                S.started_at >= lo, S.started_at <= hi]
+                S.started_at >= lo, S.started_at <= hi,
+                *_net(company_id, stations, regions)]
 
         # Покрытие нормализацией: доля сессий/выручки, привязанных к объекту L2.
         cov = (await self.db.execute(select(
@@ -331,17 +352,20 @@ class RetailService:
 
     # ── cohorts: удержание (вся история, не период) ──────────────────────
     @cached_report("retail:cohorts")
-    async def cohorts(self, company_id, months: int = 12) -> dict[str, Any]:
+    async def cohorts(self, company_id, months: int = 12,
+                      stations: list[str] | None = None,
+                      regions: list[str] | None = None) -> dict[str, Any]:
         """Retention-матрица: когорта = месяц первой сессии; ячейка = сколько
         аккаунтов когорты были активны через N месяцев. По всей истории."""
+        net = _net(company_id, stations, regions)
         cohort_m = func.date_trunc("month", func.min(S.started_at))
         firsts = select(S.user_id.label("uid"), cohort_m.label("cohort")).where(
-            *_retail_conds(company_id), S.started_at.is_not(None)).group_by(S.user_id).subquery()
+            *_retail_conds(company_id), S.started_at.is_not(None), *net).group_by(S.user_id).subquery()
         # Один объект `am` в SELECT и GROUP BY (иначе разные bind-параметры → GroupingError).
         am = func.date_trunc("month", S.started_at)
         acts = select(
             S.user_id.label("uid"), am.label("m"),
-        ).where(*_retail_conds(company_id), S.started_at.is_not(None)).group_by(
+        ).where(*_retail_conds(company_id), S.started_at.is_not(None), *net).group_by(
             S.user_id, am).subquery()
 
         stmt = select(
@@ -395,12 +419,15 @@ class RetailService:
     async def accounts(self, company_id, df: date, dt: date, *, region: str | None = None,
                        station: str | None = None, segment: str | None = None,
                        min_sessions: int = 0, search: str | None = None,
-                       sort: str = "revenue", order: str = "desc", limit: int = 200) -> dict[str, Any]:
+                       sort: str = "revenue", order: str = "desc", limit: int = 200,
+                       stations: list[str] | None = None,
+                       regions: list[str] | None = None) -> dict[str, Any]:
         """Реестр аккаунтов ФЛ с фильтрами (сегмент/регион/станция/мин-сессий/поиск)
         и сортировкой. Регион/станция сужают агрегацию (только их сессии). Телефон
         не отдаётся — только хеш-ID + маска."""
         rows = self._tag_segments(await self._accounts(
-            company_id, df, dt, region=region, station=station))
+            company_id, df, dt, region=region, station=station,
+            stations=stations, regions=regions))
         if segment:
             rows = [a for a in rows if a.get("segment") == segment]
         if min_sessions and min_sessions > 1:
@@ -434,11 +461,14 @@ class RetailService:
 
     # ── dimensions: справочники фильтров (регионы/станции) ────────────────
     @cached_report("retail:dimensions")
-    async def dimensions(self, company_id, df: date, dt: date) -> dict[str, Any]:
+    async def dimensions(self, company_id, df: date, dt: date,
+                         stations: list[str] | None = None,
+                         regions: list[str] | None = None) -> dict[str, Any]:
         """Списки регионов и станций (с числом аккаунтов/сессий) для селектов фильтра."""
         lo, hi = _period(df, dt)
         base = [*_retail_conds(company_id), S.started_at.is_not(None),
-                S.started_at >= lo, S.started_at <= hi]
+                S.started_at >= lo, S.started_at <= hi,
+                *_net(company_id, stations, regions)]
         reg = func.coalesce(S.region, "— (без региона)")
         reg_rows = (await self.db.execute(select(
             reg.label("region"), func.count(func.distinct(S.user_id)).label("accounts"),
@@ -475,12 +505,15 @@ class RetailService:
 
     @cached_report("retail:profile")
     async def profile(self, company_id, df: date, dt: date, *,
-                      station: str | None = None, region: str | None = None) -> dict[str, Any]:
+                      station: str | None = None, region: str | None = None,
+                      stations: list[str] | None = None,
+                      regions: list[str] | None = None) -> dict[str, Any]:
         """Разрез по конкретной станции ИЛИ региону: KPI + профиль по часам суток и
         дням недели + топ аккаунтов этого разреза."""
         lo, hi = _period(df, dt)
         conds = [*_retail_conds(company_id), S.started_at.is_not(None),
-                 S.started_at >= lo, S.started_at <= hi]
+                 S.started_at >= lo, S.started_at <= hi,
+                 *_net(company_id, stations, regions)]
         scope: dict[str, Any] = {"kind": None, "label": "Вся розница ФЛ"}
         if station:
             conds.append(S.location_id == station)
@@ -529,7 +562,8 @@ class RetailService:
                     "revenue": round(wmap.get(i + 1, (0, 0.0))[1], 2)} for i in range(7)]
 
         accts = self._tag_segments(await self._accounts(
-            company_id, df, dt, region=region, station=station))
+            company_id, df, dt, region=region, station=station,
+            stations=stations, regions=regions))
         accts.sort(key=lambda a: -a["revenue"])
         top = [self._pub(a) for a in accts[:25]]
 
@@ -539,18 +573,22 @@ class RetailService:
 
     # ── account: подробная карточка одного аккаунта ──────────────────────
     @cached_report("retail:account")
-    async def account(self, company_id, df: date, dt: date, account_hash: str) -> dict[str, Any]:
+    async def account(self, company_id, df: date, dt: date, account_hash: str,
+                      stations: list[str] | None = None,
+                      regions: list[str] | None = None) -> dict[str, Any]:
         """Детализация одного аккаунта ФЛ (по хеш-ID): сводка + разбивки по станциям/
         месяцам/часам/коннекторам + последние сессии. Хеш резолвится в телефон
         сканом distinct user_id (телефон в ответ НЕ уходит)."""
-        accts = self._tag_segments(await self._accounts(company_id, df, dt))
+        accts = self._tag_segments(await self._accounts(company_id, df, dt,
+                                                        stations=stations, regions=regions))
         me = next((a for a in accts if a["account"] == account_hash), None)
         if not me:
             return {"found": False}
         phone = me["phone"]
         lo, hi = _period(df, dt)
         base = [S.company_id == company_id, S.user_id == phone,
-                S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+                S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi,
+                *_net(company_id, stations, regions)]
 
         # По станциям (объект L2 + имя)
         loc_rows = (await self.db.execute(select(
@@ -608,11 +646,15 @@ class RetailService:
 
     # ── marketing: B2C-KPI розничной базы + автоматические выводы ─────────
     @cached_report("retail:marketing")
-    async def marketing(self, company_id, df: date, dt: date) -> dict[str, Any]:
+    async def marketing(self, company_id, df: date, dt: date,
+                        stations: list[str] | None = None,
+                        regions: list[str] | None = None) -> dict[str, Any]:
         """Маркетинговая витрина частных клиентов (B2C): повторные/разовые, ядро
         лояльности, зона оттока, концентрация выручки, retention когорт, AOV/частота
         + авто-выводы (принятые в потребительском маркетинге разрезы)."""
-        accts = self._tag_segments(await self._accounts(company_id, df, dt))
+        net = _net(company_id, stations, regions)
+        accts = self._tag_segments(await self._accounts(company_id, df, dt,
+                                                        stations=stations, regions=regions))
         n = len(accts)
         if not n:
             return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "kpis": {}, "insights": []}
@@ -622,7 +664,7 @@ class RetailService:
         lo, hi = _period(df, dt)
         new_accounts = int((await self.db.execute(select(func.count()).select_from(
             select(S.user_id, func.min(S.started_at).label("f"))
-            .where(*_retail_conds(company_id), S.started_at.is_not(None))
+            .where(*_retail_conds(company_id), S.started_at.is_not(None), *net)
             .group_by(S.user_id).having(func.min(S.started_at) >= lo)
             .having(func.min(S.started_at) <= hi).subquery()))).scalar() or 0)
         returning = max(0, n - new_accounts)
@@ -642,7 +684,8 @@ class RetailService:
             return round(sum(by_rev[:k]) / total_rev * 100, 1)
         top10, top20 = top_share(10), top_share(20)
 
-        coh = (await self.cohorts(company_id, months=12))["cohorts"]
+        coh = (await self.cohorts(company_id, months=12,
+                                  stations=stations, regions=regions))["cohorts"]
         def avg_ret(offset: int) -> float | None:
             elig = coh[:len(coh) - offset] if len(coh) > offset else []   # исключаем молодые когорты
             num = sum(next((x["count"] for x in c["retention"] if x["offset"] == offset), 0) for c in elig)
@@ -699,11 +742,15 @@ class RetailService:
 
     # ── dashboard: собранная BI-витрина «Обзора ФЛ» ──────────────────────
     @cached_report("retail:dashboard")
-    async def dashboard(self, company_id, df: date, dt: date) -> dict[str, Any]:
+    async def dashboard(self, company_id, df: date, dt: date,
+                        stations: list[str] | None = None,
+                        regions: list[str] | None = None) -> dict[str, Any]:
         """Расширенная витрина: динамика базы+выручки и Δ к прошлому периоду,
         retention-кривая, CLV/LTV, тепловая карта 7×24, поведение (коннекторы/
         оплата/качество), концентрация (Лоренц/Джини) + распределения."""
-        accts = self._tag_segments(await self._accounts(company_id, df, dt))
+        net = _net(company_id, stations, regions)
+        accts = self._tag_segments(await self._accounts(company_id, df, dt,
+                                                        stations=stations, regions=regions))
         n = len(accts)
         empty = {"period": {"from": df.isoformat(), "to": dt.isoformat()}}
         if not n:
@@ -717,7 +764,7 @@ class RetailService:
         # ── Динамика: активность (аккаунт, месяц) за всю историю ──
         amh = func.date_trunc("month", S.started_at)
         act_rows = (await self.db.execute(select(S.user_id.label("u"), amh.label("m"))
-            .where(*_retail_conds(company_id), S.started_at.is_not(None)).group_by(S.user_id, amh))).all()
+            .where(*_retail_conds(company_id), S.started_at.is_not(None), *net).group_by(S.user_id, amh))).all()
         active_by_user: dict[str, set] = defaultdict(set)
         for r in act_rows:
             active_by_user[r.u].add((r.m.year, r.m.month))
@@ -725,7 +772,7 @@ class RetailService:
         rev_rows = (await self.db.execute(select(amh.label("m"),
             func.coalesce(func.sum(S.amount), 0).label("rev"), func.count().label("sess"))
             .where(*_retail_conds(company_id), S.started_at.is_not(None),
-                   S.started_at >= lo, S.started_at <= hi).group_by(amh))).all()
+                   S.started_at >= lo, S.started_at <= hi, *net).group_by(amh))).all()
         rev_by_m = {(r.m.year, r.m.month): (float(r.rev), int(r.sess)) for r in rev_rows}
         period_months: list[tuple] = []
         y, mo = df.year, df.month
@@ -749,7 +796,8 @@ class RetailService:
 
         # ── Δ к прошлому периоду равной длины ──
         span_days = (dt - df).days + 1
-        prev = await self.overview(company_id, df - timedelta(days=span_days), df - timedelta(days=1))
+        prev = await self.overview(company_id, df - timedelta(days=span_days), df - timedelta(days=1),
+                                   stations=stations, regions=regions)
         pt = prev["totals"]
         cur = {"accounts": n, "revenue": round(total_rev, 2), "arpa": round(total_rev / n, 2),
                "avg_check": round(total_rev / total_sessions, 2) if total_sessions else 0.0,
@@ -760,7 +808,8 @@ class RetailService:
         deltas = {k: dlt(k) for k in ("accounts", "revenue", "arpa", "avg_check", "sessions")}
 
         # ── Retention-кривая ──
-        coh = (await self.cohorts(company_id, months=12))["cohorts"]
+        coh = (await self.cohorts(company_id, months=12,
+                                  stations=stations, regions=regions))["cohorts"]
         def avg_ret(offset):
             elig = coh[:len(coh) - offset] if len(coh) > offset else []
             num = sum(next((x["count"] for x in c["retention"] if x["offset"] == offset), 0) for c in elig)
@@ -793,12 +842,12 @@ class RetailService:
         hd, hh = func.extract("isodow", S.started_at), func.extract("hour", S.started_at)
         hm_rows = (await self.db.execute(select(hd.label("d"), hh.label("h"), func.count().label("s"))
             .where(*_retail_conds(company_id), S.started_at.is_not(None),
-                   S.started_at >= lo, S.started_at <= hi).group_by(hd, hh))).all()
+                   S.started_at >= lo, S.started_at <= hi, *net).group_by(hd, hh))).all()
         heatmap = [{"dow": int(r.d), "hour": int(r.h), "sessions": int(r.s)}
                    for r in hm_rows if r.d is not None and r.h is not None]
 
         # ── Поведение: коннекторы / оплата / качество ──
-        base = [*_retail_conds(company_id), S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi]
+        base = [*_retail_conds(company_id), S.started_at.is_not(None), S.started_at >= lo, S.started_at <= hi, *net]
         cc = func.coalesce(S.connector_type, "—")
         conn_rows = (await self.db.execute(select(cc.label("c"), func.count().label("s"),
             func.coalesce(func.sum(S.amount), 0).label("rev")).where(*base).group_by(cc)

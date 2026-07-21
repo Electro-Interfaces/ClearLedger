@@ -16,6 +16,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getChargeLongTrend } from '@/services/analyticsService'
+import { useNetScope } from '@/hooks/useScopeReset'
 import { seriesColor } from './analytics/palette'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
@@ -39,9 +40,10 @@ export function ChargeTrendPanel({ companyId }: {
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [groupBy, setGroupBy] = useState<GroupKey>('none')
+  const sc = useNetScope()
   const { data, isLoading } = useQuery({
-    queryKey: ['charge-long-trend', companyId, groupBy],
-    queryFn: () => getChargeLongTrend(companyId, groupBy),
+    queryKey: ['charge-long-trend', companyId, groupBy, sc.key],
+    queryFn: () => getChargeLongTrend(companyId, groupBy, { stations: sc.stations, regions: sc.regions }),
     enabled: !!companyId,
     staleTime: 5 * 60_000,
   })
