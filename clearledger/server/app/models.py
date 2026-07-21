@@ -3725,6 +3725,71 @@ class EzsSupplyLine(Base):
 
 
 # ===========================================================================
+# Банк ЗУ — площадки (земельные участки) под установку ЭЗС: девелоперский
+# пайплайн развития сети. НЕ путать с EzsEquipmentUnit (склад железа): здесь
+# учёт МЕСТ, где сеть строится, на стадиях проработки → работы → архива.
+# Источник — сводный Excel «Банк данных ЗУ» (3 листа = стадии). Ключевые поля —
+# в колонках (фильтры/агрегаты), полный ряд (55 колонок) — в raw JSONB.
+# ===========================================================================
+class EzsSite(Base):
+    """Площадка (ЗУ) под установку ЭЗС — запись девелоперского пайплайна."""
+    __tablename__ = "ezs_sites"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # prospect (в проработке/согласовании) | in_work (в работе) | archive (в архиве)
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="prospect")
+    status_raw: Mapped[str | None] = mapped_column(String(80), nullable=True)   # исходный «Статус»
+    received_date: Mapped[str | None] = mapped_column(String(10), nullable=True)  # ISO, «Дата поступления»
+    # ── география ──
+    region: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    full_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    place_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)   # город|трасса
+    install_place: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    route: Mapped[str | None] = mapped_column(String(80), nullable=True)        # трасса (Е-30, М-5…)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)             # распарсено из «Координаты»
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    coords_raw: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    map_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── участок ──
+    owner: Mapped[str | None] = mapped_column(String(400), nullable=True)       # собственник
+    brand: Mapped[str | None] = mapped_column(String(160), nullable=True)       # бренд площадки (АЗС и т.п.)
+    area_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ownership: Mapped[str | None] = mapped_column(String(60), nullable=True)    # собственность|аренда
+    free_power_kwt: Mapped[str | None] = mapped_column(String(80), nullable=True)  # часто текст («по запросу»)
+    # ── экономика подключения (парсинг best-effort; NULL если не распознано) ──
+    connection_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    rent_cost_month: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # ── план ЭЗС ──
+    planned_power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    planned_ezs_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ports_gbt: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ports_ccs: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ports_chademo: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ports_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # ── участники и техприсоединение ──
+    supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)    # поставщик ЭЗС
+    contractor: Mapped[str | None] = mapped_column(String(400), nullable=True)  # подрядчик
+    tu_status: Mapped[str | None] = mapped_column(Text, nullable=True)          # статус согласования / ТУ
+    tech_conn_type: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    dop_service: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Полный исходный ряд (заголовок → значение) — ничего не теряем при импорте.
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    source_sheet: Mapped[str | None] = mapped_column(String(80), nullable=True)  # лист-источник
+    row_no: Mapped[int | None] = mapped_column(Integer, nullable=True)           # № строки в листе
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_site_company_stage", "company_id", "stage"),
+        Index("ix_ezs_site_company_region", "company_id", "region"),
+    )
+
+
+# ===========================================================================
 # Чат (внутренний мессенджер, Telegram-подобный) — порт ядра из TSupport.
 # Комнаты компании (Общий/Объявления) + личные + группы; company-scoped.
 # ===========================================================================

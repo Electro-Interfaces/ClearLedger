@@ -62,6 +62,16 @@ export const EQUIPMENT_MENU: CentralMenuItem[] = [
 ]
 export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 
+// Банк ЗУ — площадки (земельные участки) под установку ЭЗС: девелоперский
+// пайплайн развития сети (МЕСТА, где сеть строится, на стадиях проработка →
+// работа → архив). НЕ путать с «Оборудованием» (склад железа). Ядро раздела
+// «Управленческий», группа «Площадки».
+export const SITES_MENU: CentralMenuItem[] = [
+  { key: 'sites_overview', label: 'Обзор пайплайна', group: 'Площадки (Банк ЗУ)' },
+  { key: 'sites_list',     label: 'Реестр площадок', group: 'Площадки (Банк ЗУ)' },
+]
+export const SITES_KEYS = SITES_MENU.map((m) => m.key)
+
 // Анализ зарядных сессий ЭЗС (реальные данные, для energy-профиля).
 // Сгруппировано по смыслу (заголовки групп рисует сайдбар по полю group):
 //   СЕТЬ — состояние сети (обзор + карта);
@@ -135,6 +145,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
           { key: 'ops_balance', label: 'Баланс (факт)', group: 'Мониторинг' },
           { key: 'ops_completeness', label: 'Полнота данных', group: 'Мониторинг' },
           ...EQUIPMENT_MENU,
+          ...SITES_MENU,
         ]
       : []),
     ...energyOps,
