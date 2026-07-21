@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
+import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, ChevronRight, ChevronDown } from 'lucide-react'
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { HINTS } from './analytics/MetricHint'
 import { TzToggle, type Tz } from './analytics/TzToggle'
@@ -31,6 +31,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'r
 import {
   getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
   getChargeNewClients, getChargeNewClientsList, getChargeVisits, getChargeUnpaid, getChargeUnpaidStation,
+  getChargeBrandReliability,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
   type ChargeGroupBy, type ChargeSessionLine, type ChargeMetric, type ChargeBucket,
   type ChargeSeriesBy, type ChargeTimeseriesResponse, type ChargeSliceResponse, type ChargeSessionsResponse,
@@ -2250,6 +2251,116 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
   )
 }
 
+// Цвет доли «факт против паспорта»: ≥85% норма, 60–85 внимание, <60 деградация.
+const ratioTxt = (v: number | null) =>
+  v == null ? 'text-muted-foreground'
+    : v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
+      : v >= 60 ? 'text-amber-600 dark:text-amber-400'
+        : 'text-red-600 dark:text-red-400'
+const pct1 = (v: number | null) => (v == null ? '—' : nf1.format(v) + '%')
+
+/** Надёжность станций в разрезе ПРОИЗВОДИТЕЛЯ оборудования (brand): вендор →
+ *  его станции. Отвечает на «оборудование какого поставщика чаще сбоит» — по
+ *  этому планируют ТОиР и предъявляют вендору. Успех считаем по ОТПУСКУ энергии
+ *  (energy>0), а не по флагу Complete (см. HINTS.chargedEnergy). Строку бренда
+ *  можно раскрыть до его станций (худшие сверху — кандидаты на выезд). */
+function BrandReliability({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  const n = useNarrow()
+  const q = useQuery({
+    queryKey: ['charge-brand-reliability', companyId, dateFrom, dateTo, n.key],
+    queryFn: () => getChargeBrandReliability({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
+  })
+  const [open, setOpen] = useState<Set<string>>(new Set())
+  const toggle = (b: string) => setOpen((s) => { const x = new Set(s); if (x.has(b)) x.delete(b); else x.add(b); return x })
+  if (q.isLoading) return <Loading />
+  if (!q.data || q.data.brands.length === 0) return <Empty />
+  const { totals, brands } = q.data
+
+  const brandRows = brands.map((b): (string | number | null)[] =>
+    [b.brand, b.stations, b.sessions, b.charged_pct, b.complete_pct, b.avg_power_ratio, b.risk_stations, b.energy_kwh, b.amount])
+  const stationRows = brands.flatMap((b) => b.stations_list.map((s): (string | number | null)[] =>
+    [b.brand, s.label, s.sessions, s.charged_pct, s.complete_pct, s.power_ratio, s.port_power, s.risk ? 'риск' : '']))
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KpiCard label="Производителей" value={nf0.format(totals.brands)} hint={`${nf0.format(totals.stations)} станций`} />
+        <KpiCard label="Отпустили энергию" value={nf1.format(totals.charged_pct) + '%'} accent={succAccent(totals.charged_pct)}
+          hint={`Complete (CPO): ${nf1.format(totals.complete_pct)}%`} info={HINTS.chargedEnergy} />
+        <KpiCard label="Станций риска" value={nf0.format(totals.risk_stations)} accent={totals.risk_stations ? 'warning' : 'success'}
+          hint="отпуск < 70% при ≥30 сессий" />
+        <KpiCard label="Энергия" value={kwh(totals.energy_kwh)} hint={`${fmtMoney(totals.amount)} ₽ выручка`} />
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-center gap-2">
+            Надёжность по производителям — клик по строке раскрывает станции вендора
+          </div>
+          <table className="w-full text-xs" {...exportRows('Надёжность по производителям',
+            ['Производитель', 'Станций', 'Сессий', 'Отпуск энергии, %', 'Complete, %', 'Факт/паспорт, %', 'Станций риска', 'Энергия, кВтч', 'Выручка, ₽'], brandRows)}>
+            <thead>
+              <tr className="border-b bg-muted/20 text-muted-foreground">
+                <th className="text-left p-2 font-medium">Производитель</th>
+                <th className="text-right p-2 font-medium">Станций</th>
+                <th className="text-right p-2 font-medium">Сессий</th>
+                <th className="text-right p-2 font-medium" title="Доля сессий с отпуском энергии (energy > 0)">Отпуск&nbsp;энергии</th>
+                <th className="text-right p-2 font-medium text-muted-foreground/70" title="Сырой флаг CPO result='Complete'">Complete</th>
+                <th className="text-right p-2 font-medium" title="Средняя выдаваемая мощность в долях от паспорта порта">Факт/паспорт</th>
+                <th className="text-right p-2 font-medium">Станций&nbsp;риска</th>
+                <th className="text-right p-2 font-medium">Энергия</th>
+              </tr>
+            </thead>
+            <tbody>
+              {brands.map((b) => {
+                const isOpen = open.has(b.brand)
+                return (
+                  <Fragment key={b.brand}>
+                    <tr className="border-b border-border/40 hover:bg-muted/30 cursor-pointer" onClick={() => toggle(b.brand)}>
+                      <td className="p-2 font-medium">
+                        <span className="inline-flex items-center gap-1">
+                          {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+                          {b.brand}
+                        </span>
+                      </td>
+                      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(b.stations)}</td>
+                      <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(b.sessions)}</td>
+                      <td className={`p-2 text-right font-mono ${succTxt(b.charged_pct)}`}>{nf1.format(b.charged_pct)}%</td>
+                      <td className="p-2 text-right font-mono text-muted-foreground/70">{nf1.format(b.complete_pct)}%</td>
+                      <td className={`p-2 text-right font-mono ${ratioTxt(b.avg_power_ratio)}`}>{pct1(b.avg_power_ratio)}</td>
+                      <td className={`p-2 text-right font-mono ${b.risk_stations ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>{nf0.format(b.risk_stations)}</td>
+                      <td className="p-2 text-right font-mono text-muted-foreground">{kwh(b.energy_kwh)}</td>
+                    </tr>
+                    {isOpen && b.stations_list.map((s) => (
+                      <tr key={b.brand + '|' + (s.code ?? s.label)} className="border-b border-border/20 bg-muted/10">
+                        <td className="p-2 pl-7 truncate max-w-[260px]">
+                          {s.risk && <AlertTriangle className="inline h-3 w-3 mr-1 text-red-500 align-[-1px]" />}
+                          {s.label}
+                        </td>
+                        <td className="p-2 text-right font-mono text-muted-foreground">—</td>
+                        <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(s.sessions)}</td>
+                        <td className={`p-2 text-right font-mono ${succTxt(s.charged_pct)}`}>{nf1.format(s.charged_pct)}%</td>
+                        <td className="p-2 text-right font-mono text-muted-foreground/70">{nf1.format(s.complete_pct)}%</td>
+                        <td className={`p-2 text-right font-mono ${ratioTxt(s.power_ratio)}`} title={s.port_power != null ? `паспорт порта ${nf0.format(s.port_power)} кВт` : 'паспорт не сопоставим'}>{pct1(s.power_ratio)}</td>
+                        <td className="p-2 text-right font-mono text-muted-foreground">{s.risk ? <span className="text-red-600 dark:text-red-400">риск</span> : ''}</td>
+                        <td className="p-2 text-right font-mono text-muted-foreground">{kwh(s.energy_kwh)}</td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      {/* Полная разбивка «производитель × станция» — отдельным листом в выгрузке. */}
+      <ExportOnlyTable name="Станции по производителям"
+        columns={['Производитель', 'Станция', 'Сессий', 'Отпуск энергии, %', 'Complete, %', 'Факт/паспорт, %', 'Паспорт порта, кВт', 'Риск']}
+        rows={stationRows} />
+    </div>
+  )
+}
+
 // Внутренние табы пункта «Сессии». «Разрезы» — единая таблица с селектором разреза
 // (станция/коннектор/регион/тариф/клиент). Сетевой «Обзор» (cs_dashboard),
 // «Надёжность» (cs_reliability), Клиенты/Корпоратив — отдельные пункты меню.
@@ -2308,6 +2419,7 @@ function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, set
 const RELIABILITY_TABS: { k: string; label: string }[] = [
   { k: 'overview', label: 'Обзор' },
   { k: 'retries', label: 'Повторные попытки' },
+  { k: 'brands', label: 'По производителям' },
   { k: 'unpaid', label: 'Без оплаты' },
   { k: 'ports', label: 'Использование портов' },
 ]
@@ -2331,6 +2443,7 @@ function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType,
       </div>
       <div ref={ref} className="pt-3" key={st.sub}>
         {st.sub === 'retries' ? <RetryAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
+          : st.sub === 'brands' ? <BrandReliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
           : st.sub === 'unpaid' ? <UnpaidAnalysis companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
           : st.sub === 'ports' ? <PortEfficiency companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
           : <Reliability companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />}

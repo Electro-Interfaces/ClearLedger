@@ -173,6 +173,30 @@ async def get_charge_sessions(
     return await svc.charge_sessions(f, group_by=group_by, tz=tz)
 
 
+@router.get("/charge-sessions/reliability-brands")
+async def get_charge_reliability_brands(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    station_id: str | None = None,
+    stations: str | None = None,
+    regions: str | None = None,
+    dim: str | None = None,
+    dim_val: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Надёжность станций в разрезе производителя оборудования (brand).
+
+    Двухуровневый срез производитель → станции: доля сессий с отпуском энергии
+    и факт против паспорта порта. Сужение (сеть/ФЛ-ЮЛ) — как у /charge-sessions."""
+    f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
+    f.station_codes = _csv(stations); f.regions = _csv(regions)
+    f.dim_by = dim; f.dim_val = dim_val
+    svc = AnalyticsService(db)
+    return await svc.charge_reliability_by_brand(f)
+
+
 @router.get("/charge-sessions/group-catalog")
 async def get_charge_group_catalog(
     current_user: User = Depends(get_current_user),

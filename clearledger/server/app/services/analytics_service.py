@@ -958,6 +958,167 @@ class AnalyticsService:
         return {"period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
                 "group_by": group_by, "lines": lines, "totals": totals, "period_days": period_days}
 
+    #: Порог «станции риска» надёжности: заметный поток, но мало отпуска энергии.
+    #: Успех — по ОТПУСКУ энергии (energy>0), а не по флагу Complete: часть
+    #: Complete отдала 0 кВтч, часть CompleteError — отдала (CLAUDE.md, п. 14).
+    _RISK_MIN_SESSIONS = 30
+    _RISK_CHARGED_PCT = 70.0
+
+    async def charge_reliability_by_brand(self, f: PeriodFilter) -> dict[str, Any]:
+        """Надёжность станций в разрезе ПРОИЗВОДИТЕЛЯ оборудования (brand).
+
+        Двухуровневый срез: производитель → его станции. По каждой станции —
+        доля сессий с отпуском энергии (честная «зарядились», не флаг Complete)
+        и факт против паспорта порта (деградация выдаваемой мощности). Отвечает
+        на вопрос «оборудование какого вендора чаще сбоит» — по нему планируют
+        ТОиР и предъявляют поставщику.
+
+        Бренд канонизируется общим словарём _BRAND_CANON (гомоглифы
+        «StarCharge»/«StarСharge», «PSS»/«ПСС») — иначе один вендор размазан по
+        трём строкам. Join к справочнику станций — ТОЛЬКО по location_id
+        (CLAUDE.md, п. 12): сравнение с кодом даёт 90 совпадений из 557.
+        Станции-сироты (нет записи в справочнике) не выпадают — LEFT JOIN,
+        группа «— (нет бренда)». Скоуп компания · сеть · ФЛ/ЮЛ — как у остальной
+        «Надёжности» (тот же _cs_conds).
+        """
+        from collections import defaultdict
+
+        from app.services.charge_grouping import _BRAND_CANON
+
+        S = ChargeSession
+        L = ServiceLocation
+        NO_BRAND = "— (нет бренда)"
+        ub = func.upper(func.btrim(L.brand))
+        brand_expr = case(
+            (func.coalesce(func.btrim(L.brand), "") == "", NO_BRAND),
+            *[(ub == k, v) for k, v in _BRAND_CANON.items()],
+            else_=func.btrim(L.brand),
+        )
+        charged = case((S.energy_kwh > 0, 1), else_=0)
+        complete = case((S.result == "Complete", 1), else_=0)
+        # Среднюю ОТДАВАЕМУЮ мощность считаем только по сессиям с реальной
+        # зарядкой (энергия и длительность > 0): пробы без отпуска дали бы
+        # деление на ноль и завысили бы долю «медленных».
+        real = and_(S.energy_kwh > 0, S.duration_min > 0)
+        real_energy = case((real, S.energy_kwh), else_=0)
+        real_dur = case((real, S.duration_min), else_=0)
+
+        stmt = select(
+            brand_expr.label("brand"),
+            S.station_code.label("code"),
+            func.count().label("sessions"),
+            func.coalesce(func.sum(charged), 0).label("charged"),
+            func.coalesce(func.sum(complete), 0).label("complete"),
+            func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
+            func.coalesce(func.sum(func.coalesce(S.client_amount, S.amount)), 0).label("amount"),
+            func.coalesce(func.sum(real_energy), 0).label("real_energy"),
+            func.coalesce(func.sum(real_dur), 0).label("real_dur"),
+            func.max(L.power_kwt).label("power_kwt"),
+            func.max(L.connectors_count).label("connectors"),
+        ).select_from(
+            S.__table__
+            .outerjoin(L.__table__, L.id == S.location_id)
+            .outerjoin(Region.__table__, Region.id == L.region_id)
+        ).where(
+            *self._cs_conds(f.company_id, f.date_from, f.date_to,
+                            f.station_codes, f.regions, f.dim_by, f.dim_val,
+                            station_id=f.station_id)
+        ).group_by(brand_expr, S.station_code)
+
+        rows = (await self.session.execute(stmt)).all()
+        labels = await self._station_labels(f.company_id)
+
+        def _station(r) -> dict[str, Any]:
+            sessions = int(r.sessions or 0)
+            charged_n = int(r.charged or 0)
+            re_e = float(r.real_energy or 0)
+            re_d = float(r.real_dur or 0)
+            pw = float(r.power_kwt) if r.power_kwt is not None else None
+            conn = int(r.connectors) if r.connectors else 0
+            # ⚠ power_kwt — мощность ВСЕЙ станции, сессия идёт через ОДИН порт:
+            # делим на число коннекторов (CLAUDE.md, разрез power_ratio).
+            port_power = (pw / conn) if (pw and conn) else None
+            avg_kw = (re_e / (re_d / 60.0)) if re_d > 0 else None
+            ratio = (avg_kw / port_power * 100.0) if (avg_kw and port_power) else None
+            charged_pct = round(charged_n / sessions * 100, 1) if sessions else 0.0
+            risk = sessions >= self._RISK_MIN_SESSIONS and charged_pct < self._RISK_CHARGED_PCT
+            code = r.code
+            return {
+                "code": code,
+                "label": labels.get(code, f"Станция ({code})") if code else "— (без кода)",
+                "sessions": sessions,
+                "charged_pct": charged_pct,
+                "complete_pct": round(int(r.complete or 0) / sessions * 100, 1) if sessions else 0.0,
+                "energy_kwh": round(float(r.energy or 0), 1),
+                "amount": round(float(r.amount or 0), 2),
+                "power_kwt": round(pw, 1) if pw is not None else None,
+                "port_power": round(port_power, 1) if port_power is not None else None,
+                "power_ratio": round(ratio, 1) if ratio is not None else None,
+                "risk": risk,
+            }
+
+        # Плоские (бренд × станция) → дерево бренд → станции + сырые суммы бренда.
+        stations_by_brand: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        agg: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {"sessions": 0, "charged": 0, "complete": 0, "energy": 0.0,
+                     "amount": 0.0, "ratios": [], "risk": 0, "codes": set()})
+        for r in rows:
+            brand = str(r.brand) if r.brand is not None else NO_BRAND
+            st = _station(r)
+            stations_by_brand[brand].append(st)
+            a = agg[brand]
+            a["sessions"] += st["sessions"]
+            a["charged"] += int(r.charged or 0)
+            a["complete"] += int(r.complete or 0)
+            a["energy"] += float(r.energy or 0)
+            a["amount"] += float(r.amount or 0)
+            if st["power_ratio"] is not None:
+                a["ratios"].append(st["power_ratio"])
+            if st["risk"]:
+                a["risk"] += 1
+            if r.code:
+                a["codes"].add(r.code)
+
+        brands: list[dict[str, Any]] = []
+        for brand, a in agg.items():
+            sess = int(a["sessions"])
+            sts = sorted(stations_by_brand[brand],
+                         key=lambda s: (s["charged_pct"], -s["sessions"]))
+            brands.append({
+                "brand": brand,
+                "stations": len(a["codes"]),
+                "sessions": sess,
+                "charged_pct": round(a["charged"] / sess * 100, 1) if sess else 0.0,
+                "complete_pct": round(a["complete"] / sess * 100, 1) if sess else 0.0,
+                "energy_kwh": round(a["energy"], 1),
+                "amount": round(a["amount"], 2),
+                # Факт/паспорт на уровне бренда — простое среднее по станциям
+                # (у каждой свой паспорт порта, взвешивать нечем).
+                "avg_power_ratio": round(sum(a["ratios"]) / len(a["ratios"]), 1) if a["ratios"] else None,
+                "risk_stations": a["risk"],
+                "stations_list": sts,
+            })
+        # Производители — от крупнейших по потоку сессий (парк вендора виден сразу).
+        brands.sort(key=lambda b: -b["sessions"])
+
+        t_sess = sum(b["sessions"] for b in brands)
+        t_charged = sum(a["charged"] for a in agg.values())
+        t_complete = sum(a["complete"] for a in agg.values())
+        return {
+            "period": {"from": f.date_from.isoformat(), "to": f.date_to.isoformat()},
+            "totals": {
+                "brands": len(brands),
+                "stations": sum(b["stations"] for b in brands),
+                "sessions": t_sess,
+                "charged_pct": round(t_charged / t_sess * 100, 1) if t_sess else 0.0,
+                "complete_pct": round(t_complete / t_sess * 100, 1) if t_sess else 0.0,
+                "energy_kwh": round(sum(b["energy_kwh"] for b in brands), 1),
+                "amount": round(sum(b["amount"] for b in brands), 2),
+                "risk_stations": sum(b["risk_stations"] for b in brands),
+            },
+            "brands": brands,
+        }
+
     async def charge_sessions_compare(
         self, company_id, a_from, a_to, b_from, b_to, group_by: str = "station",
     ) -> dict[str, Any]:

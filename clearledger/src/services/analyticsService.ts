@@ -622,6 +622,56 @@ export async function getChargeSessions(p: PeriodParams & { groupBy?: ChargeGrou
   })
 }
 
+// ─── Надёжность в разрезе производителя оборудования (brand) ───
+/** Станция внутри производителя: надёжность и факт против паспорта порта. */
+export interface BrandStationRow {
+  code: string | null
+  label: string
+  sessions: number
+  /** Доля сессий с отпуском энергии — честная «зарядились» (energy>0), не Complete. */
+  charged_pct: number
+  /** Сырой флаг CPO result='Complete' — показываем рядом, но не как истину. */
+  complete_pct: number
+  energy_kwh: number
+  amount: number
+  /** Паспортная мощность ВСЕЙ станции, кВт. */
+  power_kwt: number | null
+  /** Паспорт на порт = power_kwt / коннекторов. */
+  port_power: number | null
+  /** Факт против паспорта порта, %. null — паспорт/отпуск не сопоставимы. */
+  power_ratio: number | null
+  /** Станция риска: поток ≥30 сессий и отпуск энергии <70%. */
+  risk: boolean
+}
+export interface BrandReliabilityRow {
+  brand: string
+  stations: number
+  sessions: number
+  charged_pct: number
+  complete_pct: number
+  energy_kwh: number
+  amount: number
+  /** Среднее факт/паспорт по станциям бренда, %. null — данных нет. */
+  avg_power_ratio: number | null
+  risk_stations: number
+  stations_list: BrandStationRow[]
+}
+export interface BrandReliabilityResponse {
+  period: { from: string; to: string }
+  totals: {
+    brands: number; stations: number; sessions: number
+    charged_pct: number; complete_pct: number
+    energy_kwh: number; amount: number; risk_stations: number
+  }
+  brands: BrandReliabilityRow[]
+}
+export async function getChargeBrandReliability(p: PeriodParams): Promise<BrandReliabilityResponse> {
+  return get<BrandReliabilityResponse>('/api/analytics/charge-sessions/reliability-brands', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...narrowParams(p),
+  })
+}
+
 /** Составные визиты: смежные попытки одного клиента на одной станции, склеенные
  * в одно событие. Сырая сессия ≠ попытка зарядки — CPO пишет каждое касание
  * разъёма отдельной строкой, поэтому «успех сессий» и «человек зарядился» —
