@@ -4119,3 +4119,64 @@ class CompanyAppModule(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (Index("uq_eco_company_app_module", "company_id", "app_id", "module_code", unique=True),)
+
+
+# ===========================================================================
+# Чат экосистемы (Matrix) — модель «как в Ангаре»: плоская. Группы = именованные
+# приватные Matrix-комнаты + своя таблица; папки = клиентская группировка. Провижининг
+# через Synapse Admin API сервисным аккаунтом. Скоуп по компании (Ур. 2): группы/личка/
+# папки принадлежат компании; идентичность user→mxid — глобальная на пользователя.
+# Темы (Matrix threads) живут В комнатах (m.thread) — отдельной таблицы не требуют.
+# ===========================================================================
+class MatrixIdentity(Base):
+    """Привязка пользователя Ledger к Matrix-пользователю (mxid). Токен НЕ храним — минтим на сессию."""
+    __tablename__ = "chat_matrix_identity"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    mxid: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MatrixGroupRoom(Base):
+    """Групповой чат = именованная приватная Matrix-комната + метаданные (скоуп компании)."""
+    __tablename__ = "chat_group_room"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MatrixDmRoom(Base):
+    """Личный чат: упорядоченная пара пользователей → одна комната (скоуп компании)."""
+    __tablename__ = "chat_dm_room"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_a_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_b_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    room_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+
+    __table_args__ = (Index("uq_chat_dm_pair", "company_id", "user_a_id", "user_b_id", unique=True),)
+
+
+class MatrixChatFolder(Base):
+    """Папка чатов Matrix (Telegram-style) — клиентская группировка комнат, per-user×компания.
+    Отдельно от TSupport-ChatFolder (другой чат): таблица chat_mx_folder."""
+    __tablename__ = "chat_mx_folder"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    room_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

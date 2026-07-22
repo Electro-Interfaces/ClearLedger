@@ -82,7 +82,19 @@ class Settings(BaseSettings):
     sso_apps: str = ""
     # Платформенный сервис ЧАТ (Matrix Synapse) — адрес homeserver в стеке экосистемы
     # (пусто = чат не подключён). Используется модулем «Чат» и статусом Ядра.
+    # synapse_url — ВНУТРЕННИЙ адрес (admin API, backend-only).
     synapse_url: str = ""
+    # Модель чата «как в Ангаре»: провижининг через Synapse Admin API сервисным
+    # аккаунтом. Токен НИКОГДА не уходит на фронт; фронту отдаётся публичный homeserver.
+    matrix_admin_token: str = ""              # access_token сервисного @<prefix>-svc (admin)
+    matrix_homeserver_public: str = ""        # публичный https homeserver (в браузер)
+    matrix_server_name: str = ""              # домен mxid (обычно = DOMAIN)
+    matrix_mxid_prefix: str = "elsy"          # префикс локалпарта mxid: @elsy_<...>:server
+
+    @property
+    def chat_enabled(self) -> bool:
+        """Чат доступен: есть внутренний адрес Synapse и admin-токен."""
+        return bool(self.synapse_url and self.matrix_admin_token)
 
     @property
     def sso_enabled(self) -> bool:
