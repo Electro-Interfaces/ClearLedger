@@ -43,3 +43,40 @@ export async function setCompanyAppModule(
     { enabled },
   )
 }
+
+// ── Каталог приложений экосистемы (Ур. 1, суперадмин) ──
+
+export interface CatalogModule {
+  code: string
+  name: string
+  description?: string | null
+  isCore: boolean
+  defaultOn: boolean
+}
+
+export interface CatalogApp {
+  id: string
+  code: string
+  name: string
+  description?: string | null
+  baseUrl?: string | null
+  icon?: string | null
+  kind: string
+  isActive: boolean
+  config: Record<string, unknown>
+  modules: CatalogModule[]
+}
+
+/** Каталог приложений/модулей экосистемы — что доступно подключить + настройка. */
+export async function getAppCatalog(): Promise<CatalogApp[]> {
+  const r = await get<{ apps: CatalogApp[] }>('/api/registry/apps')
+  return r.apps
+}
+
+/** Настройка приложения при подключении (описание/адрес/конфиг/активность). */
+export async function updateApp(
+  appId: string,
+  patch: { description?: string; base_url?: string; config?: Record<string, unknown>; is_active?: boolean },
+): Promise<void> {
+  await put(`/api/registry/apps/${appId}`, patch)
+}

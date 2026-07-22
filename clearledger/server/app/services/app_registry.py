@@ -32,6 +32,15 @@ _APPS: list[dict[str, Any]] = [
 
 async def seed_apps(db: AsyncSession) -> None:
     """Идемпотентно завести каталог приложений/модулей (вызывается при старте)."""
+    # Самозаживление: create_all НЕ добавляет колонки в существующие таблицы. Для уже
+    # развёрнутых eco_apps дотягиваем config (иначе запрос поля config упадёт).
+    from sqlalchemy import text
+    try:
+        await db.execute(text("ALTER TABLE eco_apps ADD COLUMN IF NOT EXISTS config JSONB"))
+        await db.commit()
+    except Exception:  # noqa: BLE001 — не валим старт из-за миграции
+        await db.rollback()
+
     changed = False
     for a in _APPS:
         app = (await db.execute(select(App).where(App.code == a["code"]))).scalar_one_or_none()
@@ -103,3 +112,40 @@ async def set_module(db: AsyncSession, company_id, app_id, module_code: str, ena
     else:
         rec.enabled = enabled
     await db.commit()
+
+
+# ── Каталог приложений экосистемы (Ур. 1) — что доступно подключить + настройка ──
+
+async def catalog(db: AsyncSession) -> list[dict[str, Any]]:
+    """Полный каталог приложений экосистемы с модулями и конфигурацией (для консоли)."""
+    apps = (await db.execute(select(App).order_by(App.sort))).scalars().all()
+    mods: dict[Any, list[AppModule]] = {}
+    for m in (await db.execute(select(AppModule).order_by(AppModule.sort))).scalars().all():
+        mods.setdefault(m.app_id, []).append(m)
+    return [{
+        "id": str(app.id), "code": app.code, "name": app.name,
+        "description": app.description, "baseUrl": app.base_url, "icon": app.icon,
+        "kind": app.kind, "isActive": app.is_active, "config": app.config or {},
+        "modules": [{
+            "code": m.code, "name": m.name, "description": m.description,
+            "isCore": m.is_core, "defaultOn": m.default_on,
+        } for m in mods.get(app.id, [])],
+    } for app in apps]
+
+
+async def update_app(db: AsyncSession, app_id, *, description=None, base_url=None,
+                     config=None, is_active=None) -> bool:
+    """Настройка приложения при подключении (описание/адрес/конфиг/активность). None = не менять."""
+    app = (await db.execute(select(App).where(App.id == app_id))).scalar_one_or_none()
+    if app is None:
+        return False
+    if description is not None:
+        app.description = description
+    if base_url is not None:
+        app.base_url = base_url
+    if config is not None:
+        app.config = config
+    if is_active is not None:
+        app.is_active = is_active
+    await db.commit()
+    return True

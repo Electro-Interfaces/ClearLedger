@@ -33,6 +33,39 @@ async def _require_admin(company_id, user: User, db: AsyncSession) -> uuid.UUID:
     return cid
 
 
+def _require_super(user: User) -> None:
+    """Каталог экосистемы (Ур. 1) — только суперадмин."""
+    if not user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нужны права суперадминистратора экосистемы")
+
+
+@router.get("/apps")
+async def get_catalog(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Каталог приложений экосистемы: что доступно подключить + модули + конфигурация."""
+    _require_super(user)
+    return {"apps": await app_registry.catalog(db)}
+
+
+@router.put("/apps/{app_id}")
+async def put_app(
+    app_id: uuid.UUID,
+    description: str | None = Body(None),
+    base_url: str | None = Body(None),
+    config: dict | None = Body(None),
+    is_active: bool | None = Body(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Настройка приложения при подключении (описание/адрес/конфиг/активность)."""
+    _require_super(user)
+    ok = await app_registry.update_app(
+        db, app_id, description=description, base_url=base_url, config=config, is_active=is_active)
+    if not ok:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Приложение не найдено")
+    return {"appId": str(app_id), "ok": True}
+
+
 @router.get("/company-apps")
 async def get_company_apps(
     company_id: str = Query(...),

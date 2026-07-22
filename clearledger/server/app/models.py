@@ -4062,6 +4062,9 @@ class App(Base):
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="app")
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Конфигурация приложения на уровне экосистемы (настройка при подключении):
+    # свободный JSON (адреса, ключи-ссылки, параметры интеграции). Секреты — НЕ сюда.
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
