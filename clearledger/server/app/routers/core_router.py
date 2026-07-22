@@ -12,10 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi import Query
+
 from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
-from app.models import App, AppModule, Company, User
+from app.models import App, AppModule, AuditEvent, Company, User
 from app.services import sso
 
 router = APIRouter(prefix="/core", tags=["ElsyPlus Core — состояние"])
@@ -83,3 +85,29 @@ async def core_status(
         "counts": {"companies": comp_n, "users": user_n},
         "services": services,
     }
+
+
+@router.get("/audit")
+async def core_audit(
+    limit: int = Query(100, ge=1, le=500),
+    action: str | None = Query(None),
+    company_id: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Аудит по ВСЕЙ экосистеме (Ур. 1) — только суперадмин, с именем компании."""
+    _require_super(user)
+    q = (select(AuditEvent, Company.slug, Company.name)
+         .join(Company, Company.id == AuditEvent.company_id)
+         .order_by(AuditEvent.timestamp.desc()).limit(limit))
+    if action:
+        q = q.where(AuditEvent.action == action)
+    if company_id:
+        q = q.where(AuditEvent.company_id == company_id)
+    rows = (await db.execute(q)).all()
+    return [{
+        "id": str(e.id), "companyId": str(e.company_id),
+        "companySlug": slug, "companyName": name,
+        "userId": e.user_id, "userName": e.user_name, "action": e.action,
+        "details": e.details,
+        "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+    } for e, slug, name in rows]

@@ -23,3 +23,22 @@ export interface CoreStatus {
 export async function getCoreStatus(): Promise<CoreStatus> {
   return get<CoreStatus>('/api/core/status')
 }
+
+export interface CoreAuditEvent {
+  id: string
+  companyId: string
+  companySlug: string
+  companyName: string
+  userId: string
+  userName: string
+  action: string
+  details?: string | null
+  timestamp?: string | null
+}
+
+/** Аудит по всей экосистеме (суперадмин). */
+export async function getCoreAudit(
+  params?: { limit?: number; action?: string; company_id?: string },
+): Promise<CoreAuditEvent[]> {
+  return get<CoreAuditEvent[]>('/api/core/audit', params)
+}

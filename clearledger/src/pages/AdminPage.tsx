@@ -27,7 +27,7 @@ import * as userService from '@/services/userService'
 import type { OrgProfile } from '@/services/userService'
 import { MembersCard, InvitationsCard, RolesAccessTab, AuditTab } from '@/components/admin/CompanyTeam'
 import { CompanyApps } from '@/components/admin/CompanyApps'
-import { CoreOverview } from '@/components/admin/CoreOverview'
+import { EcosystemConsole } from '@/components/admin/EcosystemConsole'
 
 const PROFILES = [
   { id: 'fuel', label: 'Топливо (АЗС)' },
@@ -160,7 +160,7 @@ export function AdminPage() {
             <TabsTrigger value="ecosystem" className="gap-1.5"><Boxes className="h-4 w-4" /> Экосистема</TabsTrigger>
             <TabsTrigger value="company" className="gap-1.5"><Building2 className="h-4 w-4" /> Компания</TabsTrigger>
           </TabsList>
-          <TabsContent value="ecosystem" className="mt-4"><CoreOverview /></TabsContent>
+          <TabsContent value="ecosystem" className="mt-4"><EcosystemConsole /></TabsContent>
           <TabsContent value="company" className="mt-4">{companyBlock}</TabsContent>
         </Tabs>
       ) : companyBlock}
