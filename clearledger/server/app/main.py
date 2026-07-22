@@ -46,6 +46,8 @@ from app.routers import (
     onec_router,
     equipment_router,
     sites_router,
+    sso_router,
+    app_registry_router,
     ops_router,
     periods_router,
     policy_router,
@@ -109,6 +111,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.info(f"Часовые пояса регионов проставлены: {n}")
         except Exception as e:  # noqa: BLE001 — не валим старт из-за НСИ
             logger.warning(f"backfill region offsets пропущен: {e}")
+
+    # Каталог приложений экосистемы (ElsyPlus Core) — идемпотентный сид.
+    async with async_session_factory() as session:
+        try:
+            from app.services.app_registry import seed_apps
+            await seed_apps(session)
+            logger.info("Каталог приложений экосистемы засеян")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"seed_apps пропущен: {e}")
 
     # Сброс зависших прогонов: при рестарте фоновые задачи прерываются, их
     # ChannelSyncLog остаётся в 'running' навсегда — помечаем как прерванные.
@@ -180,6 +191,8 @@ app.include_router(online_reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(ops_router.router, prefix=API_PREFIX)  # управленческий кокпит ЭЗС
 app.include_router(equipment_router.router, prefix=API_PREFIX)  # складской учёт оборудования ЭЗС
 app.include_router(sites_router.router, prefix=API_PREFIX)  # банк ЗУ: площадки под установку ЭЗС
+app.include_router(sso_router.router, prefix=API_PREFIX)  # SSO ElsyPlus (Фаза 0): лаунчер + handoff + JWKS
+app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
 app.include_router(source_types_router.router, prefix=API_PREFIX)
 app.include_router(sources_router.router, prefix=API_PREFIX)
 app.include_router(locations_router.router, prefix=API_PREFIX)

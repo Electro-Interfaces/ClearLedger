@@ -67,6 +67,25 @@ class Settings(BaseSettings):
         """Конференции доступны (задан приватный ключ подписи)?"""
         return bool(self.jitsi_signing_key)
 
+    # Платформенный SSO ElsyPlus (Фаза 0). Ledger — временный провайдер: подписывает
+    # короткоживущий RS256-токен (iss=elsyplus), приложения экосистемы (Support/
+    # Координатор) проверяют его публичным ключом через JWKS, без общего секрета.
+    # Прецедент — jitsi_* выше. Приватный ключ (PEM) в base64, НЕ в git; фича
+    # гейтится его наличием (sso_enabled). На Фазе 1/2 провайдер переедет на Zitadel,
+    # контракт JWKS/клеймы сохранится.
+    sso_signing_key: str = ""              # приватный RSA-ключ (PEM) в base64
+    sso_kid: str = "elsyplus/1"
+    sso_issuer: str = "elsyplus"
+    sso_token_ttl_seconds: int = 300       # короткий handoff-токен (5 мин)
+    # Каталог приложений экосистемы (Фаза 0 — статический из env; Фаза 1 — БД-реестр).
+    # Формат строки: "code|Название|https://base-url|/callback|icon", записи через «;».
+    sso_apps: str = ""
+
+    @property
+    def sso_enabled(self) -> bool:
+        """Платформенный SSO доступен (задан приватный ключ подписи)?"""
+        return bool(self.sso_signing_key)
+
     @property
     def secret_is_insecure(self) -> bool:
         """Секрет не задан в окружении (используется небезопасный дефолт)?"""

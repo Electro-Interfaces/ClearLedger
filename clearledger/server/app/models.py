@@ -4039,3 +4039,80 @@ class DedupCorrectionJob(Base):
     __table_args__ = (
         Index("idx_dedup_jobs_company", "company_id", "status"),
     )
+
+
+# ===========================================================================
+# ElsyPlus Core — реестр приложений и модулей (app-измерение экосистемы).
+# Заменяет клиентский localStorage-демо (moduleConnectionService): «что подключено
+# компании» и «кто к чему допущен» — теперь СЕРВЕРНАЯ конфигурация, единый источник.
+# Приложение = самоописываемый модуль экосистемы (Ledger, Support/Координатор, …);
+# модуль = подраздел приложения (обобщение moduleComponents). Таблицы eco_* создаёт
+# create_all при старте; сид каталога — services/app_registry.seed_apps (идемпотентно).
+# ===========================================================================
+class App(Base):
+    """Каталог приложений экосистемы ElsyPlus."""
+    __tablename__ = "eco_apps"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)   # 'ledger','support',…
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    base_url: Mapped[str | None] = mapped_column(String(300), nullable=True)     # для лаунчера/SSO handoff
+    icon: Mapped[str | None] = mapped_column(String(60), nullable=True)          # lucide-имя
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="app")
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AppModule(Base):
+    """Модуль, который предоставляет приложение (обобщение moduleComponents фронта)."""
+    __tablename__ = "eco_app_modules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_apps.id", ondelete="CASCADE"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(60), nullable=False)                # уникален в рамках приложения
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # is_core — не отключается (ядро приложения); default_on — включён по умолчанию новой компании.
+    is_core: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    default_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+
+    __table_args__ = (Index("uq_eco_app_module", "app_id", "code", unique=True),)
+
+
+class CompanyApp(Base):
+    """Подключение приложения компании (серверная замена localStorage-демо)."""
+    __tablename__ = "eco_company_apps"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    app_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_apps.id", ondelete="CASCADE"), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)            # per-company настройки приложения
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (Index("uq_eco_company_app", "company_id", "app_id", unique=True),)
+
+
+class CompanyAppModule(Base):
+    """Включение конкретного модуля приложения на компанию."""
+    __tablename__ = "eco_company_app_modules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    app_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_apps.id", ondelete="CASCADE"), nullable=False)
+    module_code: Mapped[str] = mapped_column(String(60), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (Index("uq_eco_company_app_module", "company_id", "app_id", "module_code", unique=True),)
