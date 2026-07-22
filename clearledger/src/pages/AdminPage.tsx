@@ -17,7 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
-import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History, Blocks } from 'lucide-react'
+import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History, Blocks, Boxes, Gauge } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useAuth } from '@/contexts/AuthContext'
@@ -27,6 +27,7 @@ import * as userService from '@/services/userService'
 import type { OrgProfile } from '@/services/userService'
 import { MembersCard, InvitationsCard, RolesAccessTab, AuditTab } from '@/components/admin/CompanyTeam'
 import { CompanyApps } from '@/components/admin/CompanyApps'
+import { CoreOverview } from '@/components/admin/CoreOverview'
 
 const PROFILES = [
   { id: 'fuel', label: 'Топливо (АЗС)' },
@@ -47,6 +48,9 @@ export function AdminPage() {
 
   const [selectedId, setSelectedId] = useState<string>('')
   const [tab, setTab] = usePersistentState('cl-admin-tab', 'members')
+  // Двухуровневая навигация Центра управления: Экосистема (Ур.1) ⇄ Компания (Ур.2).
+  // Уровень экосистемы — только суперадмину; админ компании видит сразу свою компанию.
+  const [scope, setScope] = usePersistentState('cl-admin-scope', 'ecosystem')
   const selected = useMemo(
     () => companies.find((c) => c.id === (selectedId || activeId)) ?? companies[0],
     [companies, selectedId, activeId],
@@ -65,16 +69,10 @@ export function AdminPage() {
     )
   }
 
-  return (
+  // Ур. 2 — управление выбранной компанией (селектор + вкладки). Показывается под
+  // scope «Компания» суперадмину и как единственный вид — админу компании.
+  const companyBlock = (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <ShieldCheck className="h-6 w-6 text-primary" />
-        <div>
-          <h1 className="text-2xl font-bold leading-tight">Компании, команда и доступ</h1>
-          <p className="text-sm text-muted-foreground">Реквизиты, сотрудники, роли и доступ к модулям учёта</p>
-        </div>
-      </div>
-
       {/* Панель выбора компании */}
       <div className="flex items-center gap-3 flex-wrap border-b border-border/50 pb-3">
         <span className="text-sm font-medium text-muted-foreground">Компания:</span>
@@ -142,6 +140,30 @@ export function AdminPage() {
           {companies.length === 0 ? 'Нет доступных компаний' : 'Выберите компанию'}
         </CardContent></Card>
       )}
+    </div>
+  )
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Gauge className="h-6 w-6 text-primary" />
+        <div>
+          <h1 className="text-2xl font-bold leading-tight">Центр управления</h1>
+          <p className="text-sm text-muted-foreground">Экосистема и компании: приложения, пользователи, доступ, состояние</p>
+        </div>
+      </div>
+
+      {isSuper ? (
+        // Ур. 1 (Экосистема) — только суперадмину; иначе сразу управление своей компанией.
+        <Tabs value={scope} onValueChange={setScope} className="w-full">
+          <TabsList>
+            <TabsTrigger value="ecosystem" className="gap-1.5"><Boxes className="h-4 w-4" /> Экосистема</TabsTrigger>
+            <TabsTrigger value="company" className="gap-1.5"><Building2 className="h-4 w-4" /> Компания</TabsTrigger>
+          </TabsList>
+          <TabsContent value="ecosystem" className="mt-4"><CoreOverview /></TabsContent>
+          <TabsContent value="company" className="mt-4">{companyBlock}</TabsContent>
+        </Tabs>
+      ) : companyBlock}
     </div>
   )
 }

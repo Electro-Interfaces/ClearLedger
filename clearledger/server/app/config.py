@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # Каталог приложений экосистемы (Фаза 0 — статический из env; Фаза 1 — БД-реестр).
     # Формат строки: "code|Название|https://base-url|/callback|icon", записи через «;».
     sso_apps: str = ""
+    # Платформенный сервис ЧАТ (Matrix Synapse) — адрес homeserver в стеке экосистемы
+    # (пусто = чат не подключён). Используется модулем «Чат» и статусом Ядра.
+    synapse_url: str = ""
 
     @property
     def sso_enabled(self) -> bool:
