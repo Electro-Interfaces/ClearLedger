@@ -18,6 +18,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { CompanySelector } from '@/components/company/CompanySelector'
+import { AppLauncher } from '@/components/layout/AppLauncher'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -93,6 +94,8 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             рабочей области — единый фильтр над разделами. */}
         <div className="flex flex-1 items-center justify-center min-w-0 gap-2 px-2">
           <CompanySelector />
+          {/* Лаунчер приложений экосистемы (Ядро) — скрыт, если SSO не настроен */}
+          <AppLauncher />
 
           <div className="hidden md:flex items-center gap-2 pl-1">
             <div className="w-px h-6 bg-border/50" />

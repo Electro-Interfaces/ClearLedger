@@ -17,7 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
-import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History } from 'lucide-react'
+import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History, Blocks } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useAuth } from '@/contexts/AuthContext'
@@ -26,6 +26,7 @@ import { isApiEnabled } from '@/services/apiClient'
 import * as userService from '@/services/userService'
 import type { OrgProfile } from '@/services/userService'
 import { MembersCard, InvitationsCard, RolesAccessTab, AuditTab } from '@/components/admin/CompanyTeam'
+import { CompanyApps } from '@/components/admin/CompanyApps'
 
 const PROFILES = [
   { id: 'fuel', label: 'Топливо (АЗС)' },
@@ -104,6 +105,7 @@ export function AdminPage() {
           <TabsList>
             <TabsTrigger value="members" className="gap-1.5"><Users className="h-4 w-4" /> Сотрудники</TabsTrigger>
             <TabsTrigger value="roles" className="gap-1.5"><KeyRound className="h-4 w-4" /> Роли и доступ</TabsTrigger>
+            <TabsTrigger value="apps" className="gap-1.5"><Blocks className="h-4 w-4" /> Приложения</TabsTrigger>
             <TabsTrigger value="profile" className="gap-1.5"><Building2 className="h-4 w-4" /> Реквизиты</TabsTrigger>
             {canManageSelected(selected.id) && (
               <TabsTrigger value="invites" className="gap-1.5"><Mail className="h-4 w-4" /> Приглашения</TabsTrigger>
@@ -117,6 +119,9 @@ export function AdminPage() {
           </TabsContent>
           <TabsContent value="roles" className="mt-4">
             <RolesAccessTab companyId={selected.id} canManage={canManageSelected(selected.id)} />
+          </TabsContent>
+          <TabsContent value="apps" className="mt-4">
+            <CompanyApps companyId={selected.id} canManage={canManageSelected(selected.id)} />
           </TabsContent>
           <TabsContent value="profile" className="mt-4">
             <CompanyProfileCard company={selected} canEdit={canManageSelected(selected.id)} />
