@@ -29,6 +29,7 @@ const MetrikaPage = lazy(() => import('@/pages/MetrikaPage').then((m) => ({ defa
 const OrganizationPage = lazy(() => import('@/pages/OrganizationPage').then((m) => ({ default: m.OrganizationPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AdminPage = lazy(() => import('@/pages/AdminPage').then((m) => ({ default: m.AdminPage })))
+const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
@@ -135,6 +136,7 @@ const router = createBrowserRouter([
           { path: '/', element: <WorkspaceLayout /> },
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
+          { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },
           { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
           { path: '/connectors', element: <LazyPage><ChannelsPage /></LazyPage> },
           { path: '/metrika', element: <LazyPage><MetrikaPage /></LazyPage> },

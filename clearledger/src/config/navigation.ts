@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Settings, Upload, FileText,
   Plug, BookOpen, CalendarClock, Link2, Package,
   Landmark, ScrollText, Tag, Layers, GitCompare,
-  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw, LineChart,
+  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw, LineChart, MessagesSquare,
 } from 'lucide-react'
 
 export interface NavItemDef {
@@ -27,6 +27,7 @@ export const dashboardItem: NavItemDef = { to: '/', icon: LayoutDashboard, label
 export const mainNavItems: NavItemDef[] = [
   dashboardItem,
   { to: '/objects', icon: Boxes, label: 'Объекты' },
+  { to: '/messages', icon: MessagesSquare, label: 'Чат' },        // чат экосистемы (Matrix)
   { to: '/reconciliation', icon: GitCompare, label: 'Разрезы учёта' },
   { to: '/files', icon: FileText, label: 'Документы' },           // первый слой данных (L1 RAW)
   { to: '/contractors', icon: Building2, label: 'Контрагенты' },  // справочник контрагентов (рядом с документами)
