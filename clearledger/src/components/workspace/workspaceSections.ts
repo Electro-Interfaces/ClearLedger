@@ -91,6 +91,7 @@ export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
   { key: 'cs_dashboard',  label: 'Обзор',         group: 'Сеть' },
   { key: 'cs_map',        label: 'Карта',         group: 'Сеть' },
   { key: 'cs_trend',      label: 'Динамика 2024+', group: 'Сеть' },
+  { key: 'cs_abcxyz',     label: 'ABC-XYZ станций', group: 'Сеть' },
   { key: 'cs_sessions',    label: 'Сессии',        group: 'Аналитика сессий' },
   { key: 'cs_reliability', label: 'Надёжность',    group: 'Аналитика сессий' },
   { key: 'cs_list',        label: 'Реестр сессий', group: 'Аналитика сессий' },

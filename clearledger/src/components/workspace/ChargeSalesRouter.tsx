@@ -13,6 +13,7 @@ import { OverviewDashboardPanel } from './OverviewDashboardPanel'
 import { ChargeListPanel } from './ChargeListPanel'
 import { ChargeMapPanel } from './ChargeMapPanel'
 import { ChargeTrendPanel } from './ChargeTrendPanel'
+import { AbcXyzPanel } from './AbcXyzPanel'
 import { SessionsPanel } from './ChargeSessionsPanel'
 
 export function ChargeSalesRouter({ tab, companyId, dateFrom, dateTo }: {
@@ -23,6 +24,7 @@ export function ChargeSalesRouter({ tab, companyId, dateFrom, dateTo }: {
     case 'cs_dashboard':   return <OverviewDashboardPanel {...p} />
     case 'cs_map':         return <ChargeMapPanel {...p} />
     case 'cs_trend':       return <ChargeTrendPanel {...p} />
+    case 'cs_abcxyz':      return <AbcXyzPanel {...p} />
     case 'cs_list':        return <ChargeListPanel {...p} />
     case 'cs_sessions':
     case 'cs_reliability': return <SessionsPanel tab={tab} {...p} />

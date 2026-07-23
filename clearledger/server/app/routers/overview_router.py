@@ -140,6 +140,35 @@ async def owners_breakdown(
         stations=codes, regions=regs)
 
 
+@router.get("/abc-xyz")
+async def abc_xyz_report(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    measure: str = Query("amount", pattern="^(amount|energy)$"),
+    bucket: str = Query("week", pattern="^(week|month)$"),
+    stations: str | None = None,
+    regions: str | None = None,
+    a_pct: float = Query(80.0, ge=1, le=99),
+    b_pct: float = Query(95.0, ge=1, le=99.9),
+    x_cv: float = Query(0.5, ge=0.05, le=5),
+    y_cv: float = Query(1.0, ge=0.1, le=10),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """ABC-XYZ классификация станций: вклад в результат (ABC) × стабильность
+    спроса (XYZ). measure=amount|energy, bucket=week|month (для XYZ)."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.station_abcxyz import station_abc_xyz
+
+    codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
+    return await station_abc_xyz(
+        db, cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
+        measure=measure, bucket=bucket, stations=codes, regions=regs,
+        a_pct=a_pct, b_pct=b_pct, x_cv=x_cv, y_cv=y_cv)
+
+
 @router.get("/owners/stations")
 async def owner_stations_list(
     company_id: str,
