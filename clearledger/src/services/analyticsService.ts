@@ -705,6 +705,65 @@ export async function getTankLedger(p: PeriodParams & {
   })
 }
 
+export type ReceiptClass = 'shortfall' | 'not_measured' | 'broken_measure' | 'surplus' | 'ok'
+
+export interface ReceiptAnalysisRow {
+  ttn: string
+  date: string | null
+  station_code: number
+  station_name: string
+  tank: number | null
+  fuel_code: number | null
+  fuel_name: string
+  supplier: string
+  doc_mass_kg: number
+  fact_mass_kg: number
+  diff_mass_kg: number
+  diff_pct: number | null
+  doc_volume_l: number
+  fact_volume_l: number
+  density_doc: number | null
+  density_fact: number | null
+  density_mismatch: boolean
+  temp_doc: number | null
+  temp_fact: number | null
+  klass: ReceiptClass
+  klass_title: string
+}
+
+export interface ReceiptAnalysisResponse {
+  period: { from: string; to: string }
+  totals: {
+    ttn: number; doc_tonn: number; fact_tonn: number; diff_kg: number
+    shortfall_ttn: number; shortfall_kg: number
+    surplus_ttn: number
+    not_measured_ttn: number; not_measured_kg: number
+    broken_measure_ttn: number
+    density_mismatch: number
+  }
+  classes: { klass: ReceiptClass; title: string; count: number; doc_kg: number; diff_kg: number }[]
+  by_station: {
+    station_code: number; station_name: string; ttn: number
+    doc_kg: number; diff_kg: number
+    shortfall: number; surplus: number; not_measured: number; broken_measure: number
+  }[]
+  rows: ReceiptAnalysisRow[]
+  rows_total: number
+  rows_truncated: boolean
+  tolerance: { pct: number; min_kg: number }
+}
+
+export async function getReceiptAnalysis(p: PeriodParams & {
+  stationCodes?: number[]
+  fuelCodes?: number[]
+}): Promise<ReceiptAnalysisResponse> {
+  return get<ReceiptAnalysisResponse>('/api/analytics/receipt-analysis', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
+}
+
 export async function getSalesChannels(p: PeriodParams): Promise<SalesChannelsResponse> {
   return get<SalesChannelsResponse>('/api/analytics/sales-channels', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,

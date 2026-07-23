@@ -370,9 +370,9 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
                     <Th>Смена</Th><Th>Дата</Th>
-                    <Th right>Книга нач.</Th><Th>Стык</Th>
+                    <Th right>Книга нач.</Th><Th right>Книга кон.</Th><Th>Стык</Th>
                     <Th right>Приход</Th><Th right>Отпуск</Th>
-                    <Th right>Книга кон.</Th><Th right>Факт</Th><Th right>Книга − факт</Th>
+                    <Th right>Факт</Th><Th right>Книга − факт</Th>
                     <Th right>Плотн.</Th><Th right>Темп.</Th><Th right>Вода</Th>
                   </tr>
                 </thead>
@@ -571,8 +571,14 @@ function GroupBlock({ group, tol }: { group: Group; tol: number }) {
             <Td>№{r.shift_number}</Td>
             <Td>{r.opened_at ? new Date(r.opened_at).toLocaleDateString('ru-RU') : '—'}</Td>
             <Td right>{L1(r.book_start)}</Td>
-            {/* Стык: начало смены против конца предыдущей. Первая смена периода —
-                сравнивать не с чем. */}
+            <Td right className={ariBad ? 'font-medium text-red-600 dark:text-red-400' : ''}>
+              {L1(r.book_end)}
+              {ariBad && (
+                <span className="ml-1 text-[10px]">(счёт {nf1.format(r.arithmetic_gap)})</span>
+              )}
+            </Td>
+            {/* Стык: начало ЭТОЙ смены против конца предыдущей. Первая смена
+                периода — сравнивать не с чем. */}
             <Td>
               {r.fuel_changed ? (
                 <span className="text-blue-600 dark:text-blue-400">смена топлива</span>
@@ -590,12 +596,6 @@ function GroupBlock({ group, tol }: { group: Group; tol: number }) {
               {r.receipts > 0 ? L1(r.receipts) : '—'}
             </Td>
             <Td right>{L1(r.sales)}</Td>
-            <Td right className={ariBad ? 'font-medium text-red-600 dark:text-red-400' : ''}>
-              {L1(r.book_end)}
-              {ariBad && (
-                <span className="ml-1 text-[10px]">(счёт {nf1.format(r.arithmetic_gap)})</span>
-              )}
-            </Td>
             <Td right>{L1(r.fact_end)}</Td>
             <Td right className={cn('font-medium', gapTone(r.fact_gap, tol))}>
               {gapLabel(r.fact_gap)}

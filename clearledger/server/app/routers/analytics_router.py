@@ -162,6 +162,31 @@ async def get_tank_ledger(
     )
 
 
+@router.get("/receipt-analysis")
+async def get_receipt_analysis(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    station_codes: str | None = None,
+    fuel_codes: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ошибки слива бензовозов: разбор приёмки по ТТН (недолив/перелив/без замера).
+
+    Считается по массе — объём при сливе станция часто переписывает из накладной
+    один-в-один, а недолив прячется в массе (пересчёт через плотность).
+    """
+    from app.services.receipt_analysis import build_receipt_analysis
+
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    return await build_receipt_analysis(
+        db, f.company_id, f.date_from, f.date_to,
+        station_codes=_csv_ints(station_codes, "station_codes"),
+        fuel_codes=_csv_ints(fuel_codes, "fuel_codes"),
+    )
+
+
 @router.get("/sales-channels")
 async def get_sales_channels(
     company_id: str,
