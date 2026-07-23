@@ -24,8 +24,13 @@ export function opStatusOf(l: ServiceLocation): string {
 const SERVICE_TRUE = new Set(['true', '1', 'yes', 'да', 'служебная', 'service'])
 const PLACEHOLDER = new Set(['001', '000', '0', '1', 'test', 'тест', 'demo', 'демо'])
 
-/** Тестовая/служебная по эвристике (placeholder-код или тест-маркер в названии). */
+/** Тестовая/служебная станция. Источник правды — БД-флаг `is_test` (приходит на
+ *  фронт как `passport.isTest`): его ведёт сверка со справочником, и он ловит
+ *  мусор, который эвристика по имени пропускает («123123123», «Предпоказ»).
+ *  Эвристика по имени/коду — лишь фолбэк, пока флаг в БД не выставлен (NULL). */
 export function isTestStation(l: ServiceLocation): boolean {
+  const flag = (l.passport as Record<string, unknown> | undefined)?.isTest
+  if (typeof flag === 'boolean') return flag
   const name = (l.name ?? '').trim().toLowerCase()
   const code = (l.code ?? '').trim().toLowerCase()
   if (PLACEHOLDER.has(name) || PLACEHOLDER.has(code)) return true

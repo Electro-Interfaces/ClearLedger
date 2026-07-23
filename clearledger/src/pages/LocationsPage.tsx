@@ -48,7 +48,7 @@ import { FleetDashboard } from '@/components/locations/fleet/FleetDashboard'
 import { LocationExportDialog } from '@/components/locations/fleet/LocationExportDialog'
 import {
   applyLocationFilters, computeFleetStats, collectFilterOptions,
-  EMPTY_LOCATION_FILTERS, ATTENTION_PATCH,
+  EMPTY_LOCATION_FILTERS, ATTENTION_PATCH, isTestStation,
   type LocationFilters, type AttentionKey,
 } from '@/components/locations/fleet/locationFleetService'
 import {
@@ -367,9 +367,18 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId])
 
-  const locations = getLocations()
+  const allLocations = getLocations()
   const sourcesCount = getSources().length
   const typeByCode = useMemo(() => new Map(types.map((t) => [t.code, t])), [types])
+
+  // Тестовые/служебные (БД-флаг is_test) в инвентаре скрыты по умолчанию: справочник
+  // объектов = реальные точки, а не мусор и симуляторы. Админ может их показать.
+  const [showTest, setShowTest] = useState(false)
+  const testCount = useMemo(() => allLocations.filter(isTestStation).length, [allLocations])
+  const locations = useMemo(
+    () => (showTest ? allLocations : allLocations.filter((l) => !isTestStation(l))),
+    [allLocations, showTest],
+  )
 
   // Единый отбор парка (поднят со страницы — общий для таблицы/карточек/дашборда/экспорта).
   const [filters, setFilters] = useState<LocationFilters>(EMPTY_LOCATION_FILTERS)
@@ -511,15 +520,24 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
 
             {/* Режим + (вид списка только в режиме «Список») */}
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="inline-flex rounded-md border border-border/60 p-0.5">
-                <Button variant={fleetMode === 'list' ? 'secondary' : 'ghost'} size="sm"
-                  className="h-8" onClick={() => setFleetMode('list')}>
-                  <List className="h-4 w-4 mr-1.5" /> Список
-                </Button>
-                <Button variant={fleetMode === 'dashboard' ? 'secondary' : 'ghost'} size="sm"
-                  className="h-8" onClick={() => setFleetMode('dashboard')}>
-                  <LayoutDashboard className="h-4 w-4 mr-1.5" /> Дашборд
-                </Button>
+              <div className="flex items-center gap-2">
+                <div className="inline-flex rounded-md border border-border/60 p-0.5">
+                  <Button variant={fleetMode === 'list' ? 'secondary' : 'ghost'} size="sm"
+                    className="h-8" onClick={() => setFleetMode('list')}>
+                    <List className="h-4 w-4 mr-1.5" /> Список
+                  </Button>
+                  <Button variant={fleetMode === 'dashboard' ? 'secondary' : 'ghost'} size="sm"
+                    className="h-8" onClick={() => setFleetMode('dashboard')}>
+                    <LayoutDashboard className="h-4 w-4 mr-1.5" /> Дашборд
+                  </Button>
+                </div>
+                {testCount > 0 && (
+                  <Button variant={showTest ? 'secondary' : 'ghost'} size="sm" className="h-8"
+                    onClick={() => setShowTest((v) => !v)}
+                    title="Тестовые и служебные объекты (is_test) скрыты из справочника по умолчанию">
+                    {showTest ? 'Скрыть тестовые' : `Показать тестовые (${testCount})`}
+                  </Button>
+                )}
               </div>
               {fleetMode === 'list' && (
                 <div className="inline-flex rounded-md border border-border/60 p-0.5">
