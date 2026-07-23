@@ -4,7 +4,6 @@ import {
   BookOpen, CircleCheckBig, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
   TriangleAlert, Warehouse, X,
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -15,7 +14,7 @@ import { useLocations } from '@/hooks/useLocations'
 import { cn } from '@/lib/utils'
 import {
   fmtLiters, fmtPct, getFuelBalance,
-  type FuelBalanceLine, type FuelBalanceTank,
+  type FuelBalanceLine,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -118,53 +117,6 @@ function SummaryTable({ rows, totals }: { rows: FuelBalanceLine[]; totals: FuelB
             <td className={cn('p-2.5 text-right tabular-nums', varianceTone(totals.variance_liters))}>{fmtPct(totals.variance_pct)}</td>
             <td className="p-2.5 text-right tabular-nums">{totals.tanks_count}</td>
           </tr>
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function TanksTable({ rows }: { rows: FuelBalanceTank[] }) {
-  if (rows.length === 0) return <Empty text="Резервуары не найдены" />
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[1180px] text-xs" aria-label="Периодный баланс по резервуарам">
-        <thead>
-          <tr className="border-b bg-muted/35 text-muted-foreground">
-            <th className="p-2.5 text-left font-medium">АЗС</th>
-            <th className="p-2.5 text-left font-medium">Резервуар</th>
-            <th className="p-2.5 text-left font-medium">Топливо</th>
-            <th className="p-2.5 text-left font-medium">Смены</th>
-            <th className="p-2.5 text-right font-medium">Остаток нач.</th>
-            <th className="p-2.5 text-right font-medium">Поступления</th>
-            <th className="p-2.5 text-right font-medium">Реализация</th>
-            <th className="p-2.5 text-right font-medium">Остаток кон.</th>
-            <th className="p-2.5 text-right font-medium">Отклонение</th>
-            <th className="p-2.5 text-right font-medium">Разрывы</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={`${row.station_id}:${row.tank_number}`} className="border-b border-border/50 hover:bg-muted/25">
-              <td className="p-2.5 font-medium">{row.station_name}</td>
-              <td className="p-2.5">№ {row.tank_number}</td>
-              <td className="p-2.5">
-                {row.fuel_name}
-                {row.fuel_changed ? <Badge variant="outline" className="ml-2 border-amber-500/40 text-[10px] text-amber-400">смена топлива</Badge> : null}
-              </td>
-              <td className="p-2.5 tabular-nums text-muted-foreground">{row.first_shift} → {row.last_shift} · {row.records_count}</td>
-              <td className="p-2.5 text-right tabular-nums text-muted-foreground">{fmtLiters(row.balance_start_liters)}</td>
-              <td className="p-2.5 text-right tabular-nums text-blue-400">{fmtLiters(row.receipts_liters)}</td>
-              <td className="p-2.5 text-right tabular-nums">{fmtLiters(row.sales_liters)}</td>
-              <td className="p-2.5 text-right tabular-nums text-muted-foreground">{fmtLiters(row.balance_end_liters)}</td>
-              <td className={cn('p-2.5 text-right font-medium tabular-nums', varianceTone(row.variance_liters))}>
-                {fmtLiters(row.variance_liters)} · {varianceName(row.variance_liters)}
-              </td>
-              <td className={cn('p-2.5 text-right tabular-nums', row.continuity_breaks > 0 && 'text-amber-400')}>
-                {row.continuity_breaks || '—'}
-              </td>
-            </tr>
-          ))}
         </tbody>
       </table>
     </div>
@@ -345,44 +297,40 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
             </div>
           </div>
 
-          <Tabs defaultValue="summary">
+          {/* Один ряд вкладок. Журнал по сменам — первым: он отвечает на главный
+              вопрос (стык смен, книга ↔ факт). «По резервуарам» и «Замечания» —
+              срезы той же книги (заменили прежние «Резервуары»/«Разрывы», которые
+              показывали то же в литрах, но без фактического замера). «АЗС × топливо»
+              оставлен как обзорный свод прихода-расхода. */}
+          <Tabs defaultValue="journal">
             <TabsList variant="line" className="h-9">
+              <TabsTrigger value="journal"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Журнал по сменам</TabsTrigger>
+              <TabsTrigger value="book_tanks"><Warehouse className="mr-1.5 h-3.5 w-3.5" />По резервуарам <span className="ml-1 text-muted-foreground">{data.tanks.length}</span></TabsTrigger>
+              <TabsTrigger value="book_issues"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Замечания</TabsTrigger>
               <TabsTrigger value="summary"><Database className="mr-1.5 h-3.5 w-3.5" />АЗС × топливо <span className="ml-1 text-muted-foreground">{data.lines.length}</span></TabsTrigger>
-              <TabsTrigger value="tanks"><Warehouse className="mr-1.5 h-3.5 w-3.5" />Резервуары <span className="ml-1 text-muted-foreground">{data.tanks.length}</span></TabsTrigger>
-              <TabsTrigger value="issues"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Разрывы <span className="ml-1 text-muted-foreground">{issues}</span></TabsTrigger>
-              {/* Книга против фактического замера — отдельный вопрос от баланса
-                  прихода-расхода: здесь сверяется документ с тем, что реально
-                  в резервуаре, и отсюда растёт инвентаризация. */}
-              <TabsTrigger value="ledger"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Книга и факт</TabsTrigger>
             </TabsList>
-            <TabsContent value="ledger" className="mt-3">
-              <TankLedgerTabs
+            <TabsContent value="journal" className="mt-3">
+              <TankLedgerTabs view="journal"
+                companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+                stationCodes={effectiveStations}
+                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+              />
+            </TabsContent>
+            <TabsContent value="book_tanks" className="mt-3">
+              <TankLedgerTabs view="tanks"
+                companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+                stationCodes={effectiveStations}
+                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+              />
+            </TabsContent>
+            <TabsContent value="book_issues" className="mt-3">
+              <TankLedgerTabs view="issues"
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
                 fuelCodes={fuels.map(Number).filter(Number.isFinite)}
               />
             </TabsContent>
             <TabsContent value="summary" className="mt-3"><Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0"><SummaryTable rows={data.lines} totals={data.totals} /></CardContent></Card></TabsContent>
-            <TabsContent value="tanks" className="mt-3"><Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0"><TanksTable rows={data.tanks} /></CardContent></Card></TabsContent>
-            <TabsContent value="issues" className="mt-3">
-              <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
-                {data.issues.length === 0 ? <Empty text="Разрывов остатков и смен топлива не найдено" /> : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[980px] text-xs" aria-label="Разрывы остатков между сменами">
-                      <thead><tr className="border-b bg-muted/35 text-muted-foreground">
-                        <th className="p-2.5 text-left font-medium">Тип</th><th className="p-2.5 text-left font-medium">АЗС</th><th className="p-2.5 text-left font-medium">Резервуар</th><th className="p-2.5 text-left font-medium">Топливо</th><th className="p-2.5 text-left font-medium">Переход смен</th><th className="p-2.5 text-right font-medium">Предыдущий конец</th><th className="p-2.5 text-right font-medium">Текущее начало</th><th className="p-2.5 text-right font-medium">Разрыв</th>
-                      </tr></thead>
-                      <tbody>{data.issues.map((issue, index) => (
-                        <tr key={`${issue.station_id}:${issue.tank_number}:${issue.previous_shift}:${index}`} className="border-b border-border/50 hover:bg-muted/25">
-                          <td className="p-2.5"><Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-400">{issue.type === 'fuel_change' ? 'Смена топлива' : 'Разрыв'}</Badge></td>
-                          <td className="p-2.5 font-medium">{issue.station_name}</td><td className="p-2.5">№ {issue.tank_number}</td><td className="p-2.5">{issue.fuel_name}</td><td className="p-2.5 tabular-nums">{issue.previous_shift} → {issue.current_shift}</td><td className="p-2.5 text-right tabular-nums">{fmtLiters(issue.previous_end_liters)}</td><td className="p-2.5 text-right tabular-nums">{fmtLiters(issue.current_start_liters)}</td><td className="p-2.5 text-right font-medium tabular-nums text-amber-400">{fmtLiters(issue.gap_liters)}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent></Card>
-            </TabsContent>
           </Tabs>
 
           <div className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">

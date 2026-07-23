@@ -12,10 +12,9 @@
  */
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { BookOpen, Gauge, Loader2, TriangleAlert } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { getTankLedger, type TankLedgerRow, type TankLedgerTank } from '@/services/analyticsService'
 
@@ -49,17 +48,22 @@ function hasHardIssue(r: TankLedgerRow): boolean {
     || r.fuel_changed
 }
 
+/** Какой разрез книги показываем. Вкладками управляет родитель (панель баланса),
+ *  чтобы всё жило в одном ряду вкладок, а не пряталось на второй уровень. */
+export type TankLedgerView = 'journal' | 'tanks' | 'issues'
+
 interface Props {
   companyId: string
   dateFrom: string
   dateTo: string
   stationCodes: number[]
   fuelCodes: number[]
+  view: TankLedgerView
 }
 
 type Group = { key: string; tank: TankLedgerTank | undefined; head: TankLedgerRow; rows: TankLedgerRow[] }
 
-export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }: Props) {
+export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuelCodes, view }: Props) {
   const [onlyIssues, setOnlyIssues] = useState(false)
 
   const query = useQuery({
@@ -119,7 +123,9 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
 
   return (
     <div className="space-y-4">
-      {/* Итог: книга, факт и разрыв между ними одной строкой */}
+      {/* Итог книга↔факт — на всех разрезах книги. Это НЕ «Излишек» из шапки
+          панели: там разрыв прихода-расхода по документам, здесь книга против
+          фактического замера — разные величины, обе нужны. */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <Cell label="Книга на начало" value={L(t.book_start)} />
         <Cell label="Поступило" value={L(t.receipts)} hint={`${nf0.format(t.mass_receipts / 1000)} т`} />
@@ -134,24 +140,9 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
         />
       </div>
 
-      <Tabs defaultValue="journal">
-        <TabsList>
-          <TabsTrigger value="journal">
-            <BookOpen className="mr-1.5 h-3.5 w-3.5" />Журнал по сменам
-            <span className="ml-1 text-muted-foreground">{data.rows_total}</span>
-          </TabsTrigger>
-          <TabsTrigger value="tanks">
-            <Gauge className="mr-1.5 h-3.5 w-3.5" />Итог по резервуарам
-            <span className="ml-1 text-muted-foreground">{data.tanks.length}</span>
-          </TabsTrigger>
-          <TabsTrigger value="issues">
-            <TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Замечания
-            <span className="ml-1 text-muted-foreground">{data.issues_total}</span>
-          </TabsTrigger>
-        </TabsList>
-
-        {/* ── ГЛАВНЫЙ ЭКРАН: журнал смена-за-сменой единой лентой ────────── */}
-        <TabsContent value="journal" className="mt-3">
+      {/* ── ЖУРНАЛ смена-за-сменой единой лентой ──────────────────────── */}
+      {view === 'journal' && (
+        <div className="mt-3">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
             <p className="text-[11px] text-muted-foreground">
               Начало смены → конец → начало следующей, подряд по каждому резервуару.
@@ -199,10 +190,12 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             (недостача); жёлтым — излишек и разрыв стыка. Замер уровнемера имеет
             погрешность, поэтому расхождение книги с фактом до {nf0.format(tol)} л не подсвечивается.
           </p>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* ── Итог по резервуарам за период ────────────────────────────── */}
-        <TabsContent value="tanks" className="mt-3">
+      {/* ── Итог по резервуарам за период ────────────────────────────── */}
+      {view === 'tanks' && (
+        <div className="mt-3">
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[1100px] text-xs">
               <thead className="bg-muted/40 text-muted-foreground">
@@ -266,10 +259,12 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             близко к текущему, значит за период ничего не изменилось: вопрос старый и
             решается инвентаризацией, а не поиском утечки.
           </p>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* ── Замечания по типам ───────────────────────────────────────── */}
-        <TabsContent value="issues" className="mt-3">
+      {/* ── Замечания по типам ───────────────────────────────────────── */}
+      {view === 'issues' && (
+        <div className="mt-3">
           <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
             <Cell label="Арифметика отчёта" value={nf0.format(t.arithmetic_breaks)}
                   hint="начало + приход − отпуск ≠ конец" tone={t.arithmetic_breaks ? 'text-red-600 dark:text-red-400' : undefined} />
@@ -319,8 +314,8 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
               Показаны {data.issues.length} из {data.issues_total} — сузьте период или АЗС.
             </p>
           )}
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
     </div>
   )
 }
