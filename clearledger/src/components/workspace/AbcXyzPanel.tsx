@@ -33,6 +33,18 @@ const CLASS_TONE: Record<string, string> = {
   CY: 'border-zinc-500/25 bg-muted/40 hover:bg-muted/60',
   CZ: 'border-red-500/40 bg-red-500/10 hover:bg-red-500/20',
 }
+// Короткая подпись категории — прямо в клетке (полное объяснение — в title/hint).
+const CELL_CAPTION: Record<string, string> = {
+  AX: 'Ядро сети — беречь',
+  AY: 'Крупные, спрос колеблется',
+  AZ: 'Крупные, спрос рваный',
+  BX: 'Опора сети',
+  BY: 'Потенциал роста',
+  BZ: 'Середняк, рвано',
+  CX: 'Стабильная ниша',
+  CY: 'Малые, наблюдать',
+  CZ: 'Кандидаты на вывод',
+}
 const CLASS_BADGE: Record<string, string> = {
   A: 'text-emerald-600 dark:text-emerald-400', B: 'text-amber-600 dark:text-amber-400',
   C: 'text-red-600 dark:text-red-400',
@@ -171,6 +183,9 @@ export function AbcXyzPanel({ companyId, dateFrom, dateTo }: {
                                 <span className="text-lg font-semibold tabular-nums leading-none">{nf0.format(c?.stations ?? 0)}</span>
                                 <span className="text-[10px] text-muted-foreground">{cls}</span>
                               </div>
+                              {CELL_CAPTION[cls] && (
+                                <div className="mt-1 text-[10px] font-medium leading-tight text-foreground/80">{CELL_CAPTION[cls]}</div>
+                              )}
                               <div className="mt-0.5 text-[10px] text-muted-foreground">{c?.share_pct ?? 0}% результата</div>
                             </button>
                           </td>

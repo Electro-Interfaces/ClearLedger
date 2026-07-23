@@ -29,7 +29,8 @@ import {
 } from '@/services/analyticsService'
 import {
   getChargeOverview, getSilentStations, getOwnersBreakdown, getOwnerStations,
-  type OwnerBreakdownRow, type OverviewKpi,
+  getSpeedBreakdown, getSpeedStations,
+  type OwnerBreakdownRow, type OwnerStationsResponse, type OverviewKpi,
   type ShareRow, type StationRow, type Accent, type OverviewCorporate,
   type HourPoint, type OverviewWeekday, type OverviewNetwork,
 } from '@/services/overviewService'
@@ -111,29 +112,30 @@ function CountCard({ label, value, hint }: { label: string; value: string; hint?
  * сколько простаивало. На сети РусГидро это четверть парка — самая крупная
  * потеря, которую обзор до сих пор не показывал. Клик даёт список: простой —
  * это не справка, а перечень работ. */
-/** Парк по владельцу: свои (РусГидро) vs партнёрские (СНК). Отдельный разрез,
- *  потому что партнёрские станции отрабатывают иначе — их простой и надёжность
- *  надо видеть отдельно, а не растворёнными в общей цифре сети. */
-function OwnersCard({ companyId, period, scope }: {
-  companyId: string; period: { from: string; to: string }; scope: ScopeArg
+/** Разрез парка по признаку станции (владелец, скорость…). Карточки-классы с
+ *  метриками простоя/надёжности; клик по классу — список его станций. Обобщён,
+ *  чтобы «Парк по владельцу» и «Парк по скорости» не дублировали разметку. */
+type BreakdownConfig = {
+  title: string; hint: string; queryKey: string; stationsHint: string
+  dot: Record<string, string>; hover: Record<string, string>
+  fetchRows: (a: { companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[] }) => Promise<OwnerBreakdownRow[]>
+  fetchStations: (a: { companyId: string; dateFrom: string; dateTo: string; cls: string }) => Promise<OwnerStationsResponse>
+}
+
+function BreakdownCard({ companyId, period, scope, cfg }: {
+  companyId: string; period: { from: string; to: string }; scope: ScopeArg; cfg: BreakdownConfig
 }) {
   const [open, setOpen] = useState<OwnerBreakdownRow | null>(null)
   const { data } = useQuery({
-    queryKey: ['owners-breakdown', companyId, period.from, period.to, scope.key],
-    queryFn: () => getOwnersBreakdown({ companyId, dateFrom: period.from, dateTo: period.to,
+    queryKey: [cfg.queryKey, companyId, period.from, period.to, scope.key],
+    queryFn: () => cfg.fetchRows({ companyId, dateFrom: period.from, dateTo: period.to,
       stations: scope.stations, regions: scope.regions }),
   })
-  const owners = (data?.owners ?? []).filter((o) => o.stations > 0 || o.sessions > 0)
-  if (owners.length < 2) return null   // один владелец — сравнивать не с кем
+  const rows = (data ?? []).filter((o) => o.stations > 0 || o.sessions > 0)
+  if (rows.length < 2) return null   // один класс — сравнивать не с чем
 
-  const dotColor: Record<string, string> = {
-    own: 'bg-blue-500', partner: 'bg-violet-500', unknown: 'bg-zinc-500',
-  }
-  const hoverCls: Record<string, string> = {
-    own: 'border-blue-500/30 hover:border-blue-500/60 hover:bg-blue-500/5',
-    partner: 'border-violet-500/30 hover:border-violet-500/60 hover:bg-violet-500/5',
-    unknown: 'border-border hover:border-zinc-400/50 hover:bg-muted/40',
-  }
+  const dotFb = 'bg-zinc-500'
+  const hoverFb = 'border-border hover:border-zinc-400/50 hover:bg-muted/40'
   const succCls = (v: number) => (v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
     : v >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
   const silentCls = (v: number) => (v <= 15 ? 'text-emerald-600 dark:text-emerald-400'
@@ -143,16 +145,16 @@ function OwnersCard({ companyId, period, scope }: {
     <Card>
       <CardContent className="pt-4">
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-          Парк по владельцу
-          <MetricHint text="Собственные — станции РусГидро (включая бренд «Доступная энергия»). Партнёрские — станции СНК. Простой и надёжность считаются отдельно: партнёрские отрабатывают иначе, и в общей цифре сети это тонет. Клик по владельцу — список его станций." />
+          {cfg.title}
+          <MetricHint text={cfg.hint} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {owners.map((o) => (
+          {rows.map((o) => (
             <button key={o.cls} type="button" onClick={() => setOpen(o)}
-              title="Показать станции этого владельца"
-              className={`rounded-xl border ${hoverCls[o.cls]} bg-card/50 p-3.5 text-left shadow-sm transition-colors`}>
+              title={cfg.stationsHint}
+              className={`rounded-xl border ${cfg.hover[o.cls] ?? hoverFb} bg-card/50 p-3.5 text-left shadow-sm transition-colors`}>
               <div className="flex items-center gap-1.5 text-xs font-medium">
-                <span className={`h-2 w-2 rounded-full ${dotColor[o.cls]}`} />{o.label}
+                <span className={`h-2 w-2 rounded-full ${cfg.dot[o.cls] ?? dotFb}`} />{o.label}
                 <ArrowUpRight className="ml-auto h-3.5 w-3.5 text-muted-foreground/60" />
               </div>
               <div className="mt-1.5 flex items-baseline gap-1.5">
@@ -170,21 +172,24 @@ function OwnersCard({ companyId, period, scope }: {
         </div>
       </CardContent>
       {open && (
-        <OwnerStationsDialog companyId={companyId} period={period} owner={open} onClose={() => setOpen(null)} />
+        <BreakdownStationsDialog companyId={companyId} period={period} row={open}
+          queryKey={cfg.queryKey} fetchStations={cfg.fetchStations} onClose={() => setOpen(null)} />
       )}
     </Card>
   )
 }
 
-/** Список станций одного владельца — раскрывается по клику с карточки. Простаивающие
+/** Список станций одного класса разреза — по клику с карточки. Простаивающие
  *  (0 сессий за период) идут вперёд: список читают, чтобы найти, с чем разбираться. */
-function OwnerStationsDialog({ companyId, period, owner, onClose }: {
-  companyId: string; period: { from: string; to: string }
-  owner: OwnerBreakdownRow; onClose: () => void
+function BreakdownStationsDialog({ companyId, period, row, queryKey, fetchStations, onClose }: {
+  companyId: string; period: { from: string; to: string }; row: OwnerBreakdownRow
+  queryKey: string
+  fetchStations: (a: { companyId: string; dateFrom: string; dateTo: string; cls: string }) => Promise<OwnerStationsResponse>
+  onClose: () => void
 }) {
   const q = useQuery({
-    queryKey: ['owner-stations', companyId, period.from, period.to, owner.cls],
-    queryFn: () => getOwnerStations({ companyId, dateFrom: period.from, dateTo: period.to, cls: owner.cls }),
+    queryKey: [`${queryKey}-stations`, companyId, period.from, period.to, row.cls],
+    queryFn: () => fetchStations({ companyId, dateFrom: period.from, dateTo: period.to, cls: row.cls }),
   })
   const succCls = (v: number | null) => (v == null ? 'text-muted-foreground'
     : v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
@@ -195,9 +200,9 @@ function OwnerStationsDialog({ companyId, period, owner, onClose }: {
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
           <div>
-            <div className="text-sm font-semibold">{owner.label} — {nf0.format(owner.stations)} станций</div>
+            <div className="text-sm font-semibold">{row.label} — {nf0.format(row.stations)} станций</div>
             <div className="mt-0.5 text-[11px] text-muted-foreground">
-              активны {nf0.format(q.data?.active ?? owner.active)} · простой {nf0.format(q.data?.silent ?? owner.silent)}
+              активны {nf0.format(q.data?.active ?? row.active)} · простой {nf0.format(q.data?.silent ?? row.silent)}
               {' · '}за период {formatPeriod(period.from, period.to)}
             </div>
           </div>
@@ -252,6 +257,36 @@ function Stat({ label, value, cls }: { label: string; value: string; cls?: strin
       <div className={`font-mono tabular-nums ${cls ?? ''}`}>{value}</div>
     </div>
   )
+}
+
+// Разрез парка по владельцу — свои (РусГидро) vs партнёрские (СНК).
+const OWNERS_CFG: BreakdownConfig = {
+  title: 'Парк по владельцу',
+  hint: 'Собственные — станции РусГидро (включая бренд «Доступная энергия»). Партнёрские — станции СНК. Простой и надёжность считаются отдельно: партнёрские отрабатывают иначе, и в общей цифре сети это тонет. Клик по владельцу — список его станций.',
+  queryKey: 'owners-breakdown', stationsHint: 'Показать станции этого владельца',
+  dot: { own: 'bg-blue-500', partner: 'bg-violet-500', unknown: 'bg-zinc-500' },
+  hover: {
+    own: 'border-blue-500/30 hover:border-blue-500/60 hover:bg-blue-500/5',
+    partner: 'border-violet-500/30 hover:border-violet-500/60 hover:bg-violet-500/5',
+    unknown: 'border-border hover:border-zinc-400/50 hover:bg-muted/40',
+  },
+  fetchRows: (a) => getOwnersBreakdown(a).then((r) => r.owners),
+  fetchStations: getOwnerStations,
+}
+
+// Разрез парка по скорости — медленные (AC) vs быстрые (DC).
+const SPEED_CFG: BreakdownConfig = {
+  title: 'Парк по скорости',
+  hint: 'Медленные — AC-станции (до 50 кВт), быстрые — DC (от 50 кВт). Скорость берётся из паспорта (speed_class), где пусто — по номинальной мощности. Простой и надёжность отдельно: у быстрых DC простой стоит дороже, а износ иной, чем у AC. Клик — список станций.',
+  queryKey: 'speed-breakdown', stationsHint: 'Показать станции этой скорости',
+  dot: { fast: 'bg-amber-500', slow: 'bg-cyan-500', unknown: 'bg-zinc-500' },
+  hover: {
+    fast: 'border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/5',
+    slow: 'border-cyan-500/30 hover:border-cyan-500/60 hover:bg-cyan-500/5',
+    unknown: 'border-border hover:border-zinc-400/50 hover:bg-muted/40',
+  },
+  fetchRows: (a) => getSpeedBreakdown(a).then((r) => r.speed),
+  fetchStations: getSpeedStations,
 }
 
 function SilentCard({ companyId, period, silent }: {
@@ -922,7 +957,8 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
               <CountCard label="Коннекторов в сети" value={nf0.format(data.meta.ports)} hint="физических портов" />
             </div>
 
-            <OwnersCard companyId={companyId} period={period} scope={sc} />
+            <BreakdownCard companyId={companyId} period={period} scope={sc} cfg={OWNERS_CFG} />
+            <BreakdownCard companyId={companyId} period={period} scope={sc} cfg={SPEED_CFG} />
 
             <NetworkHealth net={data.network} />
             <RegionExtremes regions={data.network.regions} />

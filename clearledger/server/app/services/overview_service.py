@@ -495,44 +495,32 @@ class OverviewService:
             })
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "metrics": metrics}
 
-    async def owners_breakdown(self, company_id: Any, df: date, dt: date,
-                               stations: list[str] | None = None,
-                               regions: list[str] | None = None,
-                               tz: str = "msk") -> dict[str, Any]:
-        """Разрез парка по владельцу: свои (РусГидро) vs партнёрские (СНК).
+    async def _dimension_breakdown(self, company_id: Any, df: date, dt: date,
+                                   class_expr: str, order: tuple[str, ...],
+                                   labels: dict[str, str]) -> list[dict[str, Any]]:
+        """Разрез парка ЭЗС по произвольному признаку станции (владелец, скорость…).
 
-        По каждому классу: станций в парке, сколько работает по паспорту, сколько
-        реально возило за период (активные) и сколько молчит (простой), плюс
-        сессии, энергия и надёжность по визитам. Простой и надёжность — ровно то,
-        ради чего вводили владельца: сравнить, как отрабатывают наши и партнёрские.
-
-        Учитывает контур (station_codes/regions): при выбранной области считается
-        только она.
-        """
+        `class_expr` — SQL-выражение класса по `service_locations` (алиас sl.);
+        по каждому классу: станций в парке / работают, активные и молчащие за
+        период, сессии/энергия/выручка и надёжность по визитам. Считается по
+        всему company-скоупу (как карточки обзора). Надёжность — через location_id
+        (station_code партнёров/CPO не совпадает — канон CLAUDE.md)."""
         from sqlalchemy import text
 
-        from app.services.station_owner import CLASS_LABELS, owner_class_sql
-
-        # ── парк по владельцу: всего / работают по паспорту ──
-        # Сужение по кодам станций — через нормализованный station_code индекс не
-        # проходит, поэтому область считаем по region_id и по коду напрямую; при
-        # выбранной одной ЭЗС фильтр station применяется на уровне SQL ниже.
-        park = (await self.db.execute(text(f"""
-            select {owner_class_sql('owner')} as cls,
-                   count(*) as stations,
-                   count(*) filter (where operational_status = 'working') as working
-            from service_locations sl
-            where company_id = :cid and type = 'ev_charging'
-              and coalesce(is_test, false) = false
-              and coalesce(operational_status, '') <> 'decommissioned'
-            group by 1
-        """), {"cid": company_id})).mappings().all()
-
-        # ── активность и сессии по владельцу за период ──
         lo = datetime.combine(df, datetime.min.time())
         hi = datetime.combine(dt, datetime.max.time())
+        park = (await self.db.execute(text(f"""
+            select {class_expr} as cls,
+                   count(*) as stations,
+                   count(*) filter (where sl.operational_status = 'working') as working
+            from service_locations sl
+            where sl.company_id = :cid and sl.type = 'ev_charging'
+              and coalesce(sl.is_test, false) = false
+              and coalesce(sl.operational_status, '') <> 'decommissioned'
+            group by 1
+        """), {"cid": company_id})).mappings().all()
         act = (await self.db.execute(text(f"""
-            select {owner_class_sql('sl.owner')} as cls,
+            select {class_expr} as cls,
                    count(*) as sessions,
                    count(distinct cs.location_id) as active,
                    coalesce(sum(cs.energy_kwh), 0) as energy,
@@ -544,11 +532,6 @@ class OverviewService:
             group by 1
         """), {"cid": company_id, "lo": lo, "hi": hi})).mappings().all()
         act_by = {r["cls"]: r for r in act}
-
-        # ── надёжность (успех визитов) по владельцу ──
-        # Через location_id, а НЕ station_code: у партнёрских станций код в
-        # справочнике не совпадает со station_code в сессиях (свой формат CPO),
-        # и по кодам успех выходил ложным 0%. Владелец резолвится по location_id.
         rel = (await self.db.execute(text(f"""
             with v as (
                 select visit_key, min(cs.location_id) as loc,
@@ -558,7 +541,7 @@ class OverviewService:
                   and cs.started_at >= :lo and cs.started_at <= :hi
                 group by visit_key
             )
-            select {owner_class_sql('sl.owner')} as cls,
+            select {class_expr} as cls,
                    count(*) as visits,
                    count(*) filter (where v.charged) as charged
             from v join service_locations sl on sl.id = v.loc
@@ -567,7 +550,7 @@ class OverviewService:
         rel_by = {r["cls"]: r for r in rel}
 
         out = []
-        for cls in ("own", "partner", "unknown"):
+        for cls in order:
             p = next((r for r in park if r["cls"] == cls), None)
             a = act_by.get(cls)
             stations_n = int(p["stations"]) if p else 0
@@ -578,7 +561,7 @@ class OverviewService:
             visits = int(rr["visits"]) if rr else 0
             charged = int(rr["charged"]) if rr else 0
             out.append({
-                "cls": cls, "label": CLASS_LABELS[cls],
+                "cls": cls, "label": labels[cls],
                 "stations": stations_n,
                 "working": int(p["working"]) if p else 0,
                 "active": active,
@@ -590,24 +573,35 @@ class OverviewService:
                 "visits": visits, "charged": charged,
                 "success_pct": round(charged / visits * 100, 1) if visits else 0.0,
             })
+        return out
+
+    async def owners_breakdown(self, company_id: Any, df: date, dt: date,
+                               stations: list[str] | None = None,
+                               regions: list[str] | None = None,
+                               tz: str = "msk") -> dict[str, Any]:
+        """Разрез парка по владельцу: свои (РусГидро) vs партнёрские (СНК)."""
+        from app.services.station_owner import CLASS_LABELS, owner_class_sql
+        out = await self._dimension_breakdown(
+            company_id, df, dt, owner_class_sql("sl.owner"),
+            ("own", "partner", "unknown"), CLASS_LABELS)
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "owners": out}
 
-    async def owner_stations(self, company_id: Any, df: date, dt: date, cls: str) -> dict[str, Any]:
-        """Список станций одного владельца (own|partner|unknown) с их работой за
-        период. Раскрывается по клику с карточки «Парк по владельцу»: простой —
-        это не справка, а перечень станций, с которыми надо разбираться.
+    async def speed_breakdown(self, company_id: Any, df: date, dt: date,
+                              stations: list[str] | None = None,
+                              regions: list[str] | None = None) -> dict[str, Any]:
+        """Разрез парка по скорости: медленные (AC) vs быстрые (DC)."""
+        from app.services.station_speed import SPEED_LABELS, SPEED_ORDER, speed_class_sql
+        out = await self._dimension_breakdown(
+            company_id, df, dt, speed_class_sql("sl."), SPEED_ORDER, SPEED_LABELS)
+        return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "speed": out}
 
-        По каждой станции: код/имя/город, статус, сессии, энергия, надёжность
-        (успех визитов через location_id) и дата последней сессии. Сортировка —
-        молчащие вперёд (0 сессий сверху), затем по имени: список читают, чтобы
-        найти простаивающие. Считается тем же парком, что и карточка (весь
-        company-скоуп), поэтому итог списка совпадает с числом на карточке.
-        """
+    async def _dimension_stations(self, company_id: Any, df: date, dt: date, cls: str,
+                                  class_expr: str, labels: dict[str, str]) -> dict[str, Any]:
+        """Список станций одного класса (владелец/скорость) с их работой за период —
+        раскрывается по клику с карточки разреза. Молчащие вперёд (0 сессий сверху)."""
         from sqlalchemy import text
 
-        from app.services.station_owner import CLASS_LABELS, owner_class_sql
-
-        if cls not in CLASS_LABELS:
+        if cls not in labels:
             cls = "unknown"
         lo = datetime.combine(df, datetime.min.time())
         hi = datetime.combine(dt, datetime.max.time())
@@ -648,7 +642,7 @@ class OverviewService:
             where sl.company_id = :cid and sl.type = 'ev_charging'
               and coalesce(sl.is_test, false) = false
               and coalesce(sl.operational_status, '') <> 'decommissioned'
-              and ({owner_class_sql('sl.owner')}) = :cls
+              and ({class_expr}) = :cls
             order by coalesce(s.sessions, 0) asc, sl.name asc
         """), {"cid": company_id, "lo": lo, "hi": hi, "cls": cls})).mappings().all()
 
@@ -669,9 +663,21 @@ class OverviewService:
             })
         return {
             "period": {"from": df.isoformat(), "to": dt.isoformat()},
-            "cls": cls, "label": CLASS_LABELS[cls],
+            "cls": cls, "label": labels[cls],
             "total": len(out),
             "active": sum(1 for s in out if s["sessions"] > 0),
             "silent": sum(1 for s in out if s["sessions"] == 0),
             "stations": out,
         }
+
+    async def owner_stations(self, company_id: Any, df: date, dt: date, cls: str) -> dict[str, Any]:
+        """Список станций одного владельца (own|partner|unknown) — по клику с карточки."""
+        from app.services.station_owner import CLASS_LABELS, owner_class_sql
+        return await self._dimension_stations(
+            company_id, df, dt, cls, owner_class_sql("sl.owner"), CLASS_LABELS)
+
+    async def speed_stations(self, company_id: Any, df: date, dt: date, cls: str) -> dict[str, Any]:
+        """Список станций одной скорости (fast|slow|unknown) — по клику с карточки."""
+        from app.services.station_speed import SPEED_LABELS, speed_class_sql
+        return await self._dimension_stations(
+            company_id, df, dt, cls, speed_class_sql("sl."), SPEED_LABELS)

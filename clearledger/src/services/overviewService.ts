@@ -171,9 +171,10 @@ export async function getSilentStations(p: {
   })
 }
 
-/** Парк по владельцу: свои (РусГидро) vs партнёрские (СНК) — простой, сессии, надёжность. */
+/** Строка разреза парка (владелец/скорость): простой, сессии, надёжность.
+ *  cls — код класса разреза (own/partner/unknown или fast/slow/unknown). */
 export interface OwnerBreakdownRow {
-  cls: 'own' | 'partner' | 'unknown'
+  cls: string
   label: string
   stations: number
   working: number
@@ -225,9 +226,31 @@ export interface OwnerStationsResponse {
   stations: OwnerStation[]
 }
 export async function getOwnerStations(p: {
-  companyId: string; dateFrom: string; dateTo: string; cls: 'own' | 'partner' | 'unknown'
+  companyId: string; dateFrom: string; dateTo: string; cls: string
 }): Promise<OwnerStationsResponse> {
   return get<OwnerStationsResponse>('/api/analytics/charge-sessions/owners/stations', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, cls: p.cls,
+  })
+}
+
+/** Парк по скорости: медленные (AC) vs быстрые (DC). Метрики те же, что у владельца. */
+export interface SpeedResponse {
+  period: { from: string; to: string }
+  speed: OwnerBreakdownRow[]
+}
+export async function getSpeedBreakdown(p: {
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[]
+}): Promise<SpeedResponse> {
+  return get<SpeedResponse>('/api/analytics/charge-sessions/speed', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+  })
+}
+export async function getSpeedStations(p: {
+  companyId: string; dateFrom: string; dateTo: string; cls: string
+}): Promise<OwnerStationsResponse> {
+  return get<OwnerStationsResponse>('/api/analytics/charge-sessions/speed/stations', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, cls: p.cls,
   })
 }
