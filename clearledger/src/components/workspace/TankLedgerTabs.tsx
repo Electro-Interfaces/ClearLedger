@@ -12,11 +12,17 @@
  */
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Download, Loader2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { getTankLedger, type TankLedgerRow, type TankLedgerTank } from '@/services/analyticsService'
+import {
+  getTankLedger, type TankLedgerResponse, type TankLedgerRow, type TankLedgerTank,
+} from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
@@ -48,6 +54,92 @@ function hasHardIssue(r: TankLedgerRow): boolean {
     || r.fuel_changed
 }
 
+const r1 = (v: number | null | undefined) => (v == null ? '' : Math.round(v * 10) / 10)
+const r3 = (v: number | null | undefined) => (v == null ? '' : Math.round(v * 1000) / 1000)
+
+/** Выгрузка книги резервуаров в xlsx: журнал по сменам + итог + замечания.
+ *  Цифры — числами (не текстом), чтобы бухгалтер мог считать в самом Excel. */
+async function exportLedgerXlsx(data: TankLedgerResponse, dateFrom: string, dateTo: string) {
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+
+  // Лист 1 — журнал по сменам, полный (без учёта экранного фильтра).
+  const journal = data.rows.map((r) => ({
+    'АЗС': r.station_name,
+    'Резервуар': r.tank_number,
+    'Топливо': r.fuel_name,
+    'Смена': r.shift_number,
+    'Открыта': r.opened_at ? new Date(r.opened_at).toLocaleString('ru-RU') : '',
+    'Закрыта': r.closed_at ? new Date(r.closed_at).toLocaleString('ru-RU') : '',
+    'Книга нач., л': r1(r.book_start),
+    'Конец пред. смены, л': r.continuity_gap == null ? '' : r1(r.book_start - r.continuity_gap),
+    'Стык, л': r.continuity_gap == null ? '' : r1(r.continuity_gap),
+    'Приход, л': r1(r.receipts),
+    'Отпуск, л': r1(r.sales),
+    'Книга кон., л': r1(r.book_end),
+    'Счёт (арифметика), л': r1(r.arithmetic_gap),
+    'Факт (замер), л': r1(r.fact_end),
+    'Книга − факт, л': r1(r.fact_gap),
+    'Расхождение': r.fact_gap == null ? '' : Math.abs(r.fact_gap) < 0.05 ? 'сходится' : r.fact_gap > 0 ? 'недостача' : 'излишек',
+    'Масса нач., кг': r3(r.mass_start),
+    'Масса кон., кг': r3(r.mass_end),
+    'Приход, кг': r3(r.mass_received),
+    'Отпуск, кг': r3(r.mass_sales),
+    'Факт, кг': r3(r.fact_mass),
+    'Плотн. нач.': r3(r.density_beg),
+    'Плотн. кон.': r3(r.density_end),
+    'Темп. нач., °C': r1(r.temp_beg),
+    'Темп. кон., °C': r1(r.temp_end),
+    'Уровень, мм': r1(r.level_end),
+    'Вода, л': r1(r.water_volume),
+    'Смена топлива': r.fuel_changed ? 'да' : '',
+  }))
+  const wsJournal = XLSX.utils.json_to_sheet(journal)
+  wsJournal['!cols'] = [
+    { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 17 }, { wch: 17 },
+    ...Array(21).fill({ wch: 13 }),
+  ]
+  XLSX.utils.book_append_sheet(wb, wsJournal, 'Журнал по сменам')
+
+  // Лист 2 — итог по резервуарам за период.
+  const tanks = data.tanks.map((t) => ({
+    'АЗС': t.station_name,
+    'Резервуар': t.tank_number,
+    'Топливо': t.fuel_name,
+    'Смен': t.shifts,
+    'Книга нач., л': r1(t.book_start),
+    'Приход, л': r1(t.receipts),
+    'Отпуск, л': r1(t.sales),
+    'Книга кон., л': r1(t.book_end),
+    'Факт, л': r1(t.fact_end),
+    'Книга − факт, л': r1(t.fact_gap),
+    '% от отпуска': t.fact_gap_pct ?? '',
+    'Расхождение': t.fact_gap == null ? '' : Math.abs(t.fact_gap) < 0.05 ? 'сходится' : t.fact_gap > 0 ? 'недостача' : 'излишек',
+    'Было на входе, л': r1(t.fact_gap_opening),
+    'Приход, кг': r1(t.mass_receipts),
+    'Отпуск, кг': r1(t.mass_sales),
+    'Арифметика (замечаний)': t.arithmetic_breaks,
+    'Стык (замечаний)': t.continuity_breaks,
+    'Расхождение замера (замечаний)': t.fact_breaks,
+  }))
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tanks), 'Итог по резервуарам')
+
+  // Лист 3 — замечания.
+  const issues = data.issues.map((i) => ({
+    'Тип': i.type === 'arithmetic' ? 'арифметика отчёта' : i.type === 'fuel_change' ? 'смена топлива' : 'стык смен',
+    'АЗС': i.station_name,
+    'Резервуар': i.tank_number,
+    'Топливо': i.fuel_name,
+    'Смена': i.shift_number,
+    'Дата': i.date ? new Date(i.date).toLocaleDateString('ru-RU') : '',
+    'Расхождение, л': r1(i.gap_liters),
+    'Что не сходится': i.detail,
+  }))
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(issues), 'Замечания')
+
+  XLSX.writeFile(wb, `zhurnal_smen_${dateFrom}_${dateTo}.xlsx`)
+}
+
 /** Какой разрез книги показываем. Вкладками управляет родитель (панель баланса),
  *  чтобы всё жило в одном ряду вкладок, а не пряталось на второй уровень. */
 export type TankLedgerView = 'journal' | 'tanks' | 'issues'
@@ -63,8 +155,14 @@ interface Props {
 
 type Group = { key: string; tank: TankLedgerTank | undefined; head: TankLedgerRow; rows: TankLedgerRow[] }
 
+type IssueFilter = 'all' | 'issues' | 'continuity' | 'arithmetic' | 'fact' | 'fuel_change'
+
 export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuelCodes, view }: Props) {
-  const [onlyIssues, setOnlyIssues] = useState(false)
+  const [fStation, setFStation] = useState('all')  // код АЗС
+  const [fTank, setFTank] = useState('all')        // номер резервуара
+  const [fFuel, setFFuel] = useState('all')        // код топлива
+  const [fIssue, setFIssue] = useState<IssueFilter>('all')
+  const [fShift, setFShift] = useState('')         // поиск по номеру смены
 
   const query = useQuery({
     queryKey: ['tank-ledger', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
@@ -82,13 +180,56 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
     return m
   }, [data])
 
-  // Строки уже приходят в порядке АЗС → резервуар → дата. Группируем в ленты
-  // по физическому резервуару, сохраняя хронологию внутри.
+  // Значения для выпадающих фильтров — из самих данных.
+  const filterOptions = useMemo(() => {
+    const stations = new Map<number, string>()
+    const fuels = new Map<number, string>()
+    const tanksForStation = new Set<number>()
+    for (const r of data?.rows ?? []) {
+      stations.set(r.station_code, r.station_name)
+      if (r.fuel_code != null) fuels.set(r.fuel_code, r.fuel_name)
+      if (fStation === 'all' || String(r.station_code) === fStation) tanksForStation.add(r.tank_number)
+    }
+    return {
+      stations: [...stations].sort((a, b) => a[0] - b[0]),
+      fuels: [...fuels].sort((a, b) => a[0] - b[0]),
+      tanks: [...tanksForStation].sort((a, b) => a - b),
+    }
+  }, [data, fStation])
+
+  // Проходит ли строка через выбранное «замечание».
+  const passIssue = useMemo(() => {
+    const contBad = (r: TankLedgerRow) => r.continuity_gap != null && Math.abs(r.continuity_gap) > CONT_TOL
+    const ariBad = (r: TankLedgerRow) => Math.abs(r.arithmetic_gap) > ARI_TOL
+    const factBad = (r: TankLedgerRow) => r.fact_gap != null && Math.abs(r.fact_gap) > tol
+    return (r: TankLedgerRow): boolean => {
+      switch (fIssue) {
+        case 'issues': return hasHardIssue(r)
+        case 'continuity': return contBad(r)
+        case 'arithmetic': return ariBad(r)
+        case 'fact': return factBad(r)
+        case 'fuel_change': return r.fuel_changed
+        default: return true
+      }
+    }
+  }, [fIssue, tol])
+
+  // Строки уже приходят в порядке АЗС → резервуар → дата. Фильтруем по всем
+  // критериям и группируем в ленты по физическому резервуару.
   const groups: Group[] = useMemo(() => {
     if (!data) return []
+    const shiftQuery = fShift.trim()
+    const rows = data.rows.filter((r) => {
+      if (fStation !== 'all' && String(r.station_code) !== fStation) return false
+      if (fTank !== 'all' && String(r.tank_number) !== fTank) return false
+      if (fFuel !== 'all' && String(r.fuel_code) !== fFuel) return false
+      if (shiftQuery && !String(r.shift_number).includes(shiftQuery)) return false
+      if (!passIssue(r)) return false
+      return true
+    })
     const out: Group[] = []
     let cur: Group | null = null
-    for (const r of data.rows) {
+    for (const r of rows) {
       const key = `${r.station_code}:${r.tank_number}`
       if (!cur || cur.key !== key) {
         cur = { key, tank: tankByKey.get(key), head: r, rows: [] }
@@ -96,14 +237,14 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
       }
       cur.rows.push(r)
     }
-    if (!onlyIssues) return out
-    // Оставляем только резервуары, где есть сломанный счёт; внутри — только
-    // проблемные смены (плюс соседние по хронологии не тянем — стык виден в самой
-    // строке через колонку «Стык»).
     return out
-      .map((g) => ({ ...g, rows: g.rows.filter(hasHardIssue) }))
-      .filter((g) => g.rows.length > 0)
-  }, [data, tankByKey, onlyIssues])
+  }, [data, tankByKey, fStation, fTank, fFuel, fShift, passIssue])
+
+  const shownRows = groups.reduce((n, g) => n + g.rows.length, 0)
+  const filtered = fStation !== 'all' || fTank !== 'all' || fFuel !== 'all' || fIssue !== 'all' || fShift.trim() !== ''
+  const resetFilters = () => {
+    setFStation('all'); setFTank('all'); setFFuel('all'); setFIssue('all'); setFShift('')
+  }
 
   if (query.isLoading) {
     return (
@@ -143,20 +284,85 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
       {/* ── ЖУРНАЛ смена-за-сменой единой лентой ──────────────────────── */}
       {view === 'journal' && (
         <div className="mt-3">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[11px] text-muted-foreground">
-              Начало смены → конец → начало следующей, подряд по каждому резервуару.
-              Столбец «Стык» сверяет начало смены с концом предыдущей.
-            </p>
-            <label className="flex items-center gap-2 text-xs">
-              <Switch checked={onlyIssues} onCheckedChange={setOnlyIssues} />
-              Только смены с замечаниями
-            </label>
+          <p className="mb-2 text-[11px] text-muted-foreground">
+            Начало смены → конец → начало следующей, подряд по каждому резервуару.
+            Столбец «Стык» сверяет начало смены с концом предыдущей.
+          </p>
+
+          {/* Фильтры журнала: сужают уже загруженную ленту, без перезапроса. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Select value={fStation} onValueChange={(v) => { setFStation(v); setFTank('all') }}>
+              <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="АЗС" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все АЗС</SelectItem>
+                {filterOptions.stations.map(([code, name]) => (
+                  <SelectItem key={code} value={String(code)}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={fTank} onValueChange={setFTank}>
+              <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue placeholder="Резервуар" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все резервуары</SelectItem>
+                {filterOptions.tanks.map((n) => (
+                  <SelectItem key={n} value={String(n)}>Резервуар №{n}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={fFuel} onValueChange={setFFuel}>
+              <SelectTrigger className="h-8 w-[120px] text-xs"><SelectValue placeholder="Топливо" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Всё топливо</SelectItem>
+                {filterOptions.fuels.map(([code, name]) => (
+                  <SelectItem key={code} value={String(code)}>{name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={fIssue} onValueChange={(v) => setFIssue(v as IssueFilter)}>
+              <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все смены</SelectItem>
+                <SelectItem value="issues">Только с замечаниями</SelectItem>
+                <SelectItem value="continuity">Разрыв стыка смен</SelectItem>
+                <SelectItem value="arithmetic">Ошибка счёта (арифметика)</SelectItem>
+                <SelectItem value="fact">Расхождение с замером</SelectItem>
+                <SelectItem value="fuel_change">Смена вида топлива</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Input
+              value={fShift}
+              onChange={(e) => setFShift(e.target.value)}
+              placeholder="№ смены"
+              className="h-8 w-[110px] text-xs"
+              inputMode="numeric"
+            />
+
+            {filtered && (
+              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={resetFilters}>
+                <X className="mr-1 h-3.5 w-3.5" />Сбросить
+              </Button>
+            )}
+
+            <span className="ml-auto flex items-center gap-3">
+              <span className="text-[11px] text-muted-foreground">
+                строк: {nf0.format(shownRows)}{filtered && data.rows_total ? ` из ${nf0.format(data.rows_total)}` : ''}
+              </span>
+              <Button
+                variant="outline" size="sm" className="h-8"
+                onClick={() => exportLedgerXlsx(data, dateFrom, dateTo)}
+              >
+                <Download className="mr-1.5 h-3.5 w-3.5" />Экспорт в Excel
+              </Button>
+            </span>
           </div>
 
           {groups.length === 0 ? (
             <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-              Смен со сломанным счётом (стык или арифметика) за период нет
+              {filtered ? 'Под фильтр не попала ни одна смена' : 'За период нет смен по резервуарам'}
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
