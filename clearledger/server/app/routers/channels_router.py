@@ -350,6 +350,10 @@ async def _run_channel_background(
         if log is not None:
             log.status = "success" if status == "success" else (
                 "partial" if status == "skipped" else "error")
+            # Сессии по станциям вне справочника «Объекты» — данные загружены, но
+            # это ошибка (сессия без объекта недопустима) → жёлтый статус прогона.
+            if result.get("unmatched_sessions"):
+                log.status = "partial"
             log.loaded = _loaded_total(result)
             # Счётчики и per-station детали для строки прогона в кокпите.
             by = result.get("by_station") if isinstance(result.get("by_station"), list) else []
@@ -366,7 +370,8 @@ async def _run_channel_background(
                 log.errors = int(result.get("errors", 0) or 0)
             st_total = result.get("stations_total")
             log.events = [{
-                "level": "info" if status in ("success", "skipped") else "error",
+                "level": ("error" if result.get("unmatched_sessions")
+                          else "info" if status in ("success", "skipped") else "error"),
                 "event": "run",
                 "message": _run_summary(result),
                 "stations_done": len(by),

@@ -53,7 +53,12 @@ async def import_sessions(
     await db.commit()
     return {"created": result["created"], "skipped": result["skipped"],
             "errors": result["errors"], "deleted": result.get("deleted", 0),
-            "mode": result.get("mode", mode)}
+            "mode": result.get("mode", mode),
+            # Объекты — источник правды: сессии по станциям вне справочника
+            # поднимаются ошибкой (данные загружены с location_id=NULL).
+            "unmatched_stations": result.get("unmatched_stations", []),
+            "unmatched_sessions": result.get("unmatched_sessions", 0),
+            "message": result.get("message", "")}
 
 
 @router.post("/enrich")

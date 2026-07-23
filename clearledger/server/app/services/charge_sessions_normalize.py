@@ -245,10 +245,30 @@ async def ingest_charge_sessions(
         db.add_all(batch)
         await db.flush()
 
-    # Durable self-heal: неизвестные станции из сессий → объекты L2 + резолв location_id,
-    # чтобы «сироты» (location_id NULL) не копились после загрузки.
+    # Объекты — источник правды. Сессия резолвится на СУЩЕСТВУЮЩИЙ объект, но НЕ
+    # заводит его: станция не из справочника «Объекты» больше НЕ превращается в
+    # объект-призрак (auto_create=False — раньше self-heal плодил заглушки, и парк
+    # объектов рос из выгрузок сессий вместо справочника). Такие сессии грузятся с
+    # location_id=NULL и поднимаются «красной тряпкой» ниже. Повторный прогон после
+    # заведения объекта свяжет их — backfill идемпотентен.
     from app.services.stations_normalize import backfill_session_locations, refresh_location_names
-    heal = await backfill_session_locations(db, company_id, auto_create=True)
+    heal = await backfill_session_locations(db, company_id, auto_create=False)
+
+    # «Красная тряпка»: сессии, чья станция отсутствует в справочнике объектов
+    # (location_id не проставился). Сессия без объекта недопустима — объекты
+    # приоритетны, всё крутится вокруг них. Считаем по всей компании: инвариант —
+    # «в базе нет ни одной сессии без объекта», а не только в текущем прогоне.
+    unmatched_rows = (await db.execute(
+        select(ChargeSession.station_code, func.count().label("n"))
+        .where(ChargeSession.company_id == company_id,
+               ChargeSession.location_id.is_(None),
+               ChargeSession.station_code.is_not(None),
+               func.btrim(ChargeSession.station_code) != "")
+        .group_by(ChargeSession.station_code)
+        .order_by(func.count().desc())
+    )).all()
+    unmatched_stations = [{"code": r.station_code, "sessions": int(r.n)} for r in unmatched_rows]
+    unmatched_sessions = sum(u["sessions"] for u in unmatched_stations)
     # Переименования CPO: имя объекта = свежайшее имя из сессий (история в
     # extra_metadata.nameHistory) — каталог не отстаёт от загрузок.
     renamed = await refresh_location_names(db, company_id)
@@ -273,11 +293,22 @@ async def ingest_charge_sessions(
         message += (f"; визитов {visits['visits']:,}".replace(",", " ")
                     + f", успешных {visits['success_pct']}%"
                     + f", с повторными попытками {visits['retried']:,}".replace(",", " "))
+    # Несопоставленные станции — вперёд сообщения: это ошибка загрузки, а не хвост.
+    if unmatched_stations:
+        preview = ", ".join(u["code"] for u in unmatched_stations[:15])
+        more = f" +ещё {len(unmatched_stations) - 15}" if len(unmatched_stations) > 15 else ""
+        message = (f"⚠ ОШИБКА: {unmatched_sessions} сессий по {len(unmatched_stations)} станциям "
+                   f"ВНЕ справочника «Объекты» ({preview}{more}) — заведите станции в разделе "
+                   f"«Объекты» или проверьте выгрузку. Загружено с location_id=NULL, "
+                   f"повторный прогон свяжет. · ") + message
     await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
     await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
             "errors": errors, "deleted": deleted, "tests": tests,
             "stations_created": heal.get("stations_created", 0),
+            "unmatched_stations": unmatched_stations,
+            "unmatched_sessions": unmatched_sessions,
+            "unmatched_station_count": len(unmatched_stations),
             "visits": visits,
             "message": message}
 
