@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { APP_VERSION } from '@/config/version'
+import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSupportContext } from '@/contexts/SupportContext'
@@ -84,7 +85,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
               <BrandIcon className="h-5 w-5 text-white" />
             </div>
             <div className="hidden sm:flex flex-col leading-none">
-              <h1 className="font-semibold tracking-tight text-foreground text-lg">Ledger</h1>
+              <h1 className="font-semibold tracking-tight text-foreground text-lg">{ECOSYSTEM_BRAND} Учёт</h1>
               <p className="text-xs text-muted-foreground">v{APP_VERSION}</p>
             </div>
           </Link>
