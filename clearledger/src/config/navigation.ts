@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Settings, Upload, FileText,
   Plug, BookOpen, CalendarClock, Link2, Package,
   Landmark, ScrollText, Tag, Layers, GitCompare,
-  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw, LineChart, MessagesSquare,
+  Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw, LineChart,
 } from 'lucide-react'
 
 export interface NavItemDef {
@@ -27,7 +27,8 @@ export const dashboardItem: NavItemDef = { to: '/workspace', icon: LayoutDashboa
 export const mainNavItems: NavItemDef[] = [
   dashboardItem,
   { to: '/objects', icon: Boxes, label: 'Объекты' },
-  { to: '/messages', icon: MessagesSquare, label: 'Чат' },        // чат экосистемы (Matrix)
+  // Чат — универсальный сервис экосистемы (плитка на рабочем столе + встроенная кнопка
+  // «Чат с поддержкой» в шапке), а не раздел учёта: из меню приложения убран.
   { to: '/reconciliation', icon: GitCompare, label: 'Разрезы учёта' },
   { to: '/files', icon: FileText, label: 'Документы' },           // первый слой данных (L1 RAW)
   { to: '/contractors', icon: Building2, label: 'Контрагенты' },  // справочник контрагентов (рядом с документами)
