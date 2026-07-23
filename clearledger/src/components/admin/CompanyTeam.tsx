@@ -30,6 +30,7 @@ import type { CompanyRole } from '@/services/roleService'
 import { ACCESS_MODULES, ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
 import { isApiEnabled } from '@/services/apiClient'
 import { getAccessCatalog } from '@/services/registryService'
+import { ECOSYSTEM_BRAND } from '@/config/brand'
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', user: 'Сотрудник' }
 
@@ -489,7 +490,7 @@ function ModuleCheckboxGrid({ companyId, sel, onToggle, disabled }: {
   })
   // Fallback: реестр недоступен → Ledger-модули как одно приложение (legacy-ключи).
   const catalog = q.data ?? (q.isLoading ? [] : [{
-    app: 'ledger', name: 'ElsyPlus Ledger', icon: 'book-open',
+    app: 'ledger', name: `${ECOSYSTEM_BRAND} Учёт`, icon: 'book-open',
     modules: ACCESS_MODULES.map((m) => ({ key: `ledger:${m.key}`, code: m.key, name: m.label })),
   }])
 

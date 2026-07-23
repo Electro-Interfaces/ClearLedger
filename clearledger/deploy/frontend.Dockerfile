@@ -3,6 +3,10 @@ FROM node:22-alpine AS build
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=${VITE_API_URL}
 
+# Бренд экосистемы-контейнера (white-label): «Экосистема <бренд>», «<бренд> Ledger».
+ARG VITE_ECOSYSTEM_BRAND=ElsyPlus
+ENV VITE_ECOSYSTEM_BRAND=${VITE_ECOSYSTEM_BRAND}
+
 WORKDIR /src
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund

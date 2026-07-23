@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     #   ECOSYSTEM_COMPANIES=lukoil|ЛУКОЙЛ|ЛУКОЙЛ|fuel|#00a  — компании нет в каталоге
     ecosystem_companies: str = ""
 
+    # Бренд экосистемы-контейнера (white-label). Контейнер = экосистема заказчика,
+    # поэтому имя задаётся на контейнер. Влияет на имена приложений реестра
+    # (`<brand> Ledger`). Фронт бакует свой `VITE_ECOSYSTEM_BRAND` отдельно. Дефолт —
+    # платформенный. rushydro → «РусГидро», gig → «ГИГ».
+    ecosystem_brand: str = "ElsyPlus"
+
     # Видеоконференции Jitsi (meet.dataworker.ru, RS256/ASAP). TradeLedger подписывает
     # JWT организатора СВОИМ приватным ключом (iss=ledger); prosody проверяет публичным
     # ключом с keyserver по kid. Приватный ключ (PEM) — в base64, НЕ в git.

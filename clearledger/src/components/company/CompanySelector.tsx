@@ -6,19 +6,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Building2 } from 'lucide-react'
 
 export function CompanySelector() {
-  const { company, companyId, setCompanyId, companies } = useCompany()
+  const { companyId, setCompanyId, companies } = useCompany()
 
-  if (companies.length <= 1) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Building2 className="size-4" />
-        <span className="hidden sm:inline">{company.name}</span>
-      </div>
-    )
-  }
+  // Одна компания в контейнере — выбирать не из чего, селектор скрыт вовсе
+  // (имя компании и так в шапке экосистемы / рабочего стола).
+  if (companies.length <= 1) return null
 
   return (
     <Select value={companyId} onValueChange={setCompanyId}>

@@ -20,6 +20,7 @@ import {
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp } from '@/services/ssoService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ECOSYSTEM_TITLE } from '@/config/brand'
 
 export function AppLauncher() {
   const { companyId } = useCompany()
@@ -64,7 +65,7 @@ export function AppLauncher() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60 p-1">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">Экосистема ElsyPlus</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{ECOSYSTEM_TITLE}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {data.apps.map((a) => (
           <DropdownMenuItem key={a.code} onClick={() => open(a.code)} className="gap-2.5 cursor-pointer">

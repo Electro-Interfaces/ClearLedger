@@ -25,6 +25,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, type SsoApp } from '@/services/ssoService'
+import { ECOSYSTEM_BRAND, ECOSYSTEM_TITLE } from '@/config/brand'
 
 /** Иконка по имени из манифеста (`apps/<code>.yml`, поле icon). */
 const ICONS: Record<string, typeof FileText> = {
@@ -141,7 +142,7 @@ export function EcosystemHomePage() {
             <LayoutGrid className="size-5" />
           </span>
           <div className="min-w-0">
-            <div className="truncate font-semibold leading-tight">Экосистема ElsyPlus</div>
+            <div className="truncate font-semibold leading-tight">{ECOSYSTEM_TITLE}</div>
             <div className="truncate text-xs text-muted-foreground">{company.name}</div>
           </div>
         </div>
@@ -158,7 +159,7 @@ export function EcosystemHomePage() {
         <h1 className="text-2xl font-semibold">
           {user?.name ? `Здравствуйте, ${user.name}` : 'Рабочий стол'}
         </h1>
-        <p className="mt-1 text-muted-foreground">{company.name} · Экосистема ElsyPlus</p>
+        <p className="mt-1 text-muted-foreground">{company.name} · {ECOSYSTEM_TITLE}</p>
 
         {/* Слой 1 — Центр управления (админам) */}
         {isCompanyAdmin && (
@@ -191,7 +192,7 @@ export function EcosystemHomePage() {
         <Section title="Приложения">
           {canOpenLedger && (
             <Tile
-              title="ElsyPlus Ledger"
+              title={`${ECOSYSTEM_BRAND} Учёт`}
               subtitle="Учёт, сверка, обмен с 1С"
               icon={FileText}
               onClick={() => navigate('/workspace')}
