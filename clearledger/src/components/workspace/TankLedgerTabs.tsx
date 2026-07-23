@@ -1,10 +1,10 @@
 /**
- * Книга резервуара: движение смена за сменой и сверка книги с фактическим замером.
+ * Книга резервуара: движение СМЕНА ЗА СМЕНОЙ и сверка книги с фактическим замером.
  *
- * Три вкладки отвечают на три разных вопроса бухгалтера:
- *  • «Книга и факт» — где расхождение и насколько оно велико (по резервуарам);
- *  • «Журнал»       — как остаток шёл от смены к смене в одном резервуаре;
- *  • «Замечания»    — что именно сломано: арифметика отчёта, стык смен или замер.
+ * Главный экран — журнал по сменам единой лентой: начало смены → конец → начало
+ * следующей, подряд, сгруппированный по резервуару. Именно здесь виден стык
+ * смен, ради которого всё и затевалось. Сводка по резервуарам за период и список
+ * замечаний — вспомогательные экраны.
  *
  * Знак расхождения везде один: плюс — недостача (в резервуаре меньше, чем по
  * документам), минус — излишек. Подписи дублируют знак словом, потому что
@@ -14,9 +14,10 @@ import { useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { BookOpen, Gauge, Loader2, TriangleAlert } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import { getTankLedger, type TankLedgerRow } from '@/services/analyticsService'
+import { getTankLedger, type TankLedgerRow, type TankLedgerTank } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
@@ -38,6 +39,16 @@ function gapTone(v: number | null | undefined, tolerance: number): string {
   return v > 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
 }
 
+const ARI_TOL = 0.5   // арифметика книги — это счёт, любое отклонение = ошибка отчёта
+const CONT_TOL = 0.5  // стык смен — тоже счёт, не измерение
+
+/** Есть ли в смене «жёсткое» замечание — сломанный счёт (не погрешность замера). */
+function hasHardIssue(r: TankLedgerRow): boolean {
+  return Math.abs(r.arithmetic_gap) > ARI_TOL
+    || (r.continuity_gap != null && Math.abs(r.continuity_gap) > CONT_TOL)
+    || r.fuel_changed
+}
+
 interface Props {
   companyId: string
   dateFrom: string
@@ -46,8 +57,10 @@ interface Props {
   fuelCodes: number[]
 }
 
+type Group = { key: string; tank: TankLedgerTank | undefined; head: TankLedgerRow; rows: TankLedgerRow[] }
+
 export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }: Props) {
-  const [tankKey, setTankKey] = useState<string | null>(null)
+  const [onlyIssues, setOnlyIssues] = useState(false)
 
   const query = useQuery({
     queryKey: ['tank-ledger', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
@@ -56,19 +69,37 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   })
 
   const data = query.data
-  const tanks = data?.tanks ?? []
-  const selected = useMemo(() => {
-    if (tanks.length === 0) return null
-    const key = tankKey ?? `${tanks[0].station_code}:${tanks[0].tank_number}`
-    return tanks.find((t) => `${t.station_code}:${t.tank_number}` === key) ?? tanks[0]
-  }, [tanks, tankKey])
+  const tol = data?.tolerances.fact_liters ?? 50
 
-  const journal: TankLedgerRow[] = useMemo(() => {
-    if (!data || !selected) return []
-    return data.rows.filter(
-      (r) => r.station_code === selected.station_code && r.tank_number === selected.tank_number,
-    )
-  }, [data, selected])
+  // Сводка по резервуарам — для заголовков групп журнала и второго экрана.
+  const tankByKey = useMemo(() => {
+    const m = new Map<string, TankLedgerTank>()
+    for (const t of data?.tanks ?? []) m.set(`${t.station_code}:${t.tank_number}`, t)
+    return m
+  }, [data])
+
+  // Строки уже приходят в порядке АЗС → резервуар → дата. Группируем в ленты
+  // по физическому резервуару, сохраняя хронологию внутри.
+  const groups: Group[] = useMemo(() => {
+    if (!data) return []
+    const out: Group[] = []
+    let cur: Group | null = null
+    for (const r of data.rows) {
+      const key = `${r.station_code}:${r.tank_number}`
+      if (!cur || cur.key !== key) {
+        cur = { key, tank: tankByKey.get(key), head: r, rows: [] }
+        out.push(cur)
+      }
+      cur.rows.push(r)
+    }
+    if (!onlyIssues) return out
+    // Оставляем только резервуары, где есть сломанный счёт; внутри — только
+    // проблемные смены (плюс соседние по хронологии не тянем — стык виден в самой
+    // строке через колонку «Стык»).
+    return out
+      .map((g) => ({ ...g, rows: g.rows.filter(hasHardIssue) }))
+      .filter((g) => g.rows.length > 0)
+  }, [data, tankByKey, onlyIssues])
 
   if (query.isLoading) {
     return (
@@ -80,12 +111,11 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   if (query.error || !data) {
     return <div className="p-8 text-sm text-muted-foreground">Не удалось загрузить книгу резервуаров</div>
   }
-  if (tanks.length === 0) {
+  if (data.tanks.length === 0) {
     return <div className="p-8 text-sm text-muted-foreground">За период нет данных по резервуарам</div>
   }
 
   const t = data.totals
-  const tol = data.tolerances.fact_liters
 
   return (
     <div className="space-y-4">
@@ -104,14 +134,15 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
         />
       </div>
 
-      <Tabs defaultValue="tanks">
+      <Tabs defaultValue="journal">
         <TabsList>
-          <TabsTrigger value="tanks">
-            <Gauge className="mr-1.5 h-3.5 w-3.5" />Книга и факт
-            <span className="ml-1 text-muted-foreground">{tanks.length}</span>
-          </TabsTrigger>
           <TabsTrigger value="journal">
             <BookOpen className="mr-1.5 h-3.5 w-3.5" />Журнал по сменам
+            <span className="ml-1 text-muted-foreground">{data.rows_total}</span>
+          </TabsTrigger>
+          <TabsTrigger value="tanks">
+            <Gauge className="mr-1.5 h-3.5 w-3.5" />Итог по резервуарам
+            <span className="ml-1 text-muted-foreground">{data.tanks.length}</span>
           </TabsTrigger>
           <TabsTrigger value="issues">
             <TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Замечания
@@ -119,7 +150,58 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
           </TabsTrigger>
         </TabsList>
 
-        {/* ── Сводка по резервуарам ────────────────────────────────────── */}
+        {/* ── ГЛАВНЫЙ ЭКРАН: журнал смена-за-сменой единой лентой ────────── */}
+        <TabsContent value="journal" className="mt-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[11px] text-muted-foreground">
+              Начало смены → конец → начало следующей, подряд по каждому резервуару.
+              Столбец «Стык» сверяет начало смены с концом предыдущей.
+            </p>
+            <label className="flex items-center gap-2 text-xs">
+              <Switch checked={onlyIssues} onCheckedChange={setOnlyIssues} />
+              Только смены с замечаниями
+            </label>
+          </div>
+
+          {groups.length === 0 ? (
+            <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+              Смен со сломанным счётом (стык или арифметика) за период нет
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full min-w-[1120px] text-xs">
+                <thead className="bg-muted/40 text-muted-foreground">
+                  <tr>
+                    <Th>Смена</Th><Th>Дата</Th>
+                    <Th right>Книга нач.</Th><Th>Стык</Th>
+                    <Th right>Приход</Th><Th right>Отпуск</Th>
+                    <Th right>Книга кон.</Th><Th right>Факт</Th><Th right>Книга − факт</Th>
+                    <Th right>Плотн.</Th><Th right>Темп.</Th><Th right>Вода</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.map((g) => (
+                    <GroupBlock key={g.key} group={g} tol={tol} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {data.rows_truncated && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Показаны первые {nf0.format(data.rows.length)} из {nf0.format(data.rows_total)} строк —
+              сузьте период или АЗС в фильтре сверху.
+            </p>
+          )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Красным — сломанная арифметика отчёта или расхождение книги с фактом
+            (недостача); жёлтым — излишек и разрыв стыка. Замер уровнемера имеет
+            погрешность, поэтому расхождение книги с фактом до {nf0.format(tol)} л не подсвечивается.
+          </p>
+        </TabsContent>
+
+        {/* ── Итог по резервуарам за период ────────────────────────────── */}
         <TabsContent value="tanks" className="mt-3">
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[1100px] text-xs">
@@ -132,12 +214,8 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                 </tr>
               </thead>
               <tbody>
-                {tanks.map((tank) => (
-                  <tr
-                    key={`${tank.station_code}:${tank.tank_number}`}
-                    className="cursor-pointer border-t hover:bg-muted/30"
-                    onClick={() => setTankKey(`${tank.station_code}:${tank.tank_number}`)}
-                  >
+                {data.tanks.map((tank) => (
+                  <tr key={`${tank.station_code}:${tank.tank_number}`} className="border-t">
                     <Td>{tank.station_name}</Td>
                     <Td>№{tank.tank_number}</Td>
                     <Td>{tank.fuel_name}</Td>
@@ -154,9 +232,6 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                         </span>
                       )}
                     </Td>
-                    {/* Расхождение, с которым резервуар вошёл в период: если оно
-                        близко к текущему — за период ничего не изменилось, вопрос
-                        старый и решается инвентаризацией, а не поиском утечки. */}
                     <Td right className="text-muted-foreground">{gapLabel(tank.fact_gap_opening)}</Td>
                     <Td right>{tank.shifts}</Td>
                     <Td>
@@ -187,92 +262,10 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             </table>
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Плюс — недостача (в резервуаре меньше, чем по документам), минус — излишек.
-            Замер уровнемера имеет погрешность, поэтому расхождение до {nf0.format(tol)} л
-            не подсвечивается. Строка кликается — откроется журнал по резервуару.
+            «Было на входе» — с каким расхождением резервуар вошёл в период. Если оно
+            близко к текущему, значит за период ничего не изменилось: вопрос старый и
+            решается инвентаризацией, а не поиском утечки.
           </p>
-        </TabsContent>
-
-        {/* ── Журнал одного резервуара ─────────────────────────────────── */}
-        <TabsContent value="journal" className="mt-3">
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            {tanks.map((tank) => {
-              const key = `${tank.station_code}:${tank.tank_number}`
-              const active = selected && `${selected.station_code}:${selected.tank_number}` === key
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setTankKey(key)}
-                  className={cn(
-                    'rounded-md border px-2.5 py-1 text-xs transition-colors',
-                    active ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/50',
-                  )}
-                >
-                  {tank.station_name} · №{tank.tank_number} · {tank.fuel_name}
-                </button>
-              )
-            })}
-          </div>
-          <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full min-w-[1180px] text-xs">
-              <thead className="bg-muted/40 text-muted-foreground">
-                <tr>
-                  <Th>Смена</Th><Th>Дата</Th>
-                  <Th right>Книга нач.</Th><Th right>Приход</Th><Th right>Отпуск</Th>
-                  <Th right>Книга кон.</Th><Th right>Факт</Th><Th right>Книга − факт</Th>
-                  <Th right>Арифметика</Th><Th right>Стык</Th>
-                  <Th right>Плотность</Th><Th right>Темп.</Th><Th right>Вода</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {journal.map((r) => (
-                  <tr key={`${r.shift_number}:${r.opened_at}`} className="border-t">
-                    <Td>№{r.shift_number}</Td>
-                    <Td>{r.opened_at ? new Date(r.opened_at).toLocaleDateString('ru-RU') : '—'}</Td>
-                    <Td right>{L1(r.book_start)}</Td>
-                    <Td right className={r.receipts > 0 ? 'text-blue-600 dark:text-blue-400' : ''}>
-                      {r.receipts > 0 ? L1(r.receipts) : '—'}
-                    </Td>
-                    <Td right>{L1(r.sales)}</Td>
-                    <Td right>{L1(r.book_end)}</Td>
-                    <Td right>{L1(r.fact_end)}</Td>
-                    <Td right className={cn('font-medium', gapTone(r.fact_gap, tol))}>
-                      {gapLabel(r.fact_gap)}
-                    </Td>
-                    {/* Арифметика и стык — это не измерение, а счёт: любое
-                        отклонение здесь означает ошибку в отчёте, не погрешность. */}
-                    <Td right className={Math.abs(r.arithmetic_gap) > 0.5
-                      ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground'}>
-                      {Math.abs(r.arithmetic_gap) > 0.5 ? `${nf1.format(r.arithmetic_gap)} л` : '—'}
-                    </Td>
-                    <Td right className={r.continuity_gap != null && Math.abs(r.continuity_gap) > 0.5
-                      ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
-                      {r.continuity_gap != null && Math.abs(r.continuity_gap) > 0.5
-                        ? `${nf1.format(r.continuity_gap)} л` : '—'}
-                    </Td>
-                    <Td right className="text-muted-foreground">
-                      {r.density_end != null ? nf3.format(r.density_end) : '—'}
-                    </Td>
-                    <Td right className="text-muted-foreground">
-                      {r.temp_end != null ? `${nf1.format(r.temp_end)} °C` : '—'}
-                    </Td>
-                    <Td right className={r.water_volume ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
-                      {r.water_volume ? L1(r.water_volume) : '—'}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {selected && (
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              {selected.station_name} · резервуар №{selected.tank_number} · {selected.fuel_name}:
-              смены {selected.first_shift}–{selected.last_shift}. Наибольшее расхождение —
-              {' '}{gapLabel(selected.worst_fact_gap)}
-              {selected.worst_fact_shift ? ` в смене №${selected.worst_fact_shift}` : ''}.
-            </p>
-          )}
         </TabsContent>
 
         {/* ── Замечания по типам ───────────────────────────────────────── */}
@@ -329,6 +322,96 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+/** Блок одного резервуара в журнале: заголовок-итог + смены подряд. */
+function GroupBlock({ group, tol }: { group: Group; tol: number }) {
+  const { tank, head, rows } = group
+  return (
+    <>
+      {/* Разделитель-заголовок группы: какой резервуар и его итог за период. */}
+      <tr className="border-t-2 border-border bg-muted/30">
+        <td colSpan={12} className="px-2.5 py-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-semibold">
+              {head.station_name} · резервуар №{head.tank_number} · {head.fuel_name}
+            </span>
+            {tank && (
+              <>
+                <span className="text-[11px] text-muted-foreground">{tank.shifts} смен</span>
+                <span className={cn('text-[11px] font-medium', gapTone(tank.fact_gap, tol))}>
+                  за период: книга − факт {gapLabel(tank.fact_gap)}
+                </span>
+                {(tank.arithmetic_breaks > 0 || tank.continuity_breaks > 0) && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {tank.arithmetic_breaks > 0 && <span className="text-red-500">арифметика {tank.arithmetic_breaks}</span>}
+                    {tank.arithmetic_breaks > 0 && tank.continuity_breaks > 0 && ' · '}
+                    {tank.continuity_breaks > 0 && <span className="text-amber-500">стык {tank.continuity_breaks}</span>}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+      {rows.map((r) => {
+        const ariBad = Math.abs(r.arithmetic_gap) > ARI_TOL
+        const contBad = r.continuity_gap != null && Math.abs(r.continuity_gap) > CONT_TOL
+        return (
+          <tr
+            key={`${r.shift_number}:${r.opened_at}`}
+            className={cn(
+              'border-t',
+              ariBad && 'bg-red-500/5',
+              !ariBad && (contBad || r.fuel_changed) && 'bg-amber-500/5',
+            )}
+          >
+            <Td>№{r.shift_number}</Td>
+            <Td>{r.opened_at ? new Date(r.opened_at).toLocaleDateString('ru-RU') : '—'}</Td>
+            <Td right>{L1(r.book_start)}</Td>
+            {/* Стык: начало смены против конца предыдущей. Первая смена периода —
+                сравнивать не с чем. */}
+            <Td>
+              {r.fuel_changed ? (
+                <span className="text-blue-600 dark:text-blue-400">смена топлива</span>
+              ) : r.continuity_gap == null ? (
+                <span className="text-muted-foreground">начало периода</span>
+              ) : contBad ? (
+                <span className="font-medium text-amber-600 dark:text-amber-400">
+                  разрыв {nf1.format(r.continuity_gap)} л
+                </span>
+              ) : (
+                <span className="text-muted-foreground">✓ сходится</span>
+              )}
+            </Td>
+            <Td right className={r.receipts > 0 ? 'text-blue-600 dark:text-blue-400' : ''}>
+              {r.receipts > 0 ? L1(r.receipts) : '—'}
+            </Td>
+            <Td right>{L1(r.sales)}</Td>
+            <Td right className={ariBad ? 'font-medium text-red-600 dark:text-red-400' : ''}>
+              {L1(r.book_end)}
+              {ariBad && (
+                <span className="ml-1 text-[10px]">(счёт {nf1.format(r.arithmetic_gap)})</span>
+              )}
+            </Td>
+            <Td right>{L1(r.fact_end)}</Td>
+            <Td right className={cn('font-medium', gapTone(r.fact_gap, tol))}>
+              {gapLabel(r.fact_gap)}
+            </Td>
+            <Td right className="text-muted-foreground">
+              {r.density_end != null ? nf3.format(r.density_end) : '—'}
+            </Td>
+            <Td right className="text-muted-foreground">
+              {r.temp_end != null ? `${nf1.format(r.temp_end)}°` : '—'}
+            </Td>
+            <Td right className={r.water_volume ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
+              {r.water_volume ? L1(r.water_volume) : '—'}
+            </Td>
+          </tr>
+        )
+      })}
+    </>
   )
 }
 
