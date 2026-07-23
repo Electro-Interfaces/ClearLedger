@@ -3,6 +3,7 @@
 FastAPI приложение с CORS, роутерами, startup seed.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
@@ -134,8 +135,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ))
         await session.commit()
 
+    # Планировщик каналов приёма: исполняет Channel.schedule (ночные автозапуски).
+    # Без него расписание в UI — просто запись в JSON, а данные ждут ручной кнопки.
+    scheduler_task: asyncio.Task | None = None
+    try:
+        from app.services.channel_scheduler import run_forever as _sched
+        scheduler_task = asyncio.create_task(_sched())
+    except Exception as e:  # noqa: BLE001 — планировщик не критичен для API
+        logger.warning(f"Планировщик каналов не запущен: {e}")
+
     logger.info("TradeLedger Server запущен")
     yield
+    if scheduler_task is not None:
+        scheduler_task.cancel()
     logger.info("TradeLedger Server остановлен")
 
 
