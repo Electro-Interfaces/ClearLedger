@@ -11,12 +11,13 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Loader2, Search, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import {
   getSites, getPortfolio, getSiteMembers, PHASE_META, STAGE_META,
   type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { NewProjectDialog } from './NewProjectDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE = 100
@@ -29,6 +30,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const pf = useQuery({ queryKey: ['pr-portfolio', companyId], queryFn: () => getPortfolio(companyId) })
   const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
@@ -95,6 +97,9 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           {search && <button type="button" onClick={() => { setSearch(''); reset() }}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
         </div>
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCreating(true)}>
+          <Plus className="h-3.5 w-3.5 mr-1" />Новый проект
+        </Button>
         <span className="text-[11px] text-muted-foreground ml-auto">
           {q.isLoading ? '…' : `${nf0.format(rows.length)} проектов`}
         </span>
@@ -167,6 +172,10 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       )}
 
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
+      {creating && (
+        <NewProjectDialog companyId={companyId} onClose={() => setCreating(false)}
+          onCreated={(id) => { setCreating(false); setDetailId(id) }} />
+      )}
     </div>
   )
 }

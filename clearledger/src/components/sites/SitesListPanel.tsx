@@ -6,19 +6,18 @@
  * отвечает на вопрос «что у нас есть», но не на «что делать и кому».
  */
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
-import { toast } from 'sonner'
 import {
-  getSites, getSitesOverview, getSiteMembers, createSite,
+  getSites, getSitesOverview, getSiteMembers,
   STAGE_META, FUNNEL_STAGES, type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { NewProjectDialog } from './NewProjectDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE = 200
@@ -113,7 +112,7 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
         </div>
 
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCreating(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1" />Площадка
+          <Plus className="h-3.5 w-3.5 mr-1" />Новый проект
         </Button>
         <span className="text-[11px] text-muted-foreground ml-auto">{q.isLoading ? '…' : `${nf0.format(total)} площадок`}</span>
       </div>
@@ -173,64 +172,7 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
       )}
 
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
-      {creating && <NewSiteDialog companyId={companyId} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setDetailId(id) }} />}
+      {creating && <NewProjectDialog companyId={companyId} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setDetailId(id) }} />}
     </div>
-  )
-}
-
-/** Заведение лида руками — площадка может прийти звонком, а не файлом. */
-function NewSiteDialog({ companyId, onClose, onCreated }: {
-  companyId: string; onClose: () => void; onCreated: (id: string) => void
-}) {
-  const qc = useQueryClient()
-  const [form, setForm] = useState({ region: '', city: '', address: '', install_place: '', owner: '' })
-  const [busy, setBusy] = useState(false)
-  const canSave = form.address.trim() || form.install_place.trim()
-
-  const save = async () => {
-    setBusy(true)
-    try {
-      const s = await createSite(companyId, { ...form, stage: 'lead' })
-      await qc.invalidateQueries({ queryKey: ['sites-list', companyId] })
-      await qc.invalidateQueries({ queryKey: ['sites-overview', companyId] })
-      toast.success('Площадка заведена')
-      onCreated(s.id)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось создать площадку')
-    } finally { setBusy(false) }
-  }
-
-  const field = (k: keyof typeof form, label: string, ph?: string) => (
-    <div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">{label}</div>
-      <Input className="h-8 text-xs" value={form[k]} placeholder={ph}
-        onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} />
-    </div>
-  )
-
-  return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg w-[92vw]">
-        <DialogHeader><DialogTitle className="text-base">Новая площадка</DialogTitle></DialogHeader>
-        <div className="space-y-2">
-          <p className="text-[11px] text-muted-foreground">
-            Заводится стадией «Лид». Остальное заполняется в карточке по мере проработки.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {field('region', 'Регион', 'Свердловская область')}
-            {field('city', 'Город', 'Екатеринбург')}
-          </div>
-          {field('address', 'Адрес', 'ул. Кирова, 12')}
-          {field('install_place', 'Место установки', 'ТЦ «Гринвич», парковка')}
-          {field('owner', 'Собственник', 'если известен')}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Отмена</Button>
-            <Button size="sm" className="h-8 text-xs" disabled={!canSave || busy} onClick={save}>
-              {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Создать
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   )
 }
