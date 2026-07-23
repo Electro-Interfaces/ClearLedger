@@ -70,7 +70,8 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
   const { user } = useAuth()
   const { company, companyModules } = useCompany()
-  // RBAC: скрываем пункты меню, недоступные по модулям (admin/суперадмин → companyModules=null).
+  // Скрываем пункты, недоступные по модулям: права RBAC ∩ состав поставки из реестра
+  // Ядра (см. CompanyContext). null = не ограничено.
   const allow = (to: string) => routeAllowed(to, companyModules)
   const mainNav = mainNavItems.filter((i) => allow(i.to))
   const dataNav = dataItems.filter((i) => allow(i.to))

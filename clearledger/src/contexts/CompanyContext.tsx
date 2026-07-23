@@ -21,6 +21,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { CompanyRef } from '@/services/authService'
 import { resetServiceCaches, setServicesCompany } from '@/services/cacheReset'
 import { setApiCompany } from '@/services/apiClient'
+import { useRegistryModules, intersectAccess } from '@/hooks/useCompanyRegistry'
 
 interface CompanyContextType {
   company: Company
@@ -29,7 +30,9 @@ interface CompanyContextType {
   setCompanyId: (id: string) => void
   companyRole: 'user' | 'admin'   // роль текущего пользователя в активной компании
   isCompanyAdmin: boolean         // admin в активной компании ИЛИ суперадмин
-  companyModules: string[] | null // RBAC: разрешённые модули в активной компании; null = полный доступ
+  // Что показывать в активной компании: права RBAC ∩ состав поставки (реестр Ядра).
+  // null = ничто не ограничивает (полный доступ и реестр молчит).
+  companyModules: string[] | null
   profile: CompanyProfile
   categories: Category[]
   customization: CompanyCustomization
@@ -116,6 +119,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     [company?.profileId],
   )
 
+  // Состав поставки компании из серверного реестра Ядра (до ранних return — правило хуков).
+  const registryModules = useRegistryModules(companyId)
+
   // Нет доступных компаний (обычный юзер без членства) — заглушка.
   if (!authLoading && user && companies.length === 0) {
     return <NoCompaniesScreen />
@@ -143,8 +149,12 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     ? 'admin'
     : (activeRef?.role === 'admin' ? 'admin' : 'user')
   const isCompanyAdmin = !!user?.is_superadmin || companyRole === 'admin'
-  // Модули активной компании: admin/суперадмин → null (полный доступ).
-  const companyModules: string[] | null = isCompanyAdmin ? null : (activeRef?.modules ?? null)
+  // Модули активной компании = ПРАВА (RBAC) ∩ СОСТАВ ПОСТАВКИ (реестр Ядра).
+  // Права: admin/суперадмин → null (полный доступ). Состав: что подключено компании
+  // в /admin → «Приложения»; отключённый раздел не показываем и админу — он не куплен,
+  // а не «запрещён». Реестр недоступен → null, ограничивает только RBAC (см. хук).
+  const rbacModules: string[] | null = isCompanyAdmin ? null : (activeRef?.modules ?? null)
+  const companyModules: string[] | null = intersectAccess(rbacModules, registryModules)
 
   return (
     <CompanyContext.Provider
