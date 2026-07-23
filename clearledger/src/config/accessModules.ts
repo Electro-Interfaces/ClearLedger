@@ -47,9 +47,23 @@ export const ACCESS_PRESETS: AccessPreset[] = [
   { label: 'Наблюдатель', keys: ['management'], hint: 'только управленческий' },
 ]
 
-/** Метки модулей по ключам (для чипов/сводки). */
+/** Человекочитаемые имена приложений экосистемы (для app-namespaced ключей ролей). */
+export const APP_LABELS: Record<string, string> = {
+  ledger: 'Ledger', support: 'Support', chat: 'Чат', plane: 'Заявки', jitsi: 'Конференции',
+}
+
+/** Метки ключей роли (для чипов/сводки). Понимает app-namespaced (`app`, `app:module`)
+ * и legacy-плоские ключи Ledger. */
 export function moduleLabels(keys: string[]): string[] {
-  return keys.map((k) => ACCESS_MODULES.find((m) => m.key === k)?.label ?? k)
+  return keys.map((k) => {
+    if (k.includes(':')) {
+      const [app, mod] = k.split(':', 2)
+      const modLabel = ACCESS_MODULES.find((m) => m.key === mod)?.label ?? mod
+      return app === 'ledger' ? modLabel : `${APP_LABELS[app] ?? app}: ${modLabel}`
+    }
+    // app-ключ (доступ к приложению целиком) или legacy-плоский модуль Ledger
+    return APP_LABELS[k] ?? ACCESS_MODULES.find((m) => m.key === k)?.label ?? k
+  })
 }
 
 /** Роуты, доступные всегда (не гейтятся модулями). */
@@ -58,16 +72,23 @@ const ALWAYS_ROUTES = ['/', '/workspace', '/admin', '/accept-invite', '/login']
 /** Тип набора модулей: null = полный доступ. */
 export type AccessSet = string[] | null | undefined
 
+/** Разрешён ли модуль Ledger `key` при наборе `modules`. Совместимо: понимает
+ * app-namespaced ключи (`ledger:store`, `ledger` = доступ ко всему Ledger) и
+ * legacy-плоские (`store`). */
+function ledgerKeyAllowed(key: string, modules: string[]): boolean {
+  return modules.includes(key) || modules.includes(`ledger:${key}`) || modules.includes('ledger')
+}
+
 export function moduleAllowed(key: string, modules: AccessSet): boolean {
   if (!modules) return true
-  return modules.includes(key)
+  return ledgerKeyAllowed(key, modules)
 }
 
 /** Разрешён ли режим рабочего пространства (management/financial/accounting/tax). */
 export function modeAllowed(mode: string, modules: AccessSet): boolean {
   if (!modules) return true
   const def = ACCESS_MODULES.find((m) => m.mode === mode)
-  return def ? modules.includes(def.key) : true
+  return def ? ledgerKeyAllowed(def.key, modules) : true
 }
 
 /** Разрешён ли роут левого меню при данном наборе модулей. */
@@ -76,5 +97,5 @@ export function routeAllowed(pathname: string, modules: AccessSet): boolean {
   if (ALWAYS_ROUTES.some((r) => (r === '/' ? pathname === '/' : pathname.startsWith(r)))) return true
   const def = ACCESS_MODULES.find((m) => m.routes.some((r) => pathname.startsWith(r)))
   if (!def) return true  // неизвестный/несгейченный роут — пропускаем
-  return modules.includes(def.key)
+  return ledgerKeyAllowed(def.key, modules)
 }

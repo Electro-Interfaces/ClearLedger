@@ -29,6 +29,20 @@ export async function listCompanyApps(companyId: string): Promise<CompanyAppRec[
   return r.apps
 }
 
+/** Узел каталога доступа для конструктора роли: приложение + его модули (app-namespaced ключи). */
+export interface AccessCatalogApp {
+  app: string           // код приложения (= app-ключ роли, напр. 'ledger', 'support')
+  name: string
+  icon?: string
+  modules: { key: string; code: string; name: string }[]  // key = 'app:module'
+}
+
+/** Дерево приложений/модулей системы для конструктора роли (из реестра компании). */
+export async function getAccessCatalog(companyId: string): Promise<AccessCatalogApp[]> {
+  const r = await get<{ catalog: AccessCatalogApp[] }>('/api/registry/access-catalog', { company_id: companyId })
+  return r.catalog
+}
+
 /** Включить/выключить приложение компании (только админ компании/суперадмин). */
 export async function setCompanyApp(companyId: string, appId: string, enabled: boolean): Promise<void> {
   await put(`/api/registry/company-apps/${appId}?company_id=${encodeURIComponent(companyId)}`, { enabled })

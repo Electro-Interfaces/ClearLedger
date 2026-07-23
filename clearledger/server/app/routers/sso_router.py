@@ -7,6 +7,7 @@ localStorage), а НЕ браузерным редиректом — при ре
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -24,20 +25,44 @@ router = APIRouter(prefix="/sso", tags=["SSO ElsyPlus"])
 
 
 @router.get("/apps")
-async def list_apps(user: User = Depends(get_current_user)) -> dict[str, Any]:
+async def list_apps(
+    company_id: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
     """Каталог приложений экосистемы для рабочего стола (Фаза 0 — из конфига).
 
     `enabled` — есть ли что показать (мосты видны и без ключа SSO);
     `sso_enabled` — настроен ли единый вход (handoff-приложения);
     `chat_enabled` — доступен ли универсальный сервис «Чат» (Matrix): он не приложение
-      и не в каталоге, но рабочий стол показывает его плиткой в слое сервисов.
+      и не в каталоге, но рабочий стол показывает его плиткой в слое сервисов;
+    `allowed_apps` — коды приложений, доступных пользователю в компании по его роли
+      (RBAC-гейт стола). `null` = не ограничено (админ/суперадмин/компания не задана).
+      Фронт по нему гейтит плитки, включая внутренний Ledger.
     """
     apps = sso.launcher_apps()
+
+    allowed: list[str] | None = None
+    if company_id and not user.is_superadmin:
+        from app.services import app_registry
+        try:
+            cid = uuid.UUID(company_id)
+        except (ValueError, TypeError):
+            cid = None
+        if cid is not None:
+            uc = (await db.execute(select(UserCompany).where(
+                UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+            # Админ компании видит всё; иначе — по правам роли (membership.modules).
+            if uc is not None and uc.role != "admin":
+                allowed = sorted(await app_registry.effective_apps(db, cid, uc.modules))
+                apps = [a for a in apps if a["code"] in allowed]
+
     return {
         "enabled": bool(apps) or settings.chat_enabled,
         "sso_enabled": settings.sso_enabled,
         "chat_enabled": settings.chat_enabled,
         "apps": apps,
+        "allowed_apps": allowed,
     }
 
 

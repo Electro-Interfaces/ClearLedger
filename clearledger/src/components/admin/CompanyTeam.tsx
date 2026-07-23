@@ -28,6 +28,8 @@ import { InviteLinkPanel } from './InviteLinkPanel'
 import * as roleService from '@/services/roleService'
 import type { CompanyRole } from '@/services/roleService'
 import { ACCESS_MODULES, ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
+import { isApiEnabled } from '@/services/apiClient'
+import { getAccessCatalog } from '@/services/registryService'
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', user: 'Сотрудник' }
 
@@ -471,29 +473,59 @@ function Loading() {
   )
 }
 
-/** Общая сетка чекбоксов модулей (роль и ad-hoc доступ). */
-function ModuleCheckboxGrid({ sel, onToggle, disabled }: {
-  sel: Set<string>; onToggle: (k: string) => void; disabled?: boolean
+/** Сетка прав роли/доступа по приложениям экосистемы (app-namespaced). Дерево берётся
+ * из реестра компании (getAccessCatalog): приложение → «всё приложение» (app-ключ) +
+ * его модули (`app:module`). Отметка приложения покрывает все его модули. Fallback на
+ * модули Ledger, если каталог недоступен (офлайн-контур). */
+function ModuleCheckboxGrid({ companyId, sel, onToggle, disabled }: {
+  companyId: string; sel: Set<string>; onToggle: (k: string) => void; disabled?: boolean
 }) {
-  const groups = [...new Set(ACCESS_MODULES.map((m) => m.group))]
+  const q = useQuery({
+    queryKey: ['access-catalog', companyId],
+    queryFn: () => getAccessCatalog(companyId),
+    enabled: isApiEnabled() && !!companyId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  // Fallback: реестр недоступен → Ledger-модули как одно приложение (legacy-ключи).
+  const catalog = q.data ?? (q.isLoading ? [] : [{
+    app: 'ledger', name: 'ElsyPlus Ledger', icon: 'book-open',
+    modules: ACCESS_MODULES.map((m) => ({ key: `ledger:${m.key}`, code: m.key, name: m.label })),
+  }])
+
   return (
-    <div className={disabled ? 'opacity-40 pointer-events-none' : ''}>
-      {groups.map((g) => (
-        <div key={g} className="mb-3">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{g}</div>
-          <div className="flex flex-col gap-1">
-            {ACCESS_MODULES.filter((m) => m.group === g).map((m) => (
-              <button key={m.key} type="button" onClick={() => onToggle(m.key)}
-                className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-sm text-left border transition-colors ${
-                  sel.has(m.key) ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent/40'
-                }`}>
-                <span>{m.label}{m.hint && <span className="text-[11px] text-muted-foreground/70 ml-1">· {m.hint}</span>}</span>
-                {sel.has(m.key) && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-              </button>
-            ))}
+    <div className={`space-y-3 max-h-72 overflow-y-auto pr-1 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+      {q.isLoading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Загрузка каталога…</div>}
+      {catalog.map((app) => {
+        const appOn = sel.has(app.app)
+        return (
+          <div key={app.app}>
+            <button type="button" onClick={() => onToggle(app.app)}
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-sm text-left border font-medium transition-colors ${
+                appOn ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border hover:bg-accent/40'
+              }`}>
+              <span>{app.name}<span className="text-[11px] text-muted-foreground/70 ml-1">· всё приложение</span></span>
+              {appOn && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+            </button>
+            {app.modules.length > 0 && (
+              <div className="ml-3 mt-1 flex flex-col gap-1 border-l pl-2">
+                {app.modules.map((m) => {
+                  const on = appOn || sel.has(m.key)
+                  return (
+                    <button key={m.key} type="button" disabled={appOn} onClick={() => onToggle(m.key)}
+                      className={`flex items-center justify-between px-2.5 py-1 rounded-md text-sm text-left border transition-colors ${
+                        on ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent/40'
+                      } ${appOn ? 'opacity-60' : ''}`}>
+                      <span>{m.name}</span>
+                      {on && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -509,14 +541,13 @@ export function RolesAccessTab({ companyId, canManage }: { companyId: string; ca
     onSuccess: () => { toast.success('Роль удалена'); refetch(); qc.invalidateQueries({ queryKey: ['team-members', companyId] }) },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
-  const groups = [...new Set(ACCESS_MODULES.map((m) => m.group))]
   return (
     <div className="grid lg:grid-cols-2 gap-4 items-start">
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0 flex-wrap gap-2">
           <div>
             <CardTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" /> Роли доступа</CardTitle>
-            <CardDescription>Именованные наборы модулей. Системные — только чтение; кастомные можно менять.</CardDescription>
+            <CardDescription>Именованные наборы прав на приложения и модули системы. Системные — только чтение; кастомные можно менять.</CardDescription>
           </div>
           {canManage && <RoleEditDialog companyId={companyId} roles={roles} onSaved={refetch} />}
         </CardHeader>
@@ -550,32 +581,56 @@ export function RolesAccessTab({ companyId, canManage }: { companyId: string; ca
         </CardContent>
       </Card>
 
-      {/* Каталог модулей */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5" /> Модули доступа</CardTitle>
-          <CardDescription>Что открывает каждый модуль. Роль «Администратор» — всегда полный доступ.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {groups.map((g) => (
-            <div key={g}>
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">{g}</div>
-              <div className="space-y-1">
-                {ACCESS_MODULES.filter((m) => m.group === g).map((m) => (
+      {/* Каталог приложений и модулей системы (что вообще можно дать ролью) */}
+      <AccessCatalogCard companyId={companyId} />
+    </div>
+  )
+}
+
+/** Справочник: приложения экосистемы и их модули, доступные для назначения ролью
+ * (из реестра компании). Роль «Администратор» — всегда полный доступ. */
+function AccessCatalogCard({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['access-catalog', companyId],
+    queryFn: () => getAccessCatalog(companyId),
+    enabled: isApiEnabled() && !!companyId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const catalog = q.data ?? []
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5" /> Приложения и модули системы</CardTitle>
+        <CardDescription>Что можно выдать ролью. Приложения — по составу поставки компании.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {q.isLoading && <Loading />}
+        {!q.isLoading && catalog.length === 0 && (
+          <div className="text-sm text-muted-foreground">Каталог недоступен (офлайн-контур).</div>
+        )}
+        {catalog.map((app) => (
+          <div key={app.app}>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <div className="text-sm font-semibold">{app.name}</div>
+              <code className="text-[10px] text-muted-foreground/50 font-mono">{app.app}</code>
+            </div>
+            {app.modules.length > 0 ? (
+              <div className="space-y-1 ml-3 border-l pl-2">
+                {app.modules.map((m) => (
                   <div key={m.key} className="flex items-start justify-between gap-3 rounded-md border px-2.5 py-1.5">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium">{m.label}</div>
-                      {m.hint && <div className="text-[11px] text-muted-foreground">{m.hint}</div>}
-                    </div>
+                    <div className="text-sm">{m.name}</div>
                     <code className="text-[10px] text-muted-foreground/50 font-mono mt-0.5 shrink-0">{m.key}</code>
                   </div>
                 ))}
               </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+            ) : (
+              <div className="text-[11px] text-muted-foreground ml-3">доступ к приложению целиком</div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -640,7 +695,7 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
             <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="h-4 w-4" />
             Полный доступ (все модули)
           </label>
-          <ModuleCheckboxGrid sel={sel} onToggle={toggle} disabled={full} />
+          <ModuleCheckboxGrid companyId={companyId} sel={sel} onToggle={toggle} disabled={full} />
           {tmpl && (added.length > 0 || removed.length > 0) && (
             <div className="text-[11px] rounded-md border bg-muted/30 p-2">
               <span className="text-muted-foreground">Отличия от «{tmpl.name}»: </span>
@@ -764,9 +819,9 @@ function AccessDialog({ member, companyId, roles, onSaved }: {
           <div className="space-y-3">
             <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
               <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="h-4 w-4" />
-              Полный доступ (все модули)
+              Полный доступ (все приложения и модули)
             </label>
-            <ModuleCheckboxGrid sel={sel} onToggle={toggle} disabled={full} />
+            <ModuleCheckboxGrid companyId={companyId} sel={sel} onToggle={toggle} disabled={full} />
           </div>
         )}
         <DialogFooter>

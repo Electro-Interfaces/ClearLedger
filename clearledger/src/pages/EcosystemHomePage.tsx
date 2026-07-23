@@ -90,15 +90,20 @@ export function EcosystemHomePage() {
   const [busy, setBusy] = useState<string | null>(null)
 
   const q = useQuery({
-    queryKey: ['sso-apps'],
-    queryFn: listSsoApps,
+    queryKey: ['sso-apps', companyId],
+    queryFn: () => listSsoApps(companyId),
     enabled: isApiEnabled(),
     staleTime: 5 * 60_000,
   })
+  // RBAC-гейт стола: allowed_apps — коды, доступных ролью в компании (null = не ограничено,
+  // напр. админ). Бэкенд уже отфильтровал apps; здесь гейтим внутренние плитки Ledger и Чат.
+  const allowed = q.data?.allowed_apps ?? null
+  const canOpen = (code: string) => allowed === null || allowed.includes(code)
   const all: SsoApp[] = q.data?.apps ?? []
   const services = all.filter((a) => a.layer === 'service')
   const apps = all.filter((a) => a.layer !== 'service')
-  const chatEnabled = q.data?.chat_enabled ?? false
+  const chatEnabled = (q.data?.chat_enabled ?? false) && canOpen('chat')
+  const canOpenLedger = canOpen('ledger')
 
   /** Открыть внешнее приложение: SSO — по handoff-токену, мост — просто ссылкой. */
   async function openExternal(app: SsoApp) {
@@ -184,12 +189,14 @@ export function EcosystemHomePage() {
 
         {/* Слой 3 — Приложения экосистемы (Ledger живёт в этом стеке; прочие — SSO/мост) */}
         <Section title="Приложения">
-          <Tile
-            title="ElsyPlus Ledger"
-            subtitle="Учёт, сверка, обмен с 1С"
-            icon={FileText}
-            onClick={() => navigate('/workspace')}
-          />
+          {canOpenLedger && (
+            <Tile
+              title="ElsyPlus Ledger"
+              subtitle="Учёт, сверка, обмен с 1С"
+              icon={FileText}
+              onClick={() => navigate('/workspace')}
+            />
+          )}
           {apps.map((a) => <ExternalTile key={a.code} a={a} />)}
           {q.isLoading && (
             <div className="flex items-center gap-2 p-5 text-sm text-muted-foreground">

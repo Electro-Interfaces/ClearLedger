@@ -92,6 +92,48 @@ async def company_apps(db: AsyncSession, company_id) -> list[dict[str, Any]]:
     return out
 
 
+async def access_catalog(db: AsyncSession, company_id) -> list[dict[str, Any]]:
+    """Дерево приложений экосистемы для конструктора роли (RBAC): app-ключ + модули
+    (`app:module`). Объединяет реестр (Ledger с модулями, Support) и сервисы рабочего
+    стола (Чат/Заявки/Конференции), чтобы роль могла давать права на ВСЮ систему, а
+    не только на модули Ledger. Показываем лишь подключённое компании."""
+    from app.config import get_settings
+    from app.services import sso
+
+    tree: list[dict[str, Any]] = []
+    for app in await company_apps(db, company_id):
+        if not app["enabled"]:
+            continue
+        tree.append({
+            "app": app["code"], "name": app["name"], "icon": app["icon"],
+            "modules": [
+                {"key": f'{app["code"]}:{m["code"]}', "code": m["code"], "name": m["name"]}
+                for m in app["modules"] if m["enabled"]
+            ],
+        })
+    known = {t["app"] for t in tree}
+
+    # Сервисы/приложения стола из каталога SSO (Заявки, Конференции) — без модулей.
+    for a in sso.sso_apps():
+        if a["code"] not in known:
+            tree.append({"app": a["code"], "name": a["name"], "icon": a.get("icon", ""), "modules": []})
+            known.add(a["code"])
+
+    # Чат — платформенный сервис (плитка по флагу), тоже гейтится ролью.
+    if get_settings().chat_enabled and "chat" not in known:
+        tree.append({"app": "chat", "name": "Чат", "icon": "messages-square", "modules": []})
+
+    return tree
+
+
+async def effective_apps(db: AsyncSession, company_id, modules: list[str] | None) -> set[str]:
+    """Коды приложений экосистемы, доступных члену с правами `modules` (роль ∩ реестр):
+    приложение из каталога доступно, если его пускает роль (`app_allowed`)."""
+    from app.access_catalog import app_allowed
+    cat = await access_catalog(db, company_id)
+    return {t["app"] for t in cat if app_allowed(modules, t["app"])}
+
+
 async def set_app(db: AsyncSession, company_id, app_id, enabled: bool) -> None:
     rec = (await db.execute(select(CompanyApp).where(
         CompanyApp.company_id == company_id, CompanyApp.app_id == app_id))).scalar_one_or_none()

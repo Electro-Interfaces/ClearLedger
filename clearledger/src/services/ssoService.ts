@@ -26,11 +26,13 @@ export interface SsoCatalog {
   /** доступен ли универсальный сервис «Чат» (Matrix) — плитка в слое сервисов */
   chat_enabled: boolean
   apps: SsoApp[]
+  /** коды приложений, доступных по роли в компании (RBAC-гейт стола); null = не ограничено */
+  allowed_apps: string[] | null
 }
 
-/** Каталог приложений экосистемы для рабочего стола. */
-export async function listSsoApps(): Promise<SsoCatalog> {
-  return get<SsoCatalog>('/api/sso/apps')
+/** Каталог приложений экосистемы для рабочего стола. companyId — для RBAC-гейта по роли. */
+export async function listSsoApps(companyId?: string): Promise<SsoCatalog> {
+  return get<SsoCatalog>('/api/sso/apps', companyId ? { company_id: companyId } : undefined)
 }
 
 /** Выпустить handoff-токен для приложения и получить URL перехода (открывать в новой вкладке). */

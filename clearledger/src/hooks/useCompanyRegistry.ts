@@ -45,8 +45,12 @@ export function useRegistryModules(companyId: string): string[] | null {
 }
 
 /**
- * Итоговый набор ключей для гейтинга меню: права ∩ состав поставки.
+ * Итоговый набор ключей для гейтинга меню Ledger: состав поставки ∩ права роли.
  * `null` с любой стороны = «эта сторона не ограничивает».
+ *
+ * Возвращает плоские коды модулей Ledger (совместимо с routeAllowed через includes).
+ * Права роли (`rbac`) могут быть app-namespaced (`ledger:store`, `ledger` = весь Ledger)
+ * или legacy-плоскими (`store`) — фильтруем реестр по тому, что пускает роль.
  */
 export function intersectAccess(
   rbac: string[] | null | undefined,
@@ -54,5 +58,9 @@ export function intersectAccess(
 ): string[] | null {
   if (!registry) return rbac ?? null
   if (!rbac) return registry
-  return rbac.filter((k) => registry.includes(k))
+  // Модуль Ledger `code` разрешён ролью, если она содержит сам код, `ledger:code`
+  // или `ledger` (доступ ко всему приложению).
+  return registry.filter(
+    (code) => rbac.includes(code) || rbac.includes(`ledger:${code}`) || rbac.includes('ledger'),
+  )
 }

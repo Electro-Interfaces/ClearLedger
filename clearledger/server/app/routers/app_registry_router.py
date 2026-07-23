@@ -76,6 +76,17 @@ async def get_company_apps(
     return {"apps": await app_registry.company_apps(db, cid)}
 
 
+@router.get("/access-catalog")
+async def get_access_catalog(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Дерево приложений/модулей системы для конструктора роли (app-namespaced ключи).
+    Только админ компании/суперадмин — роли редактируются в Центре управления."""
+    cid = await _require_admin(company_id, user, db)
+    return {"catalog": await app_registry.access_catalog(db, cid)}
+
+
 @router.put("/company-apps/{app_id}")
 async def put_company_app(
     app_id: uuid.UUID, company_id: str = Query(...),
