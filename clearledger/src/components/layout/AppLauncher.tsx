@@ -1,10 +1,11 @@
 /**
- * Лаунчер приложений экосистемы (компонент Ядра). Показывает приложения, доступные
- * через единый вход (SSO), и по клику открывает их без повторного логина. Пока SSO
- * не настроен (нет ключа подписи) или приложений нет — лаунчер скрыт.
+ * Лаунчер приложений экосистемы (компонент Ядра). Показывает приложения экосистемы:
+ * с единым входом (SSO — открываются без повторного логина) и мосты (`mode=link`,
+ * Фаза 0: Plane/Jitsi на общих доменах — открываются по ссылке, вход свой).
+ * Мосты видны и без ключа SSO; когда показывать нечего — лаунчер скрыт.
  */
 import { useState } from 'react'
-import { LayoutGrid, ExternalLink, Loader2 } from 'lucide-react'
+import { LayoutGrid, ExternalLink, KeyRound, Loader2 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -69,8 +70,14 @@ export function AppLauncher() {
           <DropdownMenuItem key={a.code} onClick={() => open(a.code)} className="gap-2.5 cursor-pointer">
             {busy === a.code
               ? <Loader2 className="h-4 w-4 animate-spin" />
-              : <ExternalLink className="h-4 w-4 text-muted-foreground" />}
+              : a.mode === 'link'
+                ? <ExternalLink className="h-4 w-4 text-muted-foreground" />
+                : <KeyRound className="h-4 w-4 text-primary/70" />}
             <span className="flex-1 truncate">{a.name}</span>
+            {/* Мост — приложение спросит свой вход: обещать единый было бы неправдой. */}
+            {a.mode === 'link' && (
+              <span className="text-[10px] text-muted-foreground shrink-0">вход отдельный</span>
+            )}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

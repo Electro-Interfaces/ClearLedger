@@ -25,8 +25,13 @@ router = APIRouter(prefix="/sso", tags=["SSO ElsyPlus"])
 
 @router.get("/apps")
 async def list_apps(user: User = Depends(get_current_user)) -> dict[str, Any]:
-    """Каталог приложений экосистемы для лаунчера (Фаза 0 — из конфига)."""
-    return {"enabled": settings.sso_enabled, "apps": sso.sso_apps()}
+    """Каталог приложений экосистемы для лаунчера (Фаза 0 — из конфига).
+
+    `enabled` — есть ли что показать (мосты видны и без ключа SSO);
+    `sso_enabled` — настроен ли единый вход (handoff-приложения).
+    """
+    apps = sso.launcher_apps()
+    return {"enabled": bool(apps), "sso_enabled": settings.sso_enabled, "apps": apps}
 
 
 @router.get("/authorize")
@@ -39,13 +44,20 @@ async def authorize(
     """Выпустить handoff-токен для приложения `app` и вернуть URL перехода.
 
     Токен короткоживущий (RS256, ~5 мин), целевое приложение проверит его по JWKS.
+    Приложения-мосты (`mode=link`) токена не получают — только адрес.
     """
-    if not settings.sso_enabled:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
-                            "SSO не настроен (нет ключа подписи)")
     target = sso.find_app(app)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Неизвестное приложение: {app}")
+
+    # Мост (Фаза 0): приложение вне нашего контура идентичности — открываем по ссылке,
+    # без токена. Свой вход оно спросит само.
+    if target["mode"] == "link":
+        return {"url": target["base_url"], "app": app, "mode": "link", "expires_in": 0}
+
+    if not settings.sso_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "SSO не настроен (нет ключа подписи)")
 
     rows = (await db.execute(
         select(UserCompany, Company)
@@ -58,7 +70,7 @@ async def authorize(
 
     token = sso.sign_sso_token(user=user, company_id=cid, companies=companies, aud=app)
     url = f"{target['base_url']}{target['callback']}#token={token}"
-    return {"url": url, "app": app, "expires_in": settings.sso_token_ttl_seconds}
+    return {"url": url, "app": app, "mode": "sso", "expires_in": settings.sso_token_ttl_seconds}
 
 
 @router.get("/jwks.json")

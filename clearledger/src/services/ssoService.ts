@@ -12,11 +12,17 @@ export interface SsoApp {
   base_url: string
   callback: string
   icon: string
+  /** sso — вход по handoff-токену; link — мост, открываем по ссылке (своя авторизация). */
+  mode?: 'sso' | 'link'
 }
 
-/** Каталог приложений экосистемы для лаунчера. enabled=false → SSO не настроен (нет ключа). */
-export async function listSsoApps(): Promise<{ enabled: boolean; apps: SsoApp[] }> {
-  return get<{ enabled: boolean; apps: SsoApp[] }>('/api/sso/apps')
+/**
+ * Каталог приложений экосистемы для лаунчера.
+ * `enabled` — есть что показать (мосты видны и без ключа SSO);
+ * `sso_enabled` — настроен ли единый вход.
+ */
+export async function listSsoApps(): Promise<{ enabled: boolean; sso_enabled: boolean; apps: SsoApp[] }> {
+  return get<{ enabled: boolean; sso_enabled: boolean; apps: SsoApp[] }>('/api/sso/apps')
 }
 
 /** Выпустить handoff-токен для приложения и получить URL перехода (открывать в новой вкладке). */
