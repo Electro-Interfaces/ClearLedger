@@ -886,19 +886,26 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
     eq = await list_equipment(db, company_id, site.id)
     docs = await list_docs(db, company_id, site.id)
     today = date.today().isoformat()
-    cur_pos = STAGE_ORDER.index(site.stage) if site.stage in STAGE_ORDER else -1
-    archived = site.stage == "archive"
+    off_path = site.stage in ("archive", "on_hold")
+    # У снятого с пути проекта (архив / заморозка) «текущая» стадия — та, на
+    # которой его сняли (prev_stage), а не сам архив. Иначе схема красит весь путь
+    # крестами и показывает 0%, хотя проект реально прошёл часть пути.
+    effective = site.prev_stage if off_path and site.prev_stage in STAGE_ORDER else site.stage
+    cur_pos = STAGE_ORDER.index(effective) if effective in STAGE_ORDER else -1
+    # prev_stage мы знаем только для проектов, которые вели в системе; у
+    # импортированных из архива истории нет — там честно «неизвестно».
+    unknown_progress = off_path and site.prev_stage not in STAGE_ORDER
 
     def stage_state(stage: str) -> str:
-        if archived:
-            return "archived"
         pos = STAGE_ORDER.index(stage)
+        if unknown_progress:
+            return "unknown"           # импортированный архив: докуда дошёл — не знаем
         if cur_pos < 0:
             return "waiting"
         if pos < cur_pos:
             return "done"
         if pos == cur_pos:
-            return "current"
+            return "stopped" if off_path else "current"
         return "waiting"
 
     steps: list[dict[str, Any]] = []
@@ -918,7 +925,9 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
                       for i in g["items"]],
         })
 
-    # Параллельные треки «Реализации» — они не стадии, но без них схема врёт.
+    # Параллельные треки — привязаны к своему этапу, чтобы схема группировалась
+    # по этапам проекта: земля → трек «право», реализация → ТП и оборудование,
+    # эксплуатация → объект в сети.
     tracks: list[dict[str, Any]] = []
     if tc:
         tc_state = ("done" if tc["status"] == "done" else
@@ -926,7 +935,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
                     "overdue" if tc["overdue"] else
                     "current" if tc["status"] != "draft" else "waiting")
         tracks.append({
-            "key": "tp", "kind": "track", "label": "Техприсоединение",
+            "key": "tp", "kind": "track", "phase": "build", "label": "Техприсоединение",
             "state": tc_state, "status": tc["statusLabel"],
             "date": tc["doneDate"] or tc["dueDate"],
             "detail": " · ".join(x for x in [
@@ -937,7 +946,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
             "note": "срок мероприятий прошёл" if tc["overdue"] else None,
         })
     else:
-        tracks.append({"key": "tp", "kind": "track", "label": "Техприсоединение",
+        tracks.append({"key": "tp", "kind": "track", "phase": "build", "label": "Техприсоединение",
                        "state": "empty", "status": "не заведено", "date": None,
                        "detail": None, "note": "заявка в сетевую не подана"})
 
@@ -946,7 +955,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
                     "overdue" if any(i["overdue"] for i in eq["items"]) else
                     "current" if eq["allSupplied"] else "waiting")
         tracks.append({
-            "key": "equipment", "kind": "track", "label": "Оборудование",
+            "key": "equipment", "kind": "track", "phase": "build", "label": "Оборудование",
             "state": eq_state,
             "status": f"{sum(1 for i in eq['items'] if i['status'] in ('supplied', 'installed'))}"
                       f" из {len(eq['items'])} поставлено",
@@ -955,7 +964,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
             "note": "просрочена поставка" if any(i["overdue"] for i in eq["items"]) else None,
         })
     else:
-        tracks.append({"key": "equipment", "kind": "track", "label": "Оборудование",
+        tracks.append({"key": "equipment", "kind": "track", "phase": "build", "label": "Оборудование",
                        "state": "empty", "status": "потребность не заведена",
                        "date": None, "detail": None, "note": None})
 
@@ -965,7 +974,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
         if c:
             contract = f"№ {c.number} от {c.date}"
     tracks.append({
-        "key": "land", "kind": "track", "label": "Право на землю",
+        "key": "land", "kind": "track", "phase": "land", "label": "Право на землю",
         "state": ("done" if site.contract_start and contract else
                   "current" if site.contract_start else "empty"),
         "status": (site.control_form or "форма контроля не определена"),
@@ -981,7 +990,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
             ServiceLocation.id == str(site.location_id)))).scalar_one_or_none()
         location = loc.name if loc else None
     tracks.append({
-        "key": "network", "kind": "track", "label": "Объект в сети",
+        "key": "network", "kind": "track", "phase": "operate", "label": "Объект в сети",
         "state": "done" if location else "empty",
         "status": location or "не связан",
         "date": site.commissioned_on, "detail": None,
@@ -990,12 +999,17 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
 
     return {
         "stage": site.stage, "stageLabel": STAGE_LABELS.get(site.stage, site.stage),
-        "phase": STAGE_PHASE.get(site.stage), "archived": archived,
+        "phase": STAGE_PHASE.get(site.stage),
+        "offPath": off_path, "unknownProgress": unknown_progress,
+        "stoppedAt": STAGE_LABELS.get(site.prev_stage or "", None) if off_path else None,
+        "phases": [{"key": p["key"], "label": p["label"], "hint": p["hint"]} for p in PHASES],
         "steps": steps,
         "tracks": tracks,
         "docs": {"count": len(docs), "kinds": sorted({d["kindLabel"] for d in docs})},
         "subsidy": subsidy_check(site),
-        "progress": round(sum(1 for s in steps if s["state"] == "done") / len(steps) * 100),
+        "progress": None if unknown_progress
+                    else round(sum(1 for s in steps if s["state"] in ("done", "stopped"))
+                               / len(steps) * 100),
     }
 
 

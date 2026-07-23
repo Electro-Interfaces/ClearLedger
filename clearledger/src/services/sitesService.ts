@@ -521,18 +521,21 @@ export interface ProjectRoadmap {
   stage: SiteStage
   stageLabel: string
   phase: string | null
-  archived: boolean
-  progress: number
+  offPath: boolean
+  unknownProgress: boolean
+  stoppedAt: string | null
+  progress: number | null
+  phases: { key: string; label: string; hint: string }[]
   steps: {
     key: SiteStage; kind: 'stage'; label: string
     phase: string | null; phaseLabel: string
-    state: 'done' | 'current' | 'waiting' | 'archived'
+    state: 'done' | 'current' | 'stopped' | 'waiting' | 'unknown'
     date: string | null
     gateDone: number; gateTotal: number; blocking: string[]
     items: { label: string; done: boolean; required: boolean }[]
   }[]
   tracks: {
-    key: string; kind: 'track'; label: string
+    key: string; kind: 'track'; phase: string; label: string
     state: 'done' | 'current' | 'waiting' | 'overdue' | 'failed' | 'empty'
     status: string; date: string | null; detail: string | null; note: string | null
   }[]
