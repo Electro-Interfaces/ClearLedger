@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2, ArrowLeft, MapPin, User as UserIcon, CalendarClock } from 'lucide-react'
 import { getSite, STAGE_META, PHASE_META } from '@/services/sitesService'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
+import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -110,6 +111,10 @@ function ProjectWorkspace({ companyId, id, onBack }: {
           </div>
         </div>
       </div>
+
+      {/* Где проект в жизненном цикле — видно на любой вкладке */}
+      <ProjectPhaseStrip current={s.phase ?? undefined}
+        note="Подбор площадки — первый этап этого же проекта, дальше земля, реализация и ввод." />
 
       {/* Вкладки — тот же набор, что в быстром просмотре */}
       <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">

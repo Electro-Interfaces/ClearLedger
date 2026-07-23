@@ -378,7 +378,8 @@ async def priority_matrix(db: AsyncSession, company_id, *, stage: str | None = N
         sc = score_site(s, near_km=near.get(str(s.id)), bench=bench)
         buckets[sc["quadrant"]] += 1
         items.append({
-            "id": str(s.id), "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
+            "id": str(s.id), "projectNo": s.project_no, "title": s.title,
+            "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
             "region": s.region_norm or s.region, "city": s.city,
             "address": s.address or s.full_address or s.install_place,
             "owner": s.owner, "ownerUserId": str(s.owner_user_id) if s.owner_user_id else None,

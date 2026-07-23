@@ -275,6 +275,8 @@ export const QUADRANT_META: Record<Quadrant, { label: string; hint: string; cls:
 
 export interface MatrixItem {
   id: string
+  projectNo: string | null
+  title: string | null
   stage: SiteStage
   stageLabel: string
   region: string | null

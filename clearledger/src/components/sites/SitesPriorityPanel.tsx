@@ -20,6 +20,7 @@ import {
   type MatrixItem, type Quadrant,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -65,6 +66,9 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
           </SelectContent>
         </Select>
       </div>
+
+      <ProjectPhaseStrip current="select"
+        note="Приоритеты считаются для проектов на первом этапе — что двигать вперёд к земле и реализации." />
 
       {q.isLoading || !d ? (
         <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -124,7 +128,7 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b bg-muted/20 text-muted-foreground">
-                    <th className="text-left p-2 font-medium">Регион</th>
+                    <th className="text-left p-2 font-medium">Проект</th>
                     <th className="text-left p-2 font-medium">Адрес / место</th>
                     <th className="text-left p-2 font-medium">Стадия</th>
                     <th className="text-right p-2 font-medium">Привлек.</th>
@@ -139,9 +143,10 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
                   {items.slice(0, 300).map((it) => (
                     <tr key={it.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
                       onClick={(ev) => (ev.altKey ? setDetailId(it.id) : openProject(it.id))}>
-                      <td className="p-2 whitespace-nowrap">{it.region ?? '—'}</td>
+                      <td className="p-2 whitespace-nowrap font-mono">{it.projectNo ?? '—'}</td>
                       <td className="p-2 max-w-[240px] truncate" title={it.address ?? ''}>
                         {it.address ?? it.city ?? '—'}
+                        <span className="text-muted-foreground"> · {it.region ?? ''}</span>
                       </td>
                       <td className="p-2">
                         <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[it.stage]?.cls ?? ''}`}>

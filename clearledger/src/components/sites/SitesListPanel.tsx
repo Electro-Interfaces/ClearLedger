@@ -17,6 +17,7 @@ import {
   STAGE_META, FUNNEL_STAGES, type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { useOpenProject } from './useOpenProject'
 import { NewProjectDialog } from './NewProjectDialog'
 
@@ -71,6 +72,9 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
           клик открывает его рабочий экран, Alt+клик — быстрый просмотр.
         </p>
       </div>
+      <ProjectPhaseStrip current="select"
+        note="Каждая строка — проект на первом этапе. Клик открывает его целиком: землю, реализацию, ввод." />
+
       <div className="flex flex-wrap items-center gap-2">
         {/* Стадий десять — таблице хватает селекта; счётчики берём из обзора,
             чтобы не гадать, где сейчас работа. */}
@@ -137,8 +141,8 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="text-left p-2 font-medium">Проект</th>
                   <th className="text-left p-2 font-medium">Регион</th>
-                  <th className="text-left p-2 font-medium">Город</th>
                   <th className="text-left p-2 font-medium">Адрес / место</th>
                   <th className="text-left p-2 font-medium">Стадия</th>
                   <th className="text-left p-2 font-medium">Ответственный</th>
@@ -152,10 +156,11 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
                   const late = !!s.nextActionDue && s.nextActionDue < today() && s.stage !== 'archive'
                   return (
                     <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={(ev) => (ev.altKey ? setDetailId(s.id) : openProject(s.id))}>
+                      <td className="p-2 whitespace-nowrap font-mono">{s.projectNo ?? '—'}</td>
                       <td className="p-2 whitespace-nowrap">{s.region ?? '—'}</td>
-                      <td className="p-2 whitespace-nowrap">{s.city ?? '—'}</td>
                       <td className="p-2 max-w-[260px] truncate" title={s.fullAddress ?? s.address ?? s.installPlace ?? ''}>
                         {s.address ?? s.installPlace ?? s.fullAddress ?? '—'}
+                        <span className="text-muted-foreground"> · {s.city ?? ''}</span>
                       </td>
                       <td className="p-2"><StageBadge stage={s.stage} label={s.stageLabel} /></td>
                       <td className="p-2 whitespace-nowrap text-muted-foreground">{s.ownerName ?? '—'}</td>

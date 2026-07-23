@@ -13,6 +13,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Loader2, Upload, MapPin, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
+import { ProjectPhaseStrip } from './ProjectPhaseStrip'
+import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import {
   getSitesOverview, getSitesGaps, importSitesXlsx, STAGE_META,
   type SitesImportReport, type SiteStage,
@@ -21,8 +23,14 @@ import {
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const pct = (n: number, total: number) => (total ? `${Math.round((n / total) * 100)}%` : '0%')
 
+// Куда ведёт клик по этапу на ленте: у каждого этапа свой рабочий экран.
+const PHASE_TAB: Record<string, string> = {
+  select: 'sites_overview', land: 'pr_project', build: 'pr_tp', operate: 'pr_project',
+}
+
 export function SitesOverviewPanel({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
+  const [, setTab] = useWorkspaceSubView('sites_overview')
   const q = useQuery({
     queryKey: ['sites-overview', companyId],
     queryFn: () => getSitesOverview(companyId),
@@ -81,6 +89,17 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
         </div>
       </div>
 
+      <ProjectPhaseStrip current="select" onPick={(ph) => setTab(PHASE_TAB[ph] ?? 'pr_project')}
+        counts={d ? {
+          select: d.funnel.filter((f) => ['lead', 'screening', 'negotiation', 'dd', 'decision'].includes(f.stage))
+            .reduce((a, f) => a + f.count, 0),
+          land: d.funnel.find((f) => f.stage === 'contracting')?.count ?? 0,
+          build: d.funnel.filter((f) => ['construction', 'commissioning'].includes(f.stage))
+            .reduce((a, f) => a + f.count, 0),
+          operate: d.funnel.find((f) => f.stage === 'live')?.count ?? 0,
+        } : undefined}
+        note="Это один и тот же путь проекта. Ниже — первый этап в деталях по стадиям." />
+
       {err && <div className="rounded-lg border border-red-400/50 bg-red-400/5 px-3 py-2 text-xs text-red-600 dark:text-red-400">{err}</div>}
       {report && <ImportReport report={report} pending={!!pending} busy={busy} onConfirm={doImport} />}
 
@@ -106,7 +125,7 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
-                Воронка подбора — стадии по порядку гейтов
+Этап 1 «Подбор площадки» — стадии проекта по порядку гейтов
               </div>
               <div className="p-3 space-y-2">
                 {d!.funnel.map((s) => (

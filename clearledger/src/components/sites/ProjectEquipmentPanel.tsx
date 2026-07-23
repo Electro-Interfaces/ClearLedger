@@ -12,6 +12,7 @@ import { Loader2, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import { getEquipmentReport, STAGE_META, type SiteStage } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -41,6 +42,9 @@ export function ProjectEquipmentPanel({ companyId }: { companyId: string }) {
           Позиции ведутся в самом проекте, вкладка «Оборудование». Строка ведёт в проект.
         </p>
       </div>
+
+      <ProjectPhaseStrip current="build"
+        note="Третий этап тех же проектов. Строка ведёт в проект целиком." />
 
       {d.total === 0 ? (
         <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
