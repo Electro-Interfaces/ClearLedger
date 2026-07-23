@@ -123,6 +123,8 @@ async def _rebuild_shift(
         doc_beg = t.get("doc_beg") or {}
         doc_end = t.get("doc_end") or {}
         rel = t.get("release") or {}
+        recv = t.get("receipt") or {}
+        rest = t.get("rest") or {}
         water = t.get("water") or {}
         db.add(FuelTank(
             shift_id=shift.id,
@@ -132,9 +134,16 @@ async def _rebuild_shift(
             volume_start=_f(doc_beg.get("volume")),
             volume_end=_f(doc_end.get("volume")),
             sales=_f(rel.get("volume")),
-            volume_received=_f((t.get("receipt") or {}).get("volume")),
+            volume_received=_f(recv.get("volume")),
+            fact_volume=_f(rest.get("volume")) or None,
+            fact_mass=_f(rest.get("amount")) or None,
+            mass_start=_f(doc_beg.get("amount")) or None,
+            mass_end=_f(doc_end.get("amount")) or None,
+            mass_sales=_f(rel.get("amount")) or None,
+            mass_received=_f(recv.get("amount")) or None,
             density=_density(t.get("density_end")),
             density_beg=_density(t.get("density_beg")),
+            temp_beg=_f(t.get("temp_beg")) or None,
             temp_end=_f(t.get("temp_end")) or None,
             level_end=_f(t.get("level_end")) or None,
             water_level=_f(water.get("level")) or None,

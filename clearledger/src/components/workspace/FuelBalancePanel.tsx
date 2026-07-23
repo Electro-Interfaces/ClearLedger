@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
-  CircleCheckBig, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
+  BookOpen, CircleCheckBig, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
   TriangleAlert, Warehouse, X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MultiSelectFilter } from '@/components/locations/fleet/MultiSelectFilter'
+import { TankLedgerTabs } from '@/components/workspace/TankLedgerTabs'
 import { useFilters } from '@/contexts/FilterContext'
 import { useLocations } from '@/hooks/useLocations'
 import { cn } from '@/lib/utils'
@@ -349,7 +350,18 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
               <TabsTrigger value="summary"><Database className="mr-1.5 h-3.5 w-3.5" />АЗС × топливо <span className="ml-1 text-muted-foreground">{data.lines.length}</span></TabsTrigger>
               <TabsTrigger value="tanks"><Warehouse className="mr-1.5 h-3.5 w-3.5" />Резервуары <span className="ml-1 text-muted-foreground">{data.tanks.length}</span></TabsTrigger>
               <TabsTrigger value="issues"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Разрывы <span className="ml-1 text-muted-foreground">{issues}</span></TabsTrigger>
+              {/* Книга против фактического замера — отдельный вопрос от баланса
+                  прихода-расхода: здесь сверяется документ с тем, что реально
+                  в резервуаре, и отсюда растёт инвентаризация. */}
+              <TabsTrigger value="ledger"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Книга и факт</TabsTrigger>
             </TabsList>
+            <TabsContent value="ledger" className="mt-3">
+              <TankLedgerTabs
+                companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+                stationCodes={effectiveStations}
+                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+              />
+            </TabsContent>
             <TabsContent value="summary" className="mt-3"><Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0"><SummaryTable rows={data.lines} totals={data.totals} /></CardContent></Card></TabsContent>
             <TabsContent value="tanks" className="mt-3"><Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0"><TanksTable rows={data.tanks} /></CardContent></Card></TabsContent>
             <TabsContent value="issues" className="mt-3">

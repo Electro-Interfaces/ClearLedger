@@ -752,17 +752,29 @@ async def ingest_fuel_shifts(
             doc_end = t.get("doc_end", {})
             rel = t.get("release", {})
             water = t.get("water", {}) or {}
+            _rest = t.get("rest", {}) or {}
+            _recv = t.get("receipt", {}) or {}
             db.add(FuelTank(
                 shift_id=shift.id,
                 tank_number=t.get("tank", 0),
                 fuel_type=svc.get("service_name", ""),
                 fuel_code=_int_or_none(svc.get("service_code")),
+                # книга: doc_beg + приход − отпуск = doc_end
                 volume_start=float(doc_beg.get("volume", 0) or 0),
                 volume_end=float(doc_end.get("volume", 0) or 0),
                 sales=float(rel.get("volume", 0) or 0),
-                volume_received=float((t.get("receipt", {}) or {}).get("volume", 0) or 0),
+                volume_received=float(_recv.get("volume", 0) or 0),
+                # факт: замер уровнемером на конец смены (секция rest)
+                fact_volume=_num_or_none(_rest.get("volume")),
+                fact_mass=_num_or_none(_rest.get("amount")),
+                # масса (кг) по тем же точкам — учёт ГСМ ведётся в тоннах
+                mass_start=_num_or_none(doc_beg.get("amount")),
+                mass_end=_num_or_none(doc_end.get("amount")),
+                mass_sales=_num_or_none(rel.get("amount")),
+                mass_received=_num_or_none(_recv.get("amount")),
                 density=_density(t.get("density_end")),
                 density_beg=_density(t.get("density_beg")),
+                temp_beg=_num_or_none(t.get("temp_beg")),
                 temp_end=_num_or_none(t.get("temp_end")),
                 level_end=_num_or_none(t.get("level_end")),
                 water_level=_num_or_none(water.get("level")),

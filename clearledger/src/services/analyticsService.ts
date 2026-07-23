@@ -596,6 +596,115 @@ export async function getFuelBalance(p: PeriodParams & {
   })
 }
 
+/** Строка журнала: один резервуар в одной смене. Книга и факт — разные величины. */
+export interface TankLedgerRow {
+  station_code: number
+  station_name: string
+  tank_number: number
+  fuel_code: number | null
+  fuel_name: string
+  shift_number: number
+  opened_at: string | null
+  closed_at: string | null
+  book_start: number
+  receipts: number
+  sales: number
+  book_end: number
+  /** Замер уровнемером на конец смены; null — станция не передала. */
+  fact_end: number | null
+  /** Книга минус факт: плюс — недостача, минус — излишек. */
+  fact_gap: number | null
+  /** (начало + приход − отпуск) − конец. Не ноль — отчёт внутренне противоречив. */
+  arithmetic_gap: number
+  /** Начало смены минус конец предыдущей. Не ноль — между сменами правка мимо учёта. */
+  continuity_gap: number | null
+  mass_start: number | null
+  mass_end: number | null
+  mass_received: number | null
+  mass_sales: number | null
+  fact_mass: number | null
+  density_beg: number | null
+  density_end: number | null
+  temp_beg: number | null
+  temp_end: number | null
+  level_end: number | null
+  water_volume: number | null
+  fuel_changed: boolean
+}
+
+export interface TankLedgerTank {
+  station_code: number
+  station_name: string
+  tank_number: number
+  fuel_code: number | null
+  fuel_name: string
+  shifts: number
+  first_shift: number
+  last_shift: number
+  book_start: number
+  receipts: number
+  sales: number
+  book_end: number
+  fact_end: number | null
+  fact_gap: number | null
+  fact_gap_pct: number | null
+  /** Расхождение книги и факта на ВХОДЕ в период — отделяет старую недостачу от новой. */
+  fact_gap_opening: number | null
+  mass_receipts: number
+  mass_sales: number
+  mass_end: number | null
+  fact_mass_end: number | null
+  arithmetic_breaks: number
+  continuity_breaks: number
+  fact_breaks: number
+  worst_fact_gap: number
+  worst_fact_shift: number | null
+}
+
+export interface TankLedgerIssue {
+  type: 'arithmetic' | 'continuity' | 'fuel_change'
+  station_code: number
+  station_name: string
+  tank_number: number
+  fuel_name: string
+  shift_number: number
+  prev_shift_number?: number | null
+  date: string | null
+  gap_liters: number
+  detail: string
+}
+
+export interface TankLedgerResponse {
+  period: { from: string; to: string }
+  totals: {
+    book_start: number; receipts: number; sales: number; book_end: number
+    fact_end: number; fact_gap: number; fact_gap_pct: number
+    mass_receipts: number; mass_sales: number
+    tanks: number; shifts: number
+    arithmetic_breaks: number; continuity_breaks: number; fact_breaks: number
+  }
+  tanks: TankLedgerTank[]
+  rows: TankLedgerRow[]
+  rows_total: number
+  rows_truncated: boolean
+  issues: TankLedgerIssue[]
+  issues_total: number
+  tolerances: { arithmetic_liters: number; continuity_liters: number; fact_liters: number }
+}
+
+export async function getTankLedger(p: PeriodParams & {
+  stationCodes?: number[]
+  fuelCodes?: number[]
+  tankNumber?: number
+}): Promise<TankLedgerResponse> {
+  return get<TankLedgerResponse>('/api/analytics/tank-ledger', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+    ...(p.tankNumber != null ? { tank_number: String(p.tankNumber) } : {}),
+  })
+}
+
 export async function getSalesChannels(p: PeriodParams): Promise<SalesChannelsResponse> {
   return get<SalesChannelsResponse>('/api/analytics/sales-channels', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,

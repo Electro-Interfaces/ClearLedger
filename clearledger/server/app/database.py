@@ -401,6 +401,38 @@ async def create_all() -> None:
             "AND jsonb_array_length(coalesce(raw_report->'psm'->'total','[]'::jsonb)) = 0 "
             "AND jsonb_array_length(coalesce(raw_report->'sales','[]'::jsonb)) = 0 "
             "AND sales_missing = false",
+            # v4.7: факт замера и масса по резервуарам. STS отдавал их всегда
+            # (секции `rest` и `amount` в release[]), но приём брал только книжные
+            # литры — сравнить книгу с фактом было физически не с чем.
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS fact_volume NUMERIC(12,2)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS fact_mass NUMERIC(14,3)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS mass_start NUMERIC(14,3)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS mass_end NUMERIC(14,3)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS mass_sales NUMERIC(14,3)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS mass_received NUMERIC(14,3)",
+            "ALTER TABLE fuel_tanks ADD COLUMN IF NOT EXISTS temp_beg NUMERIC(6,2)",
+            # Бэкфилл из уже сохранённых сырых отчётов — перекачивать STS не нужно,
+            # цифры лежат в fuel_shifts.raw_report с первого дня приёма.
+            """
+            UPDATE fuel_tanks t SET
+                fact_volume   = nullif(r.rec->'rest'->>'volume','')::numeric,
+                fact_mass     = nullif(r.rec->'rest'->>'amount','')::numeric,
+                mass_start    = nullif(r.rec->'doc_beg'->>'amount','')::numeric,
+                mass_end      = nullif(r.rec->'doc_end'->>'amount','')::numeric,
+                mass_sales    = nullif(r.rec->'release'->>'amount','')::numeric,
+                mass_received = nullif(r.rec->'receipt'->>'amount','')::numeric,
+                temp_beg      = nullif(r.rec->>'temp_beg','')::numeric
+            FROM (
+                SELECT s.id AS shift_id, (e.rec->>'tank')::int AS tank_number, e.rec
+                FROM fuel_shifts s,
+                     LATERAL jsonb_array_elements(s.raw_report->'release') AS e(rec)
+                WHERE s.raw_report ? 'release'
+                  AND jsonb_typeof(s.raw_report->'release') = 'array'
+                  AND (e.rec->>'tank') ~ '^[0-9]+$'
+            ) r
+            WHERE t.shift_id = r.shift_id AND t.tank_number = r.tank_number
+              AND t.fact_volume IS NULL
+            """,
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

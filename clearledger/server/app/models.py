@@ -1608,12 +1608,31 @@ class FuelTank(Base):
     tank_number: Mapped[int] = mapped_column(Integer, nullable=False)
     fuel_type: Mapped[str] = mapped_column(String(100), nullable=False)
     fuel_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ── КНИГА (документальный остаток): doc_beg + приход − отпуск = doc_end ──
     volume_start: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     volume_end: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     sales: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)  # отпуск
     volume_received: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)  # поступление
+
+    # ── ФАКТ (замер уровнемером на конец смены; секция `rest` отчёта STS) ──
+    # Книга и факт — разные величины: книга считается от прошлого остатка
+    # арифметикой, факт меряется в резервуаре. Их разница и есть излишек или
+    # недостача, ради которой бухгалтер проводит инвентаризацию. Раньше факт
+    # не сохранялся вовсе, и сравнивать было не с чем.
+    fact_volume: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    fact_mass: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)  # кг
+
+    # ── МАССА (кг) по тем же четырём точкам ──
+    # Учёт ГСМ в бухгалтерии ведётся в тоннах, а не в литрах: объём «дышит» с
+    # температурой, масса — нет. Без массы сверка с 1С неполная.
+    mass_start: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    mass_end: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    mass_sales: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    mass_received: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+
     density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)  # плотность конца
     density_beg: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    temp_beg: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
     temp_end: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
     level_end: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     water_level: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)

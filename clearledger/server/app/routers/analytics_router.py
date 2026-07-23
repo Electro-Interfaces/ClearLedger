@@ -134,6 +134,34 @@ async def get_fuel_balance(
     )
 
 
+@router.get("/tank-ledger")
+async def get_tank_ledger(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    station_codes: str | None = None,
+    fuel_codes: str | None = None,
+    tank_number: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Книга резервуара: движение смена за сменой, книга против факта замера.
+
+    Отдаёт три класса замечаний раздельно — арифметика книги внутри смены,
+    стыковка с предыдущей сменой и расхождение книги с фактическим замером.
+    Смешивать их нельзя: у каждого своя причина и свой способ исправления.
+    """
+    from app.services.tank_ledger import build_tank_ledger
+
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    return await build_tank_ledger(
+        db, f.company_id, f.date_from, f.date_to,
+        station_codes=_csv_ints(station_codes, "station_codes"),
+        fuel_codes=_csv_ints(fuel_codes, "fuel_codes"),
+        tank_number=tank_number,
+    )
+
+
 @router.get("/sales-channels")
 async def get_sales_channels(
     company_id: str,
