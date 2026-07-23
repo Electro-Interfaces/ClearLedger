@@ -494,3 +494,100 @@ class OverviewService:
                 "utilization_pct": round(float(r.dur) / port_min * 100, 1) if port_min else 0.0,
             })
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "metrics": metrics}
+
+    async def owners_breakdown(self, company_id: Any, df: date, dt: date,
+                               stations: list[str] | None = None,
+                               regions: list[str] | None = None,
+                               tz: str = "msk") -> dict[str, Any]:
+        """Разрез парка по владельцу: свои (РусГидро) vs партнёрские (СНК).
+
+        По каждому классу: станций в парке, сколько работает по паспорту, сколько
+        реально возило за период (активные) и сколько молчит (простой), плюс
+        сессии, энергия и надёжность по визитам. Простой и надёжность — ровно то,
+        ради чего вводили владельца: сравнить, как отрабатывают наши и партнёрские.
+
+        Учитывает контур (station_codes/regions): при выбранной области считается
+        только она.
+        """
+        from sqlalchemy import text
+
+        from app.services.station_owner import CLASS_LABELS, owner_class_sql
+
+        # ── парк по владельцу: всего / работают по паспорту ──
+        # Сужение по кодам станций — через нормализованный station_code индекс не
+        # проходит, поэтому область считаем по region_id и по коду напрямую; при
+        # выбранной одной ЭЗС фильтр station применяется на уровне SQL ниже.
+        park = (await self.db.execute(text(f"""
+            select {owner_class_sql('owner')} as cls,
+                   count(*) as stations,
+                   count(*) filter (where operational_status = 'working') as working
+            from service_locations sl
+            where company_id = :cid and type = 'ev_charging'
+              and coalesce(is_test, false) = false
+              and coalesce(operational_status, '') <> 'decommissioned'
+            group by 1
+        """), {"cid": company_id})).mappings().all()
+
+        # ── активность и сессии по владельцу за период ──
+        lo = datetime.combine(df, datetime.min.time())
+        hi = datetime.combine(dt, datetime.max.time())
+        act = (await self.db.execute(text(f"""
+            select {owner_class_sql('sl.owner')} as cls,
+                   count(*) as sessions,
+                   count(distinct cs.location_id) as active,
+                   coalesce(sum(cs.energy_kwh), 0) as energy,
+                   coalesce(sum(coalesce(cs.client_amount, cs.amount)), 0) as amount
+            from charge_sessions cs
+            join service_locations sl on sl.id = cs.location_id
+            where cs.company_id = :cid
+              and cs.started_at >= :lo and cs.started_at <= :hi
+            group by 1
+        """), {"cid": company_id, "lo": lo, "hi": hi})).mappings().all()
+        act_by = {r["cls"]: r for r in act}
+
+        # ── надёжность (успех визитов) по владельцу ──
+        # Через location_id, а НЕ station_code: у партнёрских станций код в
+        # справочнике не совпадает со station_code в сессиях (свой формат CPO),
+        # и по кодам успех выходил ложным 0%. Владелец резолвится по location_id.
+        rel = (await self.db.execute(text(f"""
+            with v as (
+                select visit_key, min(cs.location_id) as loc,
+                       bool_or(cs.visit_charged) as charged
+                from charge_sessions cs
+                where cs.company_id = :cid and cs.visit_key is not null
+                  and cs.started_at >= :lo and cs.started_at <= :hi
+                group by visit_key
+            )
+            select {owner_class_sql('sl.owner')} as cls,
+                   count(*) as visits,
+                   count(*) filter (where v.charged) as charged
+            from v join service_locations sl on sl.id = v.loc
+            group by 1
+        """), {"cid": company_id, "lo": lo, "hi": hi})).mappings().all()
+        rel_by = {r["cls"]: r for r in rel}
+
+        out = []
+        for cls in ("own", "partner", "unknown"):
+            p = next((r for r in park if r["cls"] == cls), None)
+            a = act_by.get(cls)
+            stations_n = int(p["stations"]) if p else 0
+            if stations_n == 0 and not a:
+                continue
+            active = int(a["active"]) if a else 0
+            rr = rel_by.get(cls)
+            visits = int(rr["visits"]) if rr else 0
+            charged = int(rr["charged"]) if rr else 0
+            out.append({
+                "cls": cls, "label": CLASS_LABELS[cls],
+                "stations": stations_n,
+                "working": int(p["working"]) if p else 0,
+                "active": active,
+                "silent": max(0, stations_n - active),
+                "silent_pct": round((stations_n - active) / stations_n * 100, 1) if stations_n else 0.0,
+                "sessions": int(a["sessions"]) if a else 0,
+                "energy_kwh": round(float(a["energy"]), 1) if a else 0.0,
+                "amount": round(float(a["amount"]), 2) if a else 0.0,
+                "visits": visits, "charged": charged,
+                "success_pct": round(charged / visits * 100, 1) if visits else 0.0,
+            })
+        return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "owners": out}

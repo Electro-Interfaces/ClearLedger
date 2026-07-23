@@ -118,3 +118,23 @@ async def station_metrics(
     return await OverviewService(db).station_metrics(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=codes, regions=regs)
+
+
+@router.get("/owners")
+async def owners_breakdown(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = None,
+    regions: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Парк по владельцу: свои (РусГидро) vs партнёрские (СНК) — станции, простой,
+    сессии, надёжность за период."""
+    cid = await assert_company_member(company_id, current_user, db)
+    codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
+    regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
+    return await OverviewService(db).owners_breakdown(
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
+        stations=codes, regions=regs)

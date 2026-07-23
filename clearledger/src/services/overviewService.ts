@@ -171,6 +171,36 @@ export async function getSilentStations(p: {
   })
 }
 
+/** Парк по владельцу: свои (РусГидро) vs партнёрские (СНК) — простой, сессии, надёжность. */
+export interface OwnerBreakdownRow {
+  cls: 'own' | 'partner' | 'unknown'
+  label: string
+  stations: number
+  working: number
+  active: number
+  silent: number
+  silent_pct: number
+  sessions: number
+  energy_kwh: number
+  amount: number
+  visits: number
+  charged: number
+  success_pct: number
+}
+export interface OwnersResponse {
+  period: { from: string; to: string }
+  owners: OwnerBreakdownRow[]
+}
+export async function getOwnersBreakdown(p: {
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[]
+}): Promise<OwnersResponse> {
+  return get<OwnersResponse>('/api/analytics/charge-sessions/owners', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
+    ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),
+  })
+}
+
 /** Качество использования портов: занятость ≠ работа.
  * idle — порт занят, но не заряжает; считается только по быстрым (DC) портам,
  * где 3 кВт означают проблему, а не паспортную скорость. */

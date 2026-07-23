@@ -28,7 +28,7 @@ import {
   getChargeSessions, getStationsLinkage, getChargeTimeseries, fmtMoney, fmtMoneyShort,
 } from '@/services/analyticsService'
 import {
-  getChargeOverview, getSilentStations, type OverviewKpi,
+  getChargeOverview, getSilentStations, getOwnersBreakdown, type OverviewKpi,
   type ShareRow, type StationRow, type Accent, type OverviewCorporate,
   type HourPoint, type OverviewWeekday, type OverviewNetwork,
 } from '@/services/overviewService'
@@ -110,6 +110,71 @@ function CountCard({ label, value, hint }: { label: string; value: string; hint?
  * сколько простаивало. На сети РусГидро это четверть парка — самая крупная
  * потеря, которую обзор до сих пор не показывал. Клик даёт список: простой —
  * это не справка, а перечень работ. */
+/** Парк по владельцу: свои (РусГидро) vs партнёрские (СНК). Отдельный разрез,
+ *  потому что партнёрские станции отрабатывают иначе — их простой и надёжность
+ *  надо видеть отдельно, а не растворёнными в общей цифре сети. */
+function OwnersCard({ companyId, period, scope }: {
+  companyId: string; period: { from: string; to: string }; scope: ScopeArg
+}) {
+  const { data } = useQuery({
+    queryKey: ['owners-breakdown', companyId, period.from, period.to, scope.key],
+    queryFn: () => getOwnersBreakdown({ companyId, dateFrom: period.from, dateTo: period.to,
+      stations: scope.stations, regions: scope.regions }),
+  })
+  const owners = (data?.owners ?? []).filter((o) => o.stations > 0 || o.sessions > 0)
+  if (owners.length < 2) return null   // один владелец — сравнивать не с кем
+
+  const clsColor: Record<string, string> = {
+    own: 'border-blue-500/30', partner: 'border-violet-500/30', unknown: 'border-border',
+  }
+  const dotColor: Record<string, string> = {
+    own: 'bg-blue-500', partner: 'bg-violet-500', unknown: 'bg-zinc-500',
+  }
+  const succCls = (v: number) => (v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
+    : v >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
+  const silentCls = (v: number) => (v <= 15 ? 'text-emerald-600 dark:text-emerald-400'
+    : v <= 35 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+          Парк по владельцу
+          <MetricHint text="Собственные — станции РусГидро (включая бренд «Доступная энергия»). Партнёрские — станции СНК. Простой и надёжность считаются отдельно: партнёрские отрабатывают иначе, и в общей цифре сети это тонет." />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {owners.map((o) => (
+            <div key={o.cls} className={`rounded-xl border ${clsColor[o.cls]} bg-card/50 p-3.5`}>
+              <div className="flex items-center gap-1.5 text-xs font-medium">
+                <span className={`h-2 w-2 rounded-full ${dotColor[o.cls]}`} />{o.label}
+              </div>
+              <div className="mt-1.5 flex items-baseline gap-1.5">
+                <span className="text-2xl font-semibold tabular-nums leading-none">{nf0.format(o.stations)}</span>
+                <span className="text-xs text-muted-foreground">станций · работают {nf0.format(o.working)}</span>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                <Stat label="Простой" value={`${nf0.format(o.silent)} (${o.silent_pct.toFixed(0)}%)`} cls={silentCls(o.silent_pct)} />
+                <Stat label="Активны" value={nf0.format(o.active)} />
+                <Stat label="Надёжность" value={`${o.success_pct.toFixed(0)}%`} cls={succCls(o.success_pct)} />
+                <Stat label="Сессии" value={nf0.format(o.sessions)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function Stat({ label, value, cls }: { label: string; value: string; cls?: string }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={`font-mono tabular-nums ${cls ?? ''}`}>{value}</div>
+    </div>
+  )
+}
+
 function SilentCard({ companyId, period, silent }: {
   companyId: string; period: { from: string; to: string }
   silent: OverviewNetwork['silent']
@@ -777,6 +842,8 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
               <CountCard label="Коннекторов (типов)" value={nf0.format(connQ.data?.lines.length ?? 0)} hint="за период" />
               <CountCard label="Коннекторов в сети" value={nf0.format(data.meta.ports)} hint="физических портов" />
             </div>
+
+            <OwnersCard companyId={companyId} period={period} scope={sc} />
 
             <NetworkHealth net={data.network} />
             <RegionExtremes regions={data.network.regions} />
