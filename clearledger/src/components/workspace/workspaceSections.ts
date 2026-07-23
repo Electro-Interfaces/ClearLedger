@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import type { CentralMenuItem } from './CentralPanelLayout'
@@ -66,11 +66,18 @@ export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 // пайплайн развития сети (МЕСТА, где сеть строится, на стадиях проработка →
 // работа → архив). НЕ путать с «Оборудованием» (склад железа). Ядро раздела
 // «Управленческий», группа «Площадки».
+// Раздел «Проекты» — жизненный цикл ЭЗС от участка до эксплуатации
+// (docs/SITES_PROJECT_LIFECYCLE.md). Подбор площадки — первый этап проекта,
+// поэтому банк ЗУ живёт здесь же, а не в «Управленческом».
 export const SITES_MENU: CentralMenuItem[] = [
-  { key: 'sites_overview', label: 'Обзор пайплайна', group: 'Площадки (Банк ЗУ)' },
-  { key: 'sites_list',     label: 'Реестр площадок', group: 'Площадки (Банк ЗУ)' },
-  { key: 'sites_priority', label: 'Приоритеты',      group: 'Площадки (Банк ЗУ)' },
-  { key: 'sites_map',      label: 'Карта площадок',  group: 'Площадки (Банк ЗУ)' },
+  { key: 'pr_portfolio',   label: 'Обзор портфеля',  group: 'Портфель' },
+  { key: 'pr_projects',    label: 'Проекты',         group: 'Портфель' },
+  { key: 'sites_overview', label: 'Воронка подбора', group: 'Подбор площадок' },
+  { key: 'sites_list',     label: 'Банк площадок',   group: 'Подбор площадок' },
+  { key: 'sites_priority', label: 'Приоритеты',      group: 'Подбор площадок' },
+  { key: 'sites_map',      label: 'Карта',           group: 'Подбор площадок' },
+  { key: 'pr_tp',          label: 'Присоединение',   group: 'Реализация' },
+  { key: 'pr_accounting',  label: 'Ждёт учёта',      group: 'Реализация' },
 ]
 export const SITES_KEYS = SITES_MENU.map((m) => m.key)
 
@@ -147,7 +154,6 @@ export function useWorkspaceSections(): WorkspaceSection[] {
           { key: 'ops_balance', label: 'Баланс (факт)', group: 'Мониторинг' },
           { key: 'ops_completeness', label: 'Полнота данных', group: 'Мониторинг' },
           ...EQUIPMENT_MENU,
-          ...SITES_MENU,
         ]
       : []),
     ...energyOps,
@@ -170,6 +176,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     : []
 
   const sales: WorkspaceSection = { mode: 'management', label: 'Продажи',        icon: BarChart3,    items: mgmtItems, connected: mgmtItems.length > 0 }
+  // «Проекты» — стройка сети: от подбора участка до ввода станции в эксплуатацию.
+  // Только у energy: у топливного профиля своего девелоперского контура нет.
+  const projects: WorkspaceSection = { mode: 'projects', label: 'Проекты', icon: HardHat,
+    items: isEnergy ? SITES_MENU : [], connected: isEnergy }
   const ops: WorkspaceSection   = { mode: 'operations', label: 'Управленческий', icon: Gauge,        items: opsItems, connected: opsItems.length > 0 }
   const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
   const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
@@ -178,7 +188,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
   return isEnergy
-    ? [sales, ops, store, acc, exp]
+    ? [sales, projects, ops, store, acc, exp]
     : [sales, store, ops, acc, exp]
 }
 

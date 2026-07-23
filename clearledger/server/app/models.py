@@ -1557,6 +1557,16 @@ class FuelShift(Base):
     # (купон/МобилПр и т.п.) не теряются, в отличие от FuelShiftSale.
     raw_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # Источник не отдаёт детализацию продаж по этой смене (psm/sales пусты при
+    # живой кассе): НЕ ноль выручки, а пробел в данных. У АЗС 205/207/208/209/
+    # 210/9008 так выглядит период до подключения к контуру STS (до янв–фев 2026).
+    # Аналитика обязана исключать такие смены из средних, иначе они занижают
+    # выручку/смену и среднюю цену молча. Ставится приёмом и переигровкой
+    # (fuel_shift_refresh), снимается автоматически, как только STS отдал продажи.
+    sales_missing: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     # Учётный период (Шаг 1) — определяется по closed_at смены
     period_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("periods.id", ondelete="SET NULL"),
@@ -3744,6 +3754,10 @@ class EzsSite(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Человекочитаемый номер проекта (ЭЗС-2026-0042) — им называют проект в
+    # переписке и на совещании; UUID для этого не годится.
+    project_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)   # имя проекта
     stage: Mapped[str] = mapped_column(String(16), nullable=False, default="lead")
     stage_since: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO-дата входа в стадию
     prev_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)    # откуда пришла
@@ -3819,9 +3833,23 @@ class EzsSite(Base):
     distance_to_tp_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     tp_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     tp_term_months: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # ── замыкание цикла: построенная площадка = объект сети ──
+    # ── субсидия: требования программы = обязательные параметры проекта ──
+    # Мощность от 149 кВт, круглосуточный доступ, минимум два машино-места,
+    # обязательство эксплуатировать 5 лет (см. docs/SITES_PROJECT_LIFECYCLE.md).
+    subsidy_planned: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    parking_spots: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    access_24x7: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    has_lighting: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    has_internet: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    subsidy_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    commissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # дата ввода
+    # ── замыкание цикла: построенная площадка = объект сети + договор в учёте ──
     location_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    # Договор на землю в учёте. Через contract_locations связать нельзя: там ключ
+    # на станцию, которой у проекта ещё нет.
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
     # Полный исходный ряд (заголовок → значение) — ничего не теряем при импорте.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     source_sheet: Mapped[str | None] = mapped_column(String(80), nullable=True)  # лист-источник
@@ -3862,6 +3890,95 @@ class EzsSiteEvent(Base):
     __table_args__ = (
         Index("ix_ezs_site_event_site", "site_id", "created_at"),
     )
+
+
+class EzsSiteDoc(Base):
+    """Документ проекта: ЕГРН, ТУ, договор, схема, фото, акт.
+
+    Файл лежит в общем хранилище (`source_files`), здесь — смысл: к какому
+    проекту относится, какого типа и на каком этапе появился. Тип важен не для
+    красоты: часть пунктов гейта закрывается именно приложенным документом
+    («Договор подписан» — это скан договора, а не галочка).
+    """
+    __tablename__ = "ezs_site_docs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="SET NULL"), nullable=True)
+    # egrn | site_plan | photo | offer | contract | tu | tp_contract | project | act_mount | act | other
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, default="other")
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    stage: Mapped[str | None] = mapped_column(String(16), nullable=True)   # на какой стадии приложен
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_site_doc_site", "site_id", "kind"),
+    )
+
+
+class EzsTechConnection(Base):
+    """Техприсоединение проекта — со своим жизненным циклом и сроками.
+
+    Отдельная сущность, а не поля площадки: срок проекта определяется именно
+    присоединением (от 60 дней без реконструкции до полутора лет с усилением
+    сети), у него свои даты «план/факт» и своя переписка с сетевой организацией.
+    """
+    __tablename__ = "ezs_tech_connections"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # draft | applied | specs (ТУ получены) | contract | in_progress | done | rejected
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    grid_operator: Mapped[str | None] = mapped_column(String(300), nullable=True)  # сетевая организация
+    application_no: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    application_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    specs_no: Mapped[str | None] = mapped_column(String(80), nullable=True)        # № ТУ
+    specs_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    contract_no: Mapped[str | None] = mapped_column(String(80), nullable=True)     # договор ТП
+    contract_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    voltage: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    # Срок мероприятий сетевой организации: план и факт — из этой пары берётся просрочка.
+    due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    done_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    needs_reconstruction: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_ezs_tc_company_status", "company_id", "status"),
+    )
+
+
+class EzsSiteCost(Base):
+    """Статья бюджета проекта: план и факт. Факт может ссылаться на документ."""
+    __tablename__ = "ezs_site_costs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # tp | equipment | smr | design | rent | other
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    plan_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    fact_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    doc_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)  # основание факта
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ===========================================================================

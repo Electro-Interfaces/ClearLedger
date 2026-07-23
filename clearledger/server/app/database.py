@@ -388,6 +388,19 @@ async def create_all() -> None:
             "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS visit_charged BOOLEAN",
             "CREATE INDEX IF NOT EXISTS idx_cs_visit "
             "ON charge_sessions (company_id, visit_key)",
+            # v4.6: пробел в продажах смены. STS не отдаёт детализацию (psm/sales)
+            # по сменам АЗС 205/207/208/209/210/9008 до их подключения к контуру
+            # (янв–фев 2026) — при живой кассе и ТТН. 721 такая смена лежала с
+            # выручкой 0 и занижала средние. Это не ноль, а отсутствие данных.
+            "ALTER TABLE fuel_shifts ADD COLUMN IF NOT EXISTS sales_missing "
+            "BOOLEAN NOT NULL DEFAULT false",
+            # Бэкфилл: отчёт снят, но продаж в нём нет вовсе (ни psm.total, ни sales).
+            # Смена с непустым psm и нулевым объёмом — честный ноль, её не метим.
+            "UPDATE fuel_shifts SET sales_missing = true "
+            "WHERE total_amount = 0 AND raw_report IS NOT NULL "
+            "AND jsonb_array_length(coalesce(raw_report->'psm'->'total','[]'::jsonb)) = 0 "
+            "AND jsonb_array_length(coalesce(raw_report->'sales','[]'::jsonb)) = 0 "
+            "AND sales_missing = false",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
@@ -682,6 +695,41 @@ async def create_all() -> None:
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS location_id UUID",
             "CREATE INDEX IF NOT EXISTS ix_ezs_site_company_owner "
             "ON ezs_sites (company_id, owner_user_id)",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
+        # v2.24: раздел «Проекты» — площадка становится проектом с номером,
+        # этапами и документами. Номера выдаём разом всем существующим записям
+        # (по дате появления), иначе часть банка останется без идентификатора,
+        # которым её можно назвать в переписке.
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS project_no VARCHAR(32)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS title VARCHAR(300)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ezs_site_project_no "
+            "ON ezs_sites (company_id, project_no) WHERE project_no IS NOT NULL",
+            """
+            WITH numbered AS (
+                SELECT id, company_id,
+                       to_char(COALESCE(first_seen_at, created_at), 'YYYY') AS yr,
+                       row_number() OVER (
+                           PARTITION BY company_id, to_char(COALESCE(first_seen_at, created_at), 'YYYY')
+                           ORDER BY COALESCE(first_seen_at, created_at), id) AS n
+                FROM ezs_sites WHERE project_no IS NULL
+            )
+            UPDATE ezs_sites s SET project_no = 'ЭЗС-' || numbered.yr || '-' ||
+                   lpad(numbered.n::text, 4, '0')
+            FROM numbered WHERE numbered.id = s.id
+            """,
+            # Субсидия и замыкание на учёт (таблицы ezs_site_docs /
+            # ezs_tech_connections / ezs_site_costs создаёт create_all).
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS subsidy_planned BOOLEAN",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS parking_spots INTEGER",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS access_24x7 BOOLEAN",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS has_lighting BOOLEAN",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS has_internet BOOLEAN",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS subsidy_amount NUMERIC(16,2)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS commissioned_on VARCHAR(10)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS contract_id UUID",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

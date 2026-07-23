@@ -10,26 +10,31 @@
  * (см. `manual_fields` в ezs_site_work.py). Перевод стадии при незакрытом гейте
  * не блокируется — предупреждение уходит в историю, решение остаётся за человеком.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle } from 'lucide-react'
+import { Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle, Upload, Trash2, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  getSite, getSiteEvents, getSiteMembers, getSiteEconomics, patchSite, moveSiteStage,
-  markSiteGate, addSiteEvent, STAGE_META, FUNNEL_STAGES, QUADRANT_META,
-  type SiteDetail, type SiteStage,
+  getSite, getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
+  patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
+  saveTechConnection, saveCost, deleteCost,
+  STAGE_META, FUNNEL_STAGES, QUADRANT_META,
+  type SiteDetail, type SiteStage, type ProjectContext,
 } from '@/services/sitesService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const TABS = [
   { k: 'work', label: 'Работа' },
   { k: 'passport', label: 'Паспорт' },
+  { k: 'tp', label: 'Присоединение' },
+  { k: 'docs', label: 'Документы' },
   { k: 'economics', label: 'Экономика' },
+  { k: 'accounting', label: 'Учёт' },
   { k: 'history', label: 'История' },
 ] as const
 type Tab = (typeof TABS)[number]['k']
@@ -49,6 +54,10 @@ export function SiteCardDialog({ companyId, id, onClose }: {
     await qc.invalidateQueries({ queryKey: ['sites-list', companyId] })
     await qc.invalidateQueries({ queryKey: ['sites-overview', companyId] })
     await qc.invalidateQueries({ queryKey: ['site-events', companyId, id] })
+    await qc.invalidateQueries({ queryKey: ['site-project', companyId, id] })
+    await qc.invalidateQueries({ queryKey: ['site-docs', companyId, id] })
+    await qc.invalidateQueries({ queryKey: ['pr-portfolio', companyId] })
+    await qc.invalidateQueries({ queryKey: ['pr-tc', companyId] })
   }
 
   return (
@@ -56,7 +65,8 @@ export function SiteCardDialog({ companyId, id, onClose }: {
       <DialogContent className="sm:max-w-3xl w-[94vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-base pr-6 flex flex-wrap items-center gap-2">
-            {s ? (s.fullAddress || [s.region, s.city].filter(Boolean).join(', ') || 'Площадка') : 'Площадка'}
+            {s?.projectNo && <span className="font-mono text-xs text-muted-foreground">{s.projectNo}</span>}
+            {s ? (s.title || s.fullAddress || [s.region, s.city].filter(Boolean).join(', ') || 'Проект') : 'Проект'}
             {s && (
               <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[s.stage]?.cls ?? ''}`}
                 title={STAGE_META[s.stage]?.hint}>{s.stageLabel}</span>
@@ -78,7 +88,10 @@ export function SiteCardDialog({ companyId, id, onClose }: {
             </div>
             {tab === 'work' && <WorkTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'passport' && <PassportTab site={s} companyId={companyId} onDone={refresh} />}
+            {tab === 'tp' && <TechConnectionTab site={s} companyId={companyId} onDone={refresh} />}
+            {tab === 'docs' && <DocsTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'economics' && <EconomicsTab site={s} companyId={companyId} />}
+            {tab === 'accounting' && <AccountingTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'history' && <HistoryTab site={s} companyId={companyId} />}
           </>
         )}
@@ -106,15 +119,23 @@ function WorkTab({ site, companyId, onDone }: { site: SiteDetail; companyId: str
   const gate = site.gate
   const missing = gate.items.filter((i) => !i.done)
 
+  const [override, setOverride] = useState(false)
+  const [blocked, setBlocked] = useState<string[] | null>(null)
+  const [mayOverride, setMayOverride] = useState(false)
+
   const mMove = useMutation({
-    mutationFn: () => moveSiteStage(companyId, site.id, stage, reason || undefined),
+    mutationFn: () => moveSiteStage(companyId, site.id, stage, reason || undefined, override),
     onSuccess: async (r) => {
-      setReason('')
-      if (r.missing?.length) {
-        toast.warning(`Стадия изменена. Не закрыто на гейте: ${r.missing.join('; ')}`)
-      } else {
-        toast.success('Стадия изменена')
+      setMayOverride(!!r.mayOverride)
+      if (!r.moved && r.blocked) {
+        // Обязательные пункты гейта держат переход — это не ошибка сети, а правило.
+        setBlocked(r.blocking ?? [])
+        toast.warning(r.message ?? 'Переход заблокирован гейтом')
+        return
       }
+      setBlocked(null); setOverride(false); setReason('')
+      toast.success(r.overridden ? 'Стадия изменена в обход гейта — запись в истории'
+                                 : 'Стадия изменена')
       await onDone()
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сменить стадию'),
@@ -163,7 +184,9 @@ function WorkTab({ site, companyId, onDone }: { site: SiteDetail; companyId: str
                 </span>
               )}
               <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
-              {!it.manual && <span className="text-[10px] text-muted-foreground">— из полей паспорта</span>}
+              {it.required && <span className="text-[10px] text-red-500/80" title="Обязательно для перехода">обязательно</span>}
+              {it.doc && <span className="text-[10px] text-muted-foreground">— вкладка «Документы»</span>}
+              {!it.manual && !it.doc && <span className="text-[10px] text-muted-foreground">— из полей паспорта</span>}
             </div>
           ))}
         </div>
@@ -191,10 +214,33 @@ function WorkTab({ site, companyId, onDone }: { site: SiteDetail; companyId: str
             {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Перевести
           </Button>
         </div>
-        {stage !== site.stage && missing.length > 0 && (
+        {stage !== site.stage && gate.blocking.length > 0 && (
+          <div className="flex items-start gap-1.5 text-[11px] text-red-600 dark:text-red-400">
+            <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>
+              Обязательное не закрыто: {gate.blocking.join('; ')}. Пока эти пункты не выполнены,
+              двигаться вперёд нельзя.
+            </span>
+          </div>
+        )}
+        {stage !== site.stage && gate.blocking.length === 0 && missing.length > 0 && (
           <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <span>Не закрыто на гейте: {missing.map((m) => m.label).join('; ')}. Перевод возможен — запись останется в истории.</span>
+            <span>Не закрыто (необязательное): {missing.map((m) => m.label).join('; ')}. Перевод возможен — запись останется в истории.</span>
+          </div>
+        )}
+        {blocked && mayOverride && (
+          <label className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+            <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-0.5" />
+            <span>
+              Провести в обход гейта под мою ответственность. Нужно обоснование — оно попадёт в
+              историю проекта отдельной записью.
+            </span>
+          </label>
+        )}
+        {blocked && !mayOverride && (
+          <div className="text-[11px] text-muted-foreground">
+            Обход обязательных пунктов доступен администратору компании.
           </div>
         )}
         <div className="text-[11px] text-muted-foreground">
@@ -423,6 +469,358 @@ function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId:
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/* ── Вкладка «Присоединение» ────────────────────────────────────────────── */
+
+function TechConnectionTab({ site, companyId, onDone }: {
+  site: SiteDetail; companyId: string; onDone: () => Promise<void>
+}) {
+  const ctx = useQuery({
+    queryKey: ['site-project', companyId, site.id],
+    queryFn: () => getProjectContext(companyId, site.id),
+  })
+  const [draft, setDraft] = useState<Record<string, string | boolean>>({})
+  useEffect(() => setDraft({}), [ctx.data])
+
+  const m = useMutation({
+    mutationFn: () => saveTechConnection(companyId, site.id, draft),
+    onSuccess: async () => { setDraft({}); toast.success('Сохранено'); await onDone() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
+  })
+
+  if (ctx.isLoading || !ctx.data) {
+    return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  }
+  const tc = ctx.data.techConnection
+  const val = (k: string, fallback: unknown) =>
+    (k in draft ? draft[k] : (fallback ?? '')) as string
+  const set = (k: string, v: string | boolean) => setDraft((d) => ({ ...d, [k]: v }))
+  const dirty = Object.keys(draft).length > 0
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground">
+          Срок проекта задаёт присоединение: от заявки до исполнения — от двух месяцев
+          до полутора лет при реконструкции сети.
+        </p>
+        <Button size="sm" className="h-8 text-xs" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
+          {m.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
+          Сохранить
+        </Button>
+      </div>
+
+      {tc?.overdue && (
+        <div className="flex items-center gap-1.5 rounded border border-red-400/50 bg-red-400/5 px-2 py-1.5 text-[11px] text-red-600 dark:text-red-400">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Срок мероприятий сетевой ({tc.dueDate}) прошёл, отметки об исполнении нет.
+        </div>
+      )}
+
+      <section className="rounded-lg border border-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div>
+          <Label>Статус</Label>
+          <Select value={val('status', tc?.status) || 'draft'} onValueChange={(v) => set('status', v)}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {ctx.data.tcStatuses.map((s) => (
+                <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="md:col-span-2">
+          <Label>Сетевая организация</Label>
+          <Input className="h-8 text-xs" value={val('grid_operator', tc?.gridOperator)}
+            placeholder="Россети Урал" onChange={(e) => set('grid_operator', e.target.value)} />
+        </div>
+        <Field2 label="№ заявки" v={val('application_no', tc?.applicationNo)} on={(v) => set('application_no', v)} />
+        <Field2 label="Дата заявки" type="date" v={val('application_date', tc?.applicationDate)} on={(v) => set('application_date', v)} />
+        <Field2 label="Мощность, кВт" v={val('power_kwt', tc?.powerKwt)} on={(v) => set('power_kwt', v)} />
+        <Field2 label="№ ТУ" v={val('specs_no', tc?.specsNo)} on={(v) => set('specs_no', v)} />
+        <Field2 label="Дата ТУ" type="date" v={val('specs_date', tc?.specsDate)} on={(v) => set('specs_date', v)} />
+        <Field2 label="Класс напряжения" v={val('voltage', tc?.voltage)} on={(v) => set('voltage', v)} />
+        <Field2 label="№ договора ТП" v={val('contract_no', tc?.contractNo)} on={(v) => set('contract_no', v)} />
+        <Field2 label="Дата договора ТП" type="date" v={val('contract_date', tc?.contractDate)} on={(v) => set('contract_date', v)} />
+        <Field2 label="Стоимость, ₽" v={val('cost', tc?.cost)} on={(v) => set('cost', v)} />
+        <Field2 label="Срок мероприятий (план)" type="date" v={val('due_date', tc?.dueDate)} on={(v) => set('due_date', v)} />
+        <Field2 label="Исполнено (факт)" type="date" v={val('done_date', tc?.doneDate)} on={(v) => set('done_date', v)} />
+        <div className="flex items-end">
+          <label className="flex items-center gap-1.5 text-xs">
+            <input type="checkbox"
+              checked={Boolean(('needs_reconstruction' in draft) ? draft.needs_reconstruction : tc?.needsReconstruction)}
+              onChange={(e) => set('needs_reconstruction', e.target.checked)} />
+            Нужна реконструкция сети
+          </label>
+        </div>
+        <div className="md:col-span-3">
+          <Label>Заметка</Label>
+          <Textarea rows={2} className="text-xs min-h-[46px]" value={val('note', tc?.note)}
+            onChange={(e) => set('note', e.target.value)} />
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function Field2({ label, v, on, type }: { label: string; v: string; on: (v: string) => void; type?: string }) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <Input className="h-8 text-xs" type={type ?? 'text'} value={v} onChange={(e) => on(e.target.value)} />
+    </div>
+  )
+}
+
+/* ── Вкладка «Документы» ────────────────────────────────────────────────── */
+
+function DocsTab({ site, companyId, onDone }: {
+  site: SiteDetail; companyId: string; onDone: () => Promise<void>
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
+  const [kind, setKind] = useState('other')
+  const [busy, setBusy] = useState(false)
+  const ctx = useQuery({
+    queryKey: ['site-project', companyId, site.id],
+    queryFn: () => getProjectContext(companyId, site.id),
+  })
+  const docs = useQuery({
+    queryKey: ['site-docs', companyId, site.id],
+    queryFn: () => getSiteDocs(companyId, site.id),
+  })
+
+  const onPick = async (f: File | null) => {
+    if (!f) return
+    setBusy(true)
+    try {
+      await uploadSiteDoc(companyId, site.id, f, kind, f.name)
+      toast.success('Документ приложен')
+      await onDone()
+      await docs.refetch()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось загрузить')
+    } finally { setBusy(false); if (fileRef.current) fileRef.current.value = '' }
+  }
+  const remove = async (docId: string) => {
+    try {
+      await deleteSiteDoc(companyId, site.id, docId)
+      await onDone(); await docs.refetch()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось удалить') }
+  }
+
+  const rows = docs.data ?? []
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={kind} onValueChange={setKind}>
+          <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(ctx.data?.docKinds ?? []).map((k) => (
+              <SelectItem key={k.key} value={k.key} className="text-xs">{k.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <input ref={fileRef} type="file" hidden onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
+        <Button size="sm" variant="outline" className="h-8 text-xs" disabled={busy}
+          onClick={() => fileRef.current?.click()}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+          Приложить документ
+        </Button>
+        <span className="text-[11px] text-muted-foreground ml-auto">
+          Часть пунктов гейта закрывается именно документом: договор, ТУ, акт приёмки.
+        </span>
+      </div>
+
+      {docs.isLoading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+      ) : rows.length === 0 ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">Документов пока нет.</div>
+      ) : (
+        <div className="rounded-lg border border-border divide-y divide-border/40">
+          {rows.map((d) => (
+            <div key={d.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+              <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground shrink-0">{d.kindLabel}</span>
+              <span className="truncate flex-1" title={d.title ?? d.fileName ?? ''}>{d.title || d.fileName || '—'}</span>
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                {d.stageLabel ?? ''}{d.uploadedBy ? ` · ${d.uploadedBy}` : ''} {fmtDate(d.createdAt)}
+              </span>
+              <button type="button" onClick={() => remove(d.id)}
+                className="text-muted-foreground hover:text-red-500 shrink-0" title="Удалить">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Вкладка «Учёт» ─────────────────────────────────────────────────────── */
+
+function AccountingTab({ site, companyId, onDone }: {
+  site: SiteDetail; companyId: string; onDone: () => Promise<void>
+}) {
+  const ctx = useQuery({
+    queryKey: ['site-project', companyId, site.id],
+    queryFn: () => getProjectContext(companyId, site.id),
+  })
+  if (ctx.isLoading || !ctx.data) {
+    return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  }
+  const d = ctx.data
+  const sub = d.subsidy
+
+  return (
+    <div className="space-y-3">
+      {/* связи с учётом */}
+      <section className="rounded-lg border border-border p-3 space-y-2">
+        <div className="text-xs font-semibold">Записи в учёте</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div>
+            <Label>Договор на землю</Label>
+            {d.contract ? (
+              <div>№ {d.contract.number} от {d.contract.date}
+                {d.contract.basis && <span className="text-muted-foreground"> · {d.contract.basis}</span>}
+                {d.contract.validUntil && <span className="text-muted-foreground"> · до {d.contract.validUntil}</span>}
+              </div>
+            ) : (
+              <div className="text-amber-600 dark:text-amber-400">
+                не привязан{site.contractStart ? ' — а договор уже подписан' : ''}
+              </div>
+            )}
+          </div>
+          <div>
+            <Label>Объект сети</Label>
+            {d.location ? (
+              <div>{d.location.name} <span className="text-muted-foreground">({d.location.code})</span></div>
+            ) : (
+              <div className="text-muted-foreground">не связан — проект ещё не стал станцией</div>
+            )}
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Записи в бухгалтерии создаются в своих разделах, здесь — только связь: учётный контур
+          не должен наполняться побочным эффектом смены статуса проекта.
+        </p>
+      </section>
+
+      {/* субсидия */}
+      <section className="rounded-lg border border-border">
+        <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+          <span>Субсидия — соответствие требованиям</span>
+          <span className={`font-mono ${sub.eligible ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
+            {sub.done} / {sub.total}
+          </span>
+        </div>
+        <div className="p-3 space-y-1">
+          {sub.items.map((i) => (
+            <div key={i.key} className="flex items-center gap-2 text-xs">
+              {i.done
+                ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                : <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+              <span className={i.done ? '' : 'text-muted-foreground'}>{i.label}</span>
+              {i.value && <span className="text-[11px] text-muted-foreground">— {i.value}</span>}
+            </div>
+          ))}
+          {sub.obligationUntil && (
+            <div className="pt-1 text-[11px] text-muted-foreground">
+              Введён {sub.commissionedOn} · обязательство эксплуатировать до {sub.obligationUntil}
+              {' '}({sub.obligationYears} лет)
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* бюджет */}
+      <section className="rounded-lg border border-border">
+        <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+          <span>Бюджет проекта</span>
+          <span className="font-mono text-muted-foreground">
+            план {nf0.format(d.costs.planTotal)} ₽ · факт {nf0.format(d.costs.factTotal)} ₽
+          </span>
+        </div>
+        <BudgetEditor site={site} companyId={companyId} ctx={d} onDone={onDone} />
+      </section>
+    </div>
+  )
+}
+
+function BudgetEditor({ site, companyId, ctx, onDone }: {
+  site: SiteDetail; companyId: string; ctx: ProjectContext; onDone: () => Promise<void>
+}) {
+  const [kind, setKind] = useState('tp')
+  const [title, setTitle] = useState('')
+  const [plan, setPlan] = useState('')
+  const [fact, setFact] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const add = async () => {
+    if (!plan && !fact) return
+    setBusy(true)
+    try {
+      await saveCost(companyId, site.id, { kind, title: title || null, plan, fact })
+      setTitle(''); setPlan(''); setFact('')
+      await onDone()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить') } finally { setBusy(false) }
+  }
+  const remove = async (id: string) => {
+    try { await deleteCost(companyId, site.id, id); await onDone() }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось удалить') }
+  }
+
+  return (
+    <div className="p-3 space-y-2">
+      {ctx.costs.items.length > 0 && (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-muted-foreground border-b">
+              <th className="text-left py-1 font-medium">Статья</th>
+              <th className="text-left py-1 font-medium">Описание</th>
+              <th className="text-right py-1 font-medium">План</th>
+              <th className="text-right py-1 font-medium">Факт</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {ctx.costs.items.map((c) => (
+              <tr key={c.id} className="border-b border-border/30">
+                <td className="py-1.5">{c.kindLabel}</td>
+                <td className="py-1.5 text-muted-foreground">{c.title ?? '—'}</td>
+                <td className="py-1.5 text-right font-mono">{c.plan != null ? nf0.format(c.plan) : '—'}</td>
+                <td className="py-1.5 text-right font-mono">{c.fact != null ? nf0.format(c.fact) : '—'}</td>
+                <td className="py-1.5 text-right">
+                  <button type="button" onClick={() => remove(c.id)}
+                    className="text-muted-foreground hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <Label>Статья</Label>
+          <Select value={kind} onValueChange={setKind}>
+            <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {ctx.costKinds.map((k) => <SelectItem key={k.key} value={k.key} className="text-xs">{k.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex-1 min-w-[160px]">
+          <Label>Описание</Label>
+          <Input className="h-8 text-xs" value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div className="w-[120px]"><Label>План, ₽</Label>
+          <Input className="h-8 text-xs" value={plan} onChange={(e) => setPlan(e.target.value)} /></div>
+        <div className="w-[120px]"><Label>Факт, ₽</Label>
+          <Input className="h-8 text-xs" value={fact} onChange={(e) => setFact(e.target.value)} /></div>
+        <Button size="sm" className="h-8 text-xs" disabled={busy || (!plan && !fact)} onClick={add}>Добавить</Button>
       </div>
     </div>
   )

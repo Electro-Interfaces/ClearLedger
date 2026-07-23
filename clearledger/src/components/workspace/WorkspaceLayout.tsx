@@ -83,6 +83,8 @@ function DesktopWorkspace() {
             {coreMode === 'reconcile' && <ReconciliationPanel />}
             {coreMode === 'management' && <ManagementPanel />}
             {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+        {coreMode === 'projects' && <ManagementPanel mode="projects" />}
+            {coreMode === 'projects' && <ManagementPanel mode="projects" />}
             {coreMode === 'store' && <StorePanel />}
             {coreMode === 'financial' && <FinancialPanel />}
             {coreMode === 'accounting' && <AccountingPanel />}
@@ -159,6 +161,7 @@ function MobileWorkspace() {
         {coreMode === 'reconcile' && <ReconciliationPanel />}
         {coreMode === 'management' && <ManagementPanel />}
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+        {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {coreMode === 'store' && <StorePanel />}
         {coreMode === 'financial' && <FinancialPanel />}
         {coreMode === 'accounting' && <AccountingPanel />}

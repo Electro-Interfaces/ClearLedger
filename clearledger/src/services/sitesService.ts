@@ -4,7 +4,7 @@
  * Раздел «Управленческий» → группа «Площадки» (energy/РусГидро): девелоперский
  * пайплайн развития сети. НЕ путать с /equipment (склад железа).
  */
-import { get, post, patch, upload } from './apiClient'
+import { get, post, patch, put, del, upload } from './apiClient'
 
 /**
  * Стадии — воронка подбора недвижимости с гейтами. Порядок = порядок гейтов;
@@ -12,11 +12,12 @@ import { get, post, patch, upload } from './apiClient'
  */
 export type SiteStage =
   | 'lead' | 'screening' | 'negotiation' | 'dd' | 'decision'
-  | 'contracting' | 'construction' | 'live' | 'on_hold' | 'archive'
+  | 'contracting' | 'construction' | 'commissioning' | 'live' | 'on_hold' | 'archive'
 
 /** Активная часть воронки, в порядке движения. */
 export const FUNNEL_STAGES: SiteStage[] = [
-  'lead', 'screening', 'negotiation', 'dd', 'decision', 'contracting', 'construction', 'live',
+  'lead', 'screening', 'negotiation', 'dd', 'decision',
+  'contracting', 'construction', 'commissioning', 'live',
 ]
 
 // Цвет по семантике: холодный на входе → тёплый в работе → зелёный на выходе,
@@ -27,15 +28,20 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
   negotiation: { label: 'Переговоры', hint: 'выход на собственника, условия', cls: 'border-blue-400/50 text-blue-600 dark:text-blue-300/80', dot: 'bg-blue-500' },
   dd: { label: 'Проработка', hint: 'ТУ · право · коммерция', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80', dot: 'bg-amber-500' },
   decision: { label: 'Решение', hint: 'экономика и вердикт', cls: 'border-orange-400/50 text-orange-600 dark:text-orange-300/80', dot: 'bg-orange-500' },
-  contracting: { label: 'Оформление', hint: 'договор / сервитут', cls: 'border-violet-400/50 text-violet-600 dark:text-violet-300/80', dot: 'bg-violet-500' },
-  construction: { label: 'В стройке', hint: 'ПИР, СМР, техприсоединение', cls: 'border-teal-400/50 text-teal-600 dark:text-teal-300/80', dot: 'bg-teal-500' },
-  live: { label: 'Введена', hint: 'объект работает в сети', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
-  on_hold: { label: 'Заморожена', hint: 'пауза с датой пересмотра', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
-  archive: { label: 'Архив', hint: 'отклонена, с причиной', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
+  contracting: { label: 'Оформление земли', hint: 'договор / сервитут / разрешение', cls: 'border-violet-400/50 text-violet-600 dark:text-violet-300/80', dot: 'bg-violet-500' },
+  construction: { label: 'Реализация', hint: 'присоединение ‖ оборудование ‖ монтаж', cls: 'border-teal-400/50 text-teal-600 dark:text-teal-300/80', dot: 'bg-teal-500' },
+  commissioning: { label: 'Пусконаладка', hint: 'пусконаладка и приёмка', cls: 'border-cyan-400/50 text-cyan-600 dark:text-cyan-300/80', dot: 'bg-cyan-500' },
+  live: { label: 'В эксплуатации', hint: 'объект работает в сети', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
+  on_hold: { label: 'Заморожен', hint: 'пауза с датой пересмотра', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
+  archive: { label: 'Архив', hint: 'отклонён, с причиной', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
 }
 
 export interface SiteRow {
   id: string
+  projectNo?: string | null
+  title?: string | null
+  phase?: string | null
+  phaseLabel?: string | null
   stage: SiteStage
   stageLabel: string
   /** Ведение (Волна 2): кто отвечает, что дальше и когда. */
@@ -82,9 +88,12 @@ export interface SiteRow {
 }
 
 /** Пункт чек-листа гейта: `manual` — проверяется глазами, остальное — по полям. */
-export interface GateItem { key: string; label: string; manual: boolean; done: boolean }
+export interface GateItem { key: string; label: string; manual: boolean; done: boolean; required: boolean; doc: string | null }
 export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
+  /** Обязательные незакрытые пункты — они держат переход вперёд. */
+  blocking: string[]
+  canAdvance: boolean
 }
 
 export interface SiteDetail extends SiteRow {
@@ -218,9 +227,13 @@ export async function patchSite(
 
 /** Перевод по воронке. Незакрытый гейт не блокирует — возвращается в `missing`. */
 export async function moveSiteStage(
-  companyId: string, id: string, stage: SiteStage, reason?: string,
-): Promise<{ moved: boolean; missing?: string[]; gate: GateState; site: SiteDetail }> {
-  return post(`/api/sites/${id}/stage?company_id=${companyId}`, { stage, reason })
+  companyId: string, id: string, stage: SiteStage, reason?: string, override?: boolean,
+): Promise<{
+  moved: boolean; blocked?: boolean; blocking?: string[]; message?: string
+  mayOverride?: boolean; overridden?: boolean; missing?: string[]
+  gate: GateState; site?: SiteDetail
+}> {
+  return post(`/api/sites/${id}/stage?company_id=${companyId}`, { stage, reason, override })
 }
 
 /** Отметка пункта гейта, который проверяется глазами. */
@@ -336,6 +349,138 @@ export async function getSitesMapPoints(
   companyId: string,
 ): Promise<{ points: (MatrixItem & { lat: number; lon: number })[]; thresholds: SitesMatrix['thresholds'] }> {
   return get('/api/sites/analysis/map', { company_id: companyId })
+}
+
+// ── Проект: этапы, документы, присоединение, бюджет, учёт (Волны 4–8) ──────
+
+export const PHASE_META: Record<string, { label: string; cls: string; dot: string }> = {
+  select: { label: 'Подбор', cls: 'border-blue-400/50 text-blue-600 dark:text-blue-300/80', dot: 'bg-blue-500' },
+  land: { label: 'Земля', cls: 'border-violet-400/50 text-violet-600 dark:text-violet-300/80', dot: 'bg-violet-500' },
+  build: { label: 'Реализация', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80', dot: 'bg-amber-500' },
+  operate: { label: 'Эксплуатация', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
+  closed: { label: 'Не в работе', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
+}
+
+export interface SiteDoc {
+  id: string; kind: string; kindLabel: string; title: string | null; note: string | null
+  stage: string | null; stageLabel: string | null
+  fileId: string | null; fileName: string | null; fileSize: number | null
+  uploadedBy: string | null; createdAt: string | null
+}
+
+export interface TechConnection {
+  id: string; siteId: string; status: string; statusLabel: string
+  gridOperator: string | null
+  applicationNo: string | null; applicationDate: string | null
+  specsNo: string | null; specsDate: string | null
+  contractNo: string | null; contractDate: string | null
+  powerKwt: number | null; voltage: string | null; cost: number | null
+  dueDate: string | null; doneDate: string | null
+  needsReconstruction: boolean | null; note: string | null; overdue: boolean
+  // в реестре присоединений добавляются поля проекта
+  projectNo?: string | null; title?: string | null; region?: string | null
+  city?: string | null; address?: string | null; stage?: string; stageLabel?: string
+}
+
+export interface SiteCost {
+  id: string; kind: string; kindLabel: string; title: string | null
+  plan: number | null; fact: number | null; docRef: string | null; note: string | null
+}
+
+export interface SubsidyCheck {
+  planned: boolean; amount: number | null
+  items: { key: string; label: string; done: boolean; value: string | null }[]
+  done: number; total: number; eligible: boolean
+  commissionedOn: string | null; obligationUntil: string | null; obligationYears: number
+}
+
+export interface ProjectContext {
+  phase: string
+  phases: { key: string; label: string; hint: string; stages: { stage: SiteStage; label: string }[] }[]
+  techConnection: TechConnection | null
+  costs: { items: SiteCost[]; planTotal: number; factTotal: number }
+  subsidy: SubsidyCheck
+  contract: { id: string; number: string; date: string; basis: string | null; validUntil: string | null; type: string | null } | null
+  location: { id: string; name: string; code: string; status: string | null } | null
+  docKinds: { key: string; label: string }[]
+  tcStatuses: { key: string; label: string }[]
+  costKinds: { key: string; label: string }[]
+}
+
+export interface Portfolio {
+  phases: { key: string; label: string; hint: string; count: number
+            stages: { stage: SiteStage; label: string; count: number }[] }[]
+  active: number; total: number; realized: number
+  budget: { plan: number; fact: number }
+  techConnections: { total: number; done: number; overdue: number }
+  docs: number
+}
+
+export interface AwaitingAccounting {
+  contractMissing: { id: string; projectNo: string | null; title: string | null; region: string | null; city: string | null; address: string | null; stage: string; stageLabel: string }[]
+  locationMissing: AwaitingAccounting['contractMissing']
+  supplyMissing: { id: string; projectNo: string | null; city: string | null; address: string | null }[]
+}
+
+export async function getPortfolio(companyId: string): Promise<Portfolio> {
+  return get('/api/sites/portfolio', { company_id: companyId })
+}
+
+export async function getTechConnections(companyId: string): Promise<{
+  total: number; overdue: number; costSum: number
+  byStatus: { key: string; label: string; count: number }[]; items: TechConnection[]
+}> {
+  return get('/api/sites/tech-connections', { company_id: companyId })
+}
+
+export async function getAwaitingAccounting(companyId: string): Promise<AwaitingAccounting> {
+  return get('/api/sites/awaiting-accounting', { company_id: companyId })
+}
+
+export async function getProjectContext(companyId: string, id: string): Promise<ProjectContext> {
+  return get(`/api/sites/${id}/project`, { company_id: companyId })
+}
+
+export async function getSiteDocs(companyId: string, id: string): Promise<SiteDoc[]> {
+  return get(`/api/sites/${id}/docs`, { company_id: companyId })
+}
+
+export async function uploadSiteDoc(
+  companyId: string, id: string, file: File, kind: string, title?: string,
+): Promise<{ id: string }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const q = new URLSearchParams({ company_id: companyId, kind })
+  if (title) q.set('title', title)
+  return upload(`/api/sites/${id}/docs?${q.toString()}`, fd)
+}
+
+export async function deleteSiteDoc(companyId: string, id: string, docId: string): Promise<unknown> {
+  return del(`/api/sites/${id}/docs/${docId}?company_id=${companyId}`)
+}
+
+export async function saveTechConnection(
+  companyId: string, id: string, payload: Record<string, unknown>,
+): Promise<TechConnection> {
+  return put(`/api/sites/${id}/tech-connection?company_id=${companyId}`, payload)
+}
+
+export async function saveCost(
+  companyId: string, id: string, payload: Record<string, unknown>,
+): Promise<{ id: string }> {
+  return put(`/api/sites/${id}/costs?company_id=${companyId}`, payload)
+}
+
+export async function deleteCost(companyId: string, id: string, costId: string): Promise<unknown> {
+  return del(`/api/sites/${id}/costs/${costId}?company_id=${companyId}`)
+}
+
+export async function linkContract(companyId: string, id: string, contractId: string): Promise<unknown> {
+  return post(`/api/sites/${id}/link-contract?company_id=${companyId}`, { contract_id: contractId })
+}
+
+export async function linkLocation(companyId: string, id: string, locationId: string): Promise<unknown> {
+  return post(`/api/sites/${id}/link-location?company_id=${companyId}`, { location_id: locationId })
 }
 
 export async function getSiteEconomics(

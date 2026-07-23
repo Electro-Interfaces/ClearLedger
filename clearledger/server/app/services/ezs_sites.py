@@ -36,7 +36,7 @@ from app.models import EzsSite, Region
 # этому списку (кроме архива) — иначе файл откатывал бы ручную работу.
 STAGE_ORDER = [
     "lead", "screening", "negotiation", "dd", "decision",
-    "contracting", "construction", "live",
+    "contracting", "construction", "commissioning", "live",
 ]
 STAGE_LABELS = {
     "lead": "Лид",
@@ -44,10 +44,11 @@ STAGE_LABELS = {
     "negotiation": "Переговоры",
     "dd": "Проработка",
     "decision": "Решение",
-    "contracting": "Оформление",
-    "construction": "В стройке",
-    "live": "Введена",
-    "on_hold": "Заморожена",
+    "contracting": "Оформление земли",
+    "construction": "Реализация",
+    "commissioning": "Пусконаладка",
+    "live": "В эксплуатации",
+    "on_hold": "Заморожен",
     "archive": "Архив",
 }
 STAGE_HINTS = {
@@ -56,13 +57,34 @@ STAGE_HINTS = {
     "negotiation": "выход на собственника, условия",
     "dd": "ТУ · право · коммерция",
     "decision": "экономика и вердикт",
-    "contracting": "договор / сервитут",
-    "construction": "ПИР, СМР, техприсоединение",
+    "contracting": "договор / сервитут / разрешение",
+    "construction": "присоединение ‖ оборудование ‖ монтаж",
+    "commissioning": "пусконаладка и приёмка",
     "live": "объект работает в сети",
     "on_hold": "пауза с датой пересмотра",
-    "archive": "отклонена, с причиной",
+    "archive": "отклонён, с причиной",
 }
 ALL_STAGES = STAGE_ORDER + ["on_hold", "archive"]
+
+# Этапы проекта — крупные блоки, которыми мыслит руководитель. Стадии внутри
+# этапа последовательны, а вот работы внутри «Реализации» (присоединение,
+# закупка оборудования, монтаж) идут ПАРАЛЛЕЛЬНО: оборудование заказывают, не
+# дожидаясь исполнения ТП. Поэтому параллельность живёт не в стадиях, а в
+# отдельных треках (см. docs/SITES_PROJECT_LIFECYCLE.md).
+PHASES = [
+    {"key": "select", "label": "Подбор", "hint": "скрининг, переговоры, экономика, решение",
+     "stages": ["lead", "screening", "negotiation", "dd", "decision"]},
+    {"key": "land", "label": "Земля", "hint": "аренда / сервитут / разрешение",
+     "stages": ["contracting"]},
+    {"key": "build", "label": "Реализация", "hint": "присоединение, оборудование, монтаж, ПНР",
+     "stages": ["construction", "commissioning"]},
+    {"key": "operate", "label": "Эксплуатация", "hint": "объект работает в сети",
+     "stages": ["live"]},
+    {"key": "closed", "label": "Не в работе", "hint": "заморожен или отклонён",
+     "stages": ["on_hold", "archive"]},
+]
+STAGE_PHASE = {s: p["key"] for p in PHASES for s in p["stages"]}
+PHASE_LABELS = {p["key"]: p["label"] for p in PHASES}
 _STAGE_POS = {s: i for i, s in enumerate(STAGE_ORDER)}
 # Сколько дней без касания считаем «площадка забыта».
 STALE_DAYS = 30
@@ -794,7 +816,9 @@ async def list_sites(
 
 def _site_out(s: EzsSite) -> dict[str, Any]:
     return {
-        "id": str(s.id), "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
+        "id": str(s.id), "projectNo": s.project_no, "title": s.title,
+        "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
+        "phase": STAGE_PHASE.get(s.stage), "phaseLabel": PHASE_LABELS.get(STAGE_PHASE.get(s.stage, "")),
         "stageSince": s.stage_since, "prevStage": s.prev_stage,
         "archiveReason": s.archive_reason, "cadastralNo": s.cadastral_no,
         "statusRaw": s.status_raw, "receivedDate": s.received_date,
@@ -815,7 +839,7 @@ def _site_out(s: EzsSite) -> dict[str, Any]:
 
 async def site_detail(db: AsyncSession, company_id, site_id) -> dict[str, Any] | None:
     from app.models import User
-    from app.services.ezs_site_work import site_out_full
+    from app.services.ezs_site_work import site_doc_kinds, site_out_full
 
     row = (await db.execute(
         select(EzsSite, func.coalesce(User.name, User.email))
@@ -825,7 +849,7 @@ async def site_detail(db: AsyncSession, company_id, site_id) -> dict[str, Any] |
     if row is None:
         return None
     s, owner_name = row
-    out = site_out_full(s, owner_name)
+    out = site_out_full(s, owner_name, doc_kinds=await site_doc_kinds(db, s.id))
     out["raw"] = s.raw or {}       # все 55 исходных колонок для карточки
     out["sourceSheet"] = s.source_sheet
     out["firstSeenAt"] = s.first_seen_at.isoformat() if s.first_seen_at else None

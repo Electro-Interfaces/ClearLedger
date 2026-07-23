@@ -1,16 +1,26 @@
 /**
- * Роутер раздела «Площадки (Банк ЗУ)» — девелоперский пайплайн ЭЗС.
- * sites_overview → сводка воронки; sites_list → реестр; sites_priority →
- * матрица решений; sites_map → площадки поверх действующей сети.
+ * Роутер раздела «Проекты» — жизненный цикл ЭЗС от участка до эксплуатации.
+ *
+ * Портфель: обзор по этапам и реестр проектов.
+ * Подбор: воронка, банк площадок, приоритеты, карта — первый этап проекта.
+ * Реализация: техприсоединение (оно определяет срок проекта) и мост в бухгалтерию.
  */
 import { SitesOverviewPanel } from './SitesOverviewPanel'
 import { SitesListPanel } from './SitesListPanel'
 import { SitesPriorityPanel } from './SitesPriorityPanel'
 import { SitesMapPanel } from './SitesMapPanel'
+import { ProjectsPortfolioPanel } from './ProjectsPortfolioPanel'
+import { ProjectsListPanel } from './ProjectsListPanel'
+import { TechConnectionsPanel } from './TechConnectionsPanel'
+import { AwaitingAccountingPanel } from './AwaitingAccountingPanel'
 
 export function SitesRouter({ tab, companyId }: { tab: string; companyId: string }) {
+  if (tab === 'pr_projects') return <ProjectsListPanel companyId={companyId} />
+  if (tab === 'pr_tp') return <TechConnectionsPanel companyId={companyId} />
+  if (tab === 'pr_accounting') return <AwaitingAccountingPanel companyId={companyId} />
+  if (tab === 'sites_overview') return <SitesOverviewPanel companyId={companyId} />
   if (tab === 'sites_list') return <SitesListPanel companyId={companyId} />
   if (tab === 'sites_priority') return <SitesPriorityPanel companyId={companyId} />
   if (tab === 'sites_map') return <SitesMapPanel companyId={companyId} />
-  return <SitesOverviewPanel companyId={companyId} />
+  return <ProjectsPortfolioPanel companyId={companyId} />
 }

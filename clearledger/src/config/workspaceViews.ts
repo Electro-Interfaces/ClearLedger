@@ -12,6 +12,7 @@ import { STORE_MENU } from './storeCatalog'
 export const MODE_LABELS: Record<CoreMode, string> = {
   management: 'Продажи',
   operations: 'Управленческий',
+  projects: 'Проекты',
   store: 'Магазин',
   financial: 'Финансовый',
   accounting: 'Бухгалтерский',
@@ -23,6 +24,12 @@ export const MODE_LABELS: Record<CoreMode, string> = {
 
 // Подписи под-разделов по режимам (ключ = ключ под-вида в панели).
 const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
+  projects: {
+    pr_portfolio: 'Обзор портфеля', pr_projects: 'Проекты',
+    sites_overview: 'Воронка подбора', sites_list: 'Банк площадок',
+    sites_priority: 'Приоритеты', sites_map: 'Карта',
+    pr_tp: 'Присоединение', pr_accounting: 'Ждёт учёта',
+  },
   management: {
     overview: 'Обзор', map: 'Карта', transactions: 'Реестр операций',
     fills: 'Реализация', 'fuel-tariffs': 'Тарифы', 'fuel-corporate': 'Корпоратив', 'fuel-retail': 'Частные лица',

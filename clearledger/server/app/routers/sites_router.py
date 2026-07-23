@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import EzsSite, User
-from app.services import ezs_site_analysis, ezs_site_work, ezs_sites
+from app.services import ezs_project, ezs_site_analysis, ezs_site_work, ezs_sites
 
 router = APIRouter(prefix="/sites", tags=["Площадки ЭЗС (Банк ЗУ)"])
 
@@ -91,6 +91,36 @@ async def create_site(
     site = await ezs_site_work.create_site(db, cid, payload, user)
     await db.commit()
     return await ezs_sites.site_detail(db, cid, site.id)
+
+
+@router.get("/portfolio")
+async def portfolio(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Обзор портфеля проектов: этапы, бюджет, присоединения, реализация."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.portfolio(db, cid)
+
+
+@router.get("/tech-connections")
+async def tech_connections(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Реестр техприсоединений по всем проектам: статусы, сроки, просрочки."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.tech_connections_report(db, cid)
+
+
+@router.get("/awaiting-accounting")
+async def awaiting_accounting(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """«Ждёт учёта»: проект ушёл вперёд, а в бухгалтерии записи нет."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.awaiting_accounting(db, cid)
 
 
 @router.get("/analysis/matrix")
@@ -183,16 +213,184 @@ async def move_stage(
     site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Перевод по воронке. Незакрытый гейт не блокирует, но попадает в историю."""
+    """Перевод по воронке.
+
+    Обязательные пункты гейта блокируют движение вперёд; обход — только с
+    обоснованием и правами админа компании, и он попадает в историю.
+    """
     stage = str(payload.get("stage") or "")
     if stage not in ezs_sites.ALL_STAGES:
         raise HTTPException(400, f"Неизвестная стадия: {stage}")
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    res = await ezs_site_work.set_stage(db, site, stage,
-                                        reason=payload.get("reason"), user=user)
+    may_override = await _is_company_admin(db, cid, user)
+    res = await ezs_site_work.set_stage(
+        db, site, stage, reason=payload.get("reason"), user=user,
+        may_override=may_override, override=bool(payload.get("override")))
+    if not res.get("moved") and res.get("blocked"):
+        await db.rollback()
+        return {**res, "mayOverride": may_override}
     await db.commit()
-    return {**res, "site": await ezs_sites.site_detail(db, cid, site_id)}
+    return {**res, "mayOverride": may_override,
+            "site": await ezs_sites.site_detail(db, cid, site_id)}
+
+
+async def _is_company_admin(db: AsyncSession, cid, user: User) -> bool:
+    """Право обхода гейта: суперадмин или админ этой компании."""
+    if getattr(user, "is_superadmin", False):
+        return True
+    from app.models import UserCompany
+    row = (await db.execute(select(UserCompany).where(
+        UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+    return bool(row is not None and getattr(row, "role", None) == "admin")
+
+
+# ── Документы проекта ──────────────────────────────────────────────────────
+@router.get("/{site_id}/docs")
+async def list_site_docs(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Документы проекта: ЕГРН, ТУ, договор, схемы, фото, акты."""
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    return await ezs_project.list_docs(db, cid, site_id)
+
+
+@router.post("/{site_id}/docs", status_code=201)
+async def upload_site_doc(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    kind: str = Query("other"), title: str | None = Query(None),
+    note: str | None = Query(None), file: UploadFile = File(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Загрузить документ к проекту. Файл ложится в общее хранилище."""
+    import hashlib
+    import os
+    from pathlib import Path
+
+    from app.models import SourceFile
+
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Пустой файл")
+
+    file_id = uuid.uuid4()
+    upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(file.filename or "file").suffix
+    path = upload_dir / f"{file_id}{ext}"
+    with open(path, "wb") as fh:
+        fh.write(content)
+    db.add(SourceFile(
+        id=file_id, company_id=cid, file_name=file.filename or "документ",
+        mime_type=file.content_type or "application/octet-stream", size=len(content),
+        storage_path=str(path), fingerprint=hashlib.sha256(content).hexdigest()))
+    await db.flush()
+
+    res = await ezs_project.add_doc(db, cid, site, file_id=file_id, kind=kind,
+                                    title=title, note=note, user=user)
+    await db.commit()
+    return res
+
+
+@router.delete("/{site_id}/docs/{doc_id}")
+async def delete_site_doc(
+    site_id: uuid.UUID, doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    ok = await ezs_project.delete_doc(db, cid, site, doc_id, user)
+    if not ok:
+        raise HTTPException(404, "Документ не найден")
+    await db.commit()
+    return {"deleted": str(doc_id)}
+
+
+# ── Проект: контекст, техприсоединение, бюджет, учёт ───────────────────────
+@router.get("/{site_id}/project")
+async def project_context(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Всё, что карточка проекта показывает сверх паспорта: этапы, ТП, бюджет,
+    субсидия, договор и объект сети."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    return await ezs_project.project_context(db, cid, site)
+
+
+@router.put("/{site_id}/tech-connection")
+async def put_tech_connection(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Завести или обновить техприсоединение проекта (заявка → ТУ → договор → факт)."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_project.upsert_tech_connection(db, cid, site, payload, user)
+    await db.commit()
+    return res
+
+
+@router.put("/{site_id}/costs")
+async def put_cost(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Статья бюджета проекта (план/факт)."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_project.upsert_cost(db, cid, site, payload, user)
+    await db.commit()
+    return res
+
+
+@router.delete("/{site_id}/costs/{cost_id}")
+async def del_cost(
+    site_id: uuid.UUID, cost_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    ok = await ezs_project.delete_cost(db, cid, site_id, cost_id)
+    if not ok:
+        raise HTTPException(404, "Статья не найдена")
+    await db.commit()
+    return {"deleted": str(cost_id)}
+
+
+@router.post("/{site_id}/link-contract")
+async def link_contract(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Привязать договор учёта к проекту (аренда, сервитут, разрешение)."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_project.link_contract(db, cid, site, payload.get("contract_id"), user)
+    if not res.get("ok"):
+        raise HTTPException(404, res.get("message", "Договор не найден"))
+    await db.commit()
+    return res
+
+
+@router.post("/{site_id}/link-location")
+async def link_location(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Связать проект с объектом сети — цикл замкнут."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_project.link_location(db, cid, site, payload.get("location_id"), user)
+    if not res.get("ok"):
+        raise HTTPException(404, res.get("message", "Объект не найден"))
+    await db.commit()
+    return res
 
 
 @router.post("/{site_id}/gate")
