@@ -53,7 +53,7 @@ export function moduleLabels(keys: string[]): string[] {
 }
 
 /** Роуты, доступные всегда (не гейтятся модулями). */
-const ALWAYS_ROUTES = ['/', '/admin', '/accept-invite', '/login']
+const ALWAYS_ROUTES = ['/', '/workspace', '/admin', '/accept-invite', '/login']
 
 /** Тип набора модулей: null = полный доступ. */
 export type AccessSet = string[] | null | undefined

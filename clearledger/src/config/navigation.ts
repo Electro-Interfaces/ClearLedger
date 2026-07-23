@@ -21,7 +21,7 @@ export interface NavItemDef {
   end?: boolean
 }
 
-export const dashboardItem: NavItemDef = { to: '/', icon: LayoutDashboard, label: 'Рабочий стол', end: true }
+export const dashboardItem: NavItemDef = { to: '/workspace', icon: LayoutDashboard, label: 'Рабочий стол', end: true }
 
 // Верхний уровень меню
 export const mainNavItems: NavItemDef[] = [

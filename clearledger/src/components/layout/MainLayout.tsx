@@ -53,7 +53,7 @@ export function MainLayout() {
   const { companyModules } = useCompany()
   // RBAC route-guard: прямой переход на недоступный по модулям роут → на рабочий стол.
   useEffect(() => {
-    if (!routeAllowed(location.pathname, companyModules)) navigate('/', { replace: true })
+    if (!routeAllowed(location.pathname, companyModules)) navigate('/workspace', { replace: true })
   }, [location.pathname, companyModules, navigate])
   // «Открытие приложения» → рабочий стол. Холодный старт вкладки (нет метки сессии)
   // сбрасывает запомненный браузером экран на рабочий стол. F5 и переходы внутри
@@ -69,8 +69,8 @@ export function MainLayout() {
     try {
       if (sessionStorage.getItem('cl-booted')) return
       sessionStorage.setItem('cl-booted', '1')
-      if (location.pathname !== '/' && isWorkspacePath(location.pathname)) {
-        navigate('/', { replace: true })
+      if (location.pathname !== '/workspace' && isWorkspacePath(location.pathname)) {
+        navigate('/workspace', { replace: true })
       }
     } catch { /* ignore */ }
     // читаем стартовый путь один раз при монтировании — deps намеренно пустые

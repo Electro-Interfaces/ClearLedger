@@ -23,7 +23,7 @@ interface BottomNavItem {
 export function MobileBottomNav() {
   const { companyModules } = useCompany()
   const items: BottomNavItem[] = [
-    { label: 'Рабочий стол', path: '/', icon: LayoutDashboard },
+    { label: 'Рабочий стол', path: '/workspace', icon: LayoutDashboard },
     { label: 'Документы', path: '/files', icon: FileText },
     { label: 'Контрагенты', path: '/contractors', icon: Building2 },
     { label: 'Объекты', path: '/objects', icon: Boxes },

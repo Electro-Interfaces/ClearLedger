@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     seed_superadmin_email: str = ""
     seed_superadmin_password: str = ""
 
+    # Состав компаний экосистемы (модель «стек-на-компанию»). Пусто → сидится
+    # встроенный каталог seed.COMPANIES (текущий мультитенант-прод
+    # ledger.dataworker.ru). Задано → сидятся ТОЛЬКО перечисленные: изолированный
+    # стек не должен знать о чужих компаниях (ecosystem-deploy/docs/CORE.md §1 —
+    # контейнер = экосистема, между экосистемами не пересекается ничего).
+    # Формат: компании через ';', поля через '|'.
+    #   ECOSYSTEM_COMPANIES=rushydro                        — взять из встроенного каталога
+    #   ECOSYSTEM_COMPANIES=lukoil|ЛУКОЙЛ|ЛУКОЙЛ|fuel|#00a  — компании нет в каталоге
+    ecosystem_companies: str = ""
+
     # Видеоконференции Jitsi (meet.dataworker.ru, RS256/ASAP). TradeLedger подписывает
     # JWT организатора СВОИМ приватным ключом (iss=ledger); prosody проверяет публичным
     # ключом с keyserver по kid. Приватный ключ (PEM) — в base64, НЕ в git.

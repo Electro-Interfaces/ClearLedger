@@ -58,7 +58,7 @@ export function AppBreadcrumb() {
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
-            <Link to="/">Главная</Link>
+            <Link to="/workspace">Главная</Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
         {crumbs.map((crumb, idx) => (

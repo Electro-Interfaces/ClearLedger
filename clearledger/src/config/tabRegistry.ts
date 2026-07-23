@@ -15,9 +15,9 @@ import {
 import { isCoreMode, workspaceTitle } from './workspaceViews'
 
 // Пути с фиксированной высотой (h-full, без скролла страницы).
-const WORKSPACE_PATHS = new Set(['/', '/files', '/reconciliation', '/normalization'])
+const WORKSPACE_PATHS = new Set(['/workspace', '/files', '/reconciliation', '/normalization'])
 
-// Fuel-only разделы (для energy-профиля скрыты; RequireFuel редиректит на `/`).
+// Fuel-only разделы (для energy-профиля скрыты; RequireFuel редиректит на `/workspace`).
 const FUEL_ONLY = new Set<string>(oneCItems.map((i) => i.to))
 
 // Плоская карта статических путей → пункт меню.
@@ -45,7 +45,7 @@ export function resolveTab(pathname: string): ResolvedTab | null {
       icon: stat.icon,
       workspace: WORKSPACE_PATHS.has(pathname),
       fuelOnly: FUEL_ONLY.has(pathname),
-      closable: pathname !== '/',
+      closable: pathname !== '/workspace',
     }
   }
   // Динамика: детальная страница коннектора.

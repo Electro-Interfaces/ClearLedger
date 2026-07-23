@@ -45,6 +45,7 @@ const FuelMappingsPage = lazy(() => import('@/pages/FuelMappingsPage').then((m) 
 const MonthCloseForecastPage = lazy(() => import('@/pages/MonthCloseForecastPage').then((m) => ({ default: m.MonthCloseForecastPage })))
 const ReconciliationPage = lazy(() => import('@/pages/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })))
 const NormalizationWorkspacePage = lazy(() => import('@/pages/NormalizationWorkspacePage').then((m) => ({ default: m.NormalizationWorkspacePage })))
+const EcosystemHomePage = lazy(() => import('@/pages/EcosystemHomePage').then((m) => ({ default: m.EcosystemHomePage })))
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
@@ -69,7 +70,7 @@ function LazyPage({ children }: { children: React.ReactNode }) {
  */
 function RequireFuel({ children }: { children: React.ReactNode }) {
   const { company } = useCompany()
-  if (company.profileId === 'energy') return <Navigate to="/" replace />
+  if (company.profileId === 'energy') return <Navigate to="/workspace" replace />
   return <>{children}</>
 }
 
@@ -131,9 +132,13 @@ const router = createBrowserRouter([
       { path: '/invite/:token', element: <LazyPage><AcceptInvitePage /></LazyPage> },
       { path: '/reset-password/:token', element: <LazyPage><ResetPasswordPage /></LazyPage> },
       {
+        path: '/',
+        element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,
+      },
+      {
         element: <ProtectedRoute><MainLayout /></ProtectedRoute>,
         children: [
-          { path: '/', element: <WorkspaceLayout /> },
+          { path: '/workspace', element: <WorkspaceLayout /> },
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },

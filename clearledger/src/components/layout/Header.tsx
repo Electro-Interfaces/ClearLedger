@@ -77,7 +77,9 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             </Button>
           )}
 
-          <Link to="/" className="flex items-center gap-3 shrink-0">
+          {/* Логотип ведёт на рабочий стол ЭКОСИСТЕМЫ (`/`) — наружу, к списку
+              приложений. Рабочий стол самого Ledger — `/workspace`. */}
+          <Link to="/" title="К рабочему столу экосистемы" className="flex items-center gap-3 shrink-0">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
               <BrandIcon className="h-5 w-5 text-white" />
             </div>

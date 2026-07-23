@@ -52,6 +52,48 @@ COMPANIES = [
     {"slug": "rushydro", "name": "РусГидро", "short_name": "РусГидро", "profile_id": "energy", "color": "#ef4444"},
 ]
 
+
+def companies_to_seed() -> list[dict]:
+    """Какие компании заводить в этой БД.
+
+    Без `ECOSYSTEM_COMPANIES` — встроенный каталог (мультитенант-прод как был).
+    С переменной — только перечисленные: у изолированного стека компании своей
+    экосистемы, чужих он не видит (ecosystem-deploy/docs/CORE.md §1). Slug из
+    каталога подтягивает готовые реквизиты, незнакомый — описывается полями."""
+    raw = get_settings().ecosystem_companies.strip()
+    if not raw:
+        return COMPANIES
+
+    catalog = {c["slug"]: c for c in COMPANIES}
+    out: list[dict] = []
+    for item in raw.split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        parts = [p.strip() for p in item.split("|")]
+        slug = parts[0]
+        if len(parts) == 1:
+            known = catalog.get(slug)
+            if known is None:
+                logger.warning(
+                    "ECOSYSTEM_COMPANIES: '%s' нет во встроенном каталоге — "
+                    "создаётся с именем по slug; задай поля через '|'", slug,
+                )
+            out.append(known or {"slug": slug, "name": slug, "short_name": slug})
+            continue
+        comp = {"slug": slug, "name": parts[1] or slug}
+        if len(parts) > 2 and parts[2]:
+            comp["short_name"] = parts[2]
+        if len(parts) > 3 and parts[3]:
+            comp["profile_id"] = parts[3]
+        if len(parts) > 4 and parts[4]:
+            comp["color"] = parts[4]
+        if len(parts) > 5 and parts[5]:
+            comp["inn"] = parts[5]
+        out.append(comp)
+    return out
+
+
 async def seed_data(db: AsyncSession) -> None:
     """Создаёт начальные компании и (опционально) суперадмина."""
 
@@ -60,7 +102,7 @@ async def seed_data(db: AsyncSession) -> None:
     existing_slugs = {c.slug for c in existing.scalars().all()}
 
     created_companies: list[Company] = []
-    for comp in COMPANIES:
+    for comp in companies_to_seed():
         if comp["slug"] not in existing_slugs:
             company = Company(**comp)
             db.add(company)
@@ -349,9 +391,12 @@ async def _seed_superadmin(db: AsyncSession) -> None:
             logger.info("Сид-суперадмин %s: проставлен флаг is_superadmin", email)
         return
 
-    # Компания по умолчанию — ГИГ (членство суперадмину не обязательно).
+    # Компания по умолчанию — ПЕРВАЯ компания этой экосистемы (членство суперадмину
+    # не обязательно). Раньше здесь был жёсткий 'gig' — в стеке другой компании это
+    # сажало владельца в чужую компанию.
+    default_slug = companies_to_seed()[0]["slug"]
     company = (
-        await db.execute(select(Company).where(Company.slug == "gig"))
+        await db.execute(select(Company).where(Company.slug == default_slug))
     ).scalar_one_or_none()
     user = User(
         email=email,
