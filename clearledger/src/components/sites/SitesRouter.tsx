@@ -12,11 +12,13 @@ import { SitesMapPanel } from './SitesMapPanel'
 import { ProjectsPortfolioPanel } from './ProjectsPortfolioPanel'
 import { ProjectsListPanel } from './ProjectsListPanel'
 import { TechConnectionsPanel } from './TechConnectionsPanel'
+import { ProjectEquipmentPanel } from './ProjectEquipmentPanel'
 import { AwaitingAccountingPanel } from './AwaitingAccountingPanel'
 
 export function SitesRouter({ tab, companyId }: { tab: string; companyId: string }) {
   if (tab === 'pr_projects') return <ProjectsListPanel companyId={companyId} />
   if (tab === 'pr_tp') return <TechConnectionsPanel companyId={companyId} />
+  if (tab === 'pr_equipment') return <ProjectEquipmentPanel companyId={companyId} />
   if (tab === 'pr_accounting') return <AwaitingAccountingPanel companyId={companyId} />
   if (tab === 'sites_overview') return <SitesOverviewPanel companyId={companyId} />
   if (tab === 'sites_list') return <SitesListPanel companyId={companyId} />

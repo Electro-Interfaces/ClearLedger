@@ -28,7 +28,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     pr_portfolio: 'Обзор портфеля', pr_projects: 'Проекты',
     sites_overview: 'Воронка подбора', sites_list: 'Банк площадок',
     sites_priority: 'Приоритеты', sites_map: 'Карта',
-    pr_tp: 'Присоединение', pr_accounting: 'Ждёт учёта',
+    pr_tp: 'Присоединение', pr_equipment: 'Оборудование', pr_accounting: 'Ждёт учёта',
   },
   management: {
     overview: 'Обзор', map: 'Карта', transactions: 'Реестр операций',

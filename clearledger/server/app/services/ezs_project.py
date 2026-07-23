@@ -23,7 +23,8 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Contract, EzsSite, EzsSiteCost, EzsSiteDoc, EzsTechConnection, ServiceLocation, User,
+    Contract, EzsSite, EzsSiteCost, EzsSiteDoc, EzsSiteEquipment, EzsTechConnection,
+    ServiceLocation, User,
 )
 from app.services.ezs_site_work import log_event
 from app.services.ezs_sites import (
@@ -201,6 +202,130 @@ async def tech_connections_report(db: AsyncSession, company_id) -> dict[str, Any
     }
 
 
+# ── Оборудование проекта ───────────────────────────────────────────────────
+EQ_STATUSES = [
+    {"key": "planned", "label": "Запланировано"},
+    {"key": "ordered", "label": "Заказано"},
+    {"key": "supplied", "label": "Поставлено"},
+    {"key": "installed", "label": "Смонтировано"},
+    {"key": "cancelled", "label": "Отменено"},
+]
+EQ_LABELS = {s["key"]: s["label"] for s in EQ_STATUSES}
+EQ_FIELDS = {"status", "title", "manufacturer", "power_kwt", "connectors", "qty", "supplier",
+             "price", "order_date", "due_date", "supplied_date", "installed_date", "note"}
+_EQ_NUM = {"power_kwt", "price"}
+
+
+def _eq_out(e: EzsSiteEquipment) -> dict[str, Any]:
+    overdue = bool(e.due_date and not e.supplied_date and e.status in ("planned", "ordered")
+                   and e.due_date < date.today().isoformat())
+    return {
+        "id": str(e.id), "siteId": str(e.site_id), "status": e.status,
+        "statusLabel": EQ_LABELS.get(e.status, e.status),
+        "title": e.title, "manufacturer": e.manufacturer, "powerKwt": e.power_kwt,
+        "connectors": e.connectors, "qty": e.qty, "supplier": e.supplier,
+        "price": float(e.price) if e.price is not None else None,
+        "orderDate": e.order_date, "dueDate": e.due_date,
+        "suppliedDate": e.supplied_date, "installedDate": e.installed_date,
+        "note": e.note, "overdue": overdue,
+    }
+
+
+async def list_equipment(db: AsyncSession, company_id, site_id) -> dict[str, Any]:
+    rows = (await db.execute(select(EzsSiteEquipment).where(
+        EzsSiteEquipment.company_id == company_id, EzsSiteEquipment.site_id == site_id)
+        .order_by(EzsSiteEquipment.created_at))).scalars().all()
+    items = [_eq_out(e) for e in rows]
+    active = [i for i in items if i["status"] != "cancelled"]
+    return {
+        "items": items,
+        "priceTotal": round(sum((i["price"] or 0) * (i["qty"] or 1) for i in active), 2),
+        # Гейт «Оборудование поставлено» закрывается, когда всё нужное приехало.
+        "allSupplied": bool(active) and all(i["status"] in ("supplied", "installed") for i in active),
+        "allInstalled": bool(active) and all(i["status"] == "installed" for i in active),
+    }
+
+
+async def upsert_equipment(db: AsyncSession, company_id, site: EzsSite, payload: dict[str, Any],
+                           user: User | None) -> dict[str, Any]:
+    eid = payload.get("id")
+    row = None
+    if eid:
+        row = (await db.execute(select(EzsSiteEquipment).where(
+            EzsSiteEquipment.company_id == company_id, EzsSiteEquipment.site_id == site.id,
+            EzsSiteEquipment.id == _uuid.UUID(str(eid))))).scalar_one_or_none()
+    created = row is None
+    if row is None:
+        row = EzsSiteEquipment(company_id=company_id, site_id=site.id)
+        db.add(row)
+    prev_status = row.status
+    for f, v in payload.items():
+        if f not in EQ_FIELDS:
+            continue
+        if v in ("", None):
+            setattr(row, f, None)
+        elif f in _EQ_NUM:
+            try:
+                setattr(row, f, float(str(v).replace(",", ".").replace(" ", "")))
+            except ValueError:
+                pass
+        elif f == "qty":
+            try:
+                row.qty = max(1, int(float(str(v).replace(",", "."))))
+            except ValueError:
+                pass
+        else:
+            setattr(row, f, str(v))
+    row.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    if created:
+        await log_event(db, site, "note", user=user,
+                        text=f"Оборудование в план: {row.title or '—'} × {row.qty}")
+    elif prev_status != row.status:
+        await log_event(db, site, "note", user=user,
+                        text=f"Оборудование «{row.title or '—'}»: "
+                             f"{EQ_LABELS.get(prev_status, prev_status)} → {EQ_LABELS.get(row.status, row.status)}")
+    return _eq_out(row)
+
+
+async def delete_equipment(db: AsyncSession, company_id, site_id, eq_id) -> bool:
+    row = (await db.execute(select(EzsSiteEquipment).where(
+        EzsSiteEquipment.company_id == company_id, EzsSiteEquipment.site_id == site_id,
+        EzsSiteEquipment.id == eq_id))).scalar_one_or_none()
+    if row is None:
+        return False
+    await db.delete(row)
+    return True
+
+
+async def equipment_report(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Сводный реестр потребности в оборудовании по всем проектам."""
+    rows = (await db.execute(
+        select(EzsSiteEquipment, EzsSite.project_no, EzsSite.title, EzsSite.city,
+               EzsSite.address, EzsSite.stage)
+        .join(EzsSite, EzsSite.id == EzsSiteEquipment.site_id)
+        .where(EzsSiteEquipment.company_id == company_id)
+        .order_by(EzsSiteEquipment.due_date.nulls_last()))).all()
+    items, by_status, overdue, total_price, total_qty = [], {}, 0, 0.0, 0
+    for e, pno, title, city, addr, stage in rows:
+        out = _eq_out(e)
+        out.update({"projectNo": pno, "projectTitle": title, "city": city, "address": addr,
+                    "stage": stage, "stageLabel": STAGE_LABELS.get(stage, stage)})
+        items.append(out)
+        by_status[e.status] = by_status.get(e.status, 0) + 1
+        overdue += 1 if out["overdue"] else 0
+        if e.status != "cancelled":
+            total_price += (out["price"] or 0) * (e.qty or 1)
+            total_qty += e.qty or 1
+    return {
+        "total": len(items), "overdue": overdue, "qty": total_qty,
+        "priceTotal": round(total_price, 2),
+        "byStatus": [{"key": s["key"], "label": s["label"], "count": by_status.get(s["key"], 0)}
+                     for s in EQ_STATUSES],
+        "items": items,
+    }
+
+
 # ── Бюджет ─────────────────────────────────────────────────────────────────
 COST_KINDS = [
     {"key": "tp", "label": "Техприсоединение"},
@@ -351,6 +476,15 @@ async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
     docs = (await db.execute(select(func.count()).select_from(EzsSiteDoc)
                              .where(EzsSiteDoc.company_id == company_id))).scalar_one()
 
+    eq = (await db.execute(text("""
+        select count(*) total,
+               count(*) filter (where status in ('supplied','installed')) supplied,
+               count(*) filter (where due_date is not null and supplied_date is null
+                                and status in ('planned','ordered')
+                                and due_date < to_char(now(), 'YYYY-MM-DD')) overdue
+        from ezs_site_equipment where company_id = :cid
+    """), {"cid": company_id})).mappings().one()
+
     return {
         "phases": phases,
         "active": sum(by_stage.get(s, 0) for s in STAGE_ORDER),
@@ -360,6 +494,8 @@ async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
         "techConnections": {"total": int(tc["total"] or 0), "done": int(tc["done"] or 0),
                             "overdue": int(tc["overdue"] or 0)},
         "docs": int(docs or 0),
+        "equipment": {"total": int(eq["total"] or 0), "supplied": int(eq["supplied"] or 0),
+                      "overdue": int(eq["overdue"] or 0)},
     }
 
 
@@ -544,11 +680,13 @@ async def project_context(db: AsyncSession, company_id, site: EzsSite) -> dict[s
                     "stages": [{"stage": s, "label": STAGE_LABELS[s]} for s in p["stages"]]}
                    for p in PHASES],
         "techConnection": await get_tech_connection(db, company_id, site.id),
+        "equipment": await list_equipment(db, company_id, site.id),
         "costs": await list_costs(db, company_id, site.id),
         "subsidy": subsidy_check(site),
         "contract": contract,
         "location": location,
         "docKinds": DOC_KINDS,
         "tcStatuses": TC_STATUSES,
+        "eqStatuses": EQ_STATUSES,
         "costKinds": COST_KINDS,
     }

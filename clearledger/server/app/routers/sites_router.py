@@ -140,6 +140,16 @@ async def export_portfolio(
     )
 
 
+@router.get("/equipment")
+async def equipment_report(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Сводный реестр потребности в оборудовании по всем проектам."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.equipment_report(db, cid)
+
+
 @router.get("/awaiting-accounting")
 async def awaiting_accounting(
     company_id: str = Query(...),
@@ -361,6 +371,33 @@ async def put_tech_connection(
     res = await ezs_project.upsert_tech_connection(db, cid, site, payload, user)
     await db.commit()
     return res
+
+
+@router.put("/{site_id}/equipment")
+async def put_equipment(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Позиция оборудования проекта: план → заказ → поставка → монтаж."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_project.upsert_equipment(db, cid, site, payload, user)
+    await db.commit()
+    return res
+
+
+@router.delete("/{site_id}/equipment/{eq_id}")
+async def del_equipment(
+    site_id: uuid.UUID, eq_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    ok = await ezs_project.delete_equipment(db, cid, site_id, eq_id)
+    if not ok:
+        raise HTTPException(404, "Позиция не найдена")
+    await db.commit()
+    return {"deleted": str(eq_id)}
 
 
 @router.put("/{site_id}/costs")

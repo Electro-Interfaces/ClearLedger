@@ -66,7 +66,7 @@ GATES: dict[str, list[dict[str, Any]]] = {
         {"key": "contractor", "label": "Подрядчик определён", "field": "contractor", "required": True},
         {"key": "doc_tu", "label": "ТУ приложены", "doc": "tu"},
         {"key": "tp_done", "label": "Техприсоединение исполнено", "manual": True, "required": True},
-        {"key": "equipment", "label": "Оборудование поставлено", "manual": True, "required": True},
+        {"key": "equipment", "label": "Оборудование поставлено", "equipment": True, "required": True},
         {"key": "smr", "label": "СМР завершены", "manual": True, "required": True},
     ],
     "commissioning": [
@@ -107,7 +107,7 @@ def _field_filled(site: EzsSite, field: str) -> bool:
 
 
 def gate_state(site: EzsSite, stage: str | None = None,
-               doc_kinds: set[str] | None = None) -> dict[str, Any]:
+               doc_kinds: set[str] | None = None, equipment_supplied: bool | None = None) -> dict[str, Any]:
     """Чек-лист стадии: что закрыто, что нет, что держит переход.
 
     `doc_kinds` — типы приложенных документов проекта; без них пункты вида
@@ -123,10 +123,14 @@ def gate_state(site: EzsSite, stage: str | None = None,
             done = bool(marks.get(it["key"], {}).get("done"))
         elif it.get("doc"):
             done = it["doc"] in docs
+        elif it.get("equipment"):
+            # Закрывается не галочкой, а фактом: все нужные позиции поставлены.
+            done = bool(equipment_supplied)
         else:
             done = _field_filled(site, it["field"])
         out.append({"key": it["key"], "label": it["label"], "manual": bool(it.get("manual")),
-                    "doc": it.get("doc"), "required": bool(it.get("required")), "done": done})
+                    "doc": it.get("doc"), "equipment": bool(it.get("equipment")),
+                    "required": bool(it.get("required")), "done": done})
     blocking = [i["label"] for i in out if i["required"] and not i["done"]]
     return {
         "stage": st, "stageLabel": STAGE_LABELS.get(st, st),
@@ -163,6 +167,15 @@ async def site_doc_kinds(db: AsyncSession, site_id) -> set[str]:
     rows = (await db.execute(
         select(EzsSiteDoc.kind).where(EzsSiteDoc.site_id == site_id))).scalars().all()
     return set(rows)
+
+
+async def site_equipment_supplied(db: AsyncSession, site_id) -> bool:
+    """Всё ли нужное оборудование приехало — этим закрывается пункт гейта."""
+    from app.models import EzsSiteEquipment
+    rows = (await db.execute(select(EzsSiteEquipment.status).where(
+        EzsSiteEquipment.site_id == site_id,
+        EzsSiteEquipment.status != "cancelled"))).scalars().all()
+    return bool(rows) and all(s in ("supplied", "installed") for s in rows)
 
 
 async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | None = None,
@@ -266,10 +279,11 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     уходит в почту — туда, откуда мы её и забираем.
     """
     doc_kinds = await site_doc_kinds(db, site.id)
+    eq_ok = await site_equipment_supplied(db, site.id)
     if stage == site.stage:
-        return {"moved": False, "gate": gate_state(site, doc_kinds=doc_kinds)}
+        return {"moved": False, "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok)}
     prev = site.stage
-    gate = gate_state(site, prev, doc_kinds=doc_kinds)
+    gate = gate_state(site, prev, doc_kinds=doc_kinds, equipment_supplied=eq_ok)
     missing = [i["label"] for i in gate["items"] if not i["done"]]
     forward = (_pos(stage) > _pos(prev)) if _pos(stage) >= 0 and _pos(prev) >= 0 else False
 
@@ -278,7 +292,7 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     if forward:
         skipped: list[str] = []
         for st in STAGE_ORDER[_pos(prev):_pos(stage)]:
-            g = gate_state(site, st, doc_kinds=doc_kinds)
+            g = gate_state(site, st, doc_kinds=doc_kinds, equipment_supplied=eq_ok)
             skipped += [f"{STAGE_LABELS.get(st, st)}: {b}" for b in g["blocking"]]
         gate = {**gate, "blocking": skipped}
 
@@ -319,7 +333,7 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
                         text=f"Обход обязательных пунктов ({'; '.join(gate['blocking'])}): {reason}")
     await log_event(db, site, "stage", text=note, from_stage=prev, to_stage=stage, user=user)
     return {"moved": True, "missing": missing, "overridden": bool(forward and gate["blocking"] and override),
-            "gate": gate_state(site, doc_kinds=doc_kinds)}
+            "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok)}
 
 
 def _pos(stage: str) -> int:
@@ -344,7 +358,9 @@ async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
     site.last_touch_at = datetime.now(timezone.utc)
     await log_event(db, site, "gate", user=user,
                     text=f"{'✓' if done else '✗'} {items[key]['label']}")
-    return {"ok": True, "gate": gate_state(site, doc_kinds=await site_doc_kinds(db, site.id))}
+    return {"ok": True, "gate": gate_state(
+        site, doc_kinds=await site_doc_kinds(db, site.id),
+        equipment_supplied=await site_equipment_supplied(db, site.id))}
 
 
 async def add_touch(db: AsyncSession, site: EzsSite, text: str, kind: str,
@@ -372,7 +388,8 @@ async def site_events(db: AsyncSession, company_id, site_id, limit: int = 200) -
 
 
 def site_out_full(site: EzsSite, owner_name: str | None = None,
-                  doc_kinds: set[str] | None = None) -> dict[str, Any]:
+                  doc_kinds: set[str] | None = None,
+                  equipment_supplied: bool | None = None) -> dict[str, Any]:
     """Карточка проекта: паспорт, ведение, гейт, субсидия, связи с учётом."""
     out = _site_out(site)
     out.update({
@@ -397,7 +414,7 @@ def site_out_full(site: EzsSite, owner_name: str | None = None,
         "tpTermMonths": site.tp_term_months,
         "locationId": str(site.location_id) if site.location_id else None,
         "manualFields": site.manual_fields or [],
-        "gate": gate_state(site, doc_kinds=doc_kinds),
+        "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=equipment_supplied),
     })
     return out
 

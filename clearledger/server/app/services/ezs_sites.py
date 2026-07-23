@@ -839,7 +839,9 @@ def _site_out(s: EzsSite) -> dict[str, Any]:
 
 async def site_detail(db: AsyncSession, company_id, site_id) -> dict[str, Any] | None:
     from app.models import User
-    from app.services.ezs_site_work import site_doc_kinds, site_out_full
+    from app.services.ezs_site_work import (
+        site_doc_kinds, site_equipment_supplied, site_out_full,
+    )
 
     row = (await db.execute(
         select(EzsSite, func.coalesce(User.name, User.email))
@@ -849,7 +851,8 @@ async def site_detail(db: AsyncSession, company_id, site_id) -> dict[str, Any] |
     if row is None:
         return None
     s, owner_name = row
-    out = site_out_full(s, owner_name, doc_kinds=await site_doc_kinds(db, s.id))
+    out = site_out_full(s, owner_name, doc_kinds=await site_doc_kinds(db, s.id),
+                        equipment_supplied=await site_equipment_supplied(db, s.id))
     out["raw"] = s.raw or {}       # все 55 исходных колонок для карточки
     out["sourceSheet"] = s.source_sheet
     out["firstSeenAt"] = s.first_seen_at.isoformat() if s.first_seen_at else None

@@ -3962,6 +3962,49 @@ class EzsTechConnection(Base):
     )
 
 
+class EzsSiteEquipment(Base):
+    """Потребность проекта в оборудовании и её исполнение.
+
+    Отдельно от склада (`ezs_equipment_units`): склад отвечает на вопрос «что у
+    нас есть и где лежит», а проект — «что этой площадке нужно и на каком этапе
+    закупка». Пока железо не приехало, единицы склада ещё не существует, но
+    потребность уже влияет на сроки и бюджет проекта.
+
+    Когда оборудование поступает, строка связывается с единицей склада
+    (`unit_id`) и документом поставки (`supply_id`) — так план сходится с фактом.
+    """
+    __tablename__ = "ezs_site_equipment"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # planned | ordered | supplied | installed | cancelled
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)      # что именно
+    manufacturer: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    connectors: Mapped[str | None] = mapped_column(String(120), nullable=True)  # GB/T, CCS2, CHAdeMO…
+    qty: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    price: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    order_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)     # плановая поставка
+    supplied_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    installed_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Связь с фактом на складе — появляется, когда железо приехало.
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    supply_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_ezs_site_equipment_status", "company_id", "status"),
+    )
+
+
 class EzsSiteCost(Base):
     """Статья бюджета проекта: план и факт. Факт может ссылаться на документ."""
     __tablename__ = "ezs_site_costs"

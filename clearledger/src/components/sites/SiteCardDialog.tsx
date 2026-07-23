@@ -22,7 +22,7 @@ import { toast } from 'sonner'
 import {
   getSite, getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
   patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
-  saveTechConnection, saveCost, deleteCost,
+  saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext,
 } from '@/services/sitesService'
@@ -32,6 +32,7 @@ const TABS = [
   { k: 'work', label: 'Работа' },
   { k: 'passport', label: 'Паспорт' },
   { k: 'tp', label: 'Присоединение' },
+  { k: 'equipment', label: 'Оборудование' },
   { k: 'docs', label: 'Документы' },
   { k: 'economics', label: 'Экономика' },
   { k: 'accounting', label: 'Учёт' },
@@ -89,6 +90,7 @@ export function SiteCardDialog({ companyId, id, onClose }: {
             {tab === 'work' && <WorkTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'passport' && <PassportTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'tp' && <TechConnectionTab site={s} companyId={companyId} onDone={refresh} />}
+            {tab === 'equipment' && <EquipmentTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'docs' && <DocsTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'economics' && <EconomicsTab site={s} companyId={companyId} />}
             {tab === 'accounting' && <AccountingTab site={s} companyId={companyId} onDone={refresh} />}
@@ -572,6 +574,135 @@ function Field2({ label, v, on, type }: { label: string; v: string; on: (v: stri
     <div>
       <Label>{label}</Label>
       <Input className="h-8 text-xs" type={type ?? 'text'} value={v} onChange={(e) => on(e.target.value)} />
+    </div>
+  )
+}
+
+/* ── Вкладка «Оборудование» ─────────────────────────────────────────────── */
+
+function EquipmentTab({ site, companyId, onDone }: {
+  site: SiteDetail; companyId: string; onDone: () => Promise<void>
+}) {
+  const ctx = useQuery({
+    queryKey: ['site-project', companyId, site.id],
+    queryFn: () => getProjectContext(companyId, site.id),
+  })
+  const [form, setForm] = useState({
+    title: '', manufacturer: '', power_kwt: '', connectors: '',
+    qty: '1', supplier: '', price: '', due_date: '',
+  })
+  const [busy, setBusy] = useState(false)
+
+  const add = async () => {
+    if (!form.title.trim()) return
+    setBusy(true)
+    try {
+      await saveEquipment(companyId, site.id, { ...form, status: 'planned' })
+      setForm({ title: '', manufacturer: '', power_kwt: '', connectors: '', qty: '1',
+                supplier: '', price: '', due_date: '' })
+      await onDone(); await ctx.refetch()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось добавить') }
+    finally { setBusy(false) }
+  }
+  const setStatus = async (id: string, status: string) => {
+    // Дату проставляет система: статус без даты бесполезен для сроков.
+    const today = new Date().toISOString().slice(0, 10)
+    const extra = status === 'supplied' ? { supplied_date: today }
+      : status === 'installed' ? { installed_date: today }
+      : status === 'ordered' ? { order_date: today } : {}
+    try {
+      await saveEquipment(companyId, site.id, { id, status, ...extra })
+      await onDone(); await ctx.refetch()
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось изменить') }
+  }
+  const remove = async (id: string) => {
+    try { await deleteEquipment(companyId, site.id, id); await onDone(); await ctx.refetch() }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось удалить') }
+  }
+
+  if (ctx.isLoading || !ctx.data) {
+    return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  }
+  const eq = ctx.data.equipment
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground">
+          Потребность проекта, а не склад. Пункт гейта «Оборудование поставлено» закрывается,
+          когда все позиции получили статус «Поставлено» или «Смонтировано».
+        </p>
+        <span className={`text-[11px] rounded border px-1.5 py-0.5 shrink-0 ${eq.allSupplied ? 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80' : 'border-zinc-500/60 text-zinc-500'}`}>
+          {eq.allSupplied ? 'всё поставлено' : 'не всё поставлено'}
+        </span>
+      </div>
+
+      {eq.items.length > 0 && (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-muted-foreground border-b">
+              <th className="text-left py-1 font-medium">Оборудование</th>
+              <th className="text-right py-1 font-medium">кВт</th>
+              <th className="text-right py-1 font-medium">Кол-во</th>
+              <th className="text-left py-1 font-medium">Поставщик</th>
+              <th className="text-left py-1 font-medium">Поставка</th>
+              <th className="text-right py-1 font-medium">Стоимость</th>
+              <th className="text-left py-1 font-medium">Статус</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {eq.items.map((e) => (
+              <tr key={e.id} className="border-b border-border/30">
+                <td className="py-1.5">
+                  {e.title ?? '—'}
+                  {e.manufacturer && <span className="text-muted-foreground"> · {e.manufacturer}</span>}
+                </td>
+                <td className="py-1.5 text-right font-mono">{e.powerKwt ?? '—'}</td>
+                <td className="py-1.5 text-right font-mono">{e.qty}</td>
+                <td className="py-1.5 text-muted-foreground">{e.supplier ?? '—'}</td>
+                <td className={`py-1.5 font-mono ${e.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                  {e.suppliedDate ? `\u2713 ${e.suppliedDate}` : (e.dueDate ?? '—')}
+                </td>
+                <td className="py-1.5 text-right font-mono">{e.price != null ? nf0.format(e.price) : '—'}</td>
+                <td className="py-1.5">
+                  <Select value={e.status} onValueChange={(v) => setStatus(e.id, v)}>
+                    <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ctx.data.eqStatuses.map((s) => (
+                        <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="py-1.5 text-right">
+                  <button type="button" onClick={() => remove(e.id)}
+                    className="text-muted-foreground hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <section className="rounded-lg border border-border p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="md:col-span-2">
+          <Label>Оборудование</Label>
+          <Input className="h-8 text-xs" placeholder="Быстрая ЭЗС 150 кВт"
+            value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
+        </div>
+        <Field2 label="Производитель" v={form.manufacturer} on={(v) => setForm((f) => ({ ...f, manufacturer: v }))} />
+        <Field2 label="Мощность, кВт" v={form.power_kwt} on={(v) => setForm((f) => ({ ...f, power_kwt: v }))} />
+        <Field2 label="Разъёмы" v={form.connectors} on={(v) => setForm((f) => ({ ...f, connectors: v }))} />
+        <Field2 label="Кол-во" v={form.qty} on={(v) => setForm((f) => ({ ...f, qty: v }))} />
+        <Field2 label="Поставщик" v={form.supplier} on={(v) => setForm((f) => ({ ...f, supplier: v }))} />
+        <Field2 label="Стоимость, ₽" v={form.price} on={(v) => setForm((f) => ({ ...f, price: v }))} />
+        <Field2 label="Плановая поставка" type="date" v={form.due_date} on={(v) => setForm((f) => ({ ...f, due_date: v }))} />
+        <div className="flex items-end">
+          <Button size="sm" className="h-8 text-xs" disabled={busy || !form.title.trim()} onClick={add}>
+            Добавить
+          </Button>
+        </div>
+      </section>
     </div>
   )
 }

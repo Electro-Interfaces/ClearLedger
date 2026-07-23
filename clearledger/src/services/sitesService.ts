@@ -88,7 +88,7 @@ export interface SiteRow {
 }
 
 /** Пункт чек-листа гейта: `manual` — проверяется глазами, остальное — по полям. */
-export interface GateItem { key: string; label: string; manual: boolean; done: boolean; required: boolean; doc: string | null }
+export interface GateItem { key: string; label: string; manual: boolean; done: boolean; required: boolean; doc: string | null; equipment?: boolean }
 export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
   /** Обязательные незакрытые пункты — они держат переход вперёд. */
@@ -382,6 +382,17 @@ export interface TechConnection {
   city?: string | null; address?: string | null; stage?: string; stageLabel?: string
 }
 
+export interface SiteEquipment {
+  id: string; siteId: string; status: string; statusLabel: string
+  title: string | null; manufacturer: string | null; powerKwt: number | null
+  connectors: string | null; qty: number; supplier: string | null; price: number | null
+  orderDate: string | null; dueDate: string | null
+  suppliedDate: string | null; installedDate: string | null
+  note: string | null; overdue: boolean
+  projectNo?: string | null; projectTitle?: string | null; city?: string | null
+  address?: string | null; stage?: string; stageLabel?: string
+}
+
 export interface SiteCost {
   id: string; kind: string; kindLabel: string; title: string | null
   plan: number | null; fact: number | null; docRef: string | null; note: string | null
@@ -398,12 +409,14 @@ export interface ProjectContext {
   phase: string
   phases: { key: string; label: string; hint: string; stages: { stage: SiteStage; label: string }[] }[]
   techConnection: TechConnection | null
+  equipment: { items: SiteEquipment[]; priceTotal: number; allSupplied: boolean; allInstalled: boolean }
   costs: { items: SiteCost[]; planTotal: number; factTotal: number }
   subsidy: SubsidyCheck
   contract: { id: string; number: string; date: string; basis: string | null; validUntil: string | null; type: string | null } | null
   location: { id: string; name: string; code: string; status: string | null } | null
   docKinds: { key: string; label: string }[]
   tcStatuses: { key: string; label: string }[]
+  eqStatuses: { key: string; label: string }[]
   costKinds: { key: string; label: string }[]
 }
 
@@ -413,6 +426,7 @@ export interface Portfolio {
   active: number; total: number; realized: number
   budget: { plan: number; fact: number }
   techConnections: { total: number; done: number; overdue: number }
+  equipment: { total: number; supplied: number; overdue: number }
   docs: number
 }
 
@@ -492,6 +506,23 @@ export async function saveTechConnection(
   companyId: string, id: string, payload: Record<string, unknown>,
 ): Promise<TechConnection> {
   return put(`/api/sites/${id}/tech-connection?company_id=${companyId}`, payload)
+}
+
+export async function getEquipmentReport(companyId: string): Promise<{
+  total: number; overdue: number; qty: number; priceTotal: number
+  byStatus: { key: string; label: string; count: number }[]; items: SiteEquipment[]
+}> {
+  return get('/api/sites/equipment', { company_id: companyId })
+}
+
+export async function saveEquipment(
+  companyId: string, id: string, payload: Record<string, unknown>,
+): Promise<SiteEquipment> {
+  return put(`/api/sites/${id}/equipment?company_id=${companyId}`, payload)
+}
+
+export async function deleteEquipment(companyId: string, id: string, eqId: string): Promise<unknown> {
+  return del(`/api/sites/${id}/equipment/${eqId}?company_id=${companyId}`)
 }
 
 export async function saveCost(
