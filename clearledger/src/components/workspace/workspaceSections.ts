@@ -71,15 +71,14 @@ export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 // поэтому банк ЗУ живёт здесь же, а не в «Управленческом».
 export const SITES_MENU: CentralMenuItem[] = [
   { key: 'pr_portfolio',   label: 'Обзор портфеля',  group: 'Портфель' },
-  { key: 'pr_projects',    label: 'Проекты',         group: 'Портфель' },
-  { key: 'pr_project',     label: 'Проект',          group: 'Портфель' },
-  { key: 'sites_overview', label: 'Воронка подбора', group: 'Подбор площадок' },
-  { key: 'sites_list',     label: 'Банк площадок',   group: 'Подбор площадок' },
-  { key: 'sites_priority', label: 'Приоритеты',      group: 'Подбор площадок' },
-  { key: 'sites_map',      label: 'Карта',           group: 'Подбор площадок' },
-  { key: 'pr_tp',          label: 'Присоединение',   group: 'Реализация' },
-  { key: 'pr_equipment',   label: 'Оборудование',    group: 'Реализация' },
-  { key: 'pr_accounting',  label: 'Ждёт учёта',      group: 'Реализация' },
+  { key: 'pr_project',     label: 'Проекты',         group: 'Портфель' },
+  { key: 'sites_overview', label: 'Воронка подбора', group: 'Этап проекта · Подбор площадки' },
+  { key: 'sites_list',     label: 'Банк площадок',   group: 'Этап проекта · Подбор площадки' },
+  { key: 'sites_priority', label: 'Приоритеты',      group: 'Этап проекта · Подбор площадки' },
+  { key: 'sites_map',      label: 'Карта',           group: 'Этап проекта · Подбор площадки' },
+  { key: 'pr_tp',          label: 'Присоединение',   group: 'Этап проекта · Реализация' },
+  { key: 'pr_equipment',   label: 'Оборудование',    group: 'Этап проекта · Реализация' },
+  { key: 'pr_accounting',  label: 'Ждёт учёта',      group: 'Связь с учётом' },
 ]
 export const SITES_KEYS = SITES_MENU.map((m) => m.key)
 

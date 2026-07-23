@@ -86,7 +86,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
           ))}
         </div>
         <span className="text-[11px] text-muted-foreground ml-auto">
-          {pts.isLoading ? '…' : `${points.length} площадок с координатами`}
+          {pts.isLoading ? '…' : `${points.length} проектов с координатами`}
         </span>
       </div>
 

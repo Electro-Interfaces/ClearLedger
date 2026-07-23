@@ -20,6 +20,7 @@ import {
   type MatrixItem, type Quadrant,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -28,6 +29,8 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
   const [region, setRegion] = useState('')
   const [quadrant, setQuadrant] = useState<'' | Quadrant>('')
   const [detailId, setDetailId] = useState<string | null>(null)
+  // Клик — рабочий экран проекта, Alt+клик — быстрый просмотр.
+  const openProject = useOpenProject()
 
   const ov = useQuery({ queryKey: ['sites-overview', companyId], queryFn: () => getSitesOverview(companyId) })
   const q = useQuery({
@@ -48,8 +51,8 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
         <div>
           <h2 className="text-base font-semibold">Приоритеты площадок</h2>
           <p className="text-xs text-muted-foreground">
-            Привлекательность (спрос и покрытие) × исполнимость (мощность, деньги, право).
-            Оценивается активная часть банка.
+            Чем заняться в первую очередь на этапе подбора: привлекательность (спрос и покрытие)
+            × исполнимость (мощность, деньги, право). Клик по строке открывает проект.
           </p>
         </div>
         <Select value={region || '__all__'} onValueChange={(v) => setRegion(v === '__all__' ? '' : v)}>
@@ -135,7 +138,7 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
                 <tbody>
                   {items.slice(0, 300).map((it) => (
                     <tr key={it.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
-                      onClick={() => setDetailId(it.id)}>
+                      onClick={(ev) => (ev.altKey ? setDetailId(it.id) : openProject(it.id))}>
                       <td className="p-2 whitespace-nowrap">{it.region ?? '—'}</td>
                       <td className="p-2 max-w-[240px] truncate" title={it.address ?? ''}>
                         {it.address ?? it.city ?? '—'}

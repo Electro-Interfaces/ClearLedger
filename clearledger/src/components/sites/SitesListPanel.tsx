@@ -17,6 +17,7 @@ import {
   STAGE_META, FUNNEL_STAGES, type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { useOpenProject } from './useOpenProject'
 import { NewProjectDialog } from './NewProjectDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -40,6 +41,8 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [detailId, setDetailId] = useState<string | null>(null)
+  // Клик — рабочий экран проекта, Alt+клик — быстрый просмотр.
+  const openProject = useOpenProject()
   const [creating, setCreating] = useState(false)
 
   const ov = useQuery({ queryKey: ['sites-overview', companyId], queryFn: () => getSitesOverview(companyId) })
@@ -61,6 +64,13 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-3">
+      <div>
+        <h2 className="text-base font-semibold">Банк площадок</h2>
+        <p className="text-xs text-muted-foreground">
+          Первый этап проекта — где строить. Каждая площадка это проект на ранней стадии:
+          клик открывает его рабочий экран, Alt+клик — быстрый просмотр.
+        </p>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         {/* Стадий десять — таблице хватает селекта; счётчики берём из обзора,
             чтобы не гадать, где сейчас работа. */}
@@ -141,7 +151,7 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
                 {d!.items.map((s) => {
                   const late = !!s.nextActionDue && s.nextActionDue < today() && s.stage !== 'archive'
                   return (
-                    <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={() => setDetailId(s.id)}>
+                    <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={(ev) => (ev.altKey ? setDetailId(s.id) : openProject(s.id))}>
                       <td className="p-2 whitespace-nowrap">{s.region ?? '—'}</td>
                       <td className="p-2 whitespace-nowrap">{s.city ?? '—'}</td>
                       <td className="p-2 max-w-[260px] truncate" title={s.fullAddress ?? s.address ?? s.installPlace ?? ''}>
