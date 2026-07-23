@@ -721,6 +721,10 @@ async def ingest_fuel_shifts(
             cash=cash,
             card=card,
             voucher=voucher,
+            # Отчёт снят, но продаж в нём нет вовсе — это пробел источника, а не
+            # нулевая выручка (смена ещё открыта / станция не отдаёт детализацию).
+            # Снимется автоматически переигровкой, когда STS отдаст продажи.
+            sales_missing=(not psm_total and not report.get("sales")),
             # Сырой отчёт STS как есть — для эталонного просмотрщика «Детали смены».
             raw_report=report,
         )
@@ -2290,6 +2294,100 @@ async def fuel_readiness(
             "rejected": pk.get("rejected", 0),
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Переигровка смен — дописать продажи, которые STS отдал позже
+# ═══════════════════════════════════════════════════════════════
+
+# Прогресс фоновой переигровки по компании (в памяти воркера).
+_SHIFT_REFRESH: dict[str, dict] = {}
+
+
+class ShiftRefreshRequest(BaseModel):
+    date_from: str | None = None
+    date_to: str | None = None
+    station_codes: list[int] | None = None
+    # По умолчанию — только смены с нулевой выручкой (доводка пробелов).
+    only_zero: bool = True
+    # Ничего не пишем, только считаем, что удалось бы восстановить.
+    dry_run: bool = False
+
+
+async def _shift_refresh_bg(company_id: uuid.UUID, body: ShiftRefreshRequest) -> None:
+    from app.services.fuel_shift_refresh import refresh_shifts
+
+    key = str(company_id)
+    try:
+        async with async_session_factory() as db:
+            def _progress(st: dict) -> None:
+                _SHIFT_REFRESH[key] = {
+                    "running": True, **st,
+                    "message": f"смена {st['checked']}/{st['total']}, "
+                               f"восстановлено {st['recovered']}",
+                }
+
+            stats = await refresh_shifts(
+                db, company_id,
+                station_codes=body.station_codes,
+                date_from=body.date_from, date_to=body.date_to,
+                only_zero=body.only_zero, dry_run=body.dry_run,
+                progress=_progress,
+            )
+            if stats.get("recovered") and not body.dry_run:
+                # выручка смен изменилась → версионный кеш аналитики невалиден
+                await bump_version(db, company_id)
+                await db.commit()
+            _SHIFT_REFRESH[key] = {
+                "running": False, **stats,
+                "message": (
+                    f"готово: восстановлено {stats.get('recovered', 0)} смен на "
+                    f"{stats.get('recovered_amount', 0):,.2f} ₽; "
+                    f"без данных в источнике {stats.get('no_data', 0)}; "
+                    f"честный ноль {stats.get('true_zero', 0)}"
+                ),
+            }
+    except Exception as e:  # noqa: BLE001
+        _SHIFT_REFRESH[key] = {"running": False, "message": f"сбой переигровки: {str(e)[:120]}"}
+
+
+@router.post("/shift-refresh")
+async def shifts_refresh(
+    body: ShiftRefreshRequest | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Переспросить STS по уже загруженным сменам и дописать продажи.
+
+    Канал приёма пропускает существующую смену — смена, снятая открытой, так и
+    остаётся с нулевой выручкой. Здесь она добирается. Пустой ответ источника
+    сохранённые продажи не затирает.
+    """
+    cid = await _company_id(user, db)
+    key = str(cid)
+    if _SHIFT_REFRESH.get(key, {}).get("running"):
+        return {"status": "already_running", **_SHIFT_REFRESH[key]}
+    b = body or ShiftRefreshRequest()
+    if b.dry_run:
+        from app.services.fuel_shift_refresh import refresh_shifts
+        return {"status": "done", **await refresh_shifts(
+            db, cid, station_codes=b.station_codes, date_from=b.date_from,
+            date_to=b.date_to, only_zero=b.only_zero, dry_run=True,
+        )}
+    _SHIFT_REFRESH[key] = {"running": True, "checked": 0, "total": 0,
+                           "recovered": 0, "message": "старт…"}
+    asyncio.create_task(_shift_refresh_bg(cid, b))
+    return {"status": "running"}
+
+
+@router.get("/shift-refresh/status")
+async def shifts_refresh_status(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid = await _company_id(user, db)
+    return _SHIFT_REFRESH.get(str(cid), {"running": False, "checked": 0, "total": 0,
+                                         "recovered": 0, "message": ""})
 
 
 # ═══════════════════════════════════════════════════════════════

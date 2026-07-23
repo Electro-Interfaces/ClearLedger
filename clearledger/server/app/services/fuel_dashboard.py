@@ -295,7 +295,15 @@ class FuelDashboardService:
             "financial": {"total_revenue": round(total_revenue, 2), "payment_details": payment_details},
             "receipts": self._receipts(receipts, fuel_name),
             **self._cash(cash, shifts),
-            "operational": {"shifts_count": len(shifts)},
+            "operational": {
+                "shifts_count": len(shifts),
+                # Смены, по которым источник не отдал детализацию продаж
+                # (см. FuelShift.sales_missing). Это не нулевая выручка, а пробел:
+                # смешивать их с рабочими сменами в средних нельзя — «выручка на
+                # смену» просядет на треть без всякой причины в реальности.
+                "shifts_missing_sales": sum(1 for s in shifts if s.sales_missing),
+                "shifts_with_sales": sum(1 for s in shifts if not s.sales_missing),
+            },
         }
 
     async def _by_station(self, shifts, sales) -> list[dict]:

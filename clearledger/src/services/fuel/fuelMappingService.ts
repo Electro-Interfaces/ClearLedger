@@ -470,7 +470,14 @@ export interface ShiftDashboardData {
   receipts: { total_doc: number; total_fact: number; total_diff: number; ttn_count: number; by_fuel: DashReceiptFuel[]; details: DashReceiptDetail[] }
   cash_flow: { income: number; expense: number; calculated: number; closing: number; difference: number; operations_count: number; details: DashCashDetail[] }
   cashout: { total: number; count: number; details: DashCashoutDetail[] }
-  operational: { shifts_count: number; stations_count?: number; fuel_types_count?: number }
+  operational: {
+    shifts_count: number
+    stations_count?: number
+    fuel_types_count?: number
+    /** Смены, по которым источник (STS) не отдал детализацию продаж — пробел в данных, не ноль выручки. */
+    shifts_missing_sales?: number
+    shifts_with_sales?: number
+  }
   by_station?: DashStation[]
   onboarding?: DashOnboarding[]
   payment_methods?: DashPayMethod[]

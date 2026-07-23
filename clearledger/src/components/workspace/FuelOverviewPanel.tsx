@@ -674,6 +674,10 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
     }),
   })
 
+  // Смены-пробелы: источник не отдал детализацию продаж (см. FuelShift.sales_missing).
+  // Мешать их с рабочими сменами нельзя — «выручка на смену» просядет без причины.
+  const missingSales = data?.operational.shifts_missing_sales ?? 0
+
   const kpis: Kpi[] = useMemo(() => {
     if (!data) return []
     const daily = data.charts.daily
@@ -692,13 +696,17 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
       { label: 'Выручка', value: data.financial.total_revenue, fmt: 'money', unit: '₽', delta_pct: trendDelta(data.trends?.revenue), spark: sparkRev, hint: 'продажи топлива' },
       { label: 'Объём', value: data.volume.total, fmt: 'liters', unit: 'л', delta_pct: trendDelta(data.trends?.volume), spark: sparkVol, hint: 'реализовано' },
       { label: 'Средняя цена', value: avgPrice, fmt: 'price', unit: '₽/л', delta_pct: priceDelta, spark: sparkPrice, hint: 'выручка ÷ объём' },
-      { label: 'Смен', value: data.operational.shifts_count, fmt: 'int', delta_pct: trendDelta(data.trends?.shifts), hint: 'закрыто за период' },
+      { label: 'Смен', value: missingSales > 0 ? (data.operational.shifts_with_sales ?? data.operational.shifts_count) : data.operational.shifts_count, fmt: 'int', delta_pct: trendDelta(data.trends?.shifts), hint: missingSales > 0 ? `с продажами; ещё ${nf0.format(missingSales)} без данных` : 'закрыто за период' },
       { label: 'Маржа (FIFO)', value: marginTot, fmt: 'money', unit: '₽', delta_pct: null, hint: marginPerL ? `${nf2.format(marginPerL)} ₽/л` : 'задайте себестоимость' },
     ]
-  }, [data, margin.data])
+  }, [data, margin.data, missingSales])
 
   const alerts = useMemo(() => {
     const out: { level: 'info' | 'warn'; message: string }[] = []
+    if (missingSales > 0) out.push({
+      level: 'warn',
+      message: `Источник не отдал продажи по ${nf0.format(missingSales)} сменам — они не в цифрах периода`,
+    })
     const r = readiness.data
     if (r) {
       if (r.receipts.pending > 0) out.push({ level: 'warn', message: `Непроверенных ТТН: ${r.receipts.pending}` })
@@ -715,7 +723,7 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
       if (mt.margin < 0) out.push({ level: 'warn', message: 'Отрицательная FIFO-маржа за период' })
     }
     return out
-  }, [readiness.data, data, margin.data])
+  }, [readiness.data, data, margin.data, missingSales])
 
   const stations = data?.by_station ?? []
   const topStations = stations.slice(0, 5)
@@ -755,7 +763,7 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
             {/* счётчики размерностей */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               <CountCard label="АЗС (с продажами)" value={nf0.format(data.operational.stations_count ?? stations.length)} hint="в периоде" />
-              <CountCard label="Смен закрыто" value={nf0.format(data.operational.shifts_count)} hint="сменных отчётов" />
+              <CountCard label="Смен закрыто" value={nf0.format(data.operational.shifts_count)} hint={missingSales > 0 ? `из них ${nf0.format(missingSales)} без продаж в источнике` : 'сменных отчётов'} />
               <CountCard label="Видов топлива" value={nf0.format(data.operational.fuel_types_count ?? data.volume.by_fuel.length)} hint="в реализации" />
               <CountCard label="Дней в периоде" value={nf0.format(data.period.days)} hint="календарных" />
               <CountCard label="ТТН принято" value={nf0.format(data.receipts.ttn_count)} hint="сливов топлива" />
