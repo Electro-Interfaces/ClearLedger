@@ -9,7 +9,7 @@ import { matchPath } from 'react-router-dom'
 import { Plug } from 'lucide-react'
 import type { ComponentType } from 'react'
 import {
-  mainNavItems, dataItems, oneCItems, settingsItems, adminItem,
+  mainNavItems, dataItems, oneCItems, settingsItems,
   type NavItemDef,
 } from './navigation'
 import { isCoreMode, workspaceTitle } from './workspaceViews'
@@ -22,7 +22,7 @@ const FUEL_ONLY = new Set<string>(oneCItems.map((i) => i.to))
 
 // Плоская карта статических путей → пункт меню.
 const STATIC: Record<string, NavItemDef> = {}
-for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems, adminItem]) {
+for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]) {
   STATIC[it.to] = it
 }
 

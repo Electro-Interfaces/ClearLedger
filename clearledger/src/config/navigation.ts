@@ -64,5 +64,7 @@ export const settingsItems: NavItemDef[] = [
   { to: '/catalog', icon: Library, label: 'Каталоги' },
 ]
 
-// Администрирование (для админа/суперадмина)
-export const adminItem: NavItemDef = { to: '/admin', icon: ShieldCheck, label: 'Администрирование' }
+// Администрирование вынесено из меню Ledger в отдельное приложение «Центр управления»
+// (плитка на рабочем столе экосистемы, свой shell AdminLayout). Пункта в сайдбаре нет.
+// Определение оставлено для обратной ссылки; в навигации Ledger не используется.
+export const adminItem: NavItemDef = { to: '/admin', icon: ShieldCheck, label: 'Центр управления' }

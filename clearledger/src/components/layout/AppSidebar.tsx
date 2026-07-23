@@ -17,9 +17,8 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
-import { mainNavItems, dataItems, oneCItems, settingsItems, adminItem } from '@/config/navigation'
+import { mainNavItems, dataItems, oneCItems, settingsItems } from '@/config/navigation'
 import { routeAllowed } from '@/config/accessModules'
 
 function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate }: {
@@ -68,7 +67,6 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
 }) {
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
-  const { user } = useAuth()
   const { company, companyModules } = useCompany()
   // Скрываем пункты, недоступные по модулям: права RBAC ∩ состав поставки из реестра
   // Ядра (см. CompanyContext). null = не ограничено.
@@ -82,11 +80,6 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
   const isEnergy = company.profileId === 'energy'
   // «Баланс ЭЗС» теперь модуль внутри режима «Управленческий» (ManagementPanel),
   // подключается к компании по профилю — отдельным пунктом левого меню больше не выводится.
-  // Показываем админ-раздел, если суперадмин ИЛИ админ хотя бы в одной компании.
-  const canAdmin = !!user && (
-    user.is_superadmin || (user.companies ?? []).some((c) => c.role === 'admin')
-  )
-
   return (
     <>
       {/* Main nav */}
@@ -183,22 +176,8 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
       </SidebarGroup>
       )}
 
-      {/* Администрирование — только для админа/суперадмина */}
-      {canAdmin && (
-        <>
-          <SidebarSeparator className="my-2" />
-          <SidebarGroup className="py-0">
-            {!collapsed && (
-              <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-                Администрирование
-              </p>
-            )}
-            <SidebarMenu>
-              <NavItem {...adminItem} collapsed={collapsed} onNavigate={onNavigate} />
-            </SidebarMenu>
-          </SidebarGroup>
-        </>
-      )}
+      {/* Администрирование вынесено из Ledger в отдельное приложение «Центр управления»
+          (плитка на рабочем столе экосистемы). У приложений-продуктов своей админки нет. */}
     </>
   )
 }

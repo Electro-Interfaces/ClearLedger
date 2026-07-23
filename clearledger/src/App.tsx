@@ -28,7 +28,7 @@ const ContractorsPage = lazy(() => import('@/pages/ContractorsPage').then((m) =>
 const MetrikaPage = lazy(() => import('@/pages/MetrikaPage').then((m) => ({ default: m.MetrikaPage })))
 const OrganizationPage = lazy(() => import('@/pages/OrganizationPage').then((m) => ({ default: m.OrganizationPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
-const AdminPage = lazy(() => import('@/pages/AdminPage').then((m) => ({ default: m.AdminPage })))
+const AdminLayout = lazy(() => import('@/components/layout/AdminLayout').then((m) => ({ default: m.AdminLayout })))
 const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
@@ -136,6 +136,11 @@ const router = createBrowserRouter([
         element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,
       },
       {
+        // Центр управления — отдельное приложение экосистемы, свой shell (не в Ledger).
+        path: '/admin',
+        element: <ProtectedRoute><LazyPage><AdminLayout /></LazyPage></ProtectedRoute>,
+      },
+      {
         element: <ProtectedRoute><MainLayout /></ProtectedRoute>,
         children: [
           { path: '/workspace', element: <WorkspaceLayout /> },
@@ -171,7 +176,6 @@ const router = createBrowserRouter([
           { path: '/normalization', element: <LazyPage><NormalizationWorkspacePage /></LazyPage> },
           { path: '/reconciliation', element: <LazyPage><ReconciliationPage /></LazyPage> },
           { path: '/settings', element: <LazyPage><SettingsPage /></LazyPage> },
-          { path: '/admin', element: <LazyPage><AdminPage /></LazyPage> },
           { path: '*', element: <NotFoundPage /> },
         ],
       },
