@@ -28,7 +28,8 @@ import {
   getChargeSessions, getStationsLinkage, getChargeTimeseries, fmtMoney, fmtMoneyShort,
 } from '@/services/analyticsService'
 import {
-  getChargeOverview, getSilentStations, getOwnersBreakdown, type OverviewKpi,
+  getChargeOverview, getSilentStations, getOwnersBreakdown, getOwnerStations,
+  type OwnerBreakdownRow, type OverviewKpi,
   type ShareRow, type StationRow, type Accent, type OverviewCorporate,
   type HourPoint, type OverviewWeekday, type OverviewNetwork,
 } from '@/services/overviewService'
@@ -116,6 +117,7 @@ function CountCard({ label, value, hint }: { label: string; value: string; hint?
 function OwnersCard({ companyId, period, scope }: {
   companyId: string; period: { from: string; to: string }; scope: ScopeArg
 }) {
+  const [open, setOpen] = useState<OwnerBreakdownRow | null>(null)
   const { data } = useQuery({
     queryKey: ['owners-breakdown', companyId, period.from, period.to, scope.key],
     queryFn: () => getOwnersBreakdown({ companyId, dateFrom: period.from, dateTo: period.to,
@@ -124,11 +126,13 @@ function OwnersCard({ companyId, period, scope }: {
   const owners = (data?.owners ?? []).filter((o) => o.stations > 0 || o.sessions > 0)
   if (owners.length < 2) return null   // один владелец — сравнивать не с кем
 
-  const clsColor: Record<string, string> = {
-    own: 'border-blue-500/30', partner: 'border-violet-500/30', unknown: 'border-border',
-  }
   const dotColor: Record<string, string> = {
     own: 'bg-blue-500', partner: 'bg-violet-500', unknown: 'bg-zinc-500',
+  }
+  const hoverCls: Record<string, string> = {
+    own: 'border-blue-500/30 hover:border-blue-500/60 hover:bg-blue-500/5',
+    partner: 'border-violet-500/30 hover:border-violet-500/60 hover:bg-violet-500/5',
+    unknown: 'border-border hover:border-zinc-400/50 hover:bg-muted/40',
   }
   const succCls = (v: number) => (v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
     : v >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
@@ -140,13 +144,16 @@ function OwnersCard({ companyId, period, scope }: {
       <CardContent className="pt-4">
         <div className="mb-3 flex items-center gap-2 text-sm font-medium">
           Парк по владельцу
-          <MetricHint text="Собственные — станции РусГидро (включая бренд «Доступная энергия»). Партнёрские — станции СНК. Простой и надёжность считаются отдельно: партнёрские отрабатывают иначе, и в общей цифре сети это тонет." />
+          <MetricHint text="Собственные — станции РусГидро (включая бренд «Доступная энергия»). Партнёрские — станции СНК. Простой и надёжность считаются отдельно: партнёрские отрабатывают иначе, и в общей цифре сети это тонет. Клик по владельцу — список его станций." />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {owners.map((o) => (
-            <div key={o.cls} className={`rounded-xl border ${clsColor[o.cls]} bg-card/50 p-3.5`}>
+            <button key={o.cls} type="button" onClick={() => setOpen(o)}
+              title="Показать станции этого владельца"
+              className={`rounded-xl border ${hoverCls[o.cls]} bg-card/50 p-3.5 text-left shadow-sm transition-colors`}>
               <div className="flex items-center gap-1.5 text-xs font-medium">
                 <span className={`h-2 w-2 rounded-full ${dotColor[o.cls]}`} />{o.label}
+                <ArrowUpRight className="ml-auto h-3.5 w-3.5 text-muted-foreground/60" />
               </div>
               <div className="mt-1.5 flex items-baseline gap-1.5">
                 <span className="text-2xl font-semibold tabular-nums leading-none">{nf0.format(o.stations)}</span>
@@ -158,11 +165,83 @@ function OwnersCard({ companyId, period, scope }: {
                 <Stat label="Надёжность" value={`${o.success_pct.toFixed(0)}%`} cls={succCls(o.success_pct)} />
                 <Stat label="Сессии" value={nf0.format(o.sessions)} />
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </CardContent>
+      {open && (
+        <OwnerStationsDialog companyId={companyId} period={period} owner={open} onClose={() => setOpen(null)} />
+      )}
     </Card>
+  )
+}
+
+/** Список станций одного владельца — раскрывается по клику с карточки. Простаивающие
+ *  (0 сессий за период) идут вперёд: список читают, чтобы найти, с чем разбираться. */
+function OwnerStationsDialog({ companyId, period, owner, onClose }: {
+  companyId: string; period: { from: string; to: string }
+  owner: OwnerBreakdownRow; onClose: () => void
+}) {
+  const q = useQuery({
+    queryKey: ['owner-stations', companyId, period.from, period.to, owner.cls],
+    queryFn: () => getOwnerStations({ companyId, dateFrom: period.from, dateTo: period.to, cls: owner.cls }),
+  })
+  const succCls = (v: number | null) => (v == null ? 'text-muted-foreground'
+    : v >= 85 ? 'text-emerald-600 dark:text-emerald-400'
+    : v >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
+  return (
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="max-h-[85dvh] w-full max-w-4xl overflow-hidden rounded-xl border bg-card shadow-xl"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-baseline justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <div className="text-sm font-semibold">{owner.label} — {nf0.format(owner.stations)} станций</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              активны {nf0.format(q.data?.active ?? owner.active)} · простой {nf0.format(q.data?.silent ?? owner.silent)}
+              {' · '}за период {formatPeriod(period.from, period.to)}
+            </div>
+          </div>
+          <button type="button" onClick={onClose}
+            className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted">Закрыть</button>
+        </div>
+        <div className="max-h-[70dvh] overflow-auto">
+          {q.isLoading ? <Loading /> : (
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b text-muted-foreground">
+                  <th className="p-2 text-left font-medium">Станция</th>
+                  <th className="p-2 text-left font-medium">Город</th>
+                  <th className="p-2 text-left font-medium">Статус</th>
+                  <th className="p-2 text-right font-medium">Сессии</th>
+                  <th className="p-2 text-right font-medium">Энергия, кВтч</th>
+                  <th className="p-2 text-right font-medium">Надёжность</th>
+                  <th className="p-2 text-left font-medium">Последняя сессия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(q.data?.stations ?? []).map((s) => (
+                  <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-medium">{s.name} <span className="text-muted-foreground">({s.code})</span></td>
+                    <td className="p-2 text-muted-foreground">{s.city ?? '—'}</td>
+                    <td className="p-2 text-muted-foreground">{s.operational_status ?? '—'}</td>
+                    <td className={`p-2 text-right font-mono tabular-nums ${s.sessions === 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                      {nf0.format(s.sessions)}
+                    </td>
+                    <td className="p-2 text-right font-mono tabular-nums text-muted-foreground">{nf0.format(s.energy_kwh)}</td>
+                    <td className={`p-2 text-right font-mono tabular-nums ${succCls(s.success_pct)}`}>
+                      {s.success_pct == null ? '—' : `${s.success_pct.toFixed(0)}%`}
+                    </td>
+                    <td className="p-2 font-mono text-muted-foreground">
+                      {s.last_at ? s.last_at.slice(0, 10) : <span className="text-amber-600 dark:text-amber-400">никогда</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

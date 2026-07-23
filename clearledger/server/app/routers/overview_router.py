@@ -138,3 +138,19 @@ async def owners_breakdown(
     return await OverviewService(db).owners_breakdown(
         cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
         stations=codes, regions=regs)
+
+
+@router.get("/owners/stations")
+async def owner_stations_list(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    cls: str = Query("own", pattern="^(own|partner|unknown)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Список станций одного владельца (own|partner|unknown) с их работой за
+    период — раскрывается по клику с карточки «Парк по владельцу»."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await OverviewService(db).owner_stations(
+        cid, _d(date_from, "date_from"), _d(date_to, "date_to"), cls)

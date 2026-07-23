@@ -591,3 +591,87 @@ class OverviewService:
                 "success_pct": round(charged / visits * 100, 1) if visits else 0.0,
             })
         return {"period": {"from": df.isoformat(), "to": dt.isoformat()}, "owners": out}
+
+    async def owner_stations(self, company_id: Any, df: date, dt: date, cls: str) -> dict[str, Any]:
+        """Список станций одного владельца (own|partner|unknown) с их работой за
+        период. Раскрывается по клику с карточки «Парк по владельцу»: простой —
+        это не справка, а перечень станций, с которыми надо разбираться.
+
+        По каждой станции: код/имя/город, статус, сессии, энергия, надёжность
+        (успех визитов через location_id) и дата последней сессии. Сортировка —
+        молчащие вперёд (0 сессий сверху), затем по имени: список читают, чтобы
+        найти простаивающие. Считается тем же парком, что и карточка (весь
+        company-скоуп), поэтому итог списка совпадает с числом на карточке.
+        """
+        from sqlalchemy import text
+
+        from app.services.station_owner import CLASS_LABELS, owner_class_sql
+
+        if cls not in CLASS_LABELS:
+            cls = "unknown"
+        lo = datetime.combine(df, datetime.min.time())
+        hi = datetime.combine(dt, datetime.max.time())
+        rows = (await self.db.execute(text(f"""
+            with sess as (
+                select location_id,
+                       count(*) as sessions,
+                       coalesce(sum(energy_kwh), 0) as energy,
+                       coalesce(sum(coalesce(client_amount, amount)), 0) as amount,
+                       max(started_at) as last_at
+                from charge_sessions
+                where company_id = :cid and location_id is not null
+                  and started_at >= :lo and started_at <= :hi
+                group by location_id
+            ),
+            vis as (
+                select loc, count(*) as visits,
+                       count(*) filter (where charged) as charged
+                from (
+                    select min(location_id) as loc, bool_or(visit_charged) as charged
+                    from charge_sessions
+                    where company_id = :cid and visit_key is not null
+                      and started_at >= :lo and started_at <= :hi
+                    group by visit_key
+                ) t
+                group by loc
+            )
+            select sl.id, sl.code, sl.name, sl.city, sl.owner, sl.operational_status,
+                   coalesce(s.sessions, 0) as sessions,
+                   coalesce(s.energy, 0) as energy,
+                   coalesce(s.amount, 0) as amount,
+                   s.last_at,
+                   coalesce(v.visits, 0) as visits,
+                   coalesce(v.charged, 0) as charged
+            from service_locations sl
+            left join sess s on s.location_id = sl.id
+            left join vis v on v.loc = sl.id
+            where sl.company_id = :cid and sl.type = 'ev_charging'
+              and coalesce(sl.is_test, false) = false
+              and coalesce(sl.operational_status, '') <> 'decommissioned'
+              and ({owner_class_sql('sl.owner')}) = :cls
+            order by coalesce(s.sessions, 0) asc, sl.name asc
+        """), {"cid": company_id, "lo": lo, "hi": hi, "cls": cls})).mappings().all()
+
+        out = []
+        for r in rows:
+            visits = int(r["visits"])
+            charged = int(r["charged"])
+            sess_n = int(r["sessions"])
+            out.append({
+                "id": r["id"], "code": r["code"], "name": r["name"], "city": r["city"],
+                "owner": (r["owner"] or "").strip() or None,
+                "operational_status": r["operational_status"],
+                "sessions": sess_n,
+                "energy_kwh": round(float(r["energy"]), 1),
+                "amount": round(float(r["amount"]), 2),
+                "success_pct": round(charged / visits * 100, 1) if visits else None,
+                "last_at": r["last_at"].isoformat() if r["last_at"] else None,
+            })
+        return {
+            "period": {"from": df.isoformat(), "to": dt.isoformat()},
+            "cls": cls, "label": CLASS_LABELS[cls],
+            "total": len(out),
+            "active": sum(1 for s in out if s["sessions"] > 0),
+            "silent": sum(1 for s in out if s["sessions"] == 0),
+            "stations": out,
+        }

@@ -201,6 +201,37 @@ export async function getOwnersBreakdown(p: {
   })
 }
 
+/** Станция во списке владельца (раскрытие карточки «Парк по владельцу»). */
+export interface OwnerStation {
+  id: string
+  code: string
+  name: string
+  city: string | null
+  owner: string | null
+  operational_status: string | null
+  sessions: number
+  energy_kwh: number
+  amount: number
+  success_pct: number | null
+  last_at: string | null
+}
+export interface OwnerStationsResponse {
+  period: { from: string; to: string }
+  cls: 'own' | 'partner' | 'unknown'
+  label: string
+  total: number
+  active: number
+  silent: number
+  stations: OwnerStation[]
+}
+export async function getOwnerStations(p: {
+  companyId: string; dateFrom: string; dateTo: string; cls: 'own' | 'partner' | 'unknown'
+}): Promise<OwnerStationsResponse> {
+  return get<OwnerStationsResponse>('/api/analytics/charge-sessions/owners/stations', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, cls: p.cls,
+  })
+}
+
 /** Качество использования портов: занятость ≠ работа.
  * idle — порт занят, но не заряжает; считается только по быстрым (DC) портам,
  * где 3 кВт означают проблему, а не паспортную скорость. */
