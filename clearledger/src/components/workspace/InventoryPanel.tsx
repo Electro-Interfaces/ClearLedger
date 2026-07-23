@@ -11,7 +11,7 @@
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ClipboardCheck, Loader2 } from 'lucide-react'
+import { ClipboardCheck, Download, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   getInventories, getInventoryDraft, saveInventory,
-  type InventoryDraftRow,
+  type InventoryDraftRow, type InventoryGroup,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -115,6 +115,10 @@ export function InventoryPanel({ companyId, dateTo, stationCodes, fuelCodes }: P
             <div className="flex items-center gap-2">
               <Input value={note} onChange={(e) => setNote(e.target.value)}
                      placeholder="Комментарий (необязательно)" className="h-8 w-[240px] text-xs" />
+              <Button variant="outline" size="sm" className="h-8"
+                      onClick={() => exportDraftXlsx(activeRows, date)} disabled={activeRows.length === 0}>
+                <Download className="mr-1.5 h-3.5 w-3.5" />Экспорт в Excel
+              </Button>
               <Button size="sm" className="h-8" onClick={() => saveMut.mutate(activeRows)}
                       disabled={saveMut.isPending || activeRows.length === 0}>
                 {saveMut.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />}
@@ -199,10 +203,15 @@ export function InventoryPanel({ companyId, dateTo, stationCodes, fuelCodes }: P
                       {g.tanks} рез. · {g.surplus_tanks} излишков · {g.shortfall_tanks} недостач
                     </span>
                   </span>
-                  <span className={cn('text-xs font-medium',
-                    g.adjustment_volume > 0.5 ? 'text-red-600 dark:text-red-400'
-                      : g.adjustment_volume < -0.5 ? 'text-sky-600 dark:text-sky-400' : 'text-muted-foreground')}>
-                    итог {g.adjustment_volume >= 0 ? '+' : ''}{nf0.format(g.adjustment_volume)} л
+                  <span className="flex items-center gap-3">
+                    <span className={cn('text-xs font-medium',
+                      g.adjustment_volume > 0.5 ? 'text-red-600 dark:text-red-400'
+                        : g.adjustment_volume < -0.5 ? 'text-sky-600 dark:text-sky-400' : 'text-muted-foreground')}>
+                      итог {g.adjustment_volume >= 0 ? '+' : ''}{nf0.format(g.adjustment_volume)} л
+                    </span>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => exportGroupXlsx(g)}>
+                      <Download className="mr-1 h-3.5 w-3.5" />Excel
+                    </Button>
                   </span>
                 </div>
                 <div className="overflow-x-auto">
@@ -232,6 +241,49 @@ export function InventoryPanel({ companyId, dateTo, stationCodes, fuelCodes }: P
       </div>
     </div>
   )
+}
+
+/** Выгрузка ведомости-черновика (перед проведением). */
+async function exportDraftXlsx(rows: InventoryDraftRow[], date: string) {
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+  const data = rows.map((r) => ({
+    'АЗС': r.station_name,
+    'Резервуар': r.tank_number,
+    'Топливо': r.fuel_name,
+    'Смена': r.shift_number,
+    'Книга, л': r.book_volume,
+    'Факт, л': r.fact_volume,
+    'Корректировка, л': r.adjustment_volume,
+    'Вид': r.kind,
+    'Книга, кг': r.book_mass ?? '',
+    'Факт, кг': r.fact_mass ?? '',
+    'Корректировка, кг': r.adjustment_mass ?? '',
+  }))
+  const ws = XLSX.utils.json_to_sheet(data)
+  ws['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 8 }, { wch: 8 }, ...Array(7).fill({ wch: 14 })]
+  XLSX.utils.book_append_sheet(wb, ws, 'Ведомость инвентаризации')
+  XLSX.writeFile(wb, `vedomost_inventarizacii_${date}.xlsx`)
+}
+
+/** Выгрузка проведённой инвентаризации из истории. */
+async function exportGroupXlsx(g: InventoryGroup) {
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+  const data = g.rows.map((r) => ({
+    'АЗС': r.station_name,
+    'Резервуар': r.tank_number,
+    'Топливо': r.fuel_name ?? '',
+    'Книга, л': r.book_volume,
+    'Факт, л': r.fact_volume,
+    'Корректировка, л': r.adjustment_volume,
+    'Вид': r.adjustment_volume > 0.05 ? 'излишек' : r.adjustment_volume < -0.05 ? 'недостача' : 'сходится',
+    'Комментарий': r.note ?? '',
+  }))
+  const ws = XLSX.utils.json_to_sheet(data)
+  ws['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 11 }, { wch: 24 }]
+  XLSX.utils.book_append_sheet(wb, ws, 'Инвентаризация')
+  XLSX.writeFile(wb, `inventarizaciya_${g.inventory_date}.xlsx`)
 }
 
 function Th({ children, right }: { children?: React.ReactNode; right?: boolean }) {

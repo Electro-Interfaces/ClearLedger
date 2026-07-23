@@ -11,10 +11,13 @@
  */
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Loader2, TrendingDown, TrendingUp, Zap } from 'lucide-react'
+import { Download, Loader2, TrendingDown, TrendingUp, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { getVarianceDiagnostics, type VarianceNature } from '@/services/analyticsService'
+import {
+  getVarianceDiagnostics, type VarianceDiagnosticsResponse, type VarianceNature,
+} from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
@@ -109,7 +112,12 @@ export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes,
             показать все {nf0.format(t.tanks)}
           </button>
         )}
-        <span className="ml-auto text-[11px] text-muted-foreground">резервуаров: {nf0.format(rows.length)}</span>
+        <span className="ml-auto flex items-center gap-3">
+          <span className="text-[11px] text-muted-foreground">резервуаров: {nf0.format(rows.length)}</span>
+          <Button variant="outline" size="sm" className="h-8" onClick={() => exportXlsx(data)}>
+            <Download className="mr-1.5 h-3.5 w-3.5" />Экспорт в Excel
+          </Button>
+        </span>
       </div>
 
       {/* Таблица резервуаров с диагнозом */}
@@ -180,6 +188,31 @@ export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes,
       </p>
     </div>
   )
+}
+
+async function exportXlsx(data: VarianceDiagnosticsResponse) {
+  const XLSX = await import('xlsx')
+  const wb = XLSX.utils.book_new()
+  const rows = data.tanks.map((r) => ({
+    'АЗС': r.station_name,
+    'Резервуар': r.tank_number,
+    'Топливо': r.fuel_name,
+    'Причина': r.nature_title,
+    'Тренд, л/смену': r.trend_per_shift,
+    'Накоплено за период, л': r.accumulated,
+    'Скачок, л': r.nature === 'jump' ? r.jump_liters : '',
+    'Смена скачка': r.nature === 'jump' ? (r.jump_shift ?? '') : '',
+    'Скачок при сливе': r.jump_on_receipt ? 'да' : '',
+    'Расхождение сейчас, л': r.last_gap,
+    'Смен': r.shifts,
+    'Среднее расхождение, л': r.mean_gap,
+    'Разброс (σ), л': r.std_gap,
+    'Доля температурных смен': r.temperature_share,
+  }))
+  const ws = XLSX.utils.json_to_sheet(rows)
+  ws['!cols'] = [{ wch: 12 }, { wch: 9 }, { wch: 8 }, { wch: 26 }, ...Array(10).fill({ wch: 15 })]
+  XLSX.utils.book_append_sheet(wb, ws, 'Причины расхождений')
+  XLSX.writeFile(wb, `prichiny_rashozhdenij_${data.period.from}_${data.period.to}.xlsx`)
 }
 
 function CauseTile({ active, onClick, icon, title, value, hint, tone }: {
