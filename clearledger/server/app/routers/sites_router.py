@@ -49,14 +49,15 @@ async def list_sites(
     company_id: str = Query(...),
     stage: str | None = Query(None), region: str | None = Query(None),
     search: str | None = Query(None), owner_id: uuid.UUID | None = Query(None),
-    overdue: bool = Query(False),
+    overdue: bool = Query(False), risk: str | None = Query(None),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Список площадок с фильтрами (стадия/регион/поиск/ответственный/просрочка)."""
+    """Список площадок с фильтрами. `risk` раскрывает цифры обзора портфеля
+    (без ответственного, без шага, просрочки ТП и поставок, застрявшие)."""
     cid = await assert_company_member(company_id, user, db)
     return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
-                                      owner_id=owner_id, overdue=overdue,
+                                      owner_id=owner_id, overdue=overdue, risk=risk,
                                       page=page, page_size=page_size)
 
 

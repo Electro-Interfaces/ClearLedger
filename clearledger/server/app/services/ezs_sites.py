@@ -771,15 +771,62 @@ def _advance_stage(site: EzsSite, stage: str, today: str, apply: bool) -> str | 
     return None
 
 
+def _risk_conditions(risk: str) -> list[Any]:
+    """Фильтры под цифры обзора портфеля — чтобы «297 без ответственного» можно
+    было раскрыть и увидеть, кто именно за этим числом стоит.
+
+    Считаются ровно так же, как в `portfolio_overview`: иначе список не сойдётся
+    с цифрой, и доверия к экрану не будет.
+    """
+    from sqlalchemy import exists, select as _select
+
+    from app.models import EzsSiteEquipment, EzsTechConnection
+
+    S = EzsSite
+    today = date.today().isoformat()
+    d30 = (date.today() - timedelta(days=30)).isoformat()
+    d90 = (date.today() - timedelta(days=90)).isoformat()
+    active = [S.stage.in_(STAGE_ORDER)]
+
+    if risk == "step_overdue":
+        return [*active, S.next_action_due.is_not(None), S.next_action_due < today]
+    if risk == "no_owner":
+        return [*active, S.owner_user_id.is_(None)]
+    if risk == "no_next":
+        return [*active, S.next_action.is_(None)]
+    if risk == "stuck_90":
+        return [*active, func.coalesce(S.stage_since, "1970-01-01") < d90]
+    if risk == "no_touch_30":
+        return [*active, func.coalesce(
+            func.to_char(S.last_touch_at, "YYYY-MM-DD"), "1970-01-01") < d30]
+    if risk == "tp_overdue":
+        return [*active, exists(_select(EzsTechConnection.id).where(
+            EzsTechConnection.site_id == S.id,
+            EzsTechConnection.due_date.is_not(None),
+            EzsTechConnection.done_date.is_(None),
+            EzsTechConnection.due_date < today,
+            EzsTechConnection.status.notin_(["done", "rejected"])))]
+    if risk == "eq_overdue":
+        return [*active, exists(_select(EzsSiteEquipment.id).where(
+            EzsSiteEquipment.site_id == S.id,
+            EzsSiteEquipment.due_date.is_not(None),
+            EzsSiteEquipment.supplied_date.is_(None),
+            EzsSiteEquipment.due_date < today,
+            EzsSiteEquipment.status.in_(["planned", "ordered"])))]
+    return []
+
+
 async def list_sites(
     db: AsyncSession, company_id, *, stage: str | None = None, region: str | None = None,
     search: str | None = None, owner_id=None, overdue: bool = False,
-    page: int = 1, page_size: int = 100,
+    risk: str | None = None, page: int = 1, page_size: int = 100,
 ) -> dict[str, Any]:
     from app.models import User
 
     S = EzsSite
     conds = [S.company_id == company_id]
+    if risk:
+        conds += _risk_conditions(risk)
     if stage == "active":            # вся живая часть воронки одним фильтром
         conds.append(S.stage.in_(STAGE_ORDER))
     elif stage:

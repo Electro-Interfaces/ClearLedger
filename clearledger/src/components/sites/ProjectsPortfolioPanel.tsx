@@ -11,16 +11,18 @@
  * Блок без данных не рисует нули, а честно говорит, чем его наполнить: экран из
  * нулей выглядит работающим и потому опаснее пустого места.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Loader2, Download, AlertTriangle, ChevronRight, TrendingUp } from 'lucide-react'
+import { Loader2, Download, AlertTriangle, ChevronRight, ChevronDown, TrendingUp, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import {
-  getPortfolioOverview, exportPortfolioXlsx, PHASE_META, STAGE_META,
+  getPortfolioOverview, getSites, exportPortfolioXlsx, PHASE_META, STAGE_META,
   type PortfolioOverview,
 } from '@/services/sitesService'
+import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const money = (v: number) => `${nf0.format(Math.round(v))} ₽`
@@ -39,6 +41,10 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
   // Без списка ключей из workspaceSections: тот модуль тянет панели, а панели —
   // его, и на цикле импортов экран уходил в вечную загрузку.
   const [, setTab] = useWorkspaceSubView('pr_portfolio')
+  // Цифра без списка — это загадка: любую строку можно раскрыть и увидеть,
+  // какие именно проекты за ней стоят.
+  const [open, setOpen] = useState<string | null>(null)
+  const toggle = (key: string) => setOpen((v) => (v === key ? null : key))
   const q = useQuery({
     queryKey: ['pr-overview', companyId],
     queryFn: () => getPortfolioOverview(companyId),
@@ -83,16 +89,23 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
           ) : (
             <div className="divide-y divide-border/40">
               {d.attention.map((a) => (
-                <button key={a.key} type="button"
-                  onClick={() => setTab(RISK_TARGET[a.key]?.tab ?? 'pr_projects')}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-muted/40 transition-colors">
-                  <span className="font-mono text-sm w-14 shrink-0 text-right">{nf0.format(a.count)}</span>
-                  <span className="text-xs flex-1 min-w-0">
-                    {a.label}
-                    <span className="text-muted-foreground"> — {a.hint}</span>
-                  </span>
-                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                </button>
+                <div key={a.key}>
+                  <button type="button" onClick={() => toggle(`risk:${a.key}`)}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-muted/40 transition-colors">
+                    <span className="font-mono text-sm w-14 shrink-0 text-right">{nf0.format(a.count)}</span>
+                    <span className="text-xs flex-1 min-w-0">
+                      {a.label}
+                      <span className="text-muted-foreground"> — {a.hint}</span>
+                    </span>
+                    {open === `risk:${a.key}`
+                      ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                  </button>
+                  {open === `risk:${a.key}` && (
+                    <Drill companyId={companyId} risk={a.key} count={a.count}
+                      onAll={() => setTab(RISK_TARGET[a.key]?.tab ?? 'pr_projects')} />
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -148,13 +161,25 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                     </td>
                     <td className="px-3 py-1.5 text-right">
                       {f.count > 0 && (
-                        <button type="button" onClick={() => setTab('pr_projects')}
-                          className="text-muted-foreground hover:text-foreground"><ChevronRight className="h-3.5 w-3.5" /></button>
+                        <button type="button" onClick={() => toggle(`stage:${f.stage}`)}
+                          className="text-muted-foreground hover:text-foreground">
+                          {open === `stage:${f.stage}`
+                            ? <ChevronDown className="h-3.5 w-3.5" />
+                            : <ChevronRight className="h-3.5 w-3.5" />}
+                        </button>
                       )}
                     </td>
                   </tr>
                 )
               })}
+              {d.funnel.filter((f) => open === `stage:${f.stage}`).map((f) => (
+                <tr key={`d-${f.stage}`}>
+                  <td colSpan={6} className="p-0">
+                    <Drill companyId={companyId} stage={f.stage} count={f.count}
+                      onAll={() => setTab('pr_projects')} />
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           <div className="px-3 py-2 text-[10px] text-muted-foreground border-t">
@@ -249,6 +274,48 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       </div>
+    </div>
+  )
+}
+
+
+/**
+ * Раскрытие цифры в список проектов: 25 первых, кликом — в рабочий экран.
+ * Считается тем же фильтром, что и цифра, иначе список не сойдётся с числом.
+ */
+function Drill({ companyId, risk, stage, count, onAll }: {
+  companyId: string; risk?: string; stage?: string; count: number; onAll: () => void
+}) {
+  const openProject = useOpenProject()
+  const q = useQuery({
+    queryKey: ['pr-drill', companyId, risk ?? '', stage ?? ''],
+    queryFn: () => getSites({ companyId, risk, stage, pageSize: 25 }),
+  })
+  if (q.isLoading) {
+    return <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+  }
+  const rows = q.data?.items ?? []
+  return (
+    <div className="bg-muted/20 border-t border-border/40">
+      {rows.map((s) => (
+        <button key={s.id} type="button" onClick={() => openProject(s.id)}
+          className="w-full flex items-center gap-3 px-3 py-1.5 text-left text-xs hover:bg-muted/50 border-b border-border/20">
+          <span className="font-mono w-32 shrink-0 text-muted-foreground">{s.projectNo ?? '—'}</span>
+          <span className="flex-1 min-w-0 truncate">
+            {s.title || s.address || s.installPlace || s.fullAddress || '—'}
+            <span className="text-muted-foreground"> · {s.city ?? s.region ?? ''}</span>
+          </span>
+          <span className={`text-[10px] rounded border px-1 shrink-0 ${STAGE_META[s.stage]?.cls ?? ''}`}>
+            {s.stageLabel}
+          </span>
+          <span className="w-32 shrink-0 truncate text-muted-foreground">{s.ownerName ?? 'без ответственного'}</span>
+        </button>
+      ))}
+      <button type="button" onClick={onAll}
+        className="w-full px-3 py-1.5 text-left text-[11px] text-primary hover:underline inline-flex items-center gap-1">
+        <ExternalLink className="h-3 w-3" />
+        {count > rows.length ? `Показаны ${rows.length} из ${nf0.format(count)} — открыть весь список` : 'Открыть в реестре'}
+      </button>
     </div>
   )
 }

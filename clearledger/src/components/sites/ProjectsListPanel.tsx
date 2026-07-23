@@ -6,6 +6,7 @@
  * а фильтр — по этапу, а не по стадии подбора.
  */
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,13 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const [page, setPage] = useState(1)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  // Переход из обзора портфеля приносит фильтр риска в URL — реестр обязан его
+  // применить, иначе пользователь увидит не тот список, по которому кликнул.
+  const [params, setParams] = useSearchParams()
+  const risk = params.get('risk') ?? ''
+  const clearRisk = () => setParams((prev) => {
+    const next = new URLSearchParams(prev); next.delete('risk'); return next
+  }, { replace: true })
   // Клик по строке открывает рабочий экран проекта; Alt+клик — быстрый просмотр.
   const openProject = useOpenProject()
 
@@ -46,12 +54,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   }, [pf.data, phase])
 
   const q = useQuery({
-    queryKey: ['pr-projects', companyId, phase, ownerId, overdue, search, page],
+    queryKey: ['pr-projects', companyId, phase, ownerId, overdue, search, risk, page],
     queryFn: () => getSites({
       companyId,
       stage: phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase ? undefined : 'active'),
       ownerId: ownerId || undefined, overdue, search: search || undefined,
-      page, pageSize: PAGE,
+      risk: risk || undefined, page, pageSize: PAGE,
     }),
   })
 
@@ -103,6 +111,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCreating(true)}>
           <Plus className="h-3.5 w-3.5 mr-1" />Новый проект
         </Button>
+        {risk && (
+          <button type="button" onClick={clearRisk}
+            className="px-2.5 py-1 text-xs rounded-md border border-primary bg-primary/10 text-primary">
+            фильтр из обзора ✕
+          </button>
+        )}
         <span className="text-[11px] text-muted-foreground ml-auto">
           {q.isLoading ? '…' : `${nf0.format(rows.length)} проектов`}
         </span>

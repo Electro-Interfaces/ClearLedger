@@ -191,12 +191,12 @@ export async function getSitesOverview(companyId: string): Promise<SitesOverview
 
 export async function getSites(p: {
   companyId: string; stage?: string; region?: string; search?: string
-  ownerId?: string; overdue?: boolean; page?: number; pageSize?: number
+  ownerId?: string; overdue?: boolean; risk?: string; page?: number; pageSize?: number
 }): Promise<SitesList> {
   return get('/api/sites', {
     company_id: p.companyId, stage: p.stage || undefined, region: p.region || undefined,
     search: p.search || undefined, owner_id: p.ownerId || undefined,
-    overdue: p.overdue ? 1 : undefined,
+    overdue: p.overdue ? 1 : undefined, risk: p.risk || undefined,
     page: p.page ?? 1, page_size: p.pageSize ?? 300,
   })
 }
