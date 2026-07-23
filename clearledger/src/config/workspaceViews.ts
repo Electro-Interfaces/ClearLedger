@@ -25,7 +25,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
 // Подписи под-разделов по режимам (ключ = ключ под-вида в панели).
 const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   projects: {
-    pr_portfolio: 'Обзор портфеля', pr_projects: 'Проекты',
+    pr_portfolio: 'Обзор портфеля', pr_projects: 'Проекты', pr_project: 'Проект',
     sites_overview: 'Воронка подбора', sites_list: 'Банк площадок',
     sites_priority: 'Приоритеты', sites_map: 'Карта',
     pr_tp: 'Присоединение', pr_equipment: 'Оборудование', pr_accounting: 'Ждёт учёта',

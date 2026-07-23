@@ -17,6 +17,7 @@ import {
   type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { useOpenProject } from './useOpenProject'
 import { NewProjectDialog } from './NewProjectDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -31,6 +32,8 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const [page, setPage] = useState(1)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  // Клик по строке открывает рабочий экран проекта; Alt+клик — быстрый просмотр.
+  const openProject = useOpenProject()
 
   const pf = useQuery({ queryKey: ['pr-portfolio', companyId], queryFn: () => getPortfolio(companyId) })
   const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
@@ -129,7 +132,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                   const late = !!s.nextActionDue && s.nextActionDue < today()
                   return (
                     <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
-                      onClick={() => setDetailId(s.id)}>
+                      onClick={(ev) => (ev.altKey ? setDetailId(s.id) : openProject(s.id))}>
                       <td className="p-2 whitespace-nowrap font-mono">{s.projectNo ?? '—'}</td>
                       <td className="p-2 max-w-[300px] truncate" title={s.fullAddress ?? s.address ?? ''}>
                         {s.title || s.address || s.installPlace || s.fullAddress || '—'}

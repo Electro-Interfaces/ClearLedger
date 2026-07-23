@@ -72,6 +72,7 @@ export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 export const SITES_MENU: CentralMenuItem[] = [
   { key: 'pr_portfolio',   label: 'Обзор портфеля',  group: 'Портфель' },
   { key: 'pr_projects',    label: 'Проекты',         group: 'Портфель' },
+  { key: 'pr_project',     label: 'Проект',          group: 'Портфель' },
   { key: 'sites_overview', label: 'Воронка подбора', group: 'Подбор площадок' },
   { key: 'sites_list',     label: 'Банк площадок',   group: 'Подбор площадок' },
   { key: 'sites_priority', label: 'Приоритеты',      group: 'Подбор площадок' },

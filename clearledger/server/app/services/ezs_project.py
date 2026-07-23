@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import uuid as _uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -496,6 +496,215 @@ async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
         "docs": int(docs or 0),
         "equipment": {"total": int(eq["total"] or 0), "supplied": int(eq["supplied"] or 0),
                       "overdue": int(eq["overdue"] or 0)},
+    }
+
+
+async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Обзор портфеля как рабочий экран, а не витрина.
+
+    Отвечает на четыре вопроса руководителя развития:
+      1. что горит — просрочки и заблокированные гейты, с числами и ссылками;
+      2. где затык — на какой стадии проекты стоят дольше всего и куда не проходят;
+      3. когда ждать станции — прогноз ввода по датам ТП и поставок;
+      4. что изменилось — движение портфеля за 30 и 90 дней.
+
+    Блоки, для которых данных нет, возвращают `empty` с подсказкой, чем их
+    наполнить: экран из нулей хуже честного «нечего показывать».
+    """
+    today = date.today().isoformat()
+    d30 = (date.today() - timedelta(days=30)).isoformat()
+    d90 = (date.today() - timedelta(days=90)).isoformat()
+
+    # ── 1. Что горит ───────────────────────────────────────────────────────
+    risks = (await db.execute(text("""
+        with active as (
+            select s.* from ezs_sites s
+            where s.company_id = :cid and s.stage = any(:active)
+        )
+        select
+          (select count(*) from active where next_action_due is not null
+             and next_action_due < :today)                                as step_overdue,
+          (select count(*) from active a join ezs_tech_connections t on t.site_id = a.id
+             where t.due_date is not null and t.done_date is null
+               and t.due_date < :today and t.status not in ('done','rejected'))  as tp_overdue,
+          (select count(*) from active a join ezs_site_equipment e on e.site_id = a.id
+             where e.due_date is not null and e.supplied_date is null
+               and e.status in ('planned','ordered') and e.due_date < :today)    as eq_overdue,
+          (select count(*) from active where owner_user_id is null)         as no_owner,
+          (select count(*) from active where next_action is null)           as no_next,
+          (select count(*) from active
+             where coalesce(stage_since, '1970-01-01') < :d90)              as stuck_90,
+          (select count(*) from active
+             where coalesce(to_char(last_touch_at, 'YYYY-MM-DD'), '1970-01-01') < :d30) as no_touch_30
+    """), {"cid": company_id, "active": STAGE_ORDER, "today": today,
+           "d30": d30, "d90": d90})).mappings().one()
+
+    attention = [
+        {"key": "step_overdue", "label": "Просрочен следующий шаг", "count": int(risks["step_overdue"]),
+         "hint": "срок в карточке прошёл, шаг не сделан", "filter": "overdue"},
+        {"key": "tp_overdue", "label": "Просрочено техприсоединение", "count": int(risks["tp_overdue"]),
+         "hint": "срок мероприятий сетевой прошёл", "filter": "tp"},
+        {"key": "eq_overdue", "label": "Просрочена поставка оборудования", "count": int(risks["eq_overdue"]),
+         "hint": "плановая дата поставки прошла", "filter": "equipment"},
+        {"key": "stuck_90", "label": "Стоят на стадии больше 90 дней", "count": int(risks["stuck_90"]),
+         "hint": "движения по воронке нет три месяца", "filter": ""},
+        {"key": "no_touch_30", "label": "Без касаний больше 30 дней", "count": int(risks["no_touch_30"]),
+         "hint": "никто не разговаривал с собственником", "filter": ""},
+        {"key": "no_owner", "label": "Без ответственного", "count": int(risks["no_owner"]),
+         "hint": "непонятно, кто ведёт", "filter": ""},
+        {"key": "no_next", "label": "Без следующего шага", "count": int(risks["no_next"]),
+         "hint": "непонятно, что делать дальше", "filter": ""},
+    ]
+
+    # ── 2. Где затык: воронка со сроком и проходимостью ────────────────────
+    # Проходимость считаем по истории: сколько проектов, побывавших на стадии,
+    # ушли дальше. Это честнее, чем делить текущие остатки соседних стадий.
+    passed = {r["stage"]: r for r in (await db.execute(text("""
+        with visited as (
+            select distinct site_id, to_stage as stage from ezs_site_events
+            where company_id = :cid and kind = 'stage' and to_stage is not null
+        ),
+        moved as (
+            select v.stage, v.site_id,
+                   exists (select 1 from ezs_site_events e
+                           where e.site_id = v.site_id and e.kind = 'stage'
+                             and e.created_at > (select min(e2.created_at) from ezs_site_events e2
+                                                 where e2.site_id = v.site_id and e2.to_stage = v.stage)
+                          ) as went_further
+            from visited v
+        )
+        select stage, count(*) as visited,
+               count(*) filter (where went_further) as advanced
+        from moved group by stage
+    """), {"cid": company_id})).mappings().all()}
+
+    durations = (await phase_durations(db, company_id))["stages"]
+    dur_by_stage = {d["stage"]: d for d in durations}
+
+    counts = {r.stage: int(r.n) for r in (await db.execute(
+        select(EzsSite.stage, func.count().label("n"))
+        .where(EzsSite.company_id == company_id).group_by(EzsSite.stage))).all()}
+
+    stuck_by_stage = {r["stage"]: int(r["n"]) for r in (await db.execute(text("""
+        select stage, count(*) n from ezs_sites
+        where company_id = :cid and stage = any(:active)
+          and coalesce(stage_since, '1970-01-01') < :d90
+        group by 1
+    """), {"cid": company_id, "active": STAGE_ORDER, "d90": d90})).mappings().all()}
+
+    funnel = []
+    for st in STAGE_ORDER:
+        v = passed.get(st, {})
+        visited = int(v.get("visited") or 0)
+        advanced = int(v.get("advanced") or 0)
+        funnel.append({
+            "stage": st, "label": STAGE_LABELS[st],
+            "phase": STAGE_PHASE.get(st), "count": counts.get(st, 0),
+            "medianDays": dur_by_stage.get(st, {}).get("medianDays", 0),
+            "visited": visited, "advanced": advanced,
+            "conversion": round(advanced / visited * 100) if visited else None,
+            "stuck": stuck_by_stage.get(st, 0),
+        })
+    # Узкое место — стадия с наибольшим числом застрявших; при равенстве берём
+    # ту, где дольше медиана. Считаем только по активным стадиям с проектами.
+    live = [f for f in funnel if f["count"] > 0]
+    bottleneck = max(live, key=lambda f: (f["stuck"], f["medianDays"]), default=None)
+
+    # ── 3. Когда ждать станции ─────────────────────────────────────────────
+    forecast = (await db.execute(text("""
+        with dates as (
+            select s.id,
+                   greatest(
+                     coalesce((select max(t.due_date) from ezs_tech_connections t
+                               where t.site_id = s.id and t.done_date is null), ''),
+                     coalesce((select max(e.due_date) from ezs_site_equipment e
+                               where e.site_id = s.id and e.supplied_date is null), '')
+                   ) as ready_date
+            from ezs_sites s
+            where s.company_id = :cid and s.stage in ('construction','commissioning')
+        )
+        select case when ready_date = '' then 'без даты'
+                    else to_char(to_date(ready_date, 'YYYY-MM-DD'), 'YYYY') || ' Q'
+                         || to_char(to_date(ready_date, 'YYYY-MM-DD'), 'Q') end as bucket,
+               count(*) as n
+        from dates group by 1 order by 1
+    """), {"cid": company_id})).mappings().all()
+
+    commissioned = (await db.execute(text("""
+        select to_char(to_date(commissioned_on, 'YYYY-MM-DD'), 'YYYY') || ' Q'
+               || to_char(to_date(commissioned_on, 'YYYY-MM-DD'), 'Q') as bucket, count(*) n
+        from ezs_sites
+        where company_id = :cid and commissioned_on is not null and commissioned_on <> ''
+        group by 1 order by 1
+    """), {"cid": company_id})).mappings().all()
+
+    # ── 4. Что изменилось ──────────────────────────────────────────────────
+    movement = (await db.execute(text("""
+        select
+          (select count(*) from ezs_sites
+             where company_id = :cid and first_seen_at >= now() - interval '30 days')  as added_30,
+          (select count(*) from ezs_sites
+             where company_id = :cid and first_seen_at >= now() - interval '90 days')  as added_90,
+          (select count(distinct site_id) from ezs_site_events
+             where company_id = :cid and kind = 'stage'
+               and created_at >= now() - interval '30 days'
+               and to_stage <> 'archive')                                               as moved_30,
+          (select count(distinct site_id) from ezs_site_events
+             where company_id = :cid and kind = 'stage' and to_stage = 'archive'
+               and created_at >= now() - interval '30 days')                            as archived_30,
+          (select count(distinct site_id) from ezs_site_events
+             where company_id = :cid and kind = 'stage' and to_stage = 'live'
+               and created_at >= now() - interval '90 days')                            as live_90,
+          (select count(*) from ezs_site_events
+             where company_id = :cid and kind in ('touch','note')
+               and created_at >= now() - interval '30 days')                            as touches_30
+    """), {"cid": company_id})).mappings().one()
+
+    # ── 5. Кто ведёт ───────────────────────────────────────────────────────
+    owners = (await db.execute(text("""
+        select coalesce(u.name, u.email, '— не назначен') as owner,
+               count(*) as projects,
+               count(*) filter (where s.next_action_due is not null
+                                 and s.next_action_due < :today) as overdue
+        from ezs_sites s
+        left join users u on u.id = s.owner_user_id
+        where s.company_id = :cid and s.stage = any(:active)
+        group by 1 order by projects desc limit 10
+    """), {"cid": company_id, "active": STAGE_ORDER, "today": today})).mappings().all()
+
+    # ── 6. Деньги ──────────────────────────────────────────────────────────
+    money = (await db.execute(text("""
+        select coalesce(sum(plan_amount), 0) plan, coalesce(sum(fact_amount), 0) fact,
+               count(distinct site_id) sites
+        from ezs_site_costs where company_id = :cid
+    """), {"cid": company_id})).mappings().one()
+    eq_money = (await db.execute(text("""
+        select coalesce(sum(price * qty), 0) total from ezs_site_equipment
+        where company_id = :cid and status <> 'cancelled'
+    """), {"cid": company_id})).scalar()
+
+    active_total = sum(counts.get(s, 0) for s in STAGE_ORDER)
+    return {
+        "active": active_total,
+        "total": sum(counts.values()),
+        "live": counts.get("live", 0),
+        "archived": counts.get("archive", 0),
+        "onHold": counts.get("on_hold", 0),
+        "attention": [a for a in attention if a["count"] > 0],
+        "attentionAll": attention,
+        "atRisk": int(risks["step_overdue"]) + int(risks["tp_overdue"]) + int(risks["eq_overdue"]),
+        "funnel": funnel,
+        "bottleneck": bottleneck,
+        "forecast": [{"bucket": r["bucket"], "count": int(r["n"])} for r in forecast],
+        "commissioned": [{"bucket": r["bucket"], "count": int(r["n"])} for r in commissioned],
+        "movement": {k: int(v or 0) for k, v in dict(movement).items()},
+        "owners": [{"owner": r["owner"], "projects": int(r["projects"]),
+                    "overdue": int(r["overdue"])} for r in owners],
+        "budget": {"plan": float(money["plan"] or 0), "fact": float(money["fact"] or 0),
+                   "sites": int(money["sites"] or 0),
+                   "equipment": float(eq_money or 0)},
+        "phases": [{"key": p["key"], "label": p["label"], "hint": p["hint"],
+                    "count": sum(counts.get(s, 0) for s in p["stages"])} for p in PHASES],
     }
 
 

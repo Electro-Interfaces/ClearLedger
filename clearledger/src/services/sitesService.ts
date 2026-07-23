@@ -436,6 +436,39 @@ export interface AwaitingAccounting {
   supplyMissing: { id: string; projectNo: string | null; city: string | null; address: string | null }[]
 }
 
+
+/** Рабочий обзор портфеля: что горит, где затык, когда станции, что изменилось. */
+export interface PortfolioOverview {
+  active: number
+  total: number
+  live: number
+  archived: number
+  onHold: number
+  /** Проекты со сорванным сроком (шаг, ТП, поставка). */
+  atRisk: number
+  attention: { key: string; label: string; count: number; hint: string; filter: string }[]
+  attentionAll: PortfolioOverview['attention']
+  funnel: {
+    stage: SiteStage; label: string; phase: string | null; count: number
+    medianDays: number; visited: number; advanced: number
+    conversion: number | null; stuck: number
+  }[]
+  bottleneck: PortfolioOverview['funnel'][number] | null
+  forecast: { bucket: string; count: number }[]
+  commissioned: { bucket: string; count: number }[]
+  movement: {
+    added_30: number; added_90: number; moved_30: number
+    archived_30: number; live_90: number; touches_30: number
+  }
+  owners: { owner: string; projects: number; overdue: number }[]
+  budget: { plan: number; fact: number; sites: number; equipment: number }
+  phases: { key: string; label: string; hint: string; count: number }[]
+}
+
+export async function getPortfolioOverview(companyId: string): Promise<PortfolioOverview> {
+  return get('/api/sites/portfolio/overview', { company_id: companyId })
+}
+
 export async function getPortfolio(companyId: string): Promise<Portfolio> {
   return get('/api/sites/portfolio', { company_id: companyId })
 }

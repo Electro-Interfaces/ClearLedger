@@ -14,11 +14,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, FileWarning, MapPinOff, PackageX } from 'lucide-react'
 import { getAwaitingAccounting, STAGE_META, type SiteStage } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
 export function AwaitingAccountingPanel({ companyId }: { companyId: string }) {
   const [detailId, setDetailId] = useState<string | null>(null)
+  // Клик по строке открывает рабочий экран проекта; Alt+клик — быстрый просмотр.
+  const openProject = useOpenProject()
   const q = useQuery({ queryKey: ['pr-awaiting', companyId], queryFn: () => getAwaitingAccounting(companyId) })
   const d = q.data
 
@@ -72,7 +75,7 @@ export function AwaitingAccountingPanel({ companyId }: { companyId: string }) {
               <tbody>
                 {g.items.slice(0, 100).map((s) => (
                   <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
-                    onClick={() => setDetailId(s.id)}>
+                    onClick={(ev) => (ev.altKey ? setDetailId(s.id) : openProject(s.id))}>
                     <td className="p-2 whitespace-nowrap font-mono w-36">{s.projectNo ?? '—'}</td>
                     <td className="p-2 max-w-[380px] truncate">
                       {s.address ?? '—'}<span className="text-muted-foreground"> · {s.city ?? ''}</span>

@@ -103,6 +103,16 @@ async def portfolio(
     return await ezs_project.portfolio(db, cid)
 
 
+@router.get("/portfolio/overview")
+async def portfolio_overview(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Рабочий обзор портфеля: что горит, где затык, когда ждать станции, что изменилось."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.portfolio_overview(db, cid)
+
+
 @router.get("/tech-connections")
 async def tech_connections(
     company_id: str = Query(...),

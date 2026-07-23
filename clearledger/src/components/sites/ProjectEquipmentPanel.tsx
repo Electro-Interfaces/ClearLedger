@@ -12,6 +12,7 @@ import { Loader2, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import { getEquipmentReport, STAGE_META, type SiteStage } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
@@ -19,6 +20,8 @@ export function ProjectEquipmentPanel({ companyId }: { companyId: string }) {
   const [status, setStatus] = useState('')
   const [onlyOverdue, setOnlyOverdue] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
+  // Клик по строке открывает рабочий экран проекта; Alt+клик — быстрый просмотр.
+  const openProject = useOpenProject()
 
   const q = useQuery({ queryKey: ['pr-equipment', companyId], queryFn: () => getEquipmentReport(companyId) })
   const d = q.data
@@ -96,7 +99,7 @@ export function ProjectEquipmentPanel({ companyId }: { companyId: string }) {
                 <tbody>
                   {rows.map((e) => (
                     <tr key={e.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
-                      onClick={() => setDetailId(e.siteId)}>
+                      onClick={(ev) => (ev.altKey ? setDetailId(e.siteId) : openProject(e.siteId))}>
                       <td className="p-2 whitespace-nowrap font-mono">{e.projectNo ?? '—'}</td>
                       <td className="p-2 max-w-[220px] truncate" title={e.address ?? ''}>
                         {e.address ?? e.city ?? '—'}

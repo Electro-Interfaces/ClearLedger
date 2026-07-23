@@ -12,6 +12,7 @@ import { Loader2, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import { getTechConnections, STAGE_META, type SiteStage } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
+import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
@@ -19,6 +20,8 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
   const [status, setStatus] = useState('')
   const [onlyOverdue, setOnlyOverdue] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
+  // Клик по строке открывает рабочий экран проекта; Alt+клик — быстрый просмотр.
+  const openProject = useOpenProject()
 
   const q = useQuery({ queryKey: ['pr-tc', companyId], queryFn: () => getTechConnections(companyId) })
   const d = q.data
@@ -92,7 +95,7 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
                 <tbody>
                   {rows.map((t) => (
                     <tr key={t.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
-                      onClick={() => setDetailId(t.siteId)}>
+                      onClick={(ev) => (ev.altKey ? setDetailId(t.siteId) : openProject(t.siteId))}>
                       <td className="p-2 whitespace-nowrap font-mono">{t.projectNo ?? '—'}</td>
                       <td className="p-2 max-w-[240px] truncate" title={t.address ?? ''}>
                         {t.address ?? t.city ?? '—'}
