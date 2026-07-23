@@ -433,6 +433,35 @@ export async function getTechConnections(companyId: string): Promise<{
   return get('/api/sites/tech-connections', { company_id: companyId })
 }
 
+export interface PhaseDurations {
+  stages: { stage: SiteStage; label: string; count: number; medianDays: number; open: number }[]
+  note: string
+}
+
+export async function getPhaseDurations(companyId: string): Promise<PhaseDurations> {
+  return get('/api/sites/phase-durations', { company_id: companyId })
+}
+
+/** Выгрузка портфеля в xlsx — то, что уходит на совещание. */
+export async function exportPortfolioXlsx(companyId: string): Promise<void> {
+  const { getToken } = await import('./apiClient')
+  const token = getToken()
+  const base = import.meta.env.VITE_API_URL ?? ''
+  const res = await fetch(`${base}/api/sites/export/portfolio?company_id=${companyId}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`Выгрузка не удалась (${res.status})`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'projects_portfolio.xlsx'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export async function getAwaitingAccounting(companyId: string): Promise<AwaitingAccounting> {
   return get('/api/sites/awaiting-accounting', { company_id: companyId })
 }

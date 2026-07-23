@@ -8,9 +8,14 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, Info } from 'lucide-react'
+import { Loader2, Info, Download } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
-import { getPortfolio, getSitesOverview, PHASE_META, STAGE_META } from '@/services/sitesService'
+import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
+import {
+  getPortfolio, getSitesOverview, getPhaseDurations, exportPortfolioXlsx,
+  PHASE_META, STAGE_META,
+} from '@/services/sitesService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const money = (v: number) => `${nf0.format(Math.round(v))} ₽`
@@ -18,6 +23,7 @@ const money = (v: number) => `${nf0.format(Math.round(v))} ₽`
 export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
   const q = useQuery({ queryKey: ['pr-portfolio', companyId], queryFn: () => getPortfolio(companyId) })
   const ov = useQuery({ queryKey: ['sites-overview', companyId], queryFn: () => getSitesOverview(companyId) })
+  const dur = useQuery({ queryKey: ['pr-durations', companyId], queryFn: () => getPhaseDurations(companyId) })
   const d = q.data
 
   if (q.isLoading || !d) {
@@ -28,12 +34,19 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-4">
-      <div>
-        <h2 className="text-base font-semibold">Портфель проектов</h2>
-        <p className="text-xs text-muted-foreground">
-          Жизненный цикл ЭЗС: подбор участка → оформление земли → присоединение, оборудование и
-          монтаж → ввод в эксплуатацию.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold">Портфель проектов</h2>
+          <p className="text-xs text-muted-foreground">
+            Жизненный цикл ЭЗС: подбор участка → оформление земли → присоединение, оборудование и
+            монтаж → ввод в эксплуатацию.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="h-8 text-xs"
+          onClick={() => exportPortfolioXlsx(companyId).catch((e) =>
+            toast.error(e instanceof Error ? e.message : 'Выгрузка не удалась'))}>
+          <Download className="h-3.5 w-3.5 mr-1" />Выгрузить портфель
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -94,6 +107,28 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
               <Cell label="Без следующего шага" value={work.noNextAction} total={ov.data?.active ?? 0} />
               <Cell label="Срок просрочен" value={work.overdue} total={ov.data?.active ?? 0} />
               <Cell label={`Без касания > ${work.staleDays} дн`} value={work.stale} total={ov.data?.active ?? 0} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {(dur.data?.stages ?? []).some((s) => s.count > 0) && (
+        <Card>
+          <CardContent className="p-0">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              Сколько проекты стоят на стадиях
+            </div>
+            <div className="p-3 space-y-1.5">
+              {(dur.data?.stages ?? []).filter((s) => s.count > 0).map((s) => (
+                <div key={s.stage} className="flex items-center gap-2 text-xs">
+                  <span className="w-36 shrink-0">{s.label}</span>
+                  <span className="font-mono text-muted-foreground w-24">{s.medianDays} дн</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    переходов {s.count}{s.open ? ` · сейчас в стадии ${s.open}` : ''}
+                  </span>
+                </div>
+              ))}
+              <div className="text-[10px] text-muted-foreground pt-1">{dur.data?.note}</div>
             </div>
           </CardContent>
         </Card>

@@ -113,6 +113,33 @@ async def tech_connections(
     return await ezs_project.tech_connections_report(db, cid)
 
 
+@router.get("/phase-durations")
+async def phase_durations(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Сколько проекты реально стоят на каждой стадии (медиана по истории)."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.phase_durations(db, cid)
+
+
+@router.get("/export/portfolio")
+async def export_portfolio(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Выгрузка портфеля проектов в xlsx — то, что уходит на совещание."""
+    from fastapi.responses import Response
+
+    cid = await assert_company_member(company_id, user, db)
+    data = await ezs_project.export_portfolio_xlsx(db, cid)
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="projects_portfolio.xlsx"'},
+    )
+
+
 @router.get("/awaiting-accounting")
 async def awaiting_accounting(
     company_id: str = Query(...),

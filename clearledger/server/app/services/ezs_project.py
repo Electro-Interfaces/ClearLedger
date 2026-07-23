@@ -26,7 +26,9 @@ from app.models import (
     Contract, EzsSite, EzsSiteCost, EzsSiteDoc, EzsTechConnection, ServiceLocation, User,
 )
 from app.services.ezs_site_work import log_event
-from app.services.ezs_sites import PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE
+from app.services.ezs_sites import (
+    PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE,
+)
 
 # ── Документы ──────────────────────────────────────────────────────────────
 DOC_KINDS = [
@@ -359,6 +361,103 @@ async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
                             "overdue": int(tc["overdue"] or 0)},
         "docs": int(docs or 0),
     }
+
+
+async def phase_durations(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Сколько проекты стоят на этапах — по датам входа в стадию из истории.
+
+    Берём разницу между соседними сменами стадий: сколько проект реально провёл
+    в каждой, а не сколько числится сейчас. Для текущей стадии — время с момента
+    входа до сегодня, такие записи помечены `open`.
+    """
+    rows = (await db.execute(text("""
+        with moves as (
+            select e.site_id, e.to_stage as stage, e.created_at,
+                   lead(e.created_at) over (partition by e.site_id order by e.created_at) as next_at
+            from ezs_site_events e
+            where e.company_id = :cid and e.kind = 'stage' and e.to_stage is not null
+        )
+        select stage,
+               count(*) as n,
+               percentile_cont(0.5) within group (
+                   order by extract(epoch from (coalesce(next_at, now()) - created_at)) / 86400) as median_days,
+               count(*) filter (where next_at is null) as still_open
+        from moves group by stage
+    """), {"cid": company_id})).mappings().all()
+    by_stage = {r["stage"]: {"count": int(r["n"]),
+                             "medianDays": round(float(r["median_days"] or 0), 1),
+                             "open": int(r["still_open"])} for r in rows}
+    return {
+        "stages": [{"stage": s, "label": STAGE_LABELS[s], **by_stage.get(s, {"count": 0, "medianDays": 0, "open": 0})}
+                   for s in STAGE_ORDER],
+        "note": "медиана по фактическим переходам в истории; текущие стадии считаются до сегодня",
+    }
+
+
+async def export_portfolio_xlsx(db: AsyncSession, company_id) -> bytes:
+    """Выгрузка портфеля: проекты с этапом, ведением, ТП, бюджетом и субсидией."""
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+
+    rows = (await db.execute(text("""
+        select s.project_no, s.title, coalesce(s.region_norm, s.region) as region, s.city,
+               coalesce(s.address, s.full_address, s.install_place) as address,
+               s.stage, s.stage_since, s.owner, u.name as owner_user,
+               s.next_action, s.next_action_due,
+               s.control_form, s.contract_start, s.contract_end,
+               s.planned_power_kwt, s.parking_spots, s.subsidy_planned, s.commissioned_on,
+               tc.status as tc_status, tc.grid_operator, tc.due_date as tc_due, tc.done_date as tc_done,
+               tc.cost as tc_cost,
+               (select coalesce(sum(c.plan_amount), 0) from ezs_site_costs c where c.site_id = s.id) as plan_amount,
+               (select coalesce(sum(c.fact_amount), 0) from ezs_site_costs c where c.site_id = s.id) as fact_amount,
+               (select count(*) from ezs_site_docs d where d.site_id = s.id) as docs
+        from ezs_sites s
+        left join users u on u.id = s.owner_user_id
+        left join ezs_tech_connections tc on tc.site_id = s.id
+        where s.company_id = :cid and s.stage = any(:active)
+        order by s.project_no
+    """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Проекты"
+    headers = [
+        "Проект", "Название", "Регион", "Город", "Адрес", "Этап", "Стадия", "В стадии с",
+        "Собственник", "Ответственный", "Следующий шаг", "Срок",
+        "Форма контроля", "Договор с", "Договор по",
+        "Мощность, кВт", "Машино-мест", "Субсидия", "Введён",
+        "ТП статус", "Сетевая", "ТП срок", "ТП факт", "ТП стоимость",
+        "Бюджет план", "Бюджет факт", "Документов",
+    ]
+    ws.append(headers)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+        c.alignment = Alignment(vertical="center", wrap_text=True)
+    for r in rows:
+        ws.append([
+            r["project_no"], r["title"], r["region"], r["city"], r["address"],
+            PHASE_LABELS.get(STAGE_PHASE.get(r["stage"], ""), ""),
+            STAGE_LABELS.get(r["stage"], r["stage"]), r["stage_since"],
+            r["owner"], r["owner_user"], r["next_action"], r["next_action_due"],
+            r["control_form"], r["contract_start"], r["contract_end"],
+            float(r["planned_power_kwt"] or 0) or None, r["parking_spots"],
+            "да" if r["subsidy_planned"] else "", r["commissioned_on"],
+            TC_LABELS.get(r["tc_status"] or "", ""), r["grid_operator"],
+            r["tc_due"], r["tc_done"], float(r["tc_cost"] or 0) or None,
+            float(r["plan_amount"] or 0) or None, float(r["fact_amount"] or 0) or None,
+            int(r["docs"] or 0),
+        ])
+    widths = [16, 24, 22, 18, 40, 14, 16, 12, 26, 20, 30, 12, 18, 12, 12, 14, 12, 10, 12,
+              18, 22, 12, 12, 14, 14, 14, 12]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 async def awaiting_accounting(db: AsyncSession, company_id) -> dict[str, Any]:
