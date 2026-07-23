@@ -1,11 +1,15 @@
 /**
- * Рабочий стол экосистемы — стартовый экран Ядра (docs/CORE.md §2.1 п.8 «App-shell +
- * лаунчер»). Вход приземляется СЮДА, а не в Ledger: экосистема — это набор приложений,
- * Ledger лишь одно из них (его рабочая область — `/workspace`).
+ * Рабочий стол экосистемы — стартовый экран Ядра (docs/CORE.md §2). Вход приземляется
+ * СЮДА, а не в Ledger: экосистема — это набор слоёв, а не одно приложение.
  *
- * Что показывает: приложения экосистемы (внутренние + каталог `/api/sso/apps`: единый
- * вход `mode=sso` и мосты `mode=link`), вход в Центр управления (админам) и селектор
- * компании, если их в экосистеме больше одной.
+ * Три слоя (сверху вниз):
+ *   1. Центр управления — /admin (реестр приложений, RBAC, аудит, компании). Админам.
+ *   2. Сервисы экосистемы — универсальные сервисы КОНТЕЙНЕРА (Чат/Заявки/Конференции):
+ *      один на всю экосистему, потребляются всеми приложениями. Здесь — самостоятельный
+ *      вход; второй вход в тот же сервис — кнопка внутри приложения (напр. чат в Ledger).
+ *   3. Приложения — продукты экосистемы (Ledger со своими модулями, Support).
+ *
+ * Классификация слоя приходит с бэкенда (`layer` в /api/sso/apps), не хардкодится по коду.
  */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -22,7 +26,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, type SsoApp } from '@/services/ssoService'
 
-/** Иконка приложения по имени из манифеста (`apps/<code>.yml`, поле icon). */
+/** Иконка по имени из манифеста (`apps/<code>.yml`, поле icon). */
 const ICONS: Record<string, typeof FileText> = {
   'life-buoy': LifeBuoy,
   'clipboard-list': ClipboardList,
@@ -67,6 +71,18 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, onClick }: TileProps) 
   )
 }
 
+function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="mt-8 first:mt-6">
+      <div className="flex items-baseline gap-3">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        {hint && <span className="text-sm text-muted-foreground">{hint}</span>}
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</div>
+    </section>
+  )
+}
+
 export function EcosystemHomePage() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
@@ -79,7 +95,10 @@ export function EcosystemHomePage() {
     enabled: isApiEnabled(),
     staleTime: 5 * 60_000,
   })
-  const external: SsoApp[] = q.data?.apps ?? []
+  const all: SsoApp[] = q.data?.apps ?? []
+  const services = all.filter((a) => a.layer === 'service')
+  const apps = all.filter((a) => a.layer !== 'service')
+  const chatEnabled = q.data?.chat_enabled ?? false
 
   /** Открыть внешнее приложение: SSO — по handoff-токену, мост — просто ссылкой. */
   async function openExternal(app: SsoApp) {
@@ -94,6 +113,19 @@ export function EcosystemHomePage() {
     } finally {
       setBusy(null)
     }
+  }
+
+  function ExternalTile({ a }: { a: SsoApp }) {
+    return (
+      <Tile
+        title={a.name}
+        subtitle={a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход'}
+        icon={ICONS[a.icon] ?? LayoutGrid}
+        badge={a.mode === 'link' ? 'вход отдельный' : undefined}
+        busy={busy === a.code}
+        onClick={() => openExternal(a)}
+      />
+    )
   }
 
   return (
@@ -121,54 +153,57 @@ export function EcosystemHomePage() {
         <h1 className="text-2xl font-semibold">
           {user?.name ? `Здравствуйте, ${user.name}` : 'Рабочий стол'}
         </h1>
-        <p className="mt-1 text-muted-foreground">Приложения экосистемы</p>
+        <p className="mt-1 text-muted-foreground">{company.name} · Экосистема ElsyPlus</p>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {/* Ledger живёт в этом же стеке — открывается внутри, без handoff-токена. */}
+        {/* Слой 1 — Центр управления (админам) */}
+        {isCompanyAdmin && (
+          <Section title="Центр управления">
+            <Tile
+              title="Центр управления"
+              subtitle="Компании, приложения, пользователи, аудит"
+              icon={ShieldCheck}
+              onClick={() => navigate('/admin')}
+            />
+          </Section>
+        )}
+
+        {/* Слой 2 — Универсальные сервисы контейнера (чат/заявки/конференции) */}
+        {(chatEnabled || services.length > 0) && (
+          <Section title="Сервисы экосистемы" hint="общие для всех приложений">
+            {chatEnabled && (
+              <Tile
+                title="Чат"
+                subtitle="Переписка в рамках всей экосистемы"
+                icon={MessagesSquare}
+                onClick={() => navigate('/messages')}
+              />
+            )}
+            {services.map((a) => <ExternalTile key={a.code} a={a} />)}
+          </Section>
+        )}
+
+        {/* Слой 3 — Приложения экосистемы (Ledger живёт в этом стеке; прочие — SSO/мост) */}
+        <Section title="Приложения">
           <Tile
             title="ElsyPlus Ledger"
             subtitle="Учёт, сверка, обмен с 1С"
             icon={FileText}
             onClick={() => navigate('/workspace')}
           />
-          {external.map((a) => (
-            <Tile
-              key={a.code}
-              title={a.name}
-              subtitle={a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход'}
-              icon={ICONS[a.icon] ?? LayoutGrid}
-              badge={a.mode === 'link' ? 'вход отдельный' : undefined}
-              busy={busy === a.code}
-              onClick={() => openExternal(a)}
-            />
-          ))}
+          {apps.map((a) => <ExternalTile key={a.code} a={a} />)}
           {q.isLoading && (
             <div className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
             </div>
           )}
-        </div>
-
-        {isCompanyAdmin && (
-          <>
-            <h2 className="mt-10 text-lg font-semibold">Управление</h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Tile
-                title="Центр управления"
-                subtitle="Компании, приложения, пользователи, аудит"
-                icon={ShieldCheck}
-                onClick={() => navigate('/admin')}
-              />
-            </div>
-          </>
-        )}
+        </Section>
 
         {/* Легенда: почему часть приложений просит свой вход (Фаза 0 — мосты). */}
-        {external.some((a) => a.mode === 'link') && (
+        {all.some((a) => a.mode === 'link') && (
           <p className="mt-8 flex items-center gap-2 text-xs text-muted-foreground">
             <ExternalLink className="size-3.5" />
-            «Вход отдельный» — приложение пока живёт на своём домене и спросит собственные
-            учётные данные; с <KeyRound className="inline size-3.5" /> вход единый.
+            «Вход отдельный» — сервис пока живёт на своём домене и спросит собственные учётные
+            данные; с <KeyRound className="inline size-3.5" /> вход единый.
           </p>
         )}
       </main>

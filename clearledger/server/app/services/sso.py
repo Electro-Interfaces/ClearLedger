@@ -34,19 +34,25 @@ def _private_key() -> str | None:
 def sso_apps() -> list[dict[str, str]]:
     """Каталог приложений экосистемы из конфига (Фаза 0).
 
-    Строка env: `code|Название|https://base|/callback|icon|mode`, записи через «;».
+    Строка env: `code|Название|https://base|/callback|icon|mode|layer`, записи через «;».
     Пустой callback → `/sso/callback`.
 
     `mode` — как открывается приложение:
       * `sso`  (по умолчанию) — выпускаем handoff-токен, приложение принимает его на callback;
       * `link` — **мост**: приложение о нашем токене не знает (общий Plane/Jitsi Фазы 0),
         открываем просто по ссылке. Мост живёт и при выключенном SSO — иначе лаунчер
-        молчал бы там, где ходить уже есть куда."""
+        молчал бы там, где ходить уже есть куда.
+
+    `layer` — слой рабочего стола экосистемы (docs/CORE.md §2):
+      * `service` — универсальный сервис контейнера (Заявки/Конференции/Чат): один на всю
+        экосистему, потребляется всеми приложениями;
+      * `app` (по умолчанию) — приложение экосистемы (Support)."""
     out: list[dict[str, str]] = []
     for row in (settings.sso_apps or "").split(";"):
         parts = [p.strip() for p in row.split("|")]
         if len(parts) >= 3 and parts[0] and parts[2]:
             mode = parts[5].lower() if len(parts) > 5 and parts[5] else "sso"
+            layer = parts[6].lower() if len(parts) > 6 and parts[6] else "app"
             out.append({
                 "code": parts[0],
                 "name": parts[1] or parts[0],
@@ -54,6 +60,7 @@ def sso_apps() -> list[dict[str, str]]:
                 "callback": (parts[3] if len(parts) > 3 and parts[3] else "/sso/callback"),
                 "icon": parts[4] if len(parts) > 4 else "",
                 "mode": mode if mode in ("sso", "link") else "sso",
+                "layer": layer if layer in ("service", "app") else "app",
             })
     return out
 

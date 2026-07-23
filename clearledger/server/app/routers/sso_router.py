@@ -25,13 +25,20 @@ router = APIRouter(prefix="/sso", tags=["SSO ElsyPlus"])
 
 @router.get("/apps")
 async def list_apps(user: User = Depends(get_current_user)) -> dict[str, Any]:
-    """Каталог приложений экосистемы для лаунчера (Фаза 0 — из конфига).
+    """Каталог приложений экосистемы для рабочего стола (Фаза 0 — из конфига).
 
     `enabled` — есть ли что показать (мосты видны и без ключа SSO);
-    `sso_enabled` — настроен ли единый вход (handoff-приложения).
+    `sso_enabled` — настроен ли единый вход (handoff-приложения);
+    `chat_enabled` — доступен ли универсальный сервис «Чат» (Matrix): он не приложение
+      и не в каталоге, но рабочий стол показывает его плиткой в слое сервисов.
     """
     apps = sso.launcher_apps()
-    return {"enabled": bool(apps), "sso_enabled": settings.sso_enabled, "apps": apps}
+    return {
+        "enabled": bool(apps) or settings.chat_enabled,
+        "sso_enabled": settings.sso_enabled,
+        "chat_enabled": settings.chat_enabled,
+        "apps": apps,
+    }
 
 
 @router.get("/authorize")

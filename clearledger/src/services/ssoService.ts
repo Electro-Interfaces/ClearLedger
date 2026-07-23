@@ -14,15 +14,23 @@ export interface SsoApp {
   icon: string
   /** sso — вход по handoff-токену; link — мост, открываем по ссылке (своя авторизация). */
   mode?: 'sso' | 'link'
+  /** Слой рабочего стола: service — универсальный сервис контейнера; app — приложение. */
+  layer?: 'service' | 'app'
 }
 
-/**
- * Каталог приложений экосистемы для лаунчера.
- * `enabled` — есть что показать (мосты видны и без ключа SSO);
- * `sso_enabled` — настроен ли единый вход.
- */
-export async function listSsoApps(): Promise<{ enabled: boolean; sso_enabled: boolean; apps: SsoApp[] }> {
-  return get<{ enabled: boolean; sso_enabled: boolean; apps: SsoApp[] }>('/api/sso/apps')
+export interface SsoCatalog {
+  /** есть что показать (мосты/чат видны и без ключа SSO) */
+  enabled: boolean
+  /** настроен ли единый вход (handoff-приложения) */
+  sso_enabled: boolean
+  /** доступен ли универсальный сервис «Чат» (Matrix) — плитка в слое сервисов */
+  chat_enabled: boolean
+  apps: SsoApp[]
+}
+
+/** Каталог приложений экосистемы для рабочего стола. */
+export async function listSsoApps(): Promise<SsoCatalog> {
+  return get<SsoCatalog>('/api/sso/apps')
 }
 
 /** Выпустить handoff-токен для приложения и получить URL перехода (открывать в новой вкладке). */
