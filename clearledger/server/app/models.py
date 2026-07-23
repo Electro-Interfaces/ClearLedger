@@ -3732,18 +3732,36 @@ class EzsSupplyLine(Base):
 # в колонках (фильтры/агрегаты), полный ряд (55 колонок) — в raw JSONB.
 # ===========================================================================
 class EzsSite(Base):
-    """Площадка (ЗУ) под установку ЭЗС — запись девелоперского пайплайна."""
+    """Площадка (ЗУ) под установку ЭЗС — запись девелоперского пайплайна.
+
+    Стадии — воронка подбора недвижимости с гейтами (см.
+    `docs/SITES_LAND_BANK_BLUEPRINT.md`): lead → screening → negotiation → dd →
+    decision → contracting → construction → live, плюс on_hold и archive.
+    Дешёвые проверки идут раньше дорогих, стадия двигается по закрытию гейта.
+    """
     __tablename__ = "ezs_sites"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
-    # prospect (в проработке/согласовании) | in_work (в работе) | archive (в архиве)
-    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="prospect")
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="lead")
+    stage_since: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO-дата входа в стадию
+    prev_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)    # откуда пришла
+    archive_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)  # почему отклонена
     status_raw: Mapped[str | None] = mapped_column(String(80), nullable=True)   # исходный «Статус»
     received_date: Mapped[str | None] = mapped_column(String(10), nullable=True)  # ISO, «Дата поступления»
+    # ── идентичность площадки (иначе повторный импорт плодит дубли) ──
+    # Ключ по приоритету: кадастровый № → координаты (радиус ~50 м) → адрес+город.
+    cadastral_no: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    dedup_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # ── география ──
-    region: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(160), nullable=True)       # как в файле
+    region_norm: Mapped[str | None] = mapped_column(String(160), nullable=True)  # канон справочника regions
+    region_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("regions.id", ondelete="SET NULL"), nullable=True)
     city: Mapped[str | None] = mapped_column(String(160), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     full_address: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -3786,6 +3804,7 @@ class EzsSite(Base):
     __table_args__ = (
         Index("ix_ezs_site_company_stage", "company_id", "stage"),
         Index("ix_ezs_site_company_region", "company_id", "region"),
+        Index("ix_ezs_site_company_dedup", "company_id", "dedup_key"),
     )
 
 

@@ -10,30 +10,29 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, Search, X, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react'
-import { getSites, getSite, getSitesOverview, STAGE_META, type SiteStage } from '@/services/sitesService'
+import { getSites, getSite, getSitesOverview, STAGE_META, FUNNEL_STAGES, type SiteStage } from '@/services/sitesService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE = 200
 
-const STAGE_TABS: { v: '' | SiteStage; label: string }[] = [
-  { v: '', label: 'Все' },
-  { v: 'prospect', label: 'В проработке' },
-  { v: 'in_work', label: 'В работе' },
-  { v: 'archive', label: 'В архиве' },
-]
-
 function StageBadge({ stage, label }: { stage: SiteStage; label: string }) {
-  return <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[stage].cls}`}>{label}</span>
+  const meta = STAGE_META[stage]
+  return (
+    <span className={`text-[11px] rounded border px-1.5 py-0.5 ${meta?.cls ?? ''}`} title={meta?.hint}>
+      {label}
+    </span>
+  )
 }
 
 export function SitesListPanel({ companyId }: { companyId: string }) {
-  const [stage, setStage] = useState<'' | SiteStage>('')
+  const [stage, setStage] = useState<'' | SiteStage | 'active'>('')
   const [region, setRegion] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [detailId, setDetailId] = useState<string | null>(null)
 
   const ov = useQuery({ queryKey: ['sites-overview', companyId], queryFn: () => getSitesOverview(companyId) })
+  const stageCount = (s: SiteStage) => ov.data?.funnel.find((x) => x.stage === s)?.count ?? 0
   const q = useQuery({
     queryKey: ['sites-list', companyId, stage, region, search, page],
     queryFn: () => getSites({ companyId, stage: stage || undefined, region: region || undefined, search: search || undefined, page, pageSize: PAGE }),
@@ -48,12 +47,22 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-3">
       {/* Фильтры */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
-          {STAGE_TABS.map((t) => (
-            <button key={t.v} type="button" onClick={() => { setStage(t.v); reset() }}
-              className={`px-2.5 py-1 text-xs rounded-[5px] transition-colors ${stage === t.v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>{t.label}</button>
-          ))}
-        </div>
+        {/* Стадий десять — таблице хватает селекта; счётчики берём из обзора,
+            чтобы не гадать, где сейчас работа. */}
+        <Select value={stage || '__all__'} onValueChange={(v) => { setStage(v === '__all__' ? '' : v as SiteStage | 'active'); reset() }}>
+          <SelectTrigger className="h-8 w-[210px] text-xs"><SelectValue placeholder="Все стадии" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="text-xs">Все стадии ({nf0.format(ov.data?.total ?? 0)})</SelectItem>
+            <SelectItem value="active" className="text-xs">В работе — активные ({nf0.format(ov.data?.active ?? 0)})</SelectItem>
+            {FUNNEL_STAGES.map((s) => (
+              <SelectItem key={s} value={s} className="text-xs">
+                {STAGE_META[s].label} ({nf0.format(stageCount(s))})
+              </SelectItem>
+            ))}
+            <SelectItem value="on_hold" className="text-xs">{STAGE_META.on_hold.label} ({nf0.format(ov.data?.onHold ?? 0)})</SelectItem>
+            <SelectItem value="archive" className="text-xs">{STAGE_META.archive.label} ({nf0.format(ov.data?.archived ?? 0)})</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={region || '__all__'} onValueChange={(v) => { setRegion(v === '__all__' ? '' : v); reset() }}>
           <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue placeholder="Все регионы" /></SelectTrigger>
           <SelectContent>
@@ -154,6 +163,8 @@ function SiteDetailModal({ companyId, id, onClose }: { companyId: string; id: st
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <Field label="Регион" value={s.region} />
               <Field label="Город" value={s.city} />
+              <Field label="Кадастровый №" value={s.cadastralNo} />
+              <Field label="Стадия с" value={s.stageSince} />
               <Field label="Признак" value={s.placeKind} />
               <Field label="Место установки" value={s.installPlace} />
               <Field label="Трасса" value={s.route} />
@@ -173,8 +184,9 @@ function SiteDetailModal({ companyId, id, onClose }: { companyId: string; id: st
               <Field label="Аренда, ₽/мес" value={s.rentCostMonth != null ? nf0.format(s.rentCostMonth) : null} />
               <Field label="Доп.сервис" value={s.dopService} />
             </div>
-            {(s.tuStatus || s.comment) && (
+            {(s.tuStatus || s.comment || s.archiveReason) && (
               <div className="space-y-2">
+                {s.archiveReason && <Field label="Причина отклонения" value={s.archiveReason} />}
                 {s.tuStatus && <Field label="Статус согласования / ТУ" value={s.tuStatus} />}
                 {s.comment && <Field label="Комментарий" value={s.comment} />}
               </div>

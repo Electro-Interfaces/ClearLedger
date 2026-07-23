@@ -6,21 +6,46 @@
  */
 import { get, upload } from './apiClient'
 
-export type SiteStage = 'prospect' | 'in_work' | 'archive'
+/**
+ * Стадии — воронка подбора недвижимости с гейтами. Порядок = порядок гейтов;
+ * дешёвые проверки раньше дорогих. Обоснование — docs/SITES_LAND_BANK_BLUEPRINT.md.
+ */
+export type SiteStage =
+  | 'lead' | 'screening' | 'negotiation' | 'dd' | 'decision'
+  | 'contracting' | 'construction' | 'live' | 'on_hold' | 'archive'
 
-export const STAGE_META: Record<SiteStage, { label: string; cls: string; dot: string }> = {
-  prospect: { label: 'В проработке', cls: 'border-blue-400/50 text-blue-600 dark:text-blue-300/80', dot: 'bg-blue-500' },
-  in_work: { label: 'В работе', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80', dot: 'bg-amber-500' },
-  archive: { label: 'В архиве', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
+/** Активная часть воронки, в порядке движения. */
+export const FUNNEL_STAGES: SiteStage[] = [
+  'lead', 'screening', 'negotiation', 'dd', 'decision', 'contracting', 'construction', 'live',
+]
+
+// Цвет по семантике: холодный на входе → тёплый в работе → зелёный на выходе,
+// нейтральный для паузы и архива (см. палитру badges в CLAUDE.md).
+export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: string; dot: string }> = {
+  lead: { label: 'Лид', hint: 'адрес и источник', cls: 'border-slate-400/50 text-slate-600 dark:text-slate-300/80', dot: 'bg-slate-400' },
+  screening: { label: 'Скрининг', hint: 'быстрый отсев без затрат', cls: 'border-sky-400/50 text-sky-600 dark:text-sky-300/80', dot: 'bg-sky-500' },
+  negotiation: { label: 'Переговоры', hint: 'выход на собственника, условия', cls: 'border-blue-400/50 text-blue-600 dark:text-blue-300/80', dot: 'bg-blue-500' },
+  dd: { label: 'Проработка', hint: 'ТУ · право · коммерция', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80', dot: 'bg-amber-500' },
+  decision: { label: 'Решение', hint: 'экономика и вердикт', cls: 'border-orange-400/50 text-orange-600 dark:text-orange-300/80', dot: 'bg-orange-500' },
+  contracting: { label: 'Оформление', hint: 'договор / сервитут', cls: 'border-violet-400/50 text-violet-600 dark:text-violet-300/80', dot: 'bg-violet-500' },
+  construction: { label: 'В стройке', hint: 'ПИР, СМР, техприсоединение', cls: 'border-teal-400/50 text-teal-600 dark:text-teal-300/80', dot: 'bg-teal-500' },
+  live: { label: 'Введена', hint: 'объект работает в сети', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
+  on_hold: { label: 'Заморожена', hint: 'пауза с датой пересмотра', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
+  archive: { label: 'Архив', hint: 'отклонена, с причиной', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
 }
 
 export interface SiteRow {
   id: string
   stage: SiteStage
   stageLabel: string
+  stageSince: string | null
+  prevStage: SiteStage | null
+  archiveReason: string | null
+  cadastralNo: string | null
   statusRaw: string | null
   receivedDate: string | null
   region: string | null
+  regionRaw: string | null
   city: string | null
   address: string | null
   fullAddress: string | null
@@ -54,17 +79,24 @@ export interface SiteRow {
 export interface SiteDetail extends SiteRow {
   raw: Record<string, string>
   sourceSheet: string | null
+  firstSeenAt: string | null
+  lastSeenAt: string | null
 }
 
 export interface SitesOverview {
   total: number
-  byStage: { stage: SiteStage; label: string; count: number }[]
+  active: number
+  onHold: number
+  archived: number
+  funnel: { stage: SiteStage; label: string; hint: string; count: number }[]
+  byStage: { stage: SiteStage; label: string; hint: string; count: number }[]
   byRegion: { region: string; count: number }[]
   withCoords: number
   plannedEzs: number
   plannedPowerKwt: number
   withKnownCost: number
   connectionCostSum: number
+  quality: { withCadastral: number; regionMatched: number; withCoords: number }
 }
 
 export interface SitesList {
@@ -78,6 +110,22 @@ export interface SitesImportReport {
   dryRun: boolean
   total: number
   withCoords: number
+  /** UPSERT: файл дополняет банк, а не заменяет его. */
+  created: number
+  updated: number
+  unchanged: number
+  stageMoved: number
+  reactivated: number
+  archived: number
+  withCadastral: number
+  /** Строки без адреса, координат и собственника — опознать место нечем. */
+  skippedNoKey: number
+  /** Две строки файла на одну площадку. */
+  fileDuplicates: { sheet: string; row: number; key: string; address: string; first: string }[]
+  /** Координаты в 50 м от известной площадки, но адрес другой — вероятная ошибка координат. */
+  nearConflicts: { sheet: string; row: number; address: string; near: string }[]
+  /** Регионы, которых нет в справочнике сети (сеть туда ещё не пришла). */
+  regionsUnmatched: { value: string; count: number }[]
   sheets: { sheet: string; stage: string; rows: number; note?: string }[]
   unknownSheets: string[]
 }

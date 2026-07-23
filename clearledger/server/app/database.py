@@ -629,6 +629,34 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.22: банк ЗУ — воронка подбора недвижимости вместо трёх «листов».
+        # Добавляем идентичность площадки (без неё импорт был REPLACE-ALL и стирал
+        # историю), нормализованный регион и стадийные поля. Затем переводим
+        # legacy-стадии: «Согласованные» лежали в prospect, хотя там договоры на
+        # подписи — это конец воронки, а не начало (см. docs/SITES_LAND_BANK_BLUEPRINT.md).
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS stage_since VARCHAR(10)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS prev_stage VARCHAR(16)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS archive_reason VARCHAR(200)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS cadastral_no VARCHAR(40)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS dedup_key VARCHAR(200)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMPTZ",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS region_norm VARCHAR(160)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS region_id UUID",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_site_company_dedup "
+            "ON ezs_sites (company_id, dedup_key)",
+            # prospect = лист «Согласованные» (договор на подписи) → оформление;
+            # in_work = лист «ЗУ в работе» (первичные переговоры) → переговоры.
+            # Точную стадию внутри активной части проставит ближайший импорт.
+            "UPDATE ezs_sites SET stage='contracting' WHERE stage='prospect'",
+            "UPDATE ezs_sites SET stage='negotiation' WHERE stage='in_work'",
+            "UPDATE ezs_sites SET first_seen_at=COALESCE(first_seen_at, created_at), "
+            "last_seen_at=COALESCE(last_seen_at, created_at) WHERE first_seen_at IS NULL",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""
