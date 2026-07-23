@@ -69,6 +69,8 @@ export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 export const SITES_MENU: CentralMenuItem[] = [
   { key: 'sites_overview', label: 'Обзор пайплайна', group: 'Площадки (Банк ЗУ)' },
   { key: 'sites_list',     label: 'Реестр площадок', group: 'Площадки (Банк ЗУ)' },
+  { key: 'sites_priority', label: 'Приоритеты',      group: 'Площадки (Банк ЗУ)' },
+  { key: 'sites_map',      label: 'Карта площадок',  group: 'Площадки (Банк ЗУ)' },
 ]
 export const SITES_KEYS = SITES_MENU.map((m) => m.key)
 

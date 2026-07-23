@@ -20,14 +20,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  getSite, getSiteEvents, getSiteMembers, patchSite, moveSiteStage, markSiteGate, addSiteEvent,
-  STAGE_META, FUNNEL_STAGES, type SiteDetail, type SiteStage,
+  getSite, getSiteEvents, getSiteMembers, getSiteEconomics, patchSite, moveSiteStage,
+  markSiteGate, addSiteEvent, STAGE_META, FUNNEL_STAGES, QUADRANT_META,
+  type SiteDetail, type SiteStage,
 } from '@/services/sitesService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const TABS = [
   { k: 'work', label: 'Работа' },
   { k: 'passport', label: 'Паспорт' },
+  { k: 'economics', label: 'Экономика' },
   { k: 'history', label: 'История' },
 ] as const
 type Tab = (typeof TABS)[number]['k']
@@ -76,6 +78,7 @@ export function SiteCardDialog({ companyId, id, onClose }: {
             </div>
             {tab === 'work' && <WorkTab site={s} companyId={companyId} onDone={refresh} />}
             {tab === 'passport' && <PassportTab site={s} companyId={companyId} onDone={refresh} />}
+            {tab === 'economics' && <EconomicsTab site={s} companyId={companyId} />}
             {tab === 'history' && <HistoryTab site={s} companyId={companyId} />}
           </>
         )}
@@ -421,6 +424,115 @@ function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId:
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ── Вкладка «Экономика» ────────────────────────────────────────────────── */
+
+function EconomicsTab({ site, companyId }: { site: SiteDetail; companyId: string }) {
+  const q = useQuery({
+    queryKey: ['site-economics', companyId, site.id],
+    queryFn: () => getSiteEconomics(companyId, site.id),
+  })
+  if (q.isLoading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  const d = q.data
+  if (!d) return null
+  const { economics: e, score } = d
+
+  return (
+    <div className="space-y-3">
+      {/* Приоритет */}
+      <section className="rounded-lg border border-border p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-semibold">Приоритет</div>
+          <span className={`text-[11px] rounded border px-1.5 py-0.5 ${QUADRANT_META[score.quadrant].cls}`}
+            title={QUADRANT_META[score.quadrant].hint}>{QUADRANT_META[score.quadrant].label}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-3 text-xs">
+          <Metric label="Привлекательность" value={score.attract != null ? String(score.attract) : '—'} />
+          <Metric label="Исполнимость" value={score.feasible != null ? String(score.feasible) : '—'} />
+          <Metric label="Уверенность оценки" value={`${score.confidence}%`}
+            warn={score.confidence < 34} />
+        </div>
+        {score.nearestStationKm != null && (
+          <div className={`text-[11px] ${score.cannibalization ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
+            До ближайшей нашей станции {score.nearestStationKm} км
+            {score.cannibalization ? ' — площадка делит трафик с действующей ЭЗС' : ''}
+          </div>
+        )}
+        {score.unknown.length > 0 && (
+          <div className="text-[11px] text-muted-foreground">
+            Не хватает: {score.unknown.join('; ')}
+          </div>
+        )}
+      </section>
+
+      {/* Экономика */}
+      {!e.ok ? (
+        <div className="rounded-lg border border-border p-3 text-xs text-muted-foreground">
+          {e.message ?? 'Расчёт недоступен'}
+        </div>
+      ) : (
+        <section className="rounded-lg border border-border">
+          <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40">
+            Оценка экономики — по фактическим сессиям сети
+          </div>
+          <div className="p-3 space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <Metric label="Тариф (факт)" value={`${e.tariff} ₽/кВт·ч`} />
+              <Metric label="Входная цена" value={`${e.inputPrice} ₽/кВт·ч`} />
+              <Metric label="Маржа с кВт·ч" value={`${e.marginPerKwh} ₽`} />
+              <Metric label="Аренда" value={`${nf0.format(e.rentMonth ?? 0)} ₽/мес`} />
+            </div>
+
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-muted-foreground border-b">
+                  <th className="text-left py-1 font-medium">Сценарий</th>
+                  <th className="text-right py-1 font-medium">кВт·ч/мес</th>
+                  <th className="text-right py-1 font-medium">Выручка</th>
+                  <th className="text-right py-1 font-medium">Маржа/мес</th>
+                  <th className="text-right py-1 font-medium">Окупаемость</th>
+                </tr>
+              </thead>
+              <tbody>
+                {([['Базовый (медиана сети)', e.base], ['Хороший (верхняя четверть)', e.good]] as const).map(([label, sc]) => (
+                  <tr key={label} className="border-b border-border/30">
+                    <td className="py-1.5">{label}</td>
+                    <td className="py-1.5 text-right font-mono">{nf0.format(sc?.kwhMonth ?? 0)}</td>
+                    <td className="py-1.5 text-right font-mono">{nf0.format(sc?.revenueMonth ?? 0)} ₽</td>
+                    <td className="py-1.5 text-right font-mono">{nf0.format(sc?.marginMonth ?? 0)} ₽</td>
+                    <td className="py-1.5 text-right font-mono">
+                      {sc?.paybackMonths != null ? `${nf0.format(sc.paybackMonths)} мес` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="text-[11px] text-muted-foreground">
+              Капитальные затраты: {e.capex != null ? `${nf0.format(e.capex)} ₽` : 'не посчитаны'}
+            </div>
+
+            <div className="rounded border border-border bg-muted/20 p-2">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Допущения расчёта</div>
+              <ul className="space-y-0.5 text-[11px] text-muted-foreground list-disc pl-4">
+                {e.assumptions.map((a, i) => <li key={i}>{a}</li>)}
+              </ul>
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+function Metric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={`text-sm font-semibold ${warn ? 'text-amber-600 dark:text-amber-400' : ''}`}>{value}</div>
     </div>
   )
 }

@@ -246,3 +246,100 @@ export async function createSite(
 ): Promise<SiteDetail> {
   return post(`/api/sites?company_id=${companyId}`, payload)
 }
+
+// ── Приоритеты и экономика (Волна 3) ───────────────────────────────────────
+
+/** Квадрант решения. `need_data` — не приговор, а «сначала добрать факты». */
+export type Quadrant = 'do_now' | 'unblock' | 'option' | 'drop' | 'need_data'
+
+export const QUADRANT_META: Record<Quadrant, { label: string; hint: string; cls: string; dot: string }> = {
+  do_now: { label: 'Делать сейчас', hint: 'спрос есть и реализуемо', cls: 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80', dot: 'bg-emerald-500' },
+  unblock: { label: 'Расшивать узкое место', hint: 'место хорошее, мешает техника или право', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80', dot: 'bg-amber-500' },
+  option: { label: 'Дешёвый опцион', hint: 'сделать легко, но спрос слабый', cls: 'border-sky-400/50 text-sky-600 dark:text-sky-300/80', dot: 'bg-sky-500' },
+  drop: { label: 'Кандидат на отказ', hint: 'и спрос слабый, и делать тяжело', cls: 'border-red-400/50 text-red-600 dark:text-red-400/80', dot: 'bg-red-400' },
+  need_data: { label: 'Не хватает данных', hint: 'сначала добрать факты, потом решать', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
+}
+
+export interface MatrixItem {
+  id: string
+  stage: SiteStage
+  stageLabel: string
+  region: string | null
+  city: string | null
+  address: string | null
+  owner: string | null
+  attract: number | null
+  feasible: number | null
+  confidence: number
+  quadrant: Quadrant
+  nearestStationKm: number | null
+  cannibalization: boolean
+  unknown: string[]
+}
+
+export interface SitesMatrix {
+  total: number
+  quadrants: { key: Quadrant; label: string; hint: string; count: number }[]
+  items: MatrixItem[]
+  benchmark: {
+    network: { kwhMonth: number | null; kwhP75: number | null; tariff: number | null; stations: number }
+    byRegion: Record<string, { kwhMonth: number | null; kwhP75: number | null; tariff: number | null; stations: number }>
+    months: number
+  }
+  thresholds: { cannibalKm: number; nearKm: number; gapKm: number }
+}
+
+export interface SitesGaps {
+  regions: { region: string; stations: number; sites: number }[]
+  networkNoPipeline: { region: string; stations: number }[]
+  pipelineNoNetwork: { region: string; sites: number }[]
+  cannibalization: { id: string; region: string | null; city: string | null; address: string | null; stage: SiteStage; stageLabel: string; km: number }[]
+  withoutCoords: number
+  thresholds: { cannibalKm: number; gapKm: number }
+}
+
+export interface SiteScenario {
+  kwhMonth: number
+  revenueMonth: number
+  energyCostMonth: number
+  marginMonth: number
+  paybackMonths: number | null
+}
+
+export interface SiteEconomics {
+  ok: boolean
+  message?: string
+  tariff?: number
+  inputPrice?: number
+  marginPerKwh?: number
+  rentMonth?: number
+  capex?: number | null
+  base?: SiteScenario
+  good?: SiteScenario
+  assumptions: string[]
+  benchmarkSource?: 'region' | 'network'
+}
+
+export async function getSitesMatrix(
+  companyId: string, p?: { stage?: string; region?: string },
+): Promise<SitesMatrix> {
+  return get('/api/sites/analysis/matrix', {
+    company_id: companyId, stage: p?.stage || undefined, region: p?.region || undefined,
+  })
+}
+
+export async function getSitesGaps(companyId: string): Promise<SitesGaps> {
+  return get('/api/sites/analysis/gaps', { company_id: companyId })
+}
+
+export async function getSitesMapPoints(
+  companyId: string,
+): Promise<{ points: (MatrixItem & { lat: number; lon: number })[]; thresholds: SitesMatrix['thresholds'] }> {
+  return get('/api/sites/analysis/map', { company_id: companyId })
+}
+
+export async function getSiteEconomics(
+  companyId: string, id: string,
+): Promise<{ economics: SiteEconomics; score: { attract: number | null; feasible: number | null; confidence: number; quadrant: Quadrant; factors: { attract: { name: string; score: number }[]; feasible: { name: string; score: number }[] }; unknown: string[]; nearestStationKm: number | null; cannibalization: boolean } }> {
+  return get(`/api/sites/${id}/economics`, { company_id: companyId })
+}

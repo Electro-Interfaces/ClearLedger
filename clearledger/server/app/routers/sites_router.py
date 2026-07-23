@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import EzsSite, User
-from app.services import ezs_site_work, ezs_sites
+from app.services import ezs_site_analysis, ezs_site_work, ezs_sites
 
 router = APIRouter(prefix="/sites", tags=["Площадки ЭЗС (Банк ЗУ)"])
 
@@ -91,6 +91,64 @@ async def create_site(
     site = await ezs_site_work.create_site(db, cid, payload, user)
     await db.commit()
     return await ezs_sites.site_detail(db, cid, site.id)
+
+
+@router.get("/analysis/matrix")
+async def analysis_matrix(
+    company_id: str = Query(...), stage: str | None = Query(None),
+    region: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Приоритеты: привлекательность × исполнимость по активным площадкам."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_site_analysis.priority_matrix(db, cid, stage=stage, region=region)
+
+
+@router.get("/analysis/gaps")
+async def analysis_gaps(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Разрывы покрытия: где сеть без пайплайна, где пайплайн без сети, каннибализация."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_site_analysis.coverage_gaps(db, cid)
+
+
+@router.get("/analysis/map")
+async def analysis_map(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Точки для карты: площадки со стадией и скорингом (станции сети — из /api/locations)."""
+    cid = await assert_company_member(company_id, user, db)
+    m = await ezs_site_analysis.priority_matrix(db, cid)
+    sites = (await db.execute(
+        select(EzsSite.id, EzsSite.lat, EzsSite.lon).where(
+            EzsSite.company_id == cid, EzsSite.lat.is_not(None)))).all()
+    coords = {str(i): (la, lo) for i, la, lo in sites}
+    pts = []
+    for it in m["items"]:
+        c = coords.get(it["id"])
+        if c:
+            pts.append({**it, "lat": c[0], "lon": c[1]})
+    return {"points": pts, "thresholds": m["thresholds"]}
+
+
+@router.get("/{site_id}/economics")
+async def site_economics(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Оценка экономики площадки по фактическим сессиям сети + допущения расчёта."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    bench = await ezs_site_analysis.region_benchmarks(db, cid)
+    near = await ezs_site_analysis.nearest_station_km(db, cid)
+    return {
+        "economics": ezs_site_analysis.economics(site, bench),
+        "score": ezs_site_analysis.score_site(site, near_km=near.get(str(site_id)), bench=bench),
+        "quadrants": ezs_site_analysis.QUADRANTS,
+    }
 
 
 @router.get("/{site_id}")

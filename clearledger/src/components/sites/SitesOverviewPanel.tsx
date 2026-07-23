@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2, Upload, MapPin, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import {
-  getSitesOverview, importSitesXlsx, STAGE_META,
+  getSitesOverview, getSitesGaps, importSitesXlsx, STAGE_META,
   type SitesImportReport, type SiteStage,
 } from '@/services/sitesService'
 
@@ -167,6 +167,8 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
             </CardContent>
           </Card>
 
+          <GapsCard companyId={companyId} />
+
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-center gap-1">
@@ -193,6 +195,72 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
 
 function stage(d: { funnel: { stage: SiteStage; count: number }[] } | undefined, s: SiteStage): number {
   return d?.funnel.find((x) => x.stage === s)?.count ?? 0
+}
+
+/**
+ * Разрывы покрытия: где сеть работает без пайплайна (развитие остановилось),
+ * где пайплайн без сети (заходим в новый регион) и где новая площадка встанет
+ * вплотную к нашей же станции.
+ */
+function GapsCard({ companyId }: { companyId: string }) {
+  const q = useQuery({ queryKey: ['sites-gaps', companyId], queryFn: () => getSitesGaps(companyId) })
+  const d = q.data
+  if (q.isLoading || !d) return null
+  const noPipe = d.networkNoPipeline.slice(0, 8)
+  const noNet = d.pipelineNoNetwork.slice(0, 8)
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+          Разрывы покрытия — сеть и пайплайн не совпадают
+        </div>
+        <div className="p-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+              Сеть есть — площадок нет ({d.networkNoPipeline.length})
+            </div>
+            {noPipe.length === 0 ? <div className="text-muted-foreground">—</div> : noPipe.map((r) => (
+              <div key={r.region} className="flex justify-between border-b border-border/20 py-0.5">
+                <span className="truncate pr-2">{r.region}</span>
+                <span className="font-mono text-muted-foreground">{r.stations} ст.</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+              Площадки есть — сети нет ({d.pipelineNoNetwork.length})
+            </div>
+            {noNet.length === 0 ? <div className="text-muted-foreground">—</div> : noNet.map((r) => (
+              <div key={r.region} className="flex justify-between border-b border-border/20 py-0.5">
+                <span className="truncate pr-2">{r.region}</span>
+                <span className="font-mono text-muted-foreground">{r.sites} пл.</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+              Вплотную к своей станции ({d.cannibalization.length})
+            </div>
+            {d.cannibalization.length === 0 ? <div className="text-muted-foreground">—</div> : (
+              <>
+                {d.cannibalization.slice(0, 8).map((c) => (
+                  <div key={c.id} className="flex justify-between border-b border-border/20 py-0.5">
+                    <span className="truncate pr-2" title={`${c.region ?? ''} · ${c.address ?? ''}`}>
+                      {c.city ?? c.region ?? '—'} · {c.stageLabel}
+                    </span>
+                    <span className="font-mono text-amber-600 dark:text-amber-400">{c.km} км</span>
+                  </div>
+                ))}
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Ближе {d.thresholds.cannibalKm * 1000} м — площадка скорее делит трафик, чем добавляет покрытие.
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
 }
 
 /** Пробел в ведении: чем больше доля, тем тревожнее цвет (обратная шкала к Fill). */
