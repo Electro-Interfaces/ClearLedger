@@ -1,0 +1,212 @@
+/**
+ * Причины расхождения книга↔факт по резервуарам.
+ *
+ * Причина одной смены по массе ненадёжна (книга и факт считаются по разной
+ * плотности), поэтому она читается по поведению расхождения во времени:
+ *  • дрейф   — расхождение монотонно растёт: реальная убыль/прибыль (испарение,
+ *    утечка, недоучёт ТРК) — надо искать причину;
+ *  • скачок  — прыгнуло в одну смену и осталось: разовое событие (часто слив);
+ *  • шум     — большой разброс без тренда: замер нестабилен;
+ *  • стабильное — держится ровно: старая разница, лечится инвентаризацией.
+ */
+import { useMemo, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Loader2, TrendingDown, TrendingUp, Zap } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
+import { getVarianceDiagnostics, type VarianceNature } from '@/services/analyticsService'
+
+const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+const nf1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+
+const NATURE_TONE: Record<VarianceNature, string> = {
+  drift: 'border-red-400/50 text-red-300/80',
+  jump: 'border-amber-400/50 text-amber-300/80',
+  noise: 'border-zinc-500/50 text-zinc-300/80',
+  stable: 'border-zinc-600 text-zinc-400',
+  short: 'border-zinc-600 text-zinc-500',
+}
+
+/** Расхождение со словом: знак сам по себе неоднозначен. */
+function gap(v: number): string {
+  if (Math.abs(v) < 0.5) return '—'
+  return `${nf0.format(Math.abs(v))} л ${v > 0 ? 'недостача' : 'излишек'}`
+}
+
+interface Props {
+  companyId: string
+  dateFrom: string
+  dateTo: string
+  stationCodes: number[]
+  fuelCodes: number[]
+}
+
+export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }: Props) {
+  const [fNature, setFNature] = useState<'all' | VarianceNature>('all')
+
+  const query = useQuery({
+    queryKey: ['variance-diagnostics', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
+    queryFn: () => getVarianceDiagnostics({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }),
+    placeholderData: keepPreviousData,
+  })
+
+  const data = query.data
+  const rows = useMemo(() => {
+    if (!data) return []
+    return fNature === 'all' ? data.tanks : data.tanks.filter((t) => t.nature === fNature)
+  }, [data, fNature])
+
+  if (query.isLoading) {
+    return (
+      <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />Разбор причин расхождений…
+      </div>
+    )
+  }
+  if (query.error || !data) {
+    return <div className="p-8 text-sm text-muted-foreground">Не удалось загрузить разбор причин</div>
+  }
+  if (data.totals.tanks === 0) {
+    return <div className="p-8 text-sm text-muted-foreground">За период нет данных для диагностики</div>
+  }
+
+  const t = data.totals
+
+  return (
+    <div className="space-y-4">
+      {/* Причины — плитки, кликаются как фильтр */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <CauseTile
+          active={fNature === 'drift'} onClick={() => setFNature(fNature === 'drift' ? 'all' : 'drift')}
+          icon={<TrendingDown className="h-4 w-4" />}
+          title="Систематическая убыль" value={t.drift}
+          hint="растёт от смены к смене — реальный процесс" tone="text-red-600 dark:text-red-400" />
+        <CauseTile
+          active={fNature === 'jump'} onClick={() => setFNature(fNature === 'jump' ? 'all' : 'jump')}
+          icon={<Zap className="h-4 w-4" />}
+          title="Разовый скачок" value={t.jump}
+          hint="прыгнуло в одну смену — событие/слив" tone="text-amber-600 dark:text-amber-400" />
+        <CauseTile
+          active={fNature === 'noise'} onClick={() => setFNature(fNature === 'noise' ? 'all' : 'noise')}
+          icon={<TrendingUp className="h-4 w-4" />}
+          title="Нестабильный замер" value={t.noise}
+          hint="большой разброс без тренда" />
+        <CauseTile
+          active={fNature === 'stable'} onClick={() => setFNature(fNature === 'stable' ? 'all' : 'stable')}
+          icon={<Badge variant="outline" className="h-4 border-0 p-0 text-[10px]">≈</Badge>}
+          title="Стабильное смещение" value={t.stable}
+          hint="держится ровно — старая разница" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        {t.temperature_driven > 0 && (
+          <Badge variant="outline" className="border-sky-400/50 text-sky-300/80">
+            тепловое расширение влияет на {nf0.format(t.temperature_driven)} рез.
+          </Badge>
+        )}
+        {fNature !== 'all' && (
+          <button className="text-xs text-muted-foreground underline" onClick={() => setFNature('all')}>
+            показать все {nf0.format(t.tanks)}
+          </button>
+        )}
+        <span className="ml-auto text-[11px] text-muted-foreground">резервуаров: {nf0.format(rows.length)}</span>
+      </div>
+
+      {/* Таблица резервуаров с диагнозом */}
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[1080px] text-xs">
+          <thead className="bg-muted/40 text-muted-foreground">
+            <tr>
+              <Th>АЗС</Th><Th>Рез.</Th><Th>Топливо</Th><Th>Причина</Th>
+              <Th right>Тренд, л/смену</Th><Th right>Накоплено за период</Th>
+              <Th right>Скачок</Th><Th>В какой смене</Th>
+              <Th right>Расхождение сейчас</Th><Th right>Смен</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={`${r.station_code}:${r.tank_number}`} className={cn(
+                'border-t',
+                r.nature === 'drift' && 'bg-red-500/5',
+                r.nature === 'jump' && 'bg-amber-500/5',
+              )}>
+                <Td>{r.station_name}</Td>
+                <Td>№{r.tank_number}</Td>
+                <Td>{r.fuel_name}</Td>
+                <Td>
+                  <Badge variant="outline" className={NATURE_TONE[r.nature]}>{r.nature_title}</Badge>
+                  {r.temperature_share >= 0.5 && (
+                    <Badge variant="outline" className="ml-1 border-sky-400/50 text-sky-300/80">температура</Badge>
+                  )}
+                </Td>
+                <Td right className={r.nature === 'drift'
+                  ? (r.trend_per_shift > 0 ? 'font-medium text-red-600 dark:text-red-400' : 'font-medium text-sky-600 dark:text-sky-400')
+                  : 'text-muted-foreground'}>
+                  {Math.abs(r.trend_per_shift) >= 0.5 ? `${r.trend_per_shift > 0 ? '+' : ''}${nf1.format(r.trend_per_shift)}` : '—'}
+                </Td>
+                <Td right className={r.nature === 'drift' ? 'font-medium' : 'text-muted-foreground'}>
+                  {Math.abs(r.accumulated) >= 1 ? gap(r.accumulated) : '—'}
+                </Td>
+                <Td right className={r.nature === 'jump' ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
+                  {r.nature === 'jump' && Math.abs(r.jump_liters) >= 1
+                    ? `${r.jump_liters > 0 ? '+' : ''}${nf0.format(r.jump_liters)} л` : '—'}
+                </Td>
+                <Td>
+                  {r.nature === 'jump' && r.jump_shift != null ? (
+                    <span>
+                      №{r.jump_shift}
+                      {r.jump_on_receipt && <span className="ml-1 text-sky-600 dark:text-sky-400">при сливе</span>}
+                    </span>
+                  ) : <span className="text-muted-foreground">—</span>}
+                </Td>
+                <Td right className={r.last_gap > 0 ? 'text-red-600 dark:text-red-400' : r.last_gap < 0 ? 'text-sky-600 dark:text-sky-400' : 'text-muted-foreground'}>
+                  {gap(r.last_gap)}
+                </Td>
+                <Td right>{r.shifts}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Причина определяется по тому, как расхождение книги с фактом ведёт себя от
+        смены к смене (порог замера {nf0.format(data.tolerance.vol_liters)} л, минимум
+        {' '}{data.tolerance.min_shifts} смен). «Тренд» — насколько расхождение меняется
+        за смену: плюс — недостача растёт, минус — растёт излишек. Расхождение одной
+        смены по массе не используется — книжная и фактическая масса считаются по
+        разной плотности и дают ложные тонны. «Температура» — где объём гуляет, а
+        масса держится: это тепловое расширение, а не потеря топлива.
+      </p>
+    </div>
+  )
+}
+
+function CauseTile({ active, onClick, icon, title, value, hint, tone }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode
+  title: string; value: number; hint: string; tone?: string
+}) {
+  return (
+    <button
+      type="button" onClick={onClick}
+      className={cn(
+        'rounded-lg border p-3 text-left transition-colors',
+        active ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'bg-card hover:bg-muted/40',
+      )}
+    >
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{icon}{title}</div>
+      <div className={cn('mt-1 text-lg font-semibold', tone)}>{nf0.format(value)} <span className="text-xs font-normal text-muted-foreground">рез.</span></div>
+      <div className="mt-0.5 text-[10px] text-muted-foreground">{hint}</div>
+    </button>
+  )
+}
+
+function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
+  return <th className={cn('p-2.5 font-medium', right ? 'text-right' : 'text-left')}>{children}</th>
+}
+
+function Td({ children, right, className }: {
+  children: React.ReactNode; right?: boolean; className?: string
+}) {
+  return <td className={cn('p-2.5', right ? 'text-right tabular-nums' : '', className)}>{children}</td>
+}

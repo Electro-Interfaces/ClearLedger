@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
-  BookOpen, CircleCheckBig, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
+  Activity, BookOpen, CircleCheckBig, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
   TriangleAlert, Truck, Warehouse, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MultiSelectFilter } from '@/components/locations/fleet/MultiSelectFilter'
 import { TankLedgerTabs } from '@/components/workspace/TankLedgerTabs'
 import { ReceiptAnalysisPanel } from '@/components/workspace/ReceiptAnalysisPanel'
+import { VarianceCausesPanel } from '@/components/workspace/VarianceCausesPanel'
 import { useFilters } from '@/contexts/FilterContext'
 import { useLocations } from '@/hooks/useLocations'
 import { cn } from '@/lib/utils'
@@ -309,6 +310,7 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
               <TabsTrigger value="book_tanks"><Warehouse className="mr-1.5 h-3.5 w-3.5" />По резервуарам <span className="ml-1 text-muted-foreground">{data.tanks.length}</span></TabsTrigger>
               <TabsTrigger value="book_issues"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Замечания</TabsTrigger>
               <TabsTrigger value="receipts"><Truck className="mr-1.5 h-3.5 w-3.5" />Приёмка (сливы)</TabsTrigger>
+              <TabsTrigger value="causes"><Activity className="mr-1.5 h-3.5 w-3.5" />Причины</TabsTrigger>
               <TabsTrigger value="summary"><Database className="mr-1.5 h-3.5 w-3.5" />АЗС × топливо <span className="ml-1 text-muted-foreground">{data.lines.length}</span></TabsTrigger>
             </TabsList>
             <TabsContent value="journal" className="mt-3">
@@ -334,6 +336,13 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
             </TabsContent>
             <TabsContent value="receipts" className="mt-3">
               <ReceiptAnalysisPanel
+                companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+                stationCodes={effectiveStations}
+                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+              />
+            </TabsContent>
+            <TabsContent value="causes" className="mt-3">
+              <VarianceCausesPanel
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
                 fuelCodes={fuels.map(Number).filter(Number.isFinite)}

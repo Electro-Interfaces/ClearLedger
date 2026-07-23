@@ -187,6 +187,32 @@ async def get_receipt_analysis(
     )
 
 
+@router.get("/variance-diagnostics")
+async def get_variance_diagnostics(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    station_codes: str | None = None,
+    fuel_codes: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Причины расхождения книга↔факт по резервуарам: стабильное/дрейф/скачок/шум.
+
+    Причина читается по поведению расхождения во времени, а не по одной смене:
+    разовое расхождение по массе ненадёжно (книга и факт считаются по разной
+    плотности), но растущий тренд или скачок в конкретную смену — надёжны.
+    """
+    from app.services.variance_diagnostics import build_variance_diagnostics
+
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "management")
+    return await build_variance_diagnostics(
+        db, f.company_id, f.date_from, f.date_to,
+        station_codes=_csv_ints(station_codes, "station_codes"),
+        fuel_codes=_csv_ints(fuel_codes, "fuel_codes"),
+    )
+
+
 @router.get("/sales-channels")
 async def get_sales_channels(
     company_id: str,

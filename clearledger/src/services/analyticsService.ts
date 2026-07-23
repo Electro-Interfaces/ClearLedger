@@ -764,6 +764,54 @@ export async function getReceiptAnalysis(p: PeriodParams & {
   })
 }
 
+export type VarianceNature = 'stable' | 'drift' | 'jump' | 'noise' | 'short'
+
+export interface VarianceTank {
+  station_code: number
+  station_name: string
+  tank_number: number
+  fuel_code: number | null
+  fuel_name: string
+  shifts: number
+  last_gap: number
+  nature: VarianceNature
+  nature_title: string
+  mean_gap: number
+  std_gap: number
+  /** Тренд расхождения, л/смену: >0 недостача растёт, <0 излишек растёт. */
+  trend_per_shift: number
+  /** Насколько тренд сдвинул расхождение за период, л. */
+  accumulated: number
+  jump_liters: number
+  jump_shift: number | null
+  jump_on_receipt: boolean
+  /** Доля смен, где масса держится, а объём гуляет (тепловое расширение). */
+  temperature_share: number
+}
+
+export interface VarianceDiagnosticsResponse {
+  period: { from: string; to: string }
+  totals: {
+    tanks: number
+    drift: number; jump: number; noise: number; stable: number
+    temperature_driven: number
+  }
+  natures: { nature: VarianceNature; title: string; count: number; abs_accum: number }[]
+  tanks: VarianceTank[]
+  tolerance: { vol_liters: number; mass_kg: number; min_shifts: number }
+}
+
+export async function getVarianceDiagnostics(p: PeriodParams & {
+  stationCodes?: number[]
+  fuelCodes?: number[]
+}): Promise<VarianceDiagnosticsResponse> {
+  return get<VarianceDiagnosticsResponse>('/api/analytics/variance-diagnostics', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
+}
+
 export async function getSalesChannels(p: PeriodParams): Promise<SalesChannelsResponse> {
   return get<SalesChannelsResponse>('/api/analytics/sales-channels', {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
