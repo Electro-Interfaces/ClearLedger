@@ -513,6 +513,35 @@ export async function getAwaitingAccounting(companyId: string): Promise<Awaiting
   return get('/api/sites/awaiting-accounting', { company_id: companyId })
 }
 
+
+/** Схема реализации: путь проекта одной лентой (стадии + параллельные треки). */
+export interface ProjectRoadmap {
+  stage: SiteStage
+  stageLabel: string
+  phase: string | null
+  archived: boolean
+  progress: number
+  steps: {
+    key: SiteStage; kind: 'stage'; label: string
+    phase: string | null; phaseLabel: string
+    state: 'done' | 'current' | 'waiting' | 'archived'
+    date: string | null
+    gateDone: number; gateTotal: number; blocking: string[]
+    items: { label: string; done: boolean; required: boolean }[]
+  }[]
+  tracks: {
+    key: string; kind: 'track'; label: string
+    state: 'done' | 'current' | 'waiting' | 'overdue' | 'failed' | 'empty'
+    status: string; date: string | null; detail: string | null; note: string | null
+  }[]
+  docs: { count: number; kinds: string[] }
+  subsidy: SubsidyCheck
+}
+
+export async function getProjectRoadmap(companyId: string, id: string): Promise<ProjectRoadmap> {
+  return get(`/api/sites/${id}/roadmap`, { company_id: companyId })
+}
+
 export async function getProjectContext(companyId: string, id: string): Promise<ProjectContext> {
   return get(`/api/sites/${id}/project`, { company_id: companyId })
 }

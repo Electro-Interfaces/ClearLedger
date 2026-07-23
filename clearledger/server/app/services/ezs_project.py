@@ -868,6 +868,137 @@ async def link_location(db: AsyncSession, company_id, site: EzsSite, location_id
     return {"ok": True, "location": {"id": str(loc.id), "name": loc.name, "code": loc.code}}
 
 
+async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[str, Any]:
+    """Схема реализации проекта — дорожная карта от участка до эксплуатации.
+
+    Собирает в одну ленту то, что разложено по вкладкам: стадии воронки с
+    гейтами, техприсоединение, оборудование, документы, договор и объект сети.
+    Каждый шаг знает своё состояние (сделано / в работе / ждёт / просрочено),
+    дату и что именно его держит.
+
+    Смысл экрана — видеть путь целиком: где мы, что осталось и что мешает.
+    Табличные вкладки отвечают «как заполнить», а схема — «где мы в проекте».
+    """
+    from app.services.ezs_site_work import GATES, gate_state, site_doc_kinds
+
+    doc_kinds = await site_doc_kinds(db, site.id)
+    tc = await get_tech_connection(db, company_id, site.id)
+    eq = await list_equipment(db, company_id, site.id)
+    docs = await list_docs(db, company_id, site.id)
+    today = date.today().isoformat()
+    cur_pos = STAGE_ORDER.index(site.stage) if site.stage in STAGE_ORDER else -1
+    archived = site.stage == "archive"
+
+    def stage_state(stage: str) -> str:
+        if archived:
+            return "archived"
+        pos = STAGE_ORDER.index(stage)
+        if cur_pos < 0:
+            return "waiting"
+        if pos < cur_pos:
+            return "done"
+        if pos == cur_pos:
+            return "current"
+        return "waiting"
+
+    steps: list[dict[str, Any]] = []
+    for stage in STAGE_ORDER:
+        st = stage_state(stage)
+        g = gate_state(site, stage, doc_kinds=doc_kinds,
+                       equipment_supplied=eq["allSupplied"])
+        # Что именно держит текущий шаг — самое ценное на схеме.
+        blocking = g["blocking"] if st == "current" else []
+        steps.append({
+            "key": stage, "kind": "stage", "label": STAGE_LABELS[stage],
+            "phase": STAGE_PHASE.get(stage), "phaseLabel": PHASE_LABELS.get(STAGE_PHASE.get(stage, ""), ""),
+            "state": st,
+            "date": site.stage_since if st == "current" else None,
+            "gateDone": g["done"], "gateTotal": g["total"], "blocking": blocking,
+            "items": [{"label": i["label"], "done": i["done"], "required": i["required"]}
+                      for i in g["items"]],
+        })
+
+    # Параллельные треки «Реализации» — они не стадии, но без них схема врёт.
+    tracks: list[dict[str, Any]] = []
+    if tc:
+        tc_state = ("done" if tc["status"] == "done" else
+                    "failed" if tc["status"] == "rejected" else
+                    "overdue" if tc["overdue"] else
+                    "current" if tc["status"] != "draft" else "waiting")
+        tracks.append({
+            "key": "tp", "kind": "track", "label": "Техприсоединение",
+            "state": tc_state, "status": tc["statusLabel"],
+            "date": tc["doneDate"] or tc["dueDate"],
+            "detail": " · ".join(x for x in [
+                tc["gridOperator"],
+                f"ТУ {tc['specsNo']}" if tc["specsNo"] else None,
+                f"{tc['powerKwt']:.0f} кВт" if tc["powerKwt"] else None,
+            ] if x) or None,
+            "note": "срок мероприятий прошёл" if tc["overdue"] else None,
+        })
+    else:
+        tracks.append({"key": "tp", "kind": "track", "label": "Техприсоединение",
+                       "state": "empty", "status": "не заведено", "date": None,
+                       "detail": None, "note": "заявка в сетевую не подана"})
+
+    if eq["items"]:
+        eq_state = ("done" if eq["allInstalled"] else
+                    "overdue" if any(i["overdue"] for i in eq["items"]) else
+                    "current" if eq["allSupplied"] else "waiting")
+        tracks.append({
+            "key": "equipment", "kind": "track", "label": "Оборудование",
+            "state": eq_state,
+            "status": f"{sum(1 for i in eq['items'] if i['status'] in ('supplied', 'installed'))}"
+                      f" из {len(eq['items'])} поставлено",
+            "date": None,
+            "detail": ", ".join(i["title"] for i in eq["items"][:2] if i["title"]) or None,
+            "note": "просрочена поставка" if any(i["overdue"] for i in eq["items"]) else None,
+        })
+    else:
+        tracks.append({"key": "equipment", "kind": "track", "label": "Оборудование",
+                       "state": "empty", "status": "потребность не заведена",
+                       "date": None, "detail": None, "note": None})
+
+    contract = None
+    if site.contract_id:
+        c = (await db.execute(select(Contract).where(Contract.id == site.contract_id))).scalar_one_or_none()
+        if c:
+            contract = f"№ {c.number} от {c.date}"
+    tracks.append({
+        "key": "land", "kind": "track", "label": "Право на землю",
+        "state": ("done" if site.contract_start and contract else
+                  "current" if site.contract_start else "empty"),
+        "status": (site.control_form or "форма контроля не определена"),
+        "date": site.contract_end,
+        "detail": contract or (f"договор с {site.contract_start}" if site.contract_start else None),
+        "note": ("подписан, но не заведён в учёте" if site.contract_start and not contract else
+                 "срок договора истёк" if site.contract_end and site.contract_end < today else None),
+    })
+
+    location = None
+    if site.location_id:
+        loc = (await db.execute(select(ServiceLocation).where(
+            ServiceLocation.id == str(site.location_id)))).scalar_one_or_none()
+        location = loc.name if loc else None
+    tracks.append({
+        "key": "network", "kind": "track", "label": "Объект в сети",
+        "state": "done" if location else "empty",
+        "status": location or "не связан",
+        "date": site.commissioned_on, "detail": None,
+        "note": None if location else "после ввода проект должен стать станцией сети",
+    })
+
+    return {
+        "stage": site.stage, "stageLabel": STAGE_LABELS.get(site.stage, site.stage),
+        "phase": STAGE_PHASE.get(site.stage), "archived": archived,
+        "steps": steps,
+        "tracks": tracks,
+        "docs": {"count": len(docs), "kinds": sorted({d["kindLabel"] for d in docs})},
+        "subsidy": subsidy_check(site),
+        "progress": round(sum(1 for s in steps if s["state"] == "done") / len(steps) * 100),
+    }
+
+
 async def project_context(db: AsyncSession, company_id, site: EzsSite) -> dict[str, Any]:
     """Всё, что показывает карточка проекта сверх паспорта."""
     contract = None

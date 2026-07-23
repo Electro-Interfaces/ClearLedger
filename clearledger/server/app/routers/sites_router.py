@@ -370,6 +370,17 @@ async def project_context(
     return await ezs_project.project_context(db, cid, site)
 
 
+@router.get("/{site_id}/roadmap")
+async def project_roadmap(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Схема реализации проекта: путь от участка до эксплуатации одной лентой."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    return await ezs_project.project_roadmap(db, cid, site)
+
+
 @router.put("/{site_id}/tech-connection")
 async def put_tech_connection(
     site_id: uuid.UUID, payload: dict, company_id: str = Query(...),

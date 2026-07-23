@@ -21,7 +21,7 @@ export function SiteCardDialog({ companyId, id, onClose }: {
   const qc = useQueryClient()
   const [, setSearchParams] = useSearchParams()
   const [, setTab] = useWorkspaceSubView('pr_portfolio')
-  const [tab, setLocalTab] = useState<ProjectTabKey>('work')
+  const [tab, setLocalTab] = useState<ProjectTabKey>('roadmap')
   const q = useQuery({ queryKey: ['site-detail', companyId, id], queryFn: () => getSite(companyId, id) })
   const s = q.data
 

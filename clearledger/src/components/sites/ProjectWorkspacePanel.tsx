@@ -112,7 +112,7 @@ function ProjectWorkspace({ companyId, id, onBack }: {
   companyId: string; id: string; onBack: () => void
 }) {
   const qc = useQueryClient()
-  const [tab, setTab] = useState<ProjectTabKey>('work')
+  const [tab, setTab] = useState<ProjectTabKey>('roadmap')
   const q = useQuery({ queryKey: ['site-detail', companyId, id], queryFn: () => getSite(companyId, id) })
   const s = q.data
 

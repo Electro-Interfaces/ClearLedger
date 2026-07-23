@@ -36,11 +36,14 @@ import {
   type SiteDetail, type SiteStage, type ProjectContext,
 } from '@/services/sitesService'
 
+import { ProjectRoadmapTab } from './ProjectRoadmapTab'
+
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение на размещение', 'собственность', 'соглашение с ТЦ']
 
 /** Набор вкладок карточки — один и тот же в диалоге и в полноэкранном режиме. */
 export const PROJECT_TABS = [
+  { k: 'roadmap', label: 'Схема' },
   { k: 'work', label: 'Работа' },
   { k: 'passport', label: 'Паспорт' },
   { k: 'tp', label: 'Присоединение' },
@@ -56,6 +59,7 @@ export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
 export function ProjectTabContent({ tab, site, companyId, onDone }: {
   tab: ProjectTabKey; site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
+  if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'passport') return <PassportTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'tp') return <TechConnectionTab site={site} companyId={companyId} onDone={onDone} />
