@@ -4,7 +4,7 @@ SQLAlchemy 2.0 ORM модели TradeLedger.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date as date_type, datetime
 
 from sqlalchemy import (
     BigInteger,
@@ -3099,6 +3099,68 @@ class FuelShiftSaleOverride(Base):
         Index(
             "uq_fuel_sale_override", "company_id", "station_id", "shift_number",
             "payment_channel", "fuel_code", unique=True,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# FuelTankInventory — ИНВЕНТАРИЗАЦИЯ РЕЗЕРВУАРА (корректировка книги на факт).
+# Замер уровнемера (факт) и документальный остаток (книга) расходятся, и это
+# расхождение само не списывается — копится, пока инвентаризация не оформит
+# корректировку. Одна строка = один резервуар на дату инвентаризации: книжный
+# остаток на момент, фактический замер и разница (излишек к оприходованию /
+# недостача к списанию). После подтверждения книга считается приведённой к
+# факту — расхождение на этот момент закрыто.
+#
+# Ключуется НАТУРАЛЬНЫМ ключом резервуара (station_id + tank_number + дата), а не
+# shift_id — чтобы пережить «Обновить период» (переигровка пересоздаёт смены с
+# новыми UUID). Слой L2, поверх raw-данных смен, как FuelShiftSaleOverride.
+# ---------------------------------------------------------------------------
+class FuelTankInventory(Base):
+    __tablename__ = "fuel_tank_inventories"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    tank_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    fuel_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fuel_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Дата инвентаризации (момент замера).
+    inventory_date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    # Смена, чей замер взят как факт (для ссылки на первоисточник).
+    shift_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Книга (документальный остаток на момент) и факт (замер уровнемера).
+    book_volume: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    fact_volume: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    # Корректировка = факт − книга: плюс — оприходование излишка, минус — списание.
+    adjustment_volume: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    book_mass: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    fact_mass: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    adjustment_mass: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+
+    # draft — черновик ведомости; confirmed — проведено (книга приведена к факту).
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_fuel_tank_inventory", "company_id", "station_id", "tank_number",
+            "inventory_date", unique=True,
         ),
     )
 

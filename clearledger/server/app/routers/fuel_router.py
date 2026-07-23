@@ -2403,6 +2403,84 @@ async def shifts_refresh_status(
 
 
 # ═══════════════════════════════════════════════════════════════
+# Инвентаризация резервуаров — корректировка книги на факт
+# ═══════════════════════════════════════════════════════════════
+
+class InventoryDraftRequest(BaseModel):
+    date: str  # дата инвентаризации YYYY-MM-DD
+    station_codes: list[int] | None = None
+    fuel_codes: list[int] | None = None
+
+
+class InventorySaveRow(BaseModel):
+    station_id: str
+    tank_number: int
+    fuel_code: int | None = None
+    fuel_name: str | None = None
+    shift_number: int | None = None
+    book_volume: float = 0
+    fact_volume: float = 0
+    book_mass: float | None = None
+    fact_mass: float | None = None
+
+
+class InventorySaveRequest(BaseModel):
+    date: str
+    rows: list[InventorySaveRow]
+    note: str | None = None
+
+
+@router.post("/inventory/draft")
+async def inventory_draft(
+    body: InventoryDraftRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Черновик ведомости инвентаризации на дату: книга/факт/корректировка по резервуарам."""
+    from datetime import date as _date
+    from app.services.tank_inventory import build_draft
+
+    cid = await _company_id(user, db)
+    inv_date = _date.fromisoformat(body.date)
+    return await build_draft(db, cid, inv_date,
+                             station_codes=body.station_codes, fuel_codes=body.fuel_codes)
+
+
+@router.post("/inventory")
+async def inventory_save(
+    body: InventorySaveRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Провести инвентаризацию: зафиксировать корректировки (книга приведена к факту)."""
+    from datetime import date as _date
+    from app.services.tank_inventory import save
+
+    cid = await _company_id(user, db)
+    inv_date = _date.fromisoformat(body.date)
+    rows = [r.model_dump() for r in body.rows]
+    result = await save(db, cid, inv_date, rows, note=body.note)
+    # новые корректировки → инвалидация версионного кеша аналитики
+    await bump_version(db, cid)
+    await db.commit()
+    return result
+
+
+@router.get("/inventory")
+async def inventory_list(
+    station_codes: str | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Проведённые инвентаризации, сгруппированные по дате."""
+    from app.services.tank_inventory import list_inventories
+
+    cid = await _company_id(user, db)
+    codes = [int(c) for c in station_codes.split(",") if c.strip()] if station_codes else None
+    return await list_inventories(db, cid, station_codes=codes)
+
+
+# ═══════════════════════════════════════════════════════════════
 # Пооперационные транзакции (наливы) — STS /v2/transactions
 # ═══════════════════════════════════════════════════════════════
 

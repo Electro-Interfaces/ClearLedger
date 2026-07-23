@@ -8,7 +8,7 @@
  * Все методы принимают периодные параметры в ISO (YYYY-MM-DD).
  */
 
-import { get } from './apiClient'
+import { get, post } from './apiClient'
 
 // ─── общие типы ─────────────────────────────────────────────────────
 
@@ -809,6 +809,68 @@ export async function getVarianceDiagnostics(p: PeriodParams & {
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
     ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
+}
+
+export interface InventoryDraftRow {
+  station_id: string
+  station_code: number
+  station_name: string
+  tank_number: number
+  fuel_code: number | null
+  fuel_name: string
+  shift_number: number
+  shift_date: string | null
+  book_volume: number
+  fact_volume: number
+  adjustment_volume: number
+  book_mass: number | null
+  fact_mass: number | null
+  adjustment_mass: number | null
+  kind: 'излишек' | 'недостача' | 'сходится'
+  already_confirmed: boolean
+}
+
+export interface InventoryDraftResponse {
+  inventory_date: string
+  rows: InventoryDraftRow[]
+  totals: { tanks: number; surplus_tanks: number; shortfall_tanks: number; adjustment_volume: number }
+}
+
+export interface InventoryGroup {
+  inventory_date: string
+  tanks: number
+  adjustment_volume: number
+  surplus_tanks: number
+  shortfall_tanks: number
+  confirmed_at: string | null
+  rows: {
+    station_code: number; station_name: string; tank_number: number; fuel_name: string | null
+    book_volume: number; fact_volume: number; adjustment_volume: number; note: string | null
+  }[]
+}
+
+export async function getInventoryDraft(p: {
+  date: string; stationCodes?: number[]; fuelCodes?: number[]
+}): Promise<InventoryDraftResponse> {
+  return post<InventoryDraftResponse>('/api/fuel/inventory/draft', {
+    date: p.date,
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes } : {}),
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes } : {}),
+  })
+}
+
+export async function saveInventory(p: {
+  date: string; rows: unknown[]; note?: string
+}): Promise<{ saved: number; inventory_date: string }> {
+  return post('/api/fuel/inventory', { date: p.date, rows: p.rows, note: p.note })
+}
+
+export async function getInventories(p: {
+  companyId: string; stationCodes?: number[]
+}): Promise<{ inventories: InventoryGroup[] }> {
+  return get('/api/fuel/inventory', {
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
   })
 }
 
