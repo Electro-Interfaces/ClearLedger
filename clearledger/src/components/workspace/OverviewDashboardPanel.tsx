@@ -36,7 +36,8 @@ import { formatPeriod } from '@/lib/formatDate'
 import { useFilters } from '@/contexts/FilterContext'
 
 /** Сужение по сети из контура (регион/станции) для запросов обзора. */
-function useScope() {
+type ScopeArg = { stations?: string[]; regions?: string[]; key: string }
+function useScope(): ScopeArg {
   const { stationCodes, regionIds } = useFilters()
   return {
     stations: stationCodes.length ? stationCodes.map(String) : undefined,
@@ -475,11 +476,16 @@ const seriesLabel = (s: string) => (s === 'value' ? 'Выручка' : s)
 
 /** Реализация (выручка) по дням за период — stacked-бары; разрез: все/коннекторы/ФЛ·ЮЛ + легенда.
  *  По умолчанию — «Все» (одна серия, синяя заливка). */
-function DailyRevenueBar({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+function DailyRevenueBar({ companyId, dateFrom, dateTo, scope }: {
+  companyId: string; dateFrom: string; dateTo: string; scope: ScopeArg
+}) {
   const [mode, setMode] = useState<RevMode>('all')
   const { data, isLoading } = useQuery({
-    queryKey: ['overview-daily-rev', companyId, dateFrom, dateTo, mode],
+    // Сеть входит в ключ (scope.key) и в запрос (stations/regions) — иначе график
+    // остаётся по всей сети, пока KPI уже сужены на выбранную ЭЗС.
+    queryKey: ['overview-daily-rev', companyId, dateFrom, dateTo, mode, scope.key],
     queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'day', metric: 'amount',
+      stations: scope.stations, regions: scope.regions,
       ...(mode === 'all' ? {} : { seriesBy: mode }), topN: 6 }),
   })
   const series = data?.series ?? []
@@ -541,10 +547,13 @@ function AvgCheckTip({ active, payload, label }: {
 }
 
 /** Средний чек ФЛ (частные) по дням + трендовая линия (линейная регрессия) + бейдж роста. */
-function AvgCheckLine({ companyId, dateFrom, dateTo, bigValue }: { companyId: string; dateFrom: string; dateTo: string; bigValue: number }) {
+function AvgCheckLine({ companyId, dateFrom, dateTo, bigValue, scope }: {
+  companyId: string; dateFrom: string; dateTo: string; bigValue: number; scope: ScopeArg
+}) {
   const { data, isLoading } = useQuery({
-    queryKey: ['overview-avgcheck-fl', companyId, dateFrom, dateTo],
-    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'day', metric: 'avg_check', dim: 'user_type', dimVal: 'ФЛ' }),
+    queryKey: ['overview-avgcheck-fl', companyId, dateFrom, dateTo, scope.key],
+    queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'day', metric: 'avg_check',
+      dim: 'user_type', dimVal: 'ФЛ', stations: scope.stations, regions: scope.regions }),
   })
   const { rows, growth } = useMemo(() => {
     const pts = (data?.data ?? []).map((d, i) => ({ i, v: typeof d.value === 'number' ? d.value : null }))
@@ -782,12 +791,12 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo }: {
             </div>
 
             {/* реализация по дням */}
-            <DailyRevenueBar companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+            <DailyRevenueBar companyId={companyId} dateFrom={period.from} dateTo={period.to} scope={sc} />
 
             {/* одна строка: средний чек (3/4) + два доната долей стопкой (1/4), выровнены по высоте */}
             <div className="grid items-stretch gap-3 lg:grid-cols-4">
               <div className="lg:col-span-3 [&>div]:h-full">
-                <AvgCheckLine companyId={companyId} dateFrom={period.from} dateTo={period.to}
+                <AvgCheckLine companyId={companyId} dateFrom={period.from} dateTo={period.to} scope={sc}
                   bigValue={(() => { const fl = data.shares.by_segment.find((r) => r.label === 'Розница (ФЛ)'); return fl && fl.sessions ? fl.amount / fl.sessions : 0 })()} />
               </div>
               <div className="flex flex-col gap-3 lg:col-span-1">
