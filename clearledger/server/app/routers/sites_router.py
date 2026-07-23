@@ -9,12 +9,13 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import User
-from app.services import ezs_sites
+from app.models import EzsSite, User
+from app.services import ezs_site_work, ezs_sites
 
 router = APIRouter(prefix="/sites", tags=["Площадки ЭЗС (Банк ЗУ)"])
 
@@ -47,14 +48,49 @@ async def sites_overview(
 async def list_sites(
     company_id: str = Query(...),
     stage: str | None = Query(None), region: str | None = Query(None),
-    search: str | None = Query(None),
+    search: str | None = Query(None), owner_id: uuid.UUID | None = Query(None),
+    overdue: bool = Query(False),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Список площадок с фильтрами (стадия/регион/поиск) и пагинацией."""
+    """Список площадок с фильтрами (стадия/регион/поиск/ответственный/просрочка)."""
     cid = await assert_company_member(company_id, user, db)
-    return await ezs_sites.list_sites(db, cid, stage=stage, region=region,
-                                      search=search, page=page, page_size=page_size)
+    return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
+                                      owner_id=owner_id, overdue=overdue,
+                                      page=page, page_size=page_size)
+
+
+@router.get("/meta/members")
+async def list_members(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Кого можно назначить ответственным за площадку (члены компании)."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_site_work.company_members(db, cid)
+
+
+@router.get("/meta/gates")
+async def list_gates(user: User = Depends(get_current_user)):
+    """Чек-листы гейтов по стадиям — чтобы UI показывал требования до перехода."""
+    return {
+        "stages": [{"stage": s, "label": ezs_sites.STAGE_LABELS[s],
+                    "hint": ezs_sites.STAGE_HINTS[s],
+                    "items": ezs_site_work.GATES.get(s, [])}
+                   for s in ezs_sites.ALL_STAGES],
+    }
+
+
+@router.post("", status_code=201)
+async def create_site(
+    payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Завести площадку руками — лид, который пришёл не из файла."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await ezs_site_work.create_site(db, cid, payload, user)
+    await db.commit()
+    return await ezs_sites.site_detail(db, cid, site.id)
 
 
 @router.get("/{site_id}")
@@ -62,9 +98,106 @@ async def get_site(
     site_id: uuid.UUID, company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Карточка площадки — все исходные поля (raw)."""
+    """Карточка площадки: поля ведения, чек-лист гейта и все исходные поля (raw)."""
     cid = await assert_company_member(company_id, user, db)
     out = await ezs_sites.site_detail(db, cid, site_id)
     if out is None:
         raise HTTPException(404, "Площадка не найдена")
     return out
+
+
+@router.patch("/{site_id}")
+async def patch_site(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Правка карточки. Изменённые поля помечаются ручными — импорт их не трогает."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_site_work.update_site(db, site, payload, user)
+    await db.commit()
+    out = await ezs_sites.site_detail(db, cid, site_id)
+    return {**res, "site": out}
+
+
+@router.post("/{site_id}/stage")
+async def move_stage(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Перевод по воронке. Незакрытый гейт не блокирует, но попадает в историю."""
+    stage = str(payload.get("stage") or "")
+    if stage not in ezs_sites.ALL_STAGES:
+        raise HTTPException(400, f"Неизвестная стадия: {stage}")
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_site_work.set_stage(db, site, stage,
+                                        reason=payload.get("reason"), user=user)
+    await db.commit()
+    return {**res, "site": await ezs_sites.site_detail(db, cid, site_id)}
+
+
+@router.post("/{site_id}/gate")
+async def mark_gate(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отметить пункт гейта, который проверяется глазами (право, согласие, СМР)."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_site_work.set_gate_item(db, site, str(payload.get("key") or ""),
+                                            bool(payload.get("done")), user)
+    await db.commit()
+    return res
+
+
+@router.get("/{site_id}/events")
+async def get_events(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """История площадки: стадии, касания, заметки, правки, импорт."""
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    return await ezs_site_work.site_events(db, cid, site_id)
+
+
+@router.post("/{site_id}/events", status_code=201)
+async def add_event(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Записать касание (звонок, письмо, встреча) или заметку."""
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Пустая запись")
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_site_work.add_touch(db, site, text,
+                                        str(payload.get("kind") or "touch"), user)
+    await db.commit()
+    return res
+
+
+@router.delete("/{site_id}")
+async def delete_site(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Удалить площадку. Для отказа есть архив с причиной — удаление только для
+    ошибочно заведённых записей, поэтому история уходит вместе с ними (каскад)."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    await db.delete(site)
+    await db.commit()
+    return {"deleted": str(site_id)}
+
+
+async def _owned(db: AsyncSession, cid, site_id: uuid.UUID) -> EzsSite:
+    """Площадка строго своей компании — иначе чужой банк можно править по id."""
+    site = (await db.execute(
+        select(EzsSite).where(EzsSite.company_id == cid, EzsSite.id == site_id)
+    )).scalar_one_or_none()
+    if site is None:
+        raise HTTPException(404, "Площадка не найдена")
+    return site

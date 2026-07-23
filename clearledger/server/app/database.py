@@ -657,6 +657,34 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.23: банк ЗУ — ведение площадки руками (ответственный, следующий шаг,
+        # чек-листы гейтов), права на землю и техприсоединение отдельными полями,
+        # связь с объектом сети. Таблица событий — через create_all.
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS owner_user_id UUID",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS next_action VARCHAR(300)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS next_action_due VARCHAR(10)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS last_touch_at TIMESTAMPTZ",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS hold_until VARCHAR(10)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS gates JSONB",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS manual_fields JSONB",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS control_form VARCHAR(40)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS land_category VARCHAR(80)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS permitted_use VARCHAR(200)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS encumbrances TEXT",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS rent_rate NUMERIC(14,2)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS contract_start VARCHAR(10)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS contract_end VARCHAR(10)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS free_power_num DOUBLE PRECISION",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS distance_to_tp_m DOUBLE PRECISION",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS tp_cost NUMERIC(16,2)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS tp_term_months DOUBLE PRECISION",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS location_id UUID",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_site_company_owner "
+            "ON ezs_sites (company_id, owner_user_id)",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

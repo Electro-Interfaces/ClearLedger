@@ -1,19 +1,28 @@
 /**
- * Реестр площадок (Банк ЗУ) с фильтрами (стадия/регион/поиск) и карточкой.
- * Клик по строке → все исходные поля площадки (raw).
+ * Реестр площадок (Банк ЗУ): фильтры (стадия/регион/ответственный/просрочка/поиск),
+ * колонки ведения и переход в рабочую карточку.
+ *
+ * Столбцы «Ответственный» и «Следующий шаг» — не украшение: без них список
+ * отвечает на вопрос «что у нас есть», но не на «что делать и кому».
  */
-import { useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Search, X, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react'
-import { getSites, getSite, getSitesOverview, STAGE_META, FUNNEL_STAGES, type SiteStage } from '@/services/sitesService'
+import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { toast } from 'sonner'
+import {
+  getSites, getSitesOverview, getSiteMembers, createSite,
+  STAGE_META, FUNNEL_STAGES, type SiteStage,
+} from '@/services/sitesService'
+import { SiteCardDialog } from './SiteCardDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE = 200
+const today = () => new Date().toISOString().slice(0, 10)
 
 function StageBadge({ stage, label }: { stage: SiteStage; label: string }) {
   const meta = STAGE_META[stage]
@@ -27,15 +36,23 @@ function StageBadge({ stage, label }: { stage: SiteStage; label: string }) {
 export function SitesListPanel({ companyId }: { companyId: string }) {
   const [stage, setStage] = useState<'' | SiteStage | 'active'>('')
   const [region, setRegion] = useState('')
+  const [ownerId, setOwnerId] = useState('')
+  const [overdue, setOverdue] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const ov = useQuery({ queryKey: ['sites-overview', companyId], queryFn: () => getSitesOverview(companyId) })
+  const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
   const stageCount = (s: SiteStage) => ov.data?.funnel.find((x) => x.stage === s)?.count ?? 0
   const q = useQuery({
-    queryKey: ['sites-list', companyId, stage, region, search, page],
-    queryFn: () => getSites({ companyId, stage: stage || undefined, region: region || undefined, search: search || undefined, page, pageSize: PAGE }),
+    queryKey: ['sites-list', companyId, stage, region, ownerId, overdue, search, page],
+    queryFn: () => getSites({
+      companyId, stage: stage || undefined, region: region || undefined,
+      ownerId: ownerId || undefined, overdue, search: search || undefined,
+      page, pageSize: PAGE,
+    }),
   })
   const reset = () => setPage(1)
 
@@ -45,7 +62,6 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      {/* Фильтры */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Стадий десять — таблице хватает селекта; счётчики берём из обзора,
             чтобы не гадать, где сейчас работа. */}
@@ -63,8 +79,9 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
             <SelectItem value="archive" className="text-xs">{STAGE_META.archive.label} ({nf0.format(ov.data?.archived ?? 0)})</SelectItem>
           </SelectContent>
         </Select>
+
         <Select value={region || '__all__'} onValueChange={(v) => { setRegion(v === '__all__' ? '' : v); reset() }}>
-          <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue placeholder="Все регионы" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue placeholder="Все регионы" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__" className="text-xs">Все регионы</SelectItem>
             {(ov.data?.byRegion ?? []).map((r) => (
@@ -72,12 +89,32 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
             ))}
           </SelectContent>
         </Select>
+
+        <Select value={ownerId || '__all__'} onValueChange={(v) => { setOwnerId(v === '__all__' ? '' : v); reset() }}>
+          <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue placeholder="Любой ответственный" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="text-xs">Любой ответственный</SelectItem>
+            {(members.data ?? []).map((m) => (
+              <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <button type="button" onClick={() => { setOverdue((v) => !v); reset() }}
+          className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${overdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          Просрочено{ov.data?.work ? ` (${ov.data.work.overdue})` : ''}
+        </button>
+
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }} placeholder="Адрес, город, собственник"
-            className="h-8 w-[230px] pl-7 pr-7 text-xs" />
+            className="h-8 w-[220px] pl-7 pr-7 text-xs" />
           {search && <button type="button" onClick={() => { setSearch(''); reset() }} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
         </div>
+
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCreating(true)}>
+          <Plus className="h-3.5 w-3.5 mr-1" />Площадка
+        </Button>
         <span className="text-[11px] text-muted-foreground ml-auto">{q.isLoading ? '…' : `${nf0.format(total)} площадок`}</span>
       </div>
 
@@ -95,25 +132,32 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
                   <th className="text-left p-2 font-medium">Город</th>
                   <th className="text-left p-2 font-medium">Адрес / место</th>
                   <th className="text-left p-2 font-medium">Стадия</th>
+                  <th className="text-left p-2 font-medium">Ответственный</th>
+                  <th className="text-left p-2 font-medium">Следующий шаг</th>
+                  <th className="text-left p-2 font-medium">Срок</th>
                   <th className="text-left p-2 font-medium">Собственник</th>
-                  <th className="text-right p-2 font-medium">ЭЗС</th>
-                  <th className="text-right p-2 font-medium">Мощн.</th>
-                  <th className="text-left p-2 font-medium">Статус ТУ</th>
                 </tr>
               </thead>
               <tbody>
-                {d!.items.map((s) => (
-                  <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={() => setDetailId(s.id)}>
-                    <td className="p-2 whitespace-nowrap">{s.region ?? '—'}</td>
-                    <td className="p-2 whitespace-nowrap">{s.city ?? '—'}</td>
-                    <td className="p-2 max-w-[280px] truncate" title={s.fullAddress ?? s.address ?? s.installPlace ?? ''}>{s.address ?? s.installPlace ?? s.fullAddress ?? '—'}</td>
-                    <td className="p-2"><StageBadge stage={s.stage} label={s.stageLabel} /></td>
-                    <td className="p-2 max-w-[180px] truncate text-muted-foreground" title={s.owner ?? ''}>{s.owner ?? '—'}</td>
-                    <td className="p-2 text-right font-mono text-muted-foreground">{s.plannedEzsCount ?? ''}</td>
-                    <td className="p-2 text-right font-mono text-muted-foreground">{s.plannedPowerKwt ?? ''}</td>
-                    <td className="p-2 max-w-[200px] truncate text-muted-foreground" title={s.tuStatus ?? ''}>{s.tuStatus ?? '—'}</td>
-                  </tr>
-                ))}
+                {d!.items.map((s) => {
+                  const late = !!s.nextActionDue && s.nextActionDue < today() && s.stage !== 'archive'
+                  return (
+                    <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={() => setDetailId(s.id)}>
+                      <td className="p-2 whitespace-nowrap">{s.region ?? '—'}</td>
+                      <td className="p-2 whitespace-nowrap">{s.city ?? '—'}</td>
+                      <td className="p-2 max-w-[260px] truncate" title={s.fullAddress ?? s.address ?? s.installPlace ?? ''}>
+                        {s.address ?? s.installPlace ?? s.fullAddress ?? '—'}
+                      </td>
+                      <td className="p-2"><StageBadge stage={s.stage} label={s.stageLabel} /></td>
+                      <td className="p-2 whitespace-nowrap text-muted-foreground">{s.ownerName ?? '—'}</td>
+                      <td className="p-2 max-w-[220px] truncate text-muted-foreground" title={s.nextAction ?? ''}>{s.nextAction ?? '—'}</td>
+                      <td className={`p-2 whitespace-nowrap font-mono ${late ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                        {s.nextActionDue ?? '—'}
+                      </td>
+                      <td className="p-2 max-w-[160px] truncate text-muted-foreground" title={s.owner ?? ''}>{s.owner ?? '—'}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -128,92 +172,64 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
         </div>
       )}
 
-      {detailId && <SiteDetailModal companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
+      {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
+      {creating && <NewSiteDialog companyId={companyId} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setDetailId(id) }} />}
     </div>
   )
 }
 
-function Field({ label, value }: { label: string; value: ReactNode }) {
-  if (value === null || value === undefined || value === '') return null
-  return (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="text-xs break-words">{value}</div>
+/** Заведение лида руками — площадка может прийти звонком, а не файлом. */
+function NewSiteDialog({ companyId, onClose, onCreated }: {
+  companyId: string; onClose: () => void; onCreated: (id: string) => void
+}) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({ region: '', city: '', address: '', install_place: '', owner: '' })
+  const [busy, setBusy] = useState(false)
+  const canSave = form.address.trim() || form.install_place.trim()
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const s = await createSite(companyId, { ...form, stage: 'lead' })
+      await qc.invalidateQueries({ queryKey: ['sites-list', companyId] })
+      await qc.invalidateQueries({ queryKey: ['sites-overview', companyId] })
+      toast.success('Площадка заведена')
+      onCreated(s.id)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось создать площадку')
+    } finally { setBusy(false) }
+  }
+
+  const field = (k: keyof typeof form, label: string, ph?: string) => (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">{label}</div>
+      <Input className="h-8 text-xs" value={form[k]} placeholder={ph}
+        onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} />
     </div>
   )
-}
 
-function SiteDetailModal({ companyId, id, onClose }: { companyId: string; id: string; onClose: () => void }) {
-  const [showRaw, setShowRaw] = useState(false)
-  const q = useQuery({ queryKey: ['site-detail', companyId, id], queryFn: () => getSite(companyId, id) })
-  const s = q.data
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-3xl w-[94vw] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-base pr-6 flex flex-wrap items-center gap-2">
-            {s ? (s.fullAddress || [s.region, s.city].filter(Boolean).join(', ') || 'Площадка') : 'Площадка'}
-            {s && <StageBadge stage={s.stage} label={s.stageLabel} />}
-          </DialogTitle>
-        </DialogHeader>
-        {q.isLoading || !s ? (
-          <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <Field label="Регион" value={s.region} />
-              <Field label="Город" value={s.city} />
-              <Field label="Кадастровый №" value={s.cadastralNo} />
-              <Field label="Стадия с" value={s.stageSince} />
-              <Field label="Признак" value={s.placeKind} />
-              <Field label="Место установки" value={s.installPlace} />
-              <Field label="Трасса" value={s.route} />
-              <Field label="Собственник" value={s.owner} />
-              <Field label="Бренд" value={s.brand} />
-              <Field label="Площадь, м²" value={s.areaM2} />
-              <Field label="Владение" value={s.ownership} />
-              <Field label="Свободная мощность" value={s.freePowerKwt} />
-              <Field label="План ЭЗС" value={s.plannedEzsCount} />
-              <Field label="План мощности, кВт" value={s.plannedPowerKwt} />
-              <Field label="Порты" value={[s.portsGbt && `GBT ${s.portsGbt}`, s.portsCcs && `CCS ${s.portsCcs}`, s.portsChademo && `Chademo ${s.portsChademo}`, s.portsType && `Type ${s.portsType}`].filter(Boolean).join(' · ') || null} />
-              <Field label="Поставщик" value={s.supplier} />
-              <Field label="Подрядчик" value={s.contractor} />
-              <Field label="Тип техприсоединения" value={s.techConnType} />
-              <Field label="Дата поступления" value={s.receivedDate} />
-              <Field label="Затраты на подключение, ₽" value={s.connectionCost != null ? nf0.format(s.connectionCost) : null} />
-              <Field label="Аренда, ₽/мес" value={s.rentCostMonth != null ? nf0.format(s.rentCostMonth) : null} />
-              <Field label="Доп.сервис" value={s.dopService} />
-            </div>
-            {(s.tuStatus || s.comment || s.archiveReason) && (
-              <div className="space-y-2">
-                {s.archiveReason && <Field label="Причина отклонения" value={s.archiveReason} />}
-                {s.tuStatus && <Field label="Статус согласования / ТУ" value={s.tuStatus} />}
-                {s.comment && <Field label="Комментарий" value={s.comment} />}
-              </div>
-            )}
-            {(s.lat != null || s.mapUrl) && (
-              <div className="flex items-center gap-3 text-xs">
-                {s.lat != null && <span className="font-mono text-muted-foreground">{s.lat}, {s.lon}</span>}
-                {s.mapUrl && <a href={s.mapUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">Карта <ExternalLink className="h-3 w-3" /></a>}
-              </div>
-            )}
-            <div className="border-t pt-2">
-              <button type="button" onClick={() => setShowRaw((v) => !v)} className="text-xs text-muted-foreground hover:text-foreground">
-                {showRaw ? '▾' : '▸'} Все поля из файла ({Object.keys(s.raw || {}).length})
-              </button>
-              {showRaw && (
-                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
-                  {Object.entries(s.raw || {}).map(([k, v]) => (
-                    <div key={k} className="flex gap-2 text-[11px] border-b border-border/20 py-0.5">
-                      <span className="text-muted-foreground shrink-0 max-w-[45%] truncate" title={k}>{k}</span>
-                      <span className="break-words">{v}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+      <DialogContent className="sm:max-w-lg w-[92vw]">
+        <DialogHeader><DialogTitle className="text-base">Новая площадка</DialogTitle></DialogHeader>
+        <div className="space-y-2">
+          <p className="text-[11px] text-muted-foreground">
+            Заводится стадией «Лид». Остальное заполняется в карточке по мере проработки.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {field('region', 'Регион', 'Свердловская область')}
+            {field('city', 'Город', 'Екатеринбург')}
           </div>
-        )}
+          {field('address', 'Адрес', 'ул. Кирова, 12')}
+          {field('install_place', 'Место установки', 'ТЦ «Гринвич», парковка')}
+          {field('owner', 'Собственник', 'если известен')}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Отмена</Button>
+            <Button size="sm" className="h-8 text-xs" disabled={!canSave || busy} onClick={save}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Создать
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   )

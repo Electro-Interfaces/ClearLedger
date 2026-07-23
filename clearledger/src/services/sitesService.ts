@@ -4,7 +4,7 @@
  * Раздел «Управленческий» → группа «Площадки» (energy/РусГидро): девелоперский
  * пайплайн развития сети. НЕ путать с /equipment (склад железа).
  */
-import { get, upload } from './apiClient'
+import { get, post, patch, upload } from './apiClient'
 
 /**
  * Стадии — воронка подбора недвижимости с гейтами. Порядок = порядок гейтов;
@@ -38,6 +38,11 @@ export interface SiteRow {
   id: string
   stage: SiteStage
   stageLabel: string
+  /** Ведение (Волна 2): кто отвечает, что дальше и когда. */
+  ownerName?: string | null
+  nextAction?: string | null
+  nextActionDue?: string | null
+  lastTouchAt?: string | null
   stageSince: string | null
   prevStage: SiteStage | null
   archiveReason: string | null
@@ -76,12 +81,51 @@ export interface SiteRow {
   comment: string | null
 }
 
+/** Пункт чек-листа гейта: `manual` — проверяется глазами, остальное — по полям. */
+export interface GateItem { key: string; label: string; manual: boolean; done: boolean }
+export interface GateState {
+  stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
+}
+
 export interface SiteDetail extends SiteRow {
   raw: Record<string, string>
   sourceSheet: string | null
   firstSeenAt: string | null
   lastSeenAt: string | null
+  // ведение
+  ownerUserId: string | null
+  holdUntil: string | null
+  gate: GateState
+  manualFields: string[]
+  // право на землю
+  controlForm: string | null
+  landCategory: string | null
+  permittedUse: string | null
+  encumbrances: string | null
+  rentRate: number | null
+  contractStart: string | null
+  contractEnd: string | null
+  // техприсоединение
+  freePowerNum: number | null
+  distanceToTpM: number | null
+  tpCost: number | null
+  tpTermMonths: number | null
+  locationId: string | null
 }
+
+export interface SiteEvent {
+  id: string
+  kind: 'stage' | 'touch' | 'note' | 'edit' | 'import' | 'gate'
+  text: string | null
+  fromStage: string | null
+  toStage: string | null
+  fromLabel: string | null
+  toLabel: string | null
+  author: string | null
+  createdAt: string | null
+}
+
+export interface SiteMember { id: string; name: string }
 
 export interface SitesOverview {
   total: number
@@ -97,6 +141,8 @@ export interface SitesOverview {
   withKnownCost: number
   connectionCostSum: number
   quality: { withCadastral: number; regionMatched: number; withCoords: number }
+  /** Управляемость активной части: без ответственного, без шага, просрочено, забыто. */
+  work: { noOwner: number; noNextAction: number; overdue: number; stale: number; staleDays: number }
 }
 
 export interface SitesList {
@@ -135,11 +181,14 @@ export async function getSitesOverview(companyId: string): Promise<SitesOverview
 }
 
 export async function getSites(p: {
-  companyId: string; stage?: string; region?: string; search?: string; page?: number; pageSize?: number
+  companyId: string; stage?: string; region?: string; search?: string
+  ownerId?: string; overdue?: boolean; page?: number; pageSize?: number
 }): Promise<SitesList> {
   return get('/api/sites', {
     company_id: p.companyId, stage: p.stage || undefined, region: p.region || undefined,
-    search: p.search || undefined, page: p.page ?? 1, page_size: p.pageSize ?? 300,
+    search: p.search || undefined, owner_id: p.ownerId || undefined,
+    overdue: p.overdue ? 1 : undefined,
+    page: p.page ?? 1, page_size: p.pageSize ?? 300,
   })
 }
 
@@ -151,4 +200,49 @@ export async function importSitesXlsx(companyId: string, file: File, dryRun: boo
   const fd = new FormData()
   fd.append('file', file)
   return upload(`/api/sites/import?company_id=${companyId}&dry_run=${dryRun}`, fd)
+}
+
+// ── Ведение площадки (Волна 2) ─────────────────────────────────────────────
+
+/** Кого можно назначить ответственным (члены компании, без прав админа). */
+export async function getSiteMembers(companyId: string): Promise<SiteMember[]> {
+  return get('/api/sites/meta/members', { company_id: companyId })
+}
+
+/** Правка карточки. Изменённые поля станут «ручными» — импорт их не тронет. */
+export async function patchSite(
+  companyId: string, id: string, payload: Record<string, unknown>,
+): Promise<{ changed: string[]; site: SiteDetail }> {
+  return patch(`/api/sites/${id}?company_id=${companyId}`, payload)
+}
+
+/** Перевод по воронке. Незакрытый гейт не блокирует — возвращается в `missing`. */
+export async function moveSiteStage(
+  companyId: string, id: string, stage: SiteStage, reason?: string,
+): Promise<{ moved: boolean; missing?: string[]; gate: GateState; site: SiteDetail }> {
+  return post(`/api/sites/${id}/stage?company_id=${companyId}`, { stage, reason })
+}
+
+/** Отметка пункта гейта, который проверяется глазами. */
+export async function markSiteGate(
+  companyId: string, id: string, key: string, done: boolean,
+): Promise<{ ok: boolean; gate?: GateState; message?: string }> {
+  return post(`/api/sites/${id}/gate?company_id=${companyId}`, { key, done })
+}
+
+export async function getSiteEvents(companyId: string, id: string): Promise<SiteEvent[]> {
+  return get(`/api/sites/${id}/events`, { company_id: companyId })
+}
+
+export async function addSiteEvent(
+  companyId: string, id: string, text: string, kind: 'touch' | 'note' = 'touch',
+): Promise<{ id: string }> {
+  return post(`/api/sites/${id}/events?company_id=${companyId}`, { text, kind })
+}
+
+/** Завести площадку руками — лид, пришедший не файлом. */
+export async function createSite(
+  companyId: string, payload: Record<string, unknown>,
+): Promise<SiteDetail> {
+  return post(`/api/sites?company_id=${companyId}`, payload)
 }

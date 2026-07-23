@@ -23,7 +23,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -64,6 +64,8 @@ STAGE_HINTS = {
 }
 ALL_STAGES = STAGE_ORDER + ["on_hold", "archive"]
 _STAGE_POS = {s: i for i, s in enumerate(STAGE_ORDER)}
+# Сколько дней без касания считаем «площадка забыта».
+STALE_DAYS = 30
 
 # Лист Excel → базовая стадия. Для «ЗУ в работе» стадия уточняется по
 # заполненности строки (_stage_for_row): лист смешивает лид и переговоры.
@@ -480,6 +482,9 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
     }
     seen_in_file: dict[str, str] = {}   # dedup_key → адрес первой строки
     touched: set[int] = set()           # площадки, уже обработанные этой загрузкой
+    # События истории пишем после commit площадок: у новых записей id появляется
+    # только после flush, а ссылаться на несуществующую строку нельзя.
+    events: list[tuple[Any, str, str, str | None, str | None]] = []
 
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     for sn in wb.sheetnames:
@@ -612,10 +617,12 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                     first_seen_at=now, last_seen_at=now, updated_at=now, **fields)
                 if not dry_run:
                     db.add(site)
+                    events.append((site, "import", f"Заведена из файла «{sn}»", None, None))
                 index.add(site)
                 touched.add(id(site))
                 report["created"] += 1
             else:
+                prev_stage = found.stage
                 changed = _apply_update(found, fields, raw, sn, ri, key, now, not dry_run)
                 moved = _advance_stage(found, stage, today, not dry_run)
                 if moved == "forward":
@@ -624,6 +631,10 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                     report["reactivated"] += 1
                 elif moved == "archived":
                     report["archived"] += 1
+                if moved and not dry_run:
+                    events.append((found, "stage",
+                                   f"Импорт: {STAGE_LABELS.get(prev_stage, prev_stage)} → "
+                                   f"{STAGE_LABELS.get(stage, stage)}", prev_stage, stage))
                 if changed or moved:
                     report["updated"] += 1
                 else:
@@ -642,6 +653,11 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
     report["regionsUnmatched"] = [{"value": v, "count": n} for v, n in
                                   sorted(resolver.unmatched.items(), key=lambda x: -x[1])[:20]]
     if not dry_run:
+        await db.flush()          # id новых площадок — до записи событий
+        from app.models import EzsSiteEvent
+        for site, kind, text_, frm, to in events:
+            db.add(EzsSiteEvent(company_id=company_id, site_id=site.id, kind=kind,
+                                text=text_, from_stage=frm, to_stage=to))
         await db.commit()
     return report
 
@@ -680,7 +696,10 @@ def _apply_update(site: EzsSite, fields: dict[str, Any], raw: dict[str, str],
     apply=False — предпросмотр: только считаем, объекты сессии не трогаем.
     """
     changed = False
+    manual = set(site.manual_fields or [])   # поля, введённые руками, — не наше дело
     for f in _FILL_FIELDS:
+        if f in manual:
+            continue
         new = fields.get(f)
         if new is None or new == "":
             continue
@@ -732,8 +751,11 @@ def _advance_stage(site: EzsSite, stage: str, today: str, apply: bool) -> str | 
 
 async def list_sites(
     db: AsyncSession, company_id, *, stage: str | None = None, region: str | None = None,
-    search: str | None = None, page: int = 1, page_size: int = 100,
+    search: str | None = None, owner_id=None, overdue: bool = False,
+    page: int = 1, page_size: int = 100,
 ) -> dict[str, Any]:
+    from app.models import User
+
     S = EzsSite
     conds = [S.company_id == company_id]
     if stage == "active":            # вся живая часть воронки одним фильтром
@@ -742,17 +764,32 @@ async def list_sites(
         conds.append(S.stage == stage)
     if region:
         conds.append(func.coalesce(S.region_norm, S.region) == region)
+    if owner_id:
+        conds.append(S.owner_user_id == owner_id)
+    if overdue:
+        # Просрочен следующий шаг — то, ради чего у площадки вообще есть срок.
+        conds.append(S.next_action_due.is_not(None))
+        conds.append(S.next_action_due < _today())
+        conds.append(S.stage.in_(STAGE_ORDER))
     if search:
         like = f"%{search.lower()}%"
         conds.append(func.lower(func.coalesce(S.full_address, "") + " " + func.coalesce(S.city, "")
                                  + " " + func.coalesce(S.owner, "") + " " + func.coalesce(S.install_place, "")).like(like))
     total = int((await db.execute(select(func.count()).select_from(S).where(*conds))).scalar_one() or 0)
     rows = (await db.execute(
-        select(S).where(*conds)
+        select(S, func.coalesce(User.name, User.email))
+        .outerjoin(User, User.id == S.owner_user_id).where(*conds)
         .order_by(func.coalesce(S.region_norm, S.region).nulls_last(), S.city.nulls_last(), S.id)
         .offset((page - 1) * page_size).limit(page_size)
-    )).scalars().all()
-    return {"total": total, "page": page, "pageSize": page_size, "items": [_site_out(s) for s in rows]}
+    )).all()
+    items = []
+    for s, owner_name in rows:
+        row = _site_out(s)
+        row.update({"ownerName": owner_name, "nextAction": s.next_action,
+                    "nextActionDue": s.next_action_due,
+                    "lastTouchAt": s.last_touch_at.isoformat() if s.last_touch_at else None})
+        items.append(row)
+    return {"total": total, "page": page, "pageSize": page_size, "items": items}
 
 
 def _site_out(s: EzsSite) -> dict[str, Any]:
@@ -777,12 +814,18 @@ def _site_out(s: EzsSite) -> dict[str, Any]:
 
 
 async def site_detail(db: AsyncSession, company_id, site_id) -> dict[str, Any] | None:
-    s = (await db.execute(
-        select(EzsSite).where(EzsSite.company_id == company_id, EzsSite.id == site_id)
-    )).scalar_one_or_none()
-    if s is None:
+    from app.models import User
+    from app.services.ezs_site_work import site_out_full
+
+    row = (await db.execute(
+        select(EzsSite, func.coalesce(User.name, User.email))
+        .outerjoin(User, User.id == EzsSite.owner_user_id)
+        .where(EzsSite.company_id == company_id, EzsSite.id == site_id)
+    )).first()
+    if row is None:
         return None
-    out = _site_out(s)
+    s, owner_name = row
+    out = site_out_full(s, owner_name)
     out["raw"] = s.raw or {}       # все 55 исходных колонок для карточки
     out["sourceSheet"] = s.source_sheet
     out["firstSeenAt"] = s.first_seen_at.isoformat() if s.first_seen_at else None
@@ -813,6 +856,17 @@ async def sites_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     active = sum(by_stage.get(s, 0) for s in STAGE_ORDER)
     funnel = [{"stage": st, "label": STAGE_LABELS[st], "hint": STAGE_HINTS[st],
                "count": by_stage.get(st, 0)} for st in STAGE_ORDER]
+
+    # Управляемость активной части: кто ведёт, что просрочено, что забыто.
+    stale_before = (datetime.now(timezone.utc) - timedelta(days=STALE_DAYS))
+    work = (await db.execute(select(
+        func.count().filter(S.owner_user_id.is_(None)).label("no_owner"),
+        func.count().filter(S.next_action.is_(None)).label("no_next"),
+        func.count().filter(S.next_action_due.is_not(None),
+                            S.next_action_due < _today()).label("overdue"),
+        func.count().filter(func.coalesce(S.last_touch_at, S.first_seen_at) < stale_before)
+        .label("stale"),
+    ).where(base, S.stage.in_(STAGE_ORDER)))).one()
     return {
         "total": total,
         "active": active,
@@ -832,5 +886,13 @@ async def sites_overview(db: AsyncSession, company_id) -> dict[str, Any]:
             "withCadastral": int(agg.with_cad or 0),
             "regionMatched": int(agg.with_region or 0),
             "withCoords": int(agg.with_coords or 0),
+        },
+        # Считается только по активной части: у архива нет ни срока, ни смысла в нём.
+        "work": {
+            "noOwner": int(work.no_owner or 0),
+            "noNextAction": int(work.no_next or 0),
+            "overdue": int(work.overdue or 0),
+            "stale": int(work.stale or 0),
+            "staleDays": STALE_DAYS,
         },
     }

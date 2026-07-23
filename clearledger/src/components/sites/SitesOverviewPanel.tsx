@@ -142,6 +142,20 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+                Управляемость активной части ({nf0.format(active)} площадок)
+              </div>
+              <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <Risk label="Без ответственного" n={d!.work.noOwner} total={active} />
+                <Risk label="Без следующего шага" n={d!.work.noNextAction} total={active} />
+                <Risk label="Срок просрочен" n={d!.work.overdue} total={active} />
+                <Risk label={`Без касания > ${d!.work.staleDays} дн`} n={d!.work.stale} total={active} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-0">
+              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
                 Чем заполнен банк
               </div>
               <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
@@ -179,6 +193,23 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
 
 function stage(d: { funnel: { stage: SiteStage; count: number }[] } | undefined, s: SiteStage): number {
   return d?.funnel.find((x) => x.stage === s)?.count ?? 0
+}
+
+/** Пробел в ведении: чем больше доля, тем тревожнее цвет (обратная шкала к Fill). */
+function Risk({ label, n, total }: { label: string; n: number; total: number }) {
+  const share = total ? n / total : 0
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-mono">{nf0.format(n)} <span className="text-muted-foreground">({pct(n, total)})</span></span>
+      </div>
+      <div className="mt-1 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className={`h-full ${share >= 0.5 ? 'bg-red-400/60' : share >= 0.2 ? 'bg-amber-500/70' : 'bg-emerald-500/70'}`}
+          style={{ width: `${share * 100}%` }} />
+      </div>
+    </div>
+  )
 }
 
 function Fill({ label, n, total }: { label: string; n: number; total: number }) {

@@ -3795,6 +3795,33 @@ class EzsSite(Base):
     tech_conn_type: Mapped[str | None] = mapped_column(String(300), nullable=True)
     dop_service: Mapped[str | None] = mapped_column(String(300), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── ведение площадки (кто, что дальше, до какого срока) ──
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    next_action: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    next_action_due: Mapped[str | None] = mapped_column(String(10), nullable=True)  # ISO
+    last_touch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hold_until: Mapped[str | None] = mapped_column(String(10), nullable=True)       # для on_hold
+    # Чек-листы гейтов: {ключ пункта: {"done": bool, "at": iso, "by": uuid}}.
+    gates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Поля, изменённые руками, — импорт из файла их не трогает.
+    manual_fields: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # ── права на землю (гейт «право») ──
+    control_form: Mapped[str | None] = mapped_column(String(40), nullable=True)   # аренда|сервитут|размещение|собственность
+    land_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    permitted_use: Mapped[str | None] = mapped_column(String(200), nullable=True)  # ВРИ
+    encumbrances: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rent_rate: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    contract_start: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    contract_end: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # ── техприсоединение (гейт «техника») ──
+    free_power_num: Mapped[float | None] = mapped_column(Float, nullable=True)     # кВт числом
+    distance_to_tp_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tp_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    tp_term_months: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ── замыкание цикла: построенная площадка = объект сети ──
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
     # Полный исходный ряд (заголовок → значение) — ничего не теряем при импорте.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     source_sheet: Mapped[str | None] = mapped_column(String(80), nullable=True)  # лист-источник
@@ -3805,6 +3832,35 @@ class EzsSite(Base):
         Index("ix_ezs_site_company_stage", "company_id", "stage"),
         Index("ix_ezs_site_company_region", "company_id", "region"),
         Index("ix_ezs_site_company_dedup", "company_id", "dedup_key"),
+        Index("ix_ezs_site_company_owner", "company_id", "owner_user_id"),
+    )
+
+
+class EzsSiteEvent(Base):
+    """Событие площадки: смена стадии, касание, заметка, правка, импорт.
+
+    История нужна не для аудита ради аудита: без даты входа в стадию нельзя
+    сказать, что зависло, а без касаний — кто последний разговаривал с
+    собственником и когда.
+    """
+    __tablename__ = "ezs_site_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # stage | touch | note | edit | import | gate
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="note")
+    from_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    to_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_ezs_site_event_site", "site_id", "created_at"),
     )
 
 
