@@ -47,6 +47,20 @@ function gapTone(v: number | null | undefined, tolerance: number): string {
 const ARI_TOL = 0.5   // арифметика книги — это счёт, любое отклонение = ошибка отчёта
 const CONT_TOL = 0.5  // стык смен — тоже счёт, не измерение
 
+/** Причины разрыва стыка. Разрыв — не один дефект: слив между сменами это работа
+ *  приёмки, сброс счётчика — эксплуатации, а списание на станции — бухгалтерии.
+ *  Раньше всё выглядело одинаково «разрыв N л», и разбирать было нечего. */
+const BREAK_KINDS: Record<string, { label: string; tone: string; hard: boolean }> = {
+  delivery:      { label: 'слив между сменами', tone: 'text-blue-600 dark:text-blue-400',    hard: false },
+  renumber:      { label: 'перенумерация',      tone: 'text-muted-foreground',               hard: false },
+  gap:           { label: 'пауза между сменами', tone: 'text-muted-foreground',              hard: false },
+  fuel_change:   { label: 'смена топлива',       tone: 'text-blue-600 dark:text-blue-400',   hard: false },
+  book_reset:    { label: 'сброс книги',         tone: 'text-red-600 dark:text-red-400',     hard: true },
+  pulled_to_fact:{ label: 'списано на станции',  tone: 'text-amber-600 dark:text-amber-400', hard: true },
+  manual:        { label: 'ручная правка',       tone: 'text-amber-600 dark:text-amber-400', hard: true },
+  unexplained:   { label: 'требует разбора',     tone: 'text-amber-600 dark:text-amber-400', hard: true },
+}
+
 /** Есть ли в смене «жёсткое» замечание — сломанный счёт (не погрешность замера). */
 function hasHardIssue(r: TankLedgerRow): boolean {
   return Math.abs(r.arithmetic_gap) > ARI_TOL
@@ -74,6 +88,8 @@ async function exportLedgerXlsx(data: TankLedgerResponse, dateFrom: string, date
     'Книга нач., л': r1(r.book_start),
     'Конец пред. смены, л': r.continuity_gap == null ? '' : r1(r.book_start - r.continuity_gap),
     'Стык, л': r.continuity_gap == null ? '' : r1(r.continuity_gap),
+    'Причина разрыва': r.continuity_kind ? (BREAK_KINDS[r.continuity_kind]?.label ?? r.continuity_kind) : '',
+    'Пояснение разрыва': r.continuity_reason ?? '',
     'Приход, л': r1(r.receipts),
     'Отпуск, л': r1(r.sales),
     'Книга кон., л': r1(r.book_end),
@@ -396,6 +412,12 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             Красным — сломанная арифметика отчёта или расхождение книги с фактом
             (недостача); жёлтым — излишек и разрыв стыка. Замер уровнемера имеет
             погрешность, поэтому расхождение книги с фактом до {nf0.format(tol)} л не подсвечивается.
+            В столбце «Стык» указана причина разрыва: <span className="text-blue-600 dark:text-blue-400">слив
+            между сменами</span> (накладная закрыта в промежутке — объём не попал в приход) и перенумерация
+            смен объяснены и разбора не требуют; <span className="text-amber-600 dark:text-amber-400">списано
+            на станции</span>, <span className="text-amber-600 dark:text-amber-400">ручная правка</span> и
+            <span className="text-red-600 dark:text-red-400"> сброс книги</span> — правки мимо учёта.
+            Наведите курсор на причину, чтобы увидеть подробность (номер ТТН, объём, номера смен).
           </p>
         </div>
       )}
@@ -581,14 +603,19 @@ function GroupBlock({ group, tol }: { group: Group; tol: number }) {
             {/* Стык: начало ЭТОЙ смены против конца предыдущей. Первая смена
                 периода — сравнивать не с чем. */}
             <Td>
-              {r.fuel_changed ? (
-                <span className="text-blue-600 dark:text-blue-400">смена топлива</span>
-              ) : r.continuity_gap == null ? (
+              {r.continuity_gap == null ? (
                 <span className="text-muted-foreground">начало периода</span>
-              ) : contBad ? (
-                <span className="font-medium text-amber-600 dark:text-amber-400">
-                  разрыв {nf1.format(r.continuity_gap)} л
-                </span>
+              ) : contBad || r.fuel_changed ? (
+                (() => {
+                  const k = BREAK_KINDS[r.continuity_kind ?? (r.fuel_changed ? 'fuel_change' : 'unexplained')]
+                    ?? BREAK_KINDS.unexplained
+                  return (
+                    <span className={k.hard ? `font-medium ${k.tone}` : k.tone} title={r.continuity_reason ?? undefined}>
+                      {k.label}
+                      {contBad && <span className="ml-1 text-[10px] opacity-80">{nf1.format(r.continuity_gap)} л</span>}
+                    </span>
+                  )
+                })()
               ) : (
                 <span className="text-muted-foreground">✓ сходится</span>
               )}

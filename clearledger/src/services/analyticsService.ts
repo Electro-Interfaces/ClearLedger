@@ -620,6 +620,10 @@ export interface TankLedgerRow {
   arithmetic_gap: number
   /** Начало смены минус конец предыдущей. Не ноль — между сменами правка мимо учёта. */
   continuity_gap: number | null
+  /** Причина разрыва стыка: delivery | renumber | book_reset | pulled_to_fact | gap | manual | fuel_change | unexplained. */
+  continuity_kind: string | null
+  /** Человеческая формулировка причины разрыва (для подсказки). */
+  continuity_reason: string | null
   mass_start: number | null
   mass_end: number | null
   mass_received: number | null
