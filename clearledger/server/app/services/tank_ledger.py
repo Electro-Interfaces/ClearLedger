@@ -81,6 +81,26 @@ def _is_round(v: float) -> bool:
     return abs(v) >= MANUAL_ROUND_STEP and abs(v) % MANUAL_ROUND_STEP < 0.51
 
 
+def _is_whole(v: float) -> bool:
+    return abs(v - round(v)) < 0.05
+
+
+def _manual_note(gap: float, book_start: float, prev_book_end: float) -> str | None:
+    """Признак ручного ввода: разрыв ровно в целых литрах, тогда как сами остатки
+    дробные. Книга и уровнемер дают десятые (1128,5 / 3249,2) — ровно целая
+    разница при них берётся не из прибора, а с клавиатуры. На ГИГ целых разрывов
+    603 из 774 (78%), из них 520 при дробных остатках; случайно ожидалось бы ~10%.
+    """
+    if not _is_whole(gap):
+        return None
+    if _is_round(gap):
+        return f"ручная правка на {gap:+,.0f} л — круглое значение"
+    if not _is_whole(book_start) or not _is_whole(prev_book_end):
+        return (f"ручная правка на {gap:+,.0f} л — ровно целые литры "
+                "при дробных остатках (ввод с клавиатуры, не прибор)")
+    return None
+
+
 def _classify_break(
     gap: float, *, book_start: float, prev_book_end: float, prev_fact: float | None,
     receipts_between: list[tuple[float, str]], shift_number: int, prev_shift_number: int,
@@ -116,9 +136,11 @@ def _classify_break(
     # 5. Длинная пауза — смены за промежуток отсутствуют, сверять нечего.
     if hours_gap is not None and hours_gap > LONG_PAUSE_HOURS:
         return ("gap", f"пауза {hours_gap:,.0f} ч между сменами — смены за этот срок нет")
-    # 6. Ручная правка: круглое число при нулевом приходе. ГИГ АЗС 208 — ±300/350/400/580.
-    if _is_round(gap) and receipts_in_shift == 0:
-        return ("manual", f"ручная правка на {gap:+,.0f} л — круглое значение без прихода")
+    # 6. Ручная правка: разрыв целым числом литров при дробных остатках.
+    #    ГИГ АЗС 208/209/9008 — основная масса разрывов именно такая.
+    note = _manual_note(gap, book_start, prev_book_end)
+    if note:
+        return ("manual", note + ("" if receipts_in_shift else " · прихода в смене не было"))
     return ("unexplained", "причина не установлена — требует разбора")
 
 
@@ -184,6 +206,10 @@ async def build_tank_ledger(
         отметки времени слива — на станции ТТН часто проводят задним числом)."""
         if since is None or until is None:
             return []
+        # Смены приходят из БД с таймзоной, накладные приведены к naive — без
+        # выравнивания сравнение падает (TypeError на offset-naive vs aware).
+        since = since.replace(tzinfo=None) if since.tzinfo else since
+        until = until.replace(tzinfo=None) if until.tzinfo else until
         lo, hi = since - timedelta(days=1), until + timedelta(days=1)
         out: list[tuple[float, str]] = []
         for at, doc_v, fact_v, ttn in receipts_by_station.get(st_code, ()):
