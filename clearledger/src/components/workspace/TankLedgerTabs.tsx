@@ -78,7 +78,8 @@ async function exportLedgerXlsx(data: TankLedgerResponse, dateFrom: string, date
     'Отпуск, л': r1(r.sales),
     'Книга кон., л': r1(r.book_end),
     'Счёт (арифметика), л': r1(r.arithmetic_gap),
-    'Факт (замер), л': r1(r.fact_end),
+    'Факт нач., л': r.fact_start == null ? '' : r1(r.fact_start),
+    'Факт кон., л': r1(r.fact_end),
     'Книга − факт, л': r1(r.fact_gap),
     'Расхождение': r.fact_gap == null ? '' : Math.abs(r.fact_gap) < 0.05 ? 'сходится' : r.fact_gap > 0 ? 'недостача' : 'излишек',
     'Масса нач., кг': r3(r.mass_start),
@@ -366,13 +367,13 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full min-w-[1120px] text-xs">
+              <table className="w-full min-w-[1200px] text-xs">
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
                     <Th>Смена</Th><Th>Дата</Th>
                     <Th right>Книга нач.</Th><Th right>Книга кон.</Th><Th>Стык</Th>
                     <Th right>Приход</Th><Th right>Отпуск</Th>
-                    <Th right>Факт</Th><Th right>Книга − факт</Th>
+                    <Th right>Факт нач.</Th><Th right>Факт кон.</Th><Th right>Книга − факт</Th>
                     <Th right>Плотн.</Th><Th right>Темп.</Th><Th right>Вода</Th>
                   </tr>
                 </thead>
@@ -596,7 +597,8 @@ function GroupBlock({ group, tol }: { group: Group; tol: number }) {
               {r.receipts > 0 ? L1(r.receipts) : '—'}
             </Td>
             <Td right>{L1(r.sales)}</Td>
-            <Td right>{L1(r.fact_end)}</Td>
+            <Td right className="text-muted-foreground">{r.fact_start != null ? L1(r.fact_start) : '—'}</Td>
+            <Td right>{r.fact_end != null ? L1(r.fact_end) : '—'}</Td>
             <Td right className={cn('font-medium', gapTone(r.fact_gap, tol))}>
               {gapLabel(r.fact_gap)}
             </Td>

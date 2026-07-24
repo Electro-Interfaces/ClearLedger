@@ -610,6 +610,8 @@ export interface TankLedgerRow {
   receipts: number
   sales: number
   book_end: number
+  /** Замер уровнемером на начало смены = замер конца предыдущей смены по резервуару; null — начало периода. */
+  fact_start: number | null
   /** Замер уровнемером на конец смены; null — станция не передала. */
   fact_end: number | null
   /** Книга минус факт: плюс — недостача, минус — излишек. */

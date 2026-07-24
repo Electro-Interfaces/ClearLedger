@@ -125,7 +125,14 @@ async def build_tank_ledger(
             book_end = _f(tank.volume_end)
             receipts = _f(tank.volume_received)
             sales = _f(tank.sales)
-            fact_end = _n(tank.fact_volume)
+            # `or None`: ноль в замере — это «уровнемер не дал показание», а не
+            # пустой резервуар. Иначе книга − факт = весь книжный остаток и в
+            # недостачу попадает вся ёмкость (как идиома приёма в fuel_shift_refresh).
+            fact_end = _n(tank.fact_volume) or None
+            # Факт на начало смены = замер конца предыдущей смены по этому же
+            # резервуару (STS даёт один замер на смену — на сдачу/конец; замер
+            # начала и есть замер конца предыдущей, как книга нач = книга кон пред.).
+            fact_start = (_n(prev.fact_volume) or None) if prev is not None else None
 
             # 1. Арифметика книги внутри смены.
             arithmetic_gap = round(book_start + receipts - sales - book_end, 2)
@@ -186,6 +193,7 @@ async def build_tank_ledger(
                 "receipts": round(receipts, 1),
                 "sales": round(sales, 1),
                 "book_end": round(book_end, 1),
+                "fact_start": round(fact_start, 1) if fact_start is not None else None,
                 "fact_end": round(fact_end, 1) if fact_end is not None else None,
                 "fact_gap": fact_gap,
                 "arithmetic_gap": arithmetic_gap,
@@ -204,14 +212,14 @@ async def build_tank_ledger(
         last = chain[-1][0]
         book_start_period = _f(first.volume_start)
         book_end_period = _f(last.volume_end)
-        fact_end_period = _n(last.fact_volume)
+        fact_end_period = _n(last.fact_volume) or None
         # Расхождение книги и факта на конец периода — то, что пойдёт в инвентаризацию.
         fact_gap_period = (round(book_end_period - fact_end_period, 1)
                            if fact_end_period is not None else None)
         # Разница расхождений начала и конца периода: сколько «набежало» именно
         # за период. Без этого нельзя отделить старую недостачу от новой.
         first_fact_gap = (_f(first.volume_start) - _f(first.fact_volume)
-                          if first.fact_volume is not None else None)
+                          if first.fact_volume else None)
 
         tanks_summary.append({
             "station_code": station_code, "station_name": station_name,
