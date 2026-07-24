@@ -105,6 +105,7 @@ def _classify_break(
     gap: float, *, book_start: float, prev_book_end: float, prev_fact: float | None,
     receipts_between: list[tuple[float, str]], shift_number: int, prev_shift_number: int,
     hours_gap: float | None, receipts_in_shift: float,
+    receipts_linked: list[tuple[float, str]] | None = None,
 ) -> tuple[str, str]:
     """Тип разрыва + человеческая формулировка причины.
 
@@ -120,9 +121,31 @@ def _classify_break(
     if book_start == 0 and prev_book_end > 100:
         return ("book_reset", "книга обнулена: начало смены 0 при остатке "
                               f"{prev_book_end:,.0f} л — переинициализация учёта на станции")
+    # Обратная сторона того же сбоя: книга закрылась нулём, а следующая смена
+    # открылась нормальным остатком. Без этой ветки «восстановление» выглядело
+    # необъяснённым, хотя это второй шаг той же переинициализации.
+    if prev_book_end == 0 and book_start > 100:
+        return ("book_reset", f"книга восстановлена после обнуления: предыдущая смена "
+                              f"закрыта нулём, эта открыта остатком {book_start:,.0f} л")
     if book_start < 0 or prev_book_end < 0:
         return ("book_reset", "отрицательный остаток в книге — отчёт недостоверен")
-    # 3. Слив между сменами: накладная закрыта в промежутке и объём совпал с разрывом.
+    # 3. Слив между сменами. Сначала — прямая привязка: накладная сама указывает
+    #    смену и резервуар (секция `receipt` отчёта). Если приход в смене не
+    #    отражён, а накладная на этот резервуар есть — объём ушёл в начальный
+    #    остаток вместо прихода. Это доказательство, а не совпадение чисел.
+    if gap > 0 and receipts_linked:
+        for vol, ttn in receipts_linked:
+            if vol > 0 and abs(vol - gap) <= max(1.0, gap * DELIVERY_TOLERANCE):
+                return ("delivery", f"слив между сменами: накладная {ttn} на {vol:,.0f} л "
+                                    "закреплена за этой сменой и резервуаром — объём попал "
+                                    "в начальный остаток, а не в приход")
+        if receipts_in_shift == 0:
+            total = sum(v for v, _ in receipts_linked)
+            if abs(total - gap) <= max(1.0, gap * DELIVERY_TOLERANCE):
+                ttns = ", ".join(sorted({t for _, t in receipts_linked}))
+                return ("delivery", f"слив между сменами: накладные {ttns} на {total:,.0f} л "
+                                    "за смену, приход в резервуаре не отражён")
+    # Запасной путь — по времени и объёму (для записей без привязки к смене).
     #    ГИГ АЗС 207 13.06: ТТН 9303 — АИ-92 10 431 л и АИ-95 8 210 л, литр в литр.
     if gap > 0 and receipts_between:
         for vol, ttn in receipts_between:
@@ -192,12 +215,20 @@ async def build_tank_ledger(
     if station_codes:
         rq = rq.where(FuelStation.code.in_([int(c) for c in station_codes]))
     receipts_by_station: dict[int, list[tuple[datetime, float, float, str]]] = defaultdict(list)
+    # Прямая привязка (станция × смена × резервуар) — после миграции v4.9 накладные
+    # знают свою смену и резервуар из секции `receipt` сменного отчёта. Это точное
+    # доказательство слива, в отличие от подбора по времени и объёму.
+    receipts_by_shift: dict[tuple[int, int, int], list[tuple[float, str]]] = defaultdict(list)
     for rec, st_code in (await db.execute(rq)).all():
+        vol = _f(rec.fact_volume_liters) or _f(rec.doc_volume_liters)
+        ttn = rec.ttn or "б/н"
+        if rec.shift_number is not None and rec.tank is not None:
+            receipts_by_shift[(int(st_code), int(rec.shift_number), int(rec.tank))].append((vol, ttn))
         if rec.received_at is None:
             continue
         receipts_by_station[int(st_code)].append((
             rec.received_at.replace(tzinfo=None) if rec.received_at.tzinfo else rec.received_at,
-            _f(rec.doc_volume_liters), _f(rec.fact_volume_liters), rec.ttn or "б/н",
+            _f(rec.doc_volume_liters), _f(rec.fact_volume_liters), ttn,
         ))
 
     def _receipts_between(st_code: int, since: datetime | None, until: datetime | None
@@ -235,6 +266,8 @@ async def build_tank_ledger(
         sum_receipts = sum_sales = 0.0
         sum_mass_receipts = sum_mass_sales = 0.0
         arithmetic_breaks = continuity_breaks = fact_breaks = 0
+        # Разрывы этой цепочки — для пост-прохода по зеркальным возвратам.
+        chain_breaks: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
         worst_fact = 0.0
         worst_fact_shift: int | None = None
 
@@ -303,10 +336,18 @@ async def build_tank_ledger(
                         prev_shift_number=int(prev_shift.shift_number) if prev_shift else 0,
                         hours_gap=hours_gap,
                         receipts_in_shift=receipts,
+                        # Накладные, закреплённые за этой сменой и резервуаром,
+                        # плюс за предыдущей: слив на стыке станция относит то к
+                        # закрываемой смене, то к открываемой.
+                        receipts_linked=(
+                            receipts_by_shift.get((station_code, int(shift.shift_number), tank_no), [])
+                            + (receipts_by_shift.get(
+                                (station_code, int(prev_shift.shift_number), tank_no), [])
+                               if prev_shift else [])),
                     )
             if continuity_gap is not None and (abs(continuity_gap) > CONTINUITY_TOLERANCE_L or fuel_changed):
                 continuity_breaks += 1
-                issues.append({
+                issue_entry = {
                     "kind": break_kind, "reason": break_reason,
                     "type": "fuel_change" if fuel_changed else "continuity",
                     "station_code": station_code, "station_name": station_name,
@@ -319,7 +360,10 @@ async def build_tank_ledger(
                                f"{_f(prev.volume_end):,.1f} ≠ начало смены "
                                f"{shift.shift_number} {book_start:,.1f}"
                                + (" · смена вида топлива" if fuel_changed else "")),
-                })
+                }
+                issues.append(issue_entry)
+            else:
+                issue_entry = None
             if fact_gap is not None and abs(fact_gap) > FACT_TOLERANCE_L:
                 fact_breaks += 1
                 if abs(fact_gap) > abs(worst_fact):
@@ -354,7 +398,29 @@ async def build_tank_ledger(
                 "water_volume": _n(tank.water_volume),
                 "fuel_changed": fuel_changed,
             })
+            if issue_entry is not None and continuity_gap is not None:
+                chain_breaks.append((continuity_gap, issue_entry, rows[-1]))
             prev, prev_shift = tank, shift
+
+        # Зеркальный возврат: разрыв, который в пределах трёх следующих разрывов
+        # по этому же резервуару компенсируется точно наоборот. Значение вернулось
+        # — топливо никуда не двигалось, это артефакт отчёта (АЗС 209 01–02.04:
+        # +4 275,1 → −4 275,1 на четырёх резервуарах сразу). Переписываем только
+        # «необъяснённые»: у доказанных причин (слив, сброс, перенумерация)
+        # основание сильнее.
+        for idx, (gap_i, issue_i, row_i) in enumerate(chain_breaks):
+            if issue_i.get("kind") != "unexplained":
+                continue
+            for gap_j, issue_j, row_j in chain_breaks[idx + 1:idx + 4]:
+                if abs(gap_i + gap_j) <= max(1.0, abs(gap_i) * 0.02):
+                    text = (f"возврат: разрыв {gap_i:+,.0f} л отменён обратным "
+                            f"{gap_j:+,.0f} л в смене {issue_j.get('shift_number')} — "
+                            "значение вернулось, движения топлива не было")
+                    for iss, rw in ((issue_i, row_i), (issue_j, row_j)):
+                        if iss.get("kind") in ("unexplained", None):
+                            iss["kind"], iss["reason"] = "reversal", text
+                            rw["continuity_kind"], rw["continuity_reason"] = "reversal", text
+                    break
 
         last = chain[-1][0]
         book_start_period = _f(first.volume_start)

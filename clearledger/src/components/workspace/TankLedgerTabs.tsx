@@ -54,6 +54,7 @@ const BREAK_KINDS: Record<string, { label: string; tone: string; hard: boolean }
   delivery:      { label: 'слив между сменами', tone: 'text-blue-600 dark:text-blue-400',    hard: false },
   renumber:      { label: 'перенумерация',      tone: 'text-muted-foreground',               hard: false },
   gap:           { label: 'пауза между сменами', tone: 'text-muted-foreground',              hard: false },
+  reversal:      { label: 'возврат',             tone: 'text-blue-600 dark:text-blue-400',   hard: false },
   fuel_change:   { label: 'смена топлива',       tone: 'text-blue-600 dark:text-blue-400',   hard: false },
   book_reset:    { label: 'сброс книги',         tone: 'text-red-600 dark:text-red-400',     hard: true },
   pulled_to_fact:{ label: 'списано на станции',  tone: 'text-amber-600 dark:text-amber-400', hard: true },
