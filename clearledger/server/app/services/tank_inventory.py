@@ -52,7 +52,11 @@ async def build_draft(
         .join(FuelStation, FuelStation.id == FuelShift.station_id)
         .where(FuelShift.company_id == company_id,
                FuelShift.opened_at <= dt_to,
-               FuelTank.fact_volume.is_not(None))
+               # Строго > 0: ноль в замере означает «уровнемер не дал показание»,
+               # а не пустой резервуар. Иначе корректировка = 0 − книга, и ведомость
+               # списала бы весь остаток (АЗС 207 рез.1 — 19 044 л). Резервуар без
+               # замера в инвентаризацию не берём — мерить нечего.
+               FuelTank.fact_volume > 0)
         .order_by(FuelStation.code, FuelTank.tank_number,
                   FuelShift.opened_at, FuelShift.shift_number)
     )

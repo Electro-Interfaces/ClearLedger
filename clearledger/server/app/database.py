@@ -433,6 +433,14 @@ async def create_all() -> None:
             WHERE t.shift_id = r.shift_id AND t.tank_number = r.tank_number
               AND t.fact_volume IS NULL
             """,
+            # v4.8: «замера не было» — это NULL, а не 0. Приём пишет
+            # `_f(rest.volume) or None` (ноль → NULL), а бэкфилл v4.7 брал
+            # nullif(...,'') — он снимает пустую строку, но "0.00" сохранял как 0.
+            # Из-за асимметрии 554 записи ГИГ читались как «в резервуаре пусто»:
+            # книга − факт = весь книжный остаток (мнимая недостача 611 тыс. л),
+            # а ведомость инвентаризации списала бы резервуар целиком.
+            "UPDATE fuel_tanks SET fact_volume = NULL WHERE fact_volume = 0",
+            "UPDATE fuel_tanks SET fact_mass = NULL WHERE fact_mass = 0",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
