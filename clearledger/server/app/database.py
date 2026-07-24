@@ -441,6 +441,98 @@ async def create_all() -> None:
             # а ведомость инвентаризации списала бы резервуар целиком.
             "UPDATE fuel_tanks SET fact_volume = NULL WHERE fact_volume = 0",
             "UPDATE fuel_tanks SET fact_mass = NULL WHERE fact_mass = 0",
+            # v4.9: накладные приёма — восстановление связи со сменой.
+            # ТТН лежит прямо в сменном отчёте (секция `receipt` верхнего уровня:
+            # ttn, shift, tank, dt, base, doc/fact по объёму и массе). Но приём
+            # шёл двумя путями: через смену (shift_id проставлялся) и каналом
+            # fuel_delivery (shift_id=None — «приём не кассовое событие»), а дедуп
+            # по (company, station, ttn, code) оставлял ту запись, что пришла первой.
+            # На ГИГ первым отработал канал → у всех 1163 записей связи не было,
+            # и сверить «слил по накладной ↔ принял резервуар в смене» было нечем.
+            # Связь берём из источника (точная), а не подбором по объёму.
+            # Заодно чиним `tank`: в таблице он сбит (в одной ТТН все виды топлива
+            # оказывались на резервуаре 1), а в отчёте у каждой строки свой.
+            """
+            WITH rep AS (
+                SELECT s.company_id, s.station_id, s.id AS shift_id, s.shift_number,
+                       trim(e.rec->>'ttn')                              AS ttn,
+                       nullif(e.rec->'service'->>'service_code','')::int AS fuel_code,
+                       nullif(e.rec->>'tank','')::int                    AS tank,
+                       row_number() OVER (
+                           PARTITION BY s.company_id, s.station_id, trim(e.rec->>'ttn'),
+                                        nullif(e.rec->'service'->>'service_code','')::int
+                           ORDER BY s.opened_at) AS rn
+                  FROM fuel_shifts s,
+                       LATERAL jsonb_array_elements(s.raw_report->'receipt') AS e(rec)
+                 WHERE s.raw_report ? 'receipt'
+                   AND jsonb_typeof(s.raw_report->'receipt') = 'array'
+                   AND coalesce(trim(e.rec->>'ttn'), '') <> ''
+            )
+            UPDATE fuel_receipts r
+               SET shift_id     = rep.shift_id,
+                   shift_number = coalesce(rep.shift_number, r.shift_number),
+                   tank         = coalesce(rep.tank, r.tank)
+              FROM rep
+             WHERE rep.rn = 1
+               AND r.shift_id IS NULL
+               AND r.company_id = rep.company_id
+               AND r.station_id = rep.station_id
+               AND trim(r.ttn)  = rep.ttn
+               AND r.fuel_code IS NOT DISTINCT FROM rep.fuel_code
+            """,
+            # v4.9 (2): добор накладных, которые есть в сменных отчётах, но в
+            # таблицу приёма не попали (на ГИГ ~83 ТТН из 720). Из-за этого приход
+            # в резервуары не сходился с ТТН на 30-40%, и расхождение списывали на
+            # перекачки. Плотность STS отдаёт в кг/м³ (≈700-900) — колонка
+            # Numeric(6,4), поэтому делим на 1000, как это делает _density().
+            """
+            INSERT INTO fuel_receipts (
+                id, company_id, station_id, shift_id, shift_number, tank, ttn,
+                fuel_name, fuel_code, supplier,
+                doc_volume_liters, doc_mass_kg, doc_cost,
+                fact_volume_liters, fact_mass_kg, fact_cost,
+                density, fact_density, doc_temp, fact_temp,
+                diff_volume, diff_mass, received_at, status, is_locked, source_uuid)
+            SELECT gen_random_uuid(), m.company_id, m.station_id, m.shift_id,
+                   m.shift_number, m.tank, m.ttn,
+                   coalesce(m.fuel_name, ''), m.fuel_code, m.supplier,
+                   m.doc_v, m.doc_m, 0, m.fact_v, m.fact_m, 0,
+                   m.doc_d, m.fact_d, m.doc_t, m.fact_t,
+                   round(m.fact_v - m.doc_v, 2), round(m.fact_m - m.doc_m, 2),
+                   m.dt, 'new', false, gen_random_uuid()
+              FROM (
+                SELECT DISTINCT ON (s.company_id, s.station_id, trim(e.rec->>'ttn'),
+                                    nullif(e.rec->'service'->>'service_code','')::int)
+                       s.company_id, s.station_id, s.id AS shift_id, s.shift_number,
+                       trim(e.rec->>'ttn')                               AS ttn,
+                       nullif(e.rec->>'tank','')::int                    AS tank,
+                       e.rec->'service'->>'service_name'                 AS fuel_name,
+                       nullif(e.rec->'service'->>'service_code','')::int AS fuel_code,
+                       e.rec->'base'->>'name'                            AS supplier,
+                       coalesce(nullif(e.rec->'doc'->>'volume','')::numeric, 0)  AS doc_v,
+                       coalesce(nullif(e.rec->'doc'->>'amount','')::numeric, 0)  AS doc_m,
+                       coalesce(nullif(e.rec->'fact'->>'volume','')::numeric, 0) AS fact_v,
+                       coalesce(nullif(e.rec->'fact'->>'amount','')::numeric, 0) AS fact_m,
+                       round(nullif(e.rec->'doc'->>'density','')::numeric  / 1000, 4) AS doc_d,
+                       round(nullif(e.rec->'fact'->>'density','')::numeric / 1000, 4) AS fact_d,
+                       nullif(e.rec->'doc'->>'temp','')::numeric          AS doc_t,
+                       nullif(e.rec->'fact'->>'temp','')::numeric         AS fact_t,
+                       coalesce(nullif(e.rec->>'dt','')::timestamptz, s.opened_at) AS dt
+                  FROM fuel_shifts s,
+                       LATERAL jsonb_array_elements(s.raw_report->'receipt') AS e(rec)
+                 WHERE s.raw_report ? 'receipt'
+                   AND jsonb_typeof(s.raw_report->'receipt') = 'array'
+                   AND coalesce(trim(e.rec->>'ttn'), '') <> ''
+                 ORDER BY s.company_id, s.station_id, trim(e.rec->>'ttn'),
+                          nullif(e.rec->'service'->>'service_code','')::int, s.opened_at
+              ) m
+             WHERE NOT EXISTS (
+                SELECT 1 FROM fuel_receipts x
+                 WHERE x.company_id = m.company_id
+                   AND x.station_id = m.station_id
+                   AND trim(x.ttn)  = m.ttn
+                   AND x.fuel_code IS NOT DISTINCT FROM m.fuel_code)
+            """,
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
