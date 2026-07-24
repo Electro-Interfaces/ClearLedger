@@ -12,7 +12,8 @@ import { listSsoApps } from '@/services/ssoService'
 
 export function CoreSettings() {
   const st = useQuery({ queryKey: ['core-status'], queryFn: getCoreStatus, staleTime: 30_000 })
-  const apps = useQuery({ queryKey: ['sso-apps'], queryFn: listSsoApps, staleTime: 60_000 })
+  // Обёртка обязательна: react-query передал бы в listSsoApps свой контекст вместо companyId.
+  const apps = useQuery({ queryKey: ['sso-apps'], queryFn: () => listSsoApps(), staleTime: 60_000 })
 
   if (st.isLoading) {
     return <div className="flex items-center gap-2 text-muted-foreground py-8"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка…</div>

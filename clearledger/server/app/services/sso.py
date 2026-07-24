@@ -80,13 +80,21 @@ def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: st
     if not key:
         return None
     now = int(time.time())
+    cid = str(company_id) if company_id else None
+    # `adm` — администратор экосистемы-контейнера (суперадмин либо admin в текущей компании).
+    # Нужен рельсу приложения: рисовать ли переход в Центр управления. Правами НЕ является —
+    # доступ проверяет само Ядро, приложение по клейму только показывает кнопку.
+    is_admin = bool(getattr(user, "is_superadmin", False)) or any(
+        c.get("id") == cid and c.get("role") == "admin" for c in companies
+    )
     payload = {
         "iss": settings.sso_issuer,
         "aud": aud,
         "sub": str(user.id),
         "email": user.email,
         "name": getattr(user, "name", None),
-        "cid": str(company_id) if company_id else None,  # текущая компания
+        "cid": cid,                                      # текущая компания
+        "adm": is_admin,                                 # админ контейнера (для рельса приложения)
         "companies": companies,                          # [{id, slug, role}]
         "iat": now,
         "nbf": now - 10,

@@ -4,10 +4,8 @@
  * Фаза 0: Plane/Jitsi на общих доменах — открываются по ссылке, вход свой).
  * Мосты видны и без ключа SSO; когда показывать нечего — лаунчер скрыт.
  */
-import { useState } from 'react'
 import { LayoutGrid, ExternalLink, KeyRound, Loader2 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -18,17 +16,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { isApiEnabled } from '@/services/apiClient'
-import { listSsoApps, authorizeApp } from '@/services/ssoService'
-import { useCompany } from '@/contexts/CompanyContext'
+import { listSsoApps } from '@/services/ssoService'
+import { useOpenApp, wantsNewTab } from '@/hooks/useOpenApp'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
 
 export function AppLauncher() {
-  const { companyId } = useCompany()
-  const [busy, setBusy] = useState<string | null>(null)
+  const { open, busy } = useOpenApp()
 
   const q = useQuery({
     queryKey: ['sso-apps'],
-    queryFn: listSsoApps,
+    queryFn: () => listSsoApps(),
     enabled: isApiEnabled(),
     staleTime: 5 * 60_000,
   })
@@ -36,20 +33,6 @@ export function AppLauncher() {
 
   // Лаунчер скрыт, пока экосистемный SSO не настроен или приложений нет.
   if (!isApiEnabled() || !data?.enabled || data.apps.length === 0) return null
-
-  async function open(code: string) {
-    if (busy) return
-    setBusy(code)
-    try {
-      const url = await authorizeApp(code, companyId)
-      window.open(url, '_blank', 'noopener,noreferrer')
-    } catch (e) {
-      const msg = (e as Error).message || ''
-      toast.error(/503|не настроен/i.test(msg) ? 'Единый вход не настроен' : 'Не удалось открыть приложение')
-    } finally {
-      setBusy(null)
-    }
-  }
 
   const cls =
     'relative h-11 px-3 gap-2 rounded-xl transition-all duration-200 font-medium border ' +
@@ -68,7 +51,12 @@ export function AppLauncher() {
         <DropdownMenuLabel className="text-xs text-muted-foreground">{ECOSYSTEM_TITLE}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {data.apps.map((a) => (
-          <DropdownMenuItem key={a.code} onClick={() => open(a.code)} className="gap-2.5 cursor-pointer">
+          <DropdownMenuItem
+            key={a.code}
+            onClick={(e) => open(a.code, wantsNewTab(e))}
+            onAuxClick={(e) => { if (e.button === 1) open(a.code, true) }}
+            className="gap-2.5 cursor-pointer"
+          >
             {busy === a.code
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : a.mode === 'link'

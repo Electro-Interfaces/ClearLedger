@@ -6,6 +6,9 @@
  * модалки). Хедер сверху открывает то же модалкой (mode='modal') — обе подачи
  * сосуществуют. Десктоп: пристыкованная панель с resize-ручкой (двигает контент).
  * Мобайл: рейла нет (вход из хедера/низа), док при открытии — полноэкранный оверлей.
+ *
+ * Низ рейла — экосистемная зона (`EcoRail`): стол, приложения, Центр управления.
+ * Она видна и при открытом доке — навигация по экосистеме не должна пропадать.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -14,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
 import { ChatPanel } from '@/components/chat/ChatPanel'
+import { EcoRail } from '@/components/layout/EcoRail'
 import { TicketsPanel, InfoPanel } from './InteractionPanels'
 
 const TABS: { key: InteractionSection; label: string; icon: typeof MessageCircle }[] = [
@@ -79,11 +83,24 @@ export function RightDock() {
     )
   }
 
-  // ── Десктоп: свёрнутый рейл (док закрыт) ──
-  if (!dockOpen) {
-    return (
+  // ── Десктоп: док (если открыт) + рейл, который виден ВСЕГДА ──
+  // Рейл не исчезает при открытом доке: в нём живёт экосистемная зона (стол,
+  // приложения, Центр управления), а она должна быть на месте в любом состоянии.
+  // Прикладные вкладки при открытом доке уезжают в его шапку — чтобы не двоились.
+  return (
+    <>
+      {dockOpen && (
+        <div className="relative flex h-full shrink-0 flex-col border-l border-border/50 bg-card" style={{ width }}>
+          <div onMouseDown={onDragStart}
+            className="absolute left-0 top-0 z-10 h-full w-1 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
+          <DockHead tabs={TABS} section={section} badgeOf={badgeOf}
+            onTab={openInteraction} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
+          <DockBody section={section} />
+        </div>
+      )}
+
       <div data-zone="Взаимодействие: чат, заявки, инфо" data-zone-side className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-l border-border/50 bg-card py-2">
-        {TABS.map((t) => {
+        {!dockOpen && TABS.map((t) => {
           const active = section === t.key   // подсвечиваем, если открыт модалкой
           const badge = badgeOf(t.key)
           return (
@@ -98,19 +115,9 @@ export function RightDock() {
             </button>
           )
         })}
+        <EcoRail />
       </div>
-    )
-  }
-
-  // ── Десктоп: развёрнутый док с resize-ручкой ──
-  return (
-    <div className="relative flex h-full shrink-0 flex-col border-l border-border/50 bg-card" style={{ width }}>
-      <div onMouseDown={onDragStart}
-        className="absolute left-0 top-0 z-10 h-full w-1 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
-      <DockHead tabs={TABS} section={section} badgeOf={badgeOf}
-        onTab={openInteraction} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
-      <DockBody section={section} />
-    </div>
+    </>
   )
 }
 

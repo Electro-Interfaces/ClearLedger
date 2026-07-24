@@ -10,6 +10,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { ShieldCheck, LayoutGrid, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
+import { EcoRail } from '@/components/layout/EcoRail'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { AdminPage } from '@/pages/AdminPage'
@@ -24,7 +25,8 @@ export function AdminLayout() {
   if (!isLoading && !isCompanyAdmin) return <Navigate to="/" replace />
 
   return (
-    <div className="min-h-svh bg-background">
+    <div className="flex min-h-svh bg-background">
+      <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-header items-center justify-between gap-4 border-b border-border px-4 sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
           <span className="rounded-xl bg-primary/10 p-2 text-primary">
@@ -47,9 +49,15 @@ export function AdminLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-8">
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8">
         <AdminPage />
       </main>
+      </div>
+
+      {/* Тот же экосистемный рельс, что в приложениях: отсюда — в приложения и на стол. */}
+      <aside className="hidden w-12 shrink-0 flex-col items-center gap-1 border-l border-border/50 bg-card py-2 md:flex">
+        <EcoRail standalone />
+      </aside>
     </div>
   )
 }
