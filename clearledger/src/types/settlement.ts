@@ -52,6 +52,7 @@ export interface EnergyPeriodPoint {
   kwh: number
   stations: number
   tariffAvg: number | null
+  tariffEst: number | null
   costEst: number | null
 }
 

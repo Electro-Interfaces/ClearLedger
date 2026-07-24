@@ -231,13 +231,19 @@ export function ProcurementVitrine() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{fmtN(Math.round(p.kwh))}</TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{p.stations}</TableCell>
-                  <TableCell className="text-right tabular-nums">{p.tariffAvg != null ? p.tariffAvg.toFixed(2) : '—'}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {p.tariffAvg != null
+                      ? p.tariffAvg.toFixed(2)
+                      : p.tariffEst != null
+                        ? <>{p.tariffEst.toFixed(2)}<span className="ml-0.5 text-[9px] text-muted-foreground">оц.</span></>
+                        : '—'}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">{p.costEst != null ? fmtN(Math.round(p.costEst)) : '—'}</TableCell>
                 </TableRow>
               ))}
             </TableBody></Table>
             <p className="text-xs text-muted-foreground/70">
-              Стоимость — оценка: объём × входящий тариф месяца (для месяцев без тарифной сетки — средний тариф станции из реестра). Помесячные тарифы контрагент ведёт с июня 2026.
+              Стоимость — оценка: объём × входящий тариф месяца (для месяцев без тарифной сетки — средний тариф станции из реестра). Помесячные тарифы контрагент ведёт с июня 2026; за более ранние месяцы в колонке «Тариф ср.» показан оценочный тариф закупки (пометка «оц.») — средневзвешенный по объёму, тот же, что заложен в стоимость.
             </p>
           </CardContent></Card>
 

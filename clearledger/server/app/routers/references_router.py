@@ -1203,7 +1203,7 @@ async def energy_periods_summary(
     cost_known = False
     for p in periods:
         b = by_period.setdefault(p.period, {"kwh": 0.0, "stations": 0, "t_sum": 0.0,
-                                            "t_n": 0, "cost": 0.0})
+                                            "t_n": 0, "cost": 0.0, "cost_kwh": 0.0})
         if p.intake_kwh is not None:
             b["kwh"] += p.intake_kwh
             b["stations"] += 1
@@ -1212,6 +1212,7 @@ async def energy_periods_summary(
                 or (last_tariff.get(p.location_id) or (None, None))[1]
             if t:
                 b["cost"] += p.intake_kwh * t
+                b["cost_kwh"] += p.intake_kwh   # объём, покрытый тарифом (для оценочного тарифа)
                 total_cost += p.intake_kwh * t
                 cost_known = True
         if p.tariff_rub_kwh is not None:
@@ -1221,6 +1222,7 @@ async def energy_periods_summary(
         EnergyPeriodPoint(
             period=k, kwh=round(v["kwh"], 1), stations=v["stations"],
             tariffAvg=round(v["t_sum"] / v["t_n"], 2) if v["t_n"] else None,
+            tariffEst=round(v["cost"] / v["cost_kwh"], 2) if v["cost_kwh"] else None,
             costEst=round(v["cost"], 0) if v["cost"] else None,
         )
         for k, v in sorted(by_period.items())

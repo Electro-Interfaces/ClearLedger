@@ -777,7 +777,8 @@ class EnergyPeriodPoint(BaseModel):
     period: str                            # 'YYYY-MM-01'
     kwh: float = 0                         # Σ объёма входящей э/э
     stations: int = 0                      # станций с объёмом
-    tariffAvg: float | None = None         # средний входящий тариф, руб/кВт·ч с НДС
+    tariffAvg: float | None = None         # средний входящий тариф (реальный, из файла тарифов), руб/кВт·ч с НДС
+    tariffEst: float | None = None         # оценочный тариф: средневзвеш. по объёму, использованный для costEst (для месяцев без сетки)
     costEst: float | None = None           # оценка стоимости: Σ kwh×тариф (мес или ср. станции)
 
 
