@@ -710,7 +710,27 @@ async def report_job(db: AsyncSession, cid: uuid.UUID, job_id: uuid.UUID, *,
     j.result = result
     j.executed_at = datetime.now(timezone.utc)
     await db.commit()
+    if j.kind == "repoint" and not j.dry_run:
+        await _mark_repointed(db, cid, j, result)
     return True
+
+
+async def _mark_repointed(db: AsyncSession, cid: uuid.UUID, j: DedupCorrectionJob,
+                          result: dict) -> None:
+    """Проставить «Перецеплено» группам, все коды которых нода подтвердила
+    контрольным перечётом среза (`codesOk`). Частично прошедшую группу не
+    трогаем: статус означает «сделано целиком», иначе остаток работ потеряется.
+    Пробный прогон статусы не двигает — там в 1С ничего не записано."""
+    done_codes = set(result.get("codesOk") or [])
+    if not done_codes:
+        return
+    for g in (j.payload or {}).get("groups", []):
+        codes = set(g.get("nsCodes") or [])
+        if not codes or not codes <= done_codes:
+            continue
+        await set_status(db, cid, entity_type="group", entity_key=g["groupKey"],
+                         status="repointed", canon_guid=None,
+                         note=None, user=f"нода 208 · задание {j.id}")
 
 
 async def deactivation_plan(db: AsyncSession, cid: uuid.UUID) -> list[dict]:

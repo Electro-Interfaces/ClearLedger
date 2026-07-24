@@ -141,18 +141,23 @@ function GroupCard({ g }: { g: DedupGroup }) {
   // Перецеп кодов кассы на канон — только по команде менеджера, погруппово.
   // Канон в задании берётся из статуса, поэтому сначала фиксируем выбор.
   const job = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (dryRun: boolean) => {
       await setDedupStatus({ entityType: 'group', entityKey: g.key, canonGuid: canon, status: 'in_progress' })
-      return correctDedup({ groupKeys: [g.key], dryRun: true })
+      return correctDedup({ groupKeys: [g.key], dryRun })
     },
-    onSuccess: (r) => {
+    onSuccess: (r, dryRun) => {
       qc.invalidateQueries({ queryKey: ['dedup-groups'] })
       qc.invalidateQueries({ queryKey: ['dedup-jobs'] })
+      setArmed(false)
       if (r.error) toast.error(r.error)
-      else toast.success(`Задание создано: ${r.codes} код(ов) кассы → канон. Нода 208 выполнит пробный прогон.`)
+      else toast.success(dryRun
+        ? `Задание создано: ${r.codes} код(ов) кассы → канон. Нода 208 выполнит пробный прогон.`
+        : `БОЕВОЕ задание создано: ${r.codes} код(ов) кассы → канон. Нода 208 проведёт УстановкаКодовНС в 1С.`)
     },
-    onError: () => toast.error('Не удалось создать задание'),
+    onError: () => { setArmed(false); toast.error('Не удалось создать задание') },
   })
+  // Боевая запись в живую кассу — в два клика: первый взводит кнопку, второй пускает.
+  const [armed, setArmed] = useState(false)
   // Перецеп трогает только кассу своей АЗС: коды чужих складов не в счёт.
   const dupCodes = g.members.filter((m) => m.guid !== canon)
     .reduce((n, m) => n + m.nsCodes.filter((c) => c.active && c.wh === '208').length, 0)
@@ -245,11 +250,22 @@ function GroupCard({ g }: { g: DedupGroup }) {
               {dirty ? 'Сохранить выбор' : 'Сохранено'}
             </Button>
             <Button size="sm" variant="outline" className="h-8 border-violet-400/40 text-xs text-violet-300/90 hover:bg-violet-500/10"
-              onClick={() => job.mutate()} disabled={job.isPending || !canon || dupCodes === 0}
+              onClick={() => job.mutate(true)} disabled={job.isPending || !canon || dupCodes === 0}
               title={!canon ? 'Сначала выберите канон' : dupCodes === 0 ? 'На дублях нет активных кодов кассы' :
                 `Пробный прогон: нода 208 покажет план перецепа ${dupCodes} код(ов) кассы на канон, без записи в 1С`}>
               {job.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <PlayCircle className="mr-1 size-3.5" />}
               Перецеп пробно{dupCodes > 0 ? ` (${dupCodes})` : ''}
+            </Button>
+            <Button size="sm" variant="outline" disabled={job.isPending || !canon || dupCodes === 0}
+              className={cn('h-8 text-xs', armed
+                ? 'border-red-400/70 bg-red-500/15 text-red-200 hover:bg-red-500/25'
+                : 'border-red-400/40 text-red-300/80 hover:bg-red-500/10')}
+              onClick={() => (armed ? job.mutate(false) : setArmed(true))}
+              title={armed
+                ? 'Второй клик — задание уйдёт на станцию и запишет привязку в 1С'
+                : `Боевой перецеп: нода 208 проведёт УстановкаКодовНС и перецепит ${dupCodes} код(ов) кассы на канон. Клик взводит кнопку, записи ещё нет.`}>
+              {job.isPending ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <AlertTriangle className="mr-1 size-3.5" />}
+              {armed ? 'Точно? Записать в 1С' : `Перецеп боевой${dupCodes > 0 ? ` (${dupCodes})` : ''}`}
             </Button>
             <Button size="sm" variant="ghost"
               className={cn('ml-auto h-8 text-xs', g.status === 'not_used'
