@@ -309,10 +309,12 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
     # разрез «наше/не наше»: касса 208 работает через группу или нет
     codes = await _codes_by_card(db, cid)
     scoped = {k: v for k, v in dup_groups.items() if in_scope_208(v, codes)}
-    # рассинхрон цен: живые карточки группы с разными розн.ценами (только контур 208 —
-    # у мёртвых групп разные цены ни на что не влияют, это ложная тревога)
+    # рассинхрон цен: касса 208 бьёт две карточки группы по разным ценам (см. groups() —
+    # у брошенного двойника без кодов цена застыла и на кассу не влияет)
     price_desync = sum(1 for v in scoped.values()
-                       if len({x.price for x in v if not x.marked and x.price}) > 1)
+                       if len({x.price for x in v if x.price
+                               and any(b.get("active") and str(b.get("wh") or "") == WH208
+                                       for b in codes.get(x.guid, []))}) > 1)
     updated = max((c.updated_at for c in cards if c.updated_at), default=None)
 
     # связь с ЦБ: интересна не галочка «есть» (у 99,96%), а аномалии
@@ -439,9 +441,19 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
         selling = [m for m in members if not m.marked and m.sold_qty and m.sold_qty > 0]
         selling.sort(key=lambda x: -(x.sold_qty or 0))
         recommended = selling[0].guid if selling else None
-        # рассинхрон цен: разные розн.цены у ЖИВЫХ карточек-дублей одного товара
-        live_prices = sorted({m.price for m in members if not m.marked and m.price})
-        spread = live_prices if len(live_prices) > 1 else []
+        # Рассинхрон цен — только когда касса РЕАЛЬНО бьёт две карточки по разным
+        # ценам, т.е. активный код склада 208 есть у обеих. Сравнение просто «живых»
+        # карточек давало 53 тревоги вместо 12: у брошенного двойника (ни кодов, ни
+        # остатка, ни продаж) цена застыла на дне, когда его перестали использовать,
+        # и кассе она невидима. Такая «тревога» неотличима от настоящей и обесценивает
+        # весь показатель.
+        trading_prices = sorted({m.price for m in members if m.price
+                                 and any(x.get("active") and str(x.get("wh") or "") == WH208
+                                         for x in codes_by_card.get(m.guid, []))})
+        spread = trading_prices if len(trading_prices) > 1 else []
+        # цена на брошенном двойнике — справочно, без тревоги
+        stale_prices = sorted({m.price for m in members if not m.marked and m.price
+                               and m.price not in trading_prices})
         if price_desync and not spread:
             continue
         # канон-хозяин может лежать в СОСЕДНЕЙ группе (нормализация имени развела
@@ -463,7 +475,7 @@ async def groups(db: AsyncSession, cid: uuid.UUID, *, q: str | None = None,
         out.append({
             "key": key, "title": title, "count": len(members), "live": len(live),
             "assortment": members[0].is_assortment, "prefixes": prefixes,
-            "inScope208": scoped, "priceSpread": spread,
+            "inScope208": scoped, "priceSpread": spread, "stalePrices": stale_prices,
             "sellingCount": len(selling),          # сколько карточек продаётся (>1 = конфликт)
             "recommendedCanon": recommended,       # канон по факту продаж
             "members": mem,

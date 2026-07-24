@@ -168,7 +168,15 @@ function GroupCard({ g }: { g: DedupGroup }) {
         {open ? <ChevronDown className="size-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.title}</span>
         {g.priceSpread.length > 1 && (
-          <Badge variant="outline" className="border-red-400/50 text-red-300/80 gap-1"><AlertTriangle className="size-3" />цены {g.priceSpread.join('/')}</Badge>
+          <Badge variant="outline" className="border-red-400/50 text-red-300/80 gap-1"
+            title="Касса бьёт обе карточки, но по разным ценам — что пробьётся, зависит от кода">
+            <AlertTriangle className="size-3" />цены {g.priceSpread.join('/')}</Badge>
+        )}
+        {/* Цена на брошенном двойнике: кодов кассы нет, на чек не влияет — не тревога */}
+        {g.priceSpread.length <= 1 && g.stalePrices.length > 0 && (
+          <Badge variant="outline" className="border-zinc-600 text-zinc-500"
+            title="Старая цена на карточке без кодов кассы — на чек не влияет">
+            старая цена {g.stalePrices.join('/')}</Badge>
         )}
         {g.sellingCount === 0 ? (
           <Badge variant="outline" className="border-zinc-600 text-zinc-400 gap-1"><ShoppingCart className="size-3" />нет продаж</Badge>

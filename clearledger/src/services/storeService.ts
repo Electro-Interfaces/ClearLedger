@@ -717,7 +717,10 @@ export interface DedupGroup {
   prefixes: string[]
   /** Касса 208 работает через группу (активный код склада 208 либо продажи). */
   inScope208: boolean
+  /** Настоящий конфликт: касса 208 бьёт 2+ карточки группы по разным ценам. */
   priceSpread: number[]
+  /** Цены на карточках без кодов кассы — застывшее наследие, на чек не влияет. */
+  stalePrices: number[]
   sellingCount: number; recommendedCanon: string | null
   members: DedupMember[]
   status: string; canonGuid: string | null; note: string | null
