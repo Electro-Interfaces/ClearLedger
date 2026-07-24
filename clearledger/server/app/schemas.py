@@ -780,6 +780,8 @@ class EnergyPeriodPoint(BaseModel):
     tariffAvg: float | None = None         # средний входящий тариф (реальный, из файла тарифов), руб/кВт·ч с НДС
     tariffEst: float | None = None         # оценочный тариф: средневзвеш. по объёму, использованный для costEst (для месяцев без сетки)
     costEst: float | None = None           # оценка стоимости: Σ kwh×тариф (мес или ср. станции)
+    saleKwh: float | None = None           # реализация: отпущено клиентам в сессиях за месяц, кВт·ч (mv_charge_daily)
+    saleRevenue: float | None = None       # выручка реализации, ₽ = Σ coalesce(client_amount, amount)
 
 
 class EnergySupplierRow(BaseModel):

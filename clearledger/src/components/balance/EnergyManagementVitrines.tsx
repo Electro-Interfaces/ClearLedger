@@ -190,6 +190,23 @@ export function ProcurementVitrine() {
   const cost12 = last12.reduce((a, p) => a + (p.costEst ?? 0), 0)
   const lastTariff = [...series].reverse().find((p) => p.tariffAvg != null)
   const maxKwh = Math.max(1, ...last12.map((p) => p.kwh))
+  // реализация (отпуск клиентам) для сравнения «закупка ↔ реализация»
+  const hasSale = last12.some((p) => p.saleKwh != null)
+  const sale12 = last12.reduce((a, p) => a + (p.saleKwh ?? 0), 0)
+  const rev12 = last12.reduce((a, p) => a + (p.saleRevenue ?? 0), 0)
+  // «сопоставимые» месяцы: обе стороны зрелые. Коридор выхода 50–110 % — потери ЭЗС
+  // реально 0-20 %; выход > 110 % = реестр закупки за месяц ещё дозаполняется (лаг
+  // 2-3 мес, «выход 3892 %» врал бы), выход < 50 % = реализация ещё не разогналась
+  // (сессии грузятся с 01.2026). По несопоставимым месяцам выход и маржу не считаем.
+  const settled = last12.filter((p) => p.saleKwh != null && p.kwh > 0
+    && p.saleKwh <= p.kwh * 1.1 && p.saleKwh >= p.kwh * 0.5)
+  const buyS = settled.reduce((a, p) => a + p.kwh, 0)
+  const saleS = settled.reduce((a, p) => a + (p.saleKwh ?? 0), 0)
+  const yield12 = buyS > 0 ? (saleS / buyS) * 100 : null
+  const margin12 = settled.length
+    ? settled.reduce((a, p) => a + ((p.saleRevenue ?? 0) - (p.costEst ?? 0)), 0)
+    : null
+  const maxBalKwh = Math.max(1, ...last12.map((p) => Math.max(p.kwh, p.saleKwh ?? 0)))
   return (
     <div ref={rootRef} className="space-y-5 px-6 py-6">
       <Head
@@ -207,6 +224,15 @@ export function ProcurementVitrine() {
             <Kpi real label={`Средний входящий тариф${lastTariff ? ` (${periodLabel(lastTariff.period)})` : ''}, ₽/кВт·ч`} value={lastTariff?.tariffAvg != null ? lastTariff.tariffAvg.toFixed(2) : '—'} />
             <Kpi real label="ЭЗС с объёмами / с тарифом" value={`${s.stationsWithVolumes} / ${s.stationsWithTariff}`} />
           </div>
+
+          {hasSale && (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <Kpi real label="Реализация за 12 мес, кВт·ч" value={fmtN(Math.round(sale12))} />
+              <Kpi real label="Выход, сопоставимые мес" value={yield12 != null ? `${yield12.toFixed(1)} %` : '—'} />
+              <Kpi real label="Выручка реализации за 12 мес, ₽" value={rev12 ? fmtN(Math.round(rev12)) : '—'} />
+              <Kpi real label="Маржа, сопоставимые мес (оценка), ₽" value={margin12 != null ? fmtN(Math.round(margin12)) : '—'} />
+            </div>
+          )}
 
           <Card><CardContent className="space-y-3 pt-5">
             <div className="flex items-center gap-2">
@@ -246,6 +272,62 @@ export function ProcurementVitrine() {
               Стоимость — оценка: объём × входящий тариф месяца (для месяцев без тарифной сетки — средний тариф станции из реестра). Помесячные тарифы контрагент ведёт с июня 2026; за более ранние месяцы в колонке «Тариф ср.» показан оценочный тариф закупки (пометка «оц.») — средневзвешенный по объёму, тот же, что заложен в стоимость.
             </p>
           </CardContent></Card>
+
+          {hasSale && (
+            <Card><CardContent className="space-y-3 overflow-x-auto pt-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-medium">Закупка ↔ реализация по месяцам</div>
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <span className="inline-block h-1.5 w-3 rounded-sm bg-primary/60" /> закупка
+                  <span className="ml-2 inline-block h-1.5 w-3 rounded-sm bg-emerald-500/70" /> реализация
+                </span>
+              </div>
+              <Table><TableHeader><TableRow>
+                <TableHead>Месяц</TableHead>
+                <TableHead className="w-[20%]"></TableHead>
+                <TableHead className="text-right">Закуплено, кВт·ч</TableHead>
+                <TableHead className="text-right">Реализация, кВт·ч</TableHead>
+                <TableHead className="text-right">Выход</TableHead>
+                <TableHead className="text-right">Стоимость закупки, ₽</TableHead>
+                <TableHead className="text-right">Выручка, ₽</TableHead>
+                <TableHead className="text-right">Маржа, ₽</TableHead>
+              </TableRow></TableHeader><TableBody>
+                {last12.map((p) => {
+                  const yld = p.saleKwh != null && p.kwh > 0 ? (p.saleKwh / p.kwh) * 100 : null
+                  const comparable = yld != null && yld >= 50 && yld <= 110
+                  const buyIncomplete = yld != null && yld > 110   // реестр закупки за месяц ещё дозаполняется
+                  const margin = comparable && p.saleRevenue != null && p.costEst != null ? p.saleRevenue - p.costEst : null
+                  return (
+                    <TableRow key={p.period}>
+                      <TableCell className="font-medium whitespace-nowrap">{periodLabel(p.period)}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <div className="h-1.5 rounded-sm bg-primary/60" style={{ width: `${Math.max(2, (p.kwh / maxBalKwh) * 100)}%` }} />
+                          <div className="h-1.5 rounded-sm bg-emerald-500/70" style={{ width: `${Math.max(2, ((p.saleKwh ?? 0) / maxBalKwh) * 100)}%` }} />
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {fmtN(Math.round(p.kwh))}
+                        {buyIncomplete && <span className="ml-0.5 text-[9px] text-amber-600 dark:text-amber-400" title="реестр закупки за месяц ещё дозаполняется">неполн.</span>}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{p.saleKwh != null ? fmtN(Math.round(p.saleKwh)) : '—'}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {yld == null ? '—' : comparable
+                          ? `${yld.toFixed(1)} %`
+                          : <span title={buyIncomplete ? 'закупка в реестре за месяц ещё не заполнена — сравнение позже' : 'реализация за месяц ещё не набрала объём'}>н/д</span>}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{p.costEst != null ? fmtN(Math.round(p.costEst)) : '—'}</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">{p.saleRevenue != null ? fmtN(Math.round(p.saleRevenue)) : '—'}</TableCell>
+                      <TableCell className={`text-right tabular-nums ${margin == null ? 'text-muted-foreground' : margin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{margin != null ? fmtN(Math.round(margin)) : (yld != null && !comparable ? 'н/д' : '—')}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody></Table>
+              <p className="text-xs text-muted-foreground/70">
+                Реализация — отпущенная клиентам энергия и выручка по зарядным сессиям (данные с 01.2026). Выход = реализация ÷ закупка: доля купленной энергии, дошедшая до клиента; разница — технологические потери сети и собственное потребление ЭЗС. Маржа = выручка − оценка стоимости закупки. Реестр закупки заполняется с лагом 2-3 мес: по месяцам, где реализация превышает закупку (метка «неполн.»), выход и маржа помечены «н/д» — сравнение появится после дозагрузки реестра.
+              </p>
+            </CardContent></Card>
+          )}
 
           {s.suppliers.length > 0 && (
             <Card><CardContent className="space-y-3 overflow-x-auto pt-5">

@@ -54,6 +54,8 @@ export interface EnergyPeriodPoint {
   tariffAvg: number | null
   tariffEst: number | null
   costEst: number | null
+  saleKwh: number | null
+  saleRevenue: number | null
 }
 
 export interface EnergySupplierRow {

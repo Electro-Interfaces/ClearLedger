@@ -1218,12 +1218,28 @@ async def energy_periods_summary(
         if p.tariff_rub_kwh is not None:
             b["t_sum"] += p.tariff_rub_kwh
             b["t_n"] += 1
+    # реализация (отпущено клиентам + выручка) по месяцам — для сравнения
+    # «закупка ↔ реализация». Источник: L3-витрина mv_charge_daily (та же, что
+    # питает обзорные дашборды: energy_kwh, revenue=coalesce(client_amount, amount)).
+    from sqlalchemy import text as _text
+    from app.services.charge_mart import ensure_mart
+    await ensure_mart()
+    sale_by_ym: dict[str, tuple[float, float]] = {}
+    for r in (await db.execute(_text(
+        "SELECT to_char(day, 'YYYY-MM') AS ym, "
+        "coalesce(sum(energy_kwh), 0) AS kwh, coalesce(sum(revenue), 0) AS rev "
+        "FROM mv_charge_daily WHERE company_id = :cid GROUP BY 1"
+    ), {"cid": str(cid)})).all():
+        sale_by_ym[r.ym] = (float(r.kwh or 0), float(r.rev or 0))
+
     series = [
         EnergyPeriodPoint(
             period=k, kwh=round(v["kwh"], 1), stations=v["stations"],
             tariffAvg=round(v["t_sum"] / v["t_n"], 2) if v["t_n"] else None,
             tariffEst=round(v["cost"] / v["cost_kwh"], 2) if v["cost_kwh"] else None,
             costEst=round(v["cost"], 0) if v["cost"] else None,
+            saleKwh=round(sale_by_ym[k[:7]][0], 1) if k[:7] in sale_by_ym else None,
+            saleRevenue=round(sale_by_ym[k[:7]][1], 0) if k[:7] in sale_by_ym else None,
         )
         for k, v in sorted(by_period.items())
     ][-months:]
