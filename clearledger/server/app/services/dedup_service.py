@@ -654,7 +654,10 @@ async def create_repoint_job(db: AsyncSession, cid: uuid.UUID, *, group_keys: li
         pgroups.append({
             "groupKey": k, "title": g["title"], "canonGuid": canon,
             "canonCode": canon_m["code"] if canon_m else None,
-            "canonName": canon_m["name"] if canon_m else None,
+            # Канон может жить в соседней группе (станция назвала карточку, которая
+            # по названию к дублям не липнет). Тогда имя берём из группы, иначе нода
+            # пишет в боевой журнал «null» вместо товара, на который перецепила код.
+            "canonName": canon_m["name"] if canon_m else g.get("canonName"),
             "canonPrice": canon_m["price"] if canon_m else None,
             "nsCodes": codes,
             "fromGuids": sorted({m["guid"] for m in g["members"] if m["guid"] != canon}),
