@@ -688,6 +688,8 @@ export interface DedupSummary {
   cbMissing: number; cbCodeDiff: number
   /** Групп в архиве (снята с продажи — не удаление, история сохраняется). Статус not_used. */
   notUsedGroups: number
+  /** Групп контура 208 с принятым решением (любой статус, кроме pending/in_progress). */
+  scopedResolved: number
   /** Факты эры/остатка загружены (иначе era/ostatok = null, бейджи скрыты). */
   factsLoaded: boolean
   /** Карточек по эре продаж (День X): при ГИГ / только Норд-Лайн / никогда (фантом). */

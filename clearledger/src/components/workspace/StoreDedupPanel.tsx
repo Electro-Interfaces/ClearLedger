@@ -555,7 +555,13 @@ export function StoreDedupPanel() {
 
   const refreshing = jobs.some((j) => j.kind === 'refresh' && ['pending', 'running'].includes(j.status))
 
-  const doneCount = useMemo(() => groups.filter((g) => ['merged', 'done'].includes(g.status)).length, [groups])
+  // Разобрана группа, по которой принято решение — включая «Перецеплено» и «Не дубль».
+  // Раньше считались только merged+done, и 18 перецепленных групп не попадали в счётчик:
+  // работа сделана, а прогресс на экране стоял на месте.
+  const OPEN = ['pending', 'in_progress']
+  const doneCount = useMemo(
+    () => groups.filter((g) => !OPEN.includes(g.status)).length, [groups]) // eslint-disable-line react-hooks/exhaustive-deps
+  const openCount = groups.length - doneCount
 
   const exportExcel = async () => {
     try {
@@ -639,6 +645,8 @@ export function StoreDedupPanel() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4 xl:grid-cols-8">
           <Kpi label="Карточек 208" value={fmt(sum.cardsTotal)} hint={`008:${fmt(sum.byPrefix['008'])} · 208:${fmt(sum.byPrefix['208'])} · ЦБ:${fmt(sum.byPrefix['ЦБ'])}`} />
           <Kpi label="Групп в контуре 208" value={fmt(sum.scopedGroups)} hint={`из ${fmt(sum.dupGroups)} · вне контура ${fmt(sum.outOfScopeGroups)}`} />
+          <Kpi label="Разобрано" value={`${fmt(sum.scopedResolved)} / ${fmt(sum.scopedGroups)}`}
+            hint={`осталось решить ${fmt((sum.scopedGroups ?? 0) - (sum.scopedResolved ?? 0))}`} />
           <Kpi label="Рассинхрон цен" value={fmt(sum.priceDesyncGroups)} hint="разные цены, касса 208 бьёт" warn={(sum.priceDesyncGroups ?? 0) > 0} />
           <Kpi label="В ассортименте" value={fmt(sum.assortmentCards)} hint="не дубли (исключены)" />
           <Kpi label="Привязок кассы" value={fmt(sum.nsActive)} hint="активных кодов НС" />
@@ -722,6 +730,7 @@ export function StoreDedupPanel() {
             )}
             <span className="ml-auto text-xs text-muted-foreground">
               {groups.length} групп · разобрано {doneCount}
+              {openCount > 0 && <> · <span className="text-amber-300/80">осталось {openCount}</span></>}
               {(sum?.notUsedGroups ?? 0) > 0 && <> · <span className="text-slate-300/80">в архиве {fmt(sum?.notUsedGroups)}</span></>}
             </span>
           </div>

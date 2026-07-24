@@ -337,6 +337,16 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         DedupStatus.company_id == cid, DedupStatus.entity_type == "group",
         DedupStatus.status == "not_used"))).scalar() or 0
 
+    # прогресс разбора по контуру 208 — единственная метрика этого экрана, которая
+    # отражает НАШУ работу. Остальные плитки — снимок 1С: число карточек и групп
+    # не изменится, пока карточки не слиты или не отправлены в архив.
+    # Разобранной считается группа с любым статусом, кроме рабочих.
+    gr_status = {k: v for k, v in (await db.execute(select(
+        DedupStatus.entity_key, DedupStatus.status).where(
+        DedupStatus.company_id == cid, DedupStatus.entity_type == "group"))).all()}
+    scoped_resolved = sum(1 for k in scoped
+                          if gr_status.get(k) not in (None, "pending", "in_progress"))
+
     # эра продаж (День X 11.06.2026): gig — торговалось при ГИГ, nl — только под
     # Норд-Лайн (наследие), never — не торговалось (фантом РИБ)
     facts = await _facts_by_guid(db, cid)
@@ -354,7 +364,7 @@ async def summary(db: AsyncSession, cid: uuid.UUID) -> dict:
         "nsActive": len(binds), "nsOnMarked": on_marked, "multiCodeCards": multi_code_cards,
         "cbLinked": len(cb_cards),
         "cbMissing": cb_missing, "cbCodeDiff": cb_code_diff,
-        "notUsedGroups": not_used_groups,
+        "notUsedGroups": not_used_groups, "scopedResolved": scoped_resolved,
         "factsLoaded": facts_loaded,
         "eraGig": era_gig, "eraNl": era_nl, "eraNever": era_never,
         "updatedAt": updated.isoformat() if updated else None,
