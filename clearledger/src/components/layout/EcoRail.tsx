@@ -21,7 +21,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps } from '@/services/ssoService'
 import { useOpenApp, wantsNewTab } from '@/hooks/useOpenApp'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -36,11 +35,14 @@ export function EcoRail({ standalone = false }: { standalone?: boolean }) {
   const { isCompanyAdmin } = useCompany()
   const { open, busy } = useOpenApp()
 
+  // Каталог спрашиваем всегда: в контейнере API живёт на том же origin, и база
+  // VITE_API_URL там пуста — гейтить рельс по isApiEnabled() значило бы прятать
+  // навигацию именно в боевом режиме. Нет приложений (или ошибка) — просто нет кнопки.
   const q = useQuery({
     queryKey: ['sso-apps'],
     queryFn: () => listSsoApps(),
-    enabled: isApiEnabled(),
     staleTime: 5 * 60_000,
+    retry: false,
   })
   const apps = q.data?.enabled ? q.data.apps : []
 

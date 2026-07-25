@@ -8,6 +8,11 @@ pdf/
 server/__pycache__/
 server/.env
 server/uploads/
+# Дев-конфиг Vite (VITE_API_URL=http://localhost:8000): в образе он уводит фронт
+# с origin контейнера. В контекст сборки не пускаем — база API задаётся build-arg.
+.env
+.env.*
+!.env.example
 .claude/
 .vscode/
 .idea/
