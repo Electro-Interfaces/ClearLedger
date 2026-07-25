@@ -1,0 +1,176 @@
+"""Реестр объектов пространства (docs/SPACE.md §5).
+
+Объект компании — общая сущность пространства: на него ссылаются ВСЕ приложения-разрезы
+(заявка Координатора и смена Учёта об одной и той же АЗС). Поэтому у объекта один
+владелец — компания, и один канонический адрес — `/api/registry/objects`.
+
+Физически данные лежат в той же таблице `service_locations`, что и раньше: реестр — это
+подъём существующей сущности в статус общей, а не вторая копия объектов. Разница в
+контракте: здесь отдаётся ТОЛЬКО паспорт пространства (код, наименование, тип, статус,
+адрес, гео, регион). Прикладные атрибуты (ЭЗС-паспорт: мощность, коннекторы, OCPP;
+привязки к источникам) остаются приложению и через реестр не ходят.
+
+Скоуп — всегда компания: `code` уникален в пределах компании, запрос без компании
+невозможен (см. роутер). В мультикомпанийном контейнере это единственное, что не даёт
+объектам одной компании утечь другой.
+"""
+from __future__ import annotations
+
+import json
+import uuid
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import AuditEvent, ServiceLocation
+
+# Типы объектов пространства (совпадают с ServiceLocation.type).
+OBJECT_TYPES = {"fuel_station", "ev_charging", "retail", "office", "warehouse", "other"}
+# Жизненный цикл карточки. Операционное состояние (работает/ремонт) — прикладное,
+# им управляет разрез, а не реестр.
+OBJECT_STATUSES = {"active", "planned", "closed"}
+
+
+def to_card(loc: ServiceLocation) -> dict[str, Any]:
+    """Паспорт объекта пространства — без прикладных полей разрезов."""
+    return {
+        "id": loc.id,
+        "companyId": str(loc.company_id),
+        "code": loc.code,
+        "name": loc.name,
+        "type": loc.type,
+        "status": loc.status,
+        # Операционное состояние отдаём только для чтения: разрезам удобно видеть его
+        # рядом с паспортом, но менять — через API приложения, не через реестр.
+        "operationalStatus": getattr(loc, "operational_status", "unknown") or "unknown",
+        "address": loc.address,
+        "city": getattr(loc, "city", None),
+        "street": getattr(loc, "street", None),
+        "house": getattr(loc, "house", None),
+        "latitude": getattr(loc, "latitude", None),
+        "longitude": getattr(loc, "longitude", None),
+        "regionId": str(loc.region_id) if getattr(loc, "region_id", None) else None,
+        "description": loc.description,
+        "createdAt": loc.created_at.isoformat() if loc.created_at else "",
+        "updatedAt": loc.updated_at.isoformat() if loc.updated_at else "",
+    }
+
+
+async def list_objects(
+    db: AsyncSession, company_id: uuid.UUID, *, status: str | None = None,
+    type_: str | None = None, query: str | None = None,
+) -> list[dict[str, Any]]:
+    """Объекты компании, отсортированные по коду."""
+    stmt = select(ServiceLocation).where(ServiceLocation.company_id == company_id)
+    if status:
+        stmt = stmt.where(ServiceLocation.status == status)
+    if type_:
+        stmt = stmt.where(ServiceLocation.type == type_)
+    if query:
+        like = f"%{query.strip().lower()}%"
+        stmt = stmt.where(
+            ServiceLocation.code.ilike(like) | ServiceLocation.name.ilike(like)
+        )
+    res = await db.execute(stmt.order_by(ServiceLocation.code))
+    return [to_card(l) for l in res.scalars().all()]
+
+
+async def get_object(
+    db: AsyncSession, company_id: uuid.UUID, object_id: str,
+) -> dict[str, Any] | None:
+    loc = await _load(db, company_id, object_id)
+    return to_card(loc) if loc else None
+
+
+async def _load(
+    db: AsyncSession, company_id: uuid.UUID, object_id: str,
+) -> ServiceLocation | None:
+    """Объект строго в пределах компании: чужой id даёт None, а не чужую карточку."""
+    res = await db.execute(select(ServiceLocation).where(
+        ServiceLocation.id == object_id, ServiceLocation.company_id == company_id))
+    return res.scalar_one_or_none()
+
+
+async def code_taken(
+    db: AsyncSession, company_id: uuid.UUID, code: str, *, except_id: str | None = None,
+) -> bool:
+    """Код уникален в пределах КОМПАНИИ: у двух компаний холдинга может быть своя «Площадка 1»."""
+    stmt = select(ServiceLocation.id).where(
+        ServiceLocation.company_id == company_id, ServiceLocation.code == code)
+    if except_id:
+        stmt = stmt.where(ServiceLocation.id != except_id)
+    return (await db.execute(stmt)).first() is not None
+
+
+async def create_object(
+    db: AsyncSession, company_id: uuid.UUID, data: dict[str, Any], *, actor: Any | None,
+) -> dict[str, Any]:
+    loc = ServiceLocation(
+        id=uuid.uuid4().hex[:24],          # id — строка (исторически клиентский nanoid)
+        company_id=company_id,
+        code=data["code"].strip(),
+        name=data["name"].strip(),
+        type=data.get("type") or "other",
+        status=data.get("status") or "active",
+        address=data.get("address"),
+        description=data.get("description"),
+        source_bindings=[],
+    )
+    _apply_optional(loc, data)
+    db.add(loc)
+    await db.flush()
+    await _audit(db, company_id, actor, "space.object.create", loc, {"code": loc.code})
+    await db.commit()
+    await db.refresh(loc)
+    return to_card(loc)
+
+
+async def update_object(
+    db: AsyncSession, company_id: uuid.UUID, object_id: str, data: dict[str, Any],
+    *, actor: Any | None,
+) -> dict[str, Any] | None:
+    loc = await _load(db, company_id, object_id)
+    if loc is None:
+        return None
+
+    changed: dict[str, Any] = {}
+    for field in ("code", "name", "type", "status", "address", "description"):
+        if field in data and data[field] is not None and getattr(loc, field) != data[field]:
+            changed[field] = {"from": getattr(loc, field), "to": data[field]}
+            setattr(loc, field, data[field].strip() if isinstance(data[field], str) else data[field])
+    _apply_optional(loc, data, changed)
+
+    if changed:
+        await _audit(db, company_id, actor, "space.object.update", loc, changed)
+    await db.commit()
+    await db.refresh(loc)
+    return to_card(loc)
+
+
+def _apply_optional(
+    loc: ServiceLocation, data: dict[str, Any], changed: dict[str, Any] | None = None,
+) -> None:
+    """Адрес и гео — часть паспорта пространства, поэтому правятся через реестр."""
+    for field, key in (("city", "city"), ("street", "street"), ("house", "house"),
+                       ("latitude", "latitude"), ("longitude", "longitude")):
+        if key in data and data[key] is not None:
+            if changed is not None and getattr(loc, field, None) != data[key]:
+                changed[field] = {"from": getattr(loc, field, None), "to": data[key]}
+            setattr(loc, field, data[key])
+
+
+async def _audit(
+    db: AsyncSession, company_id: uuid.UUID, actor: Any | None,
+    action: str, loc: ServiceLocation, details: dict[str, Any],
+) -> None:
+    """Реестр обязан помнить, кто и когда изменил карточку — иначе расхождения не разобрать."""
+    db.add(AuditEvent(
+        company_id=company_id,
+        user_id=str(actor.id) if actor else "system",
+        user_name=(getattr(actor, "name", None) or getattr(actor, "email", None)) if actor else "система",
+        action=action,
+        details=json.dumps(
+            {"objectId": loc.id, "objectCode": loc.code, "objectName": loc.name, **details},
+            ensure_ascii=False, default=str),
+    ))

@@ -103,6 +103,29 @@ def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: st
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
+def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120) -> str | None:
+    """Служебный (машинный) токен Ядра для приложения `aud`.
+
+    Отличается от handoff-токена клеймом `svc`: он не про человека, а про право
+    выполнить операцию между системами (например проекцию общих сущностей). Живёт
+    минуты — ровно на время вызова. None, если ключ подписи не настроен.
+    """
+    key = _private_key()
+    if not key:
+        return None
+    now = int(time.time())
+    payload = {
+        "iss": settings.sso_issuer,
+        "aud": aud,
+        "sub": f"service:{scope}",
+        "svc": scope,
+        "iat": now,
+        "nbf": now - 10,
+        "exp": now + ttl_seconds,
+    }
+    return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
+
+
 def public_jwks() -> dict[str, Any]:
     """Публичный JWKS: верификаторы проверяют токены по kid, не зная приватный ключ."""
     key = _private_key()

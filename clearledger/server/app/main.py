@@ -49,6 +49,7 @@ from app.routers import (
     sites_router,
     sso_router,
     app_registry_router,
+    space_registry_router,
     core_router,
     matrix_chat_router,
     ops_router,
@@ -207,6 +208,7 @@ app.include_router(equipment_router.router, prefix=API_PREFIX)  # складск
 app.include_router(sites_router.router, prefix=API_PREFIX)  # банк ЗУ: площадки под установку ЭЗС
 app.include_router(sso_router.router, prefix=API_PREFIX)  # SSO ElsyPlus (Фаза 0): лаунчер + handoff + JWKS
 app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
+app.include_router(space_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр объектов пространства
 app.include_router(core_router.router, prefix=API_PREFIX)  # ElsyPlus Core: состояние Ядра (Центр управления)
 app.include_router(matrix_chat_router.router, prefix=API_PREFIX)  # Чат экосистемы на Matrix (модель Ангара)
 app.include_router(source_types_router.router, prefix=API_PREFIX)

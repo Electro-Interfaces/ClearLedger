@@ -4437,6 +4437,38 @@ class CompanyAppModule(Base):
     __table_args__ = (Index("uq_eco_company_app_module", "company_id", "app_id", "module_code", unique=True),)
 
 
+class AppCompanyLink(Base):
+    """Карта соответствия компаний: компания пространства ↔ её идентификатор в приложении.
+
+    Приложение-разрез ведёт СВОИ компании (у Координатора это собственная таблица
+    `companies`), поэтому проекция общих сущностей обязана знать пару «наша компания —
+    его компания». Без карты в мультикомпанийном контейнере объекты одной компании
+    попадут другой — это нарушение изоляции уровня 2 (docs/SPACE.md §2, §6).
+
+    Заполняется при онбординге приложения компании (Центр управления). `external_code` —
+    человеческий ключ (slug/код) для сверки глазами и в логах.
+    """
+    __tablename__ = "eco_app_company_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    app_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_apps.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Идентификатор компании НА СТОРОНЕ приложения (строкой: у разных приложений разный тип).
+    external_company_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    external_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        # Одна компания пространства ↔ одна компания приложения, в обе стороны.
+        Index("uq_eco_app_company_link", "app_id", "company_id", unique=True),
+        Index("uq_eco_app_company_link_ext", "app_id", "external_company_id", unique=True),
+    )
+
+
 # ===========================================================================
 # Чат экосистемы (Matrix) — модель «как в Ангаре»: плоская. Группы = именованные
 # приватные Matrix-комнаты + своя таблица; папки = клиентская группировка. Провижининг
