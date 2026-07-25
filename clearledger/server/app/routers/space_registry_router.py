@@ -161,6 +161,24 @@ async def project_objects(
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
 
 
+@router.post("/users/project")
+async def project_users(
+    company_id: str = Query(...),
+    app: str = Query("support", description="код приложения-получателя"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Отправить людей компании в приложение-разрез (docs/SPACE.md §5, этап 5 плана).
+
+    Заводится человек один раз — в Центре управления. Пароли не передаются: вход в
+    приложение идёт единым входом Ядра.
+    """
+    cid = await _admin(company_id, user, db)
+    try:
+        return await space_projection.project_users(db, cid, app)
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+
 @router.get("/object-types")
 async def object_types(user: User = Depends(get_current_user)) -> dict:
     """Словари для форм Центра управления."""

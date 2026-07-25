@@ -99,3 +99,16 @@ export async function projectSpaceObjects(
     {},
   )
 }
+
+/**
+ * Отправить сотрудников компании в приложение. Пароли не передаются: вход в приложение
+ * идёт единым входом Ядра, а у кого локальный пароль уже был — он сохраняется.
+ */
+export async function projectSpaceUsers(
+  companyId: string, app = 'support',
+): Promise<ProjectionResult> {
+  return post<ProjectionResult>(
+    `/api/registry/users/project?company_id=${encodeURIComponent(companyId)}&app=${encodeURIComponent(app)}`,
+    {},
+  )
+}

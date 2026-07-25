@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   Users, Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
-  KeyRound, Plus, Pencil, Copy, History,
+  KeyRound, Plus, Pencil, Copy, History, Share2,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
@@ -30,6 +30,7 @@ import type { CompanyRole } from '@/services/roleService'
 import { ACCESS_MODULES, ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
 import { isApiEnabled } from '@/services/apiClient'
 import { getAccessCatalog } from '@/services/registryService'
+import { projectSpaceUsers } from '@/services/spaceObjectsService'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', user: 'Сотрудник' }
@@ -73,6 +74,14 @@ export function MembersCard({
     onSuccess: () => { toast.success('Сохранено'); qc.invalidateQueries({ queryKey: ['team-members', companyId] }) },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
+  const projectUsers = useMutation({
+    mutationFn: () => projectSpaceUsers(companyId, 'support'),
+    onSuccess: (r) => toast.success(
+      `Координатор обновлён: создано ${r.created}, обновлено ${r.updated}`,
+      { description: `Отправлено сотрудников: ${r.sent}` },
+    ),
+    onError: (e) => toast.error('Проекция не выполнена', { description: (e as Error).message }),
+  })
   const remove = useMutation({
     mutationFn: (id: string) => userService.removeUser(id, companyId),
     onSuccess: () => {
@@ -96,6 +105,16 @@ export function MembersCard({
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
+            {/* Люди пространства должны быть и в приложениях-разрезах: заводим один
+                раз здесь, проекция доносит их до Координатора (docs/SPACE.md). */}
+            <Button variant="outline" size="sm" className="gap-1.5"
+              disabled={projectUsers.isPending} onClick={() => projectUsers.mutate()}
+              title="Отправить сотрудников в приложения экосистемы">
+              {projectUsers.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Share2 className="h-4 w-4" />}
+              В приложения
+            </Button>
             <InviteDialog companyId={companyId} />
             <AddUserDialog companyId={companyId} />
           </div>
