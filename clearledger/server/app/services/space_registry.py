@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditEvent, ServiceLocation
+from app.models import AuditEvent, Counterparty, EzsEquipmentUnit, ServiceLocation
 
 # Типы объектов пространства (совпадают с ServiceLocation.type).
 OBJECT_TYPES = {"fuel_station", "ev_charging", "retail", "office", "warehouse", "other"}
@@ -158,6 +158,59 @@ def _apply_optional(
             if changed is not None and getattr(loc, field, None) != data[key]:
                 changed[field] = {"from": getattr(loc, field, None), "to": data[key]}
             setattr(loc, field, data[key])
+
+
+async def list_organizations(
+    db: AsyncSession, company_id: uuid.UUID, *, query: str | None = None,
+) -> list[dict[str, Any]]:
+    """Организации компании — общие карточки юрлиц (docs/SPACE.md §3).
+
+    Источник — `counterparties`: контрагенты уже ведутся в Учёте, реестр даёт им общий
+    контракт. В карточку идут только реквизиты; РОЛЬ юрлица («поставщик топлива»,
+    «подрядчик») остаётся прикладной и в реестр не поднимается.
+    """
+    stmt = select(Counterparty).where(Counterparty.company_id == company_id)
+    if query:
+        like = f"%{query.strip().lower()}%"
+        stmt = stmt.where(Counterparty.name.ilike(like) | Counterparty.inn.ilike(like))
+    res = await db.execute(stmt.order_by(Counterparty.name))
+    return [{
+        "id": str(c.id),
+        "name": c.name,
+        "shortName": c.short_name,
+        "inn": c.inn,
+        "kpp": c.kpp,
+        "type": c.type,
+        "legalAddress": getattr(c, "legal_address", None),
+        "phone": getattr(c, "phone", None),
+        "email": getattr(c, "email", None),
+    } for c in res.scalars().all()]
+
+
+async def list_equipment(
+    db: AsyncSession, company_id: uuid.UUID,
+) -> list[dict[str, Any]]:
+    """Единицы оборудования компании — паспорт (что за железо и где стоит).
+
+    Сервисная история, ремонты и амортизация — прикладные, остаются в разрезах.
+    Единицы без привязки к объекту тоже отдаём: приложение решит, принимать ли их
+    (Координатору железо без площадки не нужно).
+    """
+    res = await db.execute(
+        select(EzsEquipmentUnit).where(EzsEquipmentUnit.company_id == company_id)
+        .order_by(EzsEquipmentUnit.serial_number))
+    return [{
+        "id": str(u.id),
+        "ecoObjectId": u.current_location_id,
+        "type": u.kind or "station",
+        "model": u.model,
+        "manufacturer": u.vendor,
+        "serialNumber": u.serial_number,
+        "inventoryNumber": u.inventory_number,
+        "status": "active" if (u.state or "").startswith("installed") else "storage",
+        "state": u.state,
+        "warrantyUntil": u.warranty_until,
+    } for u in res.scalars().all()]
 
 
 async def _audit(

@@ -24,10 +24,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import App, AppCompanyLink, ServiceLocation, User, UserCompany
 from app.services import space_registry, sso
 
-# Куда приложение принимает проекцию. Путь фиксирован контрактом; адрес приложения
-# берётся из реестра (App.base_url), а не из хардкода.
-SYNC_PATHS = {"support": "/api/v1/eco/objects/sync"}
-USER_SYNC_PATHS = {"support": "/api/v1/eco/users/sync"}
+# Куда приложение принимает проекцию каждой сущности. Пути фиксированы контрактом;
+# адрес приложения берётся из реестра, а не из хардкода.
+SYNC_PATHS: dict[str, dict[str, str]] = {
+    "objects": {"support": "/api/v1/eco/objects/sync"},
+    "users": {"support": "/api/v1/eco/users/sync"},
+    "organizations": {"support": "/api/v1/eco/organizations/sync"},
+    "equipment": {"support": "/api/v1/eco/equipment/sync"},
+}
+# Как называется массив в теле запроса — по имени сущности.
+PAYLOAD_KEYS = {"objects": "objects", "users": "users",
+                "organizations": "organizations", "equipment": "equipment"}
 DEFAULT_TIMEOUT = 30.0
 
 # Роль в компании (пространство) → роль в приложении. Задаётся на приложение в реестре
@@ -40,96 +47,29 @@ class ProjectionError(RuntimeError):
     pass
 
 
-async def project_objects(
-    db: AsyncSession, company_id: uuid.UUID, app_code: str,
+async def project(
+    db: AsyncSession, company_id: uuid.UUID, app_code: str, entity: str,
 ) -> dict[str, Any]:
-    """Отправить объекты компании в приложение. Идемпотентно — повтор ничего не дублирует."""
-    app_row = (await db.execute(select(App).where(App.code == app_code))).scalar_one_or_none()
-    if app_row is None:
-        raise ProjectionError(f"Приложение не найдено в реестре: {app_code}")
+    """Отправить сущность компании в приложение. Идемпотентно — повтор не плодит дубли.
 
-    path = SYNC_PATHS.get(app_code)
-    if not path:
-        raise ProjectionError(f"Приложение «{app_code}» не умеет принимать проекцию объектов")
-
-    link = (await db.execute(select(AppCompanyLink).where(
-        AppCompanyLink.app_id == app_row.id,
-        AppCompanyLink.company_id == company_id))).scalar_one_or_none()
-    if link is None:
-        raise ProjectionError(
-            "Нет соответствия компаний: задайте, какой компании приложения отвечает эта "
-            "компания пространства (Центр управления → Приложения)")
-
-    base = _internal_base_url(app_row, app_code)
-    token = sso.sign_service_token(aud=app_code, scope="projection")
-    if not token:
-        raise ProjectionError("Единый вход не настроен (нет ключа подписи) — проекция невозможна")
-
-    objects = await _objects_payload(db, company_id)
-
-    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-        try:
-            resp = await client.post(
-                f"{base}{path}",
-                json={"companyId": link.external_company_id, "objects": objects},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-        except httpx.HTTPError as e:
-            raise ProjectionError(f"Приложение недоступно: {e}") from e
-
-    if resp.status_code >= 400:
-        detail = _error_text(resp)
-        raise ProjectionError(f"Приложение отклонило проекцию (HTTP {resp.status_code}): {detail}")
-
-    result = resp.json()
-    return {
-        "app": app_code,
-        "companyId": str(company_id),
-        "externalCompanyId": link.external_company_id,
-        "sent": len(objects),
-        "created": result.get("created", 0),
-        "updated": result.get("updated", 0),
-        "skipped": result.get("skipped", []),
-    }
-
-
-async def project_users(
-    db: AsyncSession, company_id: uuid.UUID, app_code: str,
-) -> dict[str, Any]:
-    """Отправить людей компании в приложение: заведён в пространстве — есть в разрезе.
-
-    Пароли НЕ передаются. Вход в приложение — через единый вход Ядра; локальный пароль
-    там не нужен, а гонять хеши между системами — лишний риск. У кого пароль в приложении
-    уже был (ручной перенос), тот его сохраняет: проекция обновляет имя, роль и
-    активность, но не трогает учётные данные.
+    entity: objects | users | organizations | equipment.
     """
-    app_row = (await db.execute(select(App).where(App.code == app_code))).scalar_one_or_none()
-    if app_row is None:
-        raise ProjectionError(f"Приложение не найдено в реестре: {app_code}")
+    paths = SYNC_PATHS.get(entity)
+    if paths is None:
+        raise ProjectionError(f"Неизвестная сущность пространства: {entity}")
 
-    path = USER_SYNC_PATHS.get(app_code)
+    app_row, link, token = await _target(db, company_id, app_code)
+    path = paths.get(app_code)
     if not path:
-        raise ProjectionError(f"Приложение «{app_code}» не умеет принимать проекцию людей")
+        raise ProjectionError(f"Приложение «{app_code}» не принимает «{entity}»")
 
-    link = (await db.execute(select(AppCompanyLink).where(
-        AppCompanyLink.app_id == app_row.id,
-        AppCompanyLink.company_id == company_id))).scalar_one_or_none()
-    if link is None:
-        raise ProjectionError(
-            "Нет соответствия компаний: задайте, какой компании приложения отвечает эта "
-            "компания пространства")
-
-    token = sso.sign_service_token(aud=app_code, scope="projection")
-    if not token:
-        raise ProjectionError("Единый вход не настроен (нет ключа подписи) — проекция невозможна")
-
-    users = await _users_payload(db, company_id, app_row, app_code)
+    items = await _payload(db, company_id, app_row, app_code, entity)
 
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:
             resp = await client.post(
                 f"{_internal_base_url(app_row, app_code)}{path}",
-                json={"companyId": link.external_company_id, "users": users},
+                json={"companyId": link.external_company_id, PAYLOAD_KEYS[entity]: items},
                 headers={"Authorization": f"Bearer {token}"},
             )
         except httpx.HTTPError as e:
@@ -142,12 +82,30 @@ async def project_users(
     result = resp.json()
     return {
         "app": app_code,
+        "entity": entity,
         "companyId": str(company_id),
-        "sent": len(users),
+        "sent": len(items),
         "created": result.get("created", 0),
         "updated": result.get("updated", 0),
         "skipped": result.get("skipped", []),
     }
+
+
+async def project_all(
+    db: AsyncSession, company_id: uuid.UUID, app_code: str,
+) -> dict[str, Any]:
+    """Все общие справочники разом, в порядке зависимостей.
+
+    Объекты идут первыми: оборудование в приложении встаёт на площадку, а площадка
+    появляется вместе с объектом. Сущность, которую приложение не принимает, пропускаем —
+    это не ошибка настройки, а разный состав разрезов.
+    """
+    out: dict[str, Any] = {}
+    for entity in ("objects", "organizations", "equipment", "users"):
+        if app_code not in SYNC_PATHS[entity]:
+            continue
+        out[entity] = await project(db, company_id, app_code, entity)
+    return {"app": app_code, "companyId": str(company_id), "results": out}
 
 
 async def object_tickets(
@@ -174,12 +132,10 @@ async def object_tickets(
     if not token:
         raise ProjectionError("Единый вход не настроен (нет ключа подписи)")
 
-    url = (f"{_internal_base_url(app_row, app_code)}/api/v1/eco/objects/"
-           f"{object_id}/tickets")
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
         try:
             resp = await client.get(
-                url,
+                f"{_internal_base_url(app_row, app_code)}/api/v1/eco/objects/{object_id}/tickets",
                 params={"companyId": link.external_company_id, "limit": limit},
                 headers={"Authorization": f"Bearer {token}"},
             )
@@ -200,10 +156,54 @@ async def object_tickets(
     }
 
 
+async def _target(
+    db: AsyncSession, company_id: uuid.UUID, app_code: str,
+) -> tuple[App, AppCompanyLink, str]:
+    """Приложение, пара компаний и служебный токен — всё, без чего отправлять нельзя."""
+    app_row = (await db.execute(select(App).where(App.code == app_code))).scalar_one_or_none()
+    if app_row is None:
+        raise ProjectionError(f"Приложение не найдено в реестре: {app_code}")
+
+    link = (await db.execute(select(AppCompanyLink).where(
+        AppCompanyLink.app_id == app_row.id,
+        AppCompanyLink.company_id == company_id))).scalar_one_or_none()
+    if link is None:
+        raise ProjectionError(
+            "Нет соответствия компаний: задайте, какой компании приложения отвечает эта "
+            "компания пространства (Центр управления → Приложения)")
+
+    token = sso.sign_service_token(aud=app_code, scope="projection")
+    if not token:
+        raise ProjectionError("Единый вход не настроен (нет ключа подписи) — проекция невозможна")
+    return app_row, link, token
+
+
+async def _payload(
+    db: AsyncSession, company_id: uuid.UUID, app_row: App, app_code: str, entity: str,
+) -> list[dict[str, Any]]:
+    if entity == "objects":
+        res = await db.execute(
+            select(ServiceLocation).where(ServiceLocation.company_id == company_id)
+            .order_by(ServiceLocation.code))
+        return [space_registry.to_card(l) for l in res.scalars().all()]
+    if entity == "organizations":
+        return await space_registry.list_organizations(db, company_id)
+    if entity == "equipment":
+        return await space_registry.list_equipment(db, company_id)
+    if entity == "users":
+        return await _users_payload(db, company_id, app_row, app_code)
+    raise ProjectionError(f"Неизвестная сущность пространства: {entity}")
+
+
 async def _users_payload(
     db: AsyncSession, company_id: uuid.UUID, app_row: App, app_code: str,
 ) -> list[dict[str, Any]]:
-    """Люди компании с ролью, переведённой в термины приложения."""
+    """Люди компании с ролью, переведённой в термины приложения.
+
+    Пароли не передаются: вход в приложение — единым входом Ядра. Роль берётся из
+    членства в компании, а не из глобального флага: права в пространстве считаются
+    по компании (docs/SPACE.md §2).
+    """
     cfg = app_row.config or {}
     role_map = cfg.get("roleMap") or DEFAULT_ROLE_MAP.get(app_code, {})
     default_role = cfg.get("defaultRole") or role_map.get("user") or "customer"
@@ -226,14 +226,6 @@ async def _users_payload(
             "isActive": True,
         })
     return out
-
-
-async def _objects_payload(db: AsyncSession, company_id: uuid.UUID) -> list[dict[str, Any]]:
-    """Паспорта объектов компании — ровно то, что общее (без прикладных атрибутов)."""
-    res = await db.execute(
-        select(ServiceLocation).where(ServiceLocation.company_id == company_id)
-        .order_by(ServiceLocation.code))
-    return [space_registry.to_card(l) for l in res.scalars().all()]
 
 
 def _internal_base_url(app_row: App, app_code: str) -> str:

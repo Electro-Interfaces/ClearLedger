@@ -17,7 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
-import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History, Blocks, Boxes, Gauge, MapPin } from 'lucide-react'
+import { Building2, Plus, Loader2, ShieldCheck, Users, Mail, KeyRound, History, Blocks, Boxes, Gauge, MapPin, Library } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { useAuth } from '@/contexts/AuthContext'
@@ -28,6 +28,7 @@ import type { OrgProfile } from '@/services/userService'
 import { MembersCard, InvitationsCard, RolesAccessTab, AuditTab } from '@/components/admin/CompanyTeam'
 import { CompanyApps } from '@/components/admin/CompanyApps'
 import { SpaceObjects } from '@/components/admin/SpaceObjects'
+import { SpaceRefs } from '@/components/admin/SpaceRefs'
 import { EcosystemConsole } from '@/components/admin/EcosystemConsole'
 
 const PROFILES = [
@@ -107,6 +108,7 @@ export function AdminPage() {
             <TabsTrigger value="apps" className="gap-1.5"><Blocks className="h-4 w-4" /> Приложения</TabsTrigger>
             {/* Объекты — общая сущность пространства: ведутся один раз для всех приложений. */}
             <TabsTrigger value="objects" className="gap-1.5"><MapPin className="h-4 w-4" /> Объекты</TabsTrigger>
+            <TabsTrigger value="refs" className="gap-1.5"><Library className="h-4 w-4" /> Справочники</TabsTrigger>
             <TabsTrigger value="profile" className="gap-1.5"><Building2 className="h-4 w-4" /> Реквизиты</TabsTrigger>
             {canManageSelected(selected.id) && (
               <TabsTrigger value="invites" className="gap-1.5"><Mail className="h-4 w-4" /> Приглашения</TabsTrigger>
@@ -126,6 +128,9 @@ export function AdminPage() {
           </TabsContent>
           <TabsContent value="objects" className="mt-4">
             <SpaceObjects companyId={selected.id} canManage={canManageSelected(selected.id)} />
+          </TabsContent>
+          <TabsContent value="refs" className="mt-4">
+            <SpaceRefs companyId={selected.id} canManage={canManageSelected(selected.id)} />
           </TabsContent>
           <TabsContent value="profile" className="mt-4">
             <CompanyProfileCard company={selected} canEdit={canManageSelected(selected.id)} />

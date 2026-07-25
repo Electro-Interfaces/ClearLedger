@@ -143,22 +143,49 @@ async def patch_object(
     return card
 
 
-@router.post("/objects/project")
-async def project_objects(
+@router.post("/project/{entity}")
+async def project_entity(
+    entity: str,
     company_id: str = Query(...),
     app: str = Query("support", description="код приложения-получателя"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Отправить объекты компании в приложение-разрез (docs/SPACE.md §6).
+    """Отправить общую сущность компании в приложение-разрез (docs/SPACE.md §6).
 
-    Идемпотентно: повтор обновляет карточки, а не плодит дубли. Требует заданного
-    соответствия компаний — без него неясно, в чьё пространство отправлять.
+    entity: objects | organizations | equipment | users | all. Идемпотентно: повтор
+    обновляет карточки, а не плодит дубли. Требует заданного соответствия компаний —
+    без него неясно, в чьё пространство отправлять.
     """
     cid = await _admin(company_id, user, db)
     try:
-        return await space_projection.project_objects(db, cid, app)
+        if entity == "all":
+            return await space_projection.project_all(db, cid, app)
+        return await space_projection.project(db, cid, app, entity)
     except space_projection.ProjectionError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+
+@router.get("/organizations")
+async def list_organizations(
+    company_id: str = Query(...),
+    q: str | None = Query(None, description="поиск по названию и ИНН"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Организации компании — общие карточки юрлиц (реквизиты без прикладных ролей)."""
+    cid = await _member(company_id, user, db)
+    orgs = await space_registry.list_organizations(db, cid, query=q)
+    return {"companyId": str(cid), "organizations": orgs, "total": len(orgs)}
+
+
+@router.get("/equipment")
+async def list_equipment(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Единицы оборудования компании — паспорт (что за железо и где стоит)."""
+    cid = await _member(company_id, user, db)
+    units = await space_registry.list_equipment(db, cid)
+    return {"companyId": str(cid), "equipment": units, "total": len(units)}
 
 
 @router.get("/objects/{object_id}/tickets")
@@ -181,24 +208,6 @@ async def object_tickets(
         return await space_projection.object_tickets(db, cid, object_id, app, limit)
     except space_projection.ProjectionError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
-
-
-@router.post("/users/project")
-async def project_users(
-    company_id: str = Query(...),
-    app: str = Query("support", description="код приложения-получателя"),
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Отправить людей компании в приложение-разрез (docs/SPACE.md §5, этап 5 плана).
-
-    Заводится человек один раз — в Центре управления. Пароли не передаются: вход в
-    приложение идёт единым входом Ядра.
-    """
-    cid = await _admin(company_id, user, db)
-    try:
-        return await space_projection.project_users(db, cid, app)
-    except space_projection.ProjectionError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
 
 
 @router.get("/object-types")

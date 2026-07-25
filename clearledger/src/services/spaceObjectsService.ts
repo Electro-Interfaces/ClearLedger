@@ -91,13 +91,61 @@ export interface ProjectionResult {
  * Отправить объекты компании в приложение-разрез. Идемпотентно: повтор обновляет
  * карточки, а не плодит дубли. Требует заданного соответствия компаний.
  */
+export type SpaceEntity = 'objects' | 'organizations' | 'equipment' | 'users' | 'all'
+
+export async function projectSpaceEntity(
+  companyId: string, entity: SpaceEntity, app = 'support',
+): Promise<ProjectionResult> {
+  return post<ProjectionResult>(
+    `/api/registry/project/${entity}?company_id=${encodeURIComponent(companyId)}&app=${encodeURIComponent(app)}`,
+    {},
+  )
+}
+
 export async function projectSpaceObjects(
   companyId: string, app = 'support',
 ): Promise<ProjectionResult> {
-  return post<ProjectionResult>(
-    `/api/registry/objects/project?company_id=${encodeURIComponent(companyId)}&app=${encodeURIComponent(app)}`,
-    {},
-  )
+  return projectSpaceEntity(companyId, 'objects', app)
+}
+
+export interface SpaceOrganization {
+  id: string
+  name: string
+  shortName?: string | null
+  inn: string
+  kpp?: string | null
+  type: string
+  legalAddress?: string | null
+  phone?: string | null
+  email?: string | null
+}
+
+export interface SpaceEquipmentUnit {
+  id: string
+  ecoObjectId?: string | null
+  type: string
+  model?: string | null
+  manufacturer?: string | null
+  serialNumber?: string | null
+  inventoryNumber?: string | null
+  status: string
+  state?: string | null
+}
+
+/** Организации компании — общие карточки юрлиц (роль остаётся прикладной). */
+export async function listSpaceOrganizations(companyId: string): Promise<SpaceOrganization[]> {
+  const r = await get<{ organizations: SpaceOrganization[] }>('/api/registry/organizations', {
+    company_id: companyId,
+  })
+  return r.organizations
+}
+
+/** Единицы оборудования компании — паспорт (что за железо и где стоит). */
+export async function listSpaceEquipment(companyId: string): Promise<SpaceEquipmentUnit[]> {
+  const r = await get<{ equipment: SpaceEquipmentUnit[] }>('/api/registry/equipment', {
+    company_id: companyId,
+  })
+  return r.equipment
 }
 
 export interface ObjectTicket {
@@ -136,8 +184,5 @@ export async function getObjectTickets(
 export async function projectSpaceUsers(
   companyId: string, app = 'support',
 ): Promise<ProjectionResult> {
-  return post<ProjectionResult>(
-    `/api/registry/users/project?company_id=${encodeURIComponent(companyId)}&app=${encodeURIComponent(app)}`,
-    {},
-  )
+  return projectSpaceEntity(companyId, 'users', app)
 }
