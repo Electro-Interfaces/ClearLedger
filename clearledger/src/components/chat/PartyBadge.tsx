@@ -17,6 +17,8 @@ export interface PartyInfo {
   role?: string
   orgName?: string | null
   position?: string | null
+  online?: boolean
+  lastSeenAt?: string | null
 }
 
 /** Подпись: «Поддержка платформы» / «Внешний · ООО Подрядчик» / «Администратор» / «Сотрудник». */

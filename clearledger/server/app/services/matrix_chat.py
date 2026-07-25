@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -213,13 +214,29 @@ async def search_people(db: AsyncSession, company_id, q: str, me_id, limit: int 
     return [_person_card(u, uc, org) for u, uc, org in rows]
 
 
+# Окно присутствия — как в карте пространства: отметка обновляется не чаще раза в две
+# минуты, поэтому «в сети» считаем с запасом, иначе индикатор мигал бы.
+ONLINE_WINDOW_MINUTES = 6
+
+
+def _is_online(user: User) -> bool:
+    seen = user.last_seen_at
+    if seen is None:
+        return False
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=timezone.utc)
+    return seen >= datetime.now(timezone.utc) - timedelta(minutes=ONLINE_WINDOW_MINUTES)
+
+
 def _person_card(user: User, membership: UserCompany, org: Counterparty | None) -> dict[str, Any]:
-    """Карточка человека для чата: имя + принадлежность («кто это»)."""
+    """Карточка человека для чата: имя, принадлежность («кто это») и присутствие."""
     party = getattr(membership, "party_type", None) or "internal"
     return {
         "id": str(user.id),
         "name": user.name,
         "email": user.email,
+        "online": _is_online(user),
+        "lastSeenAt": user.last_seen_at.isoformat() if user.last_seen_at else None,
         # internal — свой сотрудник компании; partner — внешний участник пространства.
         "partyType": party,
         "role": membership.role,

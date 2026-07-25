@@ -11,17 +11,18 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Activity, Building2, Check, Cpu, Library, Loader2, MapPin, Minus, ShieldCheck, Users, Clock,
+  Activity, Building2, Check, Cpu, Library, Loader2, MapPin, Minus, ShieldCheck, Users, Clock, Wifi,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PartyBadge } from '@/components/chat/PartyBadge'
 import { getSpaceMap, type SpaceMapCompany, type SpaceMapPerson } from '@/services/spaceMapService'
 
-type Filter = 'all' | 'partners' | 'noAccess' | 'neverSeen'
+type Filter = 'all' | 'online' | 'partners' | 'noAccess' | 'neverSeen'
 
 const FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'Все' },
+  { key: 'online', label: 'В сети' },
   { key: 'partners', label: 'Внешние' },
   { key: 'noAccess', label: 'Без доступа' },
   { key: 'neverSeen', label: 'Не заходили' },
@@ -32,6 +33,9 @@ export function SpaceMap({ companyId }: { companyId?: string }) {
     queryKey: ['space-map', companyId ?? 'all'],
     queryFn: () => getSpaceMap(companyId),
     staleTime: 60_000,
+    // Присутствие живёт минутами: без автообновления карта показывала бы «в сети» тех,
+    // кто уже ушёл.
+    refetchInterval: 60_000,
   })
 
   if (q.isLoading) {
@@ -85,6 +89,7 @@ function CompanyCard({ company, windowDays }: { company: SpaceMapCompany; window
 
   const people = useMemo(() => {
     switch (filter) {
+      case 'online': return company.people.filter((p) => p.online)
       case 'partners': return company.people.filter((p) => p.partyType === 'partner')
       case 'noAccess': return company.people.filter((p) => p.apps.length === 0)
       case 'neverSeen': return company.people.filter((p) => !p.lastSeenAt)
@@ -103,6 +108,7 @@ function CompanyCard({ company, windowDays }: { company: SpaceMapCompany; window
       <div className="flex flex-wrap gap-2">
         <Stat icon={Users} label="людей" value={company.counts.people}
           hint={`своих ${company.counts.internal}, внешних ${company.counts.partners}`} />
+        <Stat icon={Wifi} label="сейчас в системе" value={company.counts.online} tone="ok" />
         <Stat icon={MapPin} label="объектов" value={company.counts.objects} />
         <Stat icon={Library} label="организаций" value={company.counts.organizations} />
         <Stat icon={Cpu} label="оборудования" value={company.counts.equipment} />
@@ -173,6 +179,16 @@ function PersonRow({ person, appCodes }: { person: SpaceMapPerson; appCodes: str
     <tr className="border-t border-border/60">
       <td className="px-3 py-2">
         <div className="flex items-center gap-1.5">
+          {/* Присутствие: зелёная точка — человек работает прямо сейчас (отметка свежее
+              шести минут), серая — нет. Наводка показывает, когда был. */}
+          <span
+            className={`size-2 shrink-0 rounded-full ${person.online ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
+            title={person.online
+              ? 'В системе сейчас'
+              : person.lastSeenAt
+                ? `Был ${new Date(person.lastSeenAt).toLocaleString('ru-RU')}`
+                : 'Ни разу не заходил'}
+          />
           <span className="font-medium">{person.name}</span>
           {person.isSuperadmin && (
             <Badge variant="outline" className="gap-1 text-[10px]"><ShieldCheck className="size-3" /> супер</Badge>
@@ -191,9 +207,11 @@ function PersonRow({ person, appCodes }: { person: SpaceMapPerson; appCodes: str
         </td>
       ))}
       <td className="px-2 py-2 text-right text-xs text-muted-foreground">
-        {person.lastSeenAt
-          ? new Date(person.lastSeenAt).toLocaleDateString('ru-RU')
-          : <span className="text-amber-600 dark:text-amber-500">никогда</span>}
+        {person.online
+          ? <span className="font-medium text-emerald-600 dark:text-emerald-500">в сети</span>
+          : person.lastSeenAt
+            ? new Date(person.lastSeenAt).toLocaleDateString('ru-RU')
+            : <span className="text-amber-600 dark:text-amber-500">никогда</span>}
       </td>
       <td className="px-2 py-2 text-right text-xs tabular-nums text-muted-foreground">{person.events}</td>
     </tr>
@@ -201,12 +219,16 @@ function PersonRow({ person, appCodes }: { person: SpaceMapPerson; appCodes: str
 }
 
 function Stat({ icon: Icon, label, value, hint, tone }: {
-  icon: typeof Users; label: string; value: number; hint?: string; tone?: 'warn'
+  icon: typeof Users; label: string; value: number; hint?: string; tone?: 'warn' | 'ok'
 }) {
+  const border = tone === 'warn' ? 'border-amber-500/40 bg-amber-500/5'
+    : tone === 'ok' ? 'border-emerald-500/40 bg-emerald-500/5'
+    : 'border-border bg-muted/30'
+  const iconTone = tone === 'warn' ? 'text-amber-600 dark:text-amber-500'
+    : tone === 'ok' ? 'text-emerald-600 dark:text-emerald-500' : 'text-primary'
   return (
-    <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
-      tone === 'warn' ? 'border-amber-500/40 bg-amber-500/5' : 'border-border bg-muted/30'}`}>
-      <Icon className={`size-4 ${tone === 'warn' ? 'text-amber-600 dark:text-amber-500' : 'text-primary'}`} />
+    <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${border}`}>
+      <Icon className={`size-4 ${iconTone}`} />
       <div className="leading-tight">
         <div className="text-sm font-semibold tabular-nums">{value}</div>
         <div className="text-[11px] text-muted-foreground">{label}</div>

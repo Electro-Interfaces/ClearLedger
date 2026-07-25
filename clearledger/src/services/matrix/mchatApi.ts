@@ -16,6 +16,9 @@ export interface Person {
   role?: string
   position?: string | null
   orgName?: string | null
+  /** Работает прямо сейчас (отметка присутствия свежее нескольких минут). */
+  online?: boolean
+  lastSeenAt?: string | null
 }
 
 /** Та же карточка, но с Matrix-идентификатором: сообщения приходят от mxid. */

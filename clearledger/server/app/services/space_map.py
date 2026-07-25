@@ -25,6 +25,10 @@ from app.services import app_registry
 
 ACTIVITY_WINDOW_DAYS = 30
 RECENT_EVENTS_LIMIT = 40
+# «Сейчас в системе»: отметка присутствия обновляется при работе не чаще раза в 2 минуты
+# (auth.PRESENCE_TOUCH_SECONDS), поэтому окно берём с запасом — иначе активный человек
+# мигал бы между «в сети» и «нет» между обновлениями.
+ONLINE_WINDOW_MINUTES = 6
 
 
 async def space_map(
@@ -46,6 +50,7 @@ async def space_map(
 
 
 async def _company_map(db: AsyncSession, company: Company, since: datetime) -> dict[str, Any]:
+    online_since = datetime.now(timezone.utc) - timedelta(minutes=ONLINE_WINDOW_MINUTES)
     apps = await app_registry.company_apps(db, company.id)
     enabled_apps = [a for a in apps if a.get("enabled")]
 
@@ -82,10 +87,12 @@ async def _company_map(db: AsyncSession, company: Company, since: datetime) -> d
                     else sorted({a["code"] for a in enabled_apps if a["code"] in allowed}),
             "fullAccess": full,
             "lastSeenAt": user.last_seen_at.isoformat() if user.last_seen_at else None,
+            "online": _is_online(user.last_seen_at, online_since),
             "events": events.get(str(user.id), 0),
         })
 
     internal = sum(1 for p in people if p["partyType"] == "internal")
+    online = sum(1 for p in people if p["online"])
     silent = sum(1 for p in people if p["lastSeenAt"] is None)
     no_access = sum(1 for p in people if not p["apps"])
 
@@ -97,6 +104,7 @@ async def _company_map(db: AsyncSession, company: Company, since: datetime) -> d
         "people": people,
         "counts": {
             "people": len(people),
+            "online": online,
             "internal": internal,
             "partners": len(people) - internal,
             "neverSeen": silent,
@@ -108,6 +116,15 @@ async def _company_map(db: AsyncSession, company: Company, since: datetime) -> d
         },
         "topActions": await _top_actions(db, company.id, since),
     }
+
+
+def _is_online(seen: datetime | None, threshold: datetime) -> bool:
+    """Человек в системе, если отметка присутствия свежее порога."""
+    if seen is None:
+        return False
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=timezone.utc)
+    return seen >= threshold
 
 
 async def _count(db: AsyncSession, model, company_id: uuid.UUID) -> int:

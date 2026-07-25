@@ -18,6 +18,7 @@ export interface SpaceMapPerson {
   apps: string[]
   fullAccess: boolean
   lastSeenAt?: string | null
+  online: boolean
   events: number
 }
 
@@ -29,6 +30,7 @@ export interface SpaceMapCompany {
   people: SpaceMapPerson[]
   counts: {
     people: number
+    online: number
     internal: number
     partners: number
     neverSeen: number

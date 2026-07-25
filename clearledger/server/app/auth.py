@@ -107,7 +107,31 @@ async def get_current_user(
             detail="Пользователь не найден",
         )
 
+    await _touch_presence(user, db)
     return user
+
+
+# Как часто обновляем отметку присутствия. Писать на каждый запрос — лишняя нагрузка на
+# БД, поэтому «тёплое» обновление: раз в PRESENCE_TOUCH_SECONDS активной работы. Кто
+# сейчас в системе, определяется по свежести этой отметки (services/space_map).
+PRESENCE_TOUCH_SECONDS = 120
+
+
+async def _touch_presence(user: User, db: AsyncSession) -> None:
+    """Отметить, что человек сейчас работает. Тихо: сбой отметки не ломает запрос."""
+    now = datetime.now(timezone.utc)
+    seen = user.last_seen_at
+    if seen is not None:
+        # В старых записях отметка могла лечь без таймзоны — сравниваем аккуратно.
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        if (now - seen).total_seconds() < PRESENCE_TOUCH_SECONDS:
+            return
+    try:
+        user.last_seen_at = now
+        await db.commit()
+    except Exception:  # noqa: BLE001 — присутствие не важнее самого запроса
+        await db.rollback()
 
 
 async def assert_company_member(
