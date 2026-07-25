@@ -185,6 +185,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   const [fIssue, setFIssue] = useState<IssueFilter>('all')
   const [fShift, setFShift] = useState('')         // поиск по номеру смены
   const [picked, setPicked] = useState<TankLedgerRow | null>(null)  // строка в разборе
+  const [sort, setSort] = useState<Sort | null>(null)               // null = хронология
 
   const query = useQuery({
     queryKey: ['tank-ledger', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
@@ -388,20 +389,46 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
+              {/* Порядок строк — состояние, влияющее на чтение ленты: показываем
+                  его явно и даём вернуть хронологию одним кликом. */}
+              {sort && (
+                <div className="flex flex-wrap items-center gap-2 border-b bg-amber-500/5 px-3 py-1.5 text-[11px]">
+                  <span className="font-medium text-amber-600 dark:text-amber-400">
+                    Порядок изменён: {SORT_LABEL[sort.key]} {sort.dir === 'desc' ? '↓' : '↑'}
+                  </span>
+                  <span className="text-muted-foreground">
+                    сортировка внутри резервуара · «Стык» и «Δ за смену» посчитаны относительно
+                    предыдущей смены по времени, а не строки выше
+                  </span>
+                  <button onClick={() => setSort(null)}
+                          className="ml-auto rounded border px-1.5 py-0.5 hover:bg-muted">
+                    вернуть хронологию
+                  </button>
+                </div>
+              )}
               <table className="w-full min-w-[1400px] text-xs">
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
-                    <Th>Смена</Th><Th>Дата</Th>
-                    <Th right>Книга нач.</Th><Th right>Книга кон.</Th><Th>Стык</Th>
-                    <Th right>Приход</Th><Th right>Отпуск</Th>
-                    <Th right>Факт нач.</Th><Th right>Факт кон.</Th>
-                    <Th right>Расхожд. нач.</Th><Th right>Расхожд. кон.</Th><Th right>Δ за смену</Th>
-                    <Th right>Плотн.</Th><Th right>Темп.</Th><Th right>Вода</Th>
+                    <ThSort sortKey="shift" sort={sort} onSort={setSort}>Смена</ThSort>
+                    <Th>Дата</Th>
+                    <ThSort right sortKey="book_start" sort={sort} onSort={setSort}>Книга нач.</ThSort>
+                    <ThSort right sortKey="book_end" sort={sort} onSort={setSort}>Книга кон.</ThSort>
+                    <ThSort sortKey="continuity" sort={sort} onSort={setSort}>Стык</ThSort>
+                    <ThSort right sortKey="receipts" sort={sort} onSort={setSort}>Приход</ThSort>
+                    <ThSort right sortKey="sales" sort={sort} onSort={setSort}>Отпуск</ThSort>
+                    <ThSort right sortKey="fact_start" sort={sort} onSort={setSort}>Факт нач.</ThSort>
+                    <ThSort right sortKey="fact_end" sort={sort} onSort={setSort}>Факт кон.</ThSort>
+                    <ThSort right sortKey="gap_start" sort={sort} onSort={setSort}>Расхожд. нач.</ThSort>
+                    <ThSort right sortKey="gap_end" sort={sort} onSort={setSort}>Расхожд. кон.</ThSort>
+                    <ThSort right sortKey="gap_delta" sort={sort} onSort={setSort}>Δ за смену</ThSort>
+                    <ThSort right sortKey="density" sort={sort} onSort={setSort}>Плотн.</ThSort>
+                    <ThSort right sortKey="temp" sort={sort} onSort={setSort}>Темп.</ThSort>
+                    <ThSort right sortKey="water" sort={sort} onSort={setSort}>Вода</ThSort>
                   </tr>
                 </thead>
                 <tbody>
                   {groups.map((g) => (
-                    <GroupBlock key={g.key} group={g} tol={tol} onPick={setPicked} />
+                    <GroupBlock key={g.key} group={g} tol={tol} onPick={setPicked} sort={sort} />
                   ))}
                 </tbody>
               </table>
@@ -564,10 +591,11 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
 }
 
 /** Блок одного резервуара в журнале: заголовок-итог + смены подряд. */
-function GroupBlock({ group, tol, onPick }: {
-  group: Group; tol: number; onPick: (r: TankLedgerRow) => void
+function GroupBlock({ group, tol, onPick, sort }: {
+  group: Group; tol: number; onPick: (r: TankLedgerRow) => void; sort: Sort | null
 }) {
-  const { tank, head, rows } = group
+  const { tank, head, rows: srcRows } = group
+  const rows = useMemo(() => sortRows(srcRows, sort), [srcRows, sort])
   return (
     <>
       {/* Разделитель-заголовок группы: какой резервуар и его итог за период. */}
@@ -689,6 +717,90 @@ function Cell({ label, value, hint, tone }: {
 
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {
   return <th className={cn('p-2.5 font-medium', right ? 'text-right' : 'text-left')}>{children}</th>
+}
+
+/* ── Сортировка журнала ──────────────────────────────────────────────────
+   Сортируем ВНУТРИ резервуара, а не сквозь всю таблицу: журнал — это лента
+   движения по конкретной ёмкости, где строки связаны цепочкой. Сквозная
+   сортировка смешала бы резервуары и разорвала эту связь.
+   «Стык» и «Δ за смену» посчитаны на сервере относительно предыдущей смены
+   ПО ВРЕМЕНИ — при другом порядке они остаются верными, но соседняя строка
+   в таблице уже не та, с которой шло сравнение. Об этом предупреждаем. */
+type SortKey = 'shift' | 'book_start' | 'book_end' | 'continuity' | 'receipts' | 'sales'
+  | 'fact_start' | 'fact_end' | 'gap_start' | 'gap_end' | 'gap_delta'
+  | 'density' | 'temp' | 'water'
+
+const SORT_VALUE: Record<SortKey, (r: TankLedgerRow) => number | null> = {
+  shift: (r) => r.opened_at ? Date.parse(r.opened_at) : r.shift_number,
+  book_start: (r) => r.book_start,
+  book_end: (r) => r.book_end,
+  // По стыку и расхождениям сортируем по МОДУЛЮ: ищут «где сильнее разошлось»,
+  // а не «где самое отрицательное» — иначе крупный излишек уходит в конец списка.
+  continuity: (r) => r.continuity_gap == null ? null : Math.abs(r.continuity_gap),
+  receipts: (r) => r.receipts,
+  sales: (r) => r.sales,
+  fact_start: (r) => r.fact_start,
+  fact_end: (r) => r.fact_end,
+  gap_start: (r) => r.fact_gap_start == null ? null : Math.abs(r.fact_gap_start),
+  gap_end: (r) => r.fact_gap == null ? null : Math.abs(r.fact_gap),
+  gap_delta: (r) => r.fact_gap_delta == null ? null : Math.abs(r.fact_gap_delta),
+  density: (r) => r.density_end,
+  temp: (r) => r.temp_end,
+  water: (r) => r.water_volume,
+}
+
+type Sort = { key: SortKey; dir: 'asc' | 'desc' }
+
+const SORT_LABEL: Record<SortKey, string> = {
+  shift: 'смена', book_start: 'книга на начало', book_end: 'книга на конец',
+  continuity: 'стык (по модулю)', receipts: 'приход', sales: 'отпуск',
+  fact_start: 'факт на начало', fact_end: 'факт на конец',
+  gap_start: 'расхождение на начало (по модулю)', gap_end: 'расхождение на конец (по модулю)',
+  gap_delta: 'Δ за смену (по модулю)', density: 'плотность', temp: 'температура', water: 'вода',
+}
+
+function sortRows(rows: TankLedgerRow[], sort: Sort | null): TankLedgerRow[] {
+  if (!sort) return rows
+  const get = SORT_VALUE[sort.key]
+  const sign = sort.dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const va = get(a), vb = get(b)
+    // Пустые значения всегда внизу — при любом направлении. Иначе колонка
+    // с пропусками (нет замера) выглядит как «самые проблемные сверху».
+    if (va == null && vb == null) return 0
+    if (va == null) return 1
+    if (vb == null) return -1
+    return (va - vb) * sign
+  })
+}
+
+/** Кликабельный заголовок: 1-й клик — по убыванию (сверху самое крупное),
+ *  2-й — по возрастанию, 3-й — возврат к хронологии. */
+function ThSort({ children, right, sortKey, sort, onSort }: {
+  children: React.ReactNode; right?: boolean; sortKey: SortKey
+  sort: Sort | null; onSort: (s: Sort | null) => void
+}) {
+  const active = sort?.key === sortKey
+  const next = (): Sort | null =>
+    !active ? { key: sortKey, dir: 'desc' }
+      : sort!.dir === 'desc' ? { key: sortKey, dir: 'asc' }
+        : null
+  return (
+    <th
+      onClick={() => onSort(next())}
+      title={active ? (sort!.dir === 'desc' ? 'по убыванию · клик — по возрастанию'
+        : 'по возрастанию · клик — вернуть хронологию') : 'Сортировать внутри резервуара'}
+      className={cn('cursor-pointer select-none p-2.5 font-medium hover:text-foreground',
+        right ? 'text-right' : 'text-left', active && 'text-foreground')}
+    >
+      <span className={cn('inline-flex items-center gap-1', right && 'flex-row-reverse')}>
+        {children}
+        <span className={cn('text-[9px]', active ? 'opacity-100' : 'opacity-25')}>
+          {active ? (sort!.dir === 'desc' ? '▼' : '▲') : '▽'}
+        </span>
+      </span>
+    </th>
+  )
 }
 
 function Td({ children, right, className }: {
