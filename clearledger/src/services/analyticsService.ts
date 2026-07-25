@@ -624,6 +624,8 @@ export interface TankLedgerRow {
   continuity_kind: string | null
   /** Человеческая формулировка причины разрыва (для подсказки). */
   continuity_reason: string | null
+  /** Накладные, закреплённые за этой сменой и резервуаром (подтверждение прихода). */
+  receipts_docs?: { ttn: string; volume: number }[]
   mass_start: number | null
   mass_end: number | null
   mass_received: number | null

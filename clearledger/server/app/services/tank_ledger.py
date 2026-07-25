@@ -397,6 +397,14 @@ async def build_tank_ledger(
                 "level_end": _n(tank.level_end),
                 "water_volume": _n(tank.water_volume),
                 "fuel_changed": fuel_changed,
+                # Накладные, закреплённые за этой сменой и резервуаром (связь из
+                # секции `receipt` отчёта). Нужны в разборе строки: «приход 7 002 л»
+                # без номера ТТН нечем подтвердить перед поставщиком.
+                "receipts_docs": [
+                    {"ttn": ttn, "volume": round(vol, 1)}
+                    for vol, ttn in receipts_by_shift.get(
+                        (station_code, int(shift.shift_number), tank_no), [])
+                ],
             })
             if issue_entry is not None and continuity_gap is not None:
                 chain_breaks.append((continuity_gap, issue_entry, rows[-1]))

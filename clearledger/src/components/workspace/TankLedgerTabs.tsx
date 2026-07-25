@@ -20,6 +20,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { TankShiftDialog } from './TankShiftDialog'
 import {
   getTankLedger, type TankLedgerResponse, type TankLedgerRow, type TankLedgerTank,
 } from '@/services/analyticsService'
@@ -181,6 +182,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   const [fFuel, setFFuel] = useState('all')        // код топлива
   const [fIssue, setFIssue] = useState<IssueFilter>('all')
   const [fShift, setFShift] = useState('')         // поиск по номеру смены
+  const [picked, setPicked] = useState<TankLedgerRow | null>(null)  // строка в разборе
 
   const query = useQuery({
     queryKey: ['tank-ledger', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
@@ -396,7 +398,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                 </thead>
                 <tbody>
                   {groups.map((g) => (
-                    <GroupBlock key={g.key} group={g} tol={tol} />
+                    <GroupBlock key={g.key} group={g} tol={tol} onPick={setPicked} />
                   ))}
                 </tbody>
               </table>
@@ -546,12 +548,17 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
           )}
         </div>
       )}
+
+      {/* Разбор строки журнала: три контроля раздельно + накладные, масса, физика. */}
+      <TankShiftDialog row={picked} tol={tol} onClose={() => setPicked(null)} />
     </div>
   )
 }
 
 /** Блок одного резервуара в журнале: заголовок-итог + смены подряд. */
-function GroupBlock({ group, tol }: { group: Group; tol: number }) {
+function GroupBlock({ group, tol, onPick }: {
+  group: Group; tol: number; onPick: (r: TankLedgerRow) => void
+}) {
   const { tank, head, rows } = group
   return (
     <>
@@ -586,8 +593,10 @@ function GroupBlock({ group, tol }: { group: Group; tol: number }) {
         return (
           <tr
             key={`${r.shift_number}:${r.opened_at}`}
+            onClick={() => onPick(r)}
+            title="Открыть разбор смены по резервуару"
             className={cn(
-              'border-t',
+              'cursor-pointer border-t hover:bg-muted/50',
               ariBad && 'bg-red-500/5',
               !ariBad && (contBad || r.fuel_changed) && 'bg-amber-500/5',
             )}
