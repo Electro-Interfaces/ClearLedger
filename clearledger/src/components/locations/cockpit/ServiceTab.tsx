@@ -1,6 +1,9 @@
 /**
- * Сервис станции — полевые заявки HubEx FSM (реальная интеграция при наличии
- * metadata.hubexAssetId). Перенос из монолита окна станции 1:1.
+ * Сервис объекта: заявки Координатора (общий объект пространства) + полевые заявки
+ * HubEx FSM (внешняя система, при наличии metadata.hubexAssetId).
+ *
+ * Координатор — соседний разрез той же экосистемы, поэтому его заявки показываем всегда,
+ * а HubEx-часть — отдельной секцией, как было.
  */
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
@@ -9,6 +12,7 @@ import { Wrench } from 'lucide-react'
 import { getHubexTasks } from '@/services/locationService'
 import type { ServiceLocation } from '@/types/location'
 import { Field, Placeholder, ScrollTab } from './shared'
+import { CoordinatorTickets } from './CoordinatorTickets'
 
 export function ServiceTab({ location }: { location: ServiceLocation }) {
   const meta = (location.metadata ?? {}) as Record<string, unknown>
@@ -21,10 +25,11 @@ export function ServiceTab({ location }: { location: ServiceLocation }) {
   if (meta.hubexAssetId == null) {
     return (
       <ScrollTab>
+        <CoordinatorTickets objectId={location.id} />
         <Placeholder
           icon={Wrench}
           title="Станция не связана с HubEx"
-          text="Нет HubEx asset_id — сервисные заявки недоступны. Связка проставляется при импорте реестра."
+          text="Нет HubEx asset_id — заявки внешней сервисной системы недоступны. Связка проставляется при импорте реестра."
         />
       </ScrollTab>
     )
@@ -32,6 +37,7 @@ export function ServiceTab({ location }: { location: ServiceLocation }) {
 
   return (
     <ScrollTab>
+      <CoordinatorTickets objectId={location.id} />
       <Card>
         <CardContent className="grid grid-cols-2 gap-x-8 gap-y-2 pt-5 text-sm">
           <Field label="HubEx asset_id" value={String(meta.hubexAssetId)} mono />

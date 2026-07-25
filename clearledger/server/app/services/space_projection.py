@@ -150,6 +150,56 @@ async def project_users(
     }
 
 
+async def object_tickets(
+    db: AsyncSession, company_id: uuid.UUID, object_id: str, app_code: str = "support",
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Заявки приложения по объекту пространства — для карточки объекта в Учёте.
+
+    Ось — тот же `object_id`, который проекция положила в приложение. Данные не копируем:
+    спрашиваем разрез в момент показа, иначе в Ядре завелась бы вторая правда о заявках.
+    """
+    app_row = (await db.execute(select(App).where(App.code == app_code))).scalar_one_or_none()
+    if app_row is None:
+        raise ProjectionError(f"Приложение не найдено в реестре: {app_code}")
+
+    link = (await db.execute(select(AppCompanyLink).where(
+        AppCompanyLink.app_id == app_row.id,
+        AppCompanyLink.company_id == company_id))).scalar_one_or_none()
+    if link is None:
+        # Соответствие не задано — приложение просто ещё не знает об этой компании.
+        return {"app": app_code, "linked": False, "total": 0, "open": 0, "tickets": []}
+
+    token = sso.sign_service_token(aud=app_code, scope="projection")
+    if not token:
+        raise ProjectionError("Единый вход не настроен (нет ключа подписи)")
+
+    url = (f"{_internal_base_url(app_row, app_code)}/api/v1/eco/objects/"
+           f"{object_id}/tickets")
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        try:
+            resp = await client.get(
+                url,
+                params={"companyId": link.external_company_id, "limit": limit},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        except httpx.HTTPError as e:
+            raise ProjectionError(f"Приложение недоступно: {e}") from e
+
+    if resp.status_code >= 400:
+        raise ProjectionError(
+            f"Приложение вернуло ошибку (HTTP {resp.status_code}): {_error_text(resp)}")
+
+    data = resp.json()
+    return {
+        "app": app_code,
+        "linked": True,
+        "total": data.get("total", 0),
+        "open": data.get("open", 0),
+        "tickets": data.get("tickets", []),
+    }
+
+
 async def _users_payload(
     db: AsyncSession, company_id: uuid.UUID, app_row: App, app_code: str,
 ) -> list[dict[str, Any]]:

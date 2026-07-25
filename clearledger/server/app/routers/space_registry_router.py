@@ -161,6 +161,28 @@ async def project_objects(
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
 
 
+@router.get("/objects/{object_id}/tickets")
+async def object_tickets(
+    object_id: str,
+    company_id: str = Query(...),
+    app: str = Query("support"),
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Заявки приложения по этому объекту — сводка для карточки объекта в Учёте.
+
+    Читает любой член компании: видеть, что по объекту происходит в соседнем разрезе, —
+    рабочая потребность, а не админская.
+    """
+    cid = await _member(company_id, user, db)
+    if await space_registry.get_object(db, cid, object_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Объект не найден в этой компании")
+    try:
+        return await space_projection.object_tickets(db, cid, object_id, app, limit)
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
 @router.post("/users/project")
 async def project_users(
     company_id: str = Query(...),

@@ -100,6 +100,35 @@ export async function projectSpaceObjects(
   )
 }
 
+export interface ObjectTicket {
+  id: string
+  number: string | number
+  title: string
+  status: string
+  priority?: string | null
+  created_at: string
+}
+
+export interface ObjectTickets {
+  app: string
+  linked: boolean
+  total: number
+  open: number
+  tickets: ObjectTicket[]
+}
+
+/**
+ * Заявки соседнего разреза по этому объекту. Данные не копируются в Учёт — спрашиваем
+ * Координатор в момент показа, чтобы в пространстве не завелась вторая правда о заявках.
+ */
+export async function getObjectTickets(
+  companyId: string, objectId: string, app = 'support',
+): Promise<ObjectTickets> {
+  return get<ObjectTickets>(`/api/registry/objects/${encodeURIComponent(objectId)}/tickets`, {
+    company_id: companyId, app,
+  })
+}
+
 /**
  * Отправить сотрудников компании в приложение. Пароли не передаются: вход в приложение
  * идёт единым входом Ядра, а у кого локальный пароль уже был — он сохраняется.
