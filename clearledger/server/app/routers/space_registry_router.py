@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import App, AppCompanyLink, Company, User, UserCompany
+from app.services import space_map as space_map_service
 from app.services import space_projection, space_registry
 
 router = APIRouter(prefix="/registry", tags=["ElsyPlus Core — реестр объектов"])
@@ -163,6 +164,29 @@ async def project_entity(
         return await space_projection.project(db, cid, app, entity)
     except space_projection.ProjectionError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+
+@router.get("/space-map")
+async def space_map(
+    company_id: str | None = Query(None, description="одна компания; без него — все доступные"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Карта пространства: кто здесь, куда допущен, кто активен, что происходило.
+
+    Суперадмин без `company_id` видит весь контейнер (все пространства), админ компании —
+    только свою. Только чтение: карта нужна для анализа, а не для правок.
+    """
+    if company_id:
+        cids = [await _admin(company_id, user, db)]
+    elif user.is_superadmin:
+        cids = list((await db.execute(select(Company.id).order_by(Company.name))).scalars().all())
+    else:
+        rows = (await db.execute(select(UserCompany.company_id).where(
+            UserCompany.user_id == user.id, UserCompany.role == "admin"))).scalars().all()
+        if not rows:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Нужны права администратора компании")
+        cids = list(rows)
+    return await space_map_service.space_map(db, cids)
 
 
 @router.get("/organizations")

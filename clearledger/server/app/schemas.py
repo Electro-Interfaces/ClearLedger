@@ -103,6 +103,11 @@ class UserAdminUpdate(BaseModel):
     name: str | None = None         # ФИО (глобально)
     role: Literal["user", "admin"] | None = None
     position: str | None = None     # должность (per-company); "" → очистить
+    # Принадлежность к пространству: свой сотрудник или внешний участник (подрядчик,
+    # поставщик). Это НЕ права — права в role; это «кто он», видно в чатах и заявках.
+    party_type: Literal["internal", "partner", "vendor"] | None = None
+    # Какую организацию представляет внешний участник (id карточки юрлица); "" → очистить.
+    organization_id: str | None = None
 
 
 class CompanyMembership(BaseModel):
@@ -156,6 +161,9 @@ class UserAdminResponse(BaseModel):
     name: str                       # ФИО
     role: str                       # роль в контексте запроса (компании) или глобальная
     position: str | None = None     # должность в контексте компании
+    party_type: str | None = None   # internal | partner — свой сотрудник или внешний участник
+    organization_id: str | None = None   # кого представляет внешний участник
+    organization_name: str | None = None # имя организации (для UI)
     modules: list[str] | None = None  # эффективные RBAC-модули; null = полный доступ
     role_id: str | None = None      # назначенная именованная роль доступа (company_roles)
     role_name: str | None = None    # имя назначенной роли (для UI)

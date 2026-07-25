@@ -20,6 +20,11 @@ export interface AdminUser {
   modules?: string[] | null // эффективные RBAC-модули; null = полный доступ
   role_id?: string | null   // назначенная именованная роль доступа
   role_name?: string | null // имя назначенной роли (для UI)
+  // Принадлежность к пространству: свой сотрудник или внешний участник (подрядчик,
+  // поставщик). Не права — «кто он»: видно в чатах, заявках, справочнике людей.
+  party_type?: 'internal' | 'partner' | 'vendor' | null
+  organization_id?: string | null    // кого представляет внешний участник
+  organization_name?: string | null  // имя организации (для UI)
   is_superadmin: boolean
   companies: MembershipRef[]
 }
@@ -63,13 +68,22 @@ export async function createUser(data: {
 
 export async function updateUser(
   id: string,
-  data: { companyId: string; name?: string; role?: 'user' | 'admin'; position?: string },
+  data: {
+    companyId: string
+    name?: string
+    role?: 'user' | 'admin'
+    position?: string
+    partyType?: 'internal' | 'partner' | 'vendor'
+    organizationId?: string          // '' → снять связь с организацией
+  },
 ): Promise<AdminUser> {
   return patch<AdminUser>(`/api/users/${id}`, {
     company_id: data.companyId,
     name: data.name,
     role: data.role,
     position: data.position,
+    party_type: data.partyType,
+    organization_id: data.organizationId,
   })
 }
 

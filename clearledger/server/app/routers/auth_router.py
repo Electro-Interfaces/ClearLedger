@@ -48,6 +48,11 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
             detail="Неверный email или пароль",
         )
 
+    # Отметка входа: без неё карта пространства показывала «не заходили» даже у тех, кто
+    # работает каждый день — раньше last_seen_at обновлял только веб-сокет чата.
+    user.last_seen_at = datetime.now(timezone.utc)
+    await db.commit()
+
     token = create_access_token(str(user.id), user.email)
     return TokenResponse(
         access_token=token,

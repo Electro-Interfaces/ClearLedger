@@ -4,7 +4,24 @@ import type { ChatSession } from './types'
 
 export interface GroupRoom { roomId: string; title: string; ownerId?: string; isPublic: boolean }
 export interface ChatFolderDto { id: string; name: string; roomIds: string[]; order: number }
-export interface Person { id: string; name: string; email: string }
+/**
+ * Человек пространства в чате. `partyType` — принадлежность: свой сотрудник или внешний
+ * участник (подрядчик, поставщик). Это не права, а ответ на вопрос «с кем я говорю».
+ */
+export interface Person {
+  id: string
+  name: string
+  email: string
+  partyType?: 'internal' | 'partner' | 'vendor'
+  role?: string
+  position?: string | null
+  orgName?: string | null
+}
+
+/** Та же карточка, но с Matrix-идентификатором: сообщения приходят от mxid. */
+export interface DirectoryPerson extends Person {
+  mxid: string
+}
 
 export function getSession(): Promise<ChatSession> {
   return get<ChatSession>('/api/mchat/session')
@@ -45,4 +62,17 @@ export function deleteFolder(id: string): Promise<void> {
 
 export async function searchPeople(q: string): Promise<Person[]> {
   return (await get<{ people: Person[] }>('/api/mchat/people', { q })).people
+}
+
+/**
+ * Открыть канал связи с разработчиком платформы: комната пространства, в которой
+ * инженеры разработчика и сотрудники заказчика. Идемпотентно — комната одна на компанию.
+ */
+export function openSupportChannel(): Promise<{ roomId: string; title: string; vendors: number; created: boolean }> {
+  return post('/api/mchat/support-channel', {})
+}
+
+/** Карта участников пространства по mxid — чтобы подписать авторов сообщений. */
+export async function chatDirectory(): Promise<DirectoryPerson[]> {
+  return (await get<{ people: DirectoryPerson[] }>('/api/mchat/directory')).people
 }

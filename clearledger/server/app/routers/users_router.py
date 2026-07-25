@@ -15,7 +15,7 @@ from app.access_catalog import sanitize_modules
 from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
-from app.models import Company, CompanyRole, User, UserCompany
+from app.models import Counterparty, Company, CompanyRole, User, UserCompany
 from app.utils import resolve_company_id
 from app.schemas import (
     CompanyMembership,
@@ -88,12 +88,21 @@ async def _resp(
     modules: list[str] | None = None    # эффективные (с учётом назначенной роли)
     role_id_str: str | None = None
     role_name: str | None = None
+    party_type: str | None = None
+    org_id: str | None = None
+    org_name: str | None = None
     if scope_cid is not None:
         m = await db.get(UserCompany, (u.id, scope_cid))
         if m is not None:
             role = m.role
             position = m.position
             modules = await resolve_member_modules(m, db)
+            party_type = getattr(m, "party_type", None) or "internal"
+            if m.organization_id is not None:
+                org = await db.get(Counterparty, m.organization_id)
+                if org is not None:
+                    org_id = str(org.id)
+                    org_name = org.short_name or org.name
             if m.role_id is not None:
                 r = await db.get(CompanyRole, m.role_id)
                 if r is not None:
@@ -103,6 +112,7 @@ async def _resp(
         id=str(u.id), email=u.email, name=u.name,
         role=role, position=position, modules=modules,
         role_id=role_id_str, role_name=role_name,
+        party_type=party_type, organization_id=org_id, organization_name=org_name,
         is_superadmin=u.is_superadmin, companies=memberships,
     )
 
@@ -199,8 +209,9 @@ async def update_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя менять суперадмина")
     if payload.name is not None:
         target.name = payload.name   # ФИО — глобально
-    # Роль/должность — per-company (нужен company_id).
-    if payload.role is not None or payload.position is not None:
+    # Роль/должность/принадлежность — per-company (нужен company_id).
+    if (payload.role is not None or payload.position is not None
+            or payload.party_type is not None or payload.organization_id is not None):
         if not payload.company_id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите company_id для роли/должности")
         membership = await db.get(UserCompany, (uid, cid))
@@ -212,6 +223,26 @@ async def update_user(
                             target=target.email, details={"role": payload.role})
         if payload.position is not None:
             membership.position = payload.position or None  # "" → очистить
+        if payload.party_type is not None and payload.party_type != getattr(membership, "party_type", None):
+            membership.party_type = payload.party_type
+            # Свой сотрудник не представляет внешнюю организацию — связь снимаем,
+            # иначе в чатах остался бы висеть ярлык подрядчика.
+            if payload.party_type == "internal":
+                membership.organization_id = None
+            await log_audit(db, actor=current_user, company_id=cid, action="member.party",
+                            target=target.email, details={"partyType": payload.party_type})
+        if payload.organization_id is not None:
+            if payload.organization_id == "":
+                membership.organization_id = None
+            else:
+                try:
+                    org_uuid = uuid.UUID(payload.organization_id)
+                except ValueError:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный id организации")
+                org = await db.get(Counterparty, org_uuid)
+                if org is None or org.company_id != cid:
+                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена в компании")
+                membership.organization_id = org_uuid
     await db.flush()
     return await _resp(target, db, scope_cid=cid if payload.company_id else None)
 

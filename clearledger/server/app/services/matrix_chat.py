@@ -12,7 +12,8 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MatrixChatFolder, MatrixDmRoom, MatrixGroupRoom, MatrixIdentity, User, UserCompany
+from app.models import (Counterparty, MatrixChatFolder, MatrixDmRoom, MatrixGroupRoom,
+                        MatrixIdentity, User, UserCompany)
 from app.services import matrix_admin as ma
 
 
@@ -194,12 +195,98 @@ async def reorder_folders(db: AsyncSession, company_id, user: User, ordered_ids:
 # ── люди (для выбора участников) ──
 
 async def search_people(db: AsyncSession, company_id, q: str, me_id, limit: int = 30) -> list[dict[str, Any]]:
-    """Сотрудники компании для добавления в чаты (People, кроме себя)."""
-    stmt = (select(User).join(UserCompany, UserCompany.user_id == User.id)
+    """Люди пространства для добавления в чаты (кроме себя).
+
+    Отдаём не только имя: в чате должно быть видно, КТО собеседник — свой сотрудник или
+    внешний участник (подрядчик, поставщик) и от какой организации. Иначе в общей комнате
+    сотрудник и подрядчик выглядят одинаково, хотя разговор с ними разный.
+    """
+    stmt = (select(User, UserCompany, Counterparty)
+            .join(UserCompany, UserCompany.user_id == User.id)
+            .outerjoin(Counterparty, Counterparty.id == UserCompany.organization_id)
             .where(UserCompany.company_id == company_id, User.id != me_id))
     ql = (q or "").strip()
     if ql:
         like = f"%{ql}%"
         stmt = stmt.where(or_(User.name.ilike(like), User.email.ilike(like)))
-    rows = (await db.execute(stmt.order_by(User.name).limit(limit))).scalars().all()
-    return [{"id": str(u.id), "name": u.name, "email": u.email} for u in rows]
+    rows = (await db.execute(stmt.order_by(User.name).limit(limit))).all()
+    return [_person_card(u, uc, org) for u, uc, org in rows]
+
+
+def _person_card(user: User, membership: UserCompany, org: Counterparty | None) -> dict[str, Any]:
+    """Карточка человека для чата: имя + принадлежность («кто это»)."""
+    party = getattr(membership, "party_type", None) or "internal"
+    return {
+        "id": str(user.id),
+        "name": user.name,
+        "email": user.email,
+        # internal — свой сотрудник компании; partner — внешний участник пространства.
+        "partyType": party,
+        "role": membership.role,
+        "position": membership.position,
+        "orgName": (org.short_name or org.name) if org is not None else None,
+    }
+
+
+SUPPORT_CHANNEL_TITLE = "Поддержка платформы"
+
+
+async def ensure_support_channel(db: AsyncSession, company_id, requester: User) -> dict[str, Any]:
+    """Канал связи с разработчиком платформы — теми же средствами, что и остальные чаты.
+
+    У заказчика должен быть штатный способ дойти до тех, кто эту экосистему делает, не
+    выходя из неё: не почта и не мессенджер снаружи, а обычная комната пространства. В неё
+    входят инициатор и все участники с принадлежностью `vendor` (инженеры разработчика).
+
+    Идемпотентно: комната одна на компанию (`MatrixGroupRoom` с этим названием). Повторный
+    вызов добавляет в неё тех, кого там ещё нет, — состав поддержки со временем меняется.
+    """
+    room = (await db.execute(select(MatrixGroupRoom).where(
+        MatrixGroupRoom.company_id == company_id,
+        MatrixGroupRoom.title == SUPPORT_CHANNEL_TITLE))).scalar_one_or_none()
+
+    vendors = (await db.execute(
+        select(User).join(UserCompany, UserCompany.user_id == User.id)
+        .where(UserCompany.company_id == company_id, UserCompany.party_type == "vendor")
+    )).scalars().all()
+
+    if room is None:
+        created = await create_group_room(
+            db, company_id, requester, SUPPORT_CHANNEL_TITLE,
+            [v.id for v in vendors], is_public=False)
+        return {**created, "vendors": len(vendors), "created": True}
+
+    # Комната есть — досыпаем участников (инициатора и инженеров поддержки).
+    joined = set()
+    try:
+        joined = set(await ma.get_joined_members(room.room_id))
+    except Exception:  # noqa: BLE001 — комната недоступна: пусть решает вызывающий
+        pass
+    for person in [requester, *vendors]:
+        mxid = await ensure_matrix_account(db, person)
+        if mxid not in joined:
+            await ma.force_join(room.room_id, mxid)
+    return {"roomId": room.room_id, "title": room.title, "isPublic": room.is_public,
+            "vendors": len(vendors), "created": False}
+
+
+async def chat_directory(db: AsyncSession, company_id) -> list[dict[str, Any]]:
+    """Справочник участников чата по Matrix-идентификаторам.
+
+    В сообщениях Matrix автор приходит как mxid, поэтому подписи «свой/внешний» UI рисует
+    по этой карте: mxid → карточка человека пространства. Кого нет в карте (гость, бот) —
+    UI подписывает нейтрально, а не выдумывает принадлежность.
+    """
+    rows = (await db.execute(
+        select(User, UserCompany, MatrixIdentity, Counterparty)
+        .join(UserCompany, UserCompany.user_id == User.id)
+        .join(MatrixIdentity, MatrixIdentity.user_id == User.id)
+        .outerjoin(Counterparty, Counterparty.id == UserCompany.organization_id)
+        .where(UserCompany.company_id == company_id)
+    )).all()
+    out = []
+    for user, membership, identity, org in rows:
+        card = _person_card(user, membership, org)
+        card["mxid"] = identity.mxid
+        out.append(card)
+    return out

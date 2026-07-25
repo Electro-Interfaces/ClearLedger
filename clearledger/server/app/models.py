@@ -136,6 +136,19 @@ class UserCompany(Base):
     )
     # Должность сотрудника в этой компании (per-company).
     position: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # КТО этот человек для пространства. Права даёт role/role_id, а это — принадлежность:
+    # в чатах, заявках и справочнике людей должно быть видно, с кем разговариваешь.
+    #   internal — свой сотрудник компании;
+    #   partner  — внешний участник (подрядчик, поставщик, представитель заказчика);
+    #   vendor   — инженер разработчика платформы: поддержка самого пространства.
+    party_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="internal", server_default=text("'internal'")
+    )
+    # Какую организацию представляет внешний участник (карточка юрлица пространства).
+    # Для своих сотрудников NULL — их организация и есть компания пространства.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

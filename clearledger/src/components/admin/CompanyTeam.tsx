@@ -30,7 +30,8 @@ import type { CompanyRole } from '@/services/roleService'
 import { ACCESS_MODULES, ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
 import { isApiEnabled } from '@/services/apiClient'
 import { getAccessCatalog } from '@/services/registryService'
-import { projectSpaceUsers } from '@/services/spaceObjectsService'
+import { projectSpaceUsers, listSpaceOrganizations } from '@/services/spaceObjectsService'
+import { PartyBadge } from '@/components/chat/PartyBadge'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', user: 'Сотрудник' }
@@ -72,6 +73,20 @@ export function MembersCard({
     mutationFn: ({ id, name, position }: { id: string; name?: string; position?: string }) =>
       userService.updateUser(id, { companyId, name, position }),
     onSuccess: () => { toast.success('Сохранено'); qc.invalidateQueries({ queryKey: ['team-members', companyId] }) },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  // Организации пространства нужны, чтобы указать, КОГО представляет внешний участник.
+  const orgsQ = useQuery({
+    queryKey: ['space-orgs', companyId],
+    queryFn: () => listSpaceOrganizations(companyId),
+    enabled: canManage,
+    retry: false,
+  })
+  const setParty = useMutation({
+    mutationFn: ({ id, partyType, organizationId }: {
+      id: string; partyType?: 'internal' | 'partner' | 'vendor'; organizationId?: string
+    }) => userService.updateUser(id, { companyId, partyType, organizationId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['team-members', companyId] }),
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
   const projectUsers = useMutation({
@@ -133,6 +148,7 @@ export function MembersCard({
               <TableHead>ФИО / Email</TableHead>
               <TableHead className="w-[160px]">Должность</TableHead>
               <TableHead className="w-[130px]">Роль</TableHead>
+              <TableHead className="w-[210px]">Кто это</TableHead>
               <TableHead className="w-[300px]">Доступ к модулям</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
@@ -172,6 +188,45 @@ export function MembersCard({
                     </Select>
                   </TableCell>
                   <TableCell>
+                    {/* Принадлежность к пространству — не права, а «кто он»: в чатах и
+                        заявках внешнего участника надо отличать от своего сотрудника. */}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <PartyBadge party={{
+                          partyType: u.party_type ?? 'internal', role: u.role,
+                          orgName: u.organization_name, position: u.position,
+                        }} />
+                        {canManage && !u.is_superadmin && (
+                          <Select value={u.party_type ?? 'internal'} disabled={setParty.isPending}
+                            onValueChange={(v) => setParty.mutate({ id: u.id, partyType: v as 'internal' | 'partner' | 'vendor' })}>
+                            <SelectTrigger className="h-7 w-[132px] text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="internal">Свой сотрудник</SelectItem>
+                              <SelectItem value="partner">Внешний участник</SelectItem>
+                              {/* Инженер разработчика платформы: попадает в канал поддержки
+                                  пространства и подписан «Поддержка» во всех чатах. */}
+                              <SelectItem value="vendor">Поддержка платформы</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                      {canManage && (u.party_type === 'partner' || u.party_type === 'vendor') && (
+                        <Select value={u.organization_id ?? 'none'} disabled={setParty.isPending}
+                          onValueChange={(v) => setParty.mutate({ id: u.id, organizationId: v === 'none' ? '' : v })}>
+                          <SelectTrigger className="h-7 w-[196px] text-xs">
+                            <SelectValue placeholder="Организация" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Организация не указана</SelectItem>
+                            {(orgsQ.data ?? []).map((o) => (
+                              <SelectItem key={o.id} value={o.id}>{o.shortName || o.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
                     {u.role === 'admin' || u.is_superadmin ? (
                       <Badge variant="outline" className="text-[10px] gap-1"><ShieldCheck className="h-3 w-3" /> Все модули</Badge>
                     ) : (
@@ -207,7 +262,7 @@ export function MembersCard({
               )
             })}
             {!q.isLoading && members.length === 0 && (
-              <TableRow><TableCell colSpan={4} className="text-sm text-muted-foreground text-center py-4">Нет сотрудников</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="text-sm text-muted-foreground text-center py-4">Нет сотрудников</TableCell></TableRow>
             )}
           </TableBody>
         </Table>

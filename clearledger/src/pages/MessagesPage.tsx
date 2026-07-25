@@ -8,11 +8,12 @@ import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   Loader2, Send, MessagesSquare, Users, Hash, User as UserIcon, Plus, Reply,
-  MessageSquare, X, CornerDownRight, Search, Globe,
+  MessageSquare, X, CornerDownRight, Search, Globe, LifeBuoy,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { PartyBadge, type PartyInfo } from '@/components/chat/PartyBadge'
 import { isApiEnabled } from '@/services/apiClient'
 import * as mc from '@/services/matrix/matrixClient'
 import * as api from '@/services/matrix/mchatApi'
@@ -32,6 +33,29 @@ export function MessagesPage() {
   const [thread, setThread] = useState<string | null>(null)   // открытая тема (root event id)
 
   const foldersQ = useQuery({ queryKey: ['mchat-folders'], queryFn: api.listFolders, enabled: ready })
+  const [supportBusy, setSupportBusy] = useState(false)
+
+  /** Открыть канал поддержки платформы: создаётся один раз, дальше просто открывается. */
+  async function openSupport() {
+    if (supportBusy) return
+    setSupportBusy(true)
+    try {
+      const r = await api.openSupportChannel()
+      setRooms(mc.getChatRooms())
+      setActive(r.roomId)
+      setThread(null)
+      if (r.vendors === 0) {
+        toast.warning('Канал создан, но инженеры поддержки не назначены', {
+          description: 'В Центре управления отметьте участников поддержки платформы',
+        })
+      }
+    } catch (e) {
+      const msg = (e as Error).message || ''
+      toast.error(/503|не настроен/i.test(msg) ? 'Чат не настроен' : 'Не удалось открыть канал поддержки')
+    } finally {
+      setSupportBusy(false)
+    }
+  }
 
   // инициализация Matrix
   useEffect(() => {
@@ -78,6 +102,12 @@ export function MessagesPage() {
           <Button size="icon" variant="ghost" className="h-8 w-8" title="Публичные" onClick={() => setDialog('public')}><Globe className="h-4 w-4" /></Button>
           <Button size="icon" variant="ghost" className="h-8 w-8" title="Личный чат" onClick={() => setDialog('dm')}><UserIcon className="h-4 w-4" /></Button>
           <Button size="icon" variant="ghost" className="h-8 w-8" title="Группа" onClick={() => setDialog('group')}><Plus className="h-4 w-4" /></Button>
+          {/* Канал разработчика платформы: у заказчика должен быть штатный способ дойти
+              до тех, кто эту экосистему делает, — теми же средствами, не через почту. */}
+          <Button size="icon" variant="ghost" className="h-8 w-8 text-sky-600 dark:text-sky-400"
+            title="Поддержка платформы" disabled={supportBusy} onClick={openSupport}>
+            {supportBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LifeBuoy className="h-4 w-4" />}
+          </Button>
         </div>
         {/* папки */}
         <div className="flex gap-1 p-1.5 overflow-x-auto border-b text-xs">
@@ -132,6 +162,7 @@ export function MessagesPage() {
 
 // ── лента одной комнаты ──
 function RoomView({ roomId, tick, onOpenThread }: { roomId: string; tick: number; onOpenThread: (id: string) => void }) {
+  const directory = useChatDirectory()
   const [msgs, setMsgs] = useState<ChatMessage[]>([])
   const [threads, setThreads] = useState<ChatThread[]>([])
   const [text, setText] = useState('')
@@ -182,7 +213,8 @@ function RoomView({ roomId, tick, onOpenThread }: { roomId: string; tick: number
 
       <div className="flex-1 overflow-y-auto min-h-0 p-3 space-y-2">
         {msgs.map((m) => (
-          <Bubble key={m.id} m={m} roomId={roomId} onReply={() => setReply(m)} onThread={() => onOpenThread(m.thread_root_id || m.id)} />
+          <Bubble key={m.id} m={m} roomId={roomId} party={directory.get(m.user_id)}
+            onReply={() => setReply(m)} onThread={() => onOpenThread(m.thread_root_id || m.id)} />
         ))}
         <div ref={endRef} />
       </div>
@@ -203,13 +235,43 @@ function RoomView({ roomId, tick, onOpenThread }: { roomId: string; tick: number
   )
 }
 
+/**
+ * Справочник участников: mxid → «кто это». Matrix присылает автора как mxid, поэтому без
+ * этой карты подписать сообщение «внешний · ООО Подрядчик» нечем. Кого в карте нет
+ * (гость, бот) — остаётся без подписи, а не помечается своим.
+ */
+function useChatDirectory() {
+  const q = useQuery({
+    queryKey: ['mchat-directory'],
+    queryFn: api.chatDirectory,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  return useMemo(() => {
+    const map = new Map<string, PartyInfo>()
+    for (const p of q.data ?? []) {
+      map.set(p.mxid, { partyType: p.partyType, role: p.role, orgName: p.orgName, position: p.position })
+    }
+    return map
+  }, [q.data])
+}
+
 // ── сообщение ──
-function Bubble({ m, roomId, onReply, onThread }: { m: ChatMessage; roomId: string; onReply: () => void; onThread: () => void }) {
+function Bubble({ m, roomId, party, onReply, onThread }: {
+  m: ChatMessage; roomId: string; party?: PartyInfo; onReply: () => void; onThread: () => void
+}) {
   const mine = m.user_id === mc.getMyId()
   return (
     <div className={`group flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
       <div className={`max-w-[75%] rounded-2xl px-3 py-1.5 ${mine ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-        {!mine && <div className="text-[11px] font-medium opacity-70 mb-0.5">{m.user_name}</div>}
+        {/* Автора подписываем вместе с принадлежностью: в общей комнате важно видеть,
+            свой это сотрудник или внешний подрядчик. */}
+        {!mine && (
+          <div className="mb-0.5 flex items-center gap-1.5">
+            <span className="text-[11px] font-medium opacity-70">{m.user_name}</span>
+            <PartyBadge party={party} withIcon={false} />
+          </div>
+        )}
         <div className="text-sm whitespace-pre-wrap break-words">{m.content}{m.is_edited && <span className="opacity-50 text-[10px]"> (изм.)</span>}</div>
       </div>
       <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -234,6 +296,7 @@ function Bubble({ m, roomId, onReply, onThread }: { m: ChatMessage; roomId: stri
 
 // ── панель темы (тред) ──
 function ThreadPanel({ roomId, rootId, tick, onClose }: { roomId: string; rootId: string; tick: number; onClose: () => void }) {
+  const directory = useChatDirectory()
   const [msgs, setMsgs] = useState<ChatMessage[]>([])
   const [text, setText] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
@@ -255,7 +318,10 @@ function ThreadPanel({ roomId, rootId, tick, onClose }: { roomId: string; rootId
         <button onClick={onClose}><X className="h-4 w-4" /></button>
       </div>
       <div className="flex-1 overflow-y-auto min-h-0 p-3 space-y-2">
-        {msgs.map((m) => <Bubble key={m.id} m={m} roomId={roomId} onReply={() => {}} onThread={() => {}} />)}
+        {msgs.map((m) => (
+          <Bubble key={m.id} m={m} roomId={roomId} party={directory.get(m.user_id)}
+            onReply={() => {}} onThread={() => {}} />
+        ))}
         <div ref={endRef} />
       </div>
       <div className="flex items-center gap-2 p-2 border-t">
@@ -314,7 +380,10 @@ function NewChatDialog({ kind, onClose, onOpened }: { kind: 'group' | 'dm' | 'pu
                   onClick={() => kind === 'dm' ? openDm(p.id) : setPicked((s) => { const n = { ...s }; if (n[p.id]) delete n[p.id]; else n[p.id] = p.name; return n })}
                   className={`w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center gap-2 ${picked[p.id] ? 'bg-primary/10' : ''}`}>
                   <UserIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm flex-1">{p.name} <span className="text-xs text-muted-foreground">{p.email}</span></span>
+                  <span className="text-sm flex-1 min-w-0">
+                    <span className="block truncate">{p.name} <span className="text-xs text-muted-foreground">{p.email}</span></span>
+                  </span>
+                  <PartyBadge party={p} />
                   {kind === 'group' && picked[p.id] && <Badge variant="secondary" className="text-[10px]">выбран</Badge>}
                 </button>
               ))}

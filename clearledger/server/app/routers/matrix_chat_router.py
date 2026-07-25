@@ -151,3 +151,28 @@ async def people(q: str = Query(""),
     _require_chat()
     cid = await scope_company_id(user, db)
     return {"people": await mc.search_people(db, cid, q, user.id)}
+
+
+@router.post("/support-channel")
+async def support_channel(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Открыть (или создать) канал связи с разработчиком платформы.
+
+    Тем же механизмом, что и остальные чаты пространства: обычная комната, в которой
+    инженеры разработчика (`party_type=vendor`) и сотрудники заказчика. Идемпотентно —
+    комната одна на компанию, повторный вызов лишь дополняет состав.
+    """
+    _require_chat()
+    cid = await scope_company_id(user, db)
+    return await mc.ensure_support_channel(db, cid, user)
+
+
+@router.get("/directory")
+async def directory(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Карта mxid → «кто это»: свой сотрудник или внешний участник и от какой организации.
+
+    Нужна интерфейсу чата: Matrix присылает автора сообщения как mxid, и без этой карты
+    подписать собеседника «внешний · ООО Подрядчик» нечем.
+    """
+    _require_chat()
+    cid = await scope_company_id(user, db)
+    return {"people": await mc.chat_directory(db, cid)}

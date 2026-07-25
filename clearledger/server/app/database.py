@@ -303,6 +303,14 @@ async def create_all() -> None:
             # v2.4: hybrid RBAC — назначенная именованная роль (company_roles).
             # Таблицу company_roles создаёт create_all; здесь только колонка role_id.
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS role_id UUID",
+            # Принадлежность участника пространства: свой сотрудник или внешний
+            # (подрядчик/поставщик/представитель заказчика). Права — отдельно, в role;
+            # это про «кто с кем разговаривает» в чатах, заявках и справочнике людей.
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS party_type VARCHAR(20) "
+            "NOT NULL DEFAULT 'internal'",
+            # Какую организацию представляет внешний участник (карточка юрлица пространства).
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS organization_id UUID "
+            "REFERENCES counterparties(id) ON DELETE SET NULL",
             # v2.2: приглашения сотрудников по email.
             "CREATE TABLE IF NOT EXISTS invitations ("
             "  id UUID PRIMARY KEY,"
