@@ -16,6 +16,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PartyBadge } from '@/components/chat/PartyBadge'
+import { PresenceDot } from '@/components/chat/PresenceDot'
 import { getSpaceMap, type SpaceMapCompany, type SpaceMapPerson } from '@/services/spaceMapService'
 
 type Filter = 'all' | 'online' | 'partners' | 'noAccess' | 'neverSeen'
@@ -179,16 +180,10 @@ function PersonRow({ person, appCodes }: { person: SpaceMapPerson; appCodes: str
     <tr className="border-t border-border/60">
       <td className="px-3 py-2">
         <div className="flex items-center gap-1.5">
-          {/* Присутствие: зелёная точка — человек работает прямо сейчас (отметка свежее
-              шести минут), серая — нет. Наводка показывает, когда был. */}
-          <span
-            className={`size-2 shrink-0 rounded-full ${person.online ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
-            title={person.online
-              ? 'В системе сейчас'
-              : person.lastSeenAt
-                ? `Был ${new Date(person.lastSeenAt).toLocaleString('ru-RU')}`
-                : 'Ни разу не заходил'}
-          />
+          {/* Тот же язык индикаторов, что в чате: зелёный — работает сейчас, серый —
+              нет. Карта серверная, поэтому состояние берётся из отметки присутствия. */}
+          <PresenceDot className="size-2" state={person.online ? 'online' : 'offline'}
+            lastSeenAt={person.lastSeenAt} />
           <span className="font-medium">{person.name}</span>
           {person.isSuperadmin && (
             <Badge variant="outline" className="gap-1 text-[10px]"><ShieldCheck className="size-3" /> супер</Badge>

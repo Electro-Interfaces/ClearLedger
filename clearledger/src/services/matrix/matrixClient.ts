@@ -57,6 +57,34 @@ export function teardownChat(): void {
 
 export function getMyId(): string { return myUserId }
 
+// ── присутствие (Matrix presence) ──
+//
+// Сервер Ядра знает лишь «работал недавно» (отметка last_seen_at). Matrix знает точнее:
+// клиент сам сообщает, жива ли вкладка, и Synapse различает «в сети» и «отошёл» — по времени
+// без действий. Поэтому в чате показываем статус Matrix, а серверный признак остаётся
+// запасным: он есть у всех, даже у тех, кто чат не открывал.
+
+export type PresenceState = 'online' | 'away' | 'offline'
+
+/** Статус собеседника по mxid. undefined — Matrix о нём ничего не знает. */
+export function getPresence(mxid: string): PresenceState | undefined {
+  const u = client?.getUser?.(mxid)
+  if (!u?.presence) return undefined
+  if (u.presence === 'online') return 'online'
+  if (u.presence === 'unavailable') return 'away'
+  return 'offline'
+}
+
+/** Подписка на изменения присутствия: возвращает функцию отписки. */
+export function subscribePresence(handler: () => void): () => void {
+  const c = client
+  if (!c || !sdk) return () => {}
+  const h = () => handler()
+  c.on(sdk.UserEvent.Presence, h)
+  c.on(sdk.UserEvent.LastPresenceTs, h)
+  return () => { c.off(sdk.UserEvent.Presence, h); c.off(sdk.UserEvent.LastPresenceTs, h) }
+}
+
 // ── комнаты ──
 
 function roomType(room: any): ChatRoom['type'] {

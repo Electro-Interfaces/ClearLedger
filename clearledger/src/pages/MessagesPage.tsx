@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { PartyBadge, type PartyInfo } from '@/components/chat/PartyBadge'
+import { PresenceDot, resolvePresence } from '@/components/chat/PresenceDot'
 import { isApiEnabled } from '@/services/apiClient'
 import * as mc from '@/services/matrix/matrixClient'
 import * as api from '@/services/matrix/mchatApi'
@@ -163,6 +164,7 @@ export function MessagesPage() {
 // ── лента одной комнаты ──
 function RoomView({ roomId, tick, onOpenThread }: { roomId: string; tick: number; onOpenThread: (id: string) => void }) {
   const directory = useChatDirectory()
+  usePresenceTick()
   const [msgs, setMsgs] = useState<ChatMessage[]>([])
   const [threads, setThreads] = useState<ChatThread[]>([])
   const [text, setText] = useState('')
@@ -240,6 +242,12 @@ function RoomView({ roomId, tick, onOpenThread }: { roomId: string; tick: number
  * этой карты подписать сообщение «внешний · ООО Подрядчик» нечем. Кого в карте нет
  * (гость, бот) — остаётся без подписи, а не помечается своим.
  */
+/** Перерисовка при изменении присутствия: Matrix шлёт события, реакт про них не знает. */
+function usePresenceTick() {
+  const [, setTick] = useState(0)
+  useEffect(() => mc.subscribePresence(() => setTick((t) => t + 1)), [])
+}
+
 function useChatDirectory() {
   const q = useQuery({
     queryKey: ['mchat-directory'],
@@ -273,9 +281,8 @@ function Bubble({ m, roomId, party, onReply, onThread }: {
             свой это сотрудник или внешний подрядчик. */}
         {!mine && (
           <div className="mb-0.5 flex items-center gap-1.5">
-            {party?.online && (
-              <span className="size-1.5 rounded-full bg-emerald-500" title="В системе сейчас" />
-            )}
+            <PresenceDot className="size-1.5" lastSeenAt={party?.lastSeenAt}
+              state={resolvePresence(mc.getPresence(m.user_id), party?.online)} />
             <span className="text-[11px] font-medium opacity-70">{m.user_name}</span>
             <PartyBadge party={party} withIcon={false} />
           </div>
@@ -389,12 +396,9 @@ function NewChatDialog({ kind, onClose, onOpened }: { kind: 'group' | 'dm' | 'pu
                   className={`w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center gap-2 ${picked[p.id] ? 'bg-primary/10' : ''}`}>
                   <span className="relative shrink-0">
                     <UserIcon className="h-4 w-4 text-muted-foreground" />
-                    {/* Зелёная точка — человек в системе сейчас: видно, дойдёт ли
-                        сообщение до живого собеседника или ляжет до утра. */}
-                    <span className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-card ${
-                      p.online ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
-                      title={p.online ? 'В системе сейчас' : p.lastSeenAt
-                        ? `Был ${new Date(p.lastSeenAt).toLocaleString('ru-RU')}` : 'Ни разу не заходил'} />
+                    {/* Видно, дойдёт ли сообщение до живого собеседника или ляжет до утра. */}
+                    <PresenceDot ring className="absolute -right-0.5 -bottom-0.5 size-2"
+                      state={resolvePresence(undefined, p.online)} lastSeenAt={p.lastSeenAt} />
                   </span>
                   <span className="text-sm flex-1 min-w-0">
                     <span className="block truncate">{p.name} <span className="text-xs text-muted-foreground">{p.email}</span></span>
