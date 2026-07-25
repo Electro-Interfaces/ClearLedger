@@ -292,6 +292,16 @@ async def build_tank_ledger(
                               if prev is not None else None)
             # 3. Книга против факта (недостача > 0, излишек < 0).
             fact_gap = round(book_end - fact_end, 2) if fact_end is not None else None
+            # Расхождение — это СОСТОЯНИЕ (уровень), а не событие смены: в цифре
+            # на конец сидит и всё, что накопилось раньше. Поэтому считаем его на
+            # входе и на выходе, а разницу — как то, что набежало ИМЕННО за смену.
+            # На входе книга этой смены сравнивается с последним замером (конец
+            # предыдущей): физически в резервуаре столько, сколько показал прибор,
+            # а по документу числится book_start.
+            fact_gap_start = (round(book_start - fact_start, 2)
+                              if fact_start is not None else None)
+            fact_gap_delta = (round(fact_gap - fact_gap_start, 2)
+                              if fact_gap is not None and fact_gap_start is not None else None)
             fuel_changed = prev is not None and _fuel_key(prev) != _fuel_key(tank)
 
             sum_receipts += receipts
@@ -385,6 +395,8 @@ async def build_tank_ledger(
                 "fact_start": round(fact_start, 1) if fact_start is not None else None,
                 "fact_end": round(fact_end, 1) if fact_end is not None else None,
                 "fact_gap": fact_gap,
+                "fact_gap_start": fact_gap_start,
+                "fact_gap_delta": fact_gap_delta,
                 "arithmetic_gap": arithmetic_gap,
                 "continuity_gap": continuity_gap,
                 "continuity_kind": break_kind,

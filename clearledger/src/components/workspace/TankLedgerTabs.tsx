@@ -98,7 +98,9 @@ async function exportLedgerXlsx(data: TankLedgerResponse, dateFrom: string, date
     'Счёт (арифметика), л': r1(r.arithmetic_gap),
     'Факт нач., л': r.fact_start == null ? '' : r1(r.fact_start),
     'Факт кон., л': r1(r.fact_end),
-    'Книга − факт, л': r1(r.fact_gap),
+    'Расхождение на начало, л': r1(r.fact_gap_start),
+    'Расхождение на конец, л': r1(r.fact_gap),
+    'Δ за смену, л': r1(r.fact_gap_delta),
     'Расхождение': r.fact_gap == null ? '' : Math.abs(r.fact_gap) < 0.05 ? 'сходится' : r.fact_gap > 0 ? 'недостача' : 'излишек',
     'Масса нач., кг': r3(r.mass_start),
     'Масса кон., кг': r3(r.mass_end),
@@ -386,13 +388,14 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full min-w-[1200px] text-xs">
+              <table className="w-full min-w-[1400px] text-xs">
                 <thead className="bg-muted/40 text-muted-foreground">
                   <tr>
                     <Th>Смена</Th><Th>Дата</Th>
                     <Th right>Книга нач.</Th><Th right>Книга кон.</Th><Th>Стык</Th>
                     <Th right>Приход</Th><Th right>Отпуск</Th>
-                    <Th right>Факт нач.</Th><Th right>Факт кон.</Th><Th right>Книга − факт</Th>
+                    <Th right>Факт нач.</Th><Th right>Факт кон.</Th>
+                    <Th right>Расхожд. нач.</Th><Th right>Расхожд. кон.</Th><Th right>Δ за смену</Th>
                     <Th right>Плотн.</Th><Th right>Темп.</Th><Th right>Вода</Th>
                   </tr>
                 </thead>
@@ -412,9 +415,14 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             </p>
           )}
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Красным — сломанная арифметика отчёта или расхождение книги с фактом
-            (недостача); жёлтым — излишек и разрыв стыка. Замер уровнемера имеет
-            погрешность, поэтому расхождение книги с фактом до {nf0.format(tol)} л не подсвечивается.
+            Расхождение книги с фактом — это состояние резервуара, а не итог смены:
+            в «Расхожд. кон.» сидит и всё, что накопилось раньше. Что произошло
+            именно в эту смену, показывает <b>Δ за смену</b> = расхождение на конец
+            минус на начало. Растущая недостача сменами подряд — это убыль или утечка,
+            а разовый скачок — событие (слив, правка, сбой замера).
+            Красным — сломанная арифметика отчёта или недостача; жёлтым — излишек и
+            разрыв стыка. Замер уровнемера имеет погрешность, поэтому расхождение
+            до {nf0.format(tol)} л не подсвечивается.
             В столбце «Стык» указана причина разрыва: <span className="text-blue-600 dark:text-blue-400">слив
             между сменами</span> (накладная закрыта в промежутке — объём не попал в приход) и перенумерация
             смен объяснены и разбора не требуют; <span className="text-amber-600 dark:text-amber-400">списано
@@ -636,8 +644,20 @@ function GroupBlock({ group, tol, onPick }: {
             <Td right>{L1(r.sales)}</Td>
             <Td right className="text-muted-foreground">{r.fact_start != null ? L1(r.fact_start) : '—'}</Td>
             <Td right>{r.fact_end != null ? L1(r.fact_end) : '—'}</Td>
+            {/* Расхождение на входе и на выходе — это СОСТОЯНИЕ (в нём сидит
+                накопленное ранее), а Δ — то, что произошло именно в эту смену.
+                Без разделения одна цифра «книга − факт» читается как результат
+                смены, хотя может годами тянуться с прошлого. */}
+            <Td right className={cn(gapTone(r.fact_gap_start, tol), 'text-[11px]')}>
+              {gapLabel(r.fact_gap_start)}
+            </Td>
             <Td right className={cn('font-medium', gapTone(r.fact_gap, tol))}>
               {gapLabel(r.fact_gap)}
+            </Td>
+            <Td right className={cn('font-medium', gapTone(r.fact_gap_delta, tol))}>
+              {r.fact_gap_delta == null ? '—'
+                : Math.abs(r.fact_gap_delta) < 0.05 ? 'без изменений'
+                : `${r.fact_gap_delta > 0 ? '+' : '−'}${nf0.format(Math.abs(r.fact_gap_delta))} л`}
             </Td>
             <Td right className="text-muted-foreground">
               {r.density_end != null ? nf3.format(r.density_end) : '—'}

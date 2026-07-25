@@ -21,6 +21,21 @@ const nf3 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 3, maximumFr
 const L = (v: number | null | undefined) => (v == null ? '—' : `${nf1.format(v)} л`)
 const KG = (v: number | null | undefined) => (v == null ? '—' : `${nf1.format(v)} кг`)
 
+/** Расхождение словом: «−444 л» без слова читается как нехватка, а это излишек. */
+const gapWord = (v: number | null | undefined) =>
+  v == null ? '—'
+    : Math.abs(v) < 0.05 ? 'сходится'
+    : `${nf0.format(Math.abs(v))} л ${v > 0 ? 'недостача' : 'излишек'}`
+
+const gapTone = (v: number | null | undefined, tol: number) =>
+  v == null || Math.abs(v) <= tol ? 'text-muted-foreground'
+    : v > 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
+
+/** Что означает знак изменения — иначе «+43 л» непонятно, хуже стало или лучше. */
+const deltaHint = (v: number | null | undefined) =>
+  v == null || Math.abs(v) < 0.05 ? undefined
+    : v > 0 ? '· недостача выросла' : '· недостача сократилась'
+
 /** Строка «показатель → значение». Значение моноширинное — цифры сравнивают глазами. */
 function Line({ label, value, tone, hint, strong }: {
   label: string; value: string; tone?: string; hint?: string; strong?: boolean
@@ -133,22 +148,29 @@ export function TankShiftDialog({ row, tol, onClose }: {
                    : <Verdict ok={!factBad} text={factBad
                        ? (row.fact_gap! > 0 ? 'недостача' : 'излишек')
                        : 'в пределах погрешности'} />}>
+            <Line label="Книга на начало" value={L(row.book_start)} />
             <Line label="Факт на начало" hint="замер конца предыдущей смены" value={L(row.fact_start)} />
-            <Line label="Книга на конец" value={L(row.book_end)} />
-            <Line label="Факт на конец" hint="уровнемер" value={L(row.fact_end)} strong />
+            <Line label="Расхождение на входе" strong value={gapWord(row.fact_gap_start)}
+                  tone={gapTone(row.fact_gap_start, tol)} />
             <div className="my-1 border-t" />
-            <Line label="Книга − факт" strong
-                  value={row.fact_gap == null ? '—'
-                    : `${nf0.format(Math.abs(row.fact_gap))} л ${row.fact_gap > 0 ? 'недостача' : 'излишек'}`}
-                  tone={!factBad ? 'text-muted-foreground'
-                    : row.fact_gap! > 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'} />
+            <Line label="Книга на конец" value={L(row.book_end)} />
+            <Line label="Факт на конец" hint="уровнемер" value={L(row.fact_end)} />
+            <Line label="Расхождение на выходе" strong value={gapWord(row.fact_gap)}
+                  tone={gapTone(row.fact_gap, tol)} />
+            <div className="my-1 border-t" />
+            <Line label="Изменение за смену" strong
+                  hint={deltaHint(row.fact_gap_delta)}
+                  value={row.fact_gap_delta == null ? '—'
+                    : Math.abs(row.fact_gap_delta) < 0.05 ? 'без изменений'
+                    : `${row.fact_gap_delta > 0 ? '+' : '−'}${nf0.format(Math.abs(row.fact_gap_delta))} л`}
+                  tone={gapTone(row.fact_gap_delta, tol)} />
             {gapPct != null && (
-              <Line label="Доля от отпуска за смену" value={`${nf1.format(Math.abs(gapPct))} %`} />
+              <Line label="Расхождение на выходе к отпуску смены" value={`${nf1.format(Math.abs(gapPct))} %`} />
             )}
             <p className="mt-1.5 text-[11px] text-muted-foreground/80">
               {row.fact_end == null
                 ? 'Уровнемер не дал показание за эту смену — сравнивать не с чем; в инвентаризацию резервуар не берётся.'
-                : `Замер — измерение, у него есть погрешность: расхождение до ${nf0.format(tol)} л считаем шумом. Важна не одна смена, а накопление за период: книга к факту сама не подтягивается, пока не проведена инвентаризация.`}
+                : `Расхождение — это состояние резервуара, а не итог смены: в цифре на выходе сидит и всё, что накопилось раньше. Смену характеризует изменение за смену. Замер имеет погрешность, расхождение до ${nf0.format(tol)} л — шум прибора. Книга к факту сама не подтягивается, пока не проведена инвентаризация.`}
             </p>
           </Block>
 
