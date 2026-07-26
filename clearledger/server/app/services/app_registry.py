@@ -22,8 +22,9 @@ _LEDGER_MODULES: list[tuple[str, str]] = [
     ("documents", "Документы"), ("reconciliation", "Сверка"), ("sources", "Источники"),
     ("locations", "Объекты"), ("onec", "1С"), ("catalog", "Справочники"),
 ]
-# name — базовое имя без бренда (функциональное, без продуктовых брендов Ledger/Support);
-# бренд экосистемы добавляется в seed_apps (white-label): «<brand> Учёт», «<brand> Координатор».
+# name — функциональное имя продукта пространства, без брендов. Ни продуктовых
+# (Ledger/Support), ни бренда компании: компания названа один раз в шапке, повторять её в
+# каждой плитке («РусГидро Учёт», «РусГидро Координатор») — визуальный шум.
 _APPS: list[dict[str, Any]] = [
     {"code": "ledger", "name": "Учёт", "icon": "book-open", "sort": 10,
      "desc": "Учёт, аналитика, сверка", "modules": _LEDGER_MODULES},
@@ -43,19 +44,18 @@ async def seed_apps(db: AsyncSession) -> None:
     except Exception:  # noqa: BLE001 — не валим старт из-за миграции
         await db.rollback()
 
-    from app.config import get_settings
-    brand = (get_settings().ecosystem_brand or "ElsyPlus").strip()
-
     changed = False
     for a in _APPS:
-        full_name = f"{brand} {a['name']}"  # white-label: «<brand> Ledger» и т.п.
+        name = a["name"]
         app = (await db.execute(select(App).where(App.code == a["code"]))).scalar_one_or_none()
         if app is None:
-            app = App(code=a["code"], name=full_name, description=a.get("desc"),
+            app = App(code=a["code"], name=name, description=a.get("desc"),
                       base_url=a.get("base_url"), icon=a.get("icon"), sort=a.get("sort", 100))
             db.add(app); await db.flush(); changed = True
-        elif app.name != full_name:
-            app.name = full_name; changed = True  # применить бренд к засеянным ранее
+        elif app.name != name:
+            # Снимает и старые брендовые префиксы («РусГидро Учёт» → «Учёт») у тех,
+            # кто был засеян до этого решения.
+            app.name = name; changed = True
         for i, (mc, mn) in enumerate(a["modules"]):
             ex = (await db.execute(select(AppModule).where(
                 AppModule.app_id == app.id, AppModule.code == mc))).scalar_one_or_none()

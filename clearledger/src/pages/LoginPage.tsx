@@ -5,7 +5,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { ECOSYSTEM_TITLE, PLATFORM_NAME } from '@/config/brand'
+import { PLATFORM_PRODUCT, PLATFORM_VENDOR } from '@/config/brand'
 import * as authService from '@/services/authService'
 import { Boxes, Loader2, CheckCircle2 } from 'lucide-react'
 
@@ -63,7 +63,8 @@ export function LoginPage() {
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Boxes className="h-6 w-6" />
             </div>
-            <h1 className="text-2xl font-bold">{ECOSYSTEM_TITLE}</h1>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Рабочее пространство</p>
+            <h1 className="text-2xl font-bold">{PLATFORM_PRODUCT}</h1>
             <p className="text-sm text-muted-foreground">Восстановление пароля</p>
           </div>
 
@@ -107,11 +108,11 @@ export function LoginPage() {
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Boxes className="h-6 w-6" />
           </div>
-          {/* Вход — в ПРОСТРАНСТВО компании, а не в приложение: Ledger лишь один из его
-              разрезов, рядом Координатор и остальные. Имя пространства — из бренда
-              контейнера (white-label), платформа названа мелкой подписью ниже. */}
-          <h1 className="text-2xl font-bold text-center">{ECOSYSTEM_TITLE}</h1>
-          <p className="text-sm text-muted-foreground">Вход в пространство</p>
+          {/* До авторизации человек ещё не в чьём-то пространстве, поэтому здесь платформа,
+              а не бренд компании: имя компании появится после входа. */}
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Рабочее пространство</p>
+          <h1 className="text-center text-2xl font-bold">{PLATFORM_PRODUCT}</h1>
+          <p className="text-sm text-muted-foreground">{PLATFORM_VENDOR}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -173,10 +174,7 @@ export function LoginPage() {
           Для получения доступа обратитесь к администратору
         </p>
 
-        {/* Чей продукт: пространство носит бренд заказчика, платформа — мелкой подписью. */}
-        <p className="text-center text-[11px] text-muted-foreground/70">
-          Платформа {PLATFORM_NAME}
-        </p>
+
       </div>
     </div>
   )

@@ -90,9 +90,9 @@ export function EcoRail({ standalone = false }: { standalone?: boolean }) {
 
       {/* Центр управления — отдельное приложение уровня контейнера, только администраторам. */}
       {isCompanyAdmin && (
-        <button onClick={() => navigate('/admin')} title="Центр управления" className={btnCls()}>
+        <button onClick={() => navigate('/admin')} title="Управление пространством" className={btnCls()}>
           <ShieldCheck className="size-4" />
-          <span>Центр</span>
+          <span>Управл.</span>
         </button>
       )}
     </div>

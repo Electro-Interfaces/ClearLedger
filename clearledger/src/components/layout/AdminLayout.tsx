@@ -14,7 +14,6 @@ import { EcoRail } from '@/components/layout/EcoRail'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { AdminPage } from '@/pages/AdminPage'
-import { ECOSYSTEM_TITLE } from '@/config/brand'
 
 export function AdminLayout() {
   const navigate = useNavigate()
@@ -33,8 +32,8 @@ export function AdminLayout() {
             <ShieldCheck className="size-5" />
           </span>
           <div className="min-w-0">
-            <div className="truncate font-semibold leading-tight">Центр управления</div>
-            <div className="truncate text-xs text-muted-foreground">{company.name} · {ECOSYSTEM_TITLE}</div>
+            <div className="truncate font-semibold leading-tight">Управление</div>
+            <div className="truncate text-xs text-muted-foreground">{company.name}</div>
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">

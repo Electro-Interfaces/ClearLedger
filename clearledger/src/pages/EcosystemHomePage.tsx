@@ -25,7 +25,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, type SsoApp } from '@/services/ssoService'
-import { ECOSYSTEM_BRAND, ECOSYSTEM_TITLE } from '@/config/brand'
+import { ECOSYSTEM_BRAND } from '@/config/brand'
 
 /** Иконка по имени из манифеста (`apps/<code>.yml`, поле icon). */
 const ICONS: Record<string, typeof FileText> = {
@@ -142,8 +142,10 @@ export function EcosystemHomePage() {
             <LayoutGrid className="size-5" />
           </span>
           <div className="min-w-0">
-            <div className="truncate font-semibold leading-tight">{ECOSYSTEM_TITLE}</div>
-            <div className="truncate text-xs text-muted-foreground">{company.name}</div>
+            {/* После входа человек внутри своего пространства: в шапке только имя
+                компании, без имени платформы и слова «экосистема». */}
+            <div className="truncate font-semibold leading-tight">{company.name}</div>
+            <div className="truncate text-xs text-muted-foreground">Рабочее пространство</div>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -159,14 +161,14 @@ export function EcosystemHomePage() {
         <h1 className="text-2xl font-semibold">
           {user?.name ? `Здравствуйте, ${user.name}` : 'Рабочий стол'}
         </h1>
-        <p className="mt-1 text-muted-foreground">{company.name} · {ECOSYSTEM_TITLE}</p>
+        <p className="mt-1 text-muted-foreground">{company.name}</p>
 
         {/* Слой 1 — Центр управления (админам) */}
         {isCompanyAdmin && (
-          <Section title="Центр управления">
+          <Section title="Управление">
             <Tile
-              title="Центр управления"
-              subtitle="Компании, приложения, пользователи, аудит"
+              title="Управление"
+              subtitle="Компании, приложения, люди, объекты, аудит"
               icon={ShieldCheck}
               onClick={() => navigate('/admin')}
             />
