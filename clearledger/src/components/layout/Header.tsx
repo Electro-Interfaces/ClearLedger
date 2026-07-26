@@ -1,22 +1,14 @@
-import { User, Menu, Sun, Moon, BookText, Settings, LogOut, MessageCircle, LifeBuoy, HelpCircle, Video, Lightbulb } from 'lucide-react'
+import { Menu, BookText, MessageCircle, LifeBuoy, HelpCircle, Video, Lightbulb } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { useNavigate, Link } from 'react-router-dom'
-import { useTheme } from '@/hooks/useTheme'
+import { Link } from 'react-router-dom'
 import { useGuideMode } from '@/hooks/useGuideMode'
 import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
 import { Button } from '@/components/ui/button'
 import { createMeeting } from '@/services/conferenceService'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
-import { useCompany } from '@/contexts/CompanyContext'
-import { useAuth } from '@/contexts/AuthContext'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AppLauncher } from '@/components/layout/AppLauncher'
@@ -27,20 +19,10 @@ interface HeaderProps {
 }
 
 export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
-  const navigate = useNavigate()
-  const { theme, toggle } = useTheme()
   const guide = useGuideMode()
-  const { company } = useCompany()
-  const { user, logout } = useAuth()
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
-  const userName = user?.name ?? 'Пользователь'
   // Универсальный логотип «учёт»: приложение не привязано к топливу/энергии.
   const BrandIcon = BookText
-
-  function handleLogout() {
-    logout()
-    navigate('/login')
-  }
 
   const [confBusy, setConfBusy] = useState(false)
   async function startConference() {
@@ -166,53 +148,8 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
           >
             <Lightbulb className="h-[18px] w-[18px]" />
           </Button>
-          {/* Ниже sm скрыта: то же переключение есть в меню профиля, а место в
-              шапке нужнее названию компании — в мультитенантной системе видеть,
-              в чьих данных работаешь, важнее быстрой смены темы. */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="hidden h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground sm:inline-flex"
-            onClick={toggle}
-            title={theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-          >
-            {theme === 'dark' ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
-          </Button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                className="flex h-10 items-center gap-3 rounded-xl border-none px-1.5 md:px-2.5 hover:bg-accent"
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary">
-                  <User className="h-[18px] w-[18px] text-white" />
-                </div>
-                <div className="hidden lg:flex flex-col items-start leading-none">
-                  <span className="text-sm font-medium text-foreground truncate max-w-[140px]">{userName}</span>
-                  <span className="mt-1 text-xs text-muted-foreground truncate max-w-[140px]">{company.name}</span>
-                </div>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 p-1">
-              <div className="border-b border-border/30 px-3 py-2.5">
-                <div className="text-sm font-semibold text-foreground truncate">{userName}</div>
-                <div className="text-xs text-muted-foreground truncate">{company.name}</div>
-              </div>
-              <DropdownMenuItem onClick={() => navigate('/settings')} className="gap-2.5 cursor-pointer">
-                <Settings className="h-4 w-4 text-muted-foreground" />
-                Настройки
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={toggle} className="gap-2.5 cursor-pointer">
-                {theme === 'dark' ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Moon className="h-4 w-4 text-muted-foreground" />}
-                {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleLogout} className="gap-2.5 cursor-pointer text-red-600 dark:text-red-400 focus:text-red-600 dark:focus:text-red-400">
-                <LogOut className="h-4 w-4" />
-                Выйти
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {/* Тема + меню пользователя — общий блок приложений контейнера. */}
+          <HeaderUserMenu settingsPath="/settings" />
         </div>
       </div>
     </header>

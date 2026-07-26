@@ -4,6 +4,8 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
+import { useAppEnabled } from '@/hooks/useCompanyRegistry'
+import { SPACE_PRODUCTS, isCarvedProfile } from '@/config/spaceProducts'
 import { TabsProvider } from '@/contexts/TabsContext'
 import { FilterProvider } from '@/contexts/FilterContext'
 import { SupportProvider } from '@/contexts/SupportContext'
@@ -29,6 +31,8 @@ const MetrikaPage = lazy(() => import('@/pages/MetrikaPage').then((m) => ({ defa
 const OrganizationPage = lazy(() => import('@/pages/OrganizationPage').then((m) => ({ default: m.OrganizationPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
 const AdminLayout = lazy(() => import('@/components/layout/AdminLayout').then((m) => ({ default: m.AdminLayout })))
+const AdminSectionPage = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminSectionPage })))
+const AdminHomeRedirect = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminHomeRedirect })))
 const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
@@ -72,6 +76,29 @@ function RequireFuel({ children }: { children: React.ReactNode }) {
   const { company } = useCompany()
   if (company.profileId === 'energy') return <Navigate to="/workspace" replace />
   return <>{children}</>
+}
+
+/**
+ * Гард продукта пространства («Проекты», …): прямая ссылка не должна обходить ни роль,
+ * ни состав поставки. Не подключено компании или не дано ролью → на рабочий стол
+ * пространства. Реестр молчит (офлайн/старый бэкенд) — пускаем: это состав, а не защита.
+ */
+function RequireApp({ code, children }: { code: string; children: React.ReactNode }) {
+  const { companyId, canApp } = useCompany()
+  const enabled = useAppEnabled(companyId, code)
+  if (!canApp(code) || enabled === false) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
+/**
+ * «Учёт» (`/workspace`). Там, где разрез на продукты включён (energy), разделов у Учёта
+ * не остаётся — они разошлись по продуктам, поэтому маршрут ведёт на рабочий стол.
+ * У топливного профиля Учёт остаётся единым продуктом со всеми разделами.
+ */
+function LedgerWorkspace() {
+  const { company } = useCompany()
+  if (isCarvedProfile(company.profileId)) return <Navigate to="/" replace />
+  return <WorkspaceLayout />
 }
 
 function NotFoundPage() {
@@ -136,14 +163,26 @@ const router = createBrowserRouter([
         element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,
       },
       {
-        // Центр управления — отдельное приложение экосистемы, свой shell (не в Ledger).
+        // «Управление» — отдельное приложение экосистемы, свой shell (не в Ledger).
+        // Разделы — вложенные маршруты: на раздел даётся ссылка, работает «назад».
         path: '/admin',
         element: <ProtectedRoute><LazyPage><AdminLayout /></LazyPage></ProtectedRoute>,
+        children: [
+          { index: true, element: <LazyPage><AdminHomeRedirect /></LazyPage> },
+          { path: ':scope/:section', element: <LazyPage><AdminSectionPage /></LazyPage> },
+        ],
       },
       {
         element: <ProtectedRoute><MainLayout /></ProtectedRoute>,
         children: [
-          { path: '/workspace', element: <WorkspaceLayout /> },
+          { path: '/workspace', element: <LedgerWorkspace /> },
+          // Продукты пространства — разделы Учёта, ставшие самостоятельными рабочими
+          // местами (`config/spaceProducts.ts`): своя плитка на столе, свой ключ доступа
+          // в роли, своё левое меню. Маршруты строятся из той же карты, что и меню.
+          ...SPACE_PRODUCTS.map((p) => ({
+            path: p.route,
+            element: <RequireApp code={p.code}><WorkspaceLayout modes={p.modes} /></RequireApp>,
+          })),
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },

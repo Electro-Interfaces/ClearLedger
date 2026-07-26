@@ -18,7 +18,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Users, Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
+  Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
   KeyRound, Plus, Pencil, Copy, History, Share2,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
@@ -113,33 +113,31 @@ export function MembersCard({
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
-        <div>
-          <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Сотрудники <span className="text-sm font-normal text-muted-foreground">({members.length})</span></CardTitle>
-          <CardDescription>Роли (Администратор — полный доступ) и доступ к модулям для сотрудников</CardDescription>
-        </div>
-        {canManage && (
-          <div className="flex items-center gap-2">
-            {/* Люди пространства должны быть и в приложениях-разрезах: заводим один
-                раз здесь, проекция доносит их до Координатора (docs/SPACE.md). */}
-            <Button variant="outline" size="sm" className="gap-1.5"
-              disabled={projectUsers.isPending} onClick={() => projectUsers.mutate()}
-              title="Отправить сотрудников в приложения экосистемы">
-              {projectUsers.isPending
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <Share2 className="h-4 w-4" />}
-              В приложения
-            </Button>
-            <InviteDialog companyId={companyId} />
-            <AddUserDialog companyId={companyId} />
+      {/* Название раздела и его смысл — в шапке рабочей области («Управление»),
+          здесь только поиск, действия и сам состав: заголовок дважды не нужен. */}
+      <CardContent className="pt-6">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="relative w-full max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: ФИО, email, должность…"
+              className="h-8 pl-8 text-sm" />
           </div>
-        )}
-      </CardHeader>
-      <CardContent>
-        <div className="relative mb-3 max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: ФИО, email, должность…"
-            className="h-8 pl-8 text-sm" />
+          {canManage && (
+            <div className="flex items-center gap-2">
+              {/* Люди пространства должны быть и в приложениях-разрезах: заводим один
+                  раз здесь, проекция доносит их до Координатора (docs/SPACE.md). */}
+              <Button variant="outline" size="sm" className="gap-1.5"
+                disabled={projectUsers.isPending} onClick={() => projectUsers.mutate()}
+                title="Отправить сотрудников в приложения экосистемы">
+                {projectUsers.isPending
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Share2 className="h-4 w-4" />}
+                В приложения
+              </Button>
+              <InviteDialog companyId={companyId} />
+              <AddUserDialog companyId={companyId} />
+            </div>
+          )}
         </div>
         {q.isLoading && <Loading />}
         <Table>
@@ -266,6 +264,11 @@ export function MembersCard({
             )}
           </TableBody>
         </Table>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Сотрудников: {members.length}
+          {filtered.length !== members.length ? ` · показано ${filtered.length}` : ''}
+          {' '}· роль «Администратор» даёт полный доступ
+        </p>
       </CardContent>
     </Card>
   )

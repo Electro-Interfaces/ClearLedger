@@ -11,7 +11,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
 } from 'lucide-react'
@@ -20,8 +20,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useCompany } from '@/contexts/CompanyContext'
 import { mainNavItems, dataItems, oneCItems, settingsItems } from '@/config/navigation'
 import { routeAllowed } from '@/config/accessModules'
+import { isCarvedProfile, productForPath, productNav } from '@/config/spaceProducts'
 
-function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate }: {
+/** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения. */
+export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate }: {
   to: string; icon: React.ComponentType<{ className?: string }>; label: string
   end?: boolean; collapsed?: boolean; onNavigate?: () => void
 }) {
@@ -68,6 +70,23 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
   const { company, companyModules } = useCompany()
+  const { pathname } = useLocation()
+  // В продукте пространства («Финансы», «Данные», …) меню — только его страницы:
+  // рабочее место не должно показывать чужие разделы. Разделы рабочей области
+  // (гармошка) рисует WorkspaceModeSidebar, здесь только страницы.
+  const product = isCarvedProfile(company.profileId) ? productForPath(pathname) : null
+  if (product) {
+    const items = productNav(product).filter((i) => routeAllowed(i.to, companyModules))
+    return items.length > 0 ? (
+      <SidebarGroup className="py-0">
+        <SidebarMenu>
+          {items.map((item) => (
+            <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+    ) : null
+  }
   // Скрываем пункты, недоступные по модулям: права RBAC ∩ состав поставки из реестра
   // Ядра (см. CompanyContext). null = не ограничено.
   const allow = (to: string) => routeAllowed(to, companyModules)

@@ -85,13 +85,9 @@ export function SpaceObjects({ companyId, canManage }: { companyId: string; canM
     })
   }
 
+  // Смысл раздела подписан в шапке рабочей области «Управления» — здесь только работа.
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Объекты компании — общие для всех приложений экосистемы: на них ссылаются и заявки
-        Координатора, и учётные операции. Заводятся здесь, используются везде.
-      </p>
-
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
