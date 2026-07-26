@@ -18,9 +18,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Menu } from 'lucide-react'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
+import { CompanySelector } from '@/components/company/CompanySelector'
 import { AdminNavContent, AdminSidebar } from '@/components/layout/AdminSidebar'
 import { AppLauncher } from '@/components/layout/AppLauncher'
 import { EcoRail } from '@/components/layout/EcoRail'
@@ -29,7 +27,6 @@ import { findSection, type AdminScope } from '@/config/adminNav'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useMaxWidth } from '@/hooks/use-mobile'
-import { usePersistentState } from '@/hooks/usePersistentState'
 import { isApiEnabled } from '@/services/apiClient'
 import * as userService from '@/services/userService'
 import { LAST_SECTION_KEY, type AdminOutletContext } from '@/hooks/useAdminSpace'
@@ -62,10 +59,18 @@ function useCurrentSection() {
 export function AdminLayout() {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { canApp, companyId: activeCompanyId, isLoading } = useCompany()
+  const { canApp, companyId: activeCompanyId, setCompanyId, isLoading } = useCompany()
   const isSuper = !!user?.is_superadmin
   const isMobile = useMaxWidth(1024)
   const section = useCurrentSection()
+
+  // Вкладка браузера называется продуктом и разделом: у человека открыты Учёт и
+  // Управление рядом, по одинаковому заголовку их не различить.
+  useEffect(() => {
+    const prev = document.title
+    document.title = section ? `${section.label} · Управление` : 'Управление'
+    return () => { document.title = prev }
+  }, [section])
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
@@ -73,15 +78,18 @@ export function AdminLayout() {
     try { localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarOpen)) } catch { /* ignore */ }
   }, [sidebarOpen])
 
-  // Список компаний для управления: суперадмину — все компании контейнера, админу — свои.
+  // Полные карточки компаний (реквизиты, профиль) — их нет в контексте, он держит
+  // только активную. Суперадмину сервер отдаёт все компании контейнера, админу — свои.
   const companiesQuery = useQuery({
     queryKey: ['admin-companies'],
     queryFn: userService.listCompanies,
     enabled: isApiEnabled(),
   })
   const companies = companiesQuery.data ?? []
-  const [selectedId, setSelectedId] = usePersistentState('cl-admin-company', '')
-  const company = companies.find((c) => c.id === (selectedId || activeCompanyId)) ?? companies[0]
+  // Какой компанией управляем = активная компания пространства. Отдельного выбора у
+  // «Управления» нет намеренно: иначе человек правил бы одну компанию, а в Учёте
+  // смотрел данные другой.
+  const company = companies.find((c) => c.id === activeCompanyId) ?? companies[0]
   const canManage = isSuper || (user?.companies ?? []).some((c) => c.id === company?.id && c.role === 'admin')
 
   // «Управление» — приложение пространства: пускаем по праву роли (целиком или на раздел).
@@ -118,28 +126,19 @@ export function AdminLayout() {
             </button>
           </div>
 
-          {/* Центр: какой компанией управляем + переход в соседние продукты. */}
+          {/* Центр: какой компанией управляем + переход в соседние продукты — тот же
+              селектор и лаунчер, что в шапке Учёта. Компания одна — вместо селектора
+              просто её имя (выбирать не из чего). */}
           <div className="flex min-w-0 flex-1 items-center justify-center gap-2 px-2">
             {companiesQuery.isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : companies.length > 1 ? (
-              <Select value={company?.id ?? ''} onValueChange={setSelectedId}>
-                <SelectTrigger className="h-10 w-full min-w-[112px] max-w-[240px] border-border bg-secondary text-sm font-medium [&>span]:truncate">
-                  <SelectValue placeholder="Выберите компанию" />
-                </SelectTrigger>
-                <SelectContent>
-                  {companies.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      <span className="flex items-center gap-2">
-                        <span className="size-2.5 shrink-0 rounded-full" style={{ background: c.color ?? '#888' }} />
-                        {c.short_name || c.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             ) : (
-              <span className="truncate text-sm font-medium text-muted-foreground">{company?.name ?? ''}</span>
+              <>
+                <CompanySelector />
+                {companies.length <= 1 && (
+                  <span className="truncate text-sm font-medium text-muted-foreground">{company?.name ?? ''}</span>
+                )}
+              </>
             )}
             <AppLauncher />
           </div>
@@ -180,7 +179,7 @@ export function AdminLayout() {
                   </div>
                 </div>
               )}
-              <Outlet context={{ company, companies, canManage, selectCompany: setSelectedId } satisfies AdminOutletContext} />
+              <Outlet context={{ company, companies, canManage, selectCompany: setCompanyId } satisfies AdminOutletContext} />
             </div>
           </div>
         </SidebarInset>
