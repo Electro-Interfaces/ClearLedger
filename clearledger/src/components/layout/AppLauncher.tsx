@@ -21,7 +21,7 @@ import { useOpenApp, wantsNewTab } from '@/hooks/useOpenApp'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
 
 export function AppLauncher() {
-  const { open, busy } = useOpenApp()
+  const { openApp, busy } = useOpenApp()
 
   const q = useQuery({
     queryKey: ['sso-apps'],
@@ -53,15 +53,18 @@ export function AppLauncher() {
         {data.apps.map((a) => (
           <DropdownMenuItem
             key={a.code}
-            onClick={(e) => open(a.code, wantsNewTab(e))}
-            onAuxClick={(e) => { if (e.button === 1) open(a.code, true) }}
+            onClick={(e) => openApp(a, wantsNewTab(e))}
+            onAuxClick={(e) => { if (e.button === 1) openApp(a, true) }}
             className="gap-2.5 cursor-pointer"
           >
             {busy === a.code
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : a.mode === 'link'
                 ? <ExternalLink className="h-4 w-4 text-muted-foreground" />
-                : <KeyRound className="h-4 w-4 text-primary/70" />}
+                : a.mode === 'internal'
+                  // Внутренний продукт открывается здесь же — ни ключа, ни внешней ссылки.
+                  ? <LayoutGrid className="h-4 w-4 text-primary/70" />
+                  : <KeyRound className="h-4 w-4 text-primary/70" />}
             <span className="flex-1 truncate">{a.name}</span>
             {/* Мост — приложение спросит свой вход: обещать единый было бы неправдой. */}
             {a.mode === 'link' && (

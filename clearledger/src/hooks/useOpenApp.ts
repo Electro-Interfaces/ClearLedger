@@ -8,8 +8,9 @@
  * (Ctrl/⌘/Shift + клик, средняя кнопка) — как в любой ссылке.
  */
 import { useCallback, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { authorizeApp } from '@/services/ssoService'
+import { authorizeApp, type SsoApp } from '@/services/ssoService'
 import { useCompany } from '@/contexts/CompanyContext'
 
 /** Хочет ли пользователь открыть новой вкладкой (модификаторы/средняя кнопка). */
@@ -27,6 +28,7 @@ function isSameOrigin(url: string) {
 
 export function useOpenApp() {
   const { companyId } = useCompany()
+  const navigate = useNavigate()
   const [busy, setBusy] = useState<string | null>(null)
 
   const open = useCallback(async (code: string, newTab = false) => {
@@ -45,5 +47,18 @@ export function useOpenApp() {
     }
   }, [busy, companyId])
 
-  return { open, busy }
+  /**
+   * Внутренний продукт (Управление, Чаты, Учёт) живёт в этом же SPA: открываем маршрутом.
+   * Токен ему не нужен — сессия уже своя, а новая вкладка только сбивала бы контекст.
+   */
+  const openApp = useCallback(async (app: SsoApp, newTab = false) => {
+    if (app.mode === 'internal' && app.route) {
+      if (newTab) window.open(app.route, '_blank', 'noopener,noreferrer')
+      else navigate(app.route)
+      return
+    }
+    await open(app.code, newTab)
+  }, [navigate, open])
+
+  return { open, openApp, busy }
 }

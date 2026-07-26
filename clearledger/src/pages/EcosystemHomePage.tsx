@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  LayoutGrid, ExternalLink, KeyRound, Loader2, ShieldCheck, LogOut,
+  LayoutGrid, ExternalLink, KeyRound, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -99,11 +99,19 @@ export function EcosystemHomePage() {
   // напр. админ). Бэкенд уже отфильтровал apps; здесь гейтим внутренние плитки Ledger и Чат.
   const allowed = q.data?.allowed_apps ?? null
   const canOpen = (code: string) => allowed === null || allowed.includes(code)
-  const all: SsoApp[] = q.data?.apps ?? []
+  const all: SsoApp[] = (q.data?.apps ?? []).filter((a) => canOpen(a.code))
+  const management = all.filter((a) => a.layer === 'admin')
   const services = all.filter((a) => a.layer === 'service')
-  const apps = all.filter((a) => a.layer !== 'service')
-  const chatEnabled = (q.data?.chat_enabled ?? false) && canOpen('chat')
-  const canOpenLedger = canOpen('ledger')
+  const apps = all.filter((a) => a.layer !== 'service' && a.layer !== 'admin')
+
+  /** Открыть продукт: внутренний — маршрутом SPA, внешний — токеном или ссылкой. */
+  async function openProduct(app: SsoApp) {
+    if (app.mode === 'internal' && app.route) {
+      navigate(app.route)
+      return
+    }
+    await openExternal(app)
+  }
 
   /** Открыть внешнее приложение: SSO — по handoff-токену, мост — просто ссылкой. */
   async function openExternal(app: SsoApp) {
@@ -120,15 +128,19 @@ export function EcosystemHomePage() {
     }
   }
 
-  function ExternalTile({ a }: { a: SsoApp }) {
+  /** Плитка любого продукта пространства: подпись объясняет, как он откроется. */
+  function ProductTile({ a }: { a: SsoApp }) {
+    const subtitle = a.mode === 'internal'
+      ? (a.description || 'Продукт пространства')
+      : a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход'
     return (
       <Tile
         title={a.name}
-        subtitle={a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход'}
+        subtitle={subtitle}
         icon={ICONS[a.icon] ?? LayoutGrid}
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
         busy={busy === a.code}
-        onClick={() => openExternal(a)}
+        onClick={() => openProduct(a)}
       />
     )
   }
@@ -162,48 +174,31 @@ export function EcosystemHomePage() {
         </h1>
         <p className="mt-1 text-muted-foreground">{company.name}</p>
 
-        {/* Слой 1 — «Управление»: такое же приложение пространства, доступ по праву роли
-            (админ компании имеет его целиком, остальным можно выдать отдельные разделы). */}
-        {canOpen('admin') && (
+        {/* Все три слоя — из ОДНОГО каталога продуктов пространства. Раньше Управление,
+            Учёт и Чаты рисовались хардкодом, и в списке приложений их не было: состав
+            стола расходился с реестром. Теперь источник один. */}
+        {management.length > 0 && (
           <Section title="Управление">
-            <Tile
-              title="Управление"
-              subtitle="Компании, приложения, люди, объекты, аудит"
-              icon={ShieldCheck}
-              onClick={() => navigate('/admin')}
-            />
+            {management.map((a) => <ProductTile key={a.code} a={a} />)}
           </Section>
         )}
 
-        {/* Слой 2 — Универсальные сервисы контейнера (чат/заявки/конференции) */}
-        {(chatEnabled || services.length > 0) && (
+        {services.length > 0 && (
           <Section title="Сервисы экосистемы" hint="общие для всех приложений">
-            {chatEnabled && (
-              <Tile
-                title="Чат"
-                subtitle="Переписка в рамках всей экосистемы"
-                icon={MessagesSquare}
-                onClick={() => navigate('/messages')}
-              />
-            )}
-            {services.map((a) => <ExternalTile key={a.code} a={a} />)}
+            {services.map((a) => <ProductTile key={a.code} a={a} />)}
           </Section>
         )}
 
-        {/* Слой 3 — Приложения экосистемы (Ledger живёт в этом стеке; прочие — SSO/мост) */}
         <Section title="Приложения">
-          {canOpenLedger && (
-            <Tile
-              title="Учёт"
-              subtitle="Учёт, сверка, обмен с 1С"
-              icon={FileText}
-              onClick={() => navigate('/workspace')}
-            />
-          )}
-          {apps.map((a) => <ExternalTile key={a.code} a={a} />)}
+          {apps.map((a) => <ProductTile key={a.code} a={a} />)}
           {q.isLoading && (
             <div className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
+            </div>
+          )}
+          {!q.isLoading && apps.length === 0 && (
+            <div className="p-5 text-sm text-muted-foreground">
+              Приложения не подключены. Состав задаётся в «Управлении» → «Приложения».
             </div>
           )}
         </Section>

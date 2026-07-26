@@ -33,7 +33,7 @@ const btnCls = (active = false) =>
 export function EcoRail({ standalone = false }: { standalone?: boolean }) {
   const navigate = useNavigate()
   const { canApp } = useCompany()
-  const { open, busy } = useOpenApp()
+  const { openApp, busy } = useOpenApp()
 
   // Каталог спрашиваем всегда: в контейнере API живёт на том же origin, и база
   // VITE_API_URL там пуста — гейтить рельс по isApiEnabled() значило бы прятать
@@ -70,15 +70,18 @@ export function EcoRail({ standalone = false }: { standalone?: boolean }) {
             {apps.map((a) => (
               <DropdownMenuItem
                 key={a.code}
-                onClick={(e) => open(a.code, wantsNewTab(e))}
-                onAuxClick={(e) => { if (e.button === 1) open(a.code, true) }}
+                onClick={(e) => openApp(a, wantsNewTab(e))}
+                onAuxClick={(e) => { if (e.button === 1) openApp(a, true) }}
                 className="cursor-pointer gap-2.5"
               >
                 {busy === a.code
                   ? <Loader2 className="size-4 animate-spin" />
                   : a.mode === 'link'
                     ? <ExternalLink className="size-4 text-muted-foreground" />
-                    : <KeyRound className="size-4 text-primary/70" />}
+                    : a.mode === 'internal'
+                      // Внутренний продукт открывается здесь же — ни ключа, ни внешней ссылки.
+                      ? <LayoutGrid className="size-4 text-primary/70" />
+                      : <KeyRound className="size-4 text-primary/70" />}
                 <span className="flex-1 truncate">{a.name}</span>
                 {/* Мост — приложение спросит свой вход: обещать единый было бы неправдой. */}
                 {a.mode === 'link' && <span className="shrink-0 text-[10px] text-muted-foreground">вход отдельный</span>}

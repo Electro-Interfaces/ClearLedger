@@ -12,10 +12,19 @@ export interface SsoApp {
   base_url: string
   callback: string
   icon: string
-  /** sso — вход по handoff-токену; link — мост, открываем по ссылке (своя авторизация). */
-  mode?: 'sso' | 'link'
-  /** Слой рабочего стола: service — универсальный сервис контейнера; app — приложение. */
-  layer?: 'service' | 'app'
+  /**
+   * Как открывать продукт:
+   *   internal — маршрут этого же SPA (`route`): Управление, Чаты, Учёт;
+   *   sso      — переход по handoff-токену (Координатор);
+   *   link     — мост на своём домене, спросит свой вход (Заявки, Конференции).
+   */
+  mode?: 'sso' | 'link' | 'internal'
+  /** Слой рабочего стола: admin — управление пространством; service — сервис; app — приложение. */
+  layer?: 'admin' | 'service' | 'app'
+  /** Маршрут внутри SPA — только для mode='internal'. */
+  route?: string
+  /** Короткое описание из реестра — подпись плитки на столе. */
+  description?: string
 }
 
 export interface SsoCatalog {

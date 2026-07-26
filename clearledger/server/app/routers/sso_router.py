@@ -23,6 +23,15 @@ from app.services import sso
 settings = get_settings()
 router = APIRouter(prefix="/sso", tags=["SSO ElsyPlus"])
 
+# Внутренние продукты пространства: живут в этом же SPA, поэтому открываются маршрутом,
+# а не handoff-токеном и не ссылкой на чужой домен. Манифеста у них нет — источник истины
+# реестр (`eco_apps`), здесь только соответствие «продукт → маршрут».
+INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages"}
+# Слой рабочего стола: управление пространством стоит отдельно от прикладных продуктов.
+INTERNAL_LAYERS = {"admin": "admin", "chat": "service", "ledger": "app"}
+# Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
+INTERNAL_SORT = {"admin": 5, "ledger": 10, "support": 20, "chat": 30, "plan": 40, "conf": 50}
+
 
 @router.get("/apps")
 async def list_apps(
@@ -30,15 +39,18 @@ async def list_apps(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Каталог приложений экосистемы для рабочего стола (Фаза 0 — из конфига).
+    """Каталог ВСЕХ продуктов пространства — для стола, лаунчера и рельса.
 
-    `enabled` — есть ли что показать (мосты видны и без ключа SSO);
-    `sso_enabled` — настроен ли единый вход (handoff-приложения);
-    `chat_enabled` — доступен ли продукт «Чаты» (Matrix): движок включён в стеке
-      и не в каталоге, но рабочий стол показывает его плиткой в слое сервисов;
-    `allowed_apps` — коды приложений, доступных пользователю в компании по его роли
-      (RBAC-гейт стола). `null` = не ограничено (админ/суперадмин/компания не задана).
-      Фронт по нему гейтит плитки, включая внутренний Ledger.
+    Раньше каталог собирался только из манифестов внешних приложений, поэтому внутренние
+    продукты (Управление, Чаты, Учёт) в списке приложений не появлялись — их приходилось
+    рисовать хардкодом в каждом месте. Теперь список один, а `mode` говорит, КАК открывать:
+
+      * `internal` — маршрут этого же SPA (`route`): Управление, Чаты, Учёт;
+      * `sso`      — переход по handoff-токену (Координатор);
+      * `link`     — согласованный мост на своём домене (Заявки, Конференции).
+
+    `chat_enabled` — включён ли движок чата в стеке (Matrix); `allowed_apps` — коды,
+    доступные роли (null = без ограничений).
     """
     apps = sso.launcher_apps()
 
@@ -53,9 +65,27 @@ async def list_apps(
         except (ValueError, TypeError):
             reg_cid = None
         if reg_cid is not None:
-            registry = {a["code"]: a["enabled"] for a in await app_registry.company_apps(db, reg_cid)}
+            reg_apps = await app_registry.company_apps(db, reg_cid)
+            registry = {a["code"]: a["enabled"] for a in reg_apps}
             apps = [a for a in apps if registry.get(a["code"], True)]
             chat_enabled = chat_enabled and registry.get("chat", True)
+            # Внутренние продукты пространства — из реестра: у них нет манифеста, потому
+            # что жить им негде, кроме этого же SPA. Чат добавляем только если движок
+            # поднят в стеке: плитка без Matrix вела бы в пустоту.
+            for reg in reg_apps:
+                code = reg["code"]
+                route = INTERNAL_ROUTES.get(code)
+                if route is None or not reg["enabled"]:
+                    continue
+                if code == "chat" and not chat_enabled:
+                    continue
+                apps.append({
+                    "code": code, "name": reg["name"], "base_url": "", "callback": "",
+                    "icon": reg.get("icon") or "", "mode": "internal",
+                    "layer": INTERNAL_LAYERS.get(code, "app"), "route": route,
+                    "description": reg.get("description") or "",
+                })
+            apps.sort(key=lambda a: INTERNAL_SORT.get(a["code"], 100))
 
     allowed: list[str] | None = None
     if company_id and not user.is_superadmin:
