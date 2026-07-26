@@ -18,14 +18,16 @@ import {
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps } from '@/services/ssoService'
 import { useOpenApp, wantsNewTab } from '@/hooks/useOpenApp'
+import { useCompany } from '@/contexts/CompanyContext'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
 
 export function AppLauncher() {
   const { openApp, busy } = useOpenApp()
+  const { companyId } = useCompany()
 
   const q = useQuery({
-    queryKey: ['sso-apps'],
-    queryFn: () => listSsoApps(),
+    queryKey: ['sso-apps', companyId],
+    queryFn: () => listSsoApps(companyId),
     enabled: isApiEnabled(),
     staleTime: 5 * 60_000,
   })

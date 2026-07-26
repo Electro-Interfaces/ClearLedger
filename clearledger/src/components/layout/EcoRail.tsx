@@ -32,15 +32,15 @@ const btnCls = (active = false) =>
 
 export function EcoRail({ standalone = false }: { standalone?: boolean }) {
   const navigate = useNavigate()
-  const { canApp } = useCompany()
+  const { canApp, companyId } = useCompany()
   const { openApp, busy } = useOpenApp()
 
   // Каталог спрашиваем всегда: в контейнере API живёт на том же origin, и база
   // VITE_API_URL там пуста — гейтить рельс по isApiEnabled() значило бы прятать
   // навигацию именно в боевом режиме. Нет приложений (или ошибка) — просто нет кнопки.
   const q = useQuery({
-    queryKey: ['sso-apps'],
-    queryFn: () => listSsoApps(),
+    queryKey: ['sso-apps', companyId],
+    queryFn: () => listSsoApps(companyId),
     staleTime: 5 * 60_000,
     retry: false,
   })

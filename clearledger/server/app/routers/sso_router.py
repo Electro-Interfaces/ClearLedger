@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
+from app.deps import scope_company_id
 from app.models import Company, User, UserCompany
 from app.services import sso
 
@@ -53,6 +54,15 @@ async def list_apps(
     доступные роли (null = без ограничений).
     """
     apps = sso.launcher_apps()
+
+    # Компания в запросе не обязательна: лаунчер и рельс её не передают. Тогда берём
+    # выбранную в интерфейсе (заголовок X-Company-Id) — иначе список продуктов в шапке
+    # отличался бы от списка на столе, что и случилось: «Управление» было только на столе.
+    if not company_id:
+        try:
+            company_id = str(await scope_company_id(user, db))
+        except HTTPException:
+            company_id = None
 
     # Реестр решает, что подключено компании: отключённый в «Управлении» продукт не
     # должен появляться на столе. Раньше реестр гейтил только внутренние модули Ledger,
