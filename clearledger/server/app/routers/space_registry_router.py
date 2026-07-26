@@ -22,7 +22,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import App, AppCompanyLink, Company, User, UserCompany
 from app.services import space_map as space_map_service
-from app.services import space_projection, space_registry
+from app.services import space_connectors, space_projection, space_registry
 
 router = APIRouter(prefix="/registry", tags=["ElsyPlus Core — реестр объектов"])
 
@@ -199,6 +199,22 @@ async def list_organizations(
     cid = await _member(company_id, user, db)
     orgs = await space_registry.list_organizations(db, cid, query=q)
     return {"companyId": str(cid), "organizations": orgs, "total": len(orgs)}
+
+
+@router.get("/connectors")
+async def list_space_connectors(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Подключения пространства: откуда компания получает данные.
+
+    Файловые каналы Учёта + платформенные сервисы + живые интеграции приложений
+    (Координатор спрашивается служебным каналом). Витрина: настройка остаётся
+    в приложении-владельце, здесь только видно, что где подключено.
+    """
+    cid = await _member(company_id, user, db)
+    data = await space_connectors.list_connectors(db, cid)
+    return {"companyId": str(cid), **data, "total": len(data["connectors"])}
 
 
 @router.get("/equipment")

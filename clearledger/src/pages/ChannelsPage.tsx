@@ -18,6 +18,7 @@ import { Plus, Trash2, Radio, Database, Clock, Loader2, ArrowRightLeft, CheckCir
 import { FuelMappingsPanel } from '@/components/fuel/FuelMappingsPanel'
 import { format } from 'date-fns'
 import { ConnectorWizard } from '@/components/channels/ConnectorWizard'
+import { SpaceConnectors } from '@/components/channels/SpaceConnectors'
 import { ScheduleOverview } from '@/components/channels/ScheduleOverview'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 
@@ -164,6 +165,10 @@ export function ChannelsPage() {
 
       <ConnectorWizard open={wizardOpen} onOpenChange={(v) => { setWizardOpen(v); if (!v) refresh() }} />
       <ScheduleOverview open={scheduleOpen} onOpenChange={setScheduleOpen} />
+
+      {/* Все источники пространства одним списком: свои каналы и живые интеграции
+          соседних приложений. Ниже — настройка каналов этого продукта. */}
+      {isApiEnabled() && <SpaceConnectors />}
 
       {/* Канонические маппинги компании — единый источник для всех каналов */}
       {isApiEnabled() && (
