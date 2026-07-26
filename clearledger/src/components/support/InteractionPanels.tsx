@@ -6,6 +6,7 @@ import {
   LifeBuoy, Sparkles, Phone, Keyboard, FileText, Database, GitBranch,
 } from 'lucide-react'
 import { APP_VERSION } from '@/config/version'
+import { ECOSYSTEM_TITLE } from '@/config/brand'
 
 export function ContactList() {
   const contacts = [
@@ -54,7 +55,7 @@ export function TicketsPanel() {
 export function InfoPanel() {
   const sections = [
     { icon: FileText, title: 'Загрузка и нормализация', text: 'Приём документов с касс/STS, классификация, проверка и сверка перед выгрузкой в 1С.' },
-    { icon: Database, title: 'Контур 1С', text: 'Подключение к БП ГИГ, справочники, документы, цены, партии FIFO, периоды и учётная политика.' },
+    { icon: Database, title: 'Контур 1С', text: 'Подключение к бухгалтерской базе, справочники, документы, цены, партии FIFO, периоды и учётная политика.' },
     { icon: GitBranch, title: 'Сверка и закрытие', text: 'Трёхсторонняя сверка (касса · процессинг · банк) и прогноз закрытия месяца.' },
   ]
   const hotkeys = [
@@ -68,10 +69,12 @@ export function InfoPanel() {
           <Sparkles className="h-7 w-7 text-white" />
         </div>
         <div className="space-y-1">
-          <h3 className="text-xl font-semibold text-foreground">TradeLedger</h3>
+          {/* Ни имени движка, ни чужого заказчика: панель открыта в пространстве
+              компании, и «выгрузка в 1С ГазИнвестГрупп» там читалась как утечка. */}
+          <h3 className="text-xl font-semibold text-foreground">Учёт · {ECOSYSTEM_TITLE}</h3>
           <p className="text-sm text-muted-foreground">
-            Рабочее место менеджера: приём, классификация, сверка и выгрузка учётных документов
-            сети АЗС в 1С:Бухгалтерию ГазИнвестГрупп.
+            Рабочее место менеджера: приём, классификация, сверка и выгрузка учётных
+            документов в бухгалтерскую систему компании.
           </p>
           <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">
             версия v{APP_VERSION}

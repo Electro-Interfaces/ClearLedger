@@ -21,8 +21,9 @@ import { Menu } from 'lucide-react'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AdminNavContent, AdminSidebar } from '@/components/layout/AdminSidebar'
 import { AppLauncher } from '@/components/layout/AppLauncher'
-import { EcoRail } from '@/components/layout/EcoRail'
+import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
+import InteractionHost from '@/components/support/InteractionHost'
 import { findSection, type AdminScope } from '@/config/adminNav'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -141,6 +142,8 @@ export function AdminLayout() {
               </>
             )}
             <AppLauncher />
+            {/* Чат · Заявки · Инфо — тот же вход в поддержку, что в Учёте. */}
+            <HeaderInteractionButtons />
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
@@ -184,10 +187,9 @@ export function AdminLayout() {
           </div>
         </SidebarInset>
 
-        {/* Тот же экосистемный рельс, что в приложениях: отсюда — в приложения и на стол. */}
-        <aside className="hidden w-12 shrink-0 flex-col items-center gap-1 border-l border-border/50 bg-card py-2 md:flex">
-          <EcoRail standalone />
-        </aside>
+        {/* Та же правая область, что в Учёте: рейл Чат/Заявки/Инфо, док с панелями и
+            экосистемная зона внизу (стол, приложения). Рейл рисует EcoRail сам. */}
+        <InteractionHost />
       </div>
     </SidebarProvider>
   )

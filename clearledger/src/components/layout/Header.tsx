@@ -1,12 +1,10 @@
-import { Menu, BookText, MessageCircle, LifeBuoy, HelpCircle, Video, Lightbulb } from 'lucide-react'
-import { useState } from 'react'
-import { toast } from 'sonner'
+import { Menu, BookText, MessageCircle, Lightbulb } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useGuideMode } from '@/hooks/useGuideMode'
 import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
 import { Button } from '@/components/ui/button'
-import { createMeeting } from '@/services/conferenceService'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
+import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { useSupportContext } from '@/contexts/SupportContext'
@@ -20,34 +18,9 @@ interface HeaderProps {
 
 export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const guide = useGuideMode()
-  const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
+  const { toggleInteraction, unreadCounts } = useSupportContext()
   // Универсальный логотип «учёт»: приложение не привязано к топливу/энергии.
   const BrandIcon = BookText
-
-  const [confBusy, setConfBusy] = useState(false)
-  async function startConference() {
-    if (confBusy) return
-    setConfBusy(true)
-    try {
-      const m = await createMeeting()
-      window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
-      try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
-      toast.success('Конференция создана — гостевая ссылка скопирована', { description: m.guest_url })
-    } catch (e) {
-      const msg = (e as Error).message || ''
-      toast.error(/503|не настроен/i.test(msg) ? 'Видеоконференции не настроены' : 'Не удалось создать конференцию')
-    } finally {
-      setConfBusy(false)
-    }
-  }
-
-  // Пилюля-кнопка взаимодействия в стиле TradeFrame: синий акцент, активное состояние.
-  const btnCls = (active: boolean) =>
-    `relative h-11 px-3 gap-2 rounded-xl transition-all duration-200 font-medium border ${
-      active
-        ? 'bg-primary text-white border-primary'
-        : 'bg-primary/10 dark:bg-primary/20 hover:bg-primary text-primary dark:text-primary/80 hover:text-white border-primary/30 dark:border-primary/50 hover:border-primary'
-    }`
 
   return (
     <header className="h-[var(--header-height)] shrink-0 border-b border-border/50 bg-card/95 backdrop-blur-xl">
@@ -82,39 +55,8 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
           {/* Лаунчер приложений экосистемы (Ядро) — скрыт, если SSO не настроен */}
           <AppLauncher />
 
-          <div className="hidden md:flex items-center gap-2 pl-1">
-            <div className="w-px h-6 bg-border/50" />
-            {/* Конференция */}
-            <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy} className={btnCls(false)} title="Видеоконференция">
-              <Video className="h-4 w-4" />
-              <span className="hidden lg:inline">Конференция</span>
-            </Button>
-            {/* Чат */}
-            <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={btnCls(interactionSection === 'chat')} title="Чат с поддержкой">
-              <MessageCircle className="h-4 w-4" />
-              <span className="hidden lg:inline">Чат</span>
-              {unreadCounts.chat > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
-                  {unreadCounts.chat}
-                </span>
-              )}
-            </Button>
-            {/* Заявки */}
-            <Button variant="outline" size="sm" onClick={() => toggleInteraction('tickets')} className={btnCls(interactionSection === 'tickets')} title="Заявки в поддержку">
-              <LifeBuoy className="h-4 w-4" />
-              <span className="hidden lg:inline">Заявки</span>
-              {unreadCounts.tickets > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
-                  {unreadCounts.tickets}
-                </span>
-              )}
-            </Button>
-            {/* Инфо */}
-            <Button variant="outline" size="sm" onClick={() => toggleInteraction('help')} className={btnCls(interactionSection === 'help')} title="Инфо (Ctrl+K)">
-              <HelpCircle className="h-4 w-4" />
-              <span className="hidden lg:inline">Инфо</span>
-            </Button>
-          </div>
+          {/* Чат · Заявки · Инфо (+ Конференция) — общий блок продуктов контейнера. */}
+          <HeaderInteractionButtons conference />
         </div>
 
         {/* Правый блок: чат (моб.) + переключатель темы + профиль */}
