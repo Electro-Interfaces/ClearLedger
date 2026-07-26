@@ -125,7 +125,9 @@ function headers(extra?: Record<string, string>): Record<string, string> {
 
 /** GET запрос */
 export async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
-  const url = new URL(`${BASE_URL}${path}`)
+  // База обязательна: в контейнере VITE_API_URL пуст (API на том же origin), и без второго
+  // аргумента `new URL('/api/…')` бросает «Invalid URL» — падали все GET с параметрами.
+  const url = new URL(`${BASE_URL}${path}`, window.location.origin)
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v))
