@@ -25,7 +25,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, type SsoApp } from '@/services/ssoService'
-import { ECOSYSTEM_BRAND } from '@/config/brand'
 
 /** Иконка по имени из манифеста (`apps/<code>.yml`, поле icon). */
 const ICONS: Record<string, typeof FileText> = {
@@ -194,7 +193,7 @@ export function EcosystemHomePage() {
         <Section title="Приложения">
           {canOpenLedger && (
             <Tile
-              title={`${ECOSYSTEM_BRAND} Учёт`}
+              title="Учёт"
               subtitle="Учёт, сверка, обмен с 1С"
               icon={FileText}
               onClick={() => navigate('/workspace')}
