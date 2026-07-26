@@ -33,6 +33,14 @@ interface CompanyContextType {
   // Что показывать в активной компании: права RBAC ∩ состав поставки (реестр Ядра).
   // null = ничто не ограничивает (полный доступ и реестр молчит).
   companyModules: string[] | null
+  /**
+   * Доступ к продукту пространства целиком: `canApp('admin')`, `canApp('support')`.
+   * Правило то же, что на сервере (access_catalog.app_allowed): доступ есть, если роль
+   * даёт приложение целиком ИЛИ любой его модуль.
+   */
+  canApp: (appCode: string) => boolean
+  /** Доступ к разделу продукта: `canModule('admin', 'members')`. */
+  canModule: (appCode: string, moduleCode: string) => boolean
   profile: CompanyProfile
   categories: Category[]
   customization: CompanyCustomization
@@ -156,6 +164,17 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const rbacModules: string[] | null = isCompanyAdmin ? null : (activeRef?.modules ?? null)
   const companyModules: string[] | null = intersectAccess(rbacModules, registryModules)
 
+  // Права на продукты пространства (Управление, Координатор, Чаты…) считаются по сырым
+  // ключам роли: `companyModules` — про модули Учёта и для этого не годится.
+  const canApp = (appCode: string) => {
+    if (rbacModules === null) return true
+    return rbacModules.includes(appCode) || rbacModules.some((k) => k.startsWith(`${appCode}:`))
+  }
+  const canModule = (appCode: string, moduleCode: string) => {
+    if (rbacModules === null) return true
+    return rbacModules.includes(appCode) || rbacModules.includes(`${appCode}:${moduleCode}`)
+  }
+
   return (
     <CompanyContext.Provider
       value={{
@@ -166,6 +185,8 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         companyRole,
         isCompanyAdmin,
         companyModules,
+        canApp,
+        canModule,
         profile: activeProfile,
         categories,
         customization: emptyCustomization(),

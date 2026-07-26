@@ -42,7 +42,7 @@ const PROFILES = [
 
 export function AdminPage() {
   const { user } = useAuth()
-  const { companyId: activeId } = useCompany()
+  const { companyId: activeId, canApp, canModule } = useCompany()
   const isSuper = !!user?.is_superadmin
   const canAdminAny = isSuper || (user?.companies ?? []).some((c) => c.role === 'admin')
 
@@ -63,7 +63,7 @@ export function AdminPage() {
   const canManageSelected = (id?: string) =>
     isSuper || (user?.companies ?? []).some((c) => c.id === id && c.role === 'admin')
 
-  if (!isApiEnabled() || !canAdminAny) {
+  if (!isApiEnabled() || !(canAdminAny || canApp('admin'))) {
     return (
       <div className="flex flex-col items-center justify-center h-[60vh] gap-2 text-muted-foreground">
         <ShieldCheck className="h-8 w-8" />
@@ -104,19 +104,35 @@ export function AdminPage() {
       {selected ? (
         <Tabs value={tab} onValueChange={setTab} className="w-full">
           <TabsList>
-            <TabsTrigger value="members" className="gap-1.5"><Users className="h-4 w-4" /> Сотрудники</TabsTrigger>
-            <TabsTrigger value="roles" className="gap-1.5"><KeyRound className="h-4 w-4" /> Роли и доступ</TabsTrigger>
-            <TabsTrigger value="apps" className="gap-1.5"><Blocks className="h-4 w-4" /> Приложения</TabsTrigger>
+            {/* Разделы — модули приложения «Управление»: роль может дать часть
+                администрирования (например только объекты и справочники). */}
+            {canModule('admin', 'members') && (
+              <TabsTrigger value="members" className="gap-1.5"><Users className="h-4 w-4" /> Сотрудники</TabsTrigger>
+            )}
+            {canModule('admin', 'roles') && (
+              <TabsTrigger value="roles" className="gap-1.5"><KeyRound className="h-4 w-4" /> Роли и доступ</TabsTrigger>
+            )}
+            {canModule('admin', 'apps') && (
+              <TabsTrigger value="apps" className="gap-1.5"><Blocks className="h-4 w-4" /> Приложения</TabsTrigger>
+            )}
             {/* Объекты — общая сущность пространства: ведутся один раз для всех приложений. */}
-            <TabsTrigger value="objects" className="gap-1.5"><MapPin className="h-4 w-4" /> Объекты</TabsTrigger>
-            <TabsTrigger value="refs" className="gap-1.5"><Library className="h-4 w-4" /> Справочники</TabsTrigger>
+            {canModule('admin', 'objects') && (
+              <TabsTrigger value="objects" className="gap-1.5"><MapPin className="h-4 w-4" /> Объекты</TabsTrigger>
+            )}
+            {canModule('admin', 'refs') && (
+              <TabsTrigger value="refs" className="gap-1.5"><Library className="h-4 w-4" /> Справочники</TabsTrigger>
+            )}
             {/* Карта компании: люди, доступы, активность — для анализа своего пространства. */}
-            <TabsTrigger value="map" className="gap-1.5"><Map className="h-4 w-4" /> Карта</TabsTrigger>
-            <TabsTrigger value="profile" className="gap-1.5"><Building2 className="h-4 w-4" /> Реквизиты</TabsTrigger>
-            {canManageSelected(selected.id) && (
+            {canModule('admin', 'map') && (
+              <TabsTrigger value="map" className="gap-1.5"><Map className="h-4 w-4" /> Карта</TabsTrigger>
+            )}
+            {canModule('admin', 'profile') && (
+              <TabsTrigger value="profile" className="gap-1.5"><Building2 className="h-4 w-4" /> Реквизиты</TabsTrigger>
+            )}
+            {canManageSelected(selected.id) && canModule('admin', 'invites') && (
               <TabsTrigger value="invites" className="gap-1.5"><Mail className="h-4 w-4" /> Приглашения</TabsTrigger>
             )}
-            {canManageSelected(selected.id) && (
+            {canManageSelected(selected.id) && canModule('admin', 'audit') && (
               <TabsTrigger value="audit" className="gap-1.5"><History className="h-4 w-4" /> Журнал</TabsTrigger>
             )}
           </TabsList>

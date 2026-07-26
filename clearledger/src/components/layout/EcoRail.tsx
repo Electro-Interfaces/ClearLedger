@@ -32,7 +32,7 @@ const btnCls = (active = false) =>
 
 export function EcoRail({ standalone = false }: { standalone?: boolean }) {
   const navigate = useNavigate()
-  const { isCompanyAdmin } = useCompany()
+  const { canApp } = useCompany()
   const { open, busy } = useOpenApp()
 
   // Каталог спрашиваем всегда: в контейнере API живёт на том же origin, и база
@@ -88,8 +88,9 @@ export function EcoRail({ standalone = false }: { standalone?: boolean }) {
         </DropdownMenu>
       )}
 
-      {/* Центр управления — отдельное приложение уровня контейнера, только администраторам. */}
-      {isCompanyAdmin && (
+      {/* «Управление» — такое же приложение пространства: показываем по праву роли,
+          а не по признаку «админ компании». */}
+      {canApp('admin') && (
         <button onClick={() => navigate('/admin')} title="Управление пространством" className={btnCls()}>
           <ShieldCheck className="size-4" />
           <span>Управл.</span>

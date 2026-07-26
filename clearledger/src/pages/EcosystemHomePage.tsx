@@ -86,7 +86,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 export function EcosystemHomePage() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
-  const { company, companyId, companies, isCompanyAdmin } = useCompany()
+  const { company, companyId, companies } = useCompany()
   const [busy, setBusy] = useState<string | null>(null)
 
   const q = useQuery({
@@ -162,8 +162,9 @@ export function EcosystemHomePage() {
         </h1>
         <p className="mt-1 text-muted-foreground">{company.name}</p>
 
-        {/* Слой 1 — Центр управления (админам) */}
-        {isCompanyAdmin && (
+        {/* Слой 1 — «Управление»: такое же приложение пространства, доступ по праву роли
+            (админ компании имеет его целиком, остальным можно выдать отдельные разделы). */}
+        {canOpen('admin') && (
           <Section title="Управление">
             <Tile
               title="Управление"

@@ -18,10 +18,11 @@ import { AdminPage } from '@/pages/AdminPage'
 export function AdminLayout() {
   const navigate = useNavigate()
   const { logout } = useAuth()
-  const { company, companies, isCompanyAdmin, isLoading } = useCompany()
+  const { company, companies, canApp, isLoading } = useCompany()
 
-  // Центр управления — только администраторам. Не админ → на рабочий стол.
-  if (!isLoading && !isCompanyAdmin) return <Navigate to="/" replace />
+  // «Управление» — приложение пространства: пускаем по праву роли (целиком или на любой
+  // раздел). Нет права — на рабочий стол.
+  if (!isLoading && !canApp('admin')) return <Navigate to="/" replace />
 
   return (
     <div className="flex min-h-svh bg-background">
