@@ -38,6 +38,8 @@ def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: i
     now = int(time.time())
     payload = {
         "iss": settings.jitsi_issuer,
+        # Это токен для самого Jitsi (prosody), а не наш handoff: aud задаёт ВНЕШНИЙ
+        # сервис и переименованию под код продукта не подлежит.
         "aud": "jitsi",
         "sub": settings.jitsi_xmpp_domain,  # внутренний XMPP-домен, не публичный URL
         "room": room,

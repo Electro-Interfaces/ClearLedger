@@ -34,13 +34,28 @@ async def list_apps(
 
     `enabled` — есть ли что показать (мосты видны и без ключа SSO);
     `sso_enabled` — настроен ли единый вход (handoff-приложения);
-    `chat_enabled` — доступен ли универсальный сервис «Чат» (Matrix): он не приложение
+    `chat_enabled` — доступен ли продукт «Чаты» (Matrix): движок включён в стеке
       и не в каталоге, но рабочий стол показывает его плиткой в слое сервисов;
     `allowed_apps` — коды приложений, доступных пользователю в компании по его роли
       (RBAC-гейт стола). `null` = не ограничено (админ/суперадмин/компания не задана).
       Фронт по нему гейтит плитки, включая внутренний Ledger.
     """
     apps = sso.launcher_apps()
+
+    # Реестр решает, что подключено компании: отключённый в «Управлении» продукт не
+    # должен появляться на столе. Раньше реестр гейтил только внутренние модули Ledger,
+    # а мосты (Заявки, Конференции) показывались всегда — выключить их было нечем.
+    chat_enabled = settings.chat_enabled
+    if company_id:
+        from app.services import app_registry
+        try:
+            reg_cid = uuid.UUID(company_id)
+        except (ValueError, TypeError):
+            reg_cid = None
+        if reg_cid is not None:
+            registry = {a["code"]: a["enabled"] for a in await app_registry.company_apps(db, reg_cid)}
+            apps = [a for a in apps if registry.get(a["code"], True)]
+            chat_enabled = chat_enabled and registry.get("chat", True)
 
     allowed: list[str] | None = None
     if company_id and not user.is_superadmin:
@@ -58,9 +73,9 @@ async def list_apps(
                 apps = [a for a in apps if a["code"] in allowed]
 
     return {
-        "enabled": bool(apps) or settings.chat_enabled,
+        "enabled": bool(apps) or chat_enabled,
         "sso_enabled": settings.sso_enabled,
-        "chat_enabled": settings.chat_enabled,
+        "chat_enabled": chat_enabled,
         "apps": apps,
         "allowed_apps": allowed,
     }
