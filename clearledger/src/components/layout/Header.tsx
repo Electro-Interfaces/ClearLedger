@@ -1,5 +1,5 @@
 import { Menu, BookText, MessageCircle, Lightbulb } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useGuideMode } from '@/hooks/useGuideMode'
 import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,8 @@ import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionB
 import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { useSupportContext } from '@/contexts/SupportContext'
+import { useCompany } from '@/contexts/CompanyContext'
+import { isCarvedProfile, productForPath } from '@/config/spaceProducts'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AppLauncher } from '@/components/layout/AppLauncher'
 
@@ -19,6 +21,9 @@ interface HeaderProps {
 export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const guide = useGuideMode()
   const { toggleInteraction, unreadCounts } = useSupportContext()
+  const { company } = useCompany()
+  const { pathname } = useLocation()
+  const product = isCarvedProfile(company.profileId) ? productForPath(pathname) : null
   // Универсальный логотип «учёт»: приложение не привязано к топливу/энергии.
   const BrandIcon = BookText
 
@@ -39,9 +44,15 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
               <BrandIcon className="h-5 w-5 text-white" />
             </div>
+            {/* Шапка называет ТЕКУЩИЙ продукт: там, где Учёт разрезан на рабочие места
+                («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
             <div className="hidden sm:flex flex-col leading-none">
-              <h1 className="font-semibold tracking-tight text-foreground text-lg">{ECOSYSTEM_BRAND} Учёт</h1>
-              <p className="text-xs text-muted-foreground">v{APP_VERSION}</p>
+              <h1 className="font-semibold tracking-tight text-foreground text-lg">
+                {product ? product.label : `${ECOSYSTEM_BRAND} Учёт`}
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                {product ? ECOSYSTEM_BRAND : `v${APP_VERSION}`}
+              </p>
             </div>
           </Link>
 

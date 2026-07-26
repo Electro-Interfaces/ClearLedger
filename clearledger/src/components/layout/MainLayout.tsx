@@ -12,7 +12,7 @@ import { useMaxWidth } from '@/hooks/use-mobile'
 import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
-import { pathAllowed, homePath } from '@/config/spaceProducts'
+import { pathAllowed, homePath, productForPath } from '@/config/spaceProducts'
 
 // Состояние левого сайдбара сохраняется между запусками. По умолчанию (первый
 // запуск, нет сохранённого значения) — свёрнут: рабочая область получает
@@ -72,12 +72,18 @@ export function MainLayout() {
   // /settings, /connectors/:id, /admin — уважается: иначе ломаются ссылки из
   // писем и открытие в новой вкладке, где sessionStorage всегда пуст и любой
   // переход выглядит холодным стартом.
+  //
+  // Продукты пространства сюда не попадают: у каждого свой рабочий стол, и ссылка
+  // на «Финансы» или на их «Документы» должна открываться там, куда ведёт, — иначе
+  // открытие продукта в новой вкладке всегда выбрасывало бы на общий стол.
   useEffect(() => {
     try {
       if (sessionStorage.getItem('cl-booted')) return
       sessionStorage.setItem('cl-booted', '1')
-      if (location.pathname !== '/workspace' && isWorkspacePath(location.pathname)) {
-        navigate('/workspace', { replace: true })
+      const home = homePath(company.profileId)
+      if (location.pathname !== home && isWorkspacePath(location.pathname)
+          && !productForPath(location.pathname)) {
+        navigate(home, { replace: true })
       }
     } catch { /* ignore */ }
     // читаем стартовый путь один раз при монтировании — deps намеренно пустые

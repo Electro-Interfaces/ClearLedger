@@ -17,7 +17,7 @@
  * другой — там «Учёт» остаётся единым продуктом со всеми разделами, как раньше.
  */
 import type { CoreMode } from '@/contexts/WorkspaceContext'
-import { navByPath, type NavItemDef } from './navigation'
+import { dashboardItem, navByPath, type NavItemDef } from './navigation'
 
 export interface SpaceProduct {
   /** Код в реестре Ядра = ключ доступа роли. */
@@ -49,23 +49,27 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     modes: ['management', 'store'], paths: ['/metrika'],
   },
   {
-    // Финансы — счётная сторона целиком: проводки, налоги, выгрузка, первичка,
-    // контрагенты, 1С.
+    // Финансы — счётная сторона: проводки, налоги, выгрузка, первичка, контрагенты
+    // и паспорт своего юрлица («Организация»: реквизиты, счета, ответственные лица).
     // NB: «Хозяйство» площадок (энергозакупка, аренда) по смыслу денежное, но живёт
     // под-разделами режима `operations` и рисуется его панелью — переезд сюда требует
     // правки самих панелей, поэтому пока остаётся в Эксплуатации (см. docs/SPACE.md).
+    // Страниц контура 1С здесь нет: разрез включён профилю `energy`, а у него 1С
+    // отключён (`RequireFuel`), и пункты вели бы в редирект. Вернутся вместе с
+    // разрезом для топливного профиля.
     code: 'finance', route: '/finance', label: 'Финансы',
     modes: ['accounting', 'financial', 'tax', 'export'],
-    paths: ['/files', '/contractors', '/1c/connection', '/1c/sync', '/1c/references',
-      '/1c/documents', '/1c/periods', '/1c/policy', '/1c/posting-templates', '/1c/prices',
-      '/1c/batches', '/1c/fuel-mappings', '/1c/mappings', '/1c/export'],
+    paths: ['/files', '/contractors', '/organization'],
   },
   {
     // Данные — служебная кухня: откуда берутся цифры и как приводятся к общему виду.
     // Ошибка здесь ломает все продукты сразу, поэтому доступ отдельный и узкий.
+    // «Каталоги» — библиотека типов источников, каналов и разрезов сверки, то есть
+    // тот же входной контур; «Параметры» — его настройки.
     code: 'data', route: '/data', label: 'Данные',
     modes: ['normalize', 'reconcile'],
-    paths: ['/intake', '/connectors', '/sources', '/normalization', '/reconciliation', '/settings'],
+    paths: ['/intake', '/connectors', '/sources', '/normalization', '/reconciliation',
+      '/catalog', '/settings'],
   },
 ]
 
@@ -85,9 +89,18 @@ export function productForPath(pathname: string): SpaceProduct | null {
   return null
 }
 
-/** Пункты левого меню продукта (в порядке `paths`). */
+/**
+ * Пункты левого меню продукта: сначала его собственный рабочий стол (разделы —
+ * гармошкой под ним), затем страницы в порядке `paths`.
+ *
+ * Рабочий стол обязателен: без него у продукта без страниц («Проекты») меню было
+ * пустым, а из страницы («Документы») некуда было вернуться к разделам продукта.
+ */
 export function productNav(product: SpaceProduct): NavItemDef[] {
-  return product.paths.map((path) => navByPath[path]).filter(Boolean)
+  return [
+    { to: product.route, icon: dashboardItem.icon, label: 'Рабочий стол', end: true },
+    ...product.paths.map((path) => navByPath[path]).filter(Boolean),
+  ]
 }
 
 /** Разделы, ушедшие из Учёта в отдельные продукты (при выключенном разрезе — пусто). */
