@@ -12,6 +12,7 @@ import { useMaxWidth } from '@/hooks/use-mobile'
 import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
+import { pathAllowed, homePath } from '@/config/spaceProducts'
 
 // Состояние левого сайдбара сохраняется между запусками. По умолчанию (первый
 // запуск, нет сохранённого значения) — свёрнут: рабочая область получает
@@ -50,11 +51,17 @@ export function MainLayout() {
   const isMobile = useMaxWidth(1024)
   const location = useLocation()
   const navigate = useNavigate()
-  const { companyModules } = useCompany()
-  // RBAC route-guard: прямой переход на недоступный по модулям роут → на рабочий стол.
+  const { company, companyModules, canApp } = useCompany()
+  // RBAC route-guard: прямой переход на недоступный роут → на рабочий стол. Страницы
+  // продуктов пространства проверяются доступом к продукту (см. pathAllowed).
   useEffect(() => {
-    if (!routeAllowed(location.pathname, companyModules)) navigate('/workspace', { replace: true })
-  }, [location.pathname, companyModules, navigate])
+    const ok = pathAllowed(location.pathname, company.profileId, canApp,
+      (p) => routeAllowed(p, companyModules))
+    if (!ok) navigate(homePath(company.profileId), { replace: true })
+    // canApp пересоздаётся каждый рендер — в зависимостях его нет намеренно,
+    // источник его данных (companyModules/профиль) в списке присутствует.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, companyModules, company.profileId, navigate])
   // «Открытие приложения» → рабочий стол. Холодный старт вкладки (нет метки сессии)
   // сбрасывает запомненный браузером экран на рабочий стол. F5 и переходы внутри
   // сессии метку сохраняют (sessionStorage переживает reload, но не закрытие вкладки),

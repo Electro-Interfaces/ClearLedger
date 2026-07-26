@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import App, AppModule, CompanyApp, CompanyAppModule
+from app.models import App, AppModule, Company, CompanyApp, CompanyAppModule
 
 # Ledger-модули = ключи доступа RBAC (access_catalog.ACCESS_KEYS) — единый словарь.
 _LEDGER_MODULES: list[tuple[str, str]] = [
@@ -41,6 +41,23 @@ _APPS: list[dict[str, Any]] = [
      "modules": _ADMIN_MODULES},
     {"code": "ledger", "name": "Учёт", "icon": "book-open", "sort": 10,
      "desc": "Учёт, аналитика, сверка", "modules": _LEDGER_MODULES},
+    # Продукты, выделенные ИЗ Учёта (решение МАГа 26.07.2026): режем по рабочим местам,
+    # а не по видам учёта. Для сети ЭЗС разрез идёт по жизни объекта: строим → эксплуатируем
+    # → продаём → чиним → считаем; «Данные» — служебная кухня сбора. Все живут в том же SPA
+    # (маршруты в sso_router.INTERNAL_ROUTES), поэтому base_url им не нужен.
+    {"code": "projects", "name": "Проекты", "icon": "hard-hat", "sort": 12,
+     "desc": "Стройка сети: подбор площадок, портфель проектов, присоединение, ввод",
+     "modules": []},
+    {"code": "ops", "name": "Эксплуатация", "icon": "gauge", "sort": 14,
+     "desc": "Состояние сети, баланс, парк оборудования, склады и ЗИП", "modules": []},
+    {"code": "network", "name": "Сеть", "icon": "bar-chart-3", "sort": 16,
+     "desc": "Коммерция сети: сессии, тарифы, корпоратив и частные лица", "modules": []},
+    {"code": "finance", "name": "Финансы", "icon": "wallet", "sort": 25,
+     "desc": "Бухгалтерский и налоговый учёт, первичка, контрагенты, выгрузка",
+     "modules": []},
+    {"code": "data", "name": "Данные", "icon": "database", "sort": 60,
+     "desc": "Откуда берутся цифры: коннекторы, загрузка, нормализация, разрезы",
+     "modules": []},
     {"code": "support", "name": "Координатор", "icon": "life-buoy", "sort": 20,
      "base_url": "https://support.dataworker.ru", "desc": "Заявки, journey, поддержка", "modules": []},
     # Универсальные продукты пространства. В реестре они наравне с остальными: включаются
@@ -75,10 +92,14 @@ async def seed_apps(db: AsyncSession) -> None:
             app = App(code=a["code"], name=name, description=a.get("desc"),
                       base_url=a.get("base_url"), icon=a.get("icon"), sort=a.get("sort", 100))
             db.add(app); await db.flush(); changed = True
-        elif app.name != name:
-            # Снимает и старые брендовые префиксы («РусГидро Учёт» → «Учёт») у тех,
-            # кто был засеян до этого решения.
-            app.name = name; changed = True
+        else:
+            # Каталог в коде — источник истины: подтягиваем и переименования (снимает
+            # старые брендовые префиксы «РусГидро Учёт» → «Учёт»), и порядок с иконкой.
+            # Раньше обновлялось только имя, поэтому смена sort в коде до стенда не доезжала.
+            for field, value in (("name", name), ("icon", a.get("icon")),
+                                 ("sort", a.get("sort", 100)), ("description", a.get("desc"))):
+                if value is not None and getattr(app, field) != value:
+                    setattr(app, field, value); changed = True
         for i, (mc, mn) in enumerate(a["modules"]):
             ex = (await db.execute(select(AppModule).where(
                 AppModule.app_id == app.id, AppModule.code == mc))).scalar_one_or_none()
@@ -90,15 +111,34 @@ async def seed_apps(db: AsyncSession) -> None:
         await db.commit()
 
 
-def _default_app_on(code: str) -> bool:
-    """Что подключено новой компании без настройки.
+# Продукты, на которые разрезан Учёт (см. фронтовую карту `config/spaceProducts.ts`).
+# Разрез включён у профиля `energy`: там разделы Учёта разошлись по рабочим местам, и сам
+# «Учёт» плиткой больше не показывается. У топливного профиля разреза нет — Учёт единый.
+_CARVED_PRODUCTS = {"projects", "ops", "network", "finance", "data"}
+_CARVED_PROFILE = "energy"
+# Всегда: управление пространством + универсальные продукты (чаты, заявки, конференции).
+_ALWAYS_ON = {"admin", "chat", "plan", "conf"}
 
-    Управление, Учёт и универсальные продукты пространства (чаты, заявки, конференции) —
-    сразу: без «Управления» пространством нельзя распоряжаться вообще. Прикладные
-    приложения вроде Координатора подключаются осознанно, потому что за ними стоит
-    отдельный контур и данные.
+
+def _default_app_on(code: str, profile_id: str | None = None) -> bool:
+    """Что подключено компании без явной настройки.
+
+    Управление и универсальные продукты — сразу: без «Управления» пространством нельзя
+    распоряжаться вообще. Прикладные приложения со своим контуром и данными (Координатор)
+    подключаются осознанно.
+
+    Остальное зависит от профиля: у сети ЭЗС (`energy`) работают продукты разреза, у
+    топливного профиля — единый «Учёт». Плитка продукта, которого в профиле нет, вела бы
+    в пустой раздел, поэтому дефолты разведены, а не сложены.
     """
-    return code in {"admin", "ledger", "chat", "plan", "conf"}
+    if code in _ALWAYS_ON:
+        return True
+    carved = profile_id == _CARVED_PROFILE
+    if code in _CARVED_PRODUCTS:
+        return carved
+    if code == "ledger":
+        return not carved
+    return False
 
 
 async def company_apps(db: AsyncSession, company_id) -> list[dict[str, Any]]:
@@ -112,11 +152,14 @@ async def company_apps(db: AsyncSession, company_id) -> list[dict[str, Any]]:
     mods: dict[Any, list[AppModule]] = {}
     for m in (await db.execute(select(AppModule).order_by(AppModule.sort))).scalars().all():
         mods.setdefault(m.app_id, []).append(m)
+    # Профиль компании решает дефолт для профильных продуктов (см. _default_app_on).
+    profile_id = (await db.execute(
+        select(Company.profile_id).where(Company.id == company_id))).scalar_one_or_none()
 
     out: list[dict[str, Any]] = []
     for app in apps:
         rec = ca.get(app.id)
-        enabled = rec.enabled if rec is not None else _default_app_on(app.code)
+        enabled = rec.enabled if rec is not None else _default_app_on(app.code, profile_id)
         out.append({
             "id": str(app.id), "code": app.code, "name": app.name,
             "description": app.description, "baseUrl": app.base_url, "icon": app.icon,

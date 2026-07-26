@@ -45,6 +45,22 @@ export function useRegistryModules(companyId: string): string[] | null {
 }
 
 /**
+ * Подключён ли компании продукт пространства (`projects`, `support`, …) по реестру.
+ * `null` — реестр не ответил: маршрут пропускаем (тот же fail-open, что и у меню).
+ */
+export function useAppEnabled(companyId: string, code: string): boolean | null {
+  const q = useQuery({
+    queryKey: ['company-apps', companyId],   // общий кэш с меню и вкладкой «Приложения»
+    queryFn: () => listCompanyApps(companyId),
+    enabled: isApiEnabled() && !!companyId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  if (!q.data) return null
+  return q.data.find((a) => a.code === code)?.enabled ?? false
+}
+
+/**
  * Итоговый набор ключей для гейтинга меню Ledger: состав поставки ∩ права роли.
  * `null` с любой стороны = «эта сторона не ограничивает».
  *

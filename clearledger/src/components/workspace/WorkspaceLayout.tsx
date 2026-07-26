@@ -5,10 +5,8 @@
 
 import { useSearchParams } from 'react-router-dom'
 import { useMaxWidth } from '@/hooks/use-mobile'
-import { useWorkspace, WorkspaceProvider } from '@/contexts/WorkspaceContext'
-import { useCompany } from '@/contexts/CompanyContext'
+import { useWorkspace, WorkspaceProvider, type CoreMode } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
-import { modeAllowed } from '@/config/accessModules'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -20,7 +18,7 @@ import { ExportLayerPanel } from './ExportLayerPanel'
 import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 import { WorkspaceModeSidebar } from './WorkspaceModeSidebar'
-import { useWorkspaceSections } from './workspaceSections'
+import { useVisibleSections } from './workspaceSections'
 
 function WorkspaceContent() {
   // Компактная раскладка (горизонтальные полосы, без вертикального меню режимов)
@@ -99,8 +97,7 @@ function DesktopWorkspace() {
 function MobileWorkspace() {
   // Мобильный рабочий стол: горизонтальные полосы «режимы» + «под-виды» вместо
   // десктопного вертикального меню; контент — тот же диспетчер по coreMode.
-  const { companyModules } = useCompany()
-  const sections = useWorkspaceSections().filter((s) => modeAllowed(s.mode, companyModules))
+  const sections = useVisibleSections()
   const { coreMode, setCoreMode } = useWorkspace()
   const [searchParams, setSearchParams] = useSearchParams()
   const urlSub = searchParams.get('sub')
@@ -118,22 +115,26 @@ function MobileWorkspace() {
 
       {/* Режим — компактный селект (вместо длинной скролл-полосы), под-виды — свайп-полоса */}
       <div className="flex items-center gap-1.5 border-b border-border/50 bg-muted/20 px-2 py-1.5 shrink-0">
-        <Select value={coreMode} onValueChange={(v) => setCoreMode(v as typeof coreMode)}>
-          <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1.5 text-xs font-medium">
-            {/* иконка приезжает из выбранного SelectItem через SelectValue */}
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {sections.map((s) => {
-              const Icon = s.icon
-              return (
-                <SelectItem key={s.mode} value={s.mode}>
-                  <span className="flex items-center gap-2"><Icon className="h-3.5 w-3.5" />{s.label}</span>
-                </SelectItem>
-              )
-            })}
-          </SelectContent>
-        </Select>
+        {/* Одному разделу селект не нужен (приложение с закреплённым режимом) —
+            на телефоне это лишняя строка поверх и без того узкого экрана. */}
+        {sections.length > 1 && (
+          <Select value={coreMode} onValueChange={(v) => setCoreMode(v as typeof coreMode)}>
+            <SelectTrigger size="sm" className="h-8 w-auto shrink-0 gap-1.5 text-xs font-medium">
+              {/* иконка приезжает из выбранного SelectItem через SelectValue */}
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {sections.map((s) => {
+                const Icon = s.icon
+                return (
+                  <SelectItem key={s.mode} value={s.mode}>
+                    <span className="flex items-center gap-2"><Icon className="h-3.5 w-3.5" />{s.label}</span>
+                  </SelectItem>
+                )
+              })}
+            </SelectContent>
+          </Select>
+        )}
 
         {/* Под-виды активного режима — свайп без видимого скроллбара */}
         {items.length > 0 && (
@@ -171,9 +172,14 @@ function MobileWorkspace() {
   )
 }
 
-export function WorkspaceLayout() {
+/**
+ * Рабочая область. Без `modes` — «Учёт» со всеми своими разделами; с `modes` — продукт
+ * пространства на своём маршруте («Проекты», «Эксплуатация», «Сеть», «Финансы», «Данные»),
+ * где доступны только его разделы.
+ */
+export function WorkspaceLayout({ modes }: { modes?: CoreMode[] } = {}) {
   return (
-    <WorkspaceProvider>
+    <WorkspaceProvider lockModes={modes}>
       <WorkspaceContent />
     </WorkspaceProvider>
   )

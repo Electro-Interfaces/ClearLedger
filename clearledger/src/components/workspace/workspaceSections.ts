@@ -12,7 +12,9 @@
 import type { ComponentType } from 'react'
 import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
-import type { CoreMode } from '@/contexts/WorkspaceContext'
+import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
+import { modeAllowed } from '@/config/accessModules'
+import { carvedModes } from '@/config/spaceProducts'
 import type { CentralMenuItem } from './CentralPanelLayout'
 import { getWorkspaceModule } from '@/config/workspaceModules'
 import { useModuleConnections, isModuleConnected, isComponentEnabled } from '@/services/moduleConnectionService'
@@ -192,6 +194,23 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   return isEnergy
     ? [sales, projects, ops, store, acc, exp]
     : [sales, store, ops, acc, exp]
+}
+
+/**
+ * Разделы, уместные в ТЕКУЩЕЙ оболочке и доступные ролью.
+ *
+ * В продукте пространства (`/finance`, `/operations`, …) — только его разделы; в Учёте —
+ * все, кроме ушедших в продукты (`carvedModes`, см. `config/spaceProducts.ts`). Иначе один
+ * и тот же экран открывался бы двумя путями. У топливного профиля разрез выключен, и Учёт
+ * остаётся прежним.
+ */
+export function useVisibleSections(): WorkspaceSection[] {
+  const { company, companyModules } = useCompany()
+  const { lockedModes } = useWorkspace()
+  const carved = carvedModes(company.profileId)
+  return useWorkspaceSections()
+    .filter((s) => modeAllowed(s.mode, companyModules))
+    .filter((s) => (lockedModes ? lockedModes.includes(s.mode) : !carved.has(s.mode)))
 }
 
 /** Убрать дубли пунктов меню по ключу (на случай пересечения menuItems компонентов). */

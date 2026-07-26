@@ -47,9 +47,14 @@ export const ACCESS_PRESETS: AccessPreset[] = [
   { label: 'Наблюдатель', keys: ['management'], hint: 'только управленческий' },
 ]
 
-/** Человекочитаемые имена приложений экосистемы (для app-namespaced ключей ролей). */
+/** Имена продуктов пространства (для app-namespaced ключей ролей). Коды смысловые:
+ *  `plan`/`conf`, не по движку. Имена — те же, что в реестре. */
 export const APP_LABELS: Record<string, string> = {
-  ledger: 'Ledger', support: 'Support', chat: 'Чат', plane: 'Заявки', jitsi: 'Конференции',
+  admin: 'Управление', ledger: 'Учёт', support: 'Координатор',
+  chat: 'Чаты', plan: 'Заявки', conf: 'Конференции',
+  // Продукты разреза Учёта (config/spaceProducts.ts).
+  projects: 'Проекты', ops: 'Эксплуатация', network: 'Сеть',
+  finance: 'Финансы', data: 'Данные',
 }
 
 /** Метки ключей роли (для чипов/сводки). Понимает app-namespaced (`app`, `app:module`)

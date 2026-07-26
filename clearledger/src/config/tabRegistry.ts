@@ -6,7 +6,8 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Plug } from 'lucide-react'
+import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard } from 'lucide-react'
+import { SPACE_PRODUCTS } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
   mainNavItems, dataItems, oneCItems, settingsItems,
@@ -14,8 +15,17 @@ import {
 } from './navigation'
 import { isCoreMode, workspaceTitle } from './workspaceViews'
 
-// Пути с фиксированной высотой (h-full, без скролла страницы).
-const WORKSPACE_PATHS = new Set(['/workspace', '/files', '/reconciliation', '/normalization'])
+// Иконки продуктов пространства для вкладок (плитки берут свою из реестра Ядра).
+const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  projects: HardHat, ops: Gauge, network: BarChart3, finance: Wallet, data: Database,
+}
+
+// Пути с фиксированной высотой (h-full, без скролла страницы): рабочая область Учёта,
+// маршруты продуктов пространства и полноэкранные страницы.
+const WORKSPACE_PATHS = new Set<string>([
+  '/workspace', '/files', '/reconciliation', '/normalization',
+  ...SPACE_PRODUCTS.map((p) => p.route),
+])
 
 // Fuel-only разделы (для energy-профиля скрыты; RequireFuel редиректит на `/workspace`).
 const FUEL_ONLY = new Set<string>(oneCItems.map((i) => i.to))
@@ -24,6 +34,11 @@ const FUEL_ONLY = new Set<string>(oneCItems.map((i) => i.to))
 const STATIC: Record<string, NavItemDef> = {}
 for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]) {
   STATIC[it.to] = it
+}
+// Продукты пространства: в меню Учёта их нет (открываются плиткой со стола), но вкладка
+// и полноэкранная раскладка нужны такие же, как рабочей области.
+for (const p of SPACE_PRODUCTS) {
+  STATIC[p.route] = { to: p.route, icon: PRODUCT_ICONS[p.code] ?? LayoutDashboard, label: p.label }
 }
 
 export interface ResolvedTab {

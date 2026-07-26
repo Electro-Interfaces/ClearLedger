@@ -74,9 +74,12 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
   // В продукте пространства («Финансы», «Данные», …) меню — только его страницы:
   // рабочее место не должно показывать чужие разделы. Разделы рабочей области
   // (гармошка) рисует WorkspaceModeSidebar, здесь только страницы.
+  // Доступ к продукту уже проверен на входе (RequireApp), поэтому пункты внутри не
+  // фильтруются модулями Учёта: у роли с ключом `finance` их нет, и «Документы»
+  // исчезли бы из собственного продукта.
   const product = isCarvedProfile(company.profileId) ? productForPath(pathname) : null
   if (product) {
-    const items = productNav(product).filter((i) => routeAllowed(i.to, companyModules))
+    const items = productNav(product)
     return items.length > 0 ? (
       <SidebarGroup className="py-0">
         <SidebarMenu>

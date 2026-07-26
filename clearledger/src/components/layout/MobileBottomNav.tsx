@@ -9,6 +9,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
+import { pathAllowed, homePath } from '@/config/spaceProducts'
 
 interface BottomNavItem {
   label: string
@@ -21,14 +22,17 @@ interface BottomNavItem {
  * разделам; полное меню — в шторке по гамбургеру. Пункты фильтруются RBAC.
  */
 export function MobileBottomNav() {
-  const { companyModules } = useCompany()
+  const { company, companyModules, canApp } = useCompany()
   const items: BottomNavItem[] = [
-    { label: 'Рабочий стол', path: '/workspace', icon: LayoutDashboard },
+    // У разрезанного профиля Учёта как места нет — его роль играет рабочий стол
+    // пространства, откуда открываются продукты.
+    { label: 'Рабочий стол', path: homePath(company.profileId), icon: LayoutDashboard },
     { label: 'Документы', path: '/files', icon: FileText },
     { label: 'Контрагенты', path: '/contractors', icon: Building2 },
     { label: 'Объекты', path: '/objects', icon: Boxes },
     { label: 'Настройки', path: '/settings', icon: Settings },
-  ].filter((i) => routeAllowed(i.path, companyModules))
+  ].filter((i) => pathAllowed(i.path, company.profileId, canApp,
+    (p) => routeAllowed(p, companyModules)))
 
   return (
     <nav

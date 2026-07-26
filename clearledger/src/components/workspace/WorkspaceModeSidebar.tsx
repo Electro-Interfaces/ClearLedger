@@ -9,9 +9,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
-import { useCompany } from '@/contexts/CompanyContext'
-import { modeAllowed } from '@/config/accessModules'
-import { useWorkspaceSections } from './workspaceSections'
+import { useVisibleSections } from './workspaceSections'
 import type { CentralMenuItem } from './CentralPanelLayout'
 import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
@@ -30,9 +28,8 @@ function groupItems(items: CentralMenuItem[]): { name?: string; items: CentralMe
 }
 
 export function WorkspaceModeSidebar() {
-  const { companyModules } = useCompany()
-  // RBAC: показываем только доступные режимы учёта (admin/суперадмин → все).
-  const sections = useWorkspaceSections().filter((s) => modeAllowed(s.mode, companyModules))
+  // Доступные ролью разделы этой оболочки (без вынесенных в свои приложения).
+  const sections = useVisibleSections()
   const { coreMode, setCoreMode } = useWorkspace()
   // Если активный режим недоступен по модулям — переключаемся на первый доступный.
   useEffect(() => {

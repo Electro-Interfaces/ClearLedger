@@ -61,6 +61,10 @@ interface WorkspaceContextType {
   /** Режим центральной панели — конвейер слева направо */
   coreMode: CoreMode
   setCoreMode: (mode: CoreMode) => void
+  /** Разделы, которыми ограничена оболочка: рабочая область открыта как отдельный
+   *  продукт пространства (напр. «Финансы» на `/finance`), и переключаться можно
+   *  только внутри его разделов. `null` — Учёт со всеми своими разделами. */
+  lockedModes: CoreMode[] | null
 
   /** Результат последней сверки (для KPI в тулбаре) */
   lastReconcileResult: unknown | null
@@ -78,21 +82,31 @@ interface WorkspaceContextType {
 
 const WorkspaceContext = createContext<WorkspaceContextType | null>(null)
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
+/**
+ * `lockModes` — рабочая область открыта как отдельный продукт пространства (свой маршрут
+ * и плитка на столе), а не как раздел Учёта: доступны только эти разделы. Внутри набора
+ * переключение обычное (`?mode=`), выйти за него нельзя — чужой режим из URL откатывается
+ * к первому разделу продукта.
+ */
+export function WorkspaceProvider({ children, lockModes }: { children: ReactNode; lockModes?: CoreMode[] }) {
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null)
   const [selectedShiftNumber, setSelectedShiftNumber] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'raw' | 'core' | 'export'>('raw')
   // Режим центральной панели живёт в URL (?mode=) — чтобы под-вид можно было закрепить закладкой.
   const [searchParams, setSearchParams] = useSearchParams()
-  const coreMode = readMode(searchParams)
+  const urlMode = readMode(searchParams)
+  const coreMode = lockModes
+    ? (lockModes.includes(urlMode) ? urlMode : lockModes[0])
+    : urlMode
   const setCoreMode = useCallback((mode: CoreMode) => {
+    if (lockModes && !lockModes.includes(mode)) return   // за пределы продукта не пускаем
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('mode', mode)
       next.delete('sub')   // новый режим — со своего под-раздела по умолчанию
       return next
     }, { replace: true })
-  }, [setSearchParams])
+  }, [setSearchParams, lockModes])
   const [lastReconcileResult, setLastReconcileResult] = useState<unknown | null>(null)
   const [exportDocs, setExportDocs] = useState<ExportDocument[]>([])
 
@@ -135,6 +149,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setActiveTab,
         coreMode,
         setCoreMode,
+        lockedModes: lockModes ?? null,
         lastReconcileResult,
         setLastReconcileResult,
         exportDocs,

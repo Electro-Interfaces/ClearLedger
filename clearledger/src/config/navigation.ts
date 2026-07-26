@@ -65,6 +65,14 @@ export const settingsItems: NavItemDef[] = [
   { to: '/catalog', icon: Library, label: 'Каталоги' },
 ]
 
+/**
+ * Все пункты по пути — из этого словаря продукты пространства (`config/spaceProducts.ts`)
+ * собирают своё левое меню, не заводя вторых определений тех же страниц.
+ */
+export const navByPath: Record<string, NavItemDef> = Object.fromEntries(
+  [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems].map((i) => [i.to, i]),
+)
+
 // Администрирование вынесено из меню Ledger в отдельное приложение «Центр управления»
 // (плитка на рабочем столе экосистемы, свой shell AdminLayout). Пункта в сайдбаре нет.
 // Определение оставлено для обратной ссылки; в навигации Ledger не используется.

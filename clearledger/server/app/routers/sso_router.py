@@ -27,11 +27,20 @@ router = APIRouter(prefix="/sso", tags=["SSO ElsyPlus"])
 # Внутренние продукты пространства: живут в этом же SPA, поэтому открываются маршрутом,
 # а не handoff-токеном и не ссылкой на чужой домен. Манифеста у них нет — источник истины
 # реестр (`eco_apps`), здесь только соответствие «продукт → маршрут».
-INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages"}
-# Слой рабочего стола: управление пространством стоит отдельно от прикладных продуктов.
-INTERNAL_LAYERS = {"admin": "admin", "chat": "service", "ledger": "app"}
+INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages",
+                   # Продукты разреза Учёта (см. app_registry._CARVED_PRODUCTS и
+                   # фронтовую карту config/spaceProducts.ts — маршруты обязаны совпадать).
+                   "projects": "/projects", "ops": "/operations", "network": "/network",
+                   "finance": "/finance", "data": "/data"}
+# Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
+# прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
+INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "chat": "service",
+                   "ledger": "app", "projects": "app", "ops": "app",
+                   "network": "app", "finance": "app"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
-INTERNAL_SORT = {"admin": 5, "ledger": 10, "support": 20, "chat": 30, "plan": 40, "conf": 50}
+INTERNAL_SORT = {"admin": 5, "ledger": 10, "projects": 12, "ops": 14, "network": 16,
+                 "support": 20, "finance": 25, "chat": 30, "plan": 40, "conf": 50,
+                 "data": 60}
 
 
 @router.get("/apps")

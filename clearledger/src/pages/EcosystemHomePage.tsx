@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import {
   LayoutGrid, ExternalLink, KeyRound, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
+  ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -26,13 +27,23 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, type SsoApp } from '@/services/ssoService'
 
-/** Иконка по имени из манифеста (`apps/<code>.yml`, поле icon). */
+/** Иконка по имени из реестра Ядра (`eco_apps.icon`, манифест `apps/<code>.yml`).
+ *  Неизвестное имя — LayoutGrid: плитка появляется, просто без своего значка. */
 const ICONS: Record<string, typeof FileText> = {
   'life-buoy': LifeBuoy,
   'clipboard-list': ClipboardList,
   'video': Video,
   'file-text': FileText,
   'messages-square': MessagesSquare,
+  'message-circle': MessageCircle,
+  'shield-check': ShieldCheck,
+  'book-open': BookOpen,
+  // Продукты разреза Учёта (config/spaceProducts.ts).
+  'hard-hat': HardHat,
+  'gauge': Gauge,
+  'bar-chart-3': BarChart3,
+  'wallet': Wallet,
+  'database': Database,
 }
 
 interface TileProps {
