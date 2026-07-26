@@ -7,7 +7,7 @@
  */
 import { matchPath } from 'react-router-dom'
 import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard } from 'lucide-react'
-import { SPACE_PRODUCTS } from './spaceProducts'
+import { SPACE_PRODUCTS, SHARED_PATHS } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
   mainNavItems, dataItems, oneCItems, settingsItems,
@@ -17,7 +17,7 @@ import { isCoreMode, workspaceTitle } from './workspaceViews'
 
 // Иконки продуктов пространства для вкладок (плитки берут свою из реестра Ядра).
 const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  projects: HardHat, ops: Gauge, network: BarChart3, finance: Wallet, data: Database,
+  projects: HardHat, ops: Gauge, sales: BarChart3, finance: Wallet, data: Database,
 }
 
 // Пути с фиксированной высотой (h-full, без скролла страницы): рабочая область Учёта,
@@ -39,6 +39,13 @@ for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]
 // и полноэкранная раскладка нужны такие же, как рабочей области.
 for (const p of SPACE_PRODUCTS) {
   STATIC[p.route] = { to: p.route, icon: PRODUCT_ICONS[p.code] ?? LayoutDashboard, label: p.label }
+  // Сквозные страницы (станции) живут под адресом продукта — вкладка нужна и им,
+  // иначе экран, открытый из «Финансов», не попадёт ни в закладки, ни в keep-alive.
+  for (const path of p.paths) {
+    if (!SHARED_PATHS.includes(path)) continue
+    const item = STATIC[path]
+    if (item) STATIC[`${p.route}${path}`] = { ...item, to: `${p.route}${path}` }
+  }
 }
 
 export interface ResolvedTab {

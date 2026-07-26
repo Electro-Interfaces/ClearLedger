@@ -13,6 +13,11 @@
  * и то, какие разделы ушли из Учёта (workspaceSections). Коды совпадают с реестром Ядра
  * (`eco_apps`), поэтому доступ выдаётся ролью на продукт целиком.
  *
+ * **Объект — сквозной, а не собственность одного продукта.** «Объекты» стоят в меню
+ * каждого продукта, которому они по делу нужны (эксплуатация чинит, продажи считают
+ * выручку, финансы держат аренду и документы) — это один и тот же реестр пространства,
+ * открытый под своим углом, а не копия справочника.
+ *
  * Разрез включён только у профиля `energy` (сеть ЭЗС). У топливного профиля (ГИГ) состав
  * другой — там «Учёт» остаётся единым продуктом со всеми разделами, как раньше.
  */
@@ -29,6 +34,13 @@ export interface SpaceProduct {
   modes: CoreMode[]
   /** Страницы продукта (пути из `config/navigation.ts`) — его левое меню. */
   paths: string[]
+  /**
+   * Вкладки карточки станции, которые открывает этот продукт (коды `COCKPIT_TABS`).
+   * Станция — ось бизнеса: её ведут все рабочие места сразу, но каждому нужна своя
+   * сторона — эксплуатации железо и связь, продажам выручка, финансам договоры и
+   * снабжение, данным подключённые источники. Пусто = все вкладки (профиль без разреза).
+   */
+  objectTabs?: string[]
 }
 
 export const SPACE_PRODUCTS: SpaceProduct[] = [
@@ -38,15 +50,18 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
   },
   {
     // Эксплуатация — железо и его состояние: мониторинг сети, парк, склады, ЗИП.
-    // Объект живёт здесь: его эксплуатируют. Реестр объектов остаётся в «Управлении».
     code: 'ops', route: '/operations', label: 'Эксплуатация',
     modes: ['operations'], paths: ['/objects'],
+    objectTabs: ['passport', 'equipment', 'integrations', 'diagnostics'],
   },
   {
-    // Сеть — коммерция: сессии, тарифы, ЮЛ/ФЛ, ABC-XYZ. Метрика тоже сюда: это
-    // маркетинг сети, а не кухня данных.
-    code: 'network', route: '/network', label: 'Сеть',
-    modes: ['management', 'store'], paths: ['/metrika'],
+    // Продажи — коммерческая сторона: сессии, тарифы, ЮЛ/ФЛ, ABC-XYZ, маркетинг.
+    // Не «Сеть»: продукт называется по тому, ЧТО здесь делают, а не чем владеют —
+    // и «Сеть» уже занята группой разделов внутри (обзор, карта, динамика).
+    // Не «Реализация»: это термин бухучёта, ему место в Финансах.
+    code: 'sales', route: '/sales', label: 'Продажи',
+    modes: ['management', 'store'], paths: ['/objects', '/metrika'],
+    objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
     // Финансы — счётная сторона: проводки, налоги, выгрузка, первичка, контрагенты
@@ -59,17 +74,21 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // разрезом для топливного профиля.
     code: 'finance', route: '/finance', label: 'Финансы',
     modes: ['accounting', 'financial', 'tax', 'export'],
-    paths: ['/files', '/contractors', '/organization'],
+    paths: ['/objects', '/files', '/contractors', '/organization'],
+    objectTabs: ['passport', 'contracts', 'sales', 'supply'],
   },
   {
     // Данные — служебная кухня: откуда берутся цифры и как приводятся к общему виду.
     // Ошибка здесь ломает все продукты сразу, поэтому доступ отдельный и узкий.
     // «Каталоги» — библиотека типов источников, каналов и разрезов сверки, то есть
     // тот же входной контур; «Параметры» — его настройки.
+    // Станция здесь — ключ связи каналов: к ней привязываются источники, по ней
+    // сходятся сессии и сверка. Нужны паспорт и подключённые интеграции.
     code: 'data', route: '/data', label: 'Данные',
     modes: ['normalize', 'reconcile'],
-    paths: ['/intake', '/connectors', '/sources', '/normalization', '/reconciliation',
-      '/catalog', '/settings'],
+    paths: ['/objects', '/intake', '/connectors', '/sources', '/normalization',
+      '/reconciliation', '/catalog', '/settings'],
+    objectTabs: ['passport', 'integrations', 'diagnostics'],
   },
 ]
 
@@ -99,8 +118,32 @@ export function productForPath(pathname: string): SpaceProduct | null {
 export function productNav(product: SpaceProduct): NavItemDef[] {
   return [
     { to: product.route, icon: dashboardItem.icon, label: 'Рабочий стол', end: true },
-    ...product.paths.map((path) => navByPath[path]).filter(Boolean),
+    ...product.paths.map((path) => navByPath[path]).filter(Boolean)
+      .map((item) => ({ ...item, to: productPagePath(product, item.to) })),
   ]
+}
+
+/**
+ * Страницы, которые открыты СРАЗУ НЕСКОЛЬКИМ продуктам. У таких адрес живёт внутри
+ * продукта (`/finance/objects`), иначе по пути `/objects` не понять, из какого
+ * рабочего места человек смотрит станцию — а от этого зависят и права, и состав
+ * карточки, и название в шапке.
+ */
+export const SHARED_PATHS = ['/objects']
+
+export function productPagePath(product: SpaceProduct, path: string): string {
+  return SHARED_PATHS.includes(path) ? `${product.route}${path}` : path
+}
+
+/** Продукты, которым открыта сквозная страница (для маршрутов в `App.tsx`). */
+export function productsWithPath(path: string): SpaceProduct[] {
+  return SPACE_PRODUCTS.filter((p) => p.paths.includes(path))
+}
+
+/** Вкладки карточки станции для продукта; вне разреза — все (undefined). */
+export function objectTabsFor(pathname: string, profileId: string | null | undefined): string[] | undefined {
+  if (!isCarvedProfile(profileId)) return undefined
+  return productForPath(pathname)?.objectTabs
 }
 
 /** Разделы, ушедшие из Учёта в отдельные продукты (при выключенном разрезе — пусто). */

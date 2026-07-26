@@ -38,6 +38,20 @@ export type CockpitVariant = 'intake' | 'full'
 // intake = сырой ввод (левое меню «Точки обслуживания»): только object+connection.
 // full = рабочий модуль «Объекты» в Управленческом: все табы.
 export const INTAKE_TAB_VALUES = ['passport', 'equipment', 'integrations', 'diagnostics']
-export function cockpitTabsFor(variant: CockpitVariant = 'full'): CockpitTab[] {
-  return variant === 'intake' ? COCKPIT_TABS.filter((t) => INTAKE_TAB_VALUES.includes(t.value)) : COCKPIT_TABS
+
+/**
+ * Вкладки станции для текущего места работы.
+ *
+ * `allowed` — разрез продукта пространства (`SpaceProduct.objectTabs`): станция одна на
+ * всю компанию, но эксплуатации нужны железо и связь, продажам — выручка, финансам —
+ * договоры и снабжение, данным — подключённые источники. Не задан — показываем всё.
+ */
+export function cockpitTabsFor(variant: CockpitVariant = 'full', allowed?: string[]): CockpitTab[] {
+  const base = variant === 'intake'
+    ? COCKPIT_TABS.filter((t) => INTAKE_TAB_VALUES.includes(t.value))
+    : COCKPIT_TABS
+  if (!allowed?.length) return base
+  const shown = base.filter((t) => allowed.includes(t.value))
+  // Пустой разрез оставил бы окно вовсе без вкладок — лучше паспорт, чем ничего.
+  return shown.length > 0 ? shown : base.filter((t) => t.value === 'passport')
 }

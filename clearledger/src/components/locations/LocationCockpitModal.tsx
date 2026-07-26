@@ -12,6 +12,9 @@ import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Tabs as TabsPrimitive } from 'radix-ui'
 import { Badge } from '@/components/ui/badge'
 import { X } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
+import { useCompany } from '@/contexts/CompanyContext'
+import { objectTabsFor } from '@/config/spaceProducts'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { useLocationContracts } from '@/hooks/useReferences'
 import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
@@ -44,6 +47,12 @@ export function LocationCockpitModal({
   variant?: CockpitVariant
 }) {
   const types = useLocationTypes()
+  // Станция одна на компанию, но каждое рабочее место смотрит на неё со своей стороны:
+  // из «Эксплуатации» — железо и связь, из «Продаж» — выручка, из «Финансов» — договоры
+  // и снабжение. Разрез берётся из продукта, в котором сейчас человек.
+  const { pathname } = useLocation()
+  const { company } = useCompany()
+  const allowedTabs = objectTabsFor(pathname, company.profileId)
 
   // Портал направляем в рабочую область (SidebarInset), а не в body.
   const [container, setContainer] = useState<HTMLElement | null>(null)
@@ -66,7 +75,7 @@ export function LocationCockpitModal({
   // Сборка ряда вкладок с разделителями и подписями групп.
   const triggers: ReactNode[] = []
   let prevGroup: CockpitGroup | null = null
-  for (const tab of cockpitTabsFor(variant)) {
+  for (const tab of cockpitTabsFor(variant, allowedTabs)) {
     if (tab.group !== prevGroup) {
       if (prevGroup !== null) {
         triggers.push(<span key={`sep-${tab.group}`} aria-hidden className="mx-1.5 h-5 w-px shrink-0 self-center bg-border/60" />)

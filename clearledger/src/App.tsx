@@ -5,7 +5,7 @@ import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
-import { SPACE_PRODUCTS, isCarvedProfile } from '@/config/spaceProducts'
+import { SPACE_PRODUCTS, isCarvedProfile, productsWithPath } from '@/config/spaceProducts'
 import { TabsProvider } from '@/contexts/TabsContext'
 import { FilterProvider } from '@/contexts/FilterContext'
 import { SupportProvider } from '@/contexts/SupportContext'
@@ -182,6 +182,13 @@ const router = createBrowserRouter([
           ...SPACE_PRODUCTS.map((p) => ({
             path: p.route,
             element: <RequireApp code={p.code}><WorkspaceLayout modes={p.modes} /></RequireApp>,
+          })),
+          // Станции открыты каждому продукту, которому они по делу нужны, — под его
+          // адресом (`/finance/objects`): реестр один, но видно, откуда смотрят, и от
+          // этого зависят права и состав карточки (`SpaceProduct.objectTabs`).
+          ...productsWithPath('/objects').map((p) => ({
+            path: `${p.route}/objects`,
+            element: <RequireApp code={p.code}><LazyPage><LocationsPage cockpitVariant="full" /></LazyPage></RequireApp>,
           })),
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
