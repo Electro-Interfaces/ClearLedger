@@ -123,6 +123,17 @@ async def seed_apps(db: AsyncSession) -> None:
                 db.add(AppModule(app_id=app.id, code=mc, name=mn, sort=(i + 1) * 10,
                                  is_core=(mc == "management")))
                 changed = True
+            else:
+                # Каталог в коде — источник истины и для ИМЕН модулей, не только приложений.
+                # Иначе переименование раздела доезжает до меню, но не до матрицы прав, и в
+                # двух местах интерфейса один раздел зовётся по-разному (так «Компании»
+                # остались «Партнёрами» после первого деплоя).
+                if ex.name != mn:
+                    ex.name = mn
+                    changed = True
+                if ex.sort != (i + 1) * 10:
+                    ex.sort = (i + 1) * 10
+                    changed = True
     if changed:
         await db.commit()
 
