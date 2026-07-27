@@ -9,18 +9,20 @@
  * только каналы с известной витриной нормализации (карта NORM_TEMPLATES).
  */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import { loadChannels } from '@/services/channelService'
 import { isApiEnabled } from '@/services/apiClient'
 import { getChargeModel, getStationsModel, getStationsLinkage } from '@/services/analyticsService'
 import { usePaymentDisciplineSummary, useReestrModel, useDispenseRecon } from '@/hooks/useReferences'
-import { getSpaceDataModel } from '@/services/spaceObjectsService'
+import { getSpaceDataModel, linkCounterparties } from '@/services/spaceObjectsService'
+import type { LinkCounterpartiesResult } from '@/services/spaceObjectsService'
 import type { Channel } from '@/types/channel'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { fmtN } from '@/components/balance/balanceCalc'
 import { Database, ChevronRight } from 'lucide-react'
@@ -401,6 +403,8 @@ function SpaceDataModelBlock() {
         </CardContent></Card>
       ))}
 
+      <RoleLinkBlock />
+
       <p className="px-1 text-[11px] text-muted-foreground/70">
         Жёлтым — записи, где связь ещё не материализована: подрядчик проекта, поставщик
         оборудования и сетевая организация хранятся текстом, поэтому в общем реестре
@@ -408,6 +412,111 @@ function SpaceDataModelBlock() {
         карточкой в договорах и строкой в проекте.
       </p>
     </div>
+  )
+}
+
+/* ── Сопоставление ролей с карточками контрагентов ──
+   Отдельная операция, а не молчаливое действие импорта: связывание заводит карточки в
+   общем справочнике пространства, и сколько именно их появится, человек должен увидеть
+   до того, как это случится. Поэтому сначала отчёт, потом кнопка. */
+function RoleLinkBlock() {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const [report, setReport] = useState<LinkCounterpartiesResult | null>(null)
+
+  const check = useMutation({
+    mutationFn: () => linkCounterparties(companyId, false),
+    onSuccess: setReport,
+  })
+  const apply = useMutation({
+    mutationFn: () => linkCounterparties(companyId, true),
+    onSuccess: (r) => {
+      setReport(r)
+      qc.invalidateQueries({ queryKey: ['space-data-model', companyId] })
+    },
+  })
+
+  const pending = check.isPending || apply.isPending
+  const rows = report?.links.filter((l) => l.records > 0) ?? []
+  const canApply = !report?.applied && rows.some((l) => l.linked > 0)
+
+  return (
+    <Card><CardContent className="space-y-3 overflow-x-auto pt-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="text-sm font-medium">Сопоставление ролей с карточками</div>
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => check.mutate()}>
+          {check.isPending ? 'Считаем…' : 'Проверить'}
+        </Button>
+        {canApply && (
+          <Button size="sm" disabled={pending} onClick={() => apply.mutate()}>
+            {apply.isPending ? 'Связываем…' : `Связать (${fmtN(report!.totals.linked)} записей, `
+              + `${fmtN(report!.totals.created)} новых карточек)`}
+          </Button>
+        )}
+        {report?.applied && (
+          <span className="text-xs text-emerald-600 dark:text-emerald-400">
+            Связано {fmtN(report.totals.linked)} записей, заведено карточек: {fmtN(report.totals.created)}
+          </span>
+        )}
+      </div>
+
+      {!report && (
+        <p className="text-xs text-muted-foreground">
+          Собственник площадки, подрядчик, поставщик и сетевая организация приезжают
+          текстом. Проверка покажет, сколько имён совпадёт с уже заведёнными контрагентами,
+          а сколько потребует новой карточки — база меняется только по кнопке «Связать».
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <Table className="min-w-[860px]">
+          <TableHeader><TableRow>
+            <TableHead>Роль</TableHead>
+            <TableHead className="text-right">Записей</TableHead>
+            <TableHead className="text-right">Имён</TableHead>
+            <TableHead className="text-right">Совпало</TableHead>
+            <TableHead className="text-right">Новых карточек</TableHead>
+            <TableHead>Примеры новых</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {rows.map((l) => (
+              <TableRow key={l.key}>
+                <TableCell className="font-medium">
+                  {l.label}
+                  <div className="font-mono text-[10px] text-muted-foreground">{l.table}.{l.field}</div>
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{fmtN(l.records)}</TableCell>
+                <TableCell className="text-right tabular-nums">{fmtN(l.names)}</TableCell>
+                <TableCell className="text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                  {fmtN(l.matched)}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-amber-600 dark:text-amber-400">
+                  {fmtN(l.created)}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {l.samples.join(' · ') || '—'}
+                  {l.skipped > 0 && (
+                    <div className="text-[10px]">
+                      пропущено {fmtN(l.skipped)} — значение не похоже на юрлицо
+                    </div>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      {report && rows.length === 0 && (
+        <p className="text-xs text-muted-foreground">Несвязанных ролей нет — все ссылаются на карточки.</p>
+      )}
+      {(check.error || apply.error) && (
+        <p className="text-xs text-destructive">
+          {String((apply.error ?? check.error) instanceof Error
+            ? (apply.error ?? check.error)!.message : 'Не удалось выполнить сопоставление')}
+        </p>
+      )}
+    </CardContent></Card>
   )
 }
 

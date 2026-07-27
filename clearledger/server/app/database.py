@@ -881,6 +881,26 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.25: роль участника — ссылкой на карточку контрагента, а не строкой.
+        # Текст остаётся исходником (что написали в файле), ссылка отвечает за «это
+        # то же юрлицо, что в договоре». Заполняются сопоставлением (space_links.py),
+        # здесь только заводим колонки.
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS owner_counterparty_id UUID "
+            "REFERENCES counterparties(id) ON DELETE SET NULL",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS supplier_counterparty_id UUID "
+            "REFERENCES counterparties(id) ON DELETE SET NULL",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS contractor_counterparty_id UUID "
+            "REFERENCES counterparties(id) ON DELETE SET NULL",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS "
+            "grid_operator_counterparty_id UUID REFERENCES counterparties(id) ON DELETE SET NULL",
+            "ALTER TABLE ezs_site_equipment ADD COLUMN IF NOT EXISTS "
+            "supplier_counterparty_id UUID REFERENCES counterparties(id) ON DELETE SET NULL",
+            "ALTER TABLE corporate_clients ADD COLUMN IF NOT EXISTS counterparty_id UUID "
+            "REFERENCES counterparties(id) ON DELETE SET NULL",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

@@ -475,6 +475,7 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
     org_id = (await db.execute(select(Organization.id).where(
         Organization.company_id == company_id).limit(1))).scalar()
 
+    cp_by_phone: dict[str, Counterparty] = {}
     for o in orgs:
         name = str(o.get("name") or "").strip()
         nn = _normname(name)
@@ -494,6 +495,7 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
             # Одно юрлицо может быть и покупателем, и поставщиком — роль в реестре
             # прикладная, поэтому она копится в aliases, а не заводит вторую карточку.
             cp.aliases = sorted(set((cp.aliases or []) + ["corporate"]))
+        cp_by_phone[str(o.get("phone") or "")] = cp
         if any(by_cp.get(k) for k in (str(cp.id), cp.external_ref) if k):
             continue
         contract = Contract(
@@ -505,6 +507,15 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
         )
         db.add(contract)
         by_cp[str(cp.id)] = contract
+
+    # Ссылка клиента на карточку контрагента: реестр клиентов пересоздаётся при каждой
+    # загрузке справочника, поэтому связь ставится здесь, а не разовым сопоставлением —
+    # иначе следующая загрузка снова оставила бы сведение по имени.
+    for phone, cp in cp_by_phone.items():
+        if phone:
+            await db.execute(update(CorporateClient).where(
+                CorporateClient.company_id == company_id, CorporateClient.phone == phone,
+            ).values(counterparty_id=cp.id))
     await db.flush()
 
 

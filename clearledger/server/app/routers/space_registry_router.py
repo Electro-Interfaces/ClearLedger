@@ -22,7 +22,9 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import App, AppCompanyLink, Company, User, UserCompany
 from app.services import space_map as space_map_service
-from app.services import space_connectors, space_data_model, space_projection, space_registry
+from app.services import (
+    space_connectors, space_data_model, space_links, space_projection, space_registry,
+)
 
 router = APIRouter(prefix="/registry", tags=["ElsyPlus Core — реестр объектов"])
 
@@ -222,6 +224,22 @@ async def data_model(
     """Состав нормализованной базы пространства: сущности, объёмы, незакрытые связи."""
     cid = await _member(company_id, user, db)
     data = await space_data_model.data_model(db, cid)
+    return {"companyId": str(cid), **data}
+
+
+@router.post("/link-counterparties")
+async def link_counterparties(
+    company_id: str = Query(...),
+    apply: bool = Query(False, description="false — только отчёт, в базу ничего не пишем"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Свести текстовые роли (собственник, подрядчик, поставщик) с карточками контрагентов.
+
+    Пишет только при apply=true и только администратору: операция заводит карточки в
+    общем справочнике пространства, её последствия видят все продукты.
+    """
+    cid = await (_admin if apply else _member)(company_id, user, db)
+    data = await space_links.link_counterparties(db, cid, apply=apply)
     return {"companyId": str(cid), **data}
 
 

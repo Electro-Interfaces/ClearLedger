@@ -31,11 +31,7 @@ from app.models import (
     Region, ServiceLocation, SourceFile, StationContractSettlement, StationDispensePeriod,
     StationEnergyPeriod, UserCompany,
 )
-
-
-def _text(*cols) -> Any:
-    """Условие «поле заполнено текстом» — признак несматериализованной связи."""
-    return or_(*[(c.isnot(None)) & (c != "") for c in cols])
+from app.services.space_links import any_unlinked, unlinked
 
 
 # Сущность нормализованной базы: (ключ, метка, модель, чем наполняется, кто потребляет,
@@ -73,8 +69,10 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
         ("sites", "Площадки-проекты", EzsSite,
          "Импорт реестра площадок · ведение вручную", "Проекты · инвестпрограмма",
          "кадастровый № / координаты → объект при вводе",
-         _text(EzsSite.owner, EzsSite.supplier, EzsSite.contractor),
-         "собственник/поставщик/подрядчик строкой, не ссылкой на контрагента"),
+         any_unlinked((EzsSite.owner, EzsSite.owner_counterparty_id),
+                      (EzsSite.supplier, EzsSite.supplier_counterparty_id),
+                      (EzsSite.contractor, EzsSite.contractor_counterparty_id)),
+         "собственник/поставщик/подрядчик без карточки контрагента"),
         ("site_events", "События площадок", EzsSiteEvent,
          "Смена стадии · касания · заметки", "Проекты (история и зависания)",
          "площадка → событие", None, None),
@@ -84,13 +82,14 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
         ("tech_connections", "Техприсоединения", EzsTechConnection,
          "Ведение по проекту", "Проекты · сроки ввода",
          "площадка → заявка ТП",
-         _text(EzsTechConnection.grid_operator),
-         "сетевая организация строкой, не ссылкой на контрагента"),
+         unlinked(EzsTechConnection.grid_operator,
+                  EzsTechConnection.grid_operator_counterparty_id),
+         "сетевая организация без карточки контрагента"),
         ("site_equipment", "Оборудование проектов", EzsSiteEquipment,
          "Ведение по проекту · поставки", "Проекты · эксплуатация после ввода",
          "площадка → единица оборудования",
-         _text(EzsSiteEquipment.supplier),
-         "поставщик строкой, не ссылкой на контрагента"),
+         unlinked(EzsSiteEquipment.supplier, EzsSiteEquipment.supplier_counterparty_id),
+         "поставщик без карточки контрагента"),
         ("site_costs", "Затраты проектов", EzsSiteCost,
          "Ведение по проекту", "Проекты · бюджет",
          "площадка → статья затрат", None, None),
@@ -102,9 +101,9 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
          ChargeSession.location_id.is_(None), "без объекта"),
         ("corporate_clients", "Корпоративные клиенты", CorporateClient,
          "Канал зарядных сессий (реестр ЮЛ)", "Корпоративный процессинг",
-         "телефон · ИНН",
-         or_(CorporateClient.inn.is_(None), CorporateClient.inn == ""),
-         "без ИНН — с контрагентом сводится по имени"),
+         "телефон → сессии · карточка контрагента → договор",
+         CorporateClient.counterparty_id.is_(None),
+         "без карточки контрагента"),
     ]),
     ("energy", "Хозяйство и деньги", [
         ("settlements", "Платёжная дисциплина", StationContractSettlement,

@@ -204,6 +204,42 @@ export async function getSpaceDataModel(companyId: string): Promise<SpaceDataMod
   return get<SpaceDataModel>('/api/registry/data-model', { company_id: companyId })
 }
 
+/** Одна роль, записанная текстом: сколько имён, сколько сойдётся с карточками. */
+export interface LinkRoleReport {
+  key: string
+  label: string
+  table: string
+  field: string
+  /** Различных значений текста и записей за ними. */
+  names: number
+  records: number
+  /** Имён нашлось в справочнике / потребуют новой карточки. */
+  matched: number
+  created: number
+  /** Записей будет связано и пропущено (мусорные значения вроде «уточняется»). */
+  linked: number
+  skipped: number
+  samples: string[]
+}
+
+export interface LinkCounterpartiesResult {
+  applied: boolean
+  links: LinkRoleReport[]
+  totals: { linked: number; created: number }
+}
+
+/**
+ * Свести текстовые роли (собственник, подрядчик, поставщик, сетевая организация) с
+ * карточками контрагентов. Без `apply` — только отчёт: сколько карточек придётся
+ * завести, решает человек.
+ */
+export async function linkCounterparties(
+  companyId: string, apply = false,
+): Promise<LinkCounterpartiesResult> {
+  const qs = new URLSearchParams({ company_id: companyId, apply: String(apply) })
+  return post<LinkCounterpartiesResult>(`/api/registry/link-counterparties?${qs}`)
+}
+
 export interface ObjectTicket {
   id: string
   number: string | number

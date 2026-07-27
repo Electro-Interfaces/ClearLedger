@@ -3516,6 +3516,10 @@ class CorporateClient(Base):
     phone: Mapped[str] = mapped_column(String(20), nullable=False)          # ключ = user_id сессии
     ext_id: Mapped[str | None] = mapped_column(String(40), nullable=True)   # «ID организации» из файла
     inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Та же организация, что платит по договору корпзарядки: без ссылки клиента с
+    # контрагентом сводили по имени, и первое же переименование рвало связь.
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
     mode: Mapped[str] = mapped_column(String(16), nullable=False, default="retail")  # matrix|flat|retail
     rate: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)         # для flat
     matrix: Mapped[dict | None] = mapped_column(JSONB, nullable=True)       # {region: {CCS2,TYPE2,TYPE1}} — РОЗНИЦА
@@ -3915,6 +3919,15 @@ class EzsSite(Base):
     # ── участники и техприсоединение ──
     supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)    # поставщик ЭЗС
     contractor: Mapped[str | None] = mapped_column(String(400), nullable=True)  # подрядчик
+    # Роль участника — ссылкой на карточку контрагента; текст выше остаётся исходником
+    # (в файле пишут «ООО «Ромашка» (аренда)», а карточка одна на все роли и продукты).
+    # Без этого собственник площадки и арендодатель в договорах — два разных мира.
+    owner_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    supplier_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
+    contractor_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
     tu_status: Mapped[str | None] = mapped_column(Text, nullable=True)          # статус согласования / ТУ
     tech_conn_type: Mapped[str | None] = mapped_column(String(300), nullable=True)
     dop_service: Mapped[str | None] = mapped_column(String(300), nullable=True)
@@ -4050,6 +4063,8 @@ class EzsTechConnection(Base):
     # draft | applied | specs (ТУ получены) | contract | in_progress | done | rejected
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
     grid_operator: Mapped[str | None] = mapped_column(String(300), nullable=True)  # сетевая организация
+    grid_operator_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
     application_no: Mapped[str | None] = mapped_column(String(80), nullable=True)
     application_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     specs_no: Mapped[str | None] = mapped_column(String(80), nullable=True)        # № ТУ
@@ -4098,6 +4113,8 @@ class EzsSiteEquipment(Base):
     connectors: Mapped[str | None] = mapped_column(String(120), nullable=True)  # GB/T, CCS2, CHAdeMO…
     qty: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    supplier_counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True)
     price: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     order_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)     # плановая поставка
