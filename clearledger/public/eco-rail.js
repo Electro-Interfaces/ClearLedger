@@ -58,7 +58,13 @@
   async function core(path) {
     const t = token()
     if (!t) throw new Error('no token')
-    const r = await fetch(path, { headers: { Authorization: `Bearer ${t}` } })
+    // АБСОЛЮТНЫЙ адрес — обязательно. Приложение под префиксом (`/support`) ставит шим
+    // на window.fetch и уводит любой относительный `/api/...` в свою базу
+    // (`/support/api/...`), поэтому запрос к Ядру не доходил и каталог продуктов
+    // приходил пустым — «Продукты недоступны». С origin шим путь не трогает.
+    const r = await fetch(new URL(path, location.origin).href, {
+      headers: { Authorization: `Bearer ${t}` },
+    })
     if (!r.ok) throw new Error(String(r.status))
     return r.json()
   }
