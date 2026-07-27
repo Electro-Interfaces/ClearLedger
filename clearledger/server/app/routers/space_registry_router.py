@@ -231,15 +231,18 @@ async def data_model(
 async def link_counterparties(
     company_id: str = Query(...),
     apply: bool = Query(False, description="false — только отчёт, в базу ничего не пишем"),
+    only: str | None = Query(None, description="ключи ролей через запятую; пусто — все"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Свести текстовые роли (собственник, подрядчик, поставщик) с карточками контрагентов.
 
     Пишет только при apply=true и только администратору: операция заводит карточки в
-    общем справочнике пространства, её последствия видят все продукты.
+    общем справочнике пространства, её последствия видят все продукты. Отчёт всегда
+    полный — `only` ограничивает запись, а не подсчёт.
     """
     cid = await (_admin if apply else _member)(company_id, user, db)
-    data = await space_links.link_counterparties(db, cid, apply=apply)
+    keys = {k.strip() for k in only.split(",") if k.strip()} if only else None
+    data = await space_links.link_counterparties(db, cid, apply=apply, only=keys)
     return {"companyId": str(cid), **data}
 
 

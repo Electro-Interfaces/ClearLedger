@@ -23,6 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { fmtN } from '@/components/balance/balanceCalc'
 import { Database, ChevronRight } from 'lucide-react'
@@ -423,13 +424,20 @@ function RoleLinkBlock() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const [report, setReport] = useState<LinkCounterpartiesResult | null>(null)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
 
   const check = useMutation({
     mutationFn: () => linkCounterparties(companyId, false),
-    onSuccess: setReport,
+    onSuccess: (r) => {
+      setReport(r)
+      // Собственник площадки по умолчанию снят: это банк кандидатов на аренду, и его
+      // карточки превратят реестр контрагентов в список «с кем поговорили».
+      setPicked(new Set(r.links
+        .filter((l) => l.linked > 0 && l.key !== 'site_owner').map((l) => l.key)))
+    },
   })
   const apply = useMutation({
-    mutationFn: () => linkCounterparties(companyId, true),
+    mutationFn: () => linkCounterparties(companyId, true, [...picked]),
     onSuccess: (r) => {
       setReport(r)
       qc.invalidateQueries({ queryKey: ['space-data-model', companyId] })
@@ -438,7 +446,10 @@ function RoleLinkBlock() {
 
   const pending = check.isPending || apply.isPending
   const rows = report?.links.filter((l) => l.records > 0) ?? []
-  const canApply = !report?.applied && rows.some((l) => l.linked > 0)
+  const chosen = rows.filter((l) => picked.has(l.key))
+  const willLink = chosen.reduce((a, l) => a + l.linked, 0)
+  const willCreate = chosen.reduce((a, l) => a + l.created, 0)
+  const canApply = !report?.applied && willLink > 0
 
   return (
     <Card><CardContent className="space-y-3 overflow-x-auto pt-5">
@@ -449,8 +460,8 @@ function RoleLinkBlock() {
         </Button>
         {canApply && (
           <Button size="sm" disabled={pending} onClick={() => apply.mutate()}>
-            {apply.isPending ? 'Связываем…' : `Связать (${fmtN(report!.totals.linked)} записей, `
-              + `${fmtN(report!.totals.created)} новых карточек)`}
+            {apply.isPending ? 'Связываем…' : `Связать выбранное (${fmtN(willLink)} записей, `
+              + `${fmtN(willCreate)} новых карточек)`}
           </Button>
         )}
         {report?.applied && (
@@ -464,13 +475,15 @@ function RoleLinkBlock() {
         <p className="text-xs text-muted-foreground">
           Собственник площадки, подрядчик, поставщик и сетевая организация приезжают
           текстом. Проверка покажет, сколько имён совпадёт с уже заведёнными контрагентами,
-          а сколько потребует новой карточки — база меняется только по кнопке «Связать».
+          а сколько потребует новой карточки — база меняется только по кнопке «Связать»,
+          и только по отмеченным ролям.
         </p>
       )}
 
       {rows.length > 0 && (
-        <Table className="min-w-[860px]">
+        <Table className="min-w-[900px]">
           <TableHeader><TableRow>
+            <TableHead className="w-8" />
             <TableHead>Роль</TableHead>
             <TableHead className="text-right">Записей</TableHead>
             <TableHead className="text-right">Имён</TableHead>
@@ -480,10 +493,30 @@ function RoleLinkBlock() {
           </TableRow></TableHeader>
           <TableBody>
             {rows.map((l) => (
-              <TableRow key={l.key}>
+              <TableRow key={l.key} className={picked.has(l.key) ? undefined : 'opacity-60'}>
+                <TableCell>
+                  <Checkbox
+                    checked={picked.has(l.key)}
+                    disabled={pending || l.linked === 0 || report?.applied}
+                    onCheckedChange={(v) => setPicked((prev) => {
+                      const next = new Set(prev)
+                      if (v) next.add(l.key)
+                      else next.delete(l.key)
+                      return next
+                    })}
+                    aria-label={`Связывать: ${l.label}`}
+                  />
+                </TableCell>
                 <TableCell className="font-medium">
                   {l.label}
                   <div className="font-mono text-[10px] text-muted-foreground">{l.table}.{l.field}</div>
+                  {report?.applied && (
+                    <div className={l.written
+                      ? 'text-[10px] text-emerald-600 dark:text-emerald-400'
+                      : 'text-[10px] text-muted-foreground'}>
+                      {l.written ? 'связано' : 'осталось планом'}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{fmtN(l.records)}</TableCell>
                 <TableCell className="text-right tabular-nums">{fmtN(l.names)}</TableCell>

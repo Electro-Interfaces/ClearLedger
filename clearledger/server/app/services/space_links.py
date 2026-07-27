@@ -62,8 +62,15 @@ def _usable(raw: str) -> bool:
 
 
 async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
-                              apply: bool = False) -> dict[str, Any]:
-    """Свести текстовые роли с карточками контрагентов. apply=False — только отчёт."""
+                              apply: bool = False,
+                              only: set[str] | None = None) -> dict[str, Any]:
+    """Свести текстовые роли с карточками контрагентов. apply=False — только отчёт.
+
+    `only` — какие роли писать (остальные всё равно посчитаются в отчёте). Роли не
+    равноценны: подрядчик и корпоративный клиент — уже стороны договора, а собственник
+    площадки из банка кандидатов чаще всего останется кандидатом, и заводить его
+    карточкой значит превратить реестр контрагентов в список «с кем поговорили».
+    """
     cps = (await db.execute(select(Counterparty).where(
         Counterparty.company_id == company_id))).scalars().all()
     by_norm: dict[str, Counterparty] = {}
@@ -80,6 +87,7 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
     total_linked = total_created = 0
 
     for key, label, model, text_col, fk_col, alias in _LINKS:
+        write = apply and (only is None or key in only)
         rows = (await db.execute(
             select(text_col, func.count()).where(
                 model.company_id == company_id,
@@ -99,7 +107,7 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
                 created += 1
                 if len(samples) < 5:
                     samples.append(_clean_cp_name(raw)[:80])
-                if apply:
+                if write:
                     cp = Counterparty(
                         company_id=company_id, inn="", name=_clean_cp_name(raw)[:500],
                         type=_cp_type(raw), aliases=[alias], kind="external",
@@ -109,10 +117,10 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
                     by_norm[nn] = cp
             else:
                 matched += 1
-                if apply and alias not in (cp.aliases or []):
+                if write and alias not in (cp.aliases or []):
                     cp.aliases = sorted(set((cp.aliases or []) + [alias]))
             linked += cnt
-            if apply and cp is not None:
+            if write and cp is not None:
                 await db.execute(update(model).where(
                     model.company_id == company_id, text_col == raw, fk_col.is_(None),
                 ).values({fk_col.key: cp.id}))
@@ -121,10 +129,12 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
             "key": key, "label": label, "table": model.__tablename__,
             "field": text_col.key, "names": len(rows), "records": sum(c for _, c in rows),
             "matched": matched, "created": created, "linked": linked,
-            "skipped": skipped, "samples": samples,
+            "skipped": skipped, "samples": samples, "written": write,
         })
-        total_linked += linked
-        total_created += created
+        # Итог — про сделанное: при выборочной записи невыбранные роли остаются планом.
+        if write or not apply:
+            total_linked += linked
+            total_created += created
 
     if apply:
         await db.commit()

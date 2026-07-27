@@ -220,6 +220,8 @@ export interface LinkRoleReport {
   linked: number
   skipped: number
   samples: string[]
+  /** Записана ли роль в этом вызове (при выборочном применении). */
+  written: boolean
 }
 
 export interface LinkCounterpartiesResult {
@@ -231,12 +233,13 @@ export interface LinkCounterpartiesResult {
 /**
  * Свести текстовые роли (собственник, подрядчик, поставщик, сетевая организация) с
  * карточками контрагентов. Без `apply` — только отчёт: сколько карточек придётся
- * завести, решает человек.
+ * завести, решает человек. `only` — какие роли писать (отчёт остаётся полным).
  */
 export async function linkCounterparties(
-  companyId: string, apply = false,
+  companyId: string, apply = false, only?: string[],
 ): Promise<LinkCounterpartiesResult> {
   const qs = new URLSearchParams({ company_id: companyId, apply: String(apply) })
+  if (only?.length) qs.set('only', only.join(','))
   return post<LinkCounterpartiesResult>(`/api/registry/link-counterparties?${qs}`)
 }
 
