@@ -178,24 +178,18 @@
         <style>
           :host{ display:inline-flex; align-items:center; gap:8px; position:relative;
                  font:inherit; color:inherit }
-          /* Вид — тот же, что у прикладных кнопок рядом (в Ядре это btnCls
-             HeaderInteractionButtons): синяя пилюля, а не белая обводка. Цвет берём
-             из токена темы приложения: CSS-переменные наследуются сквозь shadow DOM,
-             поэтому кнопка окрашивается вместе с продуктом, в который её поставили.
-             Фолбэк — на случай фронта без токенов Ядра. */
+          /* Кнопки ПРОСТРАНСТВА намеренно нейтральные: рамка и цвет текста приложения,
+             без заливки. Рядом стоят прикладные кнопки (Конференция · Чат · Заявки),
+             и они синие — это действия внутри продукта. Навигация между продуктами
+             не должна спорить с ними за внимание, поэтому у неё свой, тихий вид
+             (решение МАГа 27.07.2026). Размеры при этом общие: высота 44, радиус 12. */
           button{
             display:inline-flex; align-items:center; gap:8px; height:44px; padding:0 12px;
             border-radius:12px; font:inherit; font-weight:500; font-size:14px; cursor:pointer;
-            color:hsl(var(--primary, 217 91% 60%));
-            background:hsl(var(--primary, 217 91% 60%) / .12);
-            border:1px solid hsl(var(--primary, 217 91% 60%) / .3);
-            transition:background .2s, color .2s, border-color .2s;
+            color:inherit; background:none; border:1px solid currentColor;
+            opacity:.75; transition:opacity .2s, background .2s;
           }
-          button:hover{
-            background:hsl(var(--primary, 217 91% 60%));
-            color:hsl(var(--primary-foreground, 0 0% 100%));
-            border-color:hsl(var(--primary, 217 91% 60%));
-          }
+          button:hover{ opacity:1; background:rgba(127,127,127,.14) }
           svg{ width:16px; height:16px; flex:none }
           .menu{
             position:absolute; top:52px; left:0; z-index:2147483000; width:232px; padding:4px;

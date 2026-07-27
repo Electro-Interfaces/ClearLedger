@@ -16,8 +16,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { isApiEnabled } from '@/services/apiClient'
-import { listSsoApps } from '@/services/ssoService'
-import { useOpenApp, wantsNewTab } from '@/hooks/useOpenApp'
+import { listSsoApps, launcherApps } from '@/services/ssoService'
+import { useOpenApp } from '@/hooks/useOpenApp'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
 
@@ -32,14 +32,19 @@ export function AppLauncher() {
     staleTime: 5 * 60_000,
   })
   const data = q.data
+  // Чат, Заявки и Конференция стоят отдельными кнопками в этой же шапке — в списке
+  // они были бы тем же входом, названным дважды подряд.
+  const apps = data ? launcherApps(data.apps) : []
 
-  // Лаунчер скрыт, пока экосистемный SSO не настроен или приложений нет.
-  if (!isApiEnabled() || !data?.enabled || data.apps.length === 0) return null
+  // Лаунчер скрыт, пока экосистемный SSO не настроен или показывать нечего.
+  if (!isApiEnabled() || !data?.enabled || apps.length === 0) return null
 
   const cls =
-    'relative h-11 px-3 gap-2 rounded-xl transition-all duration-200 font-medium border ' +
-    'bg-primary/10 dark:bg-primary/20 hover:bg-primary text-primary dark:text-primary/80 ' +
-    'hover:text-white border-primary/30 dark:border-primary/50 hover:border-primary'
+    'relative h-11 px-3 gap-2 rounded-xl border font-medium transition-colors duration-200 '
+    // Навигация ПРОСТРАНСТВА (стол, соседний продукт) намеренно тише прикладных
+    // кнопок рядом: рамка и цвет текста, без синей заливки. Тот же вид у приложений
+    // вне Ядра — web-component <eco-apps> (решение МАГа 27.07.2026).
+    + 'border-border bg-transparent text-foreground/80 hover:bg-accent hover:text-foreground'
 
   return (
     <DropdownMenu>
@@ -52,11 +57,10 @@ export function AppLauncher() {
       <DropdownMenuContent align="start" className="w-60 p-1">
         <DropdownMenuLabel className="text-xs text-muted-foreground">{ECOSYSTEM_TITLE}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {data.apps.map((a) => (
+        {apps.map((a) => (
           <DropdownMenuItem
             key={a.code}
-            onClick={(e) => openApp(a, wantsNewTab(e))}
-            onAuxClick={(e) => { if (e.button === 1) openApp(a, true) }}
+            onClick={() => openApp(a)}
             className="gap-2.5 cursor-pointer"
           >
             {busy === a.code
