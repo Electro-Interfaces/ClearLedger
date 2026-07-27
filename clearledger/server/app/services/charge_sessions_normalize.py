@@ -491,10 +491,16 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
             db.add(cp)
             await db.flush()
             by_norm[nn] = cp
-        elif "corporate" not in (cp.aliases or []):
+        else:
             # Одно юрлицо может быть и покупателем, и поставщиком — роль в реестре
             # прикладная, поэтому она копится в aliases, а не заводит вторую карточку.
-            cp.aliases = sorted(set((cp.aliases or []) + ["corporate"]))
+            if "corporate" not in (cp.aliases or []):
+                cp.aliases = sorted(set((cp.aliases or []) + ["corporate"]))
+            # Карточку могли завести без ИНН (например сопоставлением ролей — там его
+            # взять неоткуда). Справочник ИНН знает, и это единственное место, где он
+            # доезжает: иначе «без ИНН» осталось бы навсегда.
+            if not cp.inn and o.get("inn"):
+                cp.inn = str(o["inn"])[:20]
         cp_by_phone[str(o.get("phone") or "")] = cp
         if any(by_cp.get(k) for k in (str(cp.id), cp.external_ref) if k):
             continue
