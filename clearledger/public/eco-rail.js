@@ -1,5 +1,7 @@
 /**
- * <eco-apps> — кнопки пространства («Стол» и «Приложения») для приложений ВНЕ Ledger.
+ * Пространство в приложениях ВНЕ Ledger: `<eco-apps>` — кнопки «Стол» и «Приложения»
+ * в шапке, `<eco-nav>` — блок функций Ядра в левом меню (объекты, загрузка, документы,
+ * контрагенты, база пространства, люди и доступ).
  *
  * Ядро отдаёт этот файл по адресу `/eco/rail.js` (nginx стека), приложение подключает
  * одной строкой и ставит элемент в СВОЮ шапку. Реализация одна на все приложения —
@@ -45,7 +47,33 @@
     shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
     apps: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="M2 9h20"/><path d="M6 4v5"/>',
     external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/>',
+    objects: '<path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/>',
+    file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+    company: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/>',
+    network: '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
+    map: '<path d="m15 5-6-3-6 3v16l6-3 6 3 6-3V2z"/><path d="M15 5v16"/><path d="M9 2v16"/>',
   }
+
+  /**
+   * Функции ЯДРА для левого меню приложения — тот же состав, что в рабочих местах Ledger
+   * (`config/spaceProducts.ts` → SPACE_PAGES/SPACE_LINKS). Список продублирован намеренно:
+   * этот файл ванильный, без сборки, а состав меняется реже, чем раз в релиз.
+   */
+  const SPACE_PAGES = [
+    { path: '/objects', label: 'Объекты', icon: 'objects' },
+    { path: '/intake', label: 'Загрузка', icon: 'upload' },
+    { path: '/files', label: 'Документы', icon: 'file' },
+    { path: '/contractors', label: 'Контрагенты', icon: 'company' },
+  ]
+  // Ядровые функции, живущие в другом приложении: гейт — его наличие в каталоге.
+  const SPACE_LINKS = [
+    { app: 'data', href: '/data?mode=normalize', label: 'База пространства', icon: 'network' },
+    { app: 'admin', href: '/admin/company/map', label: 'Люди и доступ', icon: 'map' },
+  ]
+  // Рабочие места Ledger: страница Ядра открывается под адресом одного из них
+  // (`/finance/objects`) — по адресу видно, откуда смотрят, и от этого зависят права.
+  const WORKPLACES = ['projects', 'ops', 'sales', 'corp', 'shop', 'marketing', 'finance', 'data']
 
   // Продукты, у которых в шапке уже есть своя кнопка (Чат · Заявки · Конференция).
   // В списке «Приложения» их нет: один и тот же вход, названный дважды в двух соседних
@@ -71,6 +99,17 @@
     })
     if (!r.ok) throw new Error(String(r.status))
     return r.json()
+  }
+
+  /** Каталог продуктов — один запрос на страницу: его спрашивают и кнопки, и меню. */
+  let appsPromise = null
+  function loadApps() {
+    if (!appsPromise) {
+      appsPromise = core('/api/sso/apps')
+        .then((d) => (d && d.enabled ? (d.apps || []) : []))
+        .catch(() => [])
+    }
+    return appsPromise
   }
 
   const sameOrigin = (url) => {
@@ -135,13 +174,7 @@
       this.#open = true
       this.render()
       if (this.#apps !== null) return
-      try {
-        const data = await core('/api/sso/apps')
-        const all = data && data.enabled ? (data.apps || []) : []
-        this.#apps = all.filter((a) => !SIDE_BUTTON_APPS.includes(a.code))
-      } catch {
-        this.#apps = []
-      }
+      this.#apps = (await loadApps()).filter((a) => !SIDE_BUTTON_APPS.includes(a.code))
       if (this.#open) this.render()
     }
 
@@ -240,4 +273,76 @@
   }
 
   customElements.define('eco-apps', EcoApps)
+
+  /**
+   * <eco-nav> — блок ЯДРА в левом меню приложения контейнера.
+   *
+   * Левое вертикальное меню — это меню пространства (решение МАГа 28.07.2026): сверху
+   * разделы самого приложения, ниже — функции, которые идут от Ядра и одинаковы везде.
+   * В рабочих местах Ledger блок рисует `AppSidebar`; приложениям вне Ledger (Поддержка)
+   * его отдаёт Ядро этим компонентом — иначе человек, работающий в Поддержке, не может
+   * ни загрузить договор, ни посмотреть, откуда взялись цифры, не выйдя из приложения.
+   *
+   *   <eco-nav></eco-nav>              // в самом низу своей колонки меню
+   *   <eco-nav collapsed></eco-nav>    // свёрнутая колонка: только иконки
+   *
+   * Состав фильтруется правами: каталог `/api/sso/apps` уже отдаёт только то, что роль
+   * разрешила и что подключено компании. Нет ни одного рабочего места Ledger — страницы
+   * Ядра не показываем: они всё равно закрыты. Нет токена Ядра (вход прямой формой
+   * приложения) — компонент не рисует ничего.
+   */
+  class EcoNav extends HTMLElement {
+    #items = null
+
+    static observedAttributes = ['collapsed', 'label']
+
+    connectedCallback() {
+      this.render()
+      loadApps().then((apps) => {
+        const codes = apps.map((a) => a.code)
+        // Страницы Ядра открываются под адресом рабочего места — берём первое доступное.
+        const host = apps.find((a) => WORKPLACES.includes(a.code) && a.route)
+        this.#items = [
+          ...(host ? SPACE_PAGES.map((p) => ({ ...p, href: `${host.route}${p.path}` })) : []),
+          ...SPACE_LINKS.filter((l) => codes.includes(l.app)),
+        ]
+        this.render()
+      })
+    }
+
+    attributeChangedCallback() { if (this.#items) this.render() }
+
+    render() {
+      const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' })
+      const collapsed = this.hasAttribute('collapsed')
+      const label = this.getAttribute('label') || 'Пространство'
+      // Пустой блок не должен оставлять после себя ни отступа, ни разделителя: у роли
+      // без доступа к Ledger в колонке приложения просто ничего не меняется.
+      const empty = !token() || !this.#items || !this.#items.length
+      this.style.display = empty ? 'none' : ''
+      if (empty) { root.innerHTML = ''; return }
+
+      root.innerHTML = `
+        <style>
+          :host{ display:block; font:inherit; color:inherit;
+                 border-top:1px solid rgba(127,127,127,.28); margin-top:8px; padding-top:8px }
+          .head{ padding:6px 12px; font-size:11px; font-weight:600; letter-spacing:.12em;
+                 text-transform:uppercase; opacity:.55 }
+          a{ display:flex; align-items:center; gap:12px; padding:8px 12px; margin:1px 0;
+             border-radius:6px; font-size:14px; font-weight:500; text-decoration:none;
+             color:inherit; opacity:.7; transition:opacity .15s, background .15s }
+          a:hover{ opacity:1; background:rgba(127,127,127,.14) }
+          a.narrow{ justify-content:center; padding:8px 0 }
+          svg{ width:16px; height:16px; flex:none }
+        </style>
+        ${collapsed ? '' : `<div class="head">${escapeHtml(label)}</div>`}
+        ${this.#items.map((i) => `
+          <a href="${escapeHtml(i.href)}" class="${collapsed ? 'narrow' : ''}" title="${escapeHtml(i.label)}">
+            ${svg(ICONS[i.icon])}${collapsed ? '' : `<span>${escapeHtml(i.label)}</span>`}
+          </a>`).join('')}
+      `
+    }
+  }
+
+  customElements.define('eco-nav', EcoNav)
 })()
