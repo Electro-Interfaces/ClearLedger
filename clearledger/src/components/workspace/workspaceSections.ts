@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone, Sparkles, GitCompare } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -130,11 +130,18 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     icon: Megaphone, items: isEnergy ? MARKETING_MENU : [], connected: isEnergy }
   const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
+  // Разделы продукта «Данные» (energy): без них рабочее место открывалось панелью
+  // нормализации, но в меню её пункта не было, а право `data:normalize` указывало в
+  // пустоту. Под-меню у обеих панелей своё (каналы/разрезы) — items здесь не нужны.
+  // У топливного профиля разреза нет: там те же панели живут страницами Учёта
+  // (`/normalization`, `/reconciliation`), и вторые пункты дали бы дубль.
+  const normalize: WorkspaceSection = { mode: 'normalize', label: 'Нормализация', icon: Sparkles, items: [], connected: true }
+  const reconcile: WorkspaceSection = { mode: 'reconcile', label: 'Сверка', icon: GitCompare, items: [], connected: true }
 
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
   const all = isEnergy
-    ? [sales, corporate, marketing, projects, ops, store, acc, exp]
+    ? [sales, corporate, marketing, projects, ops, store, acc, exp, normalize, reconcile]
     : [sales, store, ops, acc, exp]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый

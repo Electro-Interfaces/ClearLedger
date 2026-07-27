@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge'
 import { getSettings, saveSettings, type AppSettings } from '@/services/settingsService'
 import { stsTestConnection, clearToken } from '@/services/fuel/stsApiClient'
 import { Loader2, CheckCircle2, XCircle, Wifi, Gauge } from 'lucide-react'
-import { AdminSection } from '@/components/settings/AdminSection'
 import { UiLevelToggle } from '@/components/common/UiLevelToggle'
 import { useCompany } from '@/contexts/CompanyContext'
 
@@ -85,8 +84,9 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Профиль организации + пользователи (по роли, API-режим) */}
-      <AdminSection />
+      {/* Реквизитов компании здесь нет: наименование и ИНН правятся в «Управлении»
+          (Компания → Реквизиты), где на них есть право `admin:profile`. Вторая форма
+          на этой странице была обходом того права и вторым местом правки одних полей. */}
 
       {/* STS API + станции АЗС — только для топливного профиля (energy не использует STS/АЗС). */}
       {!isEnergy && (

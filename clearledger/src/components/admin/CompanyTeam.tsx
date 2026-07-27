@@ -18,6 +18,11 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import {
   Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
   KeyRound, Plus, Pencil, Copy, History, Share2, Users, ChevronDown, ChevronRight,
 } from 'lucide-react'
@@ -140,20 +145,23 @@ export function MembersCard({
           )}
         </div>
         {q.isLoading && <Loading />}
-        <Table>
+        {/* Колонки (роль + принадлежность + доступ + объекты) шире рабочей области,
+            поэтому таблица прокручивается вбок сама, а не обрезается краем карточки. */}
+        <div className="overflow-x-auto">
+        <Table className="min-w-[1100px]">
           <TableHeader>
             <TableRow>
-              <TableHead>ФИО / Email</TableHead>
+              <TableHead className="min-w-[220px]">ФИО / Email</TableHead>
               <TableHead className="w-[160px]">Должность</TableHead>
               <TableHead className="w-[130px]">Роль</TableHead>
               <TableHead className="w-[210px]">Кто это</TableHead>
-              <TableHead className="w-[300px]">Доступ к модулям</TableHead>
+              <TableHead className="w-[300px]">Доступ и объекты</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {!q.isLoading && filtered.length === 0 && (
-              <TableRow><TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
+              <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-6">
                 {members.length === 0 ? 'Нет сотрудников' : 'Ничего не найдено'}
               </TableCell></TableRow>
             )}
@@ -255,22 +263,38 @@ export function MembersCard({
                     )}
                   </TableCell>
                   <TableCell>
+                    {/* Исключение из компании отбирает доступ ко всем приложениям сразу —
+                        спрашиваем, а не выполняем по одному клику мимо. */}
                     {!locked && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        title="Убрать из компании" disabled={remove.isPending}
-                        onClick={() => remove.mutate(u.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            title="Убрать из компании" disabled={remove.isPending}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Убрать из компании?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {u.name || u.email} потеряет доступ ко всем приложениям пространства.
+                              Учётная запись сохранится — человека можно вернуть приглашением.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Отмена</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => remove.mutate(u.id)}>Убрать</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     )}
                   </TableCell>
                 </TableRow>
               )
             })}
-            {!q.isLoading && members.length === 0 && (
-              <TableRow><TableCell colSpan={6} className="text-sm text-muted-foreground text-center py-4">Нет сотрудников</TableCell></TableRow>
-            )}
           </TableBody>
         </Table>
+        </div>
         <p className="mt-3 text-xs text-muted-foreground">
           Сотрудников: {members.length}
           {filtered.length !== members.length ? ` · показано ${filtered.length}` : ''}

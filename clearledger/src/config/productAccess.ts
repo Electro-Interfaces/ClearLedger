@@ -79,8 +79,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   data: [
     { code: 'normalize', label: 'Нормализация', group: 'Разделы' },
     { code: 'reconcile', label: 'Сверка', group: 'Разделы' },
-    ...pages(['/objects', '/intake', '/connectors', '/normalization',
-      '/reconciliation', '/catalog', '/settings']),
+    ...pages(['/objects', '/intake', '/connectors', '/catalog']),
   ],
 }
 
