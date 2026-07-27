@@ -201,6 +201,19 @@ async def list_organizations(
     return {"companyId": str(cid), "organizations": orgs, "total": len(orgs)}
 
 
+@router.get("/contracts")
+async def list_space_contracts(
+    company_id: str = Query(...),
+    q: str | None = Query(None, description="поиск по номеру и типу договора"),
+    direction: str | None = Query(None, description="in — платит компания, out — платят ей"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Договоры компании — общий взгляд пространства: кто, о чём, на какие объекты."""
+    cid = await _member(company_id, user, db)
+    items = await space_registry.list_contracts(db, cid, query=q, direction=direction)
+    return {"companyId": str(cid), "contracts": items, "total": len(items)}
+
+
 @router.get("/connectors")
 async def list_space_connectors(
     company_id: str = Query(...),

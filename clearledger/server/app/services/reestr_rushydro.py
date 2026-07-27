@@ -472,15 +472,20 @@ class L2Cache:
                 if same:
                     contract = same[0]
                     break
-        if contract is None and number:
+        if contract is None:
+            # Без номера обязательство всё равно есть: часть площадок стоит на
+            # муниципальной земле по разрешению или сервитуту, и раньше такие строки
+            # реестра оставались вне договорного контура (settlement.contract_id пустой).
+            # Заводим «б/н» — основание видно в `basis`, номер проставляется вручную.
+            num = str(number)[:100] if number else "б/н"
             contract = Contract(
-                company_id=company_id, number=str(number)[:100], date=cdate or "",
+                company_id=company_id, number=num, date=cdate or "",
                 counterparty_id=str(cp.id), organization_id=self.org_id or str(cp.id),
                 type=ctype, kind="СПоставщиком", basis=basis, scope_type="locations",
             )
             db.add(contract)
             await db.flush()
-            self.contr_by_key[(str(cp.id), str(number), ctype)] = contract
+            self.contr_by_key[(str(cp.id), num, ctype)] = contract
             self.contr_by_cp_type.setdefault((str(cp.id), ctype), []).append(contract)
             res["contracts"] = res.get("contracts", 0) + 1
         if contract is not None and loc is not None:

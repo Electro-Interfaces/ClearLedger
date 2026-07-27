@@ -140,6 +140,33 @@ export async function listSpaceOrganizations(companyId: string): Promise<SpaceOr
   return r.organizations
 }
 
+export interface SpaceContract {
+  id: string
+  number: string
+  date: string
+  type: string
+  kind?: string | null
+  /** in — платит компания, out — платят ей, unknown — вид договора не задан. */
+  direction: 'in' | 'out' | 'unknown'
+  basis?: string | null
+  counterpartyId?: string | null
+  counterpartyName?: string | null
+  counterpartyInn?: string | null
+  /** company — весь периметр, locations — набор объектов, unassigned — охват не задан. */
+  scopeType: string
+  objectsCount: number
+  validUntil?: string | null
+  isClosed: boolean
+}
+
+/** Договоры компании — контрагент уже разрешён в имя, охват считается по объектам. */
+export async function listSpaceContracts(companyId: string): Promise<SpaceContract[]> {
+  const r = await get<{ contracts: SpaceContract[] }>('/api/registry/contracts', {
+    company_id: companyId,
+  })
+  return r.contracts
+}
+
 /** Единицы оборудования компании — паспорт (что за железо и где стоит). */
 export async function listSpaceEquipment(companyId: string): Promise<SpaceEquipmentUnit[]> {
   const r = await get<{ equipment: SpaceEquipmentUnit[] }>('/api/registry/equipment', {

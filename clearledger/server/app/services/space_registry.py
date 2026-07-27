@@ -20,10 +20,12 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditEvent, Counterparty, EzsEquipmentUnit, ServiceLocation
+from app.models import (
+    AuditEvent, Contract, ContractLocation, Counterparty, EzsEquipmentUnit, ServiceLocation,
+)
 
 # Типы объектов пространства (совпадают с ServiceLocation.type).
 OBJECT_TYPES = {"fuel_station", "ev_charging", "retail", "office", "warehouse", "other"}
@@ -202,6 +204,83 @@ async def list_organizations(
         "phone": getattr(c, "phone", None),
         "email": getattr(c, "email", None),
     } for c in res.scalars().all()]
+
+
+# Направление обязательства по ВидуДоговора 1С (`Contract.kind`). Реестр договоров один
+# на компанию, и в нём соседствуют обе стороны: кому компания платит (аренда участка,
+# энергоснабжение, обслуживание) и кто платит компании (зарядка корпоративным клиентам,
+# поставка). Отдельной колонки в БД нет — направление выводится из вида договора, чтобы
+# не заводить второй источник правды и не мигрировать уже загруженные реестры.
+_DIRECTION_BY_KIND = {
+    "СПоставщиком": "in", "СКомитентом": "in", "СКомитентомНаЗакупку": "in",
+    "СКомиссионеромНаЗакупку": "in", "СТранспортнойКомпанией": "in",
+    "СФакторинговойКомпанией": "in", "ЗаемПолученный": "in",
+    "СПокупателем": "out", "СКомиссионером": "out",
+}
+
+
+def contract_direction(kind: str | None) -> str:
+    """in — компания платит, out — платят компании, unknown — вид не задан."""
+    return _DIRECTION_BY_KIND.get(kind or "", "unknown")
+
+
+async def list_contracts(
+    db: AsyncSession, company_id: uuid.UUID, *,
+    query: str | None = None, direction: str | None = None,
+) -> list[dict[str, Any]]:
+    """Договоры компании — общая сущность пространства (docs/SPACE.md §3).
+
+    Источник — `contracts`: та же ось контрагент↔договор↔объекты, что ведёт Учёт. Реестр
+    добавляет к ней одно: контрагент уже РАЗРЕШЁН в имя. В самой таблице он лежит
+    идентификатором 1С (`external_ref`) либо нашим UUID, и каждый разрез, которому нужен
+    договор (эксплуатация — аренда и энергоснабжение, корпоратив — договоры ЮЛ, Координатор —
+    обслуживание), повторял бы этот джойн у себя.
+
+    База договоров одна на компанию — входящие и исходящие, любых типов. Кому какие
+    видны — вопрос прав в приложении, а не отдельного реестра: разрез фильтрует то, что
+    отдаёт эта ручка, но не заводит своих договоров.
+
+    Суммы, взаиморасчёты и платёжная дисциплина не поднимаются: это прикладное, у них
+    свои разрезы (`station_contract_settlements`, документы Финансов).
+    """
+    cps = (await db.execute(
+        select(Counterparty).where(Counterparty.company_id == company_id))).scalars().all()
+    by_key = {k: c for c in cps for k in (c.external_ref, str(c.id)) if k}
+
+    covered = dict((await db.execute(
+        select(ContractLocation.contract_id, func.count())
+        .where(ContractLocation.company_id == company_id)
+        .group_by(ContractLocation.contract_id))).all())
+
+    stmt = select(Contract).where(Contract.company_id == company_id)
+    if query:
+        like = f"%{query.strip().lower()}%"
+        stmt = stmt.where(Contract.number.ilike(like) | Contract.type.ilike(like))
+    res = await db.execute(stmt.order_by(Contract.is_closed, Contract.date.desc()))
+    out: list[dict[str, Any]] = []
+    for c in res.scalars().all():
+        dir_ = contract_direction(c.kind)
+        if direction and dir_ != direction:
+            continue
+        cp = by_key.get(c.counterparty_id)
+        out.append({
+            "id": str(c.id),
+            "number": c.number,
+            "date": c.date,
+            "type": c.type,
+            "kind": c.kind,
+            "direction": dir_,
+            "basis": c.basis,
+            "counterpartyId": str(cp.id) if cp else None,
+            "counterpartyName": cp.name if cp else None,
+            "counterpartyInn": cp.inn if cp else None,
+            # company — весь периметр, locations — набор объектов, unassigned — охват не задан.
+            "scopeType": c.scope_type,
+            "objectsCount": covered.get(c.id, 0),
+            "validUntil": c.valid_until,
+            "isClosed": c.is_closed,
+        })
+    return out
 
 
 async def list_equipment(

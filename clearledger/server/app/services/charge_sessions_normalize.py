@@ -19,10 +19,15 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
-from app.models import ChannelSyncLog, ChargeSession, CorporateClient
+from app.models import (
+    ChannelSyncLog, ChargeSession, Contract, CorporateClient, Counterparty, Organization,
+)
 from app.services.analytics_cache import bump_version
 from app.services.charge_mart import rebuild_mart
 from app.services.mapping import apply, canon_region, load_kind_map
+# Те же правила сведения имён, что у входящих договоров из реестров РусГидро — иначе
+# одно юрлицо разойдётся на две карточки в общем реестре контрагентов пространства.
+from app.services.reestr_normalize import _clean_cp_name, _cp_type, _normname
 
 # Форматы дат в выгрузках сессий. Точки = DD.MM (RU), слэши = MM/DD (US, выгрузка
 # ChargeTransactions «Сессии (69)» — «12/31/2025 08:20:44»). Разделитель различает,
@@ -432,11 +437,73 @@ async def enrich_sessions_with_orgs(
             contract_start=o.get("contract_start"), status=o.get("status"), users=o.get("users"),
         ))
     await db.flush()
+    await _sync_corporate_contracts(db, company_id, orgs)
 
     named, priced, matched = await _apply_org_enrichment(db, company_id, orgs, matrix, channel_id)
     await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
     await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)
+
+
+# Предмет исходящего договора с корпоративным клиентом ЭЗС (он же ключ идемпотентности
+# вместе с контрагентом: номера в справочнике нет).
+CORP_CONTRACT_TYPE = "Зарядка ЭЗС"
+
+
+async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dict]) -> None:
+    """Завести корпоративных клиентов в общий реестр контрагентов и договоров.
+
+    База договоров одна на компанию, и в ней должны быть обе стороны. Входящие (аренда,
+    энергоснабжение, обслуживание) приходят из реестров РусГидро, исходящие — отсюда:
+    корпоративный клиент ЭЗС ездит по договору постоплаты, и до сих пор этот договор
+    существовал только как `contract_start` в его карточке.
+
+    Номера в выгрузке нет — договор заводится «б/н» с датой начала; уточнённые номер,
+    срок и охват проставляются в «Контрагентах» и повторной загрузкой не затираются.
+    """
+    if not orgs:
+        return
+    cps = (await db.execute(select(Counterparty).where(
+        Counterparty.company_id == company_id))).scalars().all()
+    by_norm = {n: c for c in cps if (n := _normname(c.name))}
+    existing = (await db.execute(select(Contract).where(
+        Contract.company_id == company_id,
+        Contract.type == CORP_CONTRACT_TYPE))).scalars().all()
+    by_cp = {c.counterparty_id: c for c in existing}
+    org_id = (await db.execute(select(Organization.id).where(
+        Organization.company_id == company_id).limit(1))).scalar()
+
+    for o in orgs:
+        name = str(o.get("name") or "").strip()
+        nn = _normname(name)
+        if not nn:
+            continue
+        cp = by_norm.get(nn)
+        if cp is None:
+            cp = Counterparty(
+                company_id=company_id, inn=str(o.get("inn") or "")[:20],
+                name=_clean_cp_name(name)[:500], type=_cp_type(name),
+                aliases=["corporate"], kind="external",
+            )
+            db.add(cp)
+            await db.flush()
+            by_norm[nn] = cp
+        elif "corporate" not in (cp.aliases or []):
+            # Одно юрлицо может быть и покупателем, и поставщиком — роль в реестре
+            # прикладная, поэтому она копится в aliases, а не заводит вторую карточку.
+            cp.aliases = sorted(set((cp.aliases or []) + ["corporate"]))
+        if any(by_cp.get(k) for k in (str(cp.id), cp.external_ref) if k):
+            continue
+        contract = Contract(
+            company_id=company_id, number="б/н", date=str(o.get("contract_start") or ""),
+            counterparty_id=str(cp.id), organization_id=str(org_id or cp.id),
+            type=CORP_CONTRACT_TYPE, kind="СПокупателем", basis="договор",
+            # Зарядка идёт по всей сети, а не по набору станций.
+            scope_type="company",
+        )
+        db.add(contract)
+        by_cp[str(cp.id)] = contract
+    await db.flush()
 
 
 async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id) -> tuple[int, int, int]:

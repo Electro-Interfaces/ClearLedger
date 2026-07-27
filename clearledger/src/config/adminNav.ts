@@ -46,7 +46,7 @@ export const companySections: AdminSection[] = [
   { code: 'roles', label: 'Роли и доступ', hint: 'Права на продукты пространства и их разделы', icon: KeyRound },
   { code: 'apps', label: 'Приложения', hint: 'Какие продукты подключены компании', icon: Blocks },
   { code: 'objects', label: 'Объекты', hint: 'Объекты компании — общие для всех приложений', icon: MapPin },
-  { code: 'refs', label: 'Справочники', hint: 'Организации и оборудование пространства', icon: Library },
+  { code: 'refs', label: 'Справочники', hint: 'Контрагенты, договоры и оборудование пространства', icon: Library },
   { code: 'map', label: 'Карта', hint: 'Люди, доступы и активность компании', icon: Map },
   { code: 'profile', label: 'Реквизиты', hint: 'Наименование, ИНН, профиль компании', icon: Building2 },
   { code: 'invites', label: 'Приглашения', hint: 'Приглашения по email и ссылки регистрации', icon: Mail },
