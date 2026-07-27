@@ -59,8 +59,8 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Юрлица пространства: реквизиты общие, роль — прикладная (в Учёте поставщик, в
-          Координаторе подрядчик). Ведутся в разделе «Контрагенты» Учёта.
+          Юрлица пространства: реквизиты общие, роль — прикладная (в Финансах поставщик,
+          в Поддержке подрядчик). Ведутся в разделе «Контрагенты».
         </p>
         {orgsQ.isLoading ? <Loading /> : orgs.length === 0 ? (
           <Empty text="Организаций пока нет" />

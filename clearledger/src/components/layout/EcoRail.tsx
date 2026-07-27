@@ -21,8 +21,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { listSsoApps } from '@/services/ssoService'
-import { useOpenApp, wantsNewTab } from '@/hooks/useOpenApp'
+import { listSsoApps, launcherApps } from '@/services/ssoService'
+import { useOpenApp } from '@/hooks/useOpenApp'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
 
@@ -44,18 +44,17 @@ export function EcoRail({ standalone = false }: { standalone?: boolean }) {
     staleTime: 5 * 60_000,
     retry: false,
   })
-  const apps = q.data?.enabled ? q.data.apps : []
+  // Чат/Заявки/Инфо живут кнопками выше по рельсу — в списке продуктов они лишние.
+  const apps = q.data?.enabled ? launcherApps(q.data.apps) : []
 
   return (
     <div className={cn('mt-auto flex w-full flex-col items-center gap-1 pt-2',
       // Внутри рейла взаимодействия зона отделена чертой; отдельным рельсом (Центр
       // управления) черта не нужна — над ней ничего нет.
       !standalone && 'border-t border-border/50')}>
-      <button onClick={() => navigate('/')} title="Рабочий стол экосистемы" className={btnCls()}>
-        <LayoutGrid className="size-4" />
-        <span>Стол</span>
-      </button>
-
+      {/* «Стол» переехал в шапку, к «Приложениям» (`DeskButton`): возврат на стол нужен
+          так же часто, как переключение продукта, и рядом с ним он заметнее, чем в
+          нижней зоне рельса. Здесь остаются переходы между продуктами. */}
       {apps.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -70,8 +69,7 @@ export function EcoRail({ standalone = false }: { standalone?: boolean }) {
             {apps.map((a) => (
               <DropdownMenuItem
                 key={a.code}
-                onClick={(e) => openApp(a, wantsNewTab(e))}
-                onAuxClick={(e) => { if (e.button === 1) openApp(a, true) }}
+                onClick={() => openApp(a)}
                 className="cursor-pointer gap-2.5"
               >
                 {busy === a.code

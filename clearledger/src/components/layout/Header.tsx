@@ -12,6 +12,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isCarvedProfile, productForPath } from '@/config/spaceProducts'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AppLauncher } from '@/components/layout/AppLauncher'
+import { DeskButton } from '@/components/layout/DeskButton'
 
 interface HeaderProps {
   onMobileMenuToggle?: () => void
@@ -63,6 +64,8 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             рабочей области — единый фильтр над разделами. */}
         <div className="flex flex-1 items-center justify-center min-w-0 gap-2 px-2">
           <CompanySelector />
+          {/* Стол пространства — перед лаунчером: сперва «вернуться», потом «перейти». */}
+          <DeskButton />
           {/* Лаунчер приложений экосистемы (Ядро) — скрыт, если SSO не настроен */}
           <AppLauncher />
 

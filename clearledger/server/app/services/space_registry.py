@@ -44,7 +44,11 @@ def to_card(loc: ServiceLocation) -> dict[str, Any]:
         # Операционное состояние отдаём только для чтения: разрезам удобно видеть его
         # рядом с паспортом, но менять — через API приложения, не через реестр.
         "operationalStatus": getattr(loc, "operational_status", "unknown") or "unknown",
-        "address": loc.address,
+        # Адрес у объекта пространства необязателен (паспорт бывает неполным), а
+        # приёмник вправе требовать его непустым (в Координаторе `locations.address`
+        # NOT NULL). Отдаём пустую строку, а не null: смысл «адрес не указан» тот же,
+        # но одна неполная карточка не роняет проекцию всего реестра.
+        "address": loc.address or "",
         "city": getattr(loc, "city", None),
         "street": getattr(loc, "street", None),
         "house": getattr(loc, "house", None),

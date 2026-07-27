@@ -34,7 +34,7 @@ export function CoordinatorTickets({ objectId }: { objectId: string }) {
     <section className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <LifeBuoy className="size-4 text-primary" /> Заявки Координатора
+          <LifeBuoy className="size-4 text-primary" /> Заявки Поддержки
         </div>
         <div className="flex items-center gap-3">
           {data && (

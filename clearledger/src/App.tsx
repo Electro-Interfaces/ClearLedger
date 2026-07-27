@@ -14,6 +14,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { MainLayout } from '@/components/layout/MainLayout'
 import { TabFilterSync } from '@/components/layout/TabFilterSync'
+import { DocumentTitle } from '@/components/layout/DocumentTitle'
 import { OneCAutoSync } from '@/components/onec/OneCAutoSync'
 import { WorkspaceLayout } from '@/components/workspace/WorkspaceLayout'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
@@ -133,6 +134,7 @@ function CompanyScopedProviders() {
         <SupportProvider>
           <TooltipProvider>
             <TabFilterSync />
+            <DocumentTitle />
             <OneCAutoSync />
             <Outlet />
             <Toaster position="bottom-right" richColors closeButton />

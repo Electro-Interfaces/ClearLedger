@@ -36,6 +36,9 @@ SYNC_PATHS: dict[str, dict[str, str]] = {
 PAYLOAD_KEYS = {"objects": "objects", "users": "users",
                 "organizations": "organizations", "equipment": "equipment"}
 DEFAULT_TIMEOUT = 30.0
+# Записей в одном запросе к приложению. Ограничение не наше: у приёмника свой предел
+# размера тела (Express — 100 КБ по умолчанию), а пространство компании его перерастает.
+BATCH_SIZE = 100
 
 # Роль в компании (пространство) → роль в приложении. Задаётся на приложение в реестре
 # (`App.config.roleMap`), здесь — разумный дефолт для Координатора: администратор остаётся
@@ -65,29 +68,42 @@ async def project(
 
     items = await _payload(db, company_id, app_row, app_code, entity)
 
+    url = f"{_internal_base_url(app_row, app_code)}{path}"
+    created = updated = 0
+    skipped: list[Any] = []
     async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-        try:
-            resp = await client.post(
-                f"{_internal_base_url(app_row, app_code)}{path}",
-                json={"companyId": link.external_company_id, PAYLOAD_KEYS[entity]: items},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-        except httpx.HTTPError as e:
-            raise ProjectionError(f"Приложение недоступно: {e}") from e
+        # Пачками: у приложения свой предел размера тела (Express по умолчанию 100 КБ),
+        # и пространство компании его перерастает — 618 объектов пилота уже давали 413.
+        # Приём идемпотентен, поэтому дробление ничего не меняет по смыслу.
+        for start in range(0, len(items) or 1, BATCH_SIZE):
+            chunk = items[start:start + BATCH_SIZE]
+            if not chunk and items:
+                break
+            try:
+                resp = await client.post(
+                    url,
+                    json={"companyId": link.external_company_id, PAYLOAD_KEYS[entity]: chunk},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            except httpx.HTTPError as e:
+                raise ProjectionError(f"Приложение недоступно: {e}") from e
+            if resp.status_code >= 400:
+                raise ProjectionError(
+                    f"Приложение отклонило проекцию (HTTP {resp.status_code}): "
+                    f"{_error_text(resp)}")
+            result = resp.json()
+            created += result.get("created", 0)
+            updated += result.get("updated", 0)
+            skipped.extend(result.get("skipped", []))
 
-    if resp.status_code >= 400:
-        raise ProjectionError(
-            f"Приложение отклонило проекцию (HTTP {resp.status_code}): {_error_text(resp)}")
-
-    result = resp.json()
     return {
         "app": app_code,
         "entity": entity,
         "companyId": str(company_id),
         "sent": len(items),
-        "created": result.get("created", 0),
-        "updated": result.get("updated", 0),
-        "skipped": result.get("skipped", []),
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
     }
 
 

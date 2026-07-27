@@ -42,7 +42,7 @@ export function SpaceObjects({ companyId, canManage }: { companyId: string; canM
   const project = useMutation({
     mutationFn: () => projectSpaceObjects(companyId, 'support'),
     onSuccess: (r) => toast.success(
-      `Координатор обновлён: создано ${r.created}, обновлено ${r.updated}`,
+      `Поддержка обновлена: создано ${r.created}, обновлено ${r.updated}`,
       { description: `Отправлено объектов: ${r.sent}` },
     ),
     onError: (e) => toast.error('Проекция не выполнена', { description: (e as Error).message }),
@@ -97,7 +97,7 @@ export function SpaceObjects({ companyId, canManage }: { companyId: string; canM
         <div className="flex-1" />
         {canManage && objects.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => project.mutate()}
-            disabled={project.isPending} className="gap-1.5" title="Отправить объекты в Координатор">
+            disabled={project.isPending} className="gap-1.5" title="Отправить объекты в Поддержку">
             {project.isPending
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : <Share2 className="h-4 w-4" />}
