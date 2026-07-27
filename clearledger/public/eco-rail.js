@@ -268,4 +268,140 @@
   }
 
   customElements.define('eco-rail', EcoRail)
+
+  /**
+   * <eco-apps> — «Стол» и «Приложения» в ШАПКЕ приложения контейнера.
+   *
+   * Тот же жест, что в Ядре (`DeskButton` + `AppLauncher`): сначала вернуться на стол,
+   * потом выбрать, куда идти дальше. Рельс остаётся для навигации по краю экрана, но
+   * переход между продуктами нужен так же часто, как прикладные кнопки рядом, — поэтому
+   * он живёт в шапке, а не прячется в углу.
+   *
+   *   <eco-apps></eco-apps>            // внутри своей шапки, рядом с кнопками приложения
+   *
+   * Атрибуты: `home` (адрес стола, по умолчанию «/»), `label` (подпись списка).
+   * Каталог и открытие — общие с рельсом (см. выше), поэтому отключённый в «Управлении»
+   * продукт исчезает и здесь. Без токена Ядра компонент не рисует ничего.
+   */
+  class EcoApps extends HTMLElement {
+    #apps = null
+    #open = false
+    #busy = null
+
+    connectedCallback() {
+      this.render()
+      this.onDocClick = (e) => { if (this.#open && !e.composedPath().includes(this)) this.#close() }
+      this.onKey = (e) => { if (e.key === 'Escape') this.#close() }
+      document.addEventListener('click', this.onDocClick)
+      document.addEventListener('keydown', this.onKey)
+    }
+
+    disconnectedCallback() {
+      document.removeEventListener('click', this.onDocClick)
+      document.removeEventListener('keydown', this.onKey)
+    }
+
+    #close() { if (this.#open) { this.#open = false; this.render() } }
+
+    async #toggle() {
+      if (this.#open) return this.#close()
+      this.#open = true
+      this.render()
+      if (this.#apps !== null) return
+      try {
+        const data = await core('/api/sso/apps')
+        this.#apps = data && data.enabled ? (data.apps || []) : []
+      } catch {
+        this.#apps = []
+      }
+      if (this.#open) this.render()
+    }
+
+    async #openApp(app, newTab) {
+      if (this.#busy) return
+      if (app.mode === 'internal' && app.route) {
+        if (newTab) window.open(app.route, '_blank', 'noopener,noreferrer')
+        else location.assign(app.route)
+        return
+      }
+      this.#busy = app.code
+      this.render()
+      try {
+        const r = await core(`/api/sso/authorize?app=${encodeURIComponent(app.code)}`)
+        if (newTab || !sameOrigin(r.url)) window.open(r.url, '_blank', 'noopener,noreferrer')
+        else location.assign(r.url)
+      } catch {
+        /* переход между продуктами не должен ронять приложение */
+      } finally {
+        this.#busy = null
+        this.render()
+      }
+    }
+
+    render() {
+      const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' })
+      const home = this.getAttribute('home') || '/'
+      const label = this.getAttribute('label') || 'Пространство'
+      // Нет токена Ядра — человек вошёл прямой формой приложения: показывать ему
+      // переключатель продуктов не на что.
+      if (!token()) { root.innerHTML = ''; return }
+
+      root.innerHTML = `
+        <style>
+          :host{ display:inline-flex; align-items:center; gap:8px; position:relative;
+                 font:inherit; color:inherit }
+          button{
+            display:inline-flex; align-items:center; gap:8px; height:44px; padding:0 12px;
+            border-radius:12px; border:1px solid currentColor; background:none; color:inherit;
+            font:inherit; font-weight:500; font-size:14px; cursor:pointer; opacity:.85;
+            transition:opacity .15s, background .15s;
+          }
+          button:hover{ opacity:1; background:rgba(127,127,127,.14) }
+          svg{ width:16px; height:16px; flex:none }
+          .menu{
+            position:absolute; top:52px; left:0; z-index:2147483000; width:232px; padding:4px;
+            box-sizing:border-box; border:1px solid rgba(127,127,127,.28); border-radius:12px;
+            background:rgba(127,127,127,.16); backdrop-filter:blur(16px) saturate(160%);
+            box-shadow:0 8px 28px rgba(0,0,0,.28); font-size:13px; font-weight:400;
+          }
+          .menu .head{ padding:6px 8px 4px; font-size:11px; opacity:.6 }
+          .menu button{
+            width:100%; height:auto; padding:7px 8px; border:0; border-radius:8px;
+            justify-content:flex-start; font-size:13px; font-weight:400; opacity:.9;
+          }
+          .spin{ animation:eco-spin 1s linear infinite; display:inline-flex }
+          @media (max-width:1023px){ .lbl{ display:none } }
+        </style>
+        <button id="desk" title="Рабочий стол пространства">
+          ${svg(ICONS.home)}<span class="lbl">Стол</span>
+        </button>
+        <button id="apps" aria-expanded="${this.#open}" title="Продукты пространства">
+          ${this.#busy ? `<span class="spin">${svg(ICONS.apps)}</span>` : svg(ICONS.apps)}
+          <span class="lbl">Приложения</span>
+        </button>
+        ${this.#open ? `
+          <div class="menu">
+            ${this.#apps === null ? '<div class="head">Загрузка…</div>' : ''}
+            ${this.#apps && !this.#apps.length ? '<div class="head">Продукты недоступны</div>' : ''}
+            <div class="head">${escapeHtml(label)}</div>
+            ${(this.#apps || []).map((a) => `
+              <button data-app="${escapeHtml(a.code)}">
+                ${svg(a.mode === 'link' ? ICONS.external : ICONS.apps)}
+                <span>${escapeHtml(a.name || a.code)}</span>
+              </button>`).join('')}
+          </div>` : ''}
+      `
+
+      root.getElementById('desk')?.addEventListener('click', () => location.assign(home))
+      root.getElementById('apps')?.addEventListener('click', () => this.#toggle())
+      root.querySelectorAll('[data-app]').forEach((el) => {
+        const app = (this.#apps || []).find((a) => a.code === el.dataset.app)
+        if (!app) return
+        el.addEventListener('click', (e) => this.#openApp(app, wantsNewTab(e)))
+        el.addEventListener('auxclick', (e) => { if (e.button === 1) this.#openApp(app, true) })
+      })
+    }
+  }
+
+  customElements.define('eco-apps', EcoApps)
 })()
