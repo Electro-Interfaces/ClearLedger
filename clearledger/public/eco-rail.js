@@ -1,10 +1,14 @@
 /**
- * <eco-rail> — экосистемный рельс контейнера для приложений ВНЕ Ledger.
+ * <eco-rail> — экосистемная панель контейнера для приложений ВНЕ Ledger.
  *
  * Ядро отдаёт этот файл по адресу `/eco/rail.js` (nginx стека), приложение подключает
- * одной строкой и получает тот же правый край, что и в Ledger: выход на рабочий стол,
- * переход в соседний продукт и в Центр управления. Реализация одна на все приложения —
- * ванильный web-component, без React и без сборки, поэтому годится и для чужих фронтов.
+ * одной строкой и получает выход на рабочий стол, переход в соседний продукт и в
+ * «Управление». Реализация одна на все приложения — ванильный web-component, без React
+ * и без сборки, поэтому годится и для чужих фронтов.
+ *
+ * Раньше это была вертикальная колонка у правого края. Колонку убрали: она съедала
+ * ширину у каждого приложения и дублировала переходы, которые есть в шапке. Теперь —
+ * компактная плашка в правом верхнем углу, поверх контента и без отступов у страницы.
  *
  *   <script defer src="/eco/rail.js"></script>
  *   <eco-rail admin></eco-rail>          // admin — показать «Центр управления»
@@ -25,8 +29,8 @@
  * им и авторизуемся. Токена нет (человек вошёл прямой формой приложения, минуя Ядро)
  * или каталог не ответил — кнопки просто не будет: рельс не должен ломать приложение.
  *
- * Рельс перекрывал бы контент, поэтому при подключении добавляется отступ справа
- * на <html>; при удалении элемента отступ снимается.
+ * Плашка висит поверх страницы и ширины у неё не отнимает — отступов приложению
+ * добавлять не нужно.
  */
 ;(() => {
   if (customElements.get('eco-rail')) return
@@ -75,14 +79,10 @@
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`
 
+  // Плавающая плашка ширины у страницы не отнимает: отступ снимаем, если остался
+  // от прежней версии рельса (человек мог не перезагрузить вкладку).
   function ensurePageOffset() {
-    if (document.getElementById(STYLE_ID)) return
-    const s = document.createElement('style')
-    s.id = STYLE_ID
-    // Отступ на <html>: контент приложения не уезжает под рельс, а вёрстка внутри
-    // остаётся его собственной — мы не трогаем ни body, ни его потомков.
-    s.textContent = `html{padding-right:${RAIL_W}px;box-sizing:border-box}`
-    document.head.appendChild(s)
+    document.getElementById(STYLE_ID)?.remove()
   }
 
   function dropPageOffset() {
@@ -193,27 +193,28 @@
       root.innerHTML = `
         <style>
           :host{
-            position:fixed; top:0; right:0; bottom:0; width:${RAIL_W}px; z-index:2147483000;
-            display:flex; flex-direction:column; align-items:center; justify-content:flex-end;
-            gap:4px; padding:8px 0; box-sizing:border-box;
-            border-left:1px solid rgba(127,127,127,.28);
-            background:rgba(127,127,127,.08); backdrop-filter:blur(6px);
-            font:400 10px/1.2 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+            position:fixed; top:10px; right:12px; z-index:2147483000;
+            display:flex; flex-direction:row; align-items:center;
+            gap:2px; padding:3px; box-sizing:border-box;
+            border:1px solid rgba(127,127,127,.28); border-radius:10px;
+            background:rgba(127,127,127,.10); backdrop-filter:blur(6px);
+            box-shadow:0 2px 10px rgba(0,0,0,.10);
+            font:500 12px/1.2 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
           }
           a,button{
-            display:flex; flex-direction:column; align-items:center; gap:2px;
-            width:44px; padding:8px 2px; border:0; border-radius:8px; text-decoration:none;
+            display:flex; flex-direction:row; align-items:center; gap:5px;
+            padding:5px 9px; border:0; border-radius:8px; text-decoration:none; white-space:nowrap;
             background:none; color:inherit; font:inherit; cursor:pointer;
             opacity:.72; transition:background .15s,opacity .15s;
           }
           a:hover,button:hover{ background:rgba(127,127,127,.18); opacity:1 }
           button[aria-expanded="true"]{ background:rgba(127,127,127,.18); opacity:1 }
           svg{ width:16px; height:16px; flex:none }
-          span{ text-align:center }
+          span{ text-align:left }
           /* Список продуктов. Фон размывает подложку, текст — currentColor приложения:
              так панель читается и на светлой, и на тёмной теме, не зная о них. */
           .apps{
-            position:absolute; right:${RAIL_W + 6}px; bottom:8px; width:224px;
+            position:absolute; right:0; top:calc(100% + 6px); width:224px;
             max-height:min(70vh,420px); overflow:auto; padding:4px; box-sizing:border-box;
             border:1px solid rgba(127,127,127,.28); border-radius:12px;
             background:rgba(127,127,127,.14); backdrop-filter:blur(16px) saturate(160%);

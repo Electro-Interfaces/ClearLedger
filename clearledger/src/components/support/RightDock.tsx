@@ -7,8 +7,8 @@
  * сосуществуют. Десктоп: пристыкованная панель с resize-ручкой (двигает контент).
  * Мобайл: рейла нет (вход из хедера/низа), док при открытии — полноэкранный оверлей.
  *
- * Низ рейла — экосистемная зона (`EcoRail`): стол, приложения, Центр управления.
- * Она видна и при открытом доке — навигация по экосистеме не должна пропадать.
+ * Экосистемной зоны здесь больше нет: переходы между продуктами пространства
+ * («Стол», «Приложения») переехали в шапку — вертикальная колонка их дублировала.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -17,7 +17,6 @@ import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
 import { ChatPanel } from '@/components/chat/ChatPanel'
-import { EcoRail } from '@/components/layout/EcoRail'
 import { TicketsPanel, InfoPanel } from './InteractionPanels'
 
 const TABS: { key: InteractionSection; label: string; icon: typeof MessageCircle }[] = [
@@ -115,7 +114,6 @@ export function RightDock() {
             </button>
           )
         })}
-        <EcoRail />
       </div>
     </>
   )
