@@ -179,16 +179,34 @@ export function carvedModes(profileId: string | null | undefined): Set<CoreMode>
  * Пускать ли на путь. Страница продукта проверяется доступом к ПРОДУКТУ, а не к модулям
  * Учёта: у того, кому роль дала «Финансы», ключа `ledger:documents` нет, и старая проверка
  * закрыла бы ему собственные «Документы». Всё остальное — по-прежнему модулями Учёта.
+ *
+ * `pageAllowed` (необязательный) добавляет второй уровень: страница продукта — тоже
+ * право (`finance:files`). Передаётся коллбэком, а не импортом `productAccess`, чтобы не
+ * замкнуть модули: карта прав сама читает `SPACE_PRODUCTS`.
  */
 export function pathAllowed(
   pathname: string,
   profileId: string | null | undefined,
   canApp: (code: string) => boolean,
   fallback: (pathname: string) => boolean,
+  pageAllowed?: (appCode: string, pageCode: string) => boolean,
 ): boolean {
   if (isCarvedProfile(profileId)) {
     const product = productForPath(pathname)
-    if (product) return canApp(product.code)
+    if (product) {
+      if (!canApp(product.code)) return false
+      if (!pageAllowed) return true
+      // Корень продукта (`/operations`) — это его разделы, а не страница: права на
+      // разделы проверяет меню, здесь достаточно доступа к самому продукту. Иначе
+      // роль «только Обзор и Парк» не пускала бы человека в собственный продукт.
+      if (pathname === product.route) return true
+      // Страница внутри продукта — `/finance/objects` (SHARED_PATHS) либо собственный
+      // путь (`/files`); в обоих случаях код = первый сегмент после корня продукта.
+      const tail = pathname.startsWith(`${product.route}/`)
+        ? pathname.slice(product.route.length) : pathname
+      const code = tail.replace(/^\//, '').split('/')[0]
+      return !code || pageAllowed(product.code, code)
+    }
   }
   return fallback(pathname)
 }

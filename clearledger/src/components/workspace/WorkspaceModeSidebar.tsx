@@ -30,7 +30,7 @@ function groupItems(items: CentralMenuItem[]): { name?: string; items: CentralMe
 export function WorkspaceModeSidebar() {
   // Доступные ролью разделы этой оболочки (без вынесенных в свои приложения).
   const sections = useVisibleSections()
-  const { coreMode, setCoreMode } = useWorkspace()
+  const { coreMode, setCoreMode, lockedModes } = useWorkspace()
   // Если активный режим недоступен по модулям — переключаемся на первый доступный.
   useEffect(() => {
     if (sections.length && !sections.some((s) => s.mode === coreMode)) {
@@ -86,6 +86,68 @@ export function WorkspaceModeSidebar() {
       // другой раздел — активируем (эффект раскроет его)
       setCoreMode(mode)
     }
+  }
+
+  // Внутри продукта пространства разделы живут в левом меню приложения (рабочий стол —
+  // уровнем выше, у пространства), поэтому здесь остаётся только подменю активной
+  // области: группы и их пункты, без верхнего уровня.
+  if (lockedModes) {
+    const section = sections.find((s) => s.mode === coreMode)
+    if (!section || section.items.length === 0) return null
+    const activeSub = urlSub && section.items.some((i) => i.key === urlSub)
+      ? urlSub : section.items[0]?.key
+    if (collapsed) {
+      return (
+        <nav data-zone="Подразделы" data-zone-side className="flex flex-col items-center gap-1 py-3 px-1 border-r border-border bg-card shrink-0 w-14">
+          <button onClick={toggleCollapsed} title={`${section.label}: развернуть`}
+            className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors">
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        </nav>
+      )
+    }
+    return (
+      <nav data-zone="Подразделы" data-zone-side className="flex flex-col gap-0.5 py-3 px-2.5 border-r border-border bg-card shrink-0 w-56 overflow-y-auto">
+        <div className="flex items-center justify-between gap-2 px-1 pb-1">
+          <span className="px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75">
+            {section.label}
+          </span>
+          <button onClick={toggleCollapsed} title="Свернуть меню"
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors">
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
+        </div>
+        {groupItems(section.items).map((grp) => {
+          const gKey = `${section.mode}:${grp.name ?? ''}`
+          const groupActive = grp.items.some((i) => i.key === activeSub)
+          const override = grp.name ? groupOverrides[gKey] : undefined
+          const gCollapsed = !!grp.name && (override !== undefined ? override : !groupActive)
+          return (
+            <div key={gKey}>
+              {grp.name && (
+                <button onClick={() => setGroupCollapsed(gKey, !gCollapsed)}
+                  className="flex items-center gap-1.5 w-full px-2 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75 hover:text-foreground transition-colors">
+                  {gCollapsed
+                    ? <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                    : <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />}
+                  <span className="flex-1 text-left">{grp.name}</span>
+                </button>
+              )}
+              {!gCollapsed && grp.items.map((item) => (
+                <button key={item.key} onClick={() => setSub(item.key)}
+                  className={`w-full px-3 py-1.5 rounded-md text-[13px] text-left whitespace-nowrap transition-colors ${
+                    item.key === activeSub
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent/40'
+                  }`}>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )
+        })}
+      </nav>
+    )
   }
 
   // Свёрнутый рельс: только иконки разделов, клик — активировать раздел.

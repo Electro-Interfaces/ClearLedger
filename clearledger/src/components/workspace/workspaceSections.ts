@@ -14,109 +14,31 @@ import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
-import { carvedModes } from '@/config/spaceProducts'
+import { carvedModes, isCarvedProfile } from '@/config/spaceProducts'
 import type { CentralMenuItem } from './CentralPanelLayout'
 import { getWorkspaceModule } from '@/config/workspaceModules'
 import { useModuleConnections, isModuleConnected, isComponentEnabled } from '@/services/moduleConnectionService'
 import { getModuleComponentDefs } from '@/config/moduleComponents'
 import { STORE_MENU } from '@/config/storeCatalog'
+import {
+  MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
+  EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
+  CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS, CORP_MENU, CORP_KEYS,
+  MARKETING_MENU, MARKETING_KEYS,
+} from '@/config/workspaceMenus'
+import { productForMode, productModuleAllowed } from '@/config/productAccess'
 
 /* ── Наборы под-разделов ── */
 
-// Управленческий контур сети АЗС (нефтепродукты). Сгруппировано по смыслу
-// (заголовки групп рисует сайдбар по полю group, по образцу ЭЗС):
-//   СЕТЬ — состояние сети (обзор + карта);
-//   АНАЛИТИКА — реализация (внутр. табы: разрезы/время/динамика/сравнение),
-//     построчный реестр, каналы оплаты, онлайн-заказы;
-//   КОММЕРЦИЯ — цена (тарифы) и клиентские направления (корпоратив/розница);
-//   ТОВАРОДВИЖЕНИЕ — маржа, поступления ТТН, контроль баланса.
-export const MGMT_MENU: CentralMenuItem[] = [
-  { key: 'overview',       label: 'Обзор',            group: 'Сеть' },
-  { key: 'map',            label: 'Карта',            group: 'Сеть' },
-  { key: 'fills',          label: 'Реализация',       group: 'Аналитика' },
-  { key: 'transactions',   label: 'Реестр операций',  group: 'Аналитика' },
-  { key: 'channels',       label: 'Каналы продаж',    group: 'Аналитика' },
-  { key: 'online-orders',  label: 'Онлайн-заказы',    group: 'Аналитика' },
-  { key: 'fuel-tariffs',   label: 'Тарифы',           group: 'Коммерция' },
-  { key: 'fuel-corporate', label: 'Корпоратив',       group: 'Коммерция' },
-  { key: 'fuel-retail',    label: 'Частные лица',     group: 'Коммерция' },
-  { key: 'margin',         label: 'Маржа и цены',     group: 'Товародвижение' },
-  { key: 'purchases',      label: 'Поступления',      group: 'Товародвижение' },
-  { key: 'tanks',          label: 'Контроль баланса', group: 'Товародвижение' },
-]
-export const MGMT_MENU_KEYS = MGMT_MENU.map((m) => m.key)
-
-// Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).
-export const ENERGY_MGMT: CentralMenuItem[] = [
-  { key: 'procurement',  label: 'Энергозакупка' },
-  { key: 'rent',         label: 'Аренда' },
-]
-export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
-
-// Складской учёт оборудования ЭЗС (energy): станции-железки на складах/в ремонте,
-// движения жизненного цикла, ЗИП. Ядро раздела «Управленческий», группа «Оборудование».
-export const EQUIPMENT_MENU: CentralMenuItem[] = [
-  { key: 'eq_fleet',      label: 'Парк оборудования',  group: 'Оборудование' },
-  { key: 'eq_warehouses', label: 'Склады и остатки',   group: 'Оборудование' },
-  { key: 'eq_supplies',   label: 'Поставки и возвраты', group: 'Оборудование' },
-  { key: 'eq_movements',  label: 'Движения',           group: 'Оборудование' },
-  { key: 'eq_spares',     label: 'ЗИП и запчасти',     group: 'Оборудование' },
-]
-export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
-
-// Банк ЗУ — площадки (земельные участки) под установку ЭЗС: девелоперский
-// пайплайн развития сети (МЕСТА, где сеть строится, на стадиях проработка →
-// работа → архив). НЕ путать с «Оборудованием» (склад железа). Ядро раздела
-// «Управленческий», группа «Площадки».
-// Раздел «Проекты» — жизненный цикл ЭЗС от участка до эксплуатации
-// (docs/SITES_PROJECT_LIFECYCLE.md). Подбор площадки — первый этап проекта,
-// поэтому банк ЗУ живёт здесь же, а не в «Управленческом».
-export const SITES_MENU: CentralMenuItem[] = [
-  { key: 'pr_portfolio',   label: 'Обзор портфеля',  group: 'Портфель' },
-  { key: 'pr_project',     label: 'Проекты',         group: 'Портфель' },
-  { key: 'sites_overview', label: 'Воронка подбора', group: 'Этап проекта · Подбор площадки' },
-  { key: 'sites_list',     label: 'Банк площадок',   group: 'Этап проекта · Подбор площадки' },
-  { key: 'sites_priority', label: 'Приоритеты',      group: 'Этап проекта · Подбор площадки' },
-  { key: 'sites_map',      label: 'Карта',           group: 'Этап проекта · Подбор площадки' },
-  { key: 'pr_tp',          label: 'Присоединение',   group: 'Этап проекта · Реализация' },
-  { key: 'pr_equipment',   label: 'Оборудование',    group: 'Этап проекта · Реализация' },
-  { key: 'pr_accounting',  label: 'Ждёт учёта',      group: 'Связь с учётом' },
-]
-export const SITES_KEYS = SITES_MENU.map((m) => m.key)
-
-// Анализ зарядных сессий ЭЗС (реальные данные, для energy-профиля).
-// Сгруппировано по смыслу (заголовки групп рисует сайдбар по полю group):
-//   СЕТЬ — состояние сети (обзор + карта);
-//   АНАЛИТИКА СЕССИЙ — агрегаты (Сессии: внутр. табы) + построчный реестр;
-//   КОММЕРЦИЯ — цена (тарифы) и клиентские направления (ЮЛ/ФЛ).
-export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
-  { key: 'cs_dashboard',  label: 'Обзор',         group: 'Сеть' },
-  { key: 'cs_map',        label: 'Карта',         group: 'Сеть' },
-  { key: 'cs_trend',      label: 'Динамика 2024+', group: 'Сеть' },
-  { key: 'cs_abcxyz',     label: 'ABC-XYZ станций', group: 'Сеть' },
-  { key: 'cs_sessions',    label: 'Сессии',        group: 'Аналитика сессий' },
-  { key: 'cs_reliability', label: 'Надёжность',    group: 'Аналитика сессий' },
-  { key: 'cs_list',        label: 'Реестр сессий', group: 'Аналитика сессий' },
-  { key: 'cs_clients',    label: 'Тарифы',        group: 'Коммерция' },
-  { key: 'cs_corporate',  label: 'Корпоратив',    group: 'Коммерция' },
-  { key: 'cs_retail',     label: 'Частные лица',  group: 'Коммерция' },
-]
-export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
-
-// Продукты, выделенные из «Продаж» (решение МАГа 27.07.2026): работа с юрлицами и
-// маркетинг — отдельные рабочие места со своими людьми, а не вкладки коммерции.
-export const CORP_MENU: CentralMenuItem[] = [
-  { key: 'cs_clients',    label: 'Тарифные планы', group: 'Коммерция' },
-  { key: 'cs_corporate',  label: 'Юрлица',         group: 'Коммерция' },
-  { key: 'cs_retail',     label: 'Частные лица',   group: 'Коммерция' },
-]
-export const CORP_KEYS = CORP_MENU.map((m) => m.key)
-
-export const MARKETING_MENU: CentralMenuItem[] = [
-  { key: 'cs_abcxyz',  label: 'ABC-XYZ станций', group: 'Сегментация' },
-  { key: 'cs_trend',   label: 'Динамика 2024+',  group: 'Сегментация' },
-]
-export const MARKETING_KEYS = MARKETING_MENU.map((m) => m.key)
+// Сами списки живут в `config/workspaceMenus.ts` — оттуда же их берёт карта прав
+// (`config/productAccess.ts`), чтобы пункт меню и право на него не разъезжались.
+// Реэкспорт сохранён: внешние импорты продолжают работать.
+export {
+  MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
+  EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
+  CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS, CORP_MENU, CORP_KEYS,
+  MARKETING_MENU, MARKETING_KEYS,
+}
 
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
 // (getModuleComponentDefs('accounting')) в useWorkspaceSections — статичного ACC_MENU
@@ -136,13 +58,15 @@ export interface WorkspaceSection {
   items: CentralMenuItem[]
   /** Подключён ли раздел компании (иначе панель покажет пустое состояние). */
   connected: boolean
+  /** Роль закрыла ВСЕ пункты раздела — показывать его нечем (см. `productAccess.ts`). */
+  restricted?: boolean
 }
 
 /**
  * Разделы рабочей области для активной компании (реактивно к подключениям модулей).
  */
 export function useWorkspaceSections(): WorkspaceSection[] {
-  const { company } = useCompany()
+  const { company, canModule } = useCompany()
   const isEnergy = company.profileId === 'energy'
   const { conn } = useModuleConnections()
   const on = (id: string) => {
@@ -171,14 +95,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const energyOps = ENERGY_MGMT.filter((m) => on(m.key))
     .map((m) => ({ ...m, group: 'Хозяйство' }))
   const opsItems: CentralMenuItem[] = [
-    ...(isEnergy
-      ? [
-          { key: 'ops_overview', label: 'Обзор', group: 'Мониторинг' },
-          { key: 'ops_balance', label: 'Баланс (факт)', group: 'Мониторинг' },
-          { key: 'ops_completeness', label: 'Полнота данных', group: 'Мониторинг' },
-          ...EQUIPMENT_MENU,
-        ]
-      : []),
+    ...(isEnergy ? [...OPS_MONITOR_MENU, ...EQUIPMENT_MENU] : []),
     ...energyOps,
     ...(!isEnergy && on('ops_contracts') ? [{ key: 'contracts', label: 'Договоры и аренда' }] : []),
     // «Баланс ЭЗС» (демо-витрина BalanceVitrine на DEMO_EZS) убран — реальный
@@ -216,9 +133,21 @@ export function useWorkspaceSections(): WorkspaceSection[] {
 
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
-  return isEnergy
+  const all = isEnergy
     ? [sales, corporate, marketing, projects, ops, store, acc, exp]
     : [sales, store, ops, acc, exp]
+  // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
+  // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый
+  // пункт ни в гармошке, ни в контенте. Гейт есть только у продуктов разреза: там код
+  // пункта однозначен (`config/productAccess.ts`), в цельном Учёте коды разделов
+  // пересекаются между видами учёта, и права остаются на уровне разделов, как были.
+  if (!isCarvedProfile(company.profileId)) return all
+  return all.map((s) => {
+    const app = productForMode(s.mode)
+    if (!app || !s.items.length) return s
+    const items = s.items.filter((i) => productModuleAllowed(app, i.key, canModule))
+    return items.length === s.items.length ? s : { ...s, items, restricted: items.length === 0 }
+  })
 }
 
 /**

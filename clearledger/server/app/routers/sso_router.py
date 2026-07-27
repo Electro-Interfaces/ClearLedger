@@ -118,9 +118,15 @@ async def list_apps(
         if cid is not None:
             uc = (await db.execute(select(UserCompany).where(
                 UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
-            # Админ компании видит всё; иначе — по правам роли (membership.modules).
+            # Админ компании видит всё; иначе — ЭФФЕКТИВНЫЕ права членства.
+            # ⚠ Именно `resolve_member_modules`, а не `uc.modules`: при назначении
+            # ИМЕНОВАННОЙ роли в членстве стоит `role_id`, а `modules` остаётся NULL.
+            # Читая поле напрямую, стол считал такого человека полнодоступным и
+            # показывал все плитки — назначенная роль не действовала вообще.
             if uc is not None and uc.role != "admin":
-                allowed = sorted(await app_registry.effective_apps(db, cid, uc.modules))
+                from app.auth import resolve_member_modules
+                allowed = sorted(await app_registry.effective_apps(
+                    db, cid, await resolve_member_modules(uc, db)))
                 apps = [a for a in apps if a["code"] in allowed]
 
     return {

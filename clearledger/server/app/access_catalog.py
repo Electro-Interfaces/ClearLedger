@@ -32,6 +32,11 @@ _KEY_RE = re.compile(r"^[a-z0-9_-]+(:[a-z0-9_-]+)?$")
 
 # Системные роли (сидятся в каждую компанию). app-namespaced; `ledger` = доступ к
 # приложению Ledger целиком, `ledger:<module>` — к конкретному режиму/разделу.
+#
+# Набор зависит от ПРОФИЛЯ компании: у сети ЭЗС Учёт разрезан на продукты, и роль с
+# ключами `ledger:*` не даёт ничего — приложения, на которое она ссылается, у компании
+# нет. До 27.07.2026 сидился один ledger-набор, поэтому в пилоте пять системных ролей
+# висели пустыми, и раздавать доступ было нечем.
 SYSTEM_ROLES: list[dict] = [
     {"name": "Полный доступ", "modules": None},
     {"name": "Финансист", "modules": ["ledger", "ledger:management", "ledger:financial", "ledger:documents", "ledger:catalog"]},
@@ -39,6 +44,29 @@ SYSTEM_ROLES: list[dict] = [
     {"name": "Оператор данных", "modules": ["ledger", "ledger:documents", "ledger:reconciliation", "ledger:sources", "ledger:locations"]},
     {"name": "Наблюдатель", "modules": ["ledger", "ledger:management"]},
 ]
+
+# Профиль `energy` (сеть ЭЗС): роли по рабочим местам разреза. Коды разделов — пункты
+# меню продуктов (`config/productAccess.ts` на фронте).
+SYSTEM_ROLES_ENERGY: list[dict] = [
+    {"name": "Полный доступ", "modules": None},
+    {"name": "Проектный офис", "modules": ["projects"]},
+    {"name": "Инженер эксплуатации", "modules": ["ops"]},
+    {"name": "Коммерция", "modules": ["sales", "corp"]},
+    {"name": "Маркетолог", "modules": ["marketing"]},
+    {"name": "Бухгалтер", "modules": ["finance"]},
+    {"name": "Оператор данных", "modules": ["data"]},
+    {"name": "Диспетчер поддержки", "modules": ["support", "chat"]},
+    # Внешний участник: заявки и состояние железа — без коммерции, денег и данных.
+    # Типовая выдача подрядчику; сузить до конкретных разделов можно матрицей.
+    {"name": "Подрядчик (внешний)", "modules": [
+        "support", "chat", "ops:ops_overview", "ops:eq_fleet", "ops:objects"]},
+    {"name": "Наблюдатель", "modules": ["sales:cs_dashboard", "ops:ops_overview"]},
+]
+
+
+def system_roles_for(profile_id: str | None) -> list[dict]:
+    """Набор системных ролей под профиль компании."""
+    return SYSTEM_ROLES_ENERGY if profile_id == "energy" else SYSTEM_ROLES
 
 
 def normalize_key(key: str) -> str:
@@ -49,20 +77,30 @@ def normalize_key(key: str) -> str:
 
 
 def normalize_modules(modules: list[str] | None) -> list[str] | None:
-    """Привести набор к app-namespaced. None → None. Если после нормализации есть
-    хоть один `ledger:*`, но нет `ledger` (app-доступ) — добавляем его: у старых
-    ролей был доступ к Ledger как к приложению неявно."""
+    """Привести набор к app-namespaced. None → None.
+
+    Плоский legacy-ключ (`store`) означал и доступ к самому Ledger — такому набору
+    app-ключ `ledger` дописывается, иначе старые роли потеряли бы вход в приложение.
+
+    ⚠ Явным ключам `<app>:<module>` app-ключ НЕ дописывается. Раньше дописывался
+    любому — и право на один раздел продукта («Продажи: Реестр сессий») молча
+    становилось правом на весь продукт: `module_allowed` находил ключ `sales` и
+    пропускал что угодно. С разрезом Учёта на продукты это обесценивало настройку
+    доступа целиком. Вход в продукт по частичному ключу всё равно открыт —
+    `app_allowed` пускает по любому `<app>:*`.
+    """
     if modules is None:
         return None
     out: list[str] = []
+    had_legacy = False
     for k in modules:
         nk = normalize_key(k)
+        if nk != k:
+            had_legacy = True
         if nk not in out:
             out.append(nk)
-    apps = {k.split(":", 1)[0] for k in out}
-    for app in list(apps):
-        if app not in out and any(k.startswith(f"{app}:") for k in out):
-            out.append(app)
+    if had_legacy and LEDGER_APP not in out:
+        out.append(LEDGER_APP)
     return out
 
 

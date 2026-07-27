@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
-  KeyRound, Plus, Pencil, Copy, History, Share2,
+  KeyRound, Plus, Pencil, Copy, History, Share2, Users, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
@@ -27,12 +27,11 @@ import * as invitationService from '@/services/invitationService'
 import { InviteLinkPanel } from './InviteLinkPanel'
 import * as roleService from '@/services/roleService'
 import type { CompanyRole } from '@/services/roleService'
-import { ACCESS_MODULES, ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
-import { isApiEnabled } from '@/services/apiClient'
-import { getAccessCatalog } from '@/services/registryService'
+import { ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
+import { AccessMatrix, AccessSummary } from './AccessMatrix'
+import { useAccessTree } from '@/hooks/useAccessTree'
 import { projectSpaceUsers, listSpaceOrganizations } from '@/services/spaceObjectsService'
 import { PartyBadge } from '@/components/chat/PartyBadge'
-import { ECOSYSTEM_BRAND } from '@/config/brand'
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Администратор', user: 'Сотрудник' }
 
@@ -92,7 +91,7 @@ export function MembersCard({
   const projectUsers = useMutation({
     mutationFn: () => projectSpaceUsers(companyId, 'support'),
     onSuccess: (r) => toast.success(
-      `Координатор обновлён: создано ${r.created}, обновлено ${r.updated}`,
+      `Поддержка обновлена: создано ${r.created}, обновлено ${r.updated}`,
       { description: `Отправлено сотрудников: ${r.sent}` },
     ),
     onError: (e) => toast.error('Проекция не выполнена', { description: (e as Error).message }),
@@ -551,56 +550,62 @@ function Loading() {
   )
 }
 
-/** Сетка прав роли/доступа по приложениям экосистемы (app-namespaced). Дерево берётся
- * из реестра компании (getAccessCatalog): приложение → «всё приложение» (app-ключ) +
- * его модули (`app:module`). Отметка приложения покрывает все его модули. Fallback на
- * модули Ledger, если каталог недоступен (офлайн-контур). */
+/** Сетка прав роли/доступа по продуктам пространства (app-namespaced). Дерево — то же,
+ * что в матрице (`useAccessTree`): каталог подключённых компании продуктов + их разделы
+ * из карты меню. Отметка продукта покрывает все его разделы; группы раскрываются по
+ * клику — иначе 25 пунктов «Магазина» в диалоге не разобрать. */
 function ModuleCheckboxGrid({ companyId, sel, onToggle, disabled }: {
   companyId: string; sel: Set<string>; onToggle: (k: string) => void; disabled?: boolean
 }) {
-  const q = useQuery({
-    queryKey: ['access-catalog', companyId],
-    queryFn: () => getAccessCatalog(companyId),
-    enabled: isApiEnabled() && !!companyId,
-    staleTime: 5 * 60_000,
-    retry: false,
-  })
-  // Fallback: реестр недоступен → Ledger-модули как одно приложение (legacy-ключи).
-  const catalog = q.data ?? (q.isLoading ? [] : [{
-    app: 'ledger', name: `${ECOSYSTEM_BRAND} Учёт`, icon: 'book-open',
-    modules: ACCESS_MODULES.map((m) => ({ key: `ledger:${m.key}`, code: m.key, name: m.label })),
-  }])
+  const { tree, isLoading } = useAccessTree(companyId)
+  const [open, setOpen] = useState<Record<string, boolean>>({})
 
   return (
-    <div className={`space-y-3 max-h-72 overflow-y-auto pr-1 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
-      {q.isLoading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Загрузка каталога…</div>}
-      {catalog.map((app) => {
+    <div className={`space-y-2 max-h-80 overflow-y-auto pr-1 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+      {isLoading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Загрузка каталога…</div>}
+      {tree.map((app) => {
         const appOn = sel.has(app.app)
+        const picked = app.groups.flatMap((g) => g.modules).filter((m) => sel.has(m.key)).length
+        const expanded = !!open[app.app]
         return (
           <div key={app.app}>
-            <button type="button" onClick={() => onToggle(app.app)}
-              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-sm text-left border font-medium transition-colors ${
-                appOn ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border hover:bg-accent/40'
-              }`}>
-              <span>{app.name}<span className="text-[11px] text-muted-foreground/70 ml-1">· всё приложение</span></span>
-              {appOn && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-            </button>
-            {app.modules.length > 0 && (
-              <div className="ml-3 mt-1 flex flex-col gap-1 border-l pl-2">
-                {app.modules.map((m) => {
-                  const on = appOn || sel.has(m.key)
-                  return (
-                    <button key={m.key} type="button" disabled={appOn} onClick={() => onToggle(m.key)}
-                      className={`flex items-center justify-between px-2.5 py-1 rounded-md text-sm text-left border transition-colors ${
-                        on ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent/40'
-                      } ${appOn ? 'opacity-60' : ''}`}>
-                      <span>{m.name}</span>
-                      {on && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
-                    </button>
-                  )
-                })}
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => setOpen((o) => ({ ...o, [app.app]: !o[app.app] }))}
+                disabled={!app.count} className="p-1 text-muted-foreground disabled:opacity-0">
+                {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              </button>
+              <button type="button" onClick={() => onToggle(app.app)}
+                className={`flex-1 flex items-center justify-between px-2.5 py-1.5 rounded-md text-sm text-left border font-medium transition-colors ${
+                  appOn ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border hover:bg-accent/40'
+                }`}>
+                <span>
+                  {app.name}
+                  <span className="text-[11px] text-muted-foreground/70 ml-1">
+                    {appOn ? '· весь продукт' : picked ? `· выбрано: ${picked}` : app.count ? `· разделов: ${app.count}` : ''}
+                  </span>
+                </span>
+                {appOn && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+              </button>
+            </div>
+            {expanded && app.groups.map((g) => (
+              <div key={g.name} className="ml-6 mt-1 border-l pl-2">
+                <div className="px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">{g.name}</div>
+                <div className="flex flex-col gap-1">
+                  {g.modules.map((m) => {
+                    const on = appOn || sel.has(m.key)
+                    return (
+                      <button key={m.key} type="button" disabled={appOn} onClick={() => onToggle(m.key)}
+                        className={`flex items-center justify-between px-2.5 py-1 rounded-md text-[13px] text-left border transition-colors ${
+                          on ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent/40'
+                        } ${appOn ? 'opacity-60' : ''}`}>
+                        <span>{m.name}</span>
+                        {on && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            )}
+            ))}
           </div>
         )
       })}
@@ -620,14 +625,19 @@ export function RolesAccessTab({ companyId, canManage }: { companyId: string; ca
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
   return (
-    <div className="grid lg:grid-cols-2 gap-4 items-start">
+    <div className="space-y-4">
+      {/* Матрица — главный экран доступа: весь контур прав компании разом. Карточки
+          ролей под ней остаются для создания, переименования и удаления. */}
+      <AccessMatrix companyId={companyId} roles={roles} canManage={canManage} />
+      <div className="grid lg:grid-cols-2 gap-4 items-start">
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0 flex-wrap gap-2">
-          <div>
-            <CardTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" /> Роли доступа</CardTitle>
-            <CardDescription>Именованные наборы прав на приложения и модули системы. Системные — только чтение; кастомные можно менять.</CardDescription>
-          </div>
-          {canManage && <RoleEditDialog companyId={companyId} roles={roles} onSaved={refetch} />}
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5" /> Роли доступа</CardTitle>
+          <CardDescription>Именованные наборы прав на продукты пространства и их разделы. Системные — только чтение; кастомные можно менять.</CardDescription>
+          {/* CardHeader — grid: без CardAction кнопка занимает всю ширину карточки. */}
+          {canManage && (
+            <CardAction><RoleEditDialog companyId={companyId} roles={roles} onSaved={refetch} /></CardAction>
+          )}
         </CardHeader>
         <CardContent className="space-y-2.5">
           {rolesQ.isLoading && <Loading />}
@@ -649,64 +659,69 @@ export function RolesAccessTab({ companyId, canManage }: { companyId: string; ca
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap gap-1 mt-2">
-                {r.modules == null
-                  ? <Badge variant="outline" className="text-[10px] gap-1"><ShieldCheck className="h-3 w-3" /> Все модули</Badge>
-                  : moduleLabels(r.modules).map((l) => <Badge key={l} variant="secondary" className="text-[10px] font-normal">{l}</Badge>)}
+              {/* Полный список ключей в бейджах перестал читаться, когда у продуктов
+                  появились разделы (у роли их бывает под сотню) — здесь сводка, состав
+                  виден в матрице выше. */}
+              <div className="flex flex-wrap items-center gap-1 mt-2">
+                <AccessSummary modules={r.modules} />
+                {r.modules != null && r.modules.length > 0 && (
+                  <span className="text-[11px] text-muted-foreground/70">
+                    · {moduleLabels(r.modules).slice(0, 4).join(', ')}{r.modules.length > 4 ? '…' : ''}
+                  </span>
+                )}
               </div>
             </div>
           ))}
         </CardContent>
       </Card>
 
-      {/* Каталог приложений и модулей системы (что вообще можно дать ролью) */}
-      <AccessCatalogCard companyId={companyId} />
+      <MemberAccessCard companyId={companyId} />
+      </div>
     </div>
   )
 }
 
-/** Справочник: приложения экосистемы и их модули, доступные для назначения ролью
- * (из реестра компании). Роль «Администратор» — всегда полный доступ. */
-function AccessCatalogCard({ companyId }: { companyId: string }) {
+/** Кто сейчас чем пользуется: человек → его роль и продукты. Матрица показывает, что
+ *  МОЖЕТ дать роль; здесь видно, кому она фактически назначена, включая внешних. */
+function MemberAccessCard({ companyId }: { companyId: string }) {
   const q = useQuery({
-    queryKey: ['access-catalog', companyId],
-    queryFn: () => getAccessCatalog(companyId),
-    enabled: isApiEnabled() && !!companyId,
-    staleTime: 5 * 60_000,
-    retry: false,
+    queryKey: ['team-members', companyId],
+    queryFn: () => userService.listUsers(companyId),
   })
-  const catalog = q.data ?? []
+  const members = q.data ?? []
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5" /> Приложения и модули системы</CardTitle>
-        <CardDescription>Что можно выдать ролью. Приложения — по составу поставки компании.</CardDescription>
+        <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Кому что назначено</CardTitle>
+        <CardDescription>Роль и права каждого участника пространства — свои сотрудники и внешние.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent>
         {q.isLoading && <Loading />}
-        {!q.isLoading && catalog.length === 0 && (
-          <div className="text-sm text-muted-foreground">Каталог недоступен (офлайн-контур).</div>
-        )}
-        {catalog.map((app) => (
-          <div key={app.app}>
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <div className="text-sm font-semibold">{app.name}</div>
-              <code className="text-[10px] text-muted-foreground/50 font-mono">{app.app}</code>
-            </div>
-            {app.modules.length > 0 ? (
-              <div className="space-y-1 ml-3 border-l pl-2">
-                {app.modules.map((m) => (
-                  <div key={m.key} className="flex items-start justify-between gap-3 rounded-md border px-2.5 py-1.5">
-                    <div className="text-sm">{m.name}</div>
-                    <code className="text-[10px] text-muted-foreground/50 font-mono mt-0.5 shrink-0">{m.key}</code>
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead>Участник</TableHead>
+            <TableHead className="w-[140px]">Роль</TableHead>
+            <TableHead className="w-[190px]">Доступ</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {members.map((m) => (
+              <TableRow key={m.id}>
+                <TableCell className="py-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-sm truncate">{m.name}</span>
+                    <PartyBadge party={{
+                      partyType: m.party_type ?? 'internal', role: m.role,
+                      orgName: m.organization_name, position: m.position,
+                    }} />
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-[11px] text-muted-foreground ml-3">доступ к приложению целиком</div>
-            )}
-          </div>
-        ))}
+                  <div className="text-[11px] text-muted-foreground truncate">{m.email}</div>
+                </TableCell>
+                <TableCell className="py-1.5 text-xs">{m.role_name ?? (m.role === 'admin' ? 'Администратор' : '—')}</TableCell>
+                <TableCell className="py-1.5"><AccessSummary modules={m.role === 'admin' ? null : (m.modules ?? null)} /></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   )

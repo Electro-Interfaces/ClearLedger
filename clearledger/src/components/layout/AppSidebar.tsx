@@ -21,11 +21,15 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { mainNavItems, dataItems, oneCItems, settingsItems } from '@/config/navigation'
 import { routeAllowed } from '@/config/accessModules'
 import { isCarvedProfile, productForPath, productNav } from '@/config/spaceProducts'
+import { pageModuleCode, productModuleAllowed } from '@/config/productAccess'
+import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
 
-/** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения. */
-export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate }: {
+/** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения.
+ *  `active` — переопределить подсветку: у разделов рабочей области адрес один и тот же,
+ *  различает их параметр `?mode=`, которого NavLink не видит. */
+export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, active }: {
   to: string; icon: React.ComponentType<{ className?: string }>; label: string
-  end?: boolean; collapsed?: boolean; onNavigate?: () => void
+  end?: boolean; collapsed?: boolean; onNavigate?: () => void; active?: boolean
 }) {
   return (
     <SidebarMenuItem>
@@ -38,7 +42,7 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate }: {
               onClick={onNavigate}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  isActive
+                  (active ?? isActive)
                     ? 'bg-primary/10 text-primary'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent'
                 } ${collapsed ? 'justify-center px-2' : ''}`
@@ -69,26 +73,51 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
 }) {
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
-  const { company, companyModules } = useCompany()
-  const { pathname } = useLocation()
-  // В продукте пространства («Финансы», «Данные», …) меню — только его страницы:
-  // рабочее место не должно показывать чужие разделы. Разделы рабочей области
-  // (гармошка) рисует WorkspaceModeSidebar, здесь только страницы.
-  // Доступ к продукту уже проверен на входе (RequireApp), поэтому пункты внутри не
-  // фильтруются модулями Учёта: у роли с ключом `finance` их нет, и «Документы»
-  // исчезли бы из собственного продукта.
+  const { company, companyModules, canModule } = useCompany()
+  const { pathname, search } = useLocation()
+  // Разделы рабочей области — здесь же, рядом со страницами продукта: рабочий стол
+  // теперь уровнем выше (пространство), и внутри продукта верхний уровень навигации
+  // принадлежит ему самому. Гармошка WorkspaceModeSidebar оставляет только под-разделы.
+  const sections = useWorkspaceSections()
+  // В продукте пространства («Финансы», «Данные», …) меню — только его разделы и
+  // страницы: рабочее место не должно показывать чужие. Модулями Учёта пункты внутри не
+  // фильтруются (у роли с ключом `finance` их нет, и «Документы» исчезли бы из
+  // собственного продукта) — правами продукта фильтруются: `finance:files`.
   const product = isCarvedProfile(company.profileId) ? productForPath(pathname) : null
   if (product) {
+    // Разделы берём фактические (useWorkspaceSections), а не объявленные в карте:
+    // «Финансовый» и «Налоговый» сняты с витрины, и пункт вёл бы в пустоту.
+    // Раздел, у которого все под-пункты закрыты ролью, приходит из хука пустым — такой
+    // пункт не показываем, он открывал бы витрину без единого доступного экрана.
+    const modes = sections
+      .filter((s) => product.modes.includes(s.mode))
+      .filter((s) => productModuleAllowed(product.code, s.mode, canModule) && !s.restricted)
+    const urlMode = new URLSearchParams(search).get('mode')
+    const activeMode = modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode
+    const onProductRoute = pathname === product.route
+    // Страницы продукта («Документы», «Коннекторы») — тоже право: код = сегмент пути.
     const items = productNav(product)
-    return items.length > 0 ? (
+      .filter((i) => productModuleAllowed(product.code, pageModuleCode(i.to), canModule))
+    return (
       <SidebarGroup className="py-0">
         <SidebarMenu>
+          {modes.map((s) => (
+            <NavItem
+              key={s.mode}
+              to={`${product.route}?mode=${s.mode}`}
+              icon={s.icon}
+              label={s.label}
+              collapsed={collapsed}
+              onNavigate={onNavigate}
+              active={onProductRoute && s.mode === activeMode}
+            />
+          ))}
           {items.map((item) => (
             <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
           ))}
         </SidebarMenu>
       </SidebarGroup>
-    ) : null
+    )
   }
   // Скрываем пункты, недоступные по модулям: права RBAC ∩ состав поставки из реестра
   // Ядра (см. CompanyContext). null = не ограничено.

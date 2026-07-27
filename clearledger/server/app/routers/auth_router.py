@@ -16,6 +16,7 @@ from app.auth import (
     create_access_token,
     get_current_user,
     hash_password,
+    resolve_member_modules,
     verify_password,
 )
 from app.database import get_db
@@ -204,17 +205,23 @@ async def get_me(
         ).scalars().all()
         briefs = [_brief(c, "admin") for c in companies]
     else:
-        # Обычный — только свои, с ролью и модулями членства в каждой.
+        # Обычный — только свои, с ролью и ЭФФЕКТИВНЫМИ правами членства.
         rows = (
             await db.execute(
-                select(Company, UserCompany.role, UserCompany.modules)
+                select(Company, UserCompany)
                 .join(UserCompany, UserCompany.company_id == Company.id)
                 .where(UserCompany.user_id == current_user.id)
                 .order_by(Company.name)
             )
         ).all()
-        # admin-член видит всё (modules игнорируется на всякий случай).
-        briefs = [_brief(c, role, None if role == "admin" else mods) for c, role, mods in rows]
+        # ⚠ Права считает `resolve_member_modules`, а не поле `UserCompany.modules`:
+        # у человека с ИМЕНОВАННОЙ ролью это поле NULL (набор лежит в самой роли), а
+        # фронт читает NULL как «полный доступ» — то есть назначенная роль не
+        # ограничивала ничего. admin-член видит всё.
+        briefs = [
+            _brief(c, uc.role, None if uc.role == "admin" else await resolve_member_modules(uc, db))
+            for c, uc in rows
+        ]
 
     return MeResponse(
         id=str(current_user.id),

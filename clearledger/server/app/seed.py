@@ -141,24 +141,43 @@ async def seed_data(db: AsyncSession) -> None:
 
 
 async def _seed_system_roles(db: AsyncSession) -> None:
-    """Идемпотентно создаёт системные роли доступа в каждой компании."""
-    from app.access_catalog import SYSTEM_ROLES
-    from app.models import CompanyRole
+    """Идемпотентно создаёт системные роли доступа в каждой компании — по её профилю.
 
-    companies = (await db.execute(select(Company.id))).scalars().all()
-    for cid in companies:
+    Состав ролей зависит от профиля: у сети ЭЗС Учёт разрезан на продукты, и роль с
+    ключами `ledger:*` не даёт ничего. Поэтому набор не только досеивается, но и
+    ПЕРЕПИСЫВАЕТСЯ у существующих системных ролей: иначе компания, заведённая до
+    разреза, навсегда осталась бы с ролями на несуществующее приложение.
+    Кастомные роли (is_system=False) не трогаются — это настройка заказчика.
+    """
+    from app.access_catalog import system_roles_for
+    from app.models import CompanyRole, UserCompany
+
+    companies = (await db.execute(select(Company.id, Company.profile_id))).all()
+    for cid, profile_id in companies:
+        roles = system_roles_for(profile_id)
+        wanted = {r["name"]: r["modules"] for r in roles}
         existing = (await db.execute(
-            select(CompanyRole.name).where(
+            select(CompanyRole).where(
                 CompanyRole.company_id == cid, CompanyRole.is_system.is_(True)
             )
         )).scalars().all()
-        have = set(existing)
-        for role in SYSTEM_ROLES:
-            if role["name"] not in have:
-                db.add(CompanyRole(
-                    company_id=cid, name=role["name"],
-                    modules=role["modules"], is_system=True,
-                ))
+        have = {r.name: r for r in existing}
+        for name, modules in wanted.items():
+            cur = have.get(name)
+            if cur is None:
+                db.add(CompanyRole(company_id=cid, name=name, modules=modules, is_system=True))
+            elif cur.modules != modules:
+                cur.modules = modules
+        # Роль прежнего набора, которой никто не пользуется, убираем: держать в списке
+        # «Финансиста» с правами на отключённый Учёт — вводить админа в заблуждение.
+        for name, role in have.items():
+            if name in wanted:
+                continue
+            used = (await db.execute(
+                select(UserCompany.user_id).where(UserCompany.role_id == role.id).limit(1)
+            )).scalar_one_or_none()
+            if used is None:
+                await db.delete(role)
 
 
 async def _seed_gig_msto_source(db: AsyncSession) -> None:

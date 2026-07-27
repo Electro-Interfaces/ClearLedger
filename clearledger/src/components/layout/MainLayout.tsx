@@ -13,6 +13,7 @@ import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
 import { pathAllowed, homePath, productForPath } from '@/config/spaceProducts'
+import { productModuleAllowed } from '@/config/productAccess'
 
 // Состояние левого сайдбара сохраняется между запусками. По умолчанию (первый
 // запуск, нет сохранённого значения) — свёрнут: рабочая область получает
@@ -51,12 +52,14 @@ export function MainLayout() {
   const isMobile = useMaxWidth(1024)
   const location = useLocation()
   const navigate = useNavigate()
-  const { company, companyModules, canApp } = useCompany()
+  const { company, companyModules, canApp, canModule } = useCompany()
   // RBAC route-guard: прямой переход на недоступный роут → на рабочий стол. Страницы
-  // продуктов пространства проверяются доступом к продукту (см. pathAllowed).
+  // продуктов пространства проверяются доступом к продукту и к самой странице
+  // (`finance:files`, см. pathAllowed и config/productAccess.ts).
   useEffect(() => {
     const ok = pathAllowed(location.pathname, company.profileId, canApp,
-      (p) => routeAllowed(p, companyModules))
+      (p) => routeAllowed(p, companyModules),
+      (app, code) => productModuleAllowed(app, code, canModule))
     if (!ok) navigate(homePath(company.profileId), { replace: true })
     // canApp пересоздаётся каждый рендер — в зависимостях его нет намеренно,
     // источник его данных (companyModules/профиль) в списке присутствует.
