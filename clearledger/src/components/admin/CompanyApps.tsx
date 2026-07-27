@@ -19,6 +19,7 @@ import {
   listCompanyApps, setCompanyApp, setCompanyAppModule, type CompanyAppRec,
 } from '@/services/registryService'
 import { AppCatalogSection } from './AppCatalog'
+import { productModules } from '@/config/productAccess'
 
 export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
   companyId: string; canManage: boolean; isSuperadmin?: boolean
@@ -49,12 +50,25 @@ export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
   }
   const apps = q.data ?? []
   const busy = appMut.isPending || modMut.isPending
+  // Состав продукта берём из той же карты, что рисует меню и матрицу прав
+  // (`productAccess`): иначе «какие модули подключены» и «на что можно выдать право»
+  // отвечали бы разными списками.
+  const sectionsOf = (code: string) => {
+    const groups: { name: string; items: string[] }[] = []
+    for (const m of productModules(code)) {
+      const last = groups[groups.length - 1]
+      if (last && last.name === m.group) last.items.push(m.label)
+      else groups.push({ name: m.group, items: [m.label] })
+    }
+    return groups
+  }
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Приложения и модули экосистемы, подключённые организации. Включение управляется здесь
-        (серверный реестр), а не браузером.
+        Из чего собрано рабочее пространство организации: подключённые продукты, их модули и
+        разделы. Включение хранится в реестре Ядра, а не в браузере; кому эти разделы открыты —
+        в «Ролях и доступе».
       </p>
       {apps.map((app) => (
         <AppCard
@@ -62,6 +76,7 @@ export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
           app={app}
           canManage={canManage}
           busy={busy}
+          sections={sectionsOf(app.code)}
           onToggleApp={(enabled) => appMut.mutate({ appId: app.id, enabled })}
           onToggleModule={(code, enabled) => modMut.mutate({ appId: app.id, code, enabled })}
         />
@@ -76,13 +91,16 @@ export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
   )
 }
 
-function AppCard({ app, canManage, busy, onToggleApp, onToggleModule }: {
+function AppCard({ app, canManage, busy, sections, onToggleApp, onToggleModule }: {
   app: CompanyAppRec
   canManage: boolean
   busy: boolean
+  /** Разделы продукта из карты доступа — состав тех продуктов, у которых нет модулей в реестре. */
+  sections: { name: string; items: string[] }[]
   onToggleApp: (enabled: boolean) => void
   onToggleModule: (code: string, enabled: boolean) => void
 }) {
+  const sectionCount = sections.reduce((s, g) => s + g.items.length, 0)
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -102,6 +120,9 @@ function AppCard({ app, canManage, busy, onToggleApp, onToggleModule }: {
       </CardHeader>
       {app.modules.length > 0 && (
         <CardContent className="pt-0">
+          <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground/70">
+            Модули — включаются организации
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {app.modules.map((m) => (
               <div
@@ -120,6 +141,34 @@ function AppCard({ app, canManage, busy, onToggleApp, onToggleModule }: {
               </div>
             ))}
           </div>
+        </CardContent>
+      )}
+      {/* У продуктов разреза (Проекты, Продажи, Финансы…) модулей в реестре нет: их состав —
+          пункты меню, и включать по отдельности нечего. Раньше карточка такого продукта была
+          пустой, и «какие модули подключены» оставалось без ответа. Показываем состав как
+          есть, отмечая, что закрывается он ролью, а не выключателем. */}
+      {app.modules.length === 0 && sectionCount > 0 && (
+        <CardContent className="pt-0">
+          <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground/70">
+            Разделы продукта ({sectionCount}) — доступ выдаётся ролью
+          </div>
+          <div className={`space-y-1.5 ${app.enabled ? '' : 'opacity-50'}`}>
+            {sections.map((g) => (
+              <div key={g.name} className="flex flex-wrap items-baseline gap-1.5">
+                <span className="text-[11px] text-muted-foreground/70">{g.name}:</span>
+                {g.items.map((it) => (
+                  <Badge key={it} variant="outline" className="text-[11px] font-normal">{it}</Badge>
+                ))}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      )}
+      {app.modules.length === 0 && sectionCount === 0 && (
+        <CardContent className="pt-0">
+          <p className="text-xs text-muted-foreground">
+            Продукт подключается целиком: отдельных модулей у него нет.
+          </p>
         </CardContent>
       )}
     </Card>

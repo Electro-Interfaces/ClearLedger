@@ -1,23 +1,23 @@
 /**
- * Вкладка «Справочники» Центра управления — контрагенты, договоры и оборудование
- * пространства (docs/SPACE.md §3, этапы 6–7 плана).
+ * «Управление» → «Договоры и оборудование»: обязательства пространства и паспорта единиц
+ * (docs/SPACE.md §3, этапы 6–7 плана).
  *
- * Карточки общие для всех разрезов; РОЛЬ у них прикладная: одно и то же юрлицо в Учёте
- * может быть поставщиком топлива, а в Координаторе — подрядчиком. Поэтому здесь только
- * реквизиты и паспорт, без ролевых полей.
+ * Контрагенты уехали в свой раздел («Контрагенты»): в одном списке с оборудованием
+ * юрлицо-сторона договора и компания-партнёр с доступом читались как одна сущность.
+ * Здесь остались сами обязательства и железо — то, что висит на объектах.
  *
- * Ведение остаётся в Учёте (контрагенты и складской контур оборудования — его рабочие
- * разделы), здесь — общий взгляд пространства и отправка в приложения.
+ * Ведение остаётся в приложениях (складской контур оборудования — рабочий раздел Учёта),
+ * здесь общий взгляд пространства и отправка в приложения.
  */
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Building2, Cpu, FileSignature, Loader2, Share2 } from 'lucide-react'
+import { Cpu, FileSignature, Loader2, Share2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  listSpaceOrganizations, listSpaceContracts, listSpaceEquipment, projectSpaceEntity,
+  listSpaceContracts, listSpaceEquipment, projectSpaceEntity,
 } from '@/services/spaceObjectsService'
 
 /** Направление обязательства: кто кому платит. Считается на сервере по виду договора. */
@@ -29,10 +29,6 @@ const DIRECTIONS = [
 
 export function SpaceRefs({ companyId, canManage }: { companyId: string; canManage: boolean }) {
   const [direction, setDirection] = useState<'all' | 'in' | 'out'>('all')
-  const orgsQ = useQuery({
-    queryKey: ['space-orgs', companyId],
-    queryFn: () => listSpaceOrganizations(companyId),
-  })
   const contractsQ = useQuery({
     queryKey: ['space-contracts', companyId],
     queryFn: () => listSpaceContracts(companyId),
@@ -43,7 +39,7 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
   })
 
   const project = useMutation({
-    mutationFn: (entity: 'organizations' | 'equipment') => projectSpaceEntity(companyId, entity),
+    mutationFn: () => projectSpaceEntity(companyId, 'equipment'),
     onSuccess: (r) => toast.success(
       `Отправлено: ${r.sent}`,
       { description: `Создано ${r.created}, обновлено ${r.updated}` +
@@ -52,7 +48,6 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
     onError: (e) => toast.error('Проекция не выполнена', { description: (e as Error).message }),
   })
 
-  const orgs = orgsQ.data ?? []
   const allContracts = contractsQ.data ?? []
   const contracts = direction === 'all'
     ? allContracts
@@ -61,59 +56,6 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Building2 className="size-4 text-primary" />
-          {/* Именно «Контрагенты»: «Организация» — это владелец пространства
-              (её реквизиты в соседнем разделе), а здесь партнёры-компании. */}
-          <span className="text-sm font-medium">Контрагенты</span>
-          <span className="text-xs text-muted-foreground">({orgs.length})</span>
-          <div className="flex-1" />
-          {canManage && orgs.length > 0 && (
-            <Button size="sm" variant="outline" className="gap-1.5"
-              disabled={project.isPending} onClick={() => project.mutate('organizations')}>
-              {project.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
-              В приложения
-            </Button>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Компании-партнёры пространства: реквизиты общие, роль — прикладная (в Финансах поставщик,
-          в Поддержке подрядчик). Ведутся в приложении «Финансы» → «Контрагенты».
-        </p>
-        {orgsQ.isLoading ? <Loading /> : orgs.length === 0 ? (
-          <Empty text="Организаций пока нет" />
-        ) : (
-          <div className="rounded-xl border border-border overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Наименование</TableHead>
-                  <TableHead className="w-[140px]">ИНН</TableHead>
-                  <TableHead className="w-[120px]">КПП</TableHead>
-                  <TableHead className="w-[80px]">Тип</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orgs.slice(0, 50).map((o) => (
-                  <TableRow key={o.id}>
-                    <TableCell className="font-medium">{o.shortName || o.name}</TableCell>
-                    <TableCell className="font-mono text-xs">{o.inn}</TableCell>
-                    <TableCell className="font-mono text-xs">{o.kpp || '—'}</TableCell>
-                    <TableCell><Badge variant="secondary" className="text-[10px]">{o.type}</Badge></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            {orgs.length > 50 && (
-              <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-                Показаны первые 50 из {orgs.length}; в приложения уходят все.
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
       {/* Договоры — вторая ось пространства после объекта: по ней сходятся аренда и
           энергоснабжение в Эксплуатации, договоры ЮЛ в Корпоративном процессинге,
           первичка в Финансах и обслуживание в Координаторе. Здесь — общий взгляд:
@@ -209,7 +151,7 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
           <div className="flex-1" />
           {canManage && units.length > 0 && (
             <Button size="sm" variant="outline" className="gap-1.5"
-              disabled={project.isPending} onClick={() => project.mutate('equipment')}>
+              disabled={project.isPending} onClick={() => project.mutate()}>
               {project.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
               В приложения
             </Button>

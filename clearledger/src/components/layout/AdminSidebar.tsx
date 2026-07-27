@@ -19,7 +19,7 @@ import {
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { NavItem } from '@/components/layout/AppSidebar'
-import { adminPath, companySections, ecosystemSections } from '@/config/adminNav'
+import { adminPath, companySections, ecosystemSections, sectionGroups } from '@/config/adminNav'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 
@@ -58,15 +58,22 @@ export function AdminNavContent({ collapsed = false, onNavigate }: {
 
       {isSuper && companyNav.length > 0 && <SidebarSeparator className="my-2" />}
 
-      {companyNav.length > 0 && (
-        <SidebarGroup className="py-0">
-          {!collapsed && (
+      {/* Разделы организации идут БЛОКАМИ (`AdminSection.group`): организация, компании
+          и партнёры, контрагенты, рабочее пространство, наблюдение. Двенадцать пунктов
+          плоским списком не читаются, а вопросы у блоков разные — партнёр с доступом и
+          контрагент в договоре это не одно и то же. */}
+      {sectionGroups(companyNav).map((g, i) => (
+        <SidebarGroup key={g.name || i} className="py-0">
+          {!collapsed && g.name && (
             <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-              Организация
+              {g.name}
             </p>
           )}
+          {/* В свёрнутом меню подписей нет — блоки разделяем чертой, иначе иконки
+              сливаются в одну колонну. */}
+          {collapsed && i > 0 && <SidebarSeparator className="my-1" />}
           <SidebarMenu>
-            {companyNav.map((s) => (
+            {g.items.map((s) => (
               <NavItem
                 key={s.code}
                 to={adminPath('company', s.code)}
@@ -78,7 +85,7 @@ export function AdminNavContent({ collapsed = false, onNavigate }: {
             ))}
           </SidebarMenu>
         </SidebarGroup>
-      )}
+      ))}
     </>
   )
 }

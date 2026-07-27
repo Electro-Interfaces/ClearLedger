@@ -13,6 +13,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { InvitationsCard, MembersCard, RolesAccessTab } from '@/components/admin/CompanyTeam'
 import { AuditLog } from '@/components/admin/AuditLog'
 import { Connections } from '@/components/admin/Connections'
+import { Counterparties } from '@/components/admin/Counterparties'
 import { Notifications } from '@/components/admin/Notifications'
 import { CompanyApps } from '@/components/admin/CompanyApps'
 import { CompanyProfileCard } from '@/components/admin/CompanyProfile'
@@ -64,6 +65,9 @@ function CompanyScreen({ code }: { code: string }) {
     case 'apps': return <CompanyApps companyId={company.id} canManage={canManage}
       isSuperadmin={!!user?.is_superadmin} />
     case 'objects': return <SpaceObjects companyId={company.id} canManage={canManage} />
+    // Контрагент — сторона договора, компания-партнёр — организация с доступом. Разные
+    // сущности и разные разделы, хотя карточка юрлица у них одна.
+    case 'counterparties': return <Counterparties companyId={company.id} canManage={canManage} />
     case 'refs': return <SpaceRefs companyId={company.id} canManage={canManage} />
     case 'notify': return <Notifications companyId={company.id} canManage={canManage} />
     // Витрина: состояние каналов платформы и подключений приложений; настройка — у владельца.
