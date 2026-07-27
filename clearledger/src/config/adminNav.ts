@@ -18,7 +18,7 @@
 import type { ComponentType } from 'react'
 import {
   LayoutDashboard, Map, Blocks, Users, History, Settings2,
-  KeyRound, MapPin, Library, Building2, Mail, Handshake,
+  KeyRound, MapPin, Library, Building2, Mail, Handshake, Bell, Cable,
 } from 'lucide-react'
 
 export type AdminScope = 'eco' | 'company'
@@ -55,6 +55,11 @@ export const companySections: AdminSection[] = [
   { code: 'apps', label: 'Приложения', hint: 'Подключённые продукты и их модули; каталог платформы — владельцу контейнера', icon: Blocks },
   { code: 'objects', label: 'Объекты', hint: 'Объекты организации — общие для всех приложений', icon: MapPin },
   { code: 'refs', label: 'Справочники', hint: 'Контрагенты, договоры и оборудование пространства', icon: Library },
+  // Коммуникации и внешний мир: о чём сообщать людям и чем пространство связано с
+  // другими системами. Раньше это лежало по кускам в «Настройках» ядра и в продукте
+  // «Данные», то есть настройка связи и её состояние жили в разных местах.
+  { code: 'notify', label: 'Оповещения', hint: 'О чём сообщать и куда — в чат организации или на почту', icon: Bell },
+  { code: 'connections', label: 'Подключения', hint: 'Каналы связи пространства и источники данных приложений', icon: Cable },
   { code: 'map', label: 'Карта', hint: 'Люди, доступы и активность организации', icon: Map },
   { code: 'profile', label: 'Реквизиты', hint: 'Наименование, ИНН, профиль организации', icon: Building2 },
   { code: 'invites', label: 'Приглашения', hint: 'Приглашения по email и ссылки регистрации', icon: Mail },

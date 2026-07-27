@@ -12,6 +12,7 @@ import base64
 import os
 import re
 import secrets
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -112,6 +113,18 @@ async def force_join(room_id: str, mxid: str) -> None:
     """Ввести пользователя в комнату admin-ом (щадит rate-limit паузой)."""
     await _mreq("POST", f"/_synapse/admin/v1/join/{quote(room_id, safe='')}", {"user_id": mxid})
     await asyncio.sleep(0.6)
+
+
+async def send_text(room_id: str, text: str) -> None:
+    """Написать в комнату от служебного аккаунта — для оповещений пространства.
+
+    `txn_id` берём из времени: Matrix требует идентификатор транзакции, и при повторной
+    отправке того же id сообщение не задваивается.
+    """
+    txn = str(int(time.time() * 1000))
+    await _mreq("PUT",
+                f"/_matrix/client/v3/rooms/{quote(room_id, safe='')}/send/m.room.message/{txn}",
+                {"msgtype": "m.text", "body": text})
 
 
 async def kick(room_id: str, mxid: str, reason: str = "") -> None:

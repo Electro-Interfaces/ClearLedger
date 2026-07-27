@@ -27,10 +27,16 @@ async def log_audit(
         parts.append(target)
     if details:
         parts.append(json.dumps(details, ensure_ascii=False))
+    text = " · ".join(parts) or None
     db.add(AuditEvent(
         company_id=company_id,
         user_id=str(actor.id) if actor else None,
         user_name=actor.name if actor else None,
         action=action,
-        details=" · ".join(parts) or None,
+        details=text,
     ))
+    # Оповещения идут по тем же событиям, что и журнал, — отдельного генератора не нужно.
+    # Доставка в фоне со своей сессией: транзакцию вызывающего не держит и запрос не
+    # ломает, если чат или почта недоступны (см. services/notify.py).
+    from app.services.notify import dispatch_async   # локально: иначе кольцо импортов
+    dispatch_async(company_id, action, who=actor.name if actor else None, details=text)

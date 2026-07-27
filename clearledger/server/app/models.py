@@ -4533,6 +4533,39 @@ class MatrixIdentity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class NotificationRule(Base):
+    """О чём и куда оповещать в пространстве компании: категория событий × каналы.
+
+    Каналы — те, что у пространства уже есть: чат (служебная комната «Оповещения», куда
+    пишет сервисный аккаунт) и почта. Внешних сервисов рассылки не завожу: сообщение
+    должно приходить туда, где человек и так работает.
+
+    Получатели: `recipients = NULL` — администраторы организации (состав меняется сам,
+    список не надо поддерживать руками); иначе перечисленные участники.
+    """
+    __tablename__ = "notification_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Код категории из `notify_catalog.CATEGORIES` (people | access | space | other).
+    category: Mapped[str] = mapped_column(String(40), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
+                                          server_default=text("true"))
+    via_chat: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
+                                           server_default=text("true"))
+    via_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                            server_default=text("false"))
+    recipients: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_notification_rule", "company_id", "category", unique=True),
+    )
+
+
 class MatrixGroupRoom(Base):
     """Групповой чат = именованная приватная Matrix-комната + метаданные (скоуп компании)."""
     __tablename__ = "chat_group_room"

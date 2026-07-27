@@ -90,6 +90,53 @@ async def send_invite(
     return True
 
 
+async def send_notice(
+    to_emails: list[str], subject: str, text: str, html: str | None = None,
+) -> bool:
+    """Служебное письмо-оповещение нескольким адресатам (события пространства).
+
+    Отдельно от `send_invite`: у приглашения свой шаблон и свой смысл, а здесь письмо
+    про то, что произошло в пространстве. Возвращает False, если SMTP не сконфигурирован
+    (тогда текст уходит в лог, как и остальная dev-почта) — вызывающий не должен считать
+    это ошибкой доставки.
+    """
+    if not to_emails:
+        return False
+    if not settings.smtp_host:
+        logger.warning("[mail:dev] оповещение для %s: %s — %s",
+                       ", ".join(to_emails), subject, text)
+        return False
+
+    import aiosmtplib  # ленивый импорт — нужен только при реальной отправке
+
+    msg = EmailMessage()
+    msg["From"] = settings.smtp_from
+    msg["To"] = ", ".join(to_emails)
+    msg["Subject"] = subject
+    # Date и Message-ID обязательны: без них внешние почтовики кладут письмо в спам.
+    from_domain = parseaddr(settings.smtp_from)[1].split("@")[-1] or "localhost"
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=from_domain)
+    msg.set_content(text)
+    if html:
+        msg.add_alternative(html, subtype="html")
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    common = dict(
+        hostname=settings.smtp_host, port=settings.smtp_port,
+        username=settings.smtp_user or None, password=settings.smtp_password or None,
+        tls_context=ctx, timeout=20,
+    )
+    if settings.smtp_secure:
+        await aiosmtplib.send(msg, use_tls=True, **common)
+    else:
+        await aiosmtplib.send(msg, start_tls=True, **common)
+    logger.info("Оповещение отправлено: %s (%s)", ", ".join(to_emails), subject)
+    return True
+
+
 def reset_link(token: str) -> str:
     base = settings.app_public_url.rstrip("/")
     return f"{base}/reset-password/{token}"

@@ -65,6 +65,7 @@ from app.routers import (
     location_types_router,
     metrika_router,
     netservice_router,
+    notifications_router,
     references_router,
     reports_router,
     settings_router,
@@ -240,6 +241,7 @@ app.include_router(store_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 app.include_router(meetings_router.router, prefix=API_PREFIX)
 app.include_router(chat_router.router, prefix=API_PREFIX)
+app.include_router(notifications_router.router, prefix=API_PREFIX)  # Оповещения пространства
 app.include_router(metrika_router.router, prefix=API_PREFIX)
 
 
