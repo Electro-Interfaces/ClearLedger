@@ -1,8 +1,13 @@
 /**
- * Вкладка «Приложения» админки — управление серверным реестром приложений/модулей
- * компании (Ядро экосистемы). Замена клиентского localStorage-гейтинга: включение
- * приложения/модуля хранится на сервере (eco_company_apps / eco_company_app_modules).
- * Правки — только админ компании/суперадмин (canManage), как на бэкенде.
+ * Раздел «Приложения»: какие продукты и модули подключены организации, а владельцу
+ * контейнера — ещё и каталог платформы второй секцией (`AppCatalogSection`).
+ *
+ * Раньше это были два соседних раздела: «Приложения» организации и «Каталог» контейнера.
+ * Чтобы ответить на один вопрос — что есть и что из этого включено — админ читал два
+ * похожих экрана с одинаковыми карточками продуктов.
+ *
+ * Включение хранится на сервере (`eco_company_apps` / `eco_company_app_modules`), а не в
+ * браузере. Правки — админ организации или суперадмин (`canManage`), как на бэкенде.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -13,8 +18,11 @@ import { Badge } from '@/components/ui/badge'
 import {
   listCompanyApps, setCompanyApp, setCompanyAppModule, type CompanyAppRec,
 } from '@/services/registryService'
+import { AppCatalogSection } from './AppCatalog'
 
-export function CompanyApps({ companyId, canManage }: { companyId: string; canManage: boolean }) {
+export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
+  companyId: string; canManage: boolean; isSuperadmin?: boolean
+}) {
   const qc = useQueryClient()
   const key = ['company-apps', companyId]
   const q = useQuery({ queryKey: key, queryFn: () => listCompanyApps(companyId) })
@@ -61,6 +69,9 @@ export function CompanyApps({ companyId, canManage }: { companyId: string; canMa
       {apps.length === 0 && (
         <Card><CardContent className="py-10 text-center text-muted-foreground">Нет приложений</CardContent></Card>
       )}
+      {/* Каталог платформы — ниже подключённых: сперва «что у этой организации», потом
+          «что вообще есть». Владельцу контейнера, эндпоинты каталога и так гейтятся. */}
+      {isSuperadmin && <AppCatalogSection />}
     </div>
   )
 }

@@ -1,8 +1,12 @@
 /**
- * Центр управления → Экосистема → «Каталог приложений». Список приложений и модулей,
- * которые можно подключить к системе, + настройка приложения при подключении
- * (описание/адрес/конфиг/активность). Включение компаниям — на уровне компании.
- * Только суперадмин (эндпоинты /registry/apps гейтят на бэкенде).
+ * Каталог продуктов платформы: что вообще можно подключить, и настройка продукта при
+ * подключении (описание/адрес/конфиг/активность). Только суперадмин — эндпоинты
+ * `/registry/apps` гейтятся на бэкенде.
+ *
+ * Своего раздела у каталога больше нет: он был отдельным пунктом «Каталог» рядом с
+ * «Приложениями» организации, и админ читал два похожих экрана, чтобы понять одно —
+ * какие продукты есть и какие из них включены. Теперь каталог живёт внутри раздела
+ * «Приложения» второй секцией, ниже подключённых продуктов.
  */
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -16,24 +20,36 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { getAppCatalog, updateApp, type CatalogApp } from '@/services/registryService'
 
-export function EcosystemApps() {
+/** Секция «Каталог платформы» — вставляется в раздел «Приложения» суперадмину. */
+export function AppCatalogSection() {
   const q = useQuery({ queryKey: ['app-catalog'], queryFn: getAppCatalog })
+  const [open, setOpen] = useState(false)
 
-  if (q.isLoading) {
-    return <div className="flex items-center gap-2 text-muted-foreground py-8"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка каталога…</div>
-  }
   const apps = q.data ?? []
-
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Приложения и модули, доступные для подключения к системе. Настройка приложения — по кнопке
-        «Настроить». Включение конкретным организациям — на уровне организации (вкладка «Приложения»).
+      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+        <Blocks className="size-4 text-primary" />
+        <span className="text-sm font-medium">Каталог платформы</span>
+        <span className="text-xs text-muted-foreground">
+          {q.isLoading ? 'загрузка…' : `продуктов: ${apps.length}`}
+        </span>
+        <div className="flex-1" />
+        <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setOpen((o) => !o)}>
+          {open ? 'Свернуть' : 'Показать'}
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Всё, что вообще можно подключить организациям, и параметры продукта (адрес,
+        конфигурация, активность). Видно только владельцу контейнера.
       </p>
-      {apps.map((a) => <AppCatalogCard key={a.id} app={a} />)}
-      {apps.length === 0 && (
-        <Card><CardContent className="py-8 text-center text-muted-foreground">Каталог пуст</CardContent></Card>
-      )}
+      {open && (q.isLoading
+        ? <div className="flex items-center gap-2 py-4 text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Загрузка каталога…</div>
+        : apps.length === 0
+          ? <Card><CardContent className="py-8 text-center text-muted-foreground">Каталог пуст</CardContent></Card>
+          : apps.map((a) => <AppCatalogCard key={a.id} app={a} />))}
     </div>
   )
 }
