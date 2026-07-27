@@ -96,6 +96,11 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6)
     role: Literal["user", "admin"] = "user"
     position: str | None = Field(None, max_length=150)  # должность
+    # Кем человек заводится: свой сотрудник (по умолчанию), представитель
+    # компании-партнёра или инженер поддержки платформы. Ставится сразу при создании —
+    # иначе партнёр появляется в списке своих сотрудников и требует ручной правки.
+    party_type: Literal["internal", "partner", "vendor"] | None = None
+    organization_id: str | None = None   # карточка юрлица, которое человек представляет
 
 
 class UserAdminUpdate(BaseModel):
@@ -194,6 +199,10 @@ class InvitationCreate(BaseModel):
     email: NormEmail
     role: Literal["user", "admin"] = "user"
     position: str | None = Field(None, max_length=150)
+    # Приглашаем своего сотрудника или представителя компании-партнёра — принадлежность
+    # переносится в членство при принятии приглашения.
+    party_type: Literal["internal", "partner", "vendor"] | None = None
+    organization_id: str | None = None
 
 
 class InvitationResponse(BaseModel):
@@ -204,6 +213,9 @@ class InvitationResponse(BaseModel):
     status: str
     created_at: datetime
     expires_at: datetime
+    party_type: str = "internal"
+    organization_id: str | None = None
+    organization_name: str | None = None
     # Ссылка отдаётся ТОЛЬКО в ответ на создание и перевыпуск: токен хранится
     # хешем, восстановить его позже нельзя. Нужна, чтобы админ мог передать
     # приглашение мессенджером, не полагаясь на почту.

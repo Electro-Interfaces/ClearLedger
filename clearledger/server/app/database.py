@@ -330,6 +330,12 @@ async def create_all() -> None:
             # v2.3: должность сотрудника (per-company) + в приглашении.
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS position VARCHAR(150)",
             "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS position VARCHAR(150)",
+            # Принадлежность задаётся в приглашении: человек входит сразу своим
+            # сотрудником или представителем компании-партнёра (с её карточкой юрлица).
+            "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS party_type VARCHAR(20) "
+            "NOT NULL DEFAULT 'internal'",
+            "ALTER TABLE invitations ADD COLUMN IF NOT EXISTS organization_id UUID "
+            "REFERENCES counterparties(id) ON DELETE SET NULL",
             # v2.5: универсальные справочники — raw-снимок всех реквизитов 1С + промо.
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS raw JSONB",
             "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS full_name VARCHAR(1000)",

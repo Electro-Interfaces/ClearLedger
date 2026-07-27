@@ -16,7 +16,7 @@ from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
 from app.models import Counterparty, Company, CompanyRole, ServiceLocation, User, UserCompany
-from app.utils import resolve_company_id
+from app.utils import resolve_company_id, resolve_org_id
 from app.schemas import (
     CompanyMembership,
     GrantCompanyBody,
@@ -156,6 +156,10 @@ async def create_user(
     """Создать пользователя в компании (или добавить существующего по email)."""
     cid = await require_company_admin(payload.company_id, current_user, db)
 
+    # Принадлежность и организация — часть создания: партнёра заводят сразу партнёром.
+    party = payload.party_type or "internal"
+    org_id = await resolve_org_id(payload.organization_id, cid, db) if party != "internal" else None
+
     existing = (
         await db.execute(select(User).where(User.email == payload.email))
     ).scalar_one_or_none()
@@ -163,7 +167,8 @@ async def create_user(
         # Пользователь уже есть — выдаём членство в этой компании с ролью.
         if not await _is_member(existing.id, cid, db):
             db.add(UserCompany(user_id=existing.id, company_id=cid,
-                               role=payload.role, position=payload.position))
+                               role=payload.role, position=payload.position,
+                               party_type=party, organization_id=org_id))
             await db.flush()
         return await _resp(existing, db, scope_cid=cid)
 
@@ -178,10 +183,11 @@ async def create_user(
     db.add(user)
     await db.flush()
     db.add(UserCompany(user_id=user.id, company_id=cid,
-                       role=payload.role, position=payload.position))
+                       role=payload.role, position=payload.position,
+                       party_type=party, organization_id=org_id))
     await db.flush()
     await log_audit(db, actor=current_user, company_id=cid, action="user.create",
-                    target=user.email, details={"role": payload.role})
+                    target=user.email, details={"role": payload.role, "partyType": party})
     return await _resp(user, db, scope_cid=cid)
 
 
@@ -237,17 +243,7 @@ async def update_user(
             await log_audit(db, actor=current_user, company_id=cid, action="member.party",
                             target=target.email, details={"partyType": payload.party_type})
         if payload.organization_id is not None:
-            if payload.organization_id == "":
-                membership.organization_id = None
-            else:
-                try:
-                    org_uuid = uuid.UUID(payload.organization_id)
-                except ValueError:
-                    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный id организации")
-                org = await db.get(Counterparty, org_uuid)
-                if org is None or org.company_id != cid:
-                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена в компании")
-                membership.organization_id = org_uuid
+            membership.organization_id = await resolve_org_id(payload.organization_id, cid, db)
     await db.flush()
     return await _resp(target, db, scope_cid=cid if payload.company_id else None)
 

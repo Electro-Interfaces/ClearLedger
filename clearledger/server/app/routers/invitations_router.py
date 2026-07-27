@@ -17,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import create_access_token, get_current_user, hash_password
 from app.database import get_db
-from app.models import Company, Invitation, User, UserCompany
+from app.models import Company, Counterparty, Invitation, User, UserCompany
 from app.routers.users_router import require_company_admin, _is_member
 from app.services import email_service
+from app.utils import resolve_org_id
 from app.schemas import (
     AcceptInvite,
     AcceptPreview,
@@ -42,19 +43,34 @@ def _resp(
     inv: Invitation,
     raw_token: str | None = None,
     email_sent: bool | None = None,
+    org_name: str | None = None,
 ) -> InvitationResponse:
     """Ответ по приглашению.
 
     `raw_token` передаётся только при создании и перевыпуске — тогда в ответ
     кладём готовую ссылку. В списке приглашений ссылки нет и быть не может:
     в базе лежит хеш токена.
+
+    `org_name` подставляет вызывающий: в списке — одним запросом на всех, иначе
+    строка приглашения партнёра показывала бы «внешний» без имени компании.
     """
     return InvitationResponse(
         id=str(inv.id), email=inv.email, role=inv.role, position=inv.position,
         status=inv.status, created_at=inv.created_at, expires_at=inv.expires_at,
+        party_type=getattr(inv, "party_type", None) or "internal",
+        organization_id=str(inv.organization_id) if inv.organization_id else None,
+        organization_name=org_name,
         invite_url=email_service.invite_link(raw_token) if raw_token else None,
         email_sent=email_sent,
     )
+
+
+async def _org_name(inv: Invitation, db: AsyncSession) -> str | None:
+    """Имя организации приглашения (для UI); None у своих сотрудников."""
+    if not inv.organization_id:
+        return None
+    org = await db.get(Counterparty, inv.organization_id)
+    return (org.short_name or org.name) if org is not None else None
 
 
 async def _company(cid: uuid.UUID, db: AsyncSession) -> Company:
@@ -88,6 +104,8 @@ async def create_invitation(
 ):
     cid = await require_company_admin(payload.company_id, current_user, db)
     email = payload.email  # уже нормализован схемой (NormEmail: strip + lower)
+    party = payload.party_type or "internal"
+    org_id = await resolve_org_id(payload.organization_id, cid, db) if party != "internal" else None
 
     # Уже член компании?
     existing_user = (
@@ -114,6 +132,7 @@ async def create_invitation(
             id=uuid.uuid4(), company_id=cid, email=email, role=payload.role,
             position=payload.position, token_hash=_hash(raw), status="pending",
             invited_by=current_user.id, expires_at=now + INVITE_TTL,
+            party_type=party, organization_id=org_id,
         )
         db.add(inv)
     else:
@@ -122,11 +141,13 @@ async def create_invitation(
         inv.position = payload.position
         inv.expires_at = now + INVITE_TTL
         inv.invited_by = current_user.id
+        inv.party_type = party
+        inv.organization_id = org_id
     await db.flush()
 
     company = await _company(cid, db)
     sent = await _send(inv, raw, company, current_user)
-    return _resp(inv, raw_token=raw, email_sent=sent)
+    return _resp(inv, raw_token=raw, email_sent=sent, org_name=await _org_name(inv, db))
 
 
 @router.get("", response_model=list[InvitationResponse])
@@ -143,7 +164,16 @@ async def list_invitations(
             .order_by(Invitation.created_at.desc())
         )
     ).scalars().all()
-    return [_resp(i) for i in rows]
+    # Имена организаций — одним запросом на весь список, а не по строке.
+    org_ids = {i.organization_id for i in rows if i.organization_id}
+    names: dict[uuid.UUID, str] = {}
+    if org_ids:
+        for oid, nm, short in (await db.execute(select(
+                Counterparty.id, Counterparty.name, Counterparty.short_name)
+                .where(Counterparty.id.in_(org_ids)))).all():
+            names[oid] = short or nm
+    return [_resp(i, org_name=names.get(i.organization_id) if i.organization_id else None)
+            for i in rows]
 
 
 async def _owned_invite(invitation_id: str, current_user: User, db: AsyncSession) -> Invitation:
@@ -184,7 +214,7 @@ async def resend_invitation(
     await db.flush()
     company = await _company(inv.company_id, db)
     sent = await _send(inv, raw, company, current_user)
-    return _resp(inv, raw_token=raw, email_sent=sent)
+    return _resp(inv, raw_token=raw, email_sent=sent, org_name=await _org_name(inv, db))
 
 
 # ─── Принятие приглашения (публичное, без авторизации) ──────────────────────
@@ -228,7 +258,9 @@ async def accept_invite(
         # Существующий — добавляем членство с ролью/должностью, без автологина.
         if not await _is_member(user.id, cid, db):
             db.add(UserCompany(user_id=user.id, company_id=cid,
-                               role=inv.role, position=inv.position))
+                               role=inv.role, position=inv.position,
+                               party_type=getattr(inv, "party_type", None) or "internal",
+                               organization_id=inv.organization_id))
         inv.status = "accepted"
         inv.accepted_at = datetime.now(timezone.utc)
         await db.flush()
@@ -244,7 +276,9 @@ async def accept_invite(
     db.add(user)
     await db.flush()
     db.add(UserCompany(user_id=user.id, company_id=cid,
-                       role=inv.role, position=inv.position))
+                       role=inv.role, position=inv.position,
+                       party_type=getattr(inv, "party_type", None) or "internal",
+                       organization_id=inv.organization_id))
     inv.status = "accepted"
     inv.accepted_at = datetime.now(timezone.utc)
     await db.flush()

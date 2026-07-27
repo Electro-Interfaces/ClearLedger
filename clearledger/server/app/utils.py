@@ -39,6 +39,31 @@ def day_end(date_to: str) -> datetime:
     return dt
 
 
+async def resolve_org_id(
+    organization_id: str | None,
+    company_id: uuid.UUID,
+    db: AsyncSession,
+) -> uuid.UUID | None:
+    """Карточка юрлица, которое представляет участник → UUID (или None, если снимаем).
+
+    Проверка принадлежности компании обязательна: без неё внешнего участника можно
+    было бы привязать к контрагенту чужого пространства и подписать его в чатах чужой
+    организацией. Пустая строка — осознанное «связь снять».
+    """
+    from app.models import Counterparty   # локально: utils не тянет весь реестр моделей
+
+    if organization_id is None or organization_id == "":
+        return None
+    try:
+        org_uuid = uuid.UUID(organization_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Невалидный id организации")
+    org = await db.get(Counterparty, org_uuid)
+    if org is None or org.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Организация не найдена в компании")
+    return org_uuid
+
+
 async def resolve_company_id(
     company_id: str,
     db: AsyncSession,

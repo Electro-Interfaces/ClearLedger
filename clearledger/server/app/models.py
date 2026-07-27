@@ -196,6 +196,16 @@ class Invitation(Base):
         String(20), nullable=False, default="user", server_default=text("'user'")
     )
     position: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # Кем человек войдёт в пространство: свой сотрудник, представитель компании-партнёра
+    # или инженер поддержки платформы. Принадлежность хранится В ПРИГЛАШЕНИИ, а не
+    # ставится потом: партнёр, принявший приглашение, иначе попадал бы в список своих
+    # сотрудников заказчика и терялся там до ручной пометки.
+    party_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="internal", server_default=text("'internal'")
+    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
+    )
     # SHA256 от сырого токена (сырой токен только в письме, в БД не хранится).
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     # pending | accepted | revoked
