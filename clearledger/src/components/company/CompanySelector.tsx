@@ -21,7 +21,7 @@ export function CompanySelector() {
       <SelectTrigger
         className="h-10 w-full min-w-[112px] max-w-[200px] text-sm font-medium bg-secondary border-border [&>span]:truncate"
       >
-        <SelectValue placeholder="Выберите компанию" />
+        <SelectValue placeholder="Выберите организацию" />
       </SelectTrigger>
       <SelectContent
         style={{ boxShadow: 'var(--shadow-large)' }}

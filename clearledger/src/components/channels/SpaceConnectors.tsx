@@ -87,7 +87,7 @@ export function SpaceConnectors() {
           <div>
             <h2 className="text-base font-semibold">Подключения пространства</h2>
             <p className="text-sm text-muted-foreground">
-              Откуда компания получает данные — во всех приложениях сразу. Настройка живёт
+              Откуда организация получает данные — во всех приложениях сразу. Настройка живёт
               там, где подключение заведено.
             </p>
           </div>

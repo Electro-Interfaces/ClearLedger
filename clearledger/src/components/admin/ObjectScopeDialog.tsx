@@ -88,7 +88,7 @@ export function ObjectScopeDialog({ member, companyId, onSaved }: {
         </p>
         <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
           <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} className="h-4 w-4" />
-          Вся сеть компании
+          Вся сеть организации
         </label>
         <div className={all ? 'opacity-40 pointer-events-none' : ''}>
           <div className="relative mb-2">

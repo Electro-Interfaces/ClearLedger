@@ -15,6 +15,7 @@ import { loadChannels } from '@/services/channelService'
 import { isApiEnabled } from '@/services/apiClient'
 import { getChargeModel, getStationsModel, getStationsLinkage } from '@/services/analyticsService'
 import { usePaymentDisciplineSummary, useReestrModel, useDispenseRecon } from '@/hooks/useReferences'
+import { getSpaceDataModel } from '@/services/spaceObjectsService'
 import type { Channel } from '@/types/channel'
 import { CentralPanelLayout, type CentralMenuItem } from './CentralPanelLayout'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -317,6 +318,99 @@ function ChannelLinkageBlock({ companyId }: { companyId: string }) {
   )
 }
 
+/* ── База пространства: ЧТО лежит в нормализованном слое целиком.
+   Каналы отвечают на вопрос «что приехало файлом», а этот таб — «из чего состоит база»:
+   там же контрагенты, договоры и весь проектный контур, которые файлом не приезжают.
+   Столбец «Связь» показывает долг схемы: где роль до сих пор хранится строкой, а не
+   ссылкой на карточку контрагента — такие записи в общий реестр не сводятся. ── */
+function SpaceDataModelBlock() {
+  const { companyId } = useCompany()
+  const q = useQuery({
+    queryKey: ['space-data-model', companyId],
+    queryFn: () => getSpaceDataModel(companyId),
+    enabled: !!companyId, staleTime: 60_000,
+  })
+  const m = q.data
+  if (q.isLoading) {
+    return <div className="px-6 py-10 text-sm text-muted-foreground">Загрузка состава базы…</div>
+  }
+  if (!m) {
+    return <div className="px-6 py-10 text-sm text-muted-foreground">Состав базы недоступен.</div>
+  }
+  return (
+    <div className="space-y-5 px-6 py-6">
+      <div>
+        <div className="flex items-center gap-2">
+          <Database className="h-5 w-5 text-primary" />
+          <h1 className="text-xl font-semibold">Нормализованная база пространства</h1>
+          <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
+        </div>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+          Из чего состоит общий слой данных компании: сущности, чем наполняются, кто их
+          потребляет. Наполняются не только файловыми каналами — контрагенты и договоры
+          приходят и из корпоративной зарядки, объекты ведутся в «Управлении», проектный
+          контур целиком ведётся руками.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Kpi label="Сущностей в базе" value={`${m.totals.filled} / ${m.totals.entities}`} sub="с данными / всего" />
+        <Kpi label="Записей всего" value={fmtN(m.totals.records)} sub="по всем сущностям" />
+        <Kpi label="Незакрытых связей" value={fmtN(m.totals.gaps)} sub="строкой вместо ссылки" />
+        <Kpi label="Доменов" value={fmtN(m.domains.length)} sub="разрезов базы" />
+      </div>
+
+      {m.domains.map((d) => (
+        <Card key={d.key}><CardContent className="overflow-x-auto pt-5">
+          <div className="mb-3 flex items-center gap-2">
+            <div className="text-sm font-medium">{d.label}</div>
+            <span className="text-xs text-muted-foreground">
+              {fmtN(d.entities.reduce((a, e) => a + e.records, 0))} записей
+            </span>
+          </div>
+          <Table className="min-w-[900px]">
+            <TableHeader><TableRow>
+              <TableHead>Сущность</TableHead>
+              <TableHead className="text-right">Записей</TableHead>
+              <TableHead>Чем наполняется</TableHead>
+              <TableHead>Кто потребляет</TableHead>
+              <TableHead>Связь</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {d.entities.map((e) => (
+                <TableRow key={e.key} className={e.records === 0 ? 'opacity-50' : undefined}>
+                  <TableCell className="font-medium">
+                    {e.label}
+                    <div className="font-mono text-[10px] text-muted-foreground">{e.table}</div>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{e.records ? fmtN(e.records) : '—'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{e.sources}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{e.consumers}</TableCell>
+                  <TableCell className="text-xs">
+                    <div className="text-muted-foreground">{e.link}</div>
+                    {e.gap != null && (
+                      <div className="text-amber-600 dark:text-amber-400">
+                        {fmtN(e.gap)} — {e.gapLabel}
+                      </div>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent></Card>
+      ))}
+
+      <p className="px-1 text-[11px] text-muted-foreground/70">
+        Жёлтым — записи, где связь ещё не материализована: подрядчик проекта, поставщик
+        оборудования и сетевая организация хранятся текстом, поэтому в общем реестре
+        контрагентов их не видно. Пока это так, одно юрлицо живёт в базе дважды —
+        карточкой в договорах и строкой в проекте.
+      </p>
+    </div>
+  )
+}
+
 /* ── Обзор: кросс-канальное здоровье нормализации (первый таб по умолчанию) ── */
 interface ChMetric { entity: string; records: number; unit: string; enrich: string; ok: boolean }
 
@@ -437,15 +531,21 @@ export function EnergyNormalizationView() {
   )
 
   const menu = useMemo<CentralMenuItem[]>(() => {
-    const items: CentralMenuItem[] = [{ key: 'overview', label: 'Обзор' }]
+    const items: CentralMenuItem[] = [
+      { key: 'base', label: 'База пространства' },
+      { key: 'overview', label: 'Обзор каналов' },
+    ]
     for (const ch of normChannels) items.push({ key: ch.id, label: ch.name })
     return items
   }, [normChannels])
 
-  const [tab, setTab] = useState('overview')
-  const activeKey = menu.some((mi) => mi.key === tab) ? tab : 'overview'
+  // Первым открывается состав базы, а не каналы: каналов три, а сущностей в базе
+  // втрое больше — начинать разговор о данных с трёх файлов вводило в заблуждение.
+  const [tab, setTab] = useState('base')
+  const activeKey = menu.some((mi) => mi.key === tab) ? tab : 'base'
 
   function render() {
+    if (activeKey === 'base') return <SpaceDataModelBlock />
     if (activeKey === 'overview') return <NormalizationOverview channels={normChannels} onOpen={setTab} />
     const ch = normChannels.find((c) => c.id === activeKey)
     const tpl = ch?.templateId ?? ''

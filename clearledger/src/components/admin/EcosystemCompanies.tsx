@@ -1,7 +1,11 @@
 /**
- * Уровень ЭКОСИСТЕМА → «Компании»: состав пространств контейнера.
+ * Уровень ЭКОСИСТЕМА → «Организации»: состав пространств контейнера.
  *
- * Раньше список компаний был панелью выбора над вкладками Центра управления. Когда
+ * Владелец пространства называется организацией, а «компания» осталась за
+ * контрагентами-партнёрами — иначе на соседних экранах одно слово значило и
+ * заказчика, и его поставщика.
+ *
+ * Раньше список был панелью выбора над вкладками Центра управления. Когда
  * разделы стали маршрутами, выбор переехал в шапку, а состав контейнера — сюда:
  * это отдельный вопрос («кто живёт в контейнере»), а не настройка соседнего экрана.
  */
@@ -26,12 +30,12 @@ export function EcosystemCompanies() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-sm text-muted-foreground">Компаний в контейнере: {companies.length}</span>
+        <span className="text-sm text-muted-foreground">Организаций в контейнере: {companies.length}</span>
         <AddCompanyDialog onCreated={(c) => manage(c.id)} />
       </div>
 
       {companies.length === 0 ? (
-        <Card><CardContent className="py-10 text-center text-muted-foreground">Нет подключённых компаний</CardContent></Card>
+        <Card><CardContent className="py-10 text-center text-muted-foreground">Нет подключённых организаций</CardContent></Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {companies.map((c) => (
@@ -46,7 +50,7 @@ export function EcosystemCompanies() {
                     {c.inn ? ` · ИНН ${c.inn}` : ''}
                   </div>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => manage(c.id)} title="Управлять компанией">
+                <Button variant="outline" size="sm" onClick={() => manage(c.id)} title="Управлять организацией">
                   <Building2 className="h-4 w-4" />
                   <span className="ml-2 hidden sm:inline">Управлять</span>
                 </Button>

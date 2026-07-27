@@ -64,7 +64,7 @@ export function CoreOverview() {
           </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <Stat icon={Building2} label="Компании" value={d.counts.companies} />
+          <Stat icon={Building2} label="Организации" value={d.counts.companies} />
           <Stat icon={Users} label="Пользователи" value={d.counts.users} />
           <Stat icon={Boxes} label="Приложения / модули" value={`${d.registry.apps} / ${d.registry.modules}`} />
           <Stat icon={KeyRound} label={d.sso.enabled ? `SSO · ${d.sso.issuer}` : 'SSO не настроен'}

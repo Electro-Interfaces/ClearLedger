@@ -105,7 +105,7 @@ export function MembersCard({
   const remove = useMutation({
     mutationFn: (id: string) => userService.removeUser(id, companyId),
     onSuccess: () => {
-      toast.success('Сотрудник убран из компании')
+      toast.success('Сотрудник убран из организации')
       qc.invalidateQueries({ queryKey: ['team-members', companyId] })
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
@@ -269,13 +269,13 @@ export function MembersCard({
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            title="Убрать из компании" disabled={remove.isPending}>
+                            title="Убрать из организации" disabled={remove.isPending}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Убрать из компании?</AlertDialogTitle>
+                            <AlertDialogTitle>Убрать из организации?</AlertDialogTitle>
                             <AlertDialogDescription>
                               {u.name || u.email} потеряет доступ ко всем приложениям пространства.
                               Учётная запись сохранится — человека можно вернуть приглашением.

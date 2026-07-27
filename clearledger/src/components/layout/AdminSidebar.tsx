@@ -4,7 +4,7 @@
  * составе разделов, он берётся из `config/adminNav`.
  *
  * Две группы = два уровня пространства: «Экосистема» (контейнер, суперадмину) и
- * «Компания» (пространство заказчика, по модулям роли). Раньше это были вкладки
+ * «Организация» (пространство заказчика, по модулям роли). Раньше это были вкладки
  * поверх одной страницы — с меню разделы стали адресуемыми (`/admin/company/roles`).
  */
 import {
@@ -62,7 +62,7 @@ export function AdminNavContent({ collapsed = false, onNavigate }: {
         <SidebarGroup className="py-0">
           {!collapsed && (
             <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-              Компания
+              Организация
             </p>
           )}
           <SidebarMenu>

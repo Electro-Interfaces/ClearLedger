@@ -18,7 +18,7 @@ export function EcosystemUsers() {
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Все пользователи экосистемы ({users.length}). Управление составом и ролями — на уровне компании.
+        Все пользователи экосистемы ({users.length}). Управление составом и ролями — на уровне организации.
       </p>
       <div className="rounded-lg border divide-y">
         {users.map((u) => (
@@ -43,7 +43,7 @@ export function EcosystemUsers() {
                   </span>
                 </Badge>
               ))}
-              {u.companies.length === 0 && <span className="text-xs text-muted-foreground">без компаний</span>}
+              {u.companies.length === 0 && <span className="text-xs text-muted-foreground">без организаций</span>}
             </div>
           </div>
         ))}

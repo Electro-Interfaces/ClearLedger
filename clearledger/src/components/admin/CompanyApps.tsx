@@ -45,7 +45,7 @@ export function CompanyApps({ companyId, canManage }: { companyId: string; canMa
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Приложения и модули экосистемы, подключённые компании. Включение управляется здесь
+        Приложения и модули экосистемы, подключённые организации. Включение управляется здесь
         (серверный реестр), а не браузером.
       </p>
       {apps.map((app) => (

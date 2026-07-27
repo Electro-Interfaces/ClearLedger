@@ -175,6 +175,35 @@ export async function listSpaceEquipment(companyId: string): Promise<SpaceEquipm
   return r.equipment
 }
 
+/** Сущность нормализованной базы пространства (витрина «Данные» → «База пространства»). */
+export interface DataModelEntity {
+  key: string
+  label: string
+  table: string
+  records: number
+  sources: string
+  consumers: string
+  link: string
+  /** Записей с незакрытой связью: роль строкой вместо ссылки, нет объекта/договора. */
+  gap: number | null
+  gapLabel: string | null
+}
+
+export interface DataModelDomain {
+  key: string
+  label: string
+  entities: DataModelEntity[]
+}
+
+export interface SpaceDataModel {
+  domains: DataModelDomain[]
+  totals: { entities: number; records: number; gaps: number; filled: number }
+}
+
+export async function getSpaceDataModel(companyId: string): Promise<SpaceDataModel> {
+  return get<SpaceDataModel>('/api/registry/data-model', { company_id: companyId })
+}
+
 export interface ObjectTicket {
   id: string
   number: string | number

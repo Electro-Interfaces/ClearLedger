@@ -64,8 +64,8 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
       <section className="space-y-3">
         <div className="flex items-center gap-2">
           <Building2 className="size-4 text-primary" />
-          {/* Именно «Контрагенты», а не «Организации»: своё юрлицо компании — в
-              «Реквизитах», и два одинаковых слова на соседних экранах путали. */}
+          {/* Именно «Контрагенты»: «Организация» — это владелец пространства
+              (её реквизиты в соседнем разделе), а здесь партнёры-компании. */}
           <span className="text-sm font-medium">Контрагенты</span>
           <span className="text-xs text-muted-foreground">({orgs.length})</span>
           <div className="flex-1" />
@@ -78,7 +78,7 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Юрлица пространства: реквизиты общие, роль — прикладная (в Финансах поставщик,
+          Компании-партнёры пространства: реквизиты общие, роль — прикладная (в Финансах поставщик,
           в Поддержке подрядчик). Ведутся в приложении «Финансы» → «Контрагенты».
         </p>
         {orgsQ.isLoading ? <Loading /> : orgs.length === 0 ? (
@@ -135,8 +135,8 @@ export function SpaceRefs({ companyId, canManage }: { companyId: string; canMana
           ))}
         </div>
         <p className="text-xs text-muted-foreground">
-          База договоров одна на компанию: входящие (компания платит — аренда,
-          энергоснабжение, обслуживание) и исходящие (платят компании — поставка,
+          База договоров одна на организацию: входящие (организация платит — аренда,
+          энергоснабжение, обслуживание) и исходящие (платят ей — поставка,
           зарядка ЭЗС). Приложения берут контрагента и договор отсюда, а показывают
           ровно то, что разрешено правами. Ось: контрагент → договор → объекты; охват
           «весь периметр» действует на все объекты, «объекты» — на выбранные.

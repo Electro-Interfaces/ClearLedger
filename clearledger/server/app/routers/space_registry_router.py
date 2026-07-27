@@ -22,7 +22,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import App, AppCompanyLink, Company, User, UserCompany
 from app.services import space_map as space_map_service
-from app.services import space_connectors, space_projection, space_registry
+from app.services import space_connectors, space_data_model, space_projection, space_registry
 
 router = APIRouter(prefix="/registry", tags=["ElsyPlus Core — реестр объектов"])
 
@@ -212,6 +212,17 @@ async def list_space_contracts(
     cid = await _member(company_id, user, db)
     items = await space_registry.list_contracts(db, cid, query=q, direction=direction)
     return {"companyId": str(cid), "contracts": items, "total": len(items)}
+
+
+@router.get("/data-model")
+async def data_model(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Состав нормализованной базы пространства: сущности, объёмы, незакрытые связи."""
+    cid = await _member(company_id, user, db)
+    data = await space_data_model.data_model(db, cid)
+    return {"companyId": str(cid), **data}
 
 
 @router.get("/connectors")

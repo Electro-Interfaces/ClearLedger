@@ -50,7 +50,7 @@ export function CompanyProfileCard({ company, canEdit }: { company: OrgProfile; 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5" /> Реквизиты компании</CardTitle>
+        <CardTitle className="flex items-center gap-2"><Building2 className="h-5 w-5" /> Реквизиты организации</CardTitle>
         <CardDescription>Код <span className="font-mono">{company.slug}</span></CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -88,7 +88,7 @@ export function AddCompanyDialog({ onCreated }: { onCreated: (c: OrgProfile) => 
   const create = useMutation({
     mutationFn: () => userService.createCompany(form),
     onSuccess: (c) => {
-      toast.success('Компания подключена')
+      toast.success('Организация подключена')
       setForm({ name: '', slug: '', profile_id: 'fuel', inn: '', color: '#3b82f6' })
       setOpen(false)
       qc.invalidateQueries({ queryKey: ['admin-companies'] })
@@ -100,10 +100,10 @@ export function AddCompanyDialog({ onCreated }: { onCreated: (c: OrgProfile) => 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline"><Plus className="mr-2 h-4 w-4" /> Подключить компанию</Button>
+        <Button size="sm" variant="outline"><Plus className="mr-2 h-4 w-4" /> Подключить организацию</Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Новая компания</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Новая организация</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="space-y-2"><Label>Наименование</Label>
             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ООО …" /></div>
