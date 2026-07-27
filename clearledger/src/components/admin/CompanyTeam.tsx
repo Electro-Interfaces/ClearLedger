@@ -29,6 +29,7 @@ import * as roleService from '@/services/roleService'
 import type { CompanyRole } from '@/services/roleService'
 import { ALL_ACCESS_KEYS, moduleLabels } from '@/config/accessModules'
 import { AccessMatrix, AccessSummary } from './AccessMatrix'
+import { ObjectScopeDialog } from './ObjectScopeDialog'
 import { useAccessTree } from '@/hooks/useAccessTree'
 import { projectSpaceUsers, listSpaceOrganizations } from '@/services/spaceObjectsService'
 import { PartyBadge } from '@/components/chat/PartyBadge'
@@ -241,6 +242,13 @@ export function MembersCard({
                         )}
                         {canManage && u.id !== selfId && (
                           <AccessDialog member={u} companyId={companyId} roles={roles}
+                            onSaved={() => qc.invalidateQueries({ queryKey: ['team-members', companyId] })} />
+                        )}
+                        {/* Второй слой доступа: по каким объектам видны данные на
+                            открытых ролью экранах. У админа не действует — он видит
+                            всю сеть, иначе не настроит то, чего не видит. */}
+                        {canManage && u.id !== selfId && (
+                          <ObjectScopeDialog member={u} companyId={companyId}
                             onSaved={() => qc.invalidateQueries({ queryKey: ['team-members', companyId] })} />
                         )}
                       </div>
@@ -700,8 +708,9 @@ function MemberAccessCard({ companyId }: { companyId: string }) {
         <Table>
           <TableHeader><TableRow>
             <TableHead>Участник</TableHead>
-            <TableHead className="w-[140px]">Роль</TableHead>
-            <TableHead className="w-[190px]">Доступ</TableHead>
+            <TableHead className="w-[130px]">Роль</TableHead>
+            <TableHead className="w-[150px]">Доступ</TableHead>
+            <TableHead className="w-[110px]">Объекты</TableHead>
           </TableRow></TableHeader>
           <TableBody>
             {members.map((m) => (
@@ -718,6 +727,11 @@ function MemberAccessCard({ companyId }: { companyId: string }) {
                 </TableCell>
                 <TableCell className="py-1.5 text-xs">{m.role_name ?? (m.role === 'admin' ? 'Администратор' : '—')}</TableCell>
                 <TableCell className="py-1.5"><AccessSummary modules={m.role === 'admin' ? null : (m.modules ?? null)} /></TableCell>
+                <TableCell className="py-1.5 text-[11px] text-muted-foreground">
+                  {m.role === 'admin' || !m.object_scope?.length
+                    ? 'вся сеть'
+                    : `${m.object_scope.length} объектов`}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

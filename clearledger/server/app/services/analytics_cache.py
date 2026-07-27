@@ -59,8 +59,16 @@ def _make_key(tag: str, company_id, params: tuple, ver: int, station_stamp: int 
     """Детерминированный ключ строки-кэша. Версия в ключе → бамп делает прежние
     ключи недостижимыми. station_stamp → переучёт станций (region_id и пр.) тоже
     инвалидирует кэши, зависящие от справочника (регион-разрезы, retail:geo), без
-    явного bump в ingest станций. repr стабилен для (args, sorted(kwargs))."""
-    raw = f"{tag}|{company_id}|{ver}|{station_stamp}|{params!r}"
+    явного bump в ingest станций. repr стабилен для (args, sorted(kwargs)).
+
+    ⚠ В ключ входит СКОУП участника (`app/scope.py`): витрина, посчитанная по пяти
+    станциям подрядчика, не должна достаться следующему, кто спросит тот же период.
+    Без этого сужение данных проваливалось бы сквозь кэш — тихо и в обе стороны."""
+    from app.scope import current_object_scope
+
+    acl = current_object_scope()
+    acl_part = ",".join(sorted(acl)) if acl else "*"
+    raw = f"{tag}|{company_id}|{ver}|{station_stamp}|{acl_part}|{params!r}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 

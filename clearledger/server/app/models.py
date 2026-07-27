@@ -149,6 +149,12 @@ class UserCompany(Base):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"), nullable=True
     )
+    # СКОУП ДАННЫХ: объекты пространства (`service_locations.id`), которые человек видит.
+    # NULL = вся сеть компании; список = только эти объекты и всё, что к ним привязано
+    # (сессии, оборудование, заявки). Права (`modules`) отвечают на вопрос «какие
+    # экраны», скоуп — «по каким объектам»: подрядчику нужен «Парк оборудования», но
+    # только на своих пяти станциях. Механика — `app/scope.py`.
+    object_scope: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

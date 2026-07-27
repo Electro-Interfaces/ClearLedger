@@ -35,6 +35,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.scope import acl_params, acl_sql
+
 from app.services.charge_grouping import _BRAND_CANON
 from app.services.charge_visits import CHARGED_MIN_KWH, VISIT_GAP_MIN, _as_date
 
@@ -60,8 +62,9 @@ def _scope_fragment(stations: list[str] | None, regions: list[str] | None,
 
     Регион — из справочника (location_id → region_id → regions.name), не из
     денорм-колонки. Пустой список ≠ None: пустой = «контур выбран, станций нет» →
-    отчёт обязан быть пустым. Фрагменты фиксированные, значения — через bind."""
-    flt = ""
+    отчёт обязан быть пустым. Фрагменты фиксированные, значения — через bind.
+    Скоуп участника (app/scope.py) — та же граница, что в списках объектов."""
+    flt = acl_sql("location_id")
     if stations is not None:
         flt += " AND station_code = ANY(:stations)"
     if regions is not None:
@@ -123,7 +126,7 @@ async def brand_reliability(
 ) -> dict[str, Any]:
     """Плоский список станций с метриками надёжности + бренд + сырые счётчики."""
     p: dict[str, Any] = {
-        "company_id": str(company_id),
+        "company_id": str(company_id), **acl_params(),
         "date_from": _as_date(date_from), "date_to": _as_date(date_to),
         "charged_min": CHARGED_MIN_KWH,
     }

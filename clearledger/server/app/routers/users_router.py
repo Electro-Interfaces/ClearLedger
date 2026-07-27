@@ -15,13 +15,14 @@ from app.access_catalog import sanitize_modules
 from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
-from app.models import Counterparty, Company, CompanyRole, User, UserCompany
+from app.models import Counterparty, Company, CompanyRole, ServiceLocation, User, UserCompany
 from app.utils import resolve_company_id
 from app.schemas import (
     CompanyMembership,
     GrantCompanyBody,
     MemberAccessUpdate,
     MemberModulesUpdate,
+    MemberScopeUpdate,
     UserAdminResponse,
     UserAdminUpdate,
     UserCreate,
@@ -91,12 +92,16 @@ async def _resp(
     party_type: str | None = None
     org_id: str | None = None
     org_name: str | None = None
+    object_scope: list[str] | None = None
     if scope_cid is not None:
         m = await db.get(UserCompany, (u.id, scope_cid))
         if m is not None:
             role = m.role
             position = m.position
             modules = await resolve_member_modules(m, db)
+            # Скоуп отдаём как есть: на админа он не действует, но админом человек
+            # может перестать быть — заранее заданный список тогда пригодится.
+            object_scope = [str(x) for x in (m.object_scope or [])] or None
             party_type = getattr(m, "party_type", None) or "internal"
             if m.organization_id is not None:
                 org = await db.get(Counterparty, m.organization_id)
@@ -111,7 +116,7 @@ async def _resp(
     return UserAdminResponse(
         id=str(u.id), email=u.email, name=u.name,
         role=role, position=position, modules=modules,
-        role_id=role_id_str, role_name=role_name,
+        role_id=role_id_str, role_name=role_name, object_scope=object_scope,
         party_type=party_type, organization_id=org_id, organization_name=org_name,
         is_superadmin=u.is_superadmin, companies=memberships,
     )
@@ -310,6 +315,45 @@ async def set_member_access(
         detail = "модули: " + (", ".join(m.modules) if m.modules else "все")
     await log_audit(db, actor=current_user, company_id=cid, action="member.access",
                     target=(target.email if target else user_id), details={"set": detail})
+    await db.commit()
+    return await _resp(target, db, scope_cid=cid)
+
+
+@router.put("/{user_id}/scope", response_model=UserAdminResponse)
+async def set_member_scope(
+    user_id: str,
+    payload: MemberScopeUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Скоуп данных участника: объекты, по которым он видит данные.
+
+    Пустой список приравнивается к «вся сеть» — сохранять «не видит ничего» через
+    эту ручку нельзя: такой доступ отбирают ролью, а не скоупом, и молчаливая
+    пустота выглядела бы как сломанные экраны.
+    """
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    cid = await require_company_admin(payload.company_id, current_user, db)
+    m = await db.get(UserCompany, (uid, cid))
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
+    target = await db.get(User, uid)
+    # `service_locations.id` — строковый nanoid, не UUID; валидация здесь одна:
+    # объект должен принадлежать этой компании. Чужой id ничего не открыл бы (запросы
+    # и так фильтруются по company_id), но и хранить его незачем.
+    raw_ids = [str(x).strip() for x in (payload.object_scope or []) if str(x).strip()]
+    ids: list[str] = []
+    if raw_ids:
+        own = (await db.execute(select(ServiceLocation.id).where(
+            ServiceLocation.company_id == cid, ServiceLocation.id.in_(raw_ids)))).scalars().all()
+        ids = [str(x) for x in own]
+    m.object_scope = ids or None
+    await log_audit(db, actor=current_user, company_id=cid, action="member.scope",
+                    target=(target.email if target else user_id),
+                    details={"objects": len(ids) if ids else "вся сеть"})
     await db.commit()
     return await _resp(target, db, scope_cid=cid)
 

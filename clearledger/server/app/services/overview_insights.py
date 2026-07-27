@@ -32,6 +32,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.scope import ACL_PARAM, acl_params, acl_sql, current_object_scope
+
 # Выручка сессии: у ЮЛ amount=0 (постоплата), фактическая сумма — client_amount.
 _REVENUE = "coalesce(NULLIF(client_amount, 0), amount)"
 
@@ -54,8 +56,12 @@ _NET = """
 
 def _scope(stations: list[str] | None, regions: list[str] | None) -> str:
     """AND-фрагмент сужения по сети для WHERE над charge_sessions. Регион — из
-    справочника (Ф1.3): location_id → region_id → regions.name."""
-    s = ""
+    справочника (Ф1.3): location_id → region_id → regions.name.
+
+    Сюда же добавляется СКОУП участника (`app/scope.py`): витрина обязана считаться
+    по тем же объектам, что видны ему в списках, — иначе он читает агрегатом то,
+    чего не видит поштучно."""
+    s = acl_sql("location_id")
     if stations is not None:
         s += " AND station_code = ANY(:scope_stations)"
     if regions is not None:
@@ -70,7 +76,7 @@ def _scope(stations: list[str] | None, regions: list[str] | None) -> str:
 def _scope_net(stations: list[str] | None, regions: list[str] | None) -> str:
     """AND-фрагмент сужения для WHERE над service_locations (парк/net): по коду
     станции и по региону напрямую (region_id → regions.name)."""
-    s = ""
+    s = acl_sql("id")   # скоуп участника: здесь колонка объекта — сам id
     if stations is not None:
         s += " AND code = ANY(:scope_stations)"
     if regions is not None:
@@ -83,6 +89,8 @@ def _scope_loc(stations: list[str] | None, regions: list[str] | None) -> str:
     """scope через location_id — для таблиц с location_id, в т.ч. без station_code
     (station_energy_periods). Станции резолвятся кодом через справочник."""
     conds = []
+    if current_object_scope():
+        conds.append(f"location_id = ANY(:{ACL_PARAM})")   # скоуп участника
     if stations is not None:
         conds.append("location_id IN (SELECT id FROM service_locations"
                      " WHERE company_id = :company_id AND code = ANY(:scope_stations))")
@@ -94,7 +102,7 @@ def _scope_loc(stations: list[str] | None, regions: list[str] | None) -> str:
 
 
 def _scope_params(stations: list[str] | None, regions: list[str] | None) -> dict[str, Any]:
-    p: dict[str, Any] = {}
+    p: dict[str, Any] = dict(acl_params())
     if stations is not None:
         p["scope_stations"] = stations
     if regions is not None:

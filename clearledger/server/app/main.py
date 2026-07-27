@@ -90,6 +90,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown: создание таблиц + seed данных."""
     logger.info("Запуск TradeLedger Server...")
 
+    # Скоуп данных по объектам — автоматическое сужение ORM-запросов участника
+    # (app/scope.py). Ставится один раз на класс сессии: иначе фильтр приходится
+    # помнить в каждой ручке, и он забывается в тех, где нет фильтра станций.
+    from app.scope import install_orm_scope
+    install_orm_scope()
+
     # Безопасность: секрет JWT не должен оставаться дефолтным на проде —
     # иначе токены подделываются публично известным ключом.
     if settings.secret_is_insecure:

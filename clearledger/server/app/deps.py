@@ -73,18 +73,34 @@ async def get_owned(
     Возвращает 404 (не 403) и для несуществующего, и для чужого объекта —
     чтобы не раскрывать существование чужих данных. Объект обязан иметь
     атрибут company_id.
+
+    Здесь же соблюдается СКОУП ДАННЫХ (`app/scope.py`): объект вне выданных
+    участнику — такое же 404, как чужая компания. Скоуп резолвится по членству, а
+    не из контекста запроса: часть одиночных ручек приходит сюда, минуя
+    `assert_company_member` (id объекта в пути, company_id в запросе нет).
     """
+    from app.models import ServiceLocation
+    from app.scope import _as_ids
+
     obj = await db.get(model, obj_id)
     if obj is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
     if current_user.is_superadmin:
         return obj
-    result = await db.execute(
-        select(UserCompany.company_id).where(
+    m = (await db.execute(
+        select(UserCompany).where(
             UserCompany.user_id == current_user.id,
             UserCompany.company_id == obj.company_id,
         )
-    )
-    if result.scalar_one_or_none() is None:
+    )).scalar_one_or_none()
+    if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+    allowed = None if m.role == "admin" else _as_ids(m.object_scope)
+    if allowed:
+        # Сам объект (карточка станции) либо запись, привязанная к объекту
+        # (оборудование, площадка, договорная позиция) — по `location_id`. Запись без
+        # объекта участнику со скоупом не видна: она относится ко всей сети.
+        ref = obj.id if model is ServiceLocation else getattr(obj, "location_id", None)
+        if ref is None or str(ref) not in allowed:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
     return obj

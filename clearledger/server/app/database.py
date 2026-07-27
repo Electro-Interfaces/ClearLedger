@@ -311,6 +311,8 @@ async def create_all() -> None:
             # Какую организацию представляет внешний участник (карточка юрлица пространства).
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS organization_id UUID "
             "REFERENCES counterparties(id) ON DELETE SET NULL",
+            # Скоуп данных: объекты, которые видит участник (NULL = вся сеть компании).
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS object_scope JSONB",
             # v2.2: приглашения сотрудников по email.
             "CREATE TABLE IF NOT EXISTS invitations ("
             "  id UUID PRIMARY KEY,"

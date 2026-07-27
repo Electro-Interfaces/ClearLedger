@@ -37,6 +37,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.scope import acl_params, acl_sql
+
 from app.services.pii_account import mask_phone
 
 # Порог склейки, мин. Меняя — пересчитать визиты по всем компаниям: показатели
@@ -163,8 +165,9 @@ def _as_date(v: str | date) -> date:
 def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None) -> str:
     """Подставить сужение по сети. Пустой список ≠ None: пустой означает «контур
     выбран, но станций в нём нет» — тогда отчёт обязан быть пустым, а не сетевым.
-    Регион — из справочника (Ф1.3): через location_id → region_id → regions.name."""
-    flt = ""
+    Регион — из справочника (Ф1.3): через location_id → region_id → regions.name.
+    Скоуп участника (app/scope.py) — та же граница, что в списках объектов."""
+    flt = acl_sql("location_id")
     if stations is not None:
         flt += " AND station_code = ANY(:stations)"
     if regions is not None:
@@ -186,7 +189,7 @@ async def visits_report(
     массив) и где именно это происходит — станция, коннектор, регион, клиент.
     """
     # asyncpg типизирует параметр по CAST в запросе и строку не примет.
-    p = {"company_id": str(company_id),
+    p = {"company_id": str(company_id), **acl_params(),
          "date_from": _as_date(date_from), "date_to": _as_date(date_to),
          "charged_min": CHARGED_MIN_KWH, "top": top}
     if stations is not None:
@@ -381,7 +384,7 @@ async def visit_success_by_station(
 async def _q(db: AsyncSession, company_id, date_from, date_to,
              stations: list[str] | None, sql: str,
              regions: list[str] | None = None) -> list[Any]:
-    p = {"company_id": str(company_id),
+    p = {"company_id": str(company_id), **acl_params(),
          "date_from": _as_date(date_from), "date_to": _as_date(date_to),
          "charged_min": CHARGED_MIN_KWH}
     if stations is not None:
@@ -400,7 +403,7 @@ async def recompute_visits(
     сколько из них потребовали повторных попыток.
     """
     res = await db.execute(_RECOMPUTE_SQL, {
-        "company_id": str(company_id), "gap_min": gap_min,
+        "company_id": str(company_id), **acl_params(), "gap_min": gap_min,
         "charged_min": CHARGED_MIN_KWH,
     })
     touched = int(res.rowcount or 0)

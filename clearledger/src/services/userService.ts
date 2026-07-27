@@ -25,6 +25,9 @@ export interface AdminUser {
   party_type?: 'internal' | 'partner' | 'vendor' | null
   organization_id?: string | null    // кого представляет внешний участник
   organization_name?: string | null  // имя организации (для UI)
+  // Скоуп данных: объекты, по которым человек видит данные; null = вся сеть компании.
+  // Ортогонален правам: modules — какие экраны, object_scope — по каким объектам.
+  object_scope?: string[] | null
   is_superadmin: boolean
   companies: MembershipRef[]
 }
@@ -103,6 +106,15 @@ export async function setMemberAccess(
     ? { company_id: companyId, mode: 'role', role_id: access.roleId }
     : { company_id: companyId, mode: 'custom', modules: access.modules }
   return put<AdminUser>(`/api/users/${id}/access`, body)
+}
+
+/** Скоуп данных члена: объекты, по которым он видит данные. null/пусто = вся сеть. */
+export async function setMemberScope(
+  id: string, companyId: string, objectScope: string[] | null,
+): Promise<AdminUser> {
+  return put<AdminUser>(`/api/users/${id}/scope`, {
+    company_id: companyId, object_scope: objectScope,
+  })
 }
 
 export async function removeUser(id: string, companyId: string): Promise<void> {

@@ -26,6 +26,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.scope import acl_params, acl_sql
+
 from app.services.charge_visits import CHARGED_MIN_KWH, _as_date
 from app.services.pii_account import mask_phone
 
@@ -58,7 +60,8 @@ WITH s AS (
 
 
 def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None) -> str:
-    flt = ""
+    # Скоуп участника (app/scope.py) — та же граница, что в списках объектов.
+    flt = acl_sql("location_id")
     if stations is not None:
         flt += " AND station_code = ANY(:stations)"
     if regions is not None:
@@ -86,7 +89,7 @@ async def unpaid_report(
 ) -> dict[str, Any]:
     """Полный разбор неоплаченного отпуска: категории, станции, клиенты,
     динамика и поимённый реестр случаев розничного долга."""
-    p = {"company_id": str(company_id),
+    p = {"company_id": str(company_id), **acl_params(),
          "date_from": _as_date(date_from), "date_to": _as_date(date_to),
          "charged_min": CHARGED_MIN_KWH, "top": top}
     if stations is not None:
@@ -221,7 +224,7 @@ async def unpaid_station_detail(
 
     Открывается кликом по строке станции: сводная цифра без имён не даёт что
     делать дальше, а разбираются такие случаи поимённо."""
-    p = {"company_id": str(company_id),
+    p = {"company_id": str(company_id), **acl_params(),
          "date_from": _as_date(date_from), "date_to": _as_date(date_to),
          "charged_min": CHARGED_MIN_KWH, "code": station_code}
 

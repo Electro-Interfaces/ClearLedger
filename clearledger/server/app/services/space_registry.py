@@ -65,8 +65,18 @@ async def list_objects(
     db: AsyncSession, company_id: uuid.UUID, *, status: str | None = None,
     type_: str | None = None, query: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Объекты компании, отсортированные по коду."""
-    stmt = select(ServiceLocation).where(ServiceLocation.company_id == company_id)
+    """Объекты компании, отсортированные по коду.
+
+    Со скоупом данных участник видит здесь только выданные ему объекты: реестр —
+    тот же список сети, открытый из «Управления». Проекция в приложения идёт от
+    админа, у которого скоупа нет, и остаётся полной.
+    """
+    from app.scope import scope_location_conds
+
+    stmt = select(ServiceLocation).where(
+        ServiceLocation.company_id == company_id,
+        *scope_location_conds(ServiceLocation.id),
+    )
     if status:
         stmt = stmt.where(ServiceLocation.status == status)
     if type_:
@@ -90,9 +100,12 @@ async def get_object(
 async def _load(
     db: AsyncSession, company_id: uuid.UUID, object_id: str,
 ) -> ServiceLocation | None:
-    """Объект строго в пределах компании: чужой id даёт None, а не чужую карточку."""
+    """Объект строго в пределах компании и скоупа: чужой id даёт None, а не карточку."""
+    from app.scope import scope_location_conds
+
     res = await db.execute(select(ServiceLocation).where(
-        ServiceLocation.id == object_id, ServiceLocation.company_id == company_id))
+        ServiceLocation.id == object_id, ServiceLocation.company_id == company_id,
+        *scope_location_conds(ServiceLocation.id)))
     return res.scalar_one_or_none()
 
 

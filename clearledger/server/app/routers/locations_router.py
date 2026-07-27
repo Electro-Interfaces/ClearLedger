@@ -17,6 +17,7 @@ from app.auth import assert_company_member, get_company_by_api_key, get_current_
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
 from app.models import AuditEvent, Company, ServiceLocation, User
+from app.scope import in_scope, scope_location_conds
 from app.services import hubex_service
 
 # decommissioned входит в белый список: раньше значение существовало только как
@@ -118,8 +119,12 @@ def _out(l: ServiceLocation) -> LocationOut:
 
 @router.get("", response_model=list[LocationOut])
 async def list_locations(cid: CompanyDep, db: AsyncSession = Depends(get_db)):
+    # Скоуп данных: участнику с выданными объектами отдаём только их. Это корневой
+    # список сети — из него строятся селектор станций, карта, парк и карточки, —
+    # поэтому сужение здесь закрывает разом все экраны, перечисляющие объекты.
     res = await db.execute(
-        select(ServiceLocation).where(ServiceLocation.company_id == cid)
+        select(ServiceLocation)
+        .where(ServiceLocation.company_id == cid, *scope_location_conds(ServiceLocation.id))
         .order_by(ServiceLocation.code)
     )
     return [_out(l) for l in res.scalars().all()]

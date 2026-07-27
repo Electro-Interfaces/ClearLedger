@@ -28,9 +28,22 @@ def session_scope_conds(
     Возвращает список условий для `.where(*conds)`. Пустой список = без сужения
     (весь контур компании). Используется как добавка к WHERE, где основной
     скоуп компании уже задан вызывающим.
+
+    Сюда же подмешивается СКОУП ДАННЫХ участника (`app/scope.py`): у человека,
+    которому выданы 5 станций, любой агрегат считается только по ним, какой бы
+    фильтр он ни выбрал в интерфейсе. Это не пользовательский фильтр, а граница
+    видимости, поэтому условия складываются (И), а не заменяют друг друга.
     """
+    from app.scope import current_object_scope
+
     S = ChargeSession
     conds: list = []
+    allowed = current_object_scope()
+    if allowed:
+        # `charge_sessions.location_id` — та же строка, что `service_locations.id`.
+        # Станция-сирота (location_id NULL) со скоупом не видна: она не привязана ни
+        # к одному объекту, а человек со скоупом видит только свои.
+        conds.append(S.location_id.in_(allowed))
     if stations:
         conds.append(S.station_code.in_(list(stations)))
     if regions:

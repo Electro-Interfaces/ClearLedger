@@ -133,6 +133,16 @@ class MemberAccessUpdate(BaseModel):
     modules: list[str] | None = None    # для mode="custom"; null = полный доступ
 
 
+class MemberScopeUpdate(BaseModel):
+    """Скоуп данных члена — объекты, по которым он видит данные.
+
+    Ортогонален правам: `modules` решают, какие экраны открыты, `object_scope` —
+    по каким объектам на них видны данные. null или пусто = вся сеть компании.
+    """
+    company_id: str
+    object_scope: list[str] | None = None
+
+
 # ===== Роли доступа (hybrid RBAC) =====
 
 class CompanyRoleResponse(BaseModel):
@@ -167,6 +177,7 @@ class UserAdminResponse(BaseModel):
     modules: list[str] | None = None  # эффективные RBAC-модули; null = полный доступ
     role_id: str | None = None      # назначенная именованная роль доступа (company_roles)
     role_name: str | None = None    # имя назначенной роли (для UI)
+    object_scope: list[str] | None = None  # скоуп данных: объекты; null = вся сеть
     is_superadmin: bool
     companies: list[CompanyMembership] = []
 

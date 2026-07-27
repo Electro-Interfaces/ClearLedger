@@ -146,21 +146,31 @@ async def assert_company_member(
     Суперадмин — доступ ко всем. Иначе требуется членство в user_companies.
     Бросает 400 при неизвестной компании, 403 при отсутствии членства.
     Единая точка проверки прав на компанию для всех эндпоинтов данных.
+
+    Здесь же выставляется СКОУП ДАННЫХ запроса (`app/scope.py`) — объекты, которые
+    участнику разрешено видеть. Место выбрано именно это: фильтр по объектам нужен
+    десяткам ручек, и протаскивать его параметром — однажды забыть в одной и открыть
+    данные. Пройти к данным компании мимо этой функции нельзя.
     """
+    from app.scope import _as_ids, set_request_scope
+
     cid = await resolve_company_id(company_ref, db)  # 400, если нет такой компании
     if user.is_superadmin:
+        set_request_scope(None)
         return cid
-    result = await db.execute(
-        select(UserCompany.company_id).where(
+    m = (await db.execute(
+        select(UserCompany).where(
             UserCompany.user_id == user.id,
             UserCompany.company_id == cid,
         )
-    )
-    if result.scalar_one_or_none() is None:
+    )).scalar_one_or_none()
+    if m is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Нет доступа к компании",
         )
+    # Админ компании видит всю сеть: иначе он не настроит то, чего не видит.
+    set_request_scope(None if m.role == "admin" else _as_ids(m.object_scope))
     return cid
 
 
