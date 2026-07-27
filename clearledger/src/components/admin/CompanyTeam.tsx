@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
-  KeyRound, Plus, Pencil, Copy, History, Share2, Users, ChevronDown, ChevronRight,
+  KeyRound, Plus, Pencil, Copy, Share2, Users, ChevronDown, ChevronRight,
   Building2, LifeBuoy,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
@@ -985,50 +985,6 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-/** Вкладка «Журнал»: последние изменения доступа/ролей/команды. */
-export function AuditTab({ companyId }: { companyId: string }) {
-  const q = useQuery({ queryKey: ['audit', companyId], queryFn: () => roleService.listAudit(companyId, 150) })
-  const RBAC = /^(role\.|member\.|user\.)/
-  const rows = (q.data ?? []).filter((e) => RBAC.test(e.action))
-  const ACTION_LABEL: Record<string, string> = {
-    'role.create': 'Роль создана', 'role.update': 'Роль изменена', 'role.delete': 'Роль удалена',
-    'member.access': 'Доступ изменён', 'member.role': 'Роль сотрудника',
-    'user.create': 'Сотрудник добавлен', 'user.remove': 'Сотрудник убран',
-  }
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><History className="h-5 w-5" /> Журнал изменений</CardTitle>
-        <CardDescription>Кто, когда и что менял в доступе, ролях и команде</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {q.isLoading && <Loading />}
-        <Table>
-          <TableHeader><TableRow>
-            <TableHead className="w-[150px]">Когда</TableHead>
-            <TableHead className="w-[170px]">Действие</TableHead>
-            <TableHead className="w-[170px]">Кто</TableHead>
-            <TableHead>Детали</TableHead>
-          </TableRow></TableHeader>
-          <TableBody>
-            {!q.isLoading && rows.length === 0 && (
-              <TableRow><TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-6">Нет записей</TableCell></TableRow>
-            )}
-            {rows.map((e) => (
-              <TableRow key={e.id}>
-                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{new Date(e.timestamp).toLocaleString('ru-RU')}</TableCell>
-                <TableCell><Badge variant="secondary" className="text-[10px] font-normal">{ACTION_LABEL[e.action] ?? e.action}</Badge></TableCell>
-                <TableCell className="text-xs">{e.user_name ?? '—'}</TableCell>
-                <TableCell className="text-xs text-muted-foreground truncate max-w-0">{e.details ?? ''}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
   )
 }
 

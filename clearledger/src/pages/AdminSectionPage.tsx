@@ -10,15 +10,13 @@
 import type { ComponentType } from 'react'
 import { Navigate, useParams } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/card'
-import { AuditTab, InvitationsCard, MembersCard, RolesAccessTab } from '@/components/admin/CompanyTeam'
+import { InvitationsCard, MembersCard, RolesAccessTab } from '@/components/admin/CompanyTeam'
+import { AuditLog } from '@/components/admin/AuditLog'
 import { CompanyApps } from '@/components/admin/CompanyApps'
 import { CompanyProfileCard } from '@/components/admin/CompanyProfile'
 import { CoreOverview } from '@/components/admin/CoreOverview'
 import { CoreSettings } from '@/components/admin/CoreSettings'
-import { EcosystemApps } from '@/components/admin/EcosystemApps'
-import { EcosystemAudit } from '@/components/admin/EcosystemAudit'
 import { EcosystemCompanies } from '@/components/admin/EcosystemCompanies'
-import { EcosystemUsers } from '@/components/admin/EcosystemUsers'
 import { SpaceMap } from '@/components/admin/SpaceMap'
 import { SpaceObjects } from '@/components/admin/SpaceObjects'
 import { SpaceRefs } from '@/components/admin/SpaceRefs'
@@ -37,13 +35,12 @@ function Empty({ text }: { text: string }) {
 }
 
 // ─── Уровень «Экосистема» ────────────────────────────────────────────────────
+// «Каталог», «Пользователи» и «Аудит» отсюда убраны как дубли разделов организации:
+// каталог продуктов стал секцией «Приложений», состав людей живёт в «Сотрудниках» и
+// «Компаниях» (а сводно — в «Карте»), журнал переключает охват сам.
 const ECO_SCREENS: Record<string, ComponentType> = {
   overview: CoreOverview,
   companies: EcosystemCompanies,
-  map: () => <SpaceMap />,          // без компании — весь контейнер
-  catalog: EcosystemApps,
-  users: EcosystemUsers,
-  audit: EcosystemAudit,
   settings: CoreSettings,
 }
 
@@ -61,14 +58,21 @@ function CompanyScreen({ code }: { code: string }) {
     // между разделами.
     case 'partners': return <MembersCard companyId={company.id} canManage={canManage} selfId={user!.id} party="external" />
     case 'roles': return <RolesAccessTab companyId={company.id} canManage={canManage} />
-    case 'apps': return <CompanyApps companyId={company.id} canManage={canManage} />
+    // Каталог платформы — второй секцией этого же раздела, владельцу контейнера.
+    case 'apps': return <CompanyApps companyId={company.id} canManage={canManage}
+      isSuperadmin={!!user?.is_superadmin} />
     case 'objects': return <SpaceObjects companyId={company.id} canManage={canManage} />
     case 'refs': return <SpaceRefs companyId={company.id} canManage={canManage} />
-    case 'map': return <SpaceMap companyId={company.id} />
+    // Одна карта на оба охвата — переключатель внутри, как в журнале.
+    case 'map': return <SpaceMap companyId={company.id} isSuperadmin={!!user?.is_superadmin} />
     case 'profile': return <CompanyProfileCard company={company} canEdit={canManage} />
-    // Приглашения и журнал — действия администратора компании, не наблюдателя.
-    case 'invites': return canManage ? <InvitationsCard companyId={company.id} /> : <Empty text="Раздел доступен администратору компании" />
-    case 'audit': return canManage ? <AuditTab companyId={company.id} /> : <Empty text="Раздел доступен администратору компании" />
+    // Приглашения и журнал — действия администратора организации, не наблюдателя.
+    case 'invites': return canManage ? <InvitationsCard companyId={company.id} /> : <Empty text="Раздел доступен администратору организации" />
+    // Один журнал на оба охвата: у суперадмина внутри переключатель «организация /
+    // весь контейнер», у админа организации — только её события.
+    case 'audit': return canManage
+      ? <AuditLog companyId={company.id} isSuperadmin={!!user?.is_superadmin} />
+      : <Empty text="Раздел доступен администратору организации" />
     default: return <Empty text="Раздел не найден" />
   }
 }

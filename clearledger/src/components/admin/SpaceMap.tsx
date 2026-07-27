@@ -29,10 +29,19 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'neverSeen', label: 'Не заходили' },
 ]
 
-export function SpaceMap({ companyId }: { companyId?: string }) {
+/**
+ * `isSuperadmin` даёт переключатель охвата вместо второго раздела: раньше «Карта» стояла
+ * и в организации, и в контейнере — один компонент с `companyId` и без него, то есть два
+ * пункта меню на одну и ту же страницу.
+ */
+export function SpaceMap({ companyId, isSuperadmin = false }: {
+  companyId?: string; isSuperadmin?: boolean
+}) {
+  const [wide, setWide] = useState(false)
+  const scoped = wide ? undefined : companyId
   const q = useQuery({
-    queryKey: ['space-map', companyId ?? 'all'],
-    queryFn: () => getSpaceMap(companyId),
+    queryKey: ['space-map', scoped ?? 'all'],
+    queryFn: () => getSpaceMap(scoped),
     staleTime: 60_000,
     // Присутствие живёт минутами: без автообновления карта показывала бы «в сети» тех,
     // кто уже ушёл.
@@ -53,10 +62,21 @@ export function SpaceMap({ companyId }: { companyId?: string }) {
   const map = q.data!
   return (
     <div className="space-y-8">
-      <p className="text-sm text-muted-foreground">
-        Обзор пространства за последние {map.windowDays} дней: состав людей, их доступы,
-        активность и события. Управление — в соответствующих разделах.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          Обзор пространства за последние {map.windowDays} дней: состав людей, их доступы,
+          активность и события. Управление — в соответствующих разделах.
+        </p>
+        {isSuperadmin && companyId && (
+          <div className="flex items-center gap-1">
+            <span className="mr-1 text-xs text-muted-foreground">Охват:</span>
+            <Button size="sm" variant={wide ? 'ghost' : 'secondary'} className="h-7 px-2 text-xs"
+              onClick={() => setWide(false)}>Организация</Button>
+            <Button size="sm" variant={wide ? 'secondary' : 'ghost'} className="h-7 px-2 text-xs"
+              onClick={() => setWide(true)}>Весь контейнер</Button>
+          </div>
+        )}
+      </div>
 
       {map.companies.map((c) => <CompanyCard key={c.id} company={c} windowDays={map.windowDays} />)}
 
