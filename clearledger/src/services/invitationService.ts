@@ -18,6 +18,10 @@ export interface Invitation {
   invite_url?: string | null
   /** Ушло ли письмо на самом деле (false — SMTP не настроен или сбой). */
   email_sent?: boolean | null
+  /** Кем человек войдёт в пространство — задаётся при приглашении, не после входа. */
+  party_type?: 'internal' | 'partner' | 'vendor'
+  organization_id?: string | null
+  organization_name?: string | null
 }
 
 export interface AcceptPreview {
@@ -33,9 +37,12 @@ export async function listInvitations(companyId: string): Promise<Invitation[]> 
 
 export async function createInvitation(
   companyId: string, email: string, role: 'user' | 'admin', position?: string,
+  party?: { partyType?: 'internal' | 'partner' | 'vendor'; organizationId?: string },
 ): Promise<Invitation> {
   return post<Invitation>('/api/invitations', {
     company_id: companyId, email, role, position: position || undefined,
+    party_type: party?.partyType,
+    organization_id: party?.organizationId || undefined,
   })
 }
 

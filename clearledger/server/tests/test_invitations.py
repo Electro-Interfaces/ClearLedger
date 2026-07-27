@@ -104,3 +104,64 @@ async def test_invitation_permissions_and_revoke(client: AsyncClient, monkeypatc
     assert (await client.get(f"/api/invitations/accept/{tok}")).status_code == 200
     assert (await client.delete(f"/api/invitations/{rid}", headers=_h(admin))).status_code == 204
     assert (await client.get(f"/api/invitations/accept/{tok}")).status_code == 404
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_принадлежность_партнёра_доезжает_из_приглашения_в_членство(
+    client: AsyncClient, monkeypatch,
+):
+    """Приглашённый партнёр должен попасть в раздел «Компании», а не в «Сотрудники».
+
+    Ломалось так: принадлежность ставили ПОСЛЕ входа, поэтому принявший приглашение
+    представитель подрядчика появлялся среди сотрудников организации и оставался там,
+    пока кто-нибудь не переключит ему тип вручную.
+    """
+    sent = {}
+
+    async def fake_send(to, token, company_name, inviter, role):
+        sent["token"] = token
+        return False
+
+    monkeypatch.setattr(email_service, "send_invite", fake_send)
+    admin = await _admin(client)
+
+    r = await client.post("/api/invitations", headers=_h(admin), json={
+        "company_id": "npk", "email": "partner-rep@test.ru", "role": "user",
+        "party_type": "partner",
+    })
+    assert r.status_code == 201, r.text
+    assert r.json()["party_type"] == "partner"
+
+    # Список приглашений тоже отдаёт принадлежность — иначе в таблице не видно,
+    # кого именно ждём: своего сотрудника или человека со стороны.
+    lst = (await client.get("/api/invitations", headers=_h(admin),
+                            params={"company_id": "npk"})).json()
+    assert any(i["email"] == "partner-rep@test.ru" and i["party_type"] == "partner" for i in lst)
+
+    a = await client.post(f"/api/invitations/accept/{sent['token']}",
+                          json={"name": "Partner Rep", "password": "secret123"})
+    assert a.status_code == 200, a.text
+
+    members = (await client.get("/api/users", headers=_h(admin),
+                                params={"company_id": "npk"})).json()
+    rep = next(m for m in members if m["email"] == "partner-rep@test.ru")
+    assert rep["party_type"] == "partner"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_чужая_организация_в_приглашении_отбивается(client: AsyncClient, monkeypatch):
+    """`resolve_org_id` не даёт привязать участника к контрагенту чужого пространства:
+    иначе внешний человек был бы подписан в чатах организацией, которой в его компании
+    не существует."""
+    async def fake_send(to, token, company_name, inviter, role):
+        return False
+
+    monkeypatch.setattr(email_service, "send_invite", fake_send)
+    admin = await _admin(client)
+
+    r = await client.post("/api/invitations", headers=_h(admin), json={
+        "company_id": "npk", "email": "ghost-org@test.ru", "role": "user",
+        "party_type": "partner",
+        "organization_id": "00000000-0000-0000-0000-000000000001",
+    })
+    assert r.status_code == 404, r.text

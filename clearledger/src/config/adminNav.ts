@@ -17,8 +17,8 @@
  */
 import type { ComponentType } from 'react'
 import {
-  LayoutDashboard, Map, Blocks, Users, History, Bell, Settings2,
-  KeyRound, MapPin, Library, Building2, Mail,
+  LayoutDashboard, Map, Blocks, Users, History, Settings2,
+  KeyRound, MapPin, Library, Building2, Mail, Handshake,
 } from 'lucide-react'
 
 export type AdminScope = 'eco' | 'company'
@@ -34,19 +34,24 @@ export interface AdminSection {
 
 /** Уровень «Экосистема» — контейнер целиком. Только суперадмину. */
 export const ecosystemSections: AdminSection[] = [
-  { code: 'overview', label: 'Обзор', hint: 'Состояние ядра, единый вход, платформенные сервисы', icon: LayoutDashboard },
+  // «Оповещения» отдельным разделом больше нет: он выводил два факта из того же
+  // `/api/core/status`, что и обзор, и теперь это блок «Требует внимания» в обзоре.
+  { code: 'overview', label: 'Обзор', hint: 'Что требует внимания, люди, объекты, сервисы, активность', icon: LayoutDashboard },
   { code: 'companies', label: 'Организации', hint: 'Организации контейнера и подключение новых', icon: Building2 },
   { code: 'map', label: 'Карта', hint: 'Люди, доступы и активность всего контейнера', icon: Map },
   { code: 'catalog', label: 'Каталог', hint: 'Продукты экосистемы и их подключение организациям', icon: Blocks },
   { code: 'users', label: 'Пользователи', hint: 'Все учётные записи контейнера', icon: Users },
   { code: 'audit', label: 'Аудит', hint: 'События контейнера', icon: History },
-  { code: 'alerts', label: 'Оповещения', hint: 'Что требует внимания владельца контейнера', icon: Bell },
   { code: 'settings', label: 'Настройки', hint: 'Параметры ядра и единого входа', icon: Settings2 },
 ]
 
 /** Уровень «Организация» — пространство заказчика. Гейт по модулям роли. */
 export const companySections: AdminSection[] = [
-  { code: 'members', label: 'Сотрудники', hint: 'Кто в пространстве организации и с какой ролью', icon: Users },
+  // Свои сотрудники и люди партнёров — разные разделы, а не один список с пометкой:
+  // вопросы разные («кому что можно внутри организации» против «какая сторонняя
+  // компания допущена и до чего»), и право на них выдаётся по отдельности.
+  { code: 'members', label: 'Сотрудники', hint: 'Сотрудники организации — владельца пространства: роли и доступ', icon: Users },
+  { code: 'partners', label: 'Компании', hint: 'Сторонние компании с доступом: их люди, роли и объекты', icon: Handshake },
   { code: 'roles', label: 'Роли и доступ', hint: 'Права на продукты пространства и их разделы', icon: KeyRound },
   { code: 'apps', label: 'Приложения', hint: 'Какие продукты подключены организации', icon: Blocks },
   { code: 'objects', label: 'Объекты', hint: 'Объекты организации — общие для всех приложений', icon: MapPin },

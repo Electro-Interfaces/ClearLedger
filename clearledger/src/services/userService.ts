@@ -58,6 +58,9 @@ export async function createUser(data: {
   password: string
   role: 'user' | 'admin'
   position?: string
+  /** Кем заводим: свой сотрудник (по умолчанию) или представитель компании-партнёра. */
+  partyType?: 'internal' | 'partner' | 'vendor'
+  organizationId?: string
 }): Promise<AdminUser> {
   return post<AdminUser>('/api/users', {
     company_id: data.companyId,
@@ -66,6 +69,8 @@ export async function createUser(data: {
     password: data.password,
     role: data.role,
     position: data.position || undefined,
+    party_type: data.partyType,
+    organization_id: data.organizationId || undefined,
   })
 }
 

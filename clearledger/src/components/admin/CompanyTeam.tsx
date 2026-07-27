@@ -25,6 +25,7 @@ import {
 import {
   Mail, UserPlus, Trash2, Loader2, ShieldCheck, Send, RotateCw, X, Check, SlidersHorizontal, Search,
   KeyRound, Plus, Pencil, Copy, History, Share2, Users, ChevronDown, ChevronRight,
+  Building2, LifeBuoy,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
@@ -52,9 +53,22 @@ export function CompanyTeam({
   )
 }
 
+/**
+ * Состав пространства: свои сотрудники ИЛИ люди компаний-партнёров.
+ *
+ * `party` делит один список на два раздела «Управления». Это не косметика: у
+ * сотрудника организации и у представителя подрядчика разные вопросы («кому что можно
+ * внутри» против «какая сторонняя компания допущена и до чего»), и в общем списке
+ * партнёр читался как свой — отличить можно было только заглянув в колонку «Кто это».
+ * Партнёров показываем сгруппированными по их компании: единица учёта здесь — компания,
+ * а не человек.
+ */
 export function MembersCard({
-  companyId, canManage, selfId,
-}: { companyId: string; canManage: boolean; selfId: string }) {
+  companyId, canManage, selfId, party = 'internal',
+}: {
+  companyId: string; canManage: boolean; selfId: string
+  party?: 'internal' | 'external'
+}) {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const q = useQuery({
@@ -111,10 +125,33 @@ export function MembersCard({
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
 
-  const members = q.data ?? []
+  // Принадлежность не задана — свой сотрудник: так было до появления партнёров, и
+  // перенесённые люди заказчика идут без явной пометки.
+  const isExternal = (m: AdminUser) => m.party_type === 'partner' || m.party_type === 'vendor'
+  const all = (q.data ?? []).filter((m) => (party === 'external' ? isExternal(m) : !isExternal(m)))
   const filtered = search.trim()
-    ? members.filter((m) => `${m.name} ${m.email} ${m.position ?? ''}`.toLowerCase().includes(search.trim().toLowerCase()))
-    : members
+    ? all.filter((m) => `${m.name} ${m.email} ${m.position ?? ''} ${m.organization_name ?? ''}`
+        .toLowerCase().includes(search.trim().toLowerCase()))
+    : all
+
+  /** Партнёры → группы по компании; поддержка платформы и «без компании» — в конец. */
+  const groups = (() => {
+    if (party !== 'external') return null
+    const byOrg = new Map<string, { label: string; kind: 'partner' | 'vendor' | 'none'; rows: AdminUser[] }>()
+    for (const m of filtered) {
+      const vendor = m.party_type === 'vendor'
+      const key = vendor ? '￿vendor' : (m.organization_id ?? '￾none')
+      const label = vendor ? 'Поддержка платформы'
+        : (m.organization_name || 'Компания не указана')
+      const kind = vendor ? 'vendor' as const : (m.organization_id ? 'partner' as const : 'none' as const)
+      if (!byOrg.has(key)) byOrg.set(key, { label, kind, rows: [] })
+      byOrg.get(key)!.rows.push(m)
+    }
+    return [...byOrg.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, 'ru'))
+      .map(([key, g]) => ({ key, ...g }))
+  })()
+  const members = all
 
   return (
     <Card>
@@ -124,23 +161,28 @@ export function MembersCard({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="relative w-full max-w-xs">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: ФИО, email, должность…"
+            <Input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder={party === 'external'
+                ? 'Поиск: ФИО, email, компания…' : 'Поиск: ФИО, email, должность…'}
               className="h-8 pl-8 text-sm" />
           </div>
           {canManage && (
             <div className="flex items-center gap-2">
               {/* Люди пространства должны быть и в приложениях-разрезах: заводим один
-                  раз здесь, проекция доносит их до Координатора (docs/SPACE.md). */}
-              <Button variant="outline" size="sm" className="gap-1.5"
-                disabled={projectUsers.isPending} onClick={() => projectUsers.mutate()}
-                title="Отправить сотрудников в приложения экосистемы">
-                {projectUsers.isPending
-                  ? <Loader2 className="h-4 w-4 animate-spin" />
-                  : <Share2 className="h-4 w-4" />}
-                В приложения
-              </Button>
-              <InviteDialog companyId={companyId} />
-              <AddUserDialog companyId={companyId} />
+                  раз здесь, проекция доносит их до Координатора (docs/SPACE.md).
+                  Проекция отправляет весь состав, поэтому кнопка одна — в «Сотрудниках». */}
+              {party === 'internal' && (
+                <Button variant="outline" size="sm" className="gap-1.5"
+                  disabled={projectUsers.isPending} onClick={() => projectUsers.mutate()}
+                  title="Отправить людей пространства в приложения экосистемы">
+                  {projectUsers.isPending
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Share2 className="h-4 w-4" />}
+                  В приложения
+                </Button>
+              )}
+              <InviteDialog companyId={companyId} party={party} orgs={orgsQ.data ?? []} />
+              <AddUserDialog companyId={companyId} party={party} orgs={orgsQ.data ?? []} />
             </div>
           )}
         </div>
@@ -154,7 +196,7 @@ export function MembersCard({
               <TableHead className="min-w-[220px]">ФИО / Email</TableHead>
               <TableHead className="w-[160px]">Должность</TableHead>
               <TableHead className="w-[130px]">Роль</TableHead>
-              <TableHead className="w-[210px]">Кто это</TableHead>
+              <TableHead className="w-[210px]">{party === 'external' ? 'Кого представляет' : 'Принадлежность'}</TableHead>
               <TableHead className="w-[300px]">Доступ и объекты</TableHead>
               <TableHead className="w-10"></TableHead>
             </TableRow>
@@ -162,10 +204,45 @@ export function MembersCard({
           <TableBody>
             {!q.isLoading && filtered.length === 0 && (
               <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-6">
-                {members.length === 0 ? 'Нет сотрудников' : 'Ничего не найдено'}
+                {members.length > 0 ? 'Ничего не найдено'
+                  : party === 'external'
+                    ? 'Внешних участников нет. Пригласите человека компании-партнёра — он появится здесь, а не в сотрудниках организации.'
+                    : 'Нет сотрудников'}
               </TableCell></TableRow>
             )}
-            {filtered.map((u) => {
+            {/* Партнёры идут группами по компаниям: строка-заголовок группы, затем её люди.
+                Строка участника у обоих разделов одна и та же — ветвится только состав
+                колонки принадлежности. */}
+            {(groups
+              ? groups.flatMap((g) => [
+                  { group: g }, ...g.rows.map((u) => ({ u })),
+                ] as Array<{ group?: typeof g; u?: AdminUser }>)
+              : filtered.map((u) => ({ u } as { group?: never; u?: AdminUser }))
+            ).map((item) => {
+              if (item.group) {
+                const g = item.group
+                return (
+                  <TableRow key={`g-${g.key}`} className="bg-muted/40 hover:bg-muted/40">
+                    <TableCell colSpan={6} className="py-2">
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        {g.kind === 'vendor'
+                          ? <LifeBuoy className="h-3.5 w-3.5 text-primary" />
+                          : <Building2 className="h-3.5 w-3.5 text-muted-foreground" />}
+                        {g.label}
+                        <span className="text-xs font-normal text-muted-foreground">
+                          · {g.rows.length} чел.
+                        </span>
+                        {g.kind === 'none' && (
+                          <span className="text-xs font-normal text-amber-500/90">
+                            — укажите компанию, иначе в чатах и заявках человек без стороны
+                          </span>
+                        )}
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                )
+              }
+              const u = item.u!
               const locked = u.is_superadmin || u.id === selfId || !canManage
               return (
                 <TableRow key={u.id}>
@@ -194,21 +271,26 @@ export function MembersCard({
                     </Select>
                   </TableCell>
                   <TableCell>
-                    {/* Принадлежность к пространству — не права, а «кто он»: в чатах и
-                        заявках внешнего участника надо отличать от своего сотрудника. */}
+                    {/* Принадлежность — не права, а «кто он»: в чатах и заявках внешнего
+                        участника надо отличать от своего сотрудника. Ярлык рисуем только
+                        среди внешних: в разделе своих сотрудников он у всех одинаковый и
+                        не сообщает ничего. Селектор остаётся в обоих — им человека и
+                        переводят между разделами. */}
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-1.5">
-                        <PartyBadge party={{
-                          partyType: u.party_type ?? 'internal', role: u.role,
-                          orgName: u.organization_name, position: u.position,
-                        }} />
+                        {party === 'external' && (
+                          <PartyBadge party={{
+                            partyType: u.party_type ?? 'internal', role: u.role,
+                            orgName: u.organization_name, position: u.position,
+                          }} />
+                        )}
                         {canManage && !u.is_superadmin && (
                           <Select value={u.party_type ?? 'internal'} disabled={setParty.isPending}
                             onValueChange={(v) => setParty.mutate({ id: u.id, partyType: v as 'internal' | 'partner' | 'vendor' })}>
-                            <SelectTrigger className="h-7 w-[132px] text-xs"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="internal">Свой сотрудник</SelectItem>
-                              <SelectItem value="partner">Внешний участник</SelectItem>
+                              <SelectItem value="internal">Сотрудник организации</SelectItem>
+                              <SelectItem value="partner">Компания-партнёр</SelectItem>
                               {/* Инженер разработчика платформы: попадает в канал поддержки
                                   пространства и подписан «Поддержка» во всех чатах. */}
                               <SelectItem value="vendor">Поддержка платформы</SelectItem>
@@ -220,10 +302,10 @@ export function MembersCard({
                         <Select value={u.organization_id ?? 'none'} disabled={setParty.isPending}
                           onValueChange={(v) => setParty.mutate({ id: u.id, organizationId: v === 'none' ? '' : v })}>
                           <SelectTrigger className="h-7 w-[196px] text-xs">
-                            <SelectValue placeholder="Организация" />
+                            <SelectValue placeholder="Компания" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="none">Организация не указана</SelectItem>
+                            <SelectItem value="none">Компания не указана</SelectItem>
                             {(orgsQ.data ?? []).map((o) => (
                               <SelectItem key={o.id} value={o.id}>{o.shortName || o.name}</SelectItem>
                             ))}
@@ -296,7 +378,9 @@ export function MembersCard({
         </Table>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          Сотрудников: {members.length}
+          {party === 'external'
+            ? `Внешних участников: ${members.length} из ${groups?.length ?? 0} компаний`
+            : `Сотрудников: ${members.length}`}
           {filtered.length !== members.length ? ` · показано ${filtered.length}` : ''}
           {' '}· роль «Администратор» даёт полный доступ
         </p>
@@ -413,20 +497,29 @@ export function InvitationsCard({ companyId }: { companyId: string }) {
   )
 }
 
-function InviteDialog({ companyId }: { companyId: string }) {
+function InviteDialog({ companyId, party = 'internal', orgs = [] }: {
+  companyId: string
+  party?: 'internal' | 'external'
+  orgs?: { id: string; name: string; shortName?: string | null }[]
+}) {
   const qc = useQueryClient()
+  const external = party === 'external'
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
   const [position, setPosition] = useState('')
   const [role, setRole] = useState<'user' | 'admin'>('user')
+  // Какую компанию представляет приглашаемый. Хранится в приглашении: иначе принявший
+  // его партнёр попадает в раздел сотрудников организации и ждёт ручной пометки.
+  const [orgId, setOrgId] = useState('')
   // Созданное приглашение со ссылкой. Диалог после успеха НЕ закрывается:
   // ссылку отдают один раз, закрыть его до копирования — потерять её.
   const [created, setCreated] = useState<invitationService.Invitation | null>(null)
 
-  const reset = () => { setEmail(''); setPosition(''); setRole('user'); setCreated(null) }
+  const reset = () => { setEmail(''); setPosition(''); setRole('user'); setOrgId(''); setCreated(null) }
 
   const invite = useMutation({
-    mutationFn: () => invitationService.createInvitation(companyId, email, role, position),
+    mutationFn: () => invitationService.createInvitation(companyId, email, role, position,
+      external ? { partyType: 'partner', organizationId: orgId } : undefined),
     onSuccess: (inv) => {
       setCreated(inv)
       qc.invalidateQueries({ queryKey: ['team-invites', companyId] })
@@ -441,7 +534,10 @@ function InviteDialog({ companyId }: { companyId: string }) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{created ? 'Приглашение создано' : 'Пригласить сотрудника'}</DialogTitle>
+          <DialogTitle>
+            {created ? 'Приглашение создано'
+              : external ? 'Пригласить человека компании-партнёра' : 'Пригласить сотрудника'}
+          </DialogTitle>
         </DialogHeader>
 
         {created ? (
@@ -449,16 +545,34 @@ function InviteDialog({ companyId }: { companyId: string }) {
             <p className="text-sm text-muted-foreground">
               {created.email}
               {created.position ? ` · ${created.position}` : ''} · {ROLE_LABEL[created.role] ?? created.role}
+              {created.organization_name ? ` · ${created.organization_name}` : ''}
             </p>
             <InviteLinkPanel invitation={created} />
           </div>
         ) : (
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>Email сотрудника</Label>
+              <Label>{external ? 'Email представителя' : 'Email сотрудника'}</Label>
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder="employee@company.ru" />
             </div>
+            {external && (
+              <div className="space-y-2">
+                <Label>Компания-партнёр</Label>
+                <Select value={orgId} onValueChange={setOrgId}>
+                  <SelectTrigger><SelectValue placeholder="Выберите компанию из контрагентов" /></SelectTrigger>
+                  <SelectContent>
+                    {orgs.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>{o.shortName || o.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Компании берутся из контрагентов пространства («Справочники»). Ею человек
+                  будет подписан в чатах и заявках.
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Должность</Label>
@@ -477,7 +591,7 @@ function InviteDialog({ companyId }: { companyId: string }) {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Сотруднику придёт письмо со ссылкой — по ней он задаст ФИО и пароль.
+              Приглашённому придёт письмо со ссылкой — по ней он задаст ФИО и пароль.
               Ссылку можно скопировать и отправить мессенджером.
             </p>
           </div>
@@ -490,7 +604,9 @@ function InviteDialog({ companyId }: { companyId: string }) {
               <Button onClick={() => { setOpen(false); reset() }}>Готово</Button>
             </>
           ) : (
-            <Button disabled={!email || invite.isPending} onClick={() => invite.mutate()}>
+            // Партнёра без компании не приглашаем: он окажется участником без стороны в
+            // чатах и заявках, а разобраться потом сложнее, чем выбрать сейчас.
+            <Button disabled={!email || (external && !orgId) || invite.isPending} onClick={() => invite.mutate()}>
               {invite.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Создать приглашение
             </Button>
           )}
@@ -500,16 +616,28 @@ function InviteDialog({ companyId }: { companyId: string }) {
   )
 }
 
-function AddUserDialog({ companyId }: { companyId: string }) {
+function AddUserDialog({ companyId, party = 'internal', orgs = [] }: {
+  companyId: string
+  party?: 'internal' | 'external'
+  orgs?: { id: string; name: string; shortName?: string | null }[]
+}) {
   const qc = useQueryClient()
+  const external = party === 'external'
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', position: '', role: 'user' as 'user' | 'admin' })
+  const empty = { name: '', email: '', password: '', position: '', role: 'user' as 'user' | 'admin', orgId: '' }
+  const [form, setForm] = useState(empty)
 
   const create = useMutation({
-    mutationFn: () => userService.createUser({ companyId, ...form }),
+    mutationFn: () => userService.createUser({
+      companyId, name: form.name, email: form.email, password: form.password,
+      position: form.position, role: form.role,
+      // Принадлежность ставится при создании, а не правится потом: заведённый из
+      // раздела партнёров человек не должен появляться в сотрудниках организации.
+      ...(external ? { partyType: 'partner' as const, organizationId: form.orgId } : {}),
+    }),
     onSuccess: () => {
-      toast.success('Сотрудник добавлен')
-      setForm({ name: '', email: '', password: '', position: '', role: 'user' }); setOpen(false)
+      toast.success(external ? 'Представитель компании добавлен' : 'Сотрудник добавлен')
+      setForm(empty); setOpen(false)
       qc.invalidateQueries({ queryKey: ['team-members', companyId] })
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
@@ -521,13 +649,26 @@ function AddUserDialog({ companyId }: { companyId: string }) {
         <Button size="sm" variant="outline"><UserPlus className="h-4 w-4 mr-2" /> Вручную</Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader><DialogTitle>Добавить сотрудника вручную</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>
+          {external ? 'Добавить представителя компании-партнёра' : 'Добавить сотрудника вручную'}
+        </DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2"><Label>ФИО</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Фамилия Имя Отчество" /></div>
             <div className="space-y-2"><Label>Email</Label>
               <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+            {external && (
+              <div className="space-y-2 col-span-2"><Label>Компания-партнёр</Label>
+                <Select value={form.orgId} onValueChange={(v) => setForm({ ...form, orgId: v })}>
+                  <SelectTrigger><SelectValue placeholder="Выберите компанию из контрагентов" /></SelectTrigger>
+                  <SelectContent>
+                    {orgs.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>{o.shortName || o.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select></div>
+            )}
             <div className="space-y-2"><Label>Должность</Label>
               <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} placeholder="напр. Бухгалтер" /></div>
             <div className="space-y-2"><Label>Роль</Label>
@@ -543,7 +684,8 @@ function AddUserDialog({ companyId }: { companyId: string }) {
           </div>
         </div>
         <DialogFooter>
-          <Button disabled={!form.email || !form.name || form.password.length < 6 || create.isPending}
+          <Button disabled={!form.email || !form.name || form.password.length < 6
+            || (external && !form.orgId) || create.isPending}
             onClick={() => create.mutate()}>
             {create.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Добавить
           </Button>

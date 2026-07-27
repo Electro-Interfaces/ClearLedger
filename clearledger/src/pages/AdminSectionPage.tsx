@@ -13,7 +13,6 @@ import { Card, CardContent } from '@/components/ui/card'
 import { AuditTab, InvitationsCard, MembersCard, RolesAccessTab } from '@/components/admin/CompanyTeam'
 import { CompanyApps } from '@/components/admin/CompanyApps'
 import { CompanyProfileCard } from '@/components/admin/CompanyProfile'
-import { CoreAlerts } from '@/components/admin/CoreAlerts'
 import { CoreOverview } from '@/components/admin/CoreOverview'
 import { CoreSettings } from '@/components/admin/CoreSettings'
 import { EcosystemApps } from '@/components/admin/EcosystemApps'
@@ -45,7 +44,6 @@ const ECO_SCREENS: Record<string, ComponentType> = {
   catalog: EcosystemApps,
   users: EcosystemUsers,
   audit: EcosystemAudit,
-  alerts: CoreAlerts,
   settings: CoreSettings,
 }
 
@@ -58,6 +56,10 @@ function CompanyScreen({ code }: { code: string }) {
 
   switch (code) {
     case 'members': return <MembersCard companyId={company.id} canManage={canManage} selfId={user!.id} />
+    // Тот же состав пространства, другая сторона: люди компаний-партнёров, сгруппированные
+    // по их компании. Один компонент — чтобы роли, доступ и скоуп объектов не разъезжались
+    // между разделами.
+    case 'partners': return <MembersCard companyId={company.id} canManage={canManage} selfId={user!.id} party="external" />
     case 'roles': return <RolesAccessTab companyId={company.id} canManage={canManage} />
     case 'apps': return <CompanyApps companyId={company.id} canManage={canManage} />
     case 'objects': return <SpaceObjects companyId={company.id} canManage={canManage} />
