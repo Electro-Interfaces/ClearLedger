@@ -22,7 +22,7 @@
  * другой — там «Учёт» остаётся единым продуктом со всеми разделами, как раньше.
  */
 import type { CoreMode } from '@/contexts/WorkspaceContext'
-import { dashboardItem, navByPath, type NavItemDef } from './navigation'
+import { navByPath, type NavItemDef } from './navigation'
 
 export interface SpaceProduct {
   /** Код в реестре Ядра = ключ доступа роли. */
@@ -45,8 +45,13 @@ export interface SpaceProduct {
 
 export const SPACE_PRODUCTS: SpaceProduct[] = [
   {
+    // Проекты — стройка сети. Действующие станции здесь для СПРАВКИ: чем оснащена
+    // соседняя площадка, что там с подключением, введена ли она — это ответ на вопрос
+    // «как делали в прошлый раз» при подборе и проектировании новой. Договоров и
+    // выручки в этом окне нет: продажами и деньгами занимаются другие рабочие места.
     code: 'projects', route: '/projects', label: 'Проекты',
-    modes: ['projects'], paths: [],
+    modes: ['projects'], paths: ['/objects'],
+    objectTabs: ['passport', 'equipment', 'integrations'],
   },
   {
     // Эксплуатация — железо и его состояние: мониторинг сети, парк, склады, ЗИП.
@@ -60,8 +65,28 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // и «Сеть» уже занята группой разделов внутри (обзор, карта, динамика).
     // Не «Реализация»: это термин бухучёта, ему место в Финансах.
     code: 'sales', route: '/sales', label: 'Продажи',
-    modes: ['management', 'store'], paths: ['/objects', '/metrika'],
+    modes: ['management'], paths: ['/objects'],
     objectTabs: ['passport', 'contracts', 'sales'],
+  },
+  {
+    // Корпоративный процессинг — работа с юрлицами: тарифные планы, договоры, лимиты,
+    // разбор частных клиентов рядом. Отдельное рабочее место: этим занимаются не те,
+    // кто смотрит загрузку сети (решение МАГа 27.07.2026).
+    code: 'corp', route: '/corporate', label: 'Корпоративный процессинг',
+    modes: ['corporate'], paths: ['/objects', '/contractors'],
+    objectTabs: ['passport', 'contracts', 'sales'],
+  },
+  {
+    // Интернет-магазин — товарный контур на объектах: витрина, номенклатура, заказы.
+    code: 'shop', route: '/shop', label: 'Интернет-магазин',
+    modes: ['store'], paths: ['/objects'],
+    objectTabs: ['passport', 'sales'],
+  },
+  {
+    // Маркетинг — поведение клиентов и сегментация сети: ABC-XYZ, динамика, веб-аналитика.
+    code: 'marketing', route: '/marketing', label: 'Маркетинг',
+    modes: ['marketing'], paths: ['/objects', '/metrika'],
+    objectTabs: ['passport', 'sales'],
   },
   {
     // Финансы — счётная сторона: проводки, налоги, выгрузка, первичка, контрагенты
@@ -109,18 +134,16 @@ export function productForPath(pathname: string): SpaceProduct | null {
 }
 
 /**
- * Пункты левого меню продукта: сначала его собственный рабочий стол (разделы —
- * гармошкой под ним), затем страницы в порядке `paths`.
+ * Страницы продукта для левого меню (в порядке `paths`).
  *
- * Рабочий стол обязателен: без него у продукта без страниц («Проекты») меню было
- * пустым, а из страницы («Документы») некуда было вернуться к разделам продукта.
+ * Пункта «Рабочий стол» здесь нет: рабочий стол — уровнем выше, у пространства.
+ * Верхний уровень внутри продукта — его собственные разделы («Продажи», «Магазин»);
+ * их подставляет `AppSidebar` из фактических секций рабочей области, а под-разделы
+ * этой области остаются в гармошке `WorkspaceModeSidebar`.
  */
 export function productNav(product: SpaceProduct): NavItemDef[] {
-  return [
-    { to: product.route, icon: dashboardItem.icon, label: 'Рабочий стол', end: true },
-    ...product.paths.map((path) => navByPath[path]).filter(Boolean)
-      .map((item) => ({ ...item, to: productPagePath(product, item.to) })),
-  ]
+  return product.paths.map((path) => navByPath[path]).filter(Boolean)
+    .map((item) => ({ ...item, to: productPagePath(product, item.to) }))
 }
 
 /**

@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -103,6 +103,21 @@ export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
 ]
 export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
 
+// Продукты, выделенные из «Продаж» (решение МАГа 27.07.2026): работа с юрлицами и
+// маркетинг — отдельные рабочие места со своими людьми, а не вкладки коммерции.
+export const CORP_MENU: CentralMenuItem[] = [
+  { key: 'cs_clients',    label: 'Тарифные планы', group: 'Коммерция' },
+  { key: 'cs_corporate',  label: 'Юрлица',         group: 'Коммерция' },
+  { key: 'cs_retail',     label: 'Частные лица',   group: 'Коммерция' },
+]
+export const CORP_KEYS = CORP_MENU.map((m) => m.key)
+
+export const MARKETING_MENU: CentralMenuItem[] = [
+  { key: 'cs_abcxyz',  label: 'ABC-XYZ станций', group: 'Сегментация' },
+  { key: 'cs_trend',   label: 'Динамика 2024+',  group: 'Сегментация' },
+]
+export const MARKETING_KEYS = MARKETING_MENU.map((m) => m.key)
+
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
 // (getModuleComponentDefs('accounting')) в useWorkspaceSections — статичного ACC_MENU
 // нет. Реальные пункты: Дашборды · Поступления · Смены · Выгрузка в БП · Сверка · Маржа.
@@ -139,7 +154,11 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Управленческий» (mode=operations) — энергозакупка/аренда (реальные реестры).
   const mgmtItems: CentralMenuItem[] = [
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
-    ...(isEnergy ? CHARGE_SESSIONS_MENU : []),
+    // Из меню ЭЗС-продаж вычтено то, что стало отдельными продуктами (корпоратив,
+    // маркетинг): один и тот же экран не должен открываться из двух рабочих мест.
+    ...(isEnergy
+      ? CHARGE_SESSIONS_MENU.filter((m) => !CORP_KEYS.includes(m.key) && !MARKETING_KEYS.includes(m.key))
+      : []),
   ]
   // «Управленческий» у ГИГ (fuel) = хозяйственные отношения компании (договоры/аренда),
   // не баланс (концепт МАГа 13.07.2026): контроль топлива уже живёт в «Продажах»,
@@ -186,13 +205,19 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: isEnergy ? SITES_MENU : [], connected: isEnergy }
   const ops: WorkspaceSection   = { mode: 'operations', label: 'Управленческий', icon: Gauge,        items: opsItems, connected: opsItems.length > 0 }
   const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
+  // Корпоративный процессинг и Маркетинг — свои рабочие места (energy): те же панели,
+  // но открываются из своего продукта, а не как вкладки внутри «Продаж».
+  const corporate: WorkspaceSection = { mode: 'corporate', label: 'Корпоративный процессинг',
+    icon: Building2, items: isEnergy ? CORP_MENU : [], connected: isEnergy }
+  const marketing: WorkspaceSection = { mode: 'marketing', label: 'Маркетинг',
+    icon: Megaphone, items: isEnergy ? MARKETING_MENU : [], connected: isEnergy }
   const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
 
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
   return isEnergy
-    ? [sales, projects, ops, store, acc, exp]
+    ? [sales, corporate, marketing, projects, ops, store, acc, exp]
     : [sales, store, ops, acc, exp]
 }
 

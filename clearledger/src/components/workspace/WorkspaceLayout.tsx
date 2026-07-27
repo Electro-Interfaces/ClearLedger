@@ -83,6 +83,10 @@ function DesktopWorkspace() {
             {coreMode === 'operations' && <ManagementPanel mode="operations" />}
             {coreMode === 'projects' && <ManagementPanel mode="projects" />}
             {coreMode === 'store' && <StorePanel />}
+            {/* Корпоратив и маркетинг — те же панели ЭЗС-продаж, роутинг идёт по
+                ключу подраздела, поэтому панель одна на все три рабочих места. */}
+            {coreMode === 'corporate' && <ManagementPanel mode="corporate" />}
+            {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
             {coreMode === 'financial' && <FinancialPanel />}
             {coreMode === 'accounting' && <AccountingPanel />}
             {coreMode === 'tax' && <TaxPanel />}
@@ -163,6 +167,8 @@ function MobileWorkspace() {
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {coreMode === 'store' && <StorePanel />}
+        {coreMode === 'corporate' && <ManagementPanel mode="corporate" />}
+        {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
         {coreMode === 'financial' && <FinancialPanel />}
         {coreMode === 'accounting' && <AccountingPanel />}
         {coreMode === 'tax' && <TaxPanel />}

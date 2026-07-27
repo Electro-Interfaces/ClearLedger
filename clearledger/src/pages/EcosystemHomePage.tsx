@@ -19,6 +19,7 @@ import {
   LayoutGrid, ExternalLink, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
+  Building2, ShoppingCart, Megaphone,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -47,6 +48,9 @@ const ICONS: Record<string, typeof FileText> = {
   'bar-chart-3': BarChart3,
   'wallet': Wallet,
   'database': Database,
+  'building-2': Building2,
+  'shopping-cart': ShoppingCart,
+  'megaphone': Megaphone,
 }
 
 interface TileProps {

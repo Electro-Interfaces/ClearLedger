@@ -14,6 +14,8 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   operations: 'Управленческий',
   projects: 'Проекты',
   store: 'Магазин',
+  corporate: 'Корпоративный процессинг',
+  marketing: 'Маркетинг',
   financial: 'Финансовый',
   accounting: 'Бухгалтерский',
   tax: 'Налоговый',

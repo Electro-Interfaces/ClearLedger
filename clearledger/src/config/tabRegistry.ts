@@ -6,7 +6,7 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard } from 'lucide-react'
+import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone } from 'lucide-react'
 import { SPACE_PRODUCTS, SHARED_PATHS } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
@@ -17,7 +17,8 @@ import { isCoreMode, workspaceTitle } from './workspaceViews'
 
 // Иконки продуктов пространства для вкладок (плитки берут свою из реестра Ядра).
 const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  projects: HardHat, ops: Gauge, sales: BarChart3, finance: Wallet, data: Database,
+  projects: HardHat, ops: Gauge, sales: BarChart3, corp: Building2, shop: ShoppingCart,
+  marketing: Megaphone, finance: Wallet, data: Database,
 }
 
 // Пути с фиксированной высотой (h-full, без скролла страницы): рабочая область Учёта,

@@ -30,17 +30,19 @@ router = APIRouter(prefix="/sso", tags=["SSO ElsyPlus"])
 INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages",
                    # Продукты разреза Учёта (см. app_registry._CARVED_PRODUCTS и
                    # фронтовую карту config/spaceProducts.ts — маршруты обязаны совпадать).
-                   "projects": "/projects", "ops": "/operations", "network": "/network",
+                   "projects": "/projects", "ops": "/operations", "sales": "/sales",
+                   "corp": "/corporate", "shop": "/shop", "marketing": "/marketing",
                    "finance": "/finance", "data": "/data"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "chat": "service",
                    "ledger": "app", "projects": "app", "ops": "app",
-                   "network": "app", "finance": "app"}
+                   "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
+                   "finance": "app"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
-INTERNAL_SORT = {"admin": 5, "ledger": 10, "projects": 12, "ops": 14, "network": 16,
-                 "support": 20, "finance": 25, "chat": 30, "plan": 40, "conf": 50,
-                 "data": 60}
+INTERNAL_SORT = {"admin": 5, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
+                 "corp": 17, "shop": 18, "marketing": 19, "support": 20, "finance": 25,
+                 "chat": 30, "plan": 40, "conf": 50, "data": 60}
 
 
 @router.get("/apps")
