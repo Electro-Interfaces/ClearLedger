@@ -5,7 +5,7 @@ import { queryClient } from '@/lib/queryClient'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
-import { SPACE_PRODUCTS, isCarvedProfile, productsWithPath } from '@/config/spaceProducts'
+import { SPACE_PAGES, SPACE_PRODUCTS, isCarvedProfile } from '@/config/spaceProducts'
 import { TabsProvider } from '@/contexts/TabsContext'
 import { FilterProvider } from '@/contexts/FilterContext'
 import { SupportProvider } from '@/contexts/SupportContext'
@@ -153,6 +153,14 @@ function ChannelDetailRedirect() {
 
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '')
 
+/** Страницы Ядра (`SPACE_PAGES`) — общий блок левого меню, один и тот же во всех продуктах. */
+const SPACE_PAGE_ELEMENTS: Record<string, React.ReactNode> = {
+  '/objects': <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage>,
+  '/intake': <LazyPage><IntakePage /></LazyPage>,
+  '/files': <LazyPage><FilesPage /></LazyPage>,
+  '/contractors': <LazyPage><ContractorsPage /></LazyPage>,
+}
+
 const router = createBrowserRouter([
   {
     element: <Providers />,
@@ -185,13 +193,13 @@ const router = createBrowserRouter([
             path: p.route,
             element: <RequireApp code={p.code}><WorkspaceLayout modes={p.modes} /></RequireApp>,
           })),
-          // Станции открыты каждому продукту, которому они по делу нужны, — под его
-          // адресом (`/finance/objects`): реестр один, но видно, откуда смотрят, и от
-          // этого зависят права и состав карточки (`SpaceProduct.objectTabs`).
-          ...productsWithPath('/objects').map((p) => ({
-            path: `${p.route}/objects`,
-            element: <RequireApp code={p.code}><LazyPage><LocationsPage cockpitVariant="full" /></LazyPage></RequireApp>,
-          })),
+          // Функции Ядра открыты из КАЖДОГО рабочего места — под его адресом
+          // (`/finance/objects`): экран один, но видно, откуда смотрят, и от этого
+          // зависят права (`finance:objects`) и состав карточки (`objectTabs`).
+          ...SPACE_PRODUCTS.flatMap((p) => SPACE_PAGES.map((path) => ({
+            path: `${p.route}${path}`,
+            element: <RequireApp code={p.code}>{SPACE_PAGE_ELEMENTS[path]}</RequireApp>,
+          }))),
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },

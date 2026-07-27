@@ -20,8 +20,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useCompany } from '@/contexts/CompanyContext'
 import { mainNavItems, dataItems, oneCItems, settingsItems } from '@/config/navigation'
 import { routeAllowed } from '@/config/accessModules'
-import { isCarvedProfile, productForPath, productNav } from '@/config/spaceProducts'
-import { pageModuleCode, productModuleAllowed } from '@/config/productAccess'
+import {
+  SPACE_LINKS, isCarvedProfile, productForPath, productNav, spaceNav,
+} from '@/config/spaceProducts'
+import { productModuleAllowed } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
 
 /** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения.
@@ -73,7 +75,7 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
 }) {
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
-  const { company, companyModules, canModule } = useCompany()
+  const { company, companyModules, canApp, canModule } = useCompany()
   const { pathname, search } = useLocation()
   // Разделы рабочей области — здесь же, рядом со страницами продукта: рабочий стол
   // теперь уровнем выше (пространство), и внутри продукта верхний уровень навигации
@@ -95,28 +97,54 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
     const urlMode = new URLSearchParams(search).get('mode')
     const activeMode = modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode
     const onProductRoute = pathname === product.route
-    // Страницы продукта («Документы», «Коннекторы») — тоже право: код = сегмент пути.
-    const items = productNav(product)
-      .filter((i) => productModuleAllowed(product.code, pageModuleCode(i.to), canModule))
+    // Страницы («Документы», «Коннекторы») — тоже право: код = сегмент ИСХОДНОГО пути.
+    const allowedPage = (code: string) => productModuleAllowed(product.code, code, canModule)
+    const items = productNav(product, allowedPage)
+    // Функции Ядра — одни на все рабочие места (`SPACE_PAGES`), поэтому отдельным блоком
+    // ниже разделов и страниц продукта: сверху то, чем человек занят, ниже — пространство.
+    const spaceItems = spaceNav(product, allowedPage)
+    const links = SPACE_LINKS.filter(
+      (l) => canApp(l.app) && productModuleAllowed(l.app, l.module, canModule))
     return (
-      <SidebarGroup className="py-0">
-        <SidebarMenu>
-          {modes.map((s) => (
-            <NavItem
-              key={s.mode}
-              to={`${product.route}?mode=${s.mode}`}
-              icon={s.icon}
-              label={s.label}
-              collapsed={collapsed}
-              onNavigate={onNavigate}
-              active={onProductRoute && s.mode === activeMode}
-            />
-          ))}
-          {items.map((item) => (
-            <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
-          ))}
-        </SidebarMenu>
-      </SidebarGroup>
+      <>
+        <SidebarGroup className="py-0">
+          <SidebarMenu>
+            {modes.map((s) => (
+              <NavItem
+                key={s.mode}
+                to={`${product.route}?mode=${s.mode}`}
+                icon={s.icon}
+                label={s.label}
+                collapsed={collapsed}
+                onNavigate={onNavigate}
+                active={onProductRoute && s.mode === activeMode}
+              />
+            ))}
+            {items.map((item) => (
+              <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+
+        {(spaceItems.length > 0 || links.length > 0) && (
+          <>
+            <SidebarSeparator className="my-2" />
+            <SidebarGroup className="py-0">
+              {!collapsed && (
+                <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
+                  Пространство
+                </p>
+              )}
+              <SidebarMenu>
+                {[...spaceItems, ...links].map((item) => (
+                  <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
+                    collapsed={collapsed} onNavigate={onNavigate} />
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
+          </>
+        )}
+      </>
     )
   }
   // Скрываем пункты, недоступные по модулям: права RBAC ∩ состав поставки из реестра

@@ -23,7 +23,7 @@ import {
   MARKETING_MENU, MARKETING_KEYS, OPS_MONITOR_MENU, SITES_MENU,
 } from './workspaceMenus'
 import { STORE_MENU } from './storeCatalog'
-import { SPACE_PRODUCTS } from './spaceProducts'
+import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
 
 export interface ProductModuleDef {
   /** Код права: ключ роли — `<продукт>:<код>`. */
@@ -34,7 +34,7 @@ export interface ProductModuleDef {
 }
 
 /** Страницы продукта как модули доступа: код = сегмент пути (`/files` → `files`). */
-export const pageModuleCode = (path: string) => path.replace(/^\//, '').split('/')[0]
+export const pageModuleCode = pageCode
 
 function pages(paths: string[]): ProductModuleDef[] {
   return paths
@@ -55,37 +55,45 @@ function items(list: { key: string; label: string; group?: string }[], group?: s
  * здесь же.
  */
 export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
-  projects: [...items(SITES_MENU), ...pages(['/objects'])],
+  projects: items(SITES_MENU),
   ops: [
     ...items(OPS_MONITOR_MENU), ...items(EQUIPMENT_MENU),
-    ...items(ENERGY_MGMT, 'Хозяйство'), ...pages(['/objects']),
+    ...items(ENERGY_MGMT, 'Хозяйство'),
   ],
-  sales: [
+  sales:
     // Корпоратив и маркетинг ушли в свои продукты — в «Продажах» их пунктов нет.
-    ...items(CHARGE_SESSIONS_MENU.filter(
+    items(CHARGE_SESSIONS_MENU.filter(
       (m) => !CORP_KEYS.includes(m.key) && !MARKETING_KEYS.includes(m.key))),
-    ...pages(['/objects']),
-  ],
-  corp: [...items(CORP_MENU), ...pages(['/objects', '/contractors'])],
-  shop: [...items(STORE_MENU), ...pages(['/objects'])],
-  marketing: [...items(MARKETING_MENU), ...pages(['/objects', '/metrika'])],
+  corp: items(CORP_MENU),
+  shop: items(STORE_MENU),
+  marketing: [...items(MARKETING_MENU), ...pages(['/metrika'])],
   finance: [
     // «Финансовый» и «Налоговый» сняты с витрины (workspaceSections) — прав на них нет:
     // роль не должна раздавать доступ к разделу, которого в интерфейсе не существует.
     { code: 'accounting', label: 'Бухгалтерский', group: 'Разделы' },
     { code: 'export', label: 'Выгрузка', group: 'Разделы' },
-    ...pages(['/objects', '/files', '/contractors', '/organization']),
+    ...pages(['/organization']),
   ],
   data: [
     { code: 'normalize', label: 'Нормализация', group: 'Разделы' },
     { code: 'reconcile', label: 'Сверка', group: 'Разделы' },
-    ...pages(['/objects', '/intake', '/connectors', '/catalog']),
+    ...pages(['/connectors', '/catalog']),
   ],
 }
 
+/**
+ * Функции Ядра есть в каждом рабочем месте, поэтому и право на них — у каждого продукта
+ * (`sales:files`): один и тот же экран, но роль может закрыть его продавцу и оставить
+ * бухгалтеру. Перечислять их в составе каждого продукта руками не нужно — блок общий,
+ * как и сам пункт меню (`spaceProducts.SPACE_PAGES`).
+ */
+const SPACE_MODULES: ProductModuleDef[] = pages(SPACE_PAGES).map(
+  (m) => ({ ...m, group: 'Пространство' }))
+
 /** Модули продукта для матрицы доступа (пусто — продукт даётся целиком). */
 export function productModules(code: string): ProductModuleDef[] {
-  return PRODUCT_MODULES[code] ?? []
+  const own = PRODUCT_MODULES[code]
+  return own ? [...own, ...SPACE_MODULES] : []
 }
 
 /** Есть ли у продукта разбиение на модули (иначе право = продукт целиком). */

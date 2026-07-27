@@ -7,7 +7,7 @@
  */
 import { matchPath } from 'react-router-dom'
 import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone } from 'lucide-react'
-import { SPACE_PRODUCTS, SHARED_PATHS } from './spaceProducts'
+import { SPACE_PRODUCTS, SPACE_PAGES } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
   mainNavItems, dataItems, oneCItems, settingsItems,
@@ -26,6 +26,8 @@ const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 const WORKSPACE_PATHS = new Set<string>([
   '/workspace', '/files', '/reconciliation', '/normalization',
   ...SPACE_PRODUCTS.map((p) => p.route),
+  // Та же страница под адресом продукта (`/finance/files`) — и раскладка та же.
+  ...SPACE_PRODUCTS.map((p) => `${p.route}/files`),
 ])
 
 // Fuel-only разделы (для energy-профиля скрыты; RequireFuel редиректит на `/workspace`).
@@ -40,10 +42,9 @@ for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]
 // и полноэкранная раскладка нужны такие же, как рабочей области.
 for (const p of SPACE_PRODUCTS) {
   STATIC[p.route] = { to: p.route, icon: PRODUCT_ICONS[p.code] ?? LayoutDashboard, label: p.label }
-  // Сквозные страницы (станции) живут под адресом продукта — вкладка нужна и им,
-  // иначе экран, открытый из «Финансов», не попадёт ни в закладки, ни в keep-alive.
-  for (const path of p.paths) {
-    if (!SHARED_PATHS.includes(path)) continue
+  // Страницы Ядра живут под адресом продукта — вкладка нужна и им, иначе экран,
+  // открытый из «Финансов», не попадёт ни в закладки, ни в keep-alive.
+  for (const path of SPACE_PAGES) {
     const item = STATIC[path]
     if (item) STATIC[`${p.route}${path}`] = { ...item, to: `${p.route}${path}` }
   }

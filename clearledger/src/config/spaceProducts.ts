@@ -21,6 +21,7 @@
  * Разрез включён только у профиля `energy` (сеть ЭЗС). У топливного профиля (ГИГ) состав
  * другой — там «Учёт» остаётся единым продуктом со всеми разделами, как раньше.
  */
+import { Map, Network } from 'lucide-react'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { navByPath, type NavItemDef } from './navigation'
 
@@ -32,7 +33,10 @@ export interface SpaceProduct {
   label: string
   /** Разделы рабочей области, которые живут в этом продукте. */
   modes: CoreMode[]
-  /** Страницы продукта (пути из `config/navigation.ts`) — его левое меню. */
+  /**
+   * СОБСТВЕННЫЕ страницы продукта (пути из `config/navigation.ts`). Функции Ядра сюда
+   * не входят — они одни на все рабочие места (`SPACE_PAGES`).
+   */
   paths: string[]
   /**
    * Вкладки карточки станции, которые открывает этот продукт (коды `COCKPIT_TABS`).
@@ -50,13 +54,13 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // «как делали в прошлый раз» при подборе и проектировании новой. Договоров и
     // выручки в этом окне нет: продажами и деньгами занимаются другие рабочие места.
     code: 'projects', route: '/projects', label: 'Проекты',
-    modes: ['projects'], paths: ['/objects'],
+    modes: ['projects'], paths: [],
     objectTabs: ['passport', 'equipment', 'integrations'],
   },
   {
     // Эксплуатация — железо и его состояние: мониторинг сети, парк, склады, ЗИП.
     code: 'ops', route: '/operations', label: 'Эксплуатация',
-    modes: ['operations'], paths: ['/objects'],
+    modes: ['operations'], paths: [],
     objectTabs: ['passport', 'equipment', 'integrations', 'diagnostics'],
   },
   {
@@ -65,7 +69,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // и «Сеть» уже занята группой разделов внутри (обзор, карта, динамика).
     // Не «Реализация»: это термин бухучёта, ему место в Финансах.
     code: 'sales', route: '/sales', label: 'Продажи',
-    modes: ['management'], paths: ['/objects'],
+    modes: ['management'], paths: [],
     objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
@@ -73,19 +77,19 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // разбор частных клиентов рядом. Отдельное рабочее место: этим занимаются не те,
     // кто смотрит загрузку сети (решение МАГа 27.07.2026).
     code: 'corp', route: '/corporate', label: 'Корпоративный процессинг',
-    modes: ['corporate'], paths: ['/objects', '/contractors'],
+    modes: ['corporate'], paths: [],
     objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
     // Интернет-магазин — товарный контур на объектах: витрина, номенклатура, заказы.
     code: 'shop', route: '/shop', label: 'Интернет-магазин',
-    modes: ['store'], paths: ['/objects'],
+    modes: ['store'], paths: [],
     objectTabs: ['passport', 'sales'],
   },
   {
     // Маркетинг — поведение клиентов и сегментация сети: ABC-XYZ, динамика, веб-аналитика.
     code: 'marketing', route: '/marketing', label: 'Маркетинг',
-    modes: ['marketing'], paths: ['/objects', '/metrika'],
+    modes: ['marketing'], paths: ['/metrika'],
     objectTabs: ['passport', 'sales'],
   },
   {
@@ -99,7 +103,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // разрезом для топливного профиля.
     code: 'finance', route: '/finance', label: 'Финансы',
     modes: ['accounting', 'financial', 'tax', 'export'],
-    paths: ['/objects', '/files', '/contractors', '/organization'],
+    paths: ['/organization'],
     objectTabs: ['passport', 'contracts', 'sales', 'supply'],
   },
   {
@@ -118,7 +122,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // настройка подключения встраивается в коннектор.
     code: 'data', route: '/data', label: 'Данные',
     modes: ['normalize', 'reconcile'],
-    paths: ['/objects', '/intake', '/connectors', '/catalog'],
+    paths: ['/connectors', '/catalog'],
     objectTabs: ['passport', 'integrations', 'diagnostics'],
   },
 ]
@@ -130,43 +134,84 @@ export function isCarvedProfile(profileId: string | null | undefined): boolean {
   return profileId === CARVED_PROFILE
 }
 
-/** Продукт по маршруту или странице (`/finance`, `/files`, `/1c/export`). */
-export function productForPath(pathname: string): SpaceProduct | null {
-  for (const p of SPACE_PRODUCTS) {
-    if (pathname === p.route || pathname.startsWith(`${p.route}/`)) return p
-    if (p.paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))) return p
-  }
-  return null
-}
-
 /**
- * Страницы продукта для левого меню (в порядке `paths`).
+ * Функции ЯДРА в левом меню — одинаковые во ВСЕХ рабочих местах (решение МАГа 28.07.2026).
  *
- * Пункта «Рабочий стол» здесь нет: рабочий стол — уровнем выше, у пространства.
- * Верхний уровень внутри продукта — его собственные разделы («Продажи», «Магазин»);
- * их подставляет `AppSidebar` из фактических секций рабочей области, а под-разделы
- * этой области остаются в гармошке `WorkspaceModeSidebar`.
+ * Левое вертикальное меню — это меню пространства: сверху мостики, переключающие рабочую
+ * область на разделы приложения, ниже — то, что идёт от Ядра. Раньше состав ядровых
+ * пунктов был прописан у каждого продукта отдельно (`paths`), и одна и та же функция
+ * пространства была видна из одного рабочего места и не видна из другого: загрузка жила
+ * только в «Данных», документы и контрагенты — только в «Финансах». Функция пространства
+ * не принадлежит рабочему месту: договоры грузит тот, кто их получил, а не тот, у кого в
+ * меню оказалась кнопка. Кому что можно — решает роль (`<продукт>:files`), а не то, из
+ * какого продукта смотрят.
+ *
+ * Адрес живёт внутри продукта (`/sales/files`) — по нему видно, откуда человек смотрит,
+ * и мостики в меню остаются мостиками его рабочего места, а не чужого.
  */
-export function productNav(product: SpaceProduct): NavItemDef[] {
-  return product.paths.map((path) => navByPath[path]).filter(Boolean)
-    .map((item) => ({ ...item, to: productPagePath(product, item.to) }))
-}
+export const SPACE_PAGES = ['/objects', '/intake', '/files', '/contractors']
 
 /**
- * Страницы, которые открыты СРАЗУ НЕСКОЛЬКИМ продуктам. У таких адрес живёт внутри
- * продукта (`/finance/objects`), иначе по пути `/objects` не понять, из какого
- * рабочего места человек смотрит станцию — а от этого зависят и права, и состав
- * карточки, и название в шапке.
+ * Ядровые функции, живущие в ДРУГОМ приложении: витрина нормализованной базы — раздел
+ * «Данных», люди и их доступы — раздел «Управления». Вопрос всё равно ядровой («откуда
+ * эти цифры», «кто это видит»), и задают его из своего рабочего места, поэтому пункт
+ * стоит в общем блоке — но ведёт наружу и гейтится доступом к тому приложению.
  */
-export const SHARED_PATHS = ['/objects']
+export const SPACE_LINKS = [
+  { to: '/data?mode=normalize', app: 'data', module: 'normalize', label: 'База пространства', icon: Network },
+  { to: '/admin/company/map', app: 'admin', module: 'map', label: 'Люди и доступ', icon: Map },
+]
+
+/** Страницы Ядра открыты каждому продукту, поэтому и адрес у них — внутри продукта. */
+export const SHARED_PATHS = SPACE_PAGES
 
 export function productPagePath(product: SpaceProduct, path: string): string {
   return SHARED_PATHS.includes(path) ? `${product.route}${path}` : path
 }
 
-/** Продукты, которым открыта сквозная страница (для маршрутов в `App.tsx`). */
-export function productsWithPath(path: string): SpaceProduct[] {
-  return SPACE_PRODUCTS.filter((p) => p.paths.includes(path))
+/** Код страницы для прав и меню: сегмент пути (`/files` → `files`, `/1c/export` → `1c`). */
+export const pageCode = (path: string) => path.replace(/^\//, '').split('/')[0]
+
+/** Продукт по маршруту или странице (`/finance`, `/finance/files`, `/organization`). */
+export function productForPath(pathname: string): SpaceProduct | null {
+  for (const p of SPACE_PRODUCTS) {
+    if (pathname === p.route || pathname.startsWith(`${p.route}/`)) return p
+    if (p.paths.some((path) => pathname === path || pathname.startsWith(`${path}/`))) return p
+  }
+  // Голый ядровой путь (`/objects` из старой закладки) продукту не принадлежит — но и
+  // меню Учёта показывать в разрезанном профиле нечего: отдаём первое рабочее место,
+  // как было, пока эти страницы числились за каждым продуктом.
+  if (SPACE_PAGES.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
+    return SPACE_PRODUCTS[0]
+  }
+  return null
+}
+
+/**
+ * СОБСТВЕННЫЕ страницы продукта для левого меню (в порядке `paths`).
+ *
+ * Пункта «Рабочий стол» здесь нет: рабочий стол — уровнем выше, у пространства.
+ * Верхний уровень внутри продукта — его собственные разделы («Продажи», «Магазин»);
+ * их подставляет `AppSidebar` из фактических секций рабочей области, а под-разделы
+ * этой области остаются в гармошке `WorkspaceModeSidebar`. Функции Ядра сюда не входят —
+ * они одни на все продукты (`spaceNav`).
+ */
+export function productNav(product: SpaceProduct, allowed?: PageGate): NavItemDef[] {
+  return navFor(product, product.paths, allowed)
+}
+
+/** Функции Ядра для левого меню продукта — один и тот же состав в каждом рабочем месте. */
+export function spaceNav(product: SpaceProduct, allowed?: PageGate): NavItemDef[] {
+  return navFor(product, SPACE_PAGES, allowed)
+}
+
+/** Право на страницу проверяется по ИСХОДНОМУ пути: у `/sales/files` код `files`, не `sales`. */
+type PageGate = (pageCode: string) => boolean
+
+function navFor(product: SpaceProduct, paths: string[], allowed?: PageGate): NavItemDef[] {
+  return paths
+    .filter((path) => navByPath[path] && (!allowed || allowed(pageCode(path))))
+    .map((path) => ({ ...navByPath[path], to: productPagePath(product, path) }))
 }
 
 /** Вкладки карточки станции для продукта; вне разреза — все (undefined). */
@@ -210,7 +255,7 @@ export function pathAllowed(
       // путь (`/files`); в обоих случаях код = первый сегмент после корня продукта.
       const tail = pathname.startsWith(`${product.route}/`)
         ? pathname.slice(product.route.length) : pathname
-      const code = tail.replace(/^\//, '').split('/')[0]
+      const code = pageCode(tail)
       return !code || pageAllowed(product.code, code)
     }
   }
