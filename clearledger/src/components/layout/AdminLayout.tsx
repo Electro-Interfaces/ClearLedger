@@ -21,6 +21,7 @@ import { Menu } from 'lucide-react'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AdminNavContent, AdminSidebar } from '@/components/layout/AdminSidebar'
 import { AppLauncher } from '@/components/layout/AppLauncher'
+import { DeskButton } from '@/components/layout/DeskButton'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import InteractionHost from '@/components/support/InteractionHost'
@@ -141,9 +142,12 @@ export function AdminLayout() {
                 )}
               </>
             )}
+            {/* Порядок и состав — как в остальных продуктах пространства: сначала выход
+                на стол, потом переключение продукта, затем прикладные кнопки. */}
+            <DeskButton />
             <AppLauncher />
             {/* Чат · Заявки · Инфо — тот же вход в поддержку, что в Учёте. */}
-            <HeaderInteractionButtons />
+            <HeaderInteractionButtons conference />
           </div>
 
           <div className="flex shrink-0 items-center gap-1.5 md:gap-2">

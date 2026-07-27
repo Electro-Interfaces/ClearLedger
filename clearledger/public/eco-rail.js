@@ -178,13 +178,24 @@
         <style>
           :host{ display:inline-flex; align-items:center; gap:8px; position:relative;
                  font:inherit; color:inherit }
+          /* Вид — тот же, что у прикладных кнопок рядом (в Ядре это btnCls
+             HeaderInteractionButtons): синяя пилюля, а не белая обводка. Цвет берём
+             из токена темы приложения: CSS-переменные наследуются сквозь shadow DOM,
+             поэтому кнопка окрашивается вместе с продуктом, в который её поставили.
+             Фолбэк — на случай фронта без токенов Ядра. */
           button{
             display:inline-flex; align-items:center; gap:8px; height:44px; padding:0 12px;
-            border-radius:12px; border:1px solid currentColor; background:none; color:inherit;
-            font:inherit; font-weight:500; font-size:14px; cursor:pointer; opacity:.85;
-            transition:opacity .15s, background .15s;
+            border-radius:12px; font:inherit; font-weight:500; font-size:14px; cursor:pointer;
+            color:hsl(var(--primary, 217 91% 60%));
+            background:hsl(var(--primary, 217 91% 60%) / .12);
+            border:1px solid hsl(var(--primary, 217 91% 60%) / .3);
+            transition:background .2s, color .2s, border-color .2s;
           }
-          button:hover{ opacity:1; background:rgba(127,127,127,.14) }
+          button:hover{
+            background:hsl(var(--primary, 217 91% 60%));
+            color:hsl(var(--primary-foreground, 0 0% 100%));
+            border-color:hsl(var(--primary, 217 91% 60%));
+          }
           svg{ width:16px; height:16px; flex:none }
           .menu{
             position:absolute; top:52px; left:0; z-index:2147483000; width:232px; padding:4px;
@@ -193,10 +204,13 @@
             box-shadow:0 8px 28px rgba(0,0,0,.28); font-size:13px; font-weight:400;
           }
           .menu .head{ padding:6px 8px 4px; font-size:11px; opacity:.6 }
+          /* Пункты списка — не пилюли: это строки меню, у них своя роль. */
           .menu button{
             width:100%; height:auto; padding:7px 8px; border:0; border-radius:8px;
-            justify-content:flex-start; font-size:13px; font-weight:400; opacity:.9;
+            justify-content:flex-start; font-size:13px; font-weight:400;
+            color:inherit; background:none;
           }
+          .menu button:hover{ background:rgba(127,127,127,.18); color:inherit }
           .spin{ animation:eco-spin 1s linear infinite; display:inline-flex }
           @media (max-width:1023px){ .lbl{ display:none } }
         </style>
