@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  LayoutGrid, ExternalLink, KeyRound, Loader2, LogOut,
+  LayoutGrid, ExternalLink, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
 } from 'lucide-react'
@@ -25,7 +25,10 @@ import { CompanySelector } from '@/components/company/CompanySelector'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
-import { listSsoApps, authorizeApp, type SsoApp } from '@/services/ssoService'
+import { listSsoApps, authorizeApp, hasSideButton, type SsoApp } from '@/services/ssoService'
+
+/** База сборки SPA (`/ClearLedger/`) — новая вкладка открывается по полному адресу. */
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 /** Иконка по имени из реестра Ядра (`eco_apps.icon`, манифест `apps/<code>.yml`).
  *  Неизвестное имя — LayoutGrid: плитка появляется, просто без своего значка. */
@@ -55,41 +58,55 @@ interface TileProps {
   onClick: () => void
 }
 
+/**
+ * Плитка продукта — строка, а не карточка: иконка, название и одна строка пояснения.
+ * Прежняя карточка занимала 170 px ради двух строк текста, поэтому уже на десяти
+ * продуктах стол уезжал в прокрутку. Пространство растёт — плитка обязана быть плотной.
+ */
 function Tile({ title, subtitle, icon: Icon, badge, busy, onClick }: TileProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="group flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-5 text-left
-                 transition-all duration-200 hover:border-primary/50 hover:shadow-lg disabled:opacity-60"
+      title={badge ? `${title} — ${badge}` : title}
+      className="group flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left
+                 transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60"
     >
-      <div className="flex w-full items-start justify-between gap-2">
-        <span className="rounded-xl bg-primary/10 p-2.5 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
-          {busy ? <Loader2 className="size-5 animate-spin" /> : <Icon className="size-5" />}
-        </span>
-        {badge && (
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-            {badge}
-          </span>
-        )}
-      </div>
-      <div className="min-w-0">
-        <div className="truncate font-medium">{title}</div>
-        <div className="mt-0.5 text-sm text-muted-foreground">{subtitle}</div>
-      </div>
+      <span className="shrink-0 rounded-lg bg-primary/10 p-2 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
+        {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium leading-tight">{title}</span>
+        <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
+      </span>
+      {/* Свой вход — значком, а не подписью: он важен при первом знакомстве, а места
+          в строке занимает как буква. Расшифровка — во всплывающей подсказке. */}
+      {badge && <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />}
     </button>
   )
 }
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+/**
+ * Слой стола: подпись слева, плитки справа. Заголовок отдельной строкой стоил трёх
+ * строк высоты на каждый слой — при трёх слоях это уже экран. Сетка `auto-fill` сама
+ * набирает столько колонок, сколько влезает, поэтому широкий экран показывает слой
+ * одной строкой, а узкий — переносит.
+ */
+function Section({ title, hint, children, grow }: {
+  title: string; hint?: string; children: React.ReactNode; grow?: boolean
+}) {
   return (
-    <section className="mt-8 first:mt-6">
-      <div className="flex items-baseline gap-3">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        {hint && <span className="text-sm text-muted-foreground">{hint}</span>}
+    <section className={`grid gap-x-4 gap-y-2 md:grid-cols-[132px_1fr] ${grow ? 'min-h-0' : ''}`}>
+      <div className="md:pt-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
+        {hint && <p className="mt-0.5 hidden text-[11px] text-muted-foreground/50 md:block">{hint}</p>}
       </div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{children}</div>
+      {/* Прокрутка достаётся только слою, который может вырасти (приложения), и только
+          когда он действительно не помещается: шапка и остальные слои остаются на месте. */}
+      <div className={`grid grid-cols-[repeat(auto-fill,minmax(216px,1fr))] gap-2 ${grow ? 'min-h-0 overflow-y-auto pr-1' : ''}`}>
+        {children}
+      </div>
     </section>
   )
 }
@@ -115,10 +132,15 @@ export function EcosystemHomePage() {
   const services = all.filter((a) => a.layer === 'service')
   const apps = all.filter((a) => a.layer !== 'service' && a.layer !== 'admin')
 
-  /** Открыть продукт: внутренний — маршрутом SPA, внешний — токеном или ссылкой. */
+  /**
+   * Открыть продукт. Рабочее место уходит в НОВУЮ вкладку (решение МАГа 27.07.2026):
+   * стол остаётся открытым, продукты копятся вкладками рядом. Сервисы с кнопкой в шапке
+   * (Чат) открываются здесь же — они часть текущего экрана, а не отдельное место.
+   */
   async function openProduct(app: SsoApp) {
     if (app.mode === 'internal' && app.route) {
-      navigate(app.route)
+      if (hasSideButton(app.code)) navigate(app.route)
+      else window.open(`${window.location.origin}${BASE}${app.route}`, '_blank', 'noopener,noreferrer')
       return
     }
     await openExternal(app)
@@ -157,8 +179,11 @@ export function EcosystemHomePage() {
   }
 
   return (
-    <div className="min-h-svh bg-background">
-      <header className="flex h-header items-center justify-between gap-4 border-b border-border px-4 sm:px-8">
+    // Стол занимает ровно экран и сам не прокручивается: это витрина пространства,
+    // а не документ. Прокрутку получает только слой приложений, если продуктов станет
+    // больше, чем помещается (docs/SPACE.md §1 — состав приложений открыт).
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+      <header className="flex h-header shrink-0 items-center justify-between gap-4 border-b border-border px-4 sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
           <span className="rounded-xl bg-primary/10 p-2 text-primary">
             <LayoutGrid className="size-5" />
@@ -179,11 +204,15 @@ export function EcosystemHomePage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
-        <h1 className="text-2xl font-semibold">
+      {/* Ширину не режем до 1024: на широком экране это выталкивало продукты вниз
+          при пустых полях по бокам. Предел нужен лишь чтобы строка плиток не
+          растягивалась бесконечно на панорамных мониторах. */}
+      <main className="mx-auto flex w-full min-h-0 max-w-[1600px] flex-1 flex-col gap-5 px-4 py-5 sm:px-8">
+        {/* Приветствие — одна строка: компания уже названа в шапке, повторять её
+            отдельным абзацем значит занять высоту ради того же слова. */}
+        <h1 className="shrink-0 text-lg font-semibold">
           {user?.name ? `Здравствуйте, ${user.name}` : 'Рабочий стол'}
         </h1>
-        <p className="mt-1 text-muted-foreground">{company.name}</p>
 
         {/* Все три слоя — из ОДНОГО каталога продуктов пространства. Раньше Управление,
             Учёт и Чаты рисовались хардкодом, и в списке приложений их не было: состав
@@ -200,28 +229,20 @@ export function EcosystemHomePage() {
           </Section>
         )}
 
-        <Section title="Приложения">
+        {/* Слой приложений растёт вместе с пространством — прокрутка достаётся ему. */}
+        <Section title="Приложения" grow>
           {apps.map((a) => <ProductTile key={a.code} a={a} />)}
           {q.isLoading && (
-            <div className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
             </div>
           )}
           {!q.isLoading && apps.length === 0 && (
-            <div className="p-5 text-sm text-muted-foreground">
+            <div className="px-3 py-2.5 text-sm text-muted-foreground">
               Приложения не подключены. Состав задаётся в «Управлении» → «Приложения».
             </div>
           )}
         </Section>
-
-        {/* Легенда: почему часть приложений просит свой вход (Фаза 0 — мосты). */}
-        {all.some((a) => a.mode === 'link') && (
-          <p className="mt-8 flex items-center gap-2 text-xs text-muted-foreground">
-            <ExternalLink className="size-3.5" />
-            «Вход отдельный» — сервис пока живёт на своём домене и спросит собственные учётные
-            данные; с <KeyRound className="inline size-3.5" /> вход единый.
-          </p>
-        )}
       </main>
     </div>
   )
