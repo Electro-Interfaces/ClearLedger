@@ -63,9 +63,17 @@ interface TileProps {
 }
 
 /**
- * Плитка продукта — строка, а не карточка: иконка, название и одна строка пояснения.
- * Прежняя карточка занимала 170 px ради двух строк текста, поэтому уже на десяти
- * продуктах стол уезжал в прокрутку. Пространство растёт — плитка обязана быть плотной.
+ * Плитка продукта — строка с названием; пояснение живёт во всплывающей подсказке.
+ *
+ * Описания в реестре длинные («Стройка сети: подбор площадок, портфель проектов,
+ * присоединение, ввод») — в строку они не помещаются НИКОГДА, и обрезка многоточием
+ * съедала половину смысла. Отдать им вторую строку значит вернуть высоту, из-за
+ * которой стол и уезжал в прокрутку. Продукт выбирают по имени, а описание нужно
+ * один раз — при первом знакомстве; подсказка для этого и существует.
+ *
+ * Имя не обрезаем: колонка не уже 200 px, а имена короткие («Эксплуатация» — самое
+ * длинное). Если чьё-то окажется длиннее — перенесётся на вторую строку, но останется
+ * читаемым, а не спрячется за многоточием.
  */
 function Tile({ title, subtitle, icon: Icon, badge, busy, onClick }: TileProps) {
   return (
@@ -73,19 +81,16 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, onClick }: TileProps) 
       type="button"
       onClick={onClick}
       disabled={busy}
-      title={badge ? `${title} — ${badge}` : title}
+      title={[title, subtitle, badge].filter(Boolean).join(' · ')}
       className="group flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left
                  transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60"
     >
       <span className="shrink-0 rounded-lg bg-primary/10 p-2 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium leading-tight">{title}</span>
-        <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
-      </span>
-      {/* Свой вход — значком, а не подписью: он важен при первом знакомстве, а места
-          в строке занимает как буква. Расшифровка — во всплывающей подсказке. */}
+      <span className="min-w-0 flex-1 text-sm font-medium leading-snug">{title}</span>
+      {/* Свой вход — значком, а не подписью: важен при первом знакомстве, а места
+          в строке занимает как буква. Расшифровка — в подсказке всей плитки. */}
       {badge && <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />}
     </button>
   )
@@ -108,7 +113,7 @@ function Section({ title, hint, children, grow }: {
       </div>
       {/* Прокрутка достаётся только слою, который может вырасти (приложения), и только
           когда он действительно не помещается: шапка и остальные слои остаются на месте. */}
-      <div className={`grid grid-cols-[repeat(auto-fill,minmax(216px,1fr))] gap-2 ${grow ? 'min-h-0 overflow-y-auto pr-1' : ''}`}>
+      <div className={`grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2 ${grow ? 'min-h-0 overflow-y-auto pr-1' : ''}`}>
         {children}
       </div>
     </section>
