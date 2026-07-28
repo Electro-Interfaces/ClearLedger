@@ -45,8 +45,8 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
   const goStage = (stage: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.set('mode', 'projects')      // площадки живут в разделе «Работа»
-      next.set('sub', 'sites_list')
+      next.set('mode', 'projects')      // работу ведут в разделе «Работа»
+      next.set('sub', 'pr_project')
       next.set('stage', stage)
       return next
     })

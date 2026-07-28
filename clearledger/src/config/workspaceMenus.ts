@@ -77,9 +77,12 @@ export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 // они стоят в левой рельсе рядом с пространством, а их пункты — во второй панели
 // (решение МАГа 28.07.2026). Так у человека один уровень навигации на экран:
 // слева «чем я занят», справа «что именно открыть».
+// Отдельного реестра площадок нет: место и работа на нём — одна сущность
+// «Проект» (решение МАГа 28.07.2026). Два списка с одинаковыми строками
+// отличались только колонками и заставляли гадать, чем они разные.
+// Ключ `sites_list` остался в правах и старых ссылках — роутер ведёт его сюда же.
 export const SITES_WORK_MENU: CentralMenuItem[] = [
   { key: 'pr_project',     label: 'Проекты' },
-  { key: 'sites_list',     label: 'Площадки' },
   { key: 'pr_tp',          label: 'Присоединение' },
   { key: 'pr_equipment',   label: 'Оборудование' },
   { key: 'sites_map',      label: 'Карта' },
@@ -94,7 +97,9 @@ export const SITES_ANALYTICS_MENU: CentralMenuItem[] = [
 // Общий список — для карты прав и роутера: право на пункт не зависит от того,
 // в каком разделе пункт показан.
 export const SITES_MENU: CentralMenuItem[] = [...SITES_WORK_MENU, ...SITES_ANALYTICS_MENU]
-export const SITES_KEYS = SITES_MENU.map((m) => m.key)
+// `sites_list` не показывается в меню, но остаётся живым ключом: на него выданы
+// права и ведут старые ссылки из обзора и воронки.
+export const SITES_KEYS = [...SITES_MENU.map((m) => m.key), 'sites_list']
 
 /**
  * Раздел, которому принадлежит пункт «Проектов».

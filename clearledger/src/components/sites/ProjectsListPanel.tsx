@@ -15,8 +15,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import {
-  getSites, getPortfolio, getSiteMembers, bulkAssignOwner, PHASE_META, STAGE_META,
-  FUNNEL_STAGES, type SiteStage, type SiteRow,
+  getSites, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner,
+  PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage, type SiteRow,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { useOpenProject } from './useOpenProject'
@@ -101,6 +101,11 @@ function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) =>
 export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const [phase, setPhase] = useState('')
   const [ownerId, setOwnerId] = useState('')
+  // Реестр «Площадок» схлопнут сюда (решение МАГа 28.07.2026): место и работа на
+  // нём — одна сущность, два одинаковых списка только путали. Регион и показ
+  // отклонённых пришли оттуда, без них реестр мест не заменить.
+  const [region, setRegion] = useState('')
+  const [closed, setClosed] = useState(false)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [assignTo, setAssignTo] = useState('')
   const [view, setView] = useState<'table' | 'board'>('table')
@@ -113,6 +118,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   // применить, иначе пользователь увидит не тот список, по которому кликнул.
   const [params, setParams] = useSearchParams()
   const risk = params.get('risk') ?? ''
+  // Из воронки приходят с конкретной стадией («Переговоры 183»): реестр обязан
+  // её применить, иначе клик по цифре открывает не тот список.
+  const stageFromUrl = params.get('stage') ?? ''
+  const clearStage = () => setParams((prev) => {
+    const next = new URLSearchParams(prev); next.delete('stage'); return next
+  }, { replace: true })
   const clearRisk = () => setParams((prev) => {
     const next = new URLSearchParams(prev); next.delete('risk'); return next
   }, { replace: true })
@@ -130,13 +141,22 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   }, [pf.data, phase])
 
   const q = useQuery({
-    queryKey: ['pr-projects', companyId, phase, ownerId, overdue, search, risk, page],
+    queryKey: ['pr-projects', companyId, phase, ownerId, region, closed, overdue, search, risk, stageFromUrl, page],
     queryFn: () => getSites({
       companyId,
-      stage: phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase ? undefined : 'active'),
+      // «Отклонённые» — тоже проекты, просто закрытые с причиной: держим их за
+      // фильтром, а не в отдельном разделе, иначе теряется история места.
+      stage: closed ? 'archive'
+        : stageFromUrl
+        || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase ? undefined : 'active')),
+      region: region || undefined,
       ownerId: ownerId || undefined, overdue, search: search || undefined,
       risk: risk || undefined, page, pageSize: PAGE,
     }),
+  })
+  const regions = useQuery({
+    queryKey: ['sites-overview', companyId],
+    queryFn: () => getSitesOverview(companyId),
   })
 
   const rows = useMemo(() => {
@@ -173,6 +193,18 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           </SelectContent>
         </Select>
 
+        <Select value={region || '__all__'} onValueChange={(v) => { setRegion(v === '__all__' ? '' : v); reset() }}>
+          <SelectTrigger className="h-8 w-[180px] text-sm"><SelectValue placeholder="Все регионы" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="text-sm">Все регионы</SelectItem>
+            {(regions.data?.byRegion ?? []).map((r) => (
+              <SelectItem key={r.region} value={r.region} className="text-sm">
+                {r.region} ({nf0.format(r.count)})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
         <Select value={ownerId || '__all__'} onValueChange={(v) => { setOwnerId(v === '__all__' ? '' : v); reset() }}>
           <SelectTrigger className="h-8 w-[180px] text-sm"><SelectValue placeholder="Любой ответственный" /></SelectTrigger>
           <SelectContent>
@@ -186,6 +218,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <button type="button" onClick={() => { setOverdue((v) => !v); reset() }}
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${overdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Просрочено
+        </button>
+
+        <button type="button" onClick={() => { setClosed((v) => !v); reset() }}
+          title="Проекты, закрытые с причиной: место рассмотрели и отказались"
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${closed ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          Отклонённые
         </button>
 
         {/* Два взгляда на один список: таблица отвечает «что с конкретным
@@ -214,6 +252,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           <button type="button" onClick={clearRisk}
             className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">
             фильтр из обзора ✕
+          </button>
+        )}
+        {stageFromUrl && (
+          <button type="button" onClick={clearStage}
+            className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">
+            {STAGE_META[stageFromUrl as SiteStage]?.label ?? stageFromUrl} ✕
           </button>
         )}
         <span className="text-xs text-muted-foreground ml-auto">
