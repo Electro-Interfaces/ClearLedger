@@ -19,8 +19,8 @@
  */
 import { navByPath } from './navigation'
 import {
-  CHARGE_SESSIONS_MENU, ENERGY_MGMT, EQUIPMENT_MENU,
-  OPS_MONITOR_MENU, SITES_MENU,
+  ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
+  SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
 } from './workspaceMenus'
 import { STORE_MENU } from './storeCatalog'
 import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
@@ -63,7 +63,13 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   // Коммерция (тарифы, ЮЛ, ФЛ), сегментация и веб-аналитика вернулись в «Продажи»
   // (28.07.2026). «Корпоративного процессинга» и «Маркетинга» в карте прав нет: пока
   // это заставка «в подключении», право выдаётся на продукт целиком.
-  sales: [...items(CHARGE_SESSIONS_MENU), ...pages(['/metrika'])],
+  // Группы матрицы = разделы продукта: строка права стоит там же, где пункт в меню.
+  sales: [
+    ...items(SALES_NETWORK_MENU, 'Сеть'),
+    ...items(SALES_SESSIONS_MENU, 'Сессии'),
+    ...items(SALES_COMMERCE_MENU, 'Коммерция'),
+    ...pages(['/metrika']),
+  ],
   shop: items(STORE_MENU),
   finance: [
     // «Финансовый» и «Налоговый» сняты с витрины (workspaceSections) — прав на них нет:

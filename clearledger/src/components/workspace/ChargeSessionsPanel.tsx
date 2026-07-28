@@ -2627,28 +2627,22 @@ function subView(sub: string, p: { companyId: string; dateFrom: string; dateTo: 
   }
 }
 
-/** Пункт «Сессии» — контейнер с внутренними табами разрезов + общий тумблер ФЛ/ЮЛ. */
-function SessionsTabbed({ companyId, dateFrom, dateTo, subtitle, clientType, setClientType }: {
-  companyId: string; dateFrom: string; dateTo: string; subtitle?: string
+/** Один вид сессий + общий тумблер ФЛ/ЮЛ и экспорт (имя вида — заголовок области). */
+function SessionsView({ view, companyId, dateFrom, dateTo, subtitle, clientType, setClientType }: {
+  view: string; companyId: string; dateFrom: string; dateTo: string; subtitle?: string
   clientType: ClientType; setClientType: (v: ClientType) => void
 }) {
-  const [st, patch] = useTabParams('cs_sessions', { sub: 'breakdown' })
-  const v = subView(st.sub, { companyId, dateFrom, dateTo })
+  const v = subView(view, { companyId, dateFrom, dateTo })
   const ref = useRef<HTMLDivElement>(null)
   return (
     <ChargeClientCtx.Provider value={clientType}>
-      {/* Единая шапка-таббар: underline-табы слева + фильтр/экспорт справа. Общий
-          нижний бордер связывает активный таб с содержимым панели под ним. */}
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4">
-        <PanelViewTabs tabs={SUB_TABS} value={st.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Сессии»" />
-        <div className="flex items-center gap-2 shrink-0">
-          <ClientTypeToggle value={clientType} onChange={setClientType} />
-          <ExportButton title={`Сессии ЭЗС · ${v.title}`} subtitle={subtitle} getEl={() => ref.current} />
-        </div>
+      <div className="flex items-center justify-end gap-2 border-b border-border px-4 py-2">
+        <ClientTypeToggle value={clientType} onChange={setClientType} />
+        <ExportButton title={`Сессии ЭЗС · ${v.title}`} subtitle={subtitle} getEl={() => ref.current} />
       </div>
-      {/* key={st.sub} — ремаунт под-вида при смене таба (чистое локальное состояние
-          на вкладку: напр. выбранный разрез в «Разрезах» не тянется в другие табы). */}
-      <div ref={ref} className="pt-3" key={st.sub}>{v.node}</div>
+      {/* key={view} — ремаунт при смене пункта: локальное состояние вида (напр.
+          выбранный разрез) не тянется в следующий. */}
+      <div ref={ref} className="pt-3" key={view}>{v.node}</div>
     </ChargeClientCtx.Provider>
   )
 }
@@ -2693,8 +2687,19 @@ function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType,
   )
 }
 
-/** Подразделы, которым нужен общий стейт типа клиента (ФЛ/ЮЛ): «Сессии»
- * (внутренние табы) и «Надёжность». Остальные пункты раздаёт ChargeSalesRouter. */
+/**
+ * Пункты, которым нужен общий стейт типа клиента (ФЛ/ЮЛ): виды сессий и «Надёжность».
+ * Остальные пункты раздаёт ChargeSalesRouter.
+ *
+ * Ключ пункта → вид: «Разрезы»/«Время»/«Тренд»/«Сравнение» — свои пункты раздела
+ * «Сессии»; `cs_sessions` — старая ссылка, ведёт на «Разрезы». «Надёжность» осталась
+ * одним пунктом с табами: её пять углов — один вопрос о качестве зарядки.
+ */
+const SESSION_VIEWS: Record<string, string> = {
+  cs_breakdown: 'breakdown', cs_time: 'time', cs_dynamics: 'dynamics',
+  cs_compare: 'compare', cs_sessions: 'breakdown',
+}
+
 export function SessionsPanel({ tab, companyId, dateFrom, dateTo }: {
   tab: string; companyId: string; dateFrom: string; dateTo: string
 }) {
@@ -2706,7 +2711,8 @@ export function SessionsPanel({ tab, companyId, dateFrom, dateTo }: {
       subtitle={sub} clientType={clientType} setClientType={setClientType} />
   }
   return (
-    <SessionsTabbed companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} subtitle={sub}
+    <SessionsView view={SESSION_VIEWS[tab] ?? 'breakdown'}
+      companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} subtitle={sub}
       clientType={clientType} setClientType={setClientType} />
   )
 }

@@ -7,7 +7,11 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import { useWorkspaceSubView, type CoreMode } from '@/contexts/WorkspaceContext'
+import { useWorkspaceSubView, useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
+import { salesModeForKey } from '@/config/workspaceMenus'
+
+/** Разделы продукта «Продажи» — между ними ходит нормализация пункта (см. ниже). */
+const SALES_MODES: CoreMode[] = ['management', 'sales_sessions', 'sales_commerce']
 import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS, EQUIPMENT_KEYS, SITES_KEYS } from './workspaceSections'
 import { EquipmentRouter } from '@/components/equipment/EquipmentRouter'
 import { SitesRouter } from '@/components/sites/SitesRouter'
@@ -39,7 +43,7 @@ import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
 // Бухгалтерский модуль ГИГ — смены/ТТН (корректировка перед 1С) + аналитика.
 // Нормализация и сверка НЕ дублируются здесь — они живут в разделах
 // «Нормализация» (/normalization) и «Разрезы учёта» (/reconciliation).
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
 import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
 import { AccountingCashPanel } from './AccountingCashPanel'
@@ -110,6 +114,14 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   const [tab] = useWorkspaceSubView(menuKeys[0] ?? 'overview')
   const { period, stationCode } = useFilters()
   const { companyId, company } = useCompany()
+  const { setCoreMode } = useWorkspace()
+  // Пункт «Продаж» из ЧУЖОГО раздела (старая ссылка или закреплённый экран, где все
+  // пункты жили под `mode=management`) — уводим в его раздел, а не молча открываем
+  // первый пункт текущего: иначе закладка «Тарифы» открывала бы «Обзор».
+  const ownerMode = CHARGE_SESSIONS_KEYS.includes(tab) ? salesModeForKey(tab) : null
+  useEffect(() => {
+    if (ownerMode && ownerMode !== mode && SALES_MODES.includes(mode)) setCoreMode(ownerMode)
+  }, [ownerMode, mode, setCoreMode])
   const activeTab = menuKeys.includes(tab) ? tab : (menuKeys[0] ?? 'balance')
 
   if (menu.length === 0) {

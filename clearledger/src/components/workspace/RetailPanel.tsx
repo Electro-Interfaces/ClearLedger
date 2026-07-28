@@ -1,8 +1,8 @@
 /**
- * Пункт «Частные лица» — розничное направление ЭЗС (ФЛ). Аналитика в разрезе
- * аккаунтов частных лиц. Внутренние табы: Обзор · Сегменты (RFM) · Экономика ·
- * Когорты · Гео. Данные — /api/retail/*. Телефоны псевдонимизированы (хеш-ID +
- * маска), сырой номер в панель не приходит.
+ * Розничное направление ЭЗС (ФЛ) — аналитика в разрезе аккаунтов частных лиц.
+ * Два пункта меню: «Частные лица» (обзор · аккаунты · станция/регион · экономика ·
+ * гео) и «Сегменты и когорты» (RFM · когорты). Данные — /api/retail/*. Телефоны
+ * псевдонимизированы (хеш-ID + маска), сырой номер в панель не приходит.
  */
 import { useMemo, useState, useRef, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -18,7 +18,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Loader2, ShieldCheck, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, Search, Check, FileDown } from 'lucide-react'
 import { exportChargePdf } from '@/services/chargeExport'
 import { BarChart, Bar, LineChart, Line, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { useTabParams } from '@/hooks/useTabParams'
+import { useTabParams, saveTabParams } from '@/hooks/useTabParams'
+import { useSearchParams } from 'react-router-dom'
 import { useResetOnScopeChange, useNetScope } from '@/hooks/useScopeReset'
 import { TzToggle, type Tz } from './analytics/TzToggle'
 import { ApplyToScope } from './ApplyToScope'
@@ -914,35 +915,65 @@ function RetailProfileTab({ companyId, dateFrom, dateTo }: TabProps) {
   )
 }
 
+/**
+ * Виды частных клиентов разведены по ДВУМ пунктам меню (решение МАГа 28.07.2026):
+ * «Частные лица» — кто и сколько платит (обзор, аккаунты, география продаж,
+ * экономика), «Сегменты и когорты» — как клиенты ведут себя во времени. Семь табов
+ * под одним пунктом были семью разными вопросами, а в меню их не было видно.
+ */
 const RETAIL_TABS: { k: string; label: string }[] = [
   { k: 'overview', label: 'Обзор' },
-  { k: 'segments', label: 'Сегменты (RFM)' },
   { k: 'accounts', label: 'Аккаунты' },
   { k: 'profile', label: 'Станция/регион' },
   { k: 'economics', label: 'Экономика' },
-  { k: 'cohorts', label: 'Когорты' },
   { k: 'geo', label: 'Гео' },
 ]
 
-/** Контейнер пункта «Частные лица» с внутренними табами. */
-export function RetailPanel({ companyId, dateFrom, dateTo }: TabProps) {
-  const [t, patch] = useTabParams('retail', { sub: 'overview' })
-  const [drillSeg, setDrillSeg] = useState<string | null>(null)
+const SEGMENT_TABS: { k: string; label: string }[] = [
+  { k: 'segments', label: 'Сегменты (RFM)' },
+  { k: 'cohorts', label: 'Когорты' },
+]
+
+/** Контейнер пунктов «Частные лица» / «Сегменты и когорты». */
+export function RetailPanel({ companyId, dateFrom, dateTo, group = 'retail' }: TabProps & {
+  group?: 'retail' | 'segments'
+}) {
+  const seg = group === 'segments'
+  const [t, patch] = useTabParams(seg ? 'retail_segments' : 'retail',
+    { sub: seg ? 'segments' : 'overview' })
+  const [, setParams] = useSearchParams()
   const p: TabProps = { companyId, dateFrom, dateTo }
-  const tab = useMemo(() => t.sub, [t.sub])
-  const drill = (seg: string) => { setDrillSeg(seg); patch({ sub: 'accounts' }) }
+  const tabs = seg ? SEGMENT_TABS : RETAIL_TABS
+  // Значение из чужого набора (после смены пункта) откатываем на первый вид.
+  const tab = useMemo(
+    () => (tabs.some((x) => x.k === t.sub) ? t.sub : tabs[0].k), [t.sub, tabs])
+  const [drillSeg, setDrillSeg] = useState<string | null>(null)
+  // Клик по сегменту уводит в «Частные лица → Аккаунты»: сегмент — вопрос поведения,
+  // а список людей в нём — уже другой пункт. Сегмент едет через параметры пункта,
+  // чтобы после перехода фильтр не потерялся.
+  const drill = (segment: string) => {
+    setDrillSeg(segment)
+    saveTabParams(companyId, 'retail', { sub: 'accounts', drillSegment: segment })
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('sub', 'cs_retail')
+      return next
+    })
+  }
+  const initialSegment = (t as { drillSegment?: string }).drillSegment ?? drillSeg
   return (
     <div>
       <div className="flex items-center gap-3 border-b border-border px-4">
         <span className="inline-flex items-center gap-1 text-[11px] rounded-md border border-primary/40 px-2 py-0.5 text-primary/80 shrink-0 my-2" title="Телефоны маскированы, аккаунт = псевдоним">
           <ShieldCheck className="h-3 w-3" />ФЛ · псевдонимы
         </span>
-        <PanelViewTabs tabs={RETAIL_TABS} value={tab} onChange={(k) => patch({ sub: k })} label={null} ariaLabel="Виды раздела «Розница»" />
+        <PanelViewTabs tabs={tabs} value={tab} onChange={(k) => patch({ sub: k })} label={null}
+          ariaLabel={seg ? 'Виды пункта «Сегменты и когорты»' : 'Виды пункта «Частные лица»'} />
       </div>
       <div className="p-4">
         {tab === 'overview' && <RetailOverviewTab {...p} />}
         {tab === 'segments' && <RetailSegmentsTab {...p} onDrill={drill} />}
-        {tab === 'accounts' && <RetailAccountsTab {...p} initialSegment={drillSeg} />}
+        {tab === 'accounts' && <RetailAccountsTab {...p} initialSegment={initialSegment} />}
         {tab === 'profile' && <RetailProfileTab {...p} />}
         {tab === 'economics' && <RetailEconomicsTab {...p} />}
         {tab === 'cohorts' && <RetailCohortsTab {...p} />}

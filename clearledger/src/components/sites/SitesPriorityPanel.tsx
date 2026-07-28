@@ -50,7 +50,7 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">Приоритеты площадок</h2>
+          <h2 className="text-base font-semibold">Приоритеты</h2>
           <p className="text-sm text-muted-foreground">
             Чем заняться в первую очередь на этапе подбора: привлекательность (спрос и покрытие)
             × исполнимость (мощность, деньги, право). Клик по строке открывает проект.
@@ -91,13 +91,13 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
-                Карта решений — каждая точка это площадка
+                Карта решений — каждая точка это проект
               </div>
               <div className="p-4">
                 <MatrixPlot items={(d.items ?? []).filter((i) => i.quadrant !== 'need_data')}
                   onPick={(id) => setDetailId(id)} />
                 <div className="mt-2 text-xs text-muted-foreground">
-                  На поле показаны только оценённые площадки
+                  На поле показаны только оценённые проекты
                   ({nf0.format((d.items ?? []).filter((i) => i.quadrant !== 'need_data').length)} из {nf0.format(d.total)}).
                   Остальным не хватает данных — по ним решать нечего, их надо дособрать.
                 </div>
@@ -122,7 +122,7 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
           <Card>
             <CardContent className="p-0 overflow-x-auto">
               <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40 flex items-center justify-between">
-                <span>{quadrant ? QUADRANT_META[quadrant].label : 'Все площадки по приоритету'}</span>
+                <span>{quadrant ? QUADRANT_META[quadrant].label : 'Все проекты по приоритету'}</span>
                 <span className="font-mono">{nf0.format(items.length)}</span>
               </div>
               <table className="w-full text-sm">
@@ -197,50 +197,103 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
   )
 }
 
-/** Поле «привлекательность × исполнимость» с квадрантами и точками-площадками. */
+/**
+ * Поле «привлекательность × исполнимость» с квадрантами и точками-проектами.
+ *
+ * Было: высота в половину экрана (52% ширины), пустое поле с горсткой точек в
+ * углу, ни сетки, ни шкал, подпись оси поперёк данных. Понять, 60 у точки или 80,
+ * было нельзя — а именно это и решает, куда её относить.
+ *
+ * Стало: фиксированная высота 400 px, сетка по 25 с числами на осях, точки с
+ * обводкой (на тёмной теме без неё они сливались с фоном), счётчик в каждом
+ * квадранте и подпись осей за пределами поля.
+ */
+const AXIS_TICKS = [0, 25, 50, 75, 100]
+
 function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: string) => void }) {
   if (items.length === 0) {
     return <div className="py-10 text-center text-sm text-muted-foreground">
-      Оценённых площадок нет — сначала нужно добрать данные (мощность, стоимость подключения, право).
+      Оценённых проектов нет — сначала нужно добрать данные (мощность, стоимость подключения, право).
     </div>
   }
+  const count = (fn: (i: MatrixItem) => boolean) => items.filter(fn).length
+  const hi = (v: number | null) => (v ?? 0) >= 50
+  const quads = [
+    { key: 'bottleneck', label: 'Расшивать узкое место', cls: 'text-amber-700 dark:text-amber-400',
+      pos: 'left-2 top-2', n: count((i) => hi(i.attract) && !hi(i.feasible)) },
+    { key: 'do_now', label: 'Делать сейчас', cls: 'text-emerald-700 dark:text-emerald-400',
+      pos: 'right-2 top-2 text-right', n: count((i) => hi(i.attract) && hi(i.feasible)) },
+    { key: 'reject', label: 'Кандидат на отказ', cls: 'text-red-600 dark:text-red-400',
+      pos: 'left-2 bottom-2', n: count((i) => !hi(i.attract) && !hi(i.feasible)) },
+    { key: 'cheap', label: 'Дешёвый опцион', cls: 'text-sky-700 dark:text-sky-400',
+      pos: 'right-2 bottom-2 text-right', n: count((i) => !hi(i.attract) && hi(i.feasible)) },
+  ]
+
   return (
-    <div className="relative w-full" style={{ paddingBottom: '52%' }}>
-      <div className="absolute inset-0">
-        {/* фон квадрантов */}
-        <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
-          <div className="border border-border/50 bg-amber-500/[0.04]" />
-          <div className="border border-border/50 bg-emerald-500/[0.05]" />
-          <div className="border border-border/50 bg-red-400/[0.04]" />
-          <div className="border border-border/50 bg-sky-500/[0.04]" />
+    <div className="flex gap-2">
+      {/* Шкала привлекательности слева: без чисел точку нельзя прочитать. */}
+      <div className="relative w-7 shrink-0" style={{ height: 400 }}>
+        {AXIS_TICKS.map((t) => (
+          <span key={t} className="absolute right-0 text-xs tabular-nums text-muted-foreground"
+            style={{ bottom: `calc(${t}% - 0.5em)` }}>{t}</span>
+        ))}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="relative w-full rounded-md border border-border" style={{ height: 400 }}>
+          {/* фон квадрантов */}
+          <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
+            <div className="bg-amber-500/[0.05]" />
+            <div className="bg-emerald-500/[0.06]" />
+            <div className="bg-red-400/[0.05]" />
+            <div className="bg-sky-500/[0.05]" />
+          </div>
+          {/* сетка по 25 и оси-разделители по 50 — они и есть границы квадрантов */}
+          {AXIS_TICKS.slice(1, -1).map((t) => (
+            <div key={`v${t}`} className={`absolute top-0 bottom-0 ${t === 50 ? 'border-l border-border' : 'border-l border-border/30'}`}
+              style={{ left: `${t}%` }} />
+          ))}
+          {AXIS_TICKS.slice(1, -1).map((t) => (
+            <div key={`h${t}`} className={`absolute left-0 right-0 ${t === 50 ? 'border-t border-border' : 'border-t border-border/30'}`}
+              style={{ bottom: `${t}%` }} />
+          ))}
+
+          {quads.map((qd) => (
+            <span key={qd.key} className={`absolute ${qd.pos} ${qd.cls} text-xs`}>
+              {qd.label} <span className="tabular-nums opacity-70">· {qd.n}</span>
+            </span>
+          ))}
+
+          {/* Точки. Размер — уверенность оценки; обводка цветом фона, иначе на
+              тёмной теме точка сливается с квадрантом. Позиция зажата в поле:
+              проект с нулём по оси иначе наполовину уезжал за край. */}
+          {items.map((it) => {
+            const x = Math.min(98, Math.max(2, it.feasible ?? 0))
+            const y = Math.min(98, Math.max(2, it.attract ?? 0))
+            const size = 8 + (it.confidence / 100) * 6
+            return (
+              <button key={it.id} type="button" onClick={() => onPick(it.id)}
+                title={`${it.projectNo ?? ''} ${it.city ?? it.region ?? ''} — привлекательность ${it.attract}, исполнимость ${it.feasible}, уверенность ${it.confidence}%`}
+                className={`absolute rounded-full ring-1 ring-background transition-transform hover:z-10 hover:scale-150 ${QUADRANT_META[it.quadrant].dot}`}
+                style={{
+                  left: `calc(${x}% - ${size / 2}px)`,
+                  bottom: `calc(${y}% - ${size / 2}px)`,
+                  width: size, height: size,
+                }} />
+            )
+          })}
         </div>
-        {/* подписи квадрантов */}
-        <span className="absolute left-2 top-2 text-xs text-amber-700 dark:text-amber-400">Расшивать узкое место</span>
-        <span className="absolute right-2 top-2 text-xs text-emerald-700 dark:text-emerald-400">Делать сейчас</span>
-        <span className="absolute left-2 bottom-6 text-xs text-red-600 dark:text-red-400">Кандидат на отказ</span>
-        <span className="absolute right-2 bottom-6 text-xs text-sky-700 dark:text-sky-400">Дешёвый опцион</span>
-        {/* точки */}
-        {items.map((it) => {
-          const x = (it.feasible ?? 0) / 100
-          const y = (it.attract ?? 0) / 100
-          const size = 6 + (it.confidence / 100) * 6
-          return (
-            <button key={it.id} type="button" onClick={() => onPick(it.id)}
-              title={`${it.region ?? ''} ${it.city ?? ''} — привлекательность ${it.attract}, исполнимость ${it.feasible}, уверенность ${it.confidence}%`}
-              className={`absolute rounded-full ${QUADRANT_META[it.quadrant].dot} opacity-80 hover:opacity-100 hover:ring-2 ring-primary/40`}
-              style={{
-                left: `calc(${x * 100}% - ${size / 2}px)`,
-                bottom: `calc(${y * 100}% - ${size / 2}px)`,
-                width: size, height: size,
-              }} />
-          )
-        })}
-        {/* оси */}
-        <div className="absolute -bottom-0.5 left-0 right-0 text-xs text-muted-foreground text-center">
-          исполнимость →
+
+        {/* Шкала исполнимости под полем — не поверх данных, как было. */}
+        <div className="relative h-4">
+          {AXIS_TICKS.map((t) => (
+            <span key={t} className="absolute top-0 -translate-x-1/2 text-xs tabular-nums text-muted-foreground"
+              style={{ left: `${t}%` }}>{t}</span>
+          ))}
         </div>
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 origin-center text-xs text-muted-foreground">
-          привлекательность →
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>↑ привлекательность: спрос, покрытие, тип места</span>
+          <span>исполнимость: мощность, деньги, право →</span>
         </div>
       </div>
     </div>
