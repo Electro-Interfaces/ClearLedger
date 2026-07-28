@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import {
   getSites, getPortfolio, getSiteMembers, bulkAssignOwner, PHASE_META, STAGE_META,
-  type SiteStage,
+  FUNNEL_STAGES, type SiteStage, type SiteRow,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { useOpenProject } from './useOpenProject'
@@ -26,11 +26,84 @@ const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE = 100
 const today = () => new Date().toISOString().slice(0, 10)
 
+/**
+ * Доска по стадиям — «где скопилось» вместо «что с проектом».
+ *
+ * Колонка = стадия воронки, карточка = проект. Перетаскивания нет намеренно:
+ * переход между стадиями держит гейт с обязательными пунктами, и таскание
+ * карточки мышью его бы обошло. Клик открывает проект, где переход делается
+ * с проверкой.
+ */
+function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) => void }) {
+  const byStage = useMemo(() => {
+    const m = new Map<string, SiteRow[]>()
+    for (const r of rows) {
+      const list = m.get(r.stage) ?? []
+      list.push(r)
+      m.set(r.stage, list)
+    }
+    return m
+  }, [rows])
+  const stages = FUNNEL_STAGES.filter((s) => (byStage.get(s)?.length ?? 0) > 0)
+
+  if (stages.length === 0) {
+    return (
+      <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
+        Проектов не найдено
+      </CardContent></Card>
+    )
+  }
+  return (
+    <div className="flex gap-2 overflow-x-auto pb-2">
+      {stages.map((st) => {
+        const list = byStage.get(st) ?? []
+        return (
+          <div key={st} className="min-w-[240px] max-w-[280px] flex-1 rounded-lg border border-border bg-muted/20">
+            <div className="px-2.5 py-1.5 border-b flex items-center justify-between">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                <span className={`h-2 w-2 rounded-full ${STAGE_META[st]?.dot ?? 'bg-zinc-400'}`} />
+                {STAGE_META[st]?.label ?? st}
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground">{list.length}</span>
+            </div>
+            <div className="p-1.5 space-y-1.5 max-h-[70vh] overflow-y-auto">
+              {list.slice(0, 50).map((s) => {
+                const late = !!s.nextActionDue && s.nextActionDue < today()
+                return (
+                  <button key={s.id} type="button" onClick={() => onOpen(s.id)}
+                    className="w-full text-left rounded-md border border-border bg-background px-2 py-1.5 hover:border-primary/50 transition-colors">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-mono text-[10px] text-muted-foreground">{s.projectNo ?? '—'}</span>
+                      {late && <span className="text-[10px] text-red-600 dark:text-red-400">просрочен шаг</span>}
+                    </div>
+                    <div className="text-xs truncate" title={s.fullAddress ?? s.address ?? ''}>
+                      {s.title || s.address || s.installPlace || s.city || '—'}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground truncate">
+                      {s.city ?? s.region ?? ''}{s.ownerName ? ` · ${s.ownerName}` : ' · без ответственного'}
+                    </div>
+                  </button>
+                )
+              })}
+              {list.length > 50 && (
+                <div className="px-1 py-1 text-[10px] text-muted-foreground">
+                  показаны первые 50 из {list.length} — сузьте фильтр
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const [phase, setPhase] = useState('')
   const [ownerId, setOwnerId] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [assignTo, setAssignTo] = useState('')
+  const [view, setView] = useState<'table' | 'board'>('table')
   const [overdue, setOverdue] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -115,6 +188,18 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           Просрочено
         </button>
 
+        {/* Два взгляда на один список: таблица отвечает «что с конкретным
+            проектом», доска — «где скопилось». Фильтры общие, переключение их
+            не сбрасывает. */}
+        <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
+          {([['table', 'Таблица'], ['board', 'Доска']] as const).map(([v, label]) => (
+            <button key={v} type="button" onClick={() => setView(v)}
+              className={`px-2 py-1 text-xs rounded-[5px] ${view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }}
@@ -159,7 +244,11 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         </div>
       )}
 
-      <Card>
+      {view === 'board' && !q.isLoading && (
+        <StageBoard rows={rows} onOpen={openProject} />
+      )}
+
+      <Card className={view === 'board' ? 'hidden' : undefined}>
         <CardContent className="p-0 overflow-x-auto">
           {q.isLoading ? (
             <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
