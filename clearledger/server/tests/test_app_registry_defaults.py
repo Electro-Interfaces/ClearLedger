@@ -1,51 +1,80 @@
 """Дефолтный состав продуктов пространства (без явной записи в eco_company_apps).
 
-Учёт разрезан на рабочие места только у профиля `energy` (сеть ЭЗС): там работают
-«Проекты», «Эксплуатация», «Сеть», «Финансы», «Данные», а сам «Учёт» плиткой не
-показывается. У топливного профиля разреза нет — единый «Учёт», и наоборот: плитки
-продуктов вели бы в пустые разделы.
+Разрез Учёта на рабочие места свой у каждого профиля: у сети ЭЗС (`energy`) это
+«Проекты», «Эксплуатация», «Продажи», «Финансы», «Данные»; у розницы нефтепродуктов
+(`fuel`) — «Продажи», «Магазин», «Управленческий», «Бухгалтерский», «Данные». У профиля
+без разреза «Учёт» остаётся единым продуктом, а плитки продуктов вели бы в пустые разделы.
 """
 
+from app.access_catalog import system_roles_for
 from app.routers.sso_router import INTERNAL_ROUTES
-from app.services.app_registry import _CARVED_PRODUCTS, _SETUP_PRODUCTS, _default_app_on
+from app.services.app_registry import _BY_PROFILE, _CARVED_BY_PROFILE, _default_app_on, carved_products
 
-
-def test_setup_products_have_route_and_follow_profile():
-    """Продукт «на вырост» («Сеть передачи данных», «Бухгалтерия») заведён в реестре,
-    но экранов ещё не имеет: маршрут обязан существовать — иначе плитка со стола ведёт
-    в «страница не найдена», а не в заставку «в подключении»."""
-    for code in _SETUP_PRODUCTS:
-        assert code in INTERNAL_ROUTES, code
-        assert _default_app_on(code, "energy") is True, code
-        assert _default_app_on(code, "fuel") is False, code
-
-
-def test_carved_products_only_for_energy():
-    for code in _CARVED_PRODUCTS:
-        assert _default_app_on(code, "energy") is True, code
-        assert _default_app_on(code, "fuel") is False, code
-        assert _default_app_on(code, None) is False, code
-
-
-def test_ledger_replaced_by_products_on_energy():
-    assert _default_app_on("ledger", "fuel") is True
-    assert _default_app_on("ledger", "energy") is False
-
-
-def test_space_management_and_services_always_on():
-    for code in ("admin", "chat", "plan", "conf"):
-        assert _default_app_on(code, "fuel") is True
-        assert _default_app_on(code, "energy") is True
-
-
-def test_coordinator_needs_explicit_enable():
-    assert _default_app_on("support", "energy") is False
+CARVED_PROFILES = sorted(_CARVED_BY_PROFILE)
 
 
 def test_every_carved_product_has_route():
     """Плитка без маршрута ведёт в никуда: каталог /api/sso/apps строит ссылку отсюда."""
-    for code in _CARVED_PRODUCTS:
-        assert code in INTERNAL_ROUTES, code
+    for profile in CARVED_PROFILES:
+        for code in carved_products(profile):
+            assert code in INTERNAL_ROUTES, f"{profile}: {code}"
+
+
+def test_product_on_only_in_its_profile():
+    """Продукт включён по умолчанию ровно тем профилям, в чей разрез он входит."""
+    for profile in CARVED_PROFILES:
+        own = carved_products(profile)
+        others = set().union(*(carved_products(p) for p in CARVED_PROFILES if p != profile))
+        for code in own:
+            assert _default_app_on(code, profile) is True, f"{profile}: {code}"
+        for code in others - own:
+            assert _default_app_on(code, profile) is False, f"{profile}: чужой {code}"
+
+
+def test_carved_products_off_without_profile():
+    for profile in CARVED_PROFILES:
+        for code in carved_products(profile):
+            assert _default_app_on(code, None) is False, code
+
+
+def test_ledger_replaced_by_products_when_carved():
+    """Разрезанный профиль «Учёт» плиткой не показывает — его разделы уехали в продукты."""
+    for profile in CARVED_PROFILES:
+        assert _default_app_on("ledger", profile) is False, profile
+    assert _default_app_on("ledger", "general") is True
+    assert _default_app_on("ledger", None) is True
+
+
+def test_space_management_and_services_always_on():
+    for code in ("admin", "chat", "plan", "conf", "info"):
+        for profile in (*CARVED_PROFILES, "general", None):
+            assert _default_app_on(code, profile) is True, f"{profile}: {code}"
+
+
+def test_coordinator_needs_explicit_enable():
+    assert _default_app_on("support", "energy") is False
+    assert _default_app_on("support", "fuel") is False
+
+
+def test_profile_names_belong_to_carved_products():
+    """Имя продукта подменяется только там, где профиль его действительно получает."""
+    for (code, profile), (name, desc) in _BY_PROFILE.items():
+        assert code in carved_products(profile), f"{profile}: {code}"
+        assert name and desc
+
+
+def test_system_roles_follow_carve():
+    """Роль на ключах `ledger:*` после разреза не даёт ничего — приложения нет. Набор
+    системных ролей обязан идти за разрезом профиля."""
+    for profile in CARVED_PROFILES:
+        keys = {k for r in system_roles_for(profile) for k in (r["modules"] or [])}
+        assert keys, profile
+        assert not any(k.startswith("ledger") for k in keys), profile
+        for key in keys:
+            assert key.split(":")[0] in carved_products(profile) | {"support", "chat"}, \
+                f"{profile}: {key}"
+    plain = {k for r in system_roles_for("general") for k in (r["modules"] or [])}
+    assert all(k.startswith("ledger") for k in plain)
 
 
 def test_routes_match_frontend_map():
@@ -61,4 +90,8 @@ def test_routes_match_frontend_map():
     assert pairs, "карта продуктов не разобралась — изменился формат spaceProducts.ts"
     for code, route in pairs:
         assert INTERNAL_ROUTES.get(code) == route, f"{code}: {INTERNAL_ROUTES.get(code)} != {route}"
-    assert {c for c, _ in pairs} == _CARVED_PRODUCTS
+    # Карта фронта описывает продукты, у которых есть рабочая область; продукты «на
+    # вырост» (за маршрутом заставка) в неё не входят. Обратное недопустимо: продукт с
+    # разделами, не попавший ни в один разрез, никому не покажется.
+    every = set().union(*(carved_products(p) for p in CARVED_PROFILES))
+    assert {c for c, _ in pairs} <= every, {c for c, _ in pairs} - every

@@ -67,9 +67,31 @@ SYSTEM_ROLES_ENERGY: list[dict] = [
 ]
 
 
+# Профиль `fuel` (розница нефтепродуктов): те же пять ролей, что раньше, но на ключах
+# продуктов разреза. Роль с ключами `ledger:*` после разреза не даёт ничего — приложения,
+# на которое она ссылается, у компании нет (на пилоте энергетики это уже ловили).
+SYSTEM_ROLES_FUEL: list[dict] = [
+    {"name": "Полный доступ", "modules": None},
+    # Коммерция сети плюс договоры и аренда: и то и другое ведёт один человек.
+    {"name": "Финансист", "modules": ["sales", "ops"]},
+    {"name": "Бухгалтер", "modules": ["finance"]},
+    {"name": "Оператор данных", "modules": ["data"]},
+    # Сопутка и общепит — своё рабочее место: 28 экранов товарного контура.
+    {"name": "Товаровед", "modules": ["shop"]},
+    {"name": "Наблюдатель", "modules": ["sales"]},
+]
+
+
 def system_roles_for(profile_id: str | None) -> list[dict]:
-    """Набор системных ролей под профиль компании."""
-    return SYSTEM_ROLES_ENERGY if profile_id == "energy" else SYSTEM_ROLES
+    """Набор системных ролей под профиль компании.
+
+    Набор идёт за разрезом: если у профиля Учёт разрезан на продукты, роли собираются на
+    ключах продуктов, иначе — на модулях Учёта (`ledger:*`).
+    """
+    from app.services.app_registry import carved_products
+    if not carved_products(profile_id):
+        return SYSTEM_ROLES
+    return SYSTEM_ROLES_ENERGY if profile_id == "energy" else SYSTEM_ROLES_FUEL
 
 
 def normalize_key(key: str) -> str:

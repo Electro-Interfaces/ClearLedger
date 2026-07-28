@@ -23,7 +23,7 @@
  */
 import { Building2, Calculator, Map, Megaphone, Network, Stethoscope, type LucideIcon } from 'lucide-react'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
-import { navByPath, type NavItemDef } from './navigation'
+import { navByPath, oneCItems, type NavItemDef } from './navigation'
 
 export interface SpaceProduct {
   /** Код в реестре Ядра = ключ доступа роли. */
@@ -209,11 +209,20 @@ export const PRODUCT_SETUP_NOTE: Record<string, { icon: LucideIcon; title: strin
   },
 }
 
-/** Профиль компании, для которого разрез включён. */
-const CARVED_PROFILE = 'energy'
+/**
+ * Профили, у которых Учёт разрезан на продукты.
+ *
+ * Набор продуктов у каждого свой (реестр Ядра, `app_registry._CARVED_BY_PROFILE`), а вот
+ * карта «раздел рабочей области → продукт» одна на всех: у розницы нефтепродуктов
+ * «Продажи» — это раздел `management`, «Магазин» — `store`, «Управленческий» —
+ * `operations`, «Бухгалтерский» — `accounting`+`export`, то есть ровно те продукты, что
+ * уже описаны ниже. Различаются только названия (их подменяет сервер по профилю) и то,
+ * какие из продуктов компании включены.
+ */
+const CARVED_PROFILES = new Set(['energy', 'fuel'])
 
 export function isCarvedProfile(profileId: string | null | undefined): boolean {
-  return profileId === CARVED_PROFILE
+  return CARVED_PROFILES.has(profileId ?? '')
 }
 
 /**
@@ -299,8 +308,24 @@ export function productForPath(pathname: string): SpaceProduct | null {
  * этой области остаются в гармошке `WorkspaceModeSidebar`. Функции Ядра сюда не входят —
  * они одни на все продукты (`spaceNav`).
  */
-export function productNav(product: SpaceProduct, allowed?: PageGate): NavItemDef[] {
-  return navFor(product, product.paths, allowed)
+export function productNav(
+  product: SpaceProduct,
+  allowed?: PageGate,
+  profileId?: string | null,
+): NavItemDef[] {
+  return navFor(product, [...product.paths, ...fuelOnlyPaths(product, profileId)], allowed)
+}
+
+/**
+ * Контур 1С — рабочее место бухгалтера топливного профиля, и живёт он в «Бухгалтерском»
+ * (`finance`). У энергетики эти маршруты закрыты гардом `RequireFuel`, поэтому пункт там
+ * вёл бы в редирект — отсюда профильный фильтр, а не общий список страниц продукта.
+ */
+const ONEC_PRODUCT = 'finance'
+
+function fuelOnlyPaths(product: SpaceProduct, profileId?: string | null): string[] {
+  if (profileId !== 'fuel' || product.code !== ONEC_PRODUCT) return []
+  return oneCItems.map((i) => i.to)
 }
 
 /** Функции Ядра для левого меню продукта — один и тот же состав в каждом рабочем месте. */

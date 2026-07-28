@@ -103,7 +103,7 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
     const onProductRoute = pathname === product.route
     // Страницы («Документы», «Коннекторы») — тоже право: код = сегмент ИСХОДНОГО пути.
     const allowedPage = (code: string) => productModuleAllowed(product.code, code, canModule)
-    const items = productNav(product, allowedPage)
+    const items = productNav(product, allowedPage, company.profileId)
     // Функции Ядра — одни на все рабочие места (`SPACE_PAGES`), поэтому отдельным блоком
     // ниже разделов и страниц продукта: сверху то, чем человек занят, ниже — пространство.
     const spaceItems = spaceNav(product, allowedPage)
