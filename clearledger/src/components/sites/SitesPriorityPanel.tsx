@@ -76,13 +76,15 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             {d.quadrants.map((qd) => (
+              // Карточки компактные: вместе с полосой этапов они съедали высоту, и
+              // карта решений уходила под сгиб — на неё же и приходят смотреть.
               <button key={qd.key} type="button" onClick={() => setQuadrant((v) => (v === qd.key ? '' : qd.key))}
-                className={`text-left rounded-lg border p-3 transition-colors ${quadrant === qd.key ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'}`}>
+                className={`text-left rounded-lg border px-3 py-2 transition-colors ${quadrant === qd.key ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'}`}>
                 <div className="flex items-center gap-1.5 text-sm font-medium">
                   <span className={`h-2 w-2 rounded-full ${QUADRANT_META[qd.key].dot}`} />{qd.label}
+                  <span className="ml-auto text-lg font-semibold tabular-nums">{nf0.format(qd.count)}</span>
                 </div>
-                <div className="text-xl font-semibold mt-1">{nf0.format(qd.count)}</div>
-                <div className="text-xs text-muted-foreground leading-tight mt-0.5">{qd.hint}</div>
+                <div className="text-xs text-muted-foreground leading-tight">{qd.hint}</div>
               </button>
             ))}
           </div>
