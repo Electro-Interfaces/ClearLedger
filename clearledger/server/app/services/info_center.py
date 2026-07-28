@@ -119,21 +119,31 @@ async def search(db: AsyncSession, company_id, query: str, limit: int = 20) -> d
     if len(q) < 2:
         return {"items": [], "query": q}
     profile = await _profile(db, company_id)
-    rows = (await db.execute(text("""
+    sql = text("""
         select a.id, a.title, a.kind, a.doc_number,
                ts_headline('russian', coalesce(a.summary, '') || ' ' || a.body_md,
-                           plainto_tsquery('russian', :q),
+                           to_tsquery('russian', :tsq),
                            'StartSel=<<, StopSel=>>, MaxWords=24, MinWords=10, MaxFragments=1') as snippet,
-               ts_rank(a.search_tsv, plainto_tsquery('russian', :q)) as rank,
+               ts_rank(a.search_tsv, to_tsquery('russian', :tsq)) as rank,
                (a.company_id is not null) as own
         from info_articles a
         where a.status = 'published'
-          and a.search_tsv @@ plainto_tsquery('russian', :q)
+          and a.search_tsv @@ to_tsquery('russian', :tsq)
           and (a.company_id = :cid
                or (a.company_id is null and (a.profile_id is null or a.profile_id = :profile)))
         order by rank desc, own desc
         limit :lim
-    """), {"q": q, "cid": company_id, "profile": profile, "lim": limit})).mappings().all()
+    """)
+    # Слова чистим сами: `to_tsquery` не терпит знаков препинания, а `plainto_tsquery`
+    # умеет только «все слова сразу» — по запросу из двух слов он молча отдаёт пусто,
+    # хотя каждая половина в базе есть. Сначала ищем все слова, потом любое из них.
+    words = [w for w in "".join(c if c.isalnum() or c.isspace() else " " for c in q).split() if len(w) > 1]
+    if not words:
+        return {"items": [], "query": q}
+    params = {"cid": company_id, "profile": profile, "lim": limit}
+    rows = (await db.execute(sql, {**params, "tsq": " & ".join(f"{w}:*" for w in words)})).mappings().all()
+    if not rows and len(words) > 1:
+        rows = (await db.execute(sql, {**params, "tsq": " | ".join(f"{w}:*" for w in words)})).mappings().all()
     return {
         "query": q,
         "items": [{"id": str(r["id"]), "title": r["title"], "kind": r["kind"],
