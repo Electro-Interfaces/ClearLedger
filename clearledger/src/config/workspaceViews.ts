@@ -12,7 +12,8 @@ import { STORE_MENU } from './storeCatalog'
 export const MODE_LABELS: Record<CoreMode, string> = {
   management: 'Продажи',
   operations: 'Управленческий',
-  projects: 'Проекты',
+  projects: 'Проекты · Работа',
+  projects_analytics: 'Проекты · Аналитика',
   store: 'Магазин',
   corporate: 'Корпоративный процессинг',
   marketing: 'Маркетинг',
@@ -29,10 +30,11 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   // Подписи те же, что в меню (`SITES_MENU`): хлебная крошка и пункт меню должны
   // называться одинаково, иначе человек не понимает, где он оказался.
   projects: {
-    pr_portfolio: 'Обзор', pr_project: 'Проекты', pr_projects: 'Проекты',
-    sites_overview: 'Воронка', sites_list: 'Площадки',
-    sites_priority: 'Приоритеты', sites_map: 'Карта',
-    pr_tp: 'Присоединение', pr_equipment: 'Оборудование',
+    pr_project: 'Проекты', pr_projects: 'Проекты', sites_list: 'Площадки',
+    pr_tp: 'Присоединение', pr_equipment: 'Оборудование', sites_map: 'Карта',
+  },
+  projects_analytics: {
+    pr_portfolio: 'Обзор', sites_overview: 'Воронка', sites_priority: 'Приоритеты',
     pr_budget: 'Бюджет', pr_accounting: 'Ждёт учёта',
   },
   management: {

@@ -23,6 +23,7 @@ import { STORE_MENU } from '@/config/storeCatalog'
 import {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
+  SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS, CORP_MENU, CORP_KEYS,
   MARKETING_MENU, MARKETING_KEYS,
 } from '@/config/workspaceMenus'
@@ -36,6 +37,7 @@ import { productForMode, productModuleAllowed } from '@/config/productAccess'
 export {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
+  SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS, CORP_MENU, CORP_KEYS,
   MARKETING_MENU, MARKETING_KEYS,
 }
@@ -118,8 +120,12 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const sales: WorkspaceSection = { mode: 'management', label: 'Продажи',        icon: BarChart3,    items: mgmtItems, connected: mgmtItems.length > 0 }
   // «Проекты» — стройка сети: от подбора участка до ввода станции в эксплуатацию.
   // Только у energy: у топливного профиля своего девелоперского контура нет.
-  const projects: WorkspaceSection = { mode: 'projects', label: 'Проекты', icon: HardHat,
-    items: isEnergy ? SITES_MENU : [], connected: isEnergy }
+  // Два раздела на один продукт: «Работа» — где ведут дела, «Аналитика» — где
+  // смотрят сводку. В левой рельсе это два пункта, их содержимое — во второй панели.
+  const projects: WorkspaceSection = { mode: 'projects', label: 'Работа', icon: HardHat,
+    items: isEnergy ? SITES_WORK_MENU : [], connected: isEnergy }
+  const projectsAnalytics: WorkspaceSection = { mode: 'projects_analytics', label: 'Аналитика',
+    icon: BarChart3, items: isEnergy ? SITES_ANALYTICS_MENU : [], connected: isEnergy }
   const ops: WorkspaceSection   = { mode: 'operations', label: 'Управленческий', icon: Gauge,        items: opsItems, connected: opsItems.length > 0 }
   const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
   // Корпоративный процессинг и Маркетинг — свои рабочие места (energy): те же панели,
@@ -141,7 +147,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
   const all = isEnergy
-    ? [sales, corporate, marketing, projects, ops, store, acc, exp, normalize, reconcile]
+    ? [sales, corporate, marketing, projects, projectsAnalytics, ops, store, acc, exp, normalize, reconcile]
     : [sales, store, ops, acc, exp]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый

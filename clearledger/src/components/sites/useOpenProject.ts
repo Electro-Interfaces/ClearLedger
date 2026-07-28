@@ -14,6 +14,9 @@ export function useOpenProject(): (id: string) => void {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('project', id)
+      // Проект ведут в разделе «Работа» — открываем именно там, откуда бы ни пришли
+      // (из аналитики, карты, реестра присоединений).
+      next.set('mode', 'projects')
       next.set('sub', 'pr_project')
       return next
     }, { replace: true })

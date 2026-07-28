@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2, Upload, MapPin, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
-import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
+import { sitesModeForKey } from '@/config/workspaceMenus'
 import {
   getSitesOverview, getSitesGaps, importSitesXlsx, STAGE_META,
   type SitesImportReport, type SiteStage,
@@ -31,13 +31,21 @@ const PHASE_TAB: Record<string, string> = {
 
 export function SitesOverviewPanel({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
-  const [, setTab] = useWorkspaceSubView('sites_overview')
   const [, setParams] = useSearchParams()
   // Клик по стадии = открыть банк площадок с этим фильтром. Стадия едет в URL,
   // чтобы ссылку можно было отправить коллеге, а не пересказывать словами.
+  const goSub = (sub: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('mode', sitesModeForKey(sub))
+      next.set('sub', sub)
+      return next
+    })
+  }
   const goStage = (stage: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
+      next.set('mode', 'projects')      // площадки живут в разделе «Работа»
       next.set('sub', 'sites_list')
       next.set('stage', stage)
       return next
@@ -101,7 +109,9 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
         </div>
       </div>
 
-      <ProjectPhaseStrip current="select" onPick={(ph) => setTab(PHASE_TAB[ph] ?? 'pr_project')}
+      {/* Клик по этапу — тоже переход через границу разделов: «Реализация» ведёт
+          в присоединения, а они в «Работе». */}
+      <ProjectPhaseStrip current="select" onPick={(ph) => goSub(PHASE_TAB[ph] ?? 'pr_project')}
         counts={d ? {
           select: d.funnel.filter((f) => ['lead', 'screening', 'negotiation', 'dd', 'decision'].includes(f.stage))
             .reduce((a, f) => a + f.count, 0),

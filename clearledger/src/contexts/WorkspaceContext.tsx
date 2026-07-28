@@ -6,9 +6,11 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'operations' | 'projects' | 'store' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
+// `projects_analytics` — второй раздел продукта «Проекты»: работа и аналитика
+// разведены по левой рельсе, пункты каждого живут во второй панели.
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'operations' | 'projects' | 'projects_analytics' | 'store' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
 
-const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'operations', 'projects', 'store', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'operations', 'projects', 'projects_analytics', 'store', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
 function readMode(sp: URLSearchParams): CoreMode {
   const m = sp.get('mode')
   return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'

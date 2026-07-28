@@ -22,6 +22,7 @@ import {
   getPortfolioOverview, getSites, exportPortfolioXlsx, PHASE_META, STAGE_META,
   type PortfolioOverview,
 } from '@/services/sitesService'
+import { sitesModeForKey } from '@/config/workspaceMenus'
 import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -42,10 +43,13 @@ const RISK_TARGET: Record<string, { tab: string; hint: string }> = {
 
 export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
   const [, setParams] = useSearchParams()
-  /** Уйти в другой реестр с фильтром: `sub` и `risk` пишем одной правкой URL. */
+  /** Уйти в другой реестр с фильтром: `mode`, `sub` и `risk` — одной правкой URL.
+   *  Раздел (`mode`) обязателен: обзор живёт в «Аналитике», а ведут работу в
+   *  «Работе», и без смены раздела пункт оказался бы чужим. */
   const goTo = useCallback((tab: string, risk?: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
+      next.set('mode', sitesModeForKey(tab))
       next.set('sub', tab)
       if (risk) next.set('risk', risk); else next.delete('risk')
       return next

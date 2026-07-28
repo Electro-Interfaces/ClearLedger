@@ -40,6 +40,7 @@ export function SiteCardDialog({ companyId, id, onClose }: {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('project', id)
+      next.set('mode', 'projects')     // рабочий экран проекта — раздел «Работа»
       next.set('sub', 'pr_project')
       return next
     }, { replace: true })

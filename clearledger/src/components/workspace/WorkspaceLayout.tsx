@@ -81,7 +81,10 @@ function DesktopWorkspace() {
             {coreMode === 'reconcile' && <ReconciliationPanel />}
             {coreMode === 'management' && <ManagementPanel />}
             {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+            {/* «Работа» и «Аналитика» — два раздела одного продукта: панель одна,
+                различаются составом пунктов (см. workspaceSections). */}
             {coreMode === 'projects' && <ManagementPanel mode="projects" />}
+            {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
             {coreMode === 'store' && <StorePanel />}
             {/* Корпоратив и маркетинг — те же панели ЭЗС-продаж, роутинг идёт по
                 ключу подраздела, поэтому панель одна на все три рабочих места. */}

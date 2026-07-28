@@ -73,19 +73,39 @@ export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 //   РАБОТА     — ведут дела: проекты, площадки, сквозные реестры ТП и железа, карта;
 //   АНАЛИТИКА  — смотрят сводку: обзор, воронка, скоринг, деньги, стык с учётом.
 // Ключи не менялись: право на пункт и ссылки в других разделах остались прежними.
-export const SITES_MENU: CentralMenuItem[] = [
-  { key: 'pr_project',     label: 'Проекты',       group: 'Работа' },
-  { key: 'sites_list',     label: 'Площадки',      group: 'Работа' },
-  { key: 'pr_tp',          label: 'Присоединение', group: 'Работа' },
-  { key: 'pr_equipment',   label: 'Оборудование',  group: 'Работа' },
-  { key: 'sites_map',      label: 'Карта',         group: 'Работа' },
-  { key: 'pr_portfolio',   label: 'Обзор',         group: 'Аналитика' },
-  { key: 'sites_overview', label: 'Воронка',       group: 'Аналитика' },
-  { key: 'sites_priority', label: 'Приоритеты',    group: 'Аналитика' },
-  { key: 'pr_budget',      label: 'Бюджет',        group: 'Аналитика' },
-  { key: 'pr_accounting',  label: 'Ждёт учёта',    group: 'Аналитика' },
+// «Работа» и «Аналитика» — не группы внутри одного меню, а два раздела продукта:
+// они стоят в левой рельсе рядом с пространством, а их пункты — во второй панели
+// (решение МАГа 28.07.2026). Так у человека один уровень навигации на экран:
+// слева «чем я занят», справа «что именно открыть».
+export const SITES_WORK_MENU: CentralMenuItem[] = [
+  { key: 'pr_project',     label: 'Проекты' },
+  { key: 'sites_list',     label: 'Площадки' },
+  { key: 'pr_tp',          label: 'Присоединение' },
+  { key: 'pr_equipment',   label: 'Оборудование' },
+  { key: 'sites_map',      label: 'Карта' },
 ]
+export const SITES_ANALYTICS_MENU: CentralMenuItem[] = [
+  { key: 'pr_portfolio',   label: 'Обзор' },
+  { key: 'sites_overview', label: 'Воронка' },
+  { key: 'sites_priority', label: 'Приоритеты' },
+  { key: 'pr_budget',      label: 'Бюджет' },
+  { key: 'pr_accounting',  label: 'Ждёт учёта' },
+]
+// Общий список — для карты прав и роутера: право на пункт не зависит от того,
+// в каком разделе пункт показан.
+export const SITES_MENU: CentralMenuItem[] = [...SITES_WORK_MENU, ...SITES_ANALYTICS_MENU]
 export const SITES_KEYS = SITES_MENU.map((m) => m.key)
+
+/**
+ * Раздел, которому принадлежит пункт «Проектов».
+ *
+ * Переходы ходят через границу разделов: с «Обзора» (аналитика) кликают в реестр
+ * площадок (работа). Если сменить только `?sub=`, пункт окажется не из текущего
+ * раздела и панель откатится на первый — поэтому вместе с `sub` ставим и `mode`.
+ */
+export function sitesModeForKey(key: string): 'projects' | 'projects_analytics' {
+  return SITES_ANALYTICS_MENU.some((m) => m.key === key) ? 'projects_analytics' : 'projects'
+}
 
 // Анализ зарядных сессий ЭЗС (реальные данные, для energy-профиля).
 // Сгруппировано по смыслу (заголовки групп рисует сайдбар по полю group):

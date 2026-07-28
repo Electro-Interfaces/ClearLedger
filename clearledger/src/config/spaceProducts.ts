@@ -54,7 +54,9 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // «как делали в прошлый раз» при подборе и проектировании новой. Договоров и
     // выручки в этом окне нет: продажами и деньгами занимаются другие рабочие места.
     code: 'projects', route: '/projects', label: 'Проекты',
-    modes: ['projects'], paths: [],
+    // Два раздела: «Работа» (ведение) и «Аналитика» (сводки). В левой рельсе они
+    // стоят рядом с пространством, пункты каждого — во второй панели.
+    modes: ['projects', 'projects_analytics'], paths: [],
     objectTabs: ['passport', 'equipment', 'integrations'],
   },
   {
