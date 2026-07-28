@@ -15,7 +15,7 @@
 """
 from __future__ import annotations
 
-import json
+
 import uuid as _uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -32,6 +32,12 @@ from app.services.ezs_checklist import norm_days
 from app.services.ezs_sites import (
     PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE,
 )
+
+# Норматив стадии прямо в SQL: параметр перед `::` (`:norms::jsonb`) SQLAlchemy
+# в text() не связывает — падает «A value is required for bind parameter».
+# Значения — целые из нашего кода, не пользовательский ввод.
+_NORM_CASE = "(case stage " + " ".join(
+    f"when '{s}' then {norm_days(s)}" for s in STAGE_ORDER) + " else 90 end)"
 
 # ── Документы ──────────────────────────────────────────────────────────────
 DOC_KINDS = [
@@ -577,12 +583,11 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
           -- врали в обе стороны.
           (select count(*) from active
              where stage_since is not null
-               and (current_date - stage_since::date) > (:norms::jsonb ->> stage)::int) as stage_overdue,
+               and (current_date - stage_since::date) > """ + _NORM_CASE + """) as stage_overdue,
           (select count(*) from active
              where coalesce(to_char(last_touch_at, 'YYYY-MM-DD'), '1970-01-01') < :d30) as no_touch_30
     """), {"cid": company_id, "active": STAGE_ORDER, "today": today,
-           "d30": d30, "norms": json.dumps(
-               {s: norm_days(s) for s in STAGE_ORDER})})).mappings().one()
+           "d30": d30})).mappings().one()
 
     attention = [
         {"key": "step_overdue", "label": "Просрочен следующий шаг", "count": int(risks["step_overdue"]),
@@ -634,10 +639,9 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     stuck_by_stage = {r["stage"]: int(r["n"]) for r in (await db.execute(text("""
         select stage, count(*) n from ezs_sites
         where company_id = :cid and stage = any(:active) and stage_since is not null
-          and (current_date - stage_since::date) > (:norms::jsonb ->> stage)::int
+          and (current_date - stage_since::date) > """ + _NORM_CASE + """
         group by 1
-    """), {"cid": company_id, "active": STAGE_ORDER,
-           "norms": json.dumps({s: norm_days(s) for s in STAGE_ORDER})})).mappings().all()}
+    """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()}
 
     funnel = []
     for st in STAGE_ORDER:
