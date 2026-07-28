@@ -544,13 +544,25 @@ _TC_NUM = {"cost", "works_cost", "total_cost", "applicant_term_months"}
 
 
 def _tc_values(vals: dict[str, Any]) -> dict[str, Any]:
-    """Значения карточки присоединения из строки файла (пустые ключи опускаем)."""
+    """Значения карточки присоединения из строки файла (пустые ключи опускаем).
+
+    Строки режем по длине СВОЕЙ колонки: в графе «Мощность силового
+    трансформатора» пишут не «63 кВА», а целый абзац про две подстанции, и
+    вставка падала на `value too long for character varying(80)`.
+    """
+    from app.models import EzsTechConnection
+
     out: dict[str, Any] = {}
     for field, src in _TC_FROM_IMPORT.items():
         v = vals.get(src)
         if v is None or str(v).strip() == "":
             continue
-        parsed = _bool(v) if field in _TC_BOOL else (_num(v) if field in _TC_NUM else _s(v, 200))
+        if field in _TC_BOOL:
+            parsed = _bool(v)
+        elif field in _TC_NUM:
+            parsed = _num(v)
+        else:
+            parsed = _s(v, getattr(EzsTechConnection.__table__.c[field].type, "length", None))
         if parsed is not None:
             out[field] = parsed
     return out

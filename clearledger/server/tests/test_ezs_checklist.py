@@ -6,9 +6,9 @@
   • графа файла перестала распознаваться — значение уедет в `raw` и пропадёт
     из расчётов, как это было со стоимостью техприса до 28.07.2026.
 """
-from app.models import EzsSite
+from app.models import EzsSite, EzsTechConnection
 from app.services.ezs_checklist import TASKS, checklist_meta, gates_by_stage
-from app.services.ezs_sites import ALL_STAGES, _bool, _match_field, _num
+from app.services.ezs_sites import ALL_STAGES, _bool, _match_field, _num, _tc_values
 
 # Заголовки листа «Банк данных ЗУ сводный» — все 55 обязательных граф.
 BANK_HEADERS = [
@@ -91,6 +91,22 @@ def test_гейты_собираются_по_стадиям():
         assert len(keys) == len(set(keys)), stage
     meta = checklist_meta()
     assert sum(len(p["tasks"]) for p in meta["phases"]) == len(TASKS)
+
+
+def test_карточка_тп_из_файла_режется_по_длине_колонки():
+    # В графе про трансформатор пишут абзац — вставка падала на varchar(80).
+    long_text = "две подстанции по 63 кВА, " * 20
+    vals = {"transformer_kva": long_text, "line_type": long_text,
+            "substation_owner": long_text, "tp_reconstruction": "нет",
+            "tu_contract_cost": "43837.22", "applicant_term_months": "24"}
+    tc = _tc_values(vals)
+    for field, v in tc.items():
+        limit = getattr(EzsTechConnection.__table__.c[field].type, "length", None)
+        if limit and isinstance(v, str):
+            assert len(v) <= limit, field
+    assert tc["needs_reconstruction"] is False
+    assert tc["cost"] == 43837.22
+    assert tc["applicant_term_months"] == 24
 
 
 def test_разбор_значений_из_файла():
