@@ -95,6 +95,8 @@ export interface SiteRow {
 export interface GateItem {
   key: string; label: string; manual: boolean; done: boolean; required: boolean
   doc: string | null; equipment?: boolean
+  /** Графы площадки, которыми закрывается пункт — для подсветки в паспорте. */
+  fields?: string[]
   role?: string | null; phase?: string | null; phaseLabel?: string | null
 }
 export interface GateState {

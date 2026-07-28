@@ -24,6 +24,13 @@ RUN test -n "$VITE_API_URL" -o -n "$ALLOW_DEMO" || { \
       echo "ОШИБКА СБОРКИ: VITE_API_URL пуст — фронт уйдёт в демо-режим (Demo / чужая компания-заглушка)." >&2; \
       echo "Боевая сборка: --build-arg VITE_API_URL=https://<домен>" >&2; \
       echo "Демо намеренно:  --build-arg ALLOW_DEMO=1" >&2; exit 1; }
+
+# ORIGIN, а не адрес API: путь `/api` добавляет сам клиент. С `.../api` на конце
+# сборка выглядит рабочей, а логин уходит на `/api/api/auth/login` и падает в 404
+# «Not Found» — так сломался v73 (28.07.2026).
+RUN case "$VITE_API_URL" in */api|*/api/) \
+      echo "ОШИБКА СБОРКИ: VITE_API_URL='$VITE_API_URL' оканчивается на /api." >&2; \
+      echo "Нужен ORIGIN: --build-arg VITE_API_URL=https://<домен> (без /api)." >&2; exit 1;; esac
 RUN npm run build
 
 # ─── runtime ─────────────────────────────────────────────────────────

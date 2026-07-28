@@ -99,6 +99,9 @@ def gate_state(site: EzsSite, stage: str | None = None,
                     "doc": it.get("doc"), "equipment": bool(it.get("equipment")),
                     "required": bool(it.get("required")), "done": done,
                     "role": it.get("role"),
+                    # Какие графы закрывают пункт: карточка подсвечивает их в паспорте.
+                    # Из 55 граф иначе не понять, какие нужны прямо сейчас.
+                    "fields": it.get("fields") or ([it["field"]] if it.get("field") else []),
                     "phase": it.get("phase"),
                     "phaseLabel": PHASE_LABELS_DOC.get(it.get("phase", ""), "")})
     blocking = [i["label"] for i in out if i["required"] and not i["done"]]

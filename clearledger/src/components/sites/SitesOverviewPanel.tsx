@@ -8,6 +8,7 @@
  * «сколько строк», а что именно изменилось в банке.
  */
 import { useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,17 @@ const PHASE_TAB: Record<string, string> = {
 export function SitesOverviewPanel({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
   const [, setTab] = useWorkspaceSubView('sites_overview')
+  const [, setParams] = useSearchParams()
+  // Клик по стадии = открыть банк площадок с этим фильтром. Стадия едет в URL,
+  // чтобы ссылку можно было отправить коллеге, а не пересказывать словами.
+  const goStage = (stage: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('sub', 'sites_list')
+      next.set('stage', stage)
+      return next
+    })
+  }
   const q = useQuery({
     queryKey: ['sites-overview', companyId],
     queryFn: () => getSitesOverview(companyId),
@@ -128,8 +140,14 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
 Этап 1 «Подбор площадки» — стадии проекта по порядку гейтов
               </div>
               <div className="p-3 space-y-2">
+                {/* Строка стадии — вход в работу, а не картинка: клик ведёт в банк
+                    площадок с уже включённым фильтром. Раньше человек видел
+                    «Переговоры 183» и не мог до них добраться. */}
                 {d!.funnel.map((s) => (
-                  <div key={s.stage} className="flex items-center gap-2">
+                  <button key={s.stage} type="button"
+                    onClick={() => goStage(s.stage)}
+                    title={`Открыть банк площадок: ${s.label}`}
+                    className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted/60">
                     <span className="inline-flex items-center gap-1.5 text-xs w-32 shrink-0">
                       <span className={`h-2 w-2 rounded-full ${STAGE_META[s.stage].dot}`} />{s.label}
                     </span>
@@ -138,7 +156,7 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
                       <div className={`h-full ${STAGE_META[s.stage].dot}`} style={{ width: `${(s.count / maxFunnel) * 100}%` }} />
                     </div>
                     <span className="font-mono text-xs text-muted-foreground w-16 text-right">{nf0.format(s.count)}</span>
-                  </div>
+                  </button>
                 ))}
                 <div className="flex items-center gap-3 pt-1 border-t text-[11px] text-muted-foreground">
                   <span className="inline-flex items-center gap-1.5">

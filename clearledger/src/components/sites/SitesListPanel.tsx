@@ -6,6 +6,7 @@
  * отвечает на вопрос «что у нас есть», но не на «что делать и кому».
  */
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -35,7 +36,13 @@ function StageBadge({ stage, label }: { stage: SiteStage; label: string }) {
 }
 
 export function SitesListPanel({ companyId }: { companyId: string }) {
-  const [stage, setStage] = useState<'' | SiteStage | 'active'>('')
+  // Открываем работой, а не архивом: из 1 019 площадок 716 отклонены, и раздел
+  // встречал человека мёртвыми строками с пустыми колонками — «система не ведётся».
+  // Архив никуда не делся: он первым же переключением того же селекта.
+  // Стадия из ссылки (`?stage=`) важнее умолчания — по ней сюда приходят из воронки.
+  const [params] = useSearchParams()
+  const [stage, setStage] = useState<'' | SiteStage | 'active'>(
+    (params.get('stage') as SiteStage | 'active' | null) ?? 'active')
   const [region, setRegion] = useState('')
   const [ownerId, setOwnerId] = useState('')
   const [overdue, setOverdue] = useState(false)

@@ -95,9 +95,15 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
   const [override, setOverride] = useState(false)
   const [blocked, setBlocked] = useState<string[] | null>(null)
   const [mayOverride, setMayOverride] = useState(false)
+  // Обычный ход — вперёд по цепочке; всё остальное открывается по запросу.
+  const [otherStage, setOtherStage] = useState(false)
+  const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
 
+  // Стадию передаём аргументом: кнопка «Перевести в …» не может ждать, пока
+  // setStage доедет до следующего рендера, иначе уйдёт предыдущее значение.
   const mMove = useMutation({
-    mutationFn: () => moveSiteStage(companyId, site.id, stage, reason || undefined, override),
+    mutationFn: (to?: SiteStage) =>
+      moveSiteStage(companyId, site.id, to ?? stage, reason || undefined, override),
     onSuccess: async (r) => {
       setMayOverride(!!r.mayOverride)
       if (!r.moved && r.blocked) {
@@ -177,28 +183,64 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         </div>
       </section>
 
-      {/* Перевод стадии */}
+      {/* Перевод стадии.
+          В девяти случаях из десяти нужен один и тот же шаг — следующая стадия по
+          цепочке. Раньше её выбирали в списке из одиннадцати значений, где рядом
+          лежали «Заморожен» и «Архив»: рабочее действие и отказ от проекта выглядели
+          одинаково. Теперь вперёд — кнопкой, а прыжок через стадию, пауза и отказ —
+          отдельно, по явному запросу. */}
       <section className="rounded-lg border border-border p-3 space-y-2">
         <div className="text-xs font-semibold">Стадия</div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={stage} onValueChange={(v) => setStage(v as SiteStage)}>
-            <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {FUNNEL_STAGES.map((st) => (
-                <SelectItem key={st} value={st} className="text-xs">{STAGE_META[st].label}</SelectItem>
-              ))}
-              <SelectItem value="on_hold" className="text-xs">{STAGE_META.on_hold.label}</SelectItem>
-              <SelectItem value="archive" className="text-xs">{STAGE_META.archive.label}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input value={reason} onChange={(e) => setReason(e.target.value)}
-            placeholder={stage === 'archive' ? 'Причина отклонения (обязательна по смыслу)' : 'Комментарий к переходу'}
-            className="h-8 text-xs flex-1 min-w-[220px]" />
-          <Button size="sm" className="h-8 text-xs" disabled={stage === site.stage || mMove.isPending}
-            onClick={() => mMove.mutate()}>
-            {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Перевести
-          </Button>
-        </div>
+        {!otherStage && nextStage ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" className="h-8 text-xs"
+              disabled={mMove.isPending}
+              onClick={() => { setStage(nextStage); mMove.mutate(nextStage) }}>
+              {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+              {/* Без предлога: «перевести в «Проработка»» требует падежа, которого
+                  у названия стадии нет — а склонять названия справочника нельзя. */}
+              Дальше: {STAGE_META[nextStage].label}
+            </Button>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder="Комментарий к переходу (необязательно)"
+              className="h-8 text-xs flex-1 min-w-[220px]" />
+            <button type="button" onClick={() => setOtherStage(true)}
+              className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+              другая стадия, пауза или отказ
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={stage} onValueChange={(v) => setStage(v as SiteStage)}>
+              <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {FUNNEL_STAGES.map((st) => (
+                  <SelectItem key={st} value={st} className="text-xs">{STAGE_META[st].label}</SelectItem>
+                ))}
+                {/* Пауза и отказ — не продолжение воронки: отделяем чертой и подписью. */}
+                <div className="mt-1 border-t px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  выход из работы
+                </div>
+                <SelectItem value="on_hold" className="text-xs">{STAGE_META.on_hold.label}</SelectItem>
+                <SelectItem value="archive" className="text-xs">{STAGE_META.archive.label}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder={stage === 'archive' ? 'Причина отклонения (обязательна по смыслу)' : 'Комментарий к переходу'}
+              className="h-8 text-xs flex-1 min-w-[220px]" />
+            <Button size="sm" variant={stage === 'archive' ? 'destructive' : 'default'}
+              className="h-8 text-xs" disabled={stage === site.stage || mMove.isPending}
+              onClick={() => mMove.mutate(undefined)}>
+              {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Перевести
+            </Button>
+            {nextStage && (
+              <button type="button" onClick={() => { setOtherStage(false); setStage(site.stage) }}
+                className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                вернуться к обычному ходу
+              </button>
+            )}
+          </div>
+        )}
         {stage !== site.stage && gate.blocking.length > 0 && (
           <div className="flex items-start gap-1.5 text-[11px] text-red-600 dark:text-red-400">
             <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -421,11 +463,26 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
   }
   const manual = useMemo(() => new Set(site.manualFields ?? []), [site.manualFields])
 
+  // Графы, которых ждёт гейт текущей стадии: по ним видно, что заполнять сейчас,
+  // а не искать нужное среди 55 полей паспорта.
+  const wanted = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const i of site.gate?.items ?? []) {
+      if (i.done) continue
+      for (const f of i.fields ?? []) map.set(f, i.key)
+    }
+    return map
+  }, [site.gate])
+  const wantedCount = wanted.size
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-muted-foreground">
           Изменённые поля перестают обновляться из файла — в них истина ваша, а не выгрузки.
+          {wantedCount > 0 && (
+            <> {' '}Подсвечено то, чего ждёт стадия «{site.stageLabel}»: {wantedCount} графы.</>
+          )}
         </p>
         <Button size="sm" className="h-8 text-xs" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
           {m.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
@@ -439,12 +496,21 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
           <div className="p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
             {g.fields.map((f) => {
               const key = String(f.k)
-              const isManual = manual.has(API_FIELD[key] ?? key)
+              const apiKey = API_FIELD[key] ?? key
+              const isManual = manual.has(apiKey)
+              const needFor = wanted.get(apiKey)
               return (
-                <div key={key} className={f.type === 'area' ? 'md:col-span-3' : ''}>
+                <div key={key} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
+                  needFor ? '-mx-1 rounded-md bg-amber-400/10 px-1 py-0.5 ring-1 ring-amber-400/40' : ''}`}>
                   <Label>
                     {f.label}
                     {isManual && <span className="ml-1 text-[9px] text-primary" title="Ведётся вручную, импорт не перезапишет">✎</span>}
+                    {needFor && (
+                      <span className="ml-1.5 rounded bg-amber-400/20 px-1 text-[9px] text-amber-700 dark:text-amber-400"
+                        title={`Закрывает пункт ${needFor} чек-листа текущей стадии`}>
+                        нужно для {needFor}
+                      </span>
+                    )}
                   </Label>
                   {f.type === 'area' ? (
                     <Textarea rows={2} className="text-xs min-h-[46px]" value={val(key)}
@@ -816,6 +882,11 @@ export function DocsTab({ site, companyId, onDone }: {
   }
 
   const rows = docs.data ?? []
+  // Какой документ ждёт гейт именно сейчас — по незакрытым пунктам текущей стадии.
+  const docGateHint = (site.gate?.items ?? [])
+    .filter((i) => !i.done && i.doc)
+    .map((i) => i.label)
+    .join('; ')
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -841,7 +912,21 @@ export function DocsTab({ site, companyId, onDone }: {
       {docs.isLoading ? (
         <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : rows.length === 0 ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">Документов пока нет.</div>
+        // Пустая вкладка обязана сказать, чем её наполнить: «Документов пока нет»
+        // не подсказывает ни какой документ нужен сейчас, ни что он закроет.
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          <div>Документов пока нет.</div>
+          {docGateHint ? (
+            <div className="mt-1 text-xs">
+              На стадии «{site.stageLabel}» ждём: {docGateHint}. Выберите тип слева и приложите файл —
+              пункт гейта закроется сам.
+            </div>
+          ) : (
+            <div className="mt-1 text-xs">
+              Сюда кладут договор на землю, ТУ, акт приёмки — файлы, которыми закрываются пункты гейта.
+            </div>
+          )}
+        </div>
       ) : (
         <div className="rounded-lg border border-border divide-y divide-border/40">
           {rows.map((d) => (

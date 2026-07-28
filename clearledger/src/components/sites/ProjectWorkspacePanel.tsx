@@ -9,13 +9,15 @@
  * возвращают на то же место, а переход из любого реестра — это просто ссылка.
  * Пока проект не выбран, экран показывает поиск и последние тронутые проекты.
  */
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Loader2, ArrowLeft, MapPin, User as UserIcon, CalendarClock } from 'lucide-react'
-import { getSite, STAGE_META, PHASE_META } from '@/services/sitesService'
+import {
+  getSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail,
+} from '@/services/sitesService'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
@@ -37,17 +39,29 @@ export function ProjectWorkspacePanel({ companyId }: { companyId: string }) {
   // Пункт один: пока проект не выбран — полноценный реестр со всеми фильтрами,
   // выбран — рабочий экран. Отдельный «список» и отдельный «проект» в меню
   // выглядели двумя разными разделами, хотя это один и тот же объект.
+  // Вкладка тоже живёт в URL: по ссылке «открыть присоединение» человек попадает
+  // на нужную вкладку, а правая панель «Инфо» знает, какой экран сейчас открыт.
+  const tab = (params.get('ptab') as ProjectTabKey | null) ?? 'roadmap'
+  const setTab = (k: ProjectTabKey) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('ptab', k)
+      return next
+    }, { replace: true })
+  }
+
   if (!projectId) return <ProjectsListPanel companyId={companyId} />
-  return <ProjectWorkspace companyId={companyId} id={projectId} onBack={() => setProject(null)} />
+  return <ProjectWorkspace companyId={companyId} id={projectId} tab={tab} onTab={setTab}
+    onBack={() => setProject(null)} />
 }
 
 /* ── Рабочий экран проекта ──────────────────────────────────────────────── */
 
-function ProjectWorkspace({ companyId, id, onBack }: {
-  companyId: string; id: string; onBack: () => void
+function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
+  companyId: string; id: string; tab: ProjectTabKey
+  onTab: (k: ProjectTabKey) => void; onBack: () => void
 }) {
   const qc = useQueryClient()
-  const [tab, setTab] = useState<ProjectTabKey>('roadmap')
   const q = useQuery({ queryKey: ['site-detail', companyId, id], queryFn: () => getSite(companyId, id) })
   const s = q.data
 
@@ -65,6 +79,20 @@ function ProjectWorkspace({ companyId, id, onBack }: {
     () => !!s?.nextActionDue && s.nextActionDue < today() && s.stage !== 'archive',
     [s],
   )
+
+  // Вкладки с незакрытыми пунктами гейта: пункт-документ ждёт «Документы»,
+  // пункт-поставка — «Оборудование», ручной и графовый — «Работу» и «Паспорт».
+  const pending = useMemo(() => {
+    const set = new Set<ProjectTabKey>()
+    for (const i of s?.gate?.items ?? []) {
+      if (i.done) continue
+      if (i.doc) set.add('docs')
+      else if (i.equipment) set.add('equipment')
+      else if (i.manual) set.add('work')
+      else set.add('passport')
+    }
+    return set
+  }, [s])
 
   if (q.isLoading || !s) {
     return <div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -116,12 +144,19 @@ function ProjectWorkspace({ companyId, id, onBack }: {
       <ProjectPhaseStrip current={s.phase ?? undefined}
         note="Подбор площадки — первый этап этого же проекта, дальше земля, реализация и ввод." />
 
-      {/* Вкладки — тот же набор, что в быстром просмотре */}
+      <NextStepBar site={s} onGoTab={onTab} />
+
+      {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
+          девять одинаковых кнопок не подсказывают, с какой начинать. */}
       <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
         {PROJECT_TABS.map((t) => (
-          <button key={t.k} type="button" onClick={() => setTab(t.k)}
-            className={`px-3 py-1.5 text-xs rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+          <button key={t.k} type="button" onClick={() => onTab(t.k)}
+            title={pending.has(t.k) ? 'Здесь есть незакрытые пункты текущей стадии' : undefined}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
             {t.label}
+            {pending.has(t.k) && (
+              <span className={`h-1.5 w-1.5 rounded-full ${tab === t.k ? 'bg-primary-foreground/80' : 'bg-amber-500'}`} />
+            )}
           </button>
         ))}
       </div>
@@ -131,6 +166,71 @@ function ProjectWorkspace({ companyId, id, onBack }: {
           <ProjectTabContent tab={tab} site={s} companyId={companyId} onDone={refresh} />
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/* ── «Что сейчас и что дальше» ──────────────────────────────────────────── */
+
+// Куда идти закрывать пункт: гейт называет задачу, но не место, где её закрывают.
+// Человек читал «держит: Акт о техприсоединении» и искал, куда его положить.
+const GATE_TAB: Record<string, ProjectTabKey> = {
+  doc: 'docs', equipment: 'equipment', manual: 'work',
+}
+
+/**
+ * Строка-навигатор: стадия, что осталось закрыть и куда за этим идти.
+ *
+ * Полоса этапов отвечает «где я», а этот блок — «что делать сейчас». Без него
+ * человек на девятой стадии из одиннадцати видел набор вкладок и не понимал,
+ * с какой начинать: чек-лист лежал на вкладке «Работа», а держащий пункт
+ * закрывался на «Документах».
+ */
+function NextStepBar({ site, onGoTab }: {
+  site: SiteDetail; onGoTab: (k: ProjectTabKey) => void
+}) {
+  const gate = site.gate
+  if (!gate) return null
+  const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
+  const nextLabel = nextStage ? STAGE_META[nextStage]?.label : null
+  const open = (gate.items ?? []).filter((i) => !i.done)
+  const blocking = open.filter((i) => i.required)
+  const lead = blocking[0] ?? open[0]
+  const leadTab = lead ? GATE_TAB[lead.doc ? 'doc' : lead.equipment ? 'equipment' : lead.manual ? 'manual' : 'field'] : undefined
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium">Сейчас: {site.stageLabel}</span>
+        {gate.canAdvance ? (
+          <span className="text-emerald-600 dark:text-emerald-400">
+            всё обязательное закрыто{nextLabel ? ` — дальше «${nextLabel}»` : ''}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">
+            осталось закрыть <span className="text-foreground">{blocking.length || open.length}</span> из {gate.total}
+            {nextLabel ? `, дальше «${nextLabel}»` : ''}
+          </span>
+        )}
+      </div>
+      {lead && (
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground">
+          <span>Ближайший шаг: {lead.label}</span>
+          <button type="button"
+            onClick={() => onGoTab(leadTab ?? 'work')}
+            className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:border-primary/60 hover:text-foreground">
+            {lead.doc ? 'Приложить документ'
+              : lead.equipment ? 'Открыть оборудование'
+              : lead.manual ? 'Отметить в чек-листе' : 'Заполнить в паспорте'}
+          </button>
+          {!lead.manual && !lead.doc && !lead.equipment && (
+            <button type="button" onClick={() => onGoTab('passport')}
+              className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:border-primary/60 hover:text-foreground">
+              Открыть паспорт
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

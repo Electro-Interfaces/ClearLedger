@@ -162,6 +162,10 @@ async def context(db: AsyncSession, company_id, *, app_code: str,
     продукта по общему дереву и честно помечаем это как «ничего своего нет».
     """
     profile = await _profile(db, company_id)
+    # Ключ места бывает двухуровневым: «pr_project:work» — раздел рабочей области
+    # и вкладка внутри него. Отдаём и статью вкладки, и статью раздела: человек на
+    # вкладке «Работа» хочет знать и про неё, и про карточку проекта целиком.
+    keys = [k for k in {(section_key or ""), (section_key or "").split(":")[0]} if k]
     rows = (await db.execute(
         select(InfoArticle, InfoBinding.section_key, InfoBinding.weight)
         .join(InfoBinding, InfoBinding.article_id == InfoArticle.id)
@@ -169,7 +173,7 @@ async def context(db: AsyncSession, company_id, *, app_code: str,
                InfoArticle.status == "published",
                InfoBinding.app_code == app_code,
                or_(InfoBinding.section_key.is_(None),
-                   InfoBinding.section_key == (section_key or "")))
+                   InfoBinding.section_key.in_(keys or [""])))
         .order_by(InfoBinding.section_key.is_(None),   # точное совпадение раздела — выше
                   InfoBinding.weight.desc(), InfoArticle.sort_order)
         .limit(limit))).all()
