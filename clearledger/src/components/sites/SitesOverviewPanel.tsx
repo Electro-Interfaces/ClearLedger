@@ -95,14 +95,14 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold">Воронка</h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Первый этап проекта: от лида до решения строить. Дальше проект уходит в оформление
             земли и реализацию — весь путь виден в карточке проекта, вкладка «Схема».
           </p>
         </div>
         <div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" hidden onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
-          <Button variant="outline" size="sm" className="h-8 text-xs" disabled={busy} onClick={() => fileRef.current?.click()}>
+          <Button variant="outline" size="sm" className="h-8 text-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
             {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
             Импорт «Банк данных ЗУ» (xlsx)
           </Button>
@@ -122,7 +122,7 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
         } : undefined}
         note="Это один и тот же путь проекта. Ниже — первый этап в деталях по стадиям." />
 
-      {err && <div className="rounded-lg border border-red-400/50 bg-red-400/5 px-3 py-2 text-xs text-red-600 dark:text-red-400">{err}</div>}
+      {err && <div className="rounded-lg border border-red-400/50 bg-red-400/5 px-3 py-2 text-sm text-red-600 dark:text-red-400">{err}</div>}
       {report && <ImportReport report={report} pending={!!pending} busy={busy} onConfirm={doImport} />}
 
       {q.isLoading ? (
@@ -146,7 +146,7 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
 
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
 Этап 1 «Подбор площадки» — стадии проекта по порядку гейтов
               </div>
               <div className="p-3 space-y-2">
@@ -158,17 +158,17 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
                     onClick={() => goStage(s.stage)}
                     title={`Открыть банк площадок: ${s.label}`}
                     className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted/60">
-                    <span className="inline-flex items-center gap-1.5 text-xs w-32 shrink-0">
+                    <span className="inline-flex items-center gap-1.5 text-sm w-32 shrink-0">
                       <span className={`h-2 w-2 rounded-full ${STAGE_META[s.stage].dot}`} />{s.label}
                     </span>
-                    <span className="text-[10px] text-muted-foreground w-44 shrink-0 truncate hidden md:block">{s.hint}</span>
+                    <span className="text-xs text-muted-foreground w-44 shrink-0 truncate hidden md:block">{s.hint}</span>
                     <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                       <div className={`h-full ${STAGE_META[s.stage].dot}`} style={{ width: `${(s.count / maxFunnel) * 100}%` }} />
                     </div>
-                    <span className="font-mono text-xs text-muted-foreground w-16 text-right">{nf0.format(s.count)}</span>
+                    <span className="font-mono text-sm text-muted-foreground w-16 text-right">{nf0.format(s.count)}</span>
                   </button>
                 ))}
-                <div className="flex items-center gap-3 pt-1 border-t text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-3 pt-1 border-t text-xs text-muted-foreground">
                   <span className="inline-flex items-center gap-1.5">
                     <span className={`h-2 w-2 rounded-full ${STAGE_META.on_hold.dot}`} />Заморожено: {nf0.format(d!.onHold)}
                   </span>
@@ -189,10 +189,10 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
 
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
                 Управляемость активной части ({nf0.format(active)} площадок)
               </div>
-              <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <Risk label="Без ответственного" n={d!.work.noOwner} total={active} />
                 <Risk label="Без следующего шага" n={d!.work.noNextAction} total={active} />
                 <Risk label="Срок просрочен" n={d!.work.overdue} total={active} />
@@ -203,10 +203,10 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
 
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
                 Чем заполнен банк
               </div>
-              <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <Fill label="Координаты" n={d!.quality.withCoords} total={total} />
                 <Fill label="Регион по справочнику сети" n={d!.quality.regionMatched} total={total} />
                 <Fill label="Кадастровый номер" n={d!.quality.withCadastral} total={total} />
@@ -219,17 +219,17 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
 
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-center gap-1">
+              <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40 flex items-center gap-1">
                 <MapPin className="h-3.5 w-3.5" />Топ-регионы по числу площадок
               </div>
               <div className="p-3 space-y-1.5">
                 {d!.byRegion.map((r) => (
                   <div key={r.region} className="flex items-center gap-2">
-                    <span className="text-xs w-48 shrink-0 truncate" title={r.region}>{r.region}</span>
+                    <span className="text-sm w-48 shrink-0 truncate" title={r.region}>{r.region}</span>
                     <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
                       <div className="h-full bg-primary/60" style={{ width: `${(r.count / maxRegion) * 100}%` }} />
                     </div>
-                    <span className="font-mono text-xs text-muted-foreground w-10 text-right">{nf0.format(r.count)}</span>
+                    <span className="font-mono text-sm text-muted-foreground w-10 text-right">{nf0.format(r.count)}</span>
                   </div>
                 ))}
               </div>
@@ -259,12 +259,12 @@ function GapsCard({ companyId }: { companyId: string }) {
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+        <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
           Разрывы покрытия — сеть и пайплайн не совпадают
         </div>
-        <div className="p-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+        <div className="p-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
               Сеть есть — площадок нет ({d.networkNoPipeline.length})
             </div>
             {noPipe.length === 0 ? <div className="text-muted-foreground">—</div> : noPipe.map((r) => (
@@ -275,7 +275,7 @@ function GapsCard({ companyId }: { companyId: string }) {
             ))}
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
               Площадки есть — сети нет ({d.pipelineNoNetwork.length})
             </div>
             {noNet.length === 0 ? <div className="text-muted-foreground">—</div> : noNet.map((r) => (
@@ -286,7 +286,7 @@ function GapsCard({ companyId }: { companyId: string }) {
             ))}
           </div>
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
               Вплотную к своей станции ({d.cannibalization.length})
             </div>
             {d.cannibalization.length === 0 ? <div className="text-muted-foreground">—</div> : (
@@ -299,7 +299,7 @@ function GapsCard({ companyId }: { companyId: string }) {
                     <span className="font-mono text-amber-600 dark:text-amber-400">{c.km} км</span>
                   </div>
                 ))}
-                <div className="text-[10px] text-muted-foreground mt-1">
+                <div className="text-xs text-muted-foreground mt-1">
                   Ближе {d.thresholds.cannibalKm * 1000} м — площадка скорее делит трафик, чем добавляет покрытие.
                 </div>
               </>
@@ -351,7 +351,7 @@ function ImportReport({ report, pending, busy, onConfirm }: {
   const [details, setDetails] = useState(false)
   const warn = report.fileDuplicates.length + report.nearConflicts.length + report.skippedNoKey
   return (
-    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs space-y-2">
+    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm space-y-2">
       <div className="font-medium text-foreground">
         {report.dryRun ? 'Предпросмотр импорта (данные пока не записаны)' : 'Импорт выполнен ✓'}
       </div>
@@ -378,7 +378,7 @@ function ImportReport({ report, pending, busy, onConfirm }: {
             <span>Требует внимания: {warn}</span>
             <span className="text-muted-foreground">{details ? '▾' : '▸'}</span>
           </button>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             {report.fileDuplicates.length > 0 && <div>дублей в файле (две строки на одну площадку): {report.fileDuplicates.length}</div>}
             {report.nearConflicts.length > 0 && <div>координаты в 50 м от другой площадки, но адрес иной: {report.nearConflicts.length}</div>}
             {report.skippedNoKey > 0 && <div>строк пропущено — нет ни адреса, ни координат, ни собственника: {report.skippedNoKey}</div>}
@@ -386,13 +386,13 @@ function ImportReport({ report, pending, busy, onConfirm }: {
           {details && (
             <div className="pt-1 space-y-1 max-h-56 overflow-y-auto">
               {report.fileDuplicates.slice(0, 30).map((x, i) => (
-                <div key={`d${i}`} className="text-[11px]">
+                <div key={`d${i}`} className="text-xs">
                   <span className="text-muted-foreground">[{x.sheet}:{x.row}]</span> {x.address || '—'}
                   <span className="text-muted-foreground"> ← совпала с «{x.first || '—'}»</span>
                 </div>
               ))}
               {report.nearConflicts.slice(0, 30).map((x, i) => (
-                <div key={`n${i}`} className="text-[11px]">
+                <div key={`n${i}`} className="text-xs">
                   <span className="text-muted-foreground">[{x.sheet}:{x.row}]</span> {x.address || '—'}
                   <span className="text-muted-foreground"> ≈ 50 м от «{x.near || '—'}»</span>
                 </div>
@@ -403,7 +403,7 @@ function ImportReport({ report, pending, busy, onConfirm }: {
       )}
 
       {report.regionsUnmatched.length > 0 && (
-        <div className="text-[11px] text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           Регионы вне справочника сети (там ещё нет наших станций):{' '}
           {report.regionsUnmatched.slice(0, 8).map((r) => `${r.value} (${r.count})`).join(', ')}
           {report.regionsUnmatched.length > 8 && ` и ещё ${report.regionsUnmatched.length - 8}`}
@@ -412,8 +412,8 @@ function ImportReport({ report, pending, busy, onConfirm }: {
 
       {report.dryRun && pending && (
         <div className="pt-1 flex items-center gap-2">
-          <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={onConfirm}>Загрузить в банк</Button>
-          <span className="text-[11px] text-muted-foreground">
+          <Button size="sm" className="h-8 text-sm" disabled={busy} onClick={onConfirm}>Загрузить в банк</Button>
+          <span className="text-xs text-muted-foreground">
             Файл дополнит банк: известные площадки обновятся, ручные правки сохранятся.
           </span>
         </div>

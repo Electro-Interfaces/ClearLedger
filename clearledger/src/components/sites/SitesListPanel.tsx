@@ -29,7 +29,7 @@ const today = () => new Date().toISOString().slice(0, 10)
 function StageBadge({ stage, label }: { stage: SiteStage; label: string }) {
   const meta = STAGE_META[stage]
   return (
-    <span className={`text-[11px] rounded border px-1.5 py-0.5 ${meta?.cls ?? ''}`} title={meta?.hint}>
+    <span className={`text-xs rounded border px-1.5 py-0.5 ${meta?.cls ?? ''}`} title={meta?.hint}>
       {label}
     </span>
   )
@@ -74,7 +74,7 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-3">
       <div>
         <h2 className="text-base font-semibold">Площадки</h2>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Первый этап проекта — где строить. Каждая площадка это проект на ранней стадии:
           клик открывает его рабочий экран, Alt+клик — быстрый просмотр.
         </p>
@@ -86,56 +86,56 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
         {/* Стадий десять — таблице хватает селекта; счётчики берём из обзора,
             чтобы не гадать, где сейчас работа. */}
         <Select value={stage || '__all__'} onValueChange={(v) => { setStage(v === '__all__' ? '' : v as SiteStage | 'active'); reset() }}>
-          <SelectTrigger className="h-8 w-[210px] text-xs"><SelectValue placeholder="Все стадии" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[210px] text-sm"><SelectValue placeholder="Все стадии" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__" className="text-xs">Все стадии ({nf0.format(ov.data?.total ?? 0)})</SelectItem>
-            <SelectItem value="active" className="text-xs">В работе — активные ({nf0.format(ov.data?.active ?? 0)})</SelectItem>
+            <SelectItem value="__all__" className="text-sm">Все стадии ({nf0.format(ov.data?.total ?? 0)})</SelectItem>
+            <SelectItem value="active" className="text-sm">В работе — активные ({nf0.format(ov.data?.active ?? 0)})</SelectItem>
             {FUNNEL_STAGES.map((s) => (
-              <SelectItem key={s} value={s} className="text-xs">
+              <SelectItem key={s} value={s} className="text-sm">
                 {STAGE_META[s].label} ({nf0.format(stageCount(s))})
               </SelectItem>
             ))}
-            <SelectItem value="on_hold" className="text-xs">{STAGE_META.on_hold.label} ({nf0.format(ov.data?.onHold ?? 0)})</SelectItem>
-            <SelectItem value="archive" className="text-xs">{STAGE_META.archive.label} ({nf0.format(ov.data?.archived ?? 0)})</SelectItem>
+            <SelectItem value="on_hold" className="text-sm">{STAGE_META.on_hold.label} ({nf0.format(ov.data?.onHold ?? 0)})</SelectItem>
+            <SelectItem value="archive" className="text-sm">{STAGE_META.archive.label} ({nf0.format(ov.data?.archived ?? 0)})</SelectItem>
           </SelectContent>
         </Select>
 
         <Select value={region || '__all__'} onValueChange={(v) => { setRegion(v === '__all__' ? '' : v); reset() }}>
-          <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue placeholder="Все регионы" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[190px] text-sm"><SelectValue placeholder="Все регионы" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__" className="text-xs">Все регионы</SelectItem>
+            <SelectItem value="__all__" className="text-sm">Все регионы</SelectItem>
             {(ov.data?.byRegion ?? []).map((r) => (
-              <SelectItem key={r.region} value={r.region} className="text-xs">{r.region} ({r.count})</SelectItem>
+              <SelectItem key={r.region} value={r.region} className="text-sm">{r.region} ({r.count})</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
         <Select value={ownerId || '__all__'} onValueChange={(v) => { setOwnerId(v === '__all__' ? '' : v); reset() }}>
-          <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue placeholder="Любой ответственный" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[180px] text-sm"><SelectValue placeholder="Любой ответственный" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__" className="text-xs">Любой ответственный</SelectItem>
+            <SelectItem value="__all__" className="text-sm">Любой ответственный</SelectItem>
             {(members.data ?? []).map((m) => (
-              <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+              <SelectItem key={m.id} value={m.id} className="text-sm">{m.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
         <button type="button" onClick={() => { setOverdue((v) => !v); reset() }}
-          className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${overdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${overdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Просрочено{ov.data?.work ? ` (${ov.data.work.overdue})` : ''}
         </button>
 
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }} placeholder="Адрес, город, собственник"
-            className="h-8 w-[220px] pl-7 pr-7 text-xs" />
+            className="h-8 w-[220px] pl-7 pr-7 text-sm" />
           {search && <button type="button" onClick={() => { setSearch(''); reset() }} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
         </div>
 
-        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCreating(true)}>
+        <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => setCreating(true)}>
           <Plus className="h-3.5 w-3.5 mr-1" />Новый проект
         </Button>
-        <span className="text-[11px] text-muted-foreground ml-auto">{q.isLoading ? '…' : `${nf0.format(total)} площадок`}</span>
+        <span className="text-xs text-muted-foreground ml-auto">{q.isLoading ? '…' : `${nf0.format(total)} площадок`}</span>
       </div>
 
       <Card>
@@ -145,7 +145,7 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
           ) : total === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">Ничего не найдено</div>
           ) : (
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/20 text-muted-foreground">
                   <th className="text-left p-2 font-medium">Проект</th>
@@ -186,10 +186,10 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
       </Card>
 
       {pages > 1 && (
-        <div className="flex items-center justify-end gap-2 text-xs">
-          <Button variant="outline" size="sm" className="h-7 px-2" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
+        <div className="flex items-center justify-end gap-2 text-sm">
+          <Button variant="outline" size="sm" className="h-8 px-2" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
           <span className="text-muted-foreground">стр. {page} из {pages}</span>
-          <Button variant="outline" size="sm" className="h-7 px-2" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
+          <Button variant="outline" size="sm" className="h-8 px-2" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
         </div>
       )}
 

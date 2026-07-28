@@ -43,8 +43,8 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
 
   const field = (k: keyof typeof form, label: string, ph?: string) => (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">{label}</div>
-      <Input className="h-8 text-xs" value={form[k]} placeholder={ph}
+      <div className="text-xs uppercase tracking-wide text-muted-foreground mb-0.5">{label}</div>
+      <Input className="h-8 text-sm" value={form[k]} placeholder={ph}
         onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} />
     </div>
   )
@@ -54,7 +54,7 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
       <DialogContent className="sm:max-w-lg w-[92vw]">
         <DialogHeader><DialogTitle className="text-base">Новый проект</DialogTitle></DialogHeader>
         <div className="space-y-2">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Заводится стадией «Лид» и получает номер. Право, мощность, экономика и документы
             добавляются в карточке по мере проработки — гейт не пустит дальше без них.
           </p>
@@ -67,13 +67,13 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
           {field('install_place', 'Место установки', 'ТЦ «Гринвич», парковка')}
           {field('owner', 'Собственник', 'если известен')}
           {!canSave && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Нужен адрес или место установки — иначе проект не отличить от соседнего.
             </p>
           )}
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>Отмена</Button>
-            <Button size="sm" className="h-8 text-xs" disabled={!canSave || busy} onClick={save}>
+            <Button variant="outline" size="sm" className="h-8 text-sm" onClick={onClose}>Отмена</Button>
+            <Button size="sm" className="h-8 text-sm" disabled={!canSave || busy} onClick={save}>
               {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Создать
             </Button>
           </div>

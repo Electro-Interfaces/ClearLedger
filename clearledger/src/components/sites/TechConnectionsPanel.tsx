@@ -38,14 +38,14 @@ function GridOperators({ companyId }: { companyId: string }) {
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
           <span>По сетевым организациям</span>
           <span className="font-mono text-muted-foreground">
             {d.withOperator} из {d.total} с названной сетевой
           </span>
         </div>
         {d.hint ? (
-          <div className="p-3 text-xs text-muted-foreground">
+          <div className="p-3 text-sm text-muted-foreground">
             {d.hint}
             {d.substationOwners.length > 0 && (
               <div className="mt-2">
@@ -55,7 +55,7 @@ function GridOperators({ companyId }: { companyId: string }) {
             )}
           </div>
         ) : (
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="text-muted-foreground border-b">
                 <th className="text-left px-3 py-1.5 font-medium">Сетевая организация</th>
@@ -118,7 +118,7 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-3">
       <div>
         <h2 className="text-base font-semibold">Технологическое присоединение</h2>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Часть этапа реализации, свод по всем проектам: заявка → ТУ → договор → мероприятия
           сетевой. Именно этот срок определяет, когда станция выйдет в сеть. Строка ведёт в проект.
         </p>
@@ -146,25 +146,25 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
               <button type="button" onClick={() => setStatus('')}
-                className={`px-2 py-1 text-xs rounded-[5px] ${status === '' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                className={`px-2 py-1 text-sm rounded-[5px] ${status === '' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                 Все
               </button>
               {d.byStatus.filter((s) => s.count > 0).map((s) => (
                 <button key={s.key} type="button" onClick={() => setStatus(s.key)}
-                  className={`px-2 py-1 text-xs rounded-[5px] ${status === s.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                  className={`px-2 py-1 text-sm rounded-[5px] ${status === s.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                   {s.label} ({s.count})
                 </button>
               ))}
             </div>
             <button type="button" onClick={() => setOnlyOverdue((v) => !v)}
-              className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${onlyOverdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${onlyOverdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
               Только просроченные
             </button>
           </div>
 
           <Card>
             <CardContent className="p-0 overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/20 text-muted-foreground">
                     <th className="text-left p-2 font-medium">Проект</th>
@@ -186,7 +186,7 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
                       <td className="p-2 max-w-[240px] truncate" title={t.address ?? ''}>
                         {t.address ?? t.city ?? '—'}
                         {t.stage && (
-                          <span className={`ml-1 text-[10px] rounded border px-1 py-0.5 ${STAGE_META[t.stage as SiteStage]?.cls ?? ''}`}>
+                          <span className={`ml-1 text-xs rounded border px-1 py-0.5 ${STAGE_META[t.stage as SiteStage]?.cls ?? ''}`}>
                             {t.stageLabel}
                           </span>
                         )}

@@ -66,26 +66,26 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
         <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
           {([['stage', 'По стадии'], ['quadrant', 'По решению']] as const).map(([k, label]) => (
             <button key={k} type="button" onClick={() => setColorBy(k)}
-              className={`px-2.5 py-1 text-xs rounded-[5px] transition-colors ${colorBy === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              className={`px-2.5 py-1 text-sm rounded-[5px] transition-colors ${colorBy === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
               {label}
             </button>
           ))}
         </div>
         <button type="button" onClick={() => setShowNetwork((v) => !v)}
-          className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${showNetwork ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${showNetwork ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Станции сети{stations.length ? ` (${stations.length})` : ''}
         </button>
         <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
           <button type="button" onClick={() => setStage('')}
-            className={`px-2 py-1 text-xs rounded-[5px] ${stage === '' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Все</button>
+            className={`px-2 py-1 text-sm rounded-[5px] ${stage === '' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>Все</button>
           {FUNNEL_STAGES.filter((s) => (pts.data?.points ?? []).some((p) => p.stage === s)).map((s) => (
             <button key={s} type="button" onClick={() => setStage(s)}
-              className={`px-2 py-1 text-xs rounded-[5px] ${stage === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              className={`px-2 py-1 text-sm rounded-[5px] ${stage === s ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
               {STAGE_META[s].label}
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-muted-foreground ml-auto">
+        <span className="text-xs text-muted-foreground ml-auto">
           {pts.isLoading ? '…' : `${points.length} проектов с координатами`}
         </span>
       </div>
@@ -103,7 +103,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
                   <CircleMarker key={`n-${l.id}`} center={[l.lat, l.lon]}
                     radius={3} pathOptions={{ color: '#64748b', fillColor: '#64748b', fillOpacity: 0.5, weight: 1 }}>
                     <Popup>
-                      <div className="text-xs">
+                      <div className="text-sm">
                         <div className="font-medium">{l.name}</div>
                         <div className="text-muted-foreground">действующая станция сети</div>
                       </div>
@@ -125,7 +125,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
                         pathOptions={{ color, fillColor: color, fillOpacity: 0.85, weight: 1 }}
                         eventHandlers={{ dblclick: () => setDetailId(p.id) }}>
                         <Popup>
-                          <div className="text-xs space-y-1 min-w-[210px]">
+                          <div className="text-sm space-y-1 min-w-[210px]">
                             <div className="font-medium">{p.address ?? p.city ?? 'Площадка'}</div>
                             <div className="text-muted-foreground">{p.region ?? ''}{p.city ? ` · ${p.city}` : ''}</div>
                             <div>Стадия: <b>{p.stageLabel}</b></div>
@@ -150,7 +150,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         {colorBy === 'stage'
           ? FUNNEL_STAGES.map((s) => (
             <span key={s} className="inline-flex items-center gap-1">

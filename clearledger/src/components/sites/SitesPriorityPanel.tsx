@@ -51,17 +51,17 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold">Приоритеты площадок</h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Чем заняться в первую очередь на этапе подбора: привлекательность (спрос и покрытие)
             × исполнимость (мощность, деньги, право). Клик по строке открывает проект.
           </p>
         </div>
         <Select value={region || '__all__'} onValueChange={(v) => setRegion(v === '__all__' ? '' : v)}>
-          <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue placeholder="Все регионы" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[200px] text-sm"><SelectValue placeholder="Все регионы" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__" className="text-xs">Все регионы</SelectItem>
+            <SelectItem value="__all__" className="text-sm">Все регионы</SelectItem>
             {(ov.data?.byRegion ?? []).map((r) => (
-              <SelectItem key={r.region} value={r.region} className="text-xs">{r.region} ({r.count})</SelectItem>
+              <SelectItem key={r.region} value={r.region} className="text-sm">{r.region} ({r.count})</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -78,11 +78,11 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
             {d.quadrants.map((qd) => (
               <button key={qd.key} type="button" onClick={() => setQuadrant((v) => (v === qd.key ? '' : qd.key))}
                 className={`text-left rounded-lg border p-3 transition-colors ${quadrant === qd.key ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'}`}>
-                <div className="flex items-center gap-1.5 text-xs font-medium">
+                <div className="flex items-center gap-1.5 text-sm font-medium">
                   <span className={`h-2 w-2 rounded-full ${QUADRANT_META[qd.key].dot}`} />{qd.label}
                 </div>
                 <div className="text-xl font-semibold mt-1">{nf0.format(qd.count)}</div>
-                <div className="text-[10px] text-muted-foreground leading-tight mt-0.5">{qd.hint}</div>
+                <div className="text-xs text-muted-foreground leading-tight mt-0.5">{qd.hint}</div>
               </button>
             ))}
           </div>
@@ -90,13 +90,13 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
           {/* Поле матрицы: ось X — исполнимость, ось Y — привлекательность */}
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40">
+              <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
                 Карта решений — каждая точка это площадка
               </div>
               <div className="p-4">
                 <MatrixPlot items={(d.items ?? []).filter((i) => i.quadrant !== 'need_data')}
                   onPick={(id) => setDetailId(id)} />
-                <div className="mt-2 text-[11px] text-muted-foreground">
+                <div className="mt-2 text-xs text-muted-foreground">
                   На поле показаны только оценённые площадки
                   ({nf0.format((d.items ?? []).filter((i) => i.quadrant !== 'need_data').length)} из {nf0.format(d.total)}).
                   Остальным не хватает данных — по ним решать нечего, их надо дособрать.
@@ -121,11 +121,11 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
 
           <Card>
             <CardContent className="p-0 overflow-x-auto">
-              <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b bg-muted/40 flex items-center justify-between">
+              <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40 flex items-center justify-between">
                 <span>{quadrant ? QUADRANT_META[quadrant].label : 'Все площадки по приоритету'}</span>
                 <span className="font-mono">{nf0.format(items.length)}</span>
               </div>
-              <table className="w-full text-xs">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/20 text-muted-foreground">
                     <th className="text-left p-2 font-medium">Проект</th>
@@ -149,7 +149,7 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
                         <span className="text-muted-foreground"> · {it.region ?? ''}</span>
                       </td>
                       <td className="p-2">
-                        <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[it.stage]?.cls ?? ''}`}>
+                        <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[it.stage]?.cls ?? ''}`}>
                           {it.stageLabel}
                         </span>
                       </td>
@@ -162,7 +162,7 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
                         {it.nearestStationKm != null ? nf1.format(it.nearestStationKm) : '—'}
                       </td>
                       <td className="p-2">
-                        <span className={`text-[11px] rounded border px-1.5 py-0.5 ${QUADRANT_META[it.quadrant].cls}`}
+                        <span className={`text-xs rounded border px-1.5 py-0.5 ${QUADRANT_META[it.quadrant].cls}`}
                           title={QUADRANT_META[it.quadrant].hint}>{QUADRANT_META[it.quadrant].label}</span>
                       </td>
                       <td className="p-2 max-w-[260px] truncate text-muted-foreground" title={it.unknown.join('; ')}>
@@ -173,14 +173,14 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
                 </tbody>
               </table>
               {items.length > 300 && (
-                <div className="px-3 py-2 text-[11px] text-muted-foreground border-t">
+                <div className="px-3 py-2 text-xs text-muted-foreground border-t">
                   Показаны первые 300 из {nf0.format(items.length)} — сузьте регион или квадрант.
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
             <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>
               Привлекательность: удалённость от собственных станций (близко — делёж трафика,
@@ -215,10 +215,10 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
           <div className="border border-border/50 bg-sky-500/[0.04]" />
         </div>
         {/* подписи квадрантов */}
-        <span className="absolute left-2 top-2 text-[10px] text-amber-700 dark:text-amber-400">Расшивать узкое место</span>
-        <span className="absolute right-2 top-2 text-[10px] text-emerald-700 dark:text-emerald-400">Делать сейчас</span>
-        <span className="absolute left-2 bottom-6 text-[10px] text-red-600 dark:text-red-400">Кандидат на отказ</span>
-        <span className="absolute right-2 bottom-6 text-[10px] text-sky-700 dark:text-sky-400">Дешёвый опцион</span>
+        <span className="absolute left-2 top-2 text-xs text-amber-700 dark:text-amber-400">Расшивать узкое место</span>
+        <span className="absolute right-2 top-2 text-xs text-emerald-700 dark:text-emerald-400">Делать сейчас</span>
+        <span className="absolute left-2 bottom-6 text-xs text-red-600 dark:text-red-400">Кандидат на отказ</span>
+        <span className="absolute right-2 bottom-6 text-xs text-sky-700 dark:text-sky-400">Дешёвый опцион</span>
         {/* точки */}
         {items.map((it) => {
           const x = (it.feasible ?? 0) / 100
@@ -236,10 +236,10 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
           )
         })}
         {/* оси */}
-        <div className="absolute -bottom-0.5 left-0 right-0 text-[10px] text-muted-foreground text-center">
+        <div className="absolute -bottom-0.5 left-0 right-0 text-xs text-muted-foreground text-center">
           исполнимость →
         </div>
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 origin-center text-[10px] text-muted-foreground">
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 origin-center text-xs text-muted-foreground">
           привлекательность →
         </div>
       </div>

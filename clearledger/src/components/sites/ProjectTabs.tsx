@@ -141,14 +141,14 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
     <div className="space-y-4">
       {/* Гейт текущей стадии */}
       <section className="rounded-lg border border-border">
-        <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
           <span>Чек-лист согласования · стадия «{gate.stageLabel}»</span>
           <span className={`font-mono ${gate.done === gate.total ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
             {gate.done} / {gate.total}
           </span>
         </div>
         <div className="p-2 space-y-1">
-          {gate.items.length === 0 && <div className="text-xs text-muted-foreground px-1 py-1">Для этой стадии проверок нет.</div>}
+          {gate.items.length === 0 && <div className="text-sm text-muted-foreground px-1 py-1">Для этой стадии проверок нет.</div>}
           {gate.items.map((it) => {
             // Ручной пункт отмечают кликом по всей строке: значок 14 px — цель,
             // в которую на ноутбуке промахиваются, а по тексту кликают первым делом.
@@ -163,7 +163,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                 disabled={it.manual ? mGate.isPending : undefined}
                 onClick={it.manual ? () => mGate.mutate({ key: it.key, done: !it.done }) : undefined}
                 title={it.manual ? 'Отметить вручную' : `Закроется само: ${source}`}
-                className={`flex w-full items-start gap-2 text-left text-xs px-1 py-1 rounded ${
+                className={`flex w-full items-start gap-2 text-left text-sm px-1 py-1 rounded ${
                   it.manual ? 'hover:bg-muted/60 cursor-pointer' : ''}`}>
                 <span className="shrink-0 mt-0.5">
                   {it.done
@@ -171,12 +171,12 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                     : <Circle className={`h-3.5 w-3.5 ${it.manual ? '' : 'text-muted-foreground/50'}`} />}
                 </span>
                 {/* Номер пункта регламента: по нему сверяются с бумагой отдела развития. */}
-                <span className="shrink-0 font-mono text-[10px] text-muted-foreground mt-0.5 w-8"
+                <span className="shrink-0 font-mono text-xs text-muted-foreground mt-0.5 w-8"
                   title={it.phaseLabel ? `Этап ${it.phase}. ${it.phaseLabel}` : undefined}>{it.key}</span>
                 <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
-                {it.role && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
-                {it.required && <span className="text-[10px] text-red-500/80 shrink-0 mt-0.5" title="Обязательно для перехода">обязательно</span>}
-                {source && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">— {source}</span>}
+                {it.role && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
+                {it.required && <span className="text-xs text-red-500/80 shrink-0 mt-0.5" title="Обязательно для перехода">обязательно</span>}
+                {source && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">— {source}</span>}
               </Row>
             )
           })}
@@ -190,10 +190,10 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
           одинаково. Теперь вперёд — кнопкой, а прыжок через стадию, пауза и отказ —
           отдельно, по явному запросу. */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-xs font-semibold">Стадия</div>
+        <div className="text-sm font-semibold">Стадия</div>
         {!otherStage && nextStage ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" className="h-8 text-xs"
+            <Button size="sm" className="h-8 text-sm"
               disabled={mMove.isPending}
               onClick={() => { setStage(nextStage); mMove.mutate(nextStage) }}>
               {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
@@ -203,46 +203,46 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             </Button>
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="Комментарий к переходу (необязательно)"
-              className="h-8 text-xs flex-1 min-w-[220px]" />
+              className="h-8 text-sm flex-1 min-w-[220px]" />
             <button type="button" onClick={() => setOtherStage(true)}
-              className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
               другая стадия, пауза или отказ
             </button>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <Select value={stage} onValueChange={(v) => setStage(v as SiteStage)}>
-              <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 w-[190px] text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {FUNNEL_STAGES.map((st) => (
-                  <SelectItem key={st} value={st} className="text-xs">{STAGE_META[st].label}</SelectItem>
+                  <SelectItem key={st} value={st} className="text-sm">{STAGE_META[st].label}</SelectItem>
                 ))}
                 {/* Пауза и отказ — не продолжение воронки: отделяем чертой и подписью. */}
-                <div className="mt-1 border-t px-2 pb-0.5 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <div className="mt-1 border-t px-2 pb-0.5 pt-1 text-xs uppercase tracking-wide text-muted-foreground">
                   выход из работы
                 </div>
-                <SelectItem value="on_hold" className="text-xs">{STAGE_META.on_hold.label}</SelectItem>
-                <SelectItem value="archive" className="text-xs">{STAGE_META.archive.label}</SelectItem>
+                <SelectItem value="on_hold" className="text-sm">{STAGE_META.on_hold.label}</SelectItem>
+                <SelectItem value="archive" className="text-sm">{STAGE_META.archive.label}</SelectItem>
               </SelectContent>
             </Select>
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder={stage === 'archive' ? 'Причина отклонения (обязательна по смыслу)' : 'Комментарий к переходу'}
-              className="h-8 text-xs flex-1 min-w-[220px]" />
+              className="h-8 text-sm flex-1 min-w-[220px]" />
             <Button size="sm" variant={stage === 'archive' ? 'destructive' : 'default'}
-              className="h-8 text-xs" disabled={stage === site.stage || mMove.isPending}
+              className="h-8 text-sm" disabled={stage === site.stage || mMove.isPending}
               onClick={() => mMove.mutate(undefined)}>
               {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Перевести
             </Button>
             {nextStage && (
               <button type="button" onClick={() => { setOtherStage(false); setStage(site.stage) }}
-                className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
                 вернуться к обычному ходу
               </button>
             )}
           </div>
         )}
         {stage !== site.stage && gate.blocking.length > 0 && (
-          <div className="flex items-start gap-1.5 text-[11px] text-red-600 dark:text-red-400">
+          <div className="flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400">
             <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>
               Обязательное не закрыто: {gate.blocking.join('; ')}. Пока эти пункты не выполнены,
@@ -251,13 +251,13 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
           </div>
         )}
         {stage !== site.stage && gate.blocking.length === 0 && missing.length > 0 && (
-          <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+          <div className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>Не закрыто (необязательное): {missing.map((m) => m.label).join('; ')}. Перевод возможен — запись останется в истории.</span>
           </div>
         )}
         {blocked && mayOverride && (
-          <label className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+          <label className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
             <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-0.5" />
             <span>
               Провести в обход гейта под мою ответственность. Нужно обоснование — оно попадёт в
@@ -266,11 +266,11 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
           </label>
         )}
         {blocked && !mayOverride && (
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             Обход обязательных пунктов доступен администратору компании.
           </div>
         )}
-        <div className="text-[11px] text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           В стадии с {site.stageSince ?? '—'}
           {site.prevStage ? ` · до этого «${STAGE_META[site.prevStage]?.label ?? site.prevStage}»` : ''}
         </div>
@@ -278,37 +278,37 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
       {/* Ответственный и следующий шаг */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-xs font-semibold">Кто ведёт и что дальше</div>
+        <div className="text-sm font-semibold">Кто ведёт и что дальше</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <div>
             <Label>Ответственный</Label>
             <Select value={owner || '__none__'} onValueChange={(v) => setOwner(v === '__none__' ? '' : v)}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Не назначен" /></SelectTrigger>
+              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Не назначен" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__" className="text-xs">Не назначен</SelectItem>
+                <SelectItem value="__none__" className="text-sm">Не назначен</SelectItem>
                 {(members.data ?? []).map((m) => (
-                  <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+                  <SelectItem key={m.id} value={m.id} className="text-sm">{m.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="md:col-span-2">
             <Label>Следующий шаг</Label>
-            <Input value={next} onChange={(e) => setNext(e.target.value)} className="h-8 text-xs"
+            <Input value={next} onChange={(e) => setNext(e.target.value)} className="h-8 text-sm"
               placeholder="Например: запросить ТУ у сетевой организации" />
           </div>
           <div>
             <Label>Срок</Label>
             <Input type="date" value={due} onChange={(e) => setDue(e.target.value)}
-              className={`h-8 text-xs ${overdue ? 'border-red-400/60' : ''}`} />
+              className={`h-8 text-sm ${overdue ? 'border-red-400/60' : ''}`} />
           </div>
           <div className="flex items-end">
-            <Button size="sm" variant="outline" className="h-8 text-xs" disabled={mSave.isPending}
+            <Button size="sm" variant="outline" className="h-8 text-sm" disabled={mSave.isPending}
               onClick={() => mSave.mutate()}>
               <Save className="h-3.5 w-3.5 mr-1" />Сохранить
             </Button>
           </div>
-          <div className="flex items-end text-[11px] text-muted-foreground">
+          <div className="flex items-end text-xs text-muted-foreground">
             Последнее касание: {fmtDate(site.lastTouchAt) || '—'}
           </div>
         </div>
@@ -316,12 +316,12 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
       {/* Касание */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-xs font-semibold">Записать касание</div>
+        <div className="text-sm font-semibold">Записать касание</div>
         <div className="flex items-start gap-2">
           <Textarea value={touch} onChange={(e) => setTouch(e.target.value)} rows={2}
             placeholder="Звонок, письмо, встреча — что обсудили и о чём договорились"
-            className="text-xs min-h-[52px]" />
-          <Button size="sm" className="h-8 text-xs shrink-0" disabled={!touch.trim() || mTouch.isPending}
+            className="text-sm min-h-[52px]" />
+          <Button size="sm" className="h-8 text-sm shrink-0" disabled={!touch.trim() || mTouch.isPending}
             onClick={() => mTouch.mutate()}>
             <MessageSquarePlus className="h-3.5 w-3.5 mr-1" />Записать
           </Button>
@@ -478,13 +478,13 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Изменённые поля перестают обновляться из файла — в них истина ваша, а не выгрузки.
           {wantedCount > 0 && (
             <> {' '}Подсвечено то, чего ждёт стадия «{site.stageLabel}»: {wantedCount} графы.</>
           )}
         </p>
-        <Button size="sm" className="h-8 text-xs" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
+        <Button size="sm" className="h-8 text-sm" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
           {m.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
           Сохранить{dirty ? ` (${Object.keys(draft).length})` : ''}
         </Button>
@@ -492,7 +492,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
 
       {PASSPORT_GROUPS.map((g) => (
         <section key={g.title} className="rounded-lg border border-border">
-          <div className="px-3 py-1.5 text-xs font-semibold border-b bg-muted/40">{g.title}</div>
+          <div className="px-3 py-1.5 text-sm font-semibold border-b bg-muted/40">{g.title}</div>
           <div className="p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
             {g.fields.map((f) => {
               const key = String(f.k)
@@ -504,30 +504,30 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                   needFor ? '-mx-1 rounded-md bg-amber-400/10 px-1 py-0.5 ring-1 ring-amber-400/40' : ''}`}>
                   <Label>
                     {f.label}
-                    {isManual && <span className="ml-1 text-[9px] text-primary" title="Ведётся вручную, импорт не перезапишет">✎</span>}
+                    {isManual && <span className="ml-1 text-xs text-primary" title="Ведётся вручную, импорт не перезапишет">✎</span>}
                     {needFor && (
-                      <span className="ml-1.5 rounded bg-amber-400/20 px-1 text-[9px] text-amber-700 dark:text-amber-400"
+                      <span className="ml-1.5 rounded bg-amber-400/20 px-1 text-xs text-amber-700 dark:text-amber-400"
                         title={`Закрывает пункт ${needFor} чек-листа текущей стадии`}>
                         нужно для {needFor}
                       </span>
                     )}
                   </Label>
                   {f.type === 'area' ? (
-                    <Textarea rows={2} className="text-xs min-h-[46px]" value={val(key)}
+                    <Textarea rows={2} className="text-sm min-h-[46px]" value={val(key)}
                       onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
                   ) : f.type === 'select' || f.type === 'bool' ? (
                     <Select value={val(key) || '__none__'}
                       onValueChange={(v) => setDraft((d) => ({ ...d, [key]: v === '__none__' ? '' : v }))}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__" className="text-xs">—</SelectItem>
+                        <SelectItem value="__none__" className="text-sm">—</SelectItem>
                         {(f.type === 'bool' ? ['да', 'нет'] : f.options ?? []).map((o) => (
-                          <SelectItem key={o} value={o} className="text-xs">{o}</SelectItem>
+                          <SelectItem key={o} value={o} className="text-sm">{o}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Input className="h-8 text-xs" type={f.type === 'date' ? 'date' : 'text'}
+                    <Input className="h-8 text-sm" type={f.type === 'date' ? 'date' : 'text'}
                       inputMode={f.type === 'number' ? 'decimal' : undefined}
                       value={val(key)} onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
                   )}
@@ -539,7 +539,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
       ))}
 
       {(site.lat != null || site.mapUrl) && (
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-3 text-sm">
           {site.lat != null && <span className="font-mono text-muted-foreground">{site.lat}, {site.lon}</span>}
           {site.mapUrl && (
             <a href={site.mapUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
@@ -550,13 +550,13 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
       )}
 
       <div className="border-t pt-2">
-        <button type="button" onClick={() => setShowRaw((v) => !v)} className="text-xs text-muted-foreground hover:text-foreground">
+        <button type="button" onClick={() => setShowRaw((v) => !v)} className="text-sm text-muted-foreground hover:text-foreground">
           {showRaw ? '▾' : '▸'} Все поля из файла ({Object.keys(site.raw || {}).length})
         </button>
         {showRaw && (
           <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
             {Object.entries(site.raw || {}).map(([k, v]) => (
-              <div key={k} className="flex gap-2 text-[11px] border-b border-border/20 py-0.5">
+              <div key={k} className="flex gap-2 text-xs border-b border-border/20 py-0.5">
                 <span className="text-muted-foreground shrink-0 max-w-[45%] truncate" title={k}>{k}</span>
                 <span className="break-words">{v}</span>
               </div>
@@ -604,18 +604,18 @@ export function TechConnectionTab({ site, companyId, onDone }: {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Срок проекта задаёт присоединение: от заявки до исполнения — от двух месяцев
           до полутора лет при реконструкции сети.
         </p>
-        <Button size="sm" className="h-8 text-xs" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
+        <Button size="sm" className="h-8 text-sm" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
           {m.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
           Сохранить
         </Button>
       </div>
 
       {tc?.overdue && (
-        <div className="flex items-center gap-1.5 rounded border border-red-400/50 bg-red-400/5 px-2 py-1.5 text-[11px] text-red-600 dark:text-red-400">
+        <div className="flex items-center gap-1.5 rounded border border-red-400/50 bg-red-400/5 px-2 py-1.5 text-xs text-red-600 dark:text-red-400">
           <AlertTriangle className="h-3.5 w-3.5" />
           Срок мероприятий сетевой ({tc.dueDate}) прошёл, отметки об исполнении нет.
         </div>
@@ -625,10 +625,10 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         <div>
           <Label>Статус</Label>
           <Select value={val('status', tc?.status) || 'draft'} onValueChange={(v) => set('status', v)}>
-            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
               {ctx.data.tcStatuses.map((s) => (
-                <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>
+                <SelectItem key={s.key} value={s.key} className="text-sm">{s.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -638,7 +638,7 @@ export function TechConnectionTab({ site, companyId, onDone }: {
           {/* Подсказка из справочника контрагентов: одна и та же сетевая, записанная
               пятью способами, рассыпает разрез по срокам и стоимости. Свободный ввод
               оставлен — новую организацию заводить прямо здесь никто не запрещает. */}
-          <Input className="h-8 text-xs" list="grid-operators"
+          <Input className="h-8 text-sm" list="grid-operators"
             value={val('grid_operator', tc?.gridOperator)}
             placeholder="Россети Урал" onChange={(e) => set('grid_operator', e.target.value)} />
           <datalist id="grid-operators">
@@ -657,7 +657,7 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         <Field2 label="Срок мероприятий (план)" type="date" v={val('due_date', tc?.dueDate)} on={(v) => set('due_date', v)} />
         <Field2 label="Исполнено (факт)" type="date" v={val('done_date', tc?.doneDate)} on={(v) => set('done_date', v)} />
         <div className="flex items-end">
-          <label className="flex items-center gap-1.5 text-xs">
+          <label className="flex items-center gap-1.5 text-sm">
             <input type="checkbox"
               checked={Boolean(('needs_reconstruction' in draft) ? draft.needs_reconstruction : tc?.needsReconstruction)}
               onChange={(e) => set('needs_reconstruction', e.target.checked)} />
@@ -666,7 +666,7 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         </div>
         <div className="md:col-span-3">
           <Label>Заметка</Label>
-          <Textarea rows={2} className="text-xs min-h-[46px]" value={val('note', tc?.note)}
+          <Textarea rows={2} className="text-sm min-h-[46px]" value={val('note', tc?.note)}
             onChange={(e) => set('note', e.target.value)} />
         </div>
       </section>
@@ -675,7 +675,7 @@ export function TechConnectionTab({ site, companyId, onDone }: {
           развития и до сих пор нигде не показывались: без владельца ТП и запаса
           мощности нельзя ни оценить срок, ни понять, к кому идти за резервом. */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-xs font-semibold">Питающая сеть и деньги ТУ</div>
+        <div className="text-sm font-semibold">Питающая сеть и деньги ТУ</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <Field2 label="Владелец ТП" v={val('substation_owner', tc?.substationOwner)} on={(v) => set('substation_owner', v)} />
           <Field2 label="Владелец линии" v={val('line_owner', tc?.lineOwner)} on={(v) => set('line_owner', v)} />
@@ -686,13 +686,13 @@ export function TechConnectionTab({ site, companyId, onDone }: {
           <Field2 label="Стоимость работ, ₽" v={val('works_cost', tc?.worksCost)} on={(v) => set('works_cost', v)} />
           <Field2 label="Итого по ТУ, ₽" v={val('total_cost', tc?.totalCost)} on={(v) => set('total_cost', v)} />
           <div className="flex flex-col justify-end gap-1 pb-1">
-            <label className="flex items-center gap-1.5 text-xs">
+            <label className="flex items-center gap-1.5 text-sm">
               <input type="checkbox"
                 checked={Boolean(('extra_power_possible' in draft) ? draft.extra_power_possible : tc?.extraPowerPossible)}
                 onChange={(e) => set('extra_power_possible', e.target.checked)} />
               Есть запас мощности
             </label>
-            <label className="flex items-center gap-1.5 text-xs">
+            <label className="flex items-center gap-1.5 text-sm">
               <input type="checkbox"
                 checked={Boolean(('transformer_swap_possible' in draft) ? draft.transformer_swap_possible : tc?.transformerSwapPossible)}
                 onChange={(e) => set('transformer_swap_possible', e.target.checked)} />
@@ -709,7 +709,7 @@ export function Field2({ label, v, on, type }: { label: string; v: string; on: (
   return (
     <div>
       <Label>{label}</Label>
-      <Input className="h-8 text-xs" type={type ?? 'text'} value={v} onChange={(e) => on(e.target.value)} />
+      <Input className="h-8 text-sm" type={type ?? 'text'} value={v} onChange={(e) => on(e.target.value)} />
     </div>
   )
 }
@@ -763,11 +763,11 @@ export function EquipmentTab({ site, companyId, onDone }: {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Потребность проекта, а не склад. Пункт гейта «Оборудование поставлено» закрывается,
           когда все позиции получили статус «Поставлено» или «Смонтировано».
         </p>
-        <span className={`text-[11px] rounded border px-1.5 py-0.5 shrink-0 ${eq.allSupplied ? 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80' : 'border-zinc-500/60 text-zinc-500'}`}>
+        <span className={`text-xs rounded border px-1.5 py-0.5 shrink-0 ${eq.allSupplied ? 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80' : 'border-zinc-500/60 text-zinc-500'}`}>
           {eq.allSupplied ? 'всё поставлено' : 'не всё поставлено'}
         </span>
       </div>
@@ -775,7 +775,7 @@ export function EquipmentTab({ site, companyId, onDone }: {
       {/* px-2 на каждой ячейке: без него «Кол-во» и «Поставщик» читаются как
           «Кол-воПоставщик» — колонки стоят впритык, разделителя нет. */}
       {eq.items.length > 0 && (
-        <table className="w-full text-xs">
+        <table className="w-full text-sm">
           <thead>
             <tr className="text-muted-foreground border-b">
               <th className="text-left px-2 py-1 font-medium">Оборудование</th>
@@ -804,10 +804,10 @@ export function EquipmentTab({ site, companyId, onDone }: {
                 <td className="px-2 py-1.5 text-right font-mono">{e.price != null ? nf0.format(e.price) : '—'}</td>
                 <td className="px-2 py-1.5">
                   <Select value={e.status} onValueChange={(v) => setStatus(e.id, v)}>
-                    <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-8 w-[150px] text-sm"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {ctx.data.eqStatuses.map((s) => (
-                        <SelectItem key={s.key} value={s.key} className="text-xs">{s.label}</SelectItem>
+                        <SelectItem key={s.key} value={s.key} className="text-sm">{s.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -825,7 +825,7 @@ export function EquipmentTab({ site, companyId, onDone }: {
       <section className="rounded-lg border border-border p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
         <div className="md:col-span-2">
           <Label>Оборудование</Label>
-          <Input className="h-8 text-xs" placeholder="Быстрая ЭЗС 150 кВт"
+          <Input className="h-8 text-sm" placeholder="Быстрая ЭЗС 150 кВт"
             value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
         </div>
         <Field2 label="Производитель" v={form.manufacturer} on={(v) => setForm((f) => ({ ...f, manufacturer: v }))} />
@@ -836,7 +836,7 @@ export function EquipmentTab({ site, companyId, onDone }: {
         <Field2 label="Стоимость, ₽" v={form.price} on={(v) => setForm((f) => ({ ...f, price: v }))} />
         <Field2 label="Плановая поставка" type="date" v={form.due_date} on={(v) => setForm((f) => ({ ...f, due_date: v }))} />
         <div className="flex items-end">
-          <Button size="sm" className="h-8 text-xs" disabled={busy || !form.title.trim()} onClick={add}>
+          <Button size="sm" className="h-8 text-sm" disabled={busy || !form.title.trim()} onClick={add}>
             Добавить
           </Button>
         </div>
@@ -891,20 +891,20 @@ export function DocsTab({ site, companyId, onDone }: {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Select value={kind} onValueChange={setKind}>
-          <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>
             {(ctx.data?.docKinds ?? []).map((k) => (
-              <SelectItem key={k.key} value={k.key} className="text-xs">{k.label}</SelectItem>
+              <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
         <input ref={fileRef} type="file" hidden onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
-        <Button size="sm" variant="outline" className="h-8 text-xs" disabled={busy}
+        <Button size="sm" variant="outline" className="h-8 text-sm" disabled={busy}
           onClick={() => fileRef.current?.click()}>
           {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
           Приложить документ
         </Button>
-        <span className="text-[11px] text-muted-foreground ml-auto">
+        <span className="text-xs text-muted-foreground ml-auto">
           Часть пунктов гейта закрывается именно документом: договор, ТУ, акт приёмки.
         </span>
       </div>
@@ -917,12 +917,12 @@ export function DocsTab({ site, companyId, onDone }: {
         <div className="py-8 text-center text-sm text-muted-foreground">
           <div>Документов пока нет.</div>
           {docGateHint ? (
-            <div className="mt-1 text-xs">
+            <div className="mt-1 text-sm">
               На стадии «{site.stageLabel}» ждём: {docGateHint}. Выберите тип слева и приложите файл —
               пункт гейта закроется сам.
             </div>
           ) : (
-            <div className="mt-1 text-xs">
+            <div className="mt-1 text-sm">
               Сюда кладут договор на землю, ТУ, акт приёмки — файлы, которыми закрываются пункты гейта.
             </div>
           )}
@@ -930,10 +930,10 @@ export function DocsTab({ site, companyId, onDone }: {
       ) : (
         <div className="rounded-lg border border-border divide-y divide-border/40">
           {rows.map((d) => (
-            <div key={d.id} className="flex items-center gap-2 px-3 py-2 text-xs">
-              <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground shrink-0">{d.kindLabel}</span>
+            <div key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground shrink-0">{d.kindLabel}</span>
               <span className="truncate flex-1" title={d.title ?? d.fileName ?? ''}>{d.title || d.fileName || '—'}</span>
-              <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+              <span className="text-xs text-muted-foreground whitespace-nowrap">
                 {d.stageLabel ?? ''}{d.uploadedBy ? ` · ${d.uploadedBy}` : ''} {fmtDate(d.createdAt)}
               </span>
               <button type="button" onClick={() => remove(d.id)}
@@ -974,7 +974,7 @@ function LinkPicker({ label, options, onPick, pending }: {
 
   if (!open) {
     return (
-      <Button variant="outline" size="sm" className="h-7 text-xs mt-1"
+      <Button variant="outline" size="sm" className="h-8 text-sm mt-1"
         disabled={pending} onClick={() => setOpen(true)}>
         {pending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <LinkIcon className="h-3.5 w-3.5 mr-1" />}
         {label}
@@ -983,20 +983,20 @@ function LinkPicker({ label, options, onPick, pending }: {
   }
   return (
     <div className="mt-1 rounded-md border border-border p-2 space-y-1">
-      <Input autoFocus className="h-7 text-xs" placeholder="Поиск…"
+      <Input autoFocus className="h-8 text-sm" placeholder="Поиск…"
         value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="max-h-48 overflow-y-auto">
-        {found.length === 0 && <div className="text-[11px] text-muted-foreground px-1 py-2">Ничего не найдено.</div>}
+        {found.length === 0 && <div className="text-xs text-muted-foreground px-1 py-2">Ничего не найдено.</div>}
         {found.map((o) => (
           <button key={o.id} type="button" disabled={pending}
             onClick={() => { onPick(o.id); setOpen(false) }}
-            className="w-full text-left text-xs px-1 py-1 rounded hover:bg-muted/60">
+            className="w-full text-left text-sm px-1 py-1 rounded hover:bg-muted/60">
             {o.title}
             {o.hint && <span className="text-muted-foreground"> · {o.hint}</span>}
           </button>
         ))}
       </div>
-      <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground"
+      <button type="button" className="text-xs text-muted-foreground hover:text-foreground"
         onClick={() => setOpen(false)}>Отмена</button>
     </div>
   )
@@ -1039,17 +1039,17 @@ function ProjectLifecycleSection({ site, companyId, onDone }: {
   const rows = projects.data ?? []
   return (
     <section className="rounded-lg border border-border">
-      <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+      <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
         <span>Проекты на этом месте</span>
         <span className="font-mono text-muted-foreground">{rows.length}</span>
       </div>
       <div className="p-3 space-y-2">
-        {rows.length === 0 && <div className="text-xs text-muted-foreground">Проектов пока нет.</div>}
+        {rows.length === 0 && <div className="text-sm text-muted-foreground">Проектов пока нет.</div>}
         {rows.map((p) => (
-          <div key={p.id} className="flex flex-wrap items-center gap-2 text-xs">
+          <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-mono">{p.projectNo ?? '—'}</span>
             <span>{p.kindLabel}</span>
-            <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[p.stage]?.cls ?? ''}`}>
+            <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[p.stage]?.cls ?? ''}`}>
               {p.stageLabel}
             </span>
             {p.commissionedOn && <span className="text-muted-foreground">введён {p.commissionedOn}</span>}
@@ -1064,14 +1064,14 @@ function ProjectLifecycleSection({ site, companyId, onDone }: {
             месте нет своего чек-листа. Молчать об этом нельзя — заведут ретрофит и
             будут ждать, что работа пойдёт сама. */}
         {rows.length > 1 && (
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             Чек-лист и стадии этой карточки относятся к первому проекту места.
             Работу по следующему ведут здесь же — отдельного рабочего места у него пока нет.
           </div>
         )}
 
         {!open ? (
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setOpen(true)}>
+          <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => setOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />Завести проект на этом месте
           </Button>
         ) : (
@@ -1080,25 +1080,25 @@ function ProjectLifecycleSection({ site, companyId, onDone }: {
               <div>
                 <Label>Тип проекта</Label>
                 <Select value={kind} onValueChange={setKind}>
-                  <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {(kinds.data?.kinds ?? []).map((k) => (
-                      <SelectItem key={k.key} value={k.key} className="text-xs">{k.label}</SelectItem>
+                      <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <Input className="h-8 text-xs flex-1 min-w-[220px]" value={reason}
+              <Input className="h-8 text-sm flex-1 min-w-[220px]" value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Основание: что случилось и зачем новый проект" />
-              <Button size="sm" className="h-8 text-xs" disabled={mStart.isPending}
+              <Button size="sm" className="h-8 text-sm" disabled={mStart.isPending}
                 onClick={() => mStart.mutate()}>
                 {mStart.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Завести
               </Button>
-              <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground"
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => setOpen(false)}>отмена</button>
             </div>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {kind === 'new_build'
                 ? 'Новая очередь на том же месте — отдельный проект со своей воронкой.'
                 : 'Работа с действующим объектом: старый проект остаётся закрытым, этот начинается со стадии «Решение».'}
@@ -1151,8 +1151,8 @@ export function AccountingTab({ site, companyId, onDone }: {
     <div className="space-y-3">
       {/* связи с учётом */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-xs font-semibold">Записи в учёте</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div className="text-sm font-semibold">Записи в учёте</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
             <Label>Договор на землю</Label>
             {d.contract ? (
@@ -1193,7 +1193,7 @@ export function AccountingTab({ site, companyId, onDone }: {
             )}
           </div>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Записи в бухгалтерии создаются в своих разделах, здесь — только связь: учётный контур
           не должен наполняться побочным эффектом смены статуса проекта.
         </p>
@@ -1203,7 +1203,7 @@ export function AccountingTab({ site, companyId, onDone }: {
 
       {/* субсидия */}
       <section className="rounded-lg border border-border">
-        <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
           <span>Субсидия — соответствие требованиям</span>
           <span className={`font-mono ${sub.eligible ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
             {sub.done} / {sub.total}
@@ -1211,16 +1211,16 @@ export function AccountingTab({ site, companyId, onDone }: {
         </div>
         <div className="p-3 space-y-1">
           {sub.items.map((i) => (
-            <div key={i.key} className="flex items-center gap-2 text-xs">
+            <div key={i.key} className="flex items-center gap-2 text-sm">
               {i.done
                 ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 : <Circle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
               <span className={i.done ? '' : 'text-muted-foreground'}>{i.label}</span>
-              {i.value && <span className="text-[11px] text-muted-foreground">— {i.value}</span>}
+              {i.value && <span className="text-xs text-muted-foreground">— {i.value}</span>}
             </div>
           ))}
           {sub.obligationUntil && (
-            <div className="pt-1 text-[11px] text-muted-foreground">
+            <div className="pt-1 text-xs text-muted-foreground">
               Введён {sub.commissionedOn} · обязательство эксплуатировать до {sub.obligationUntil}
               {' '}({sub.obligationYears} лет)
             </div>
@@ -1230,7 +1230,7 @@ export function AccountingTab({ site, companyId, onDone }: {
 
       {/* бюджет */}
       <section className="rounded-lg border border-border">
-        <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
           <span>Бюджет проекта</span>
           <span className="font-mono text-muted-foreground">
             план {nf0.format(d.costs.planTotal)} ₽ · факт {nf0.format(d.costs.factTotal)} ₽
@@ -1268,7 +1268,7 @@ function BudgetEditor({ site, companyId, ctx, onDone }: {
   return (
     <div className="p-3 space-y-2">
       {ctx.costs.items.length > 0 && (
-        <table className="w-full text-xs">
+        <table className="w-full text-sm">
           <thead>
             <tr className="text-muted-foreground border-b">
               <th className="text-left py-1 font-medium">Статья</th>
@@ -1288,7 +1288,7 @@ function BudgetEditor({ site, companyId, ctx, onDone }: {
                     {c.kindLabel}
                     {/* Капвложение пойдёт в стоимость объекта (08 → 01), расход
                         периода — нет. При отмене проекта их судьба разная. */}
-                    <span className="ml-1 text-[10px] text-muted-foreground"
+                    <span className="ml-1 text-xs text-muted-foreground"
                       title={c.capital
                         ? 'Капвложение: войдёт в стоимость объекта, при отмене проекта списывается'
                         : 'Расход периода: в стоимость объекта не входит'}>
@@ -1312,7 +1312,7 @@ function BudgetEditor({ site, companyId, ctx, onDone }: {
         </table>
       )}
       {ctx.costs.items.length > 0 && (
-        <div className="flex flex-wrap gap-4 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
           <span>Капвложения: план {nf0.format(ctx.costs.capitalPlan ?? 0)} ₽ · факт {nf0.format(ctx.costs.capitalFact ?? 0)} ₽</span>
           <span>Расходы периода: план {nf0.format(ctx.costs.expensePlan ?? 0)} ₽ · факт {nf0.format(ctx.costs.expenseFact ?? 0)} ₽</span>
         </div>
@@ -1321,21 +1321,21 @@ function BudgetEditor({ site, companyId, ctx, onDone }: {
         <div>
           <Label>Статья</Label>
           <Select value={kind} onValueChange={setKind}>
-            <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 w-[190px] text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {ctx.costKinds.map((k) => <SelectItem key={k.key} value={k.key} className="text-xs">{k.label}</SelectItem>)}
+              {ctx.costKinds.map((k) => <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
         <div className="flex-1 min-w-[160px]">
           <Label>Описание</Label>
-          <Input className="h-8 text-xs" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <Input className="h-8 text-sm" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <div className="w-[120px]"><Label>План, ₽</Label>
-          <Input className="h-8 text-xs" value={plan} onChange={(e) => setPlan(e.target.value)} /></div>
+          <Input className="h-8 text-sm" value={plan} onChange={(e) => setPlan(e.target.value)} /></div>
         <div className="w-[120px]"><Label>Факт, ₽</Label>
-          <Input className="h-8 text-xs" value={fact} onChange={(e) => setFact(e.target.value)} /></div>
-        <Button size="sm" className="h-8 text-xs" disabled={busy || (!plan && !fact)} onClick={add}>Добавить</Button>
+          <Input className="h-8 text-sm" value={fact} onChange={(e) => setFact(e.target.value)} /></div>
+        <Button size="sm" className="h-8 text-sm" disabled={busy || (!plan && !fact)} onClick={add}>Добавить</Button>
       </div>
     </div>
   )
@@ -1358,24 +1358,24 @@ export function EconomicsTab({ site, companyId }: { site: SiteDetail; companyId:
       {/* Приоритет */}
       <section className="rounded-lg border border-border p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <div className="text-xs font-semibold">Приоритет</div>
-          <span className={`text-[11px] rounded border px-1.5 py-0.5 ${QUADRANT_META[score.quadrant].cls}`}
+          <div className="text-sm font-semibold">Приоритет</div>
+          <span className={`text-xs rounded border px-1.5 py-0.5 ${QUADRANT_META[score.quadrant].cls}`}
             title={QUADRANT_META[score.quadrant].hint}>{QUADRANT_META[score.quadrant].label}</span>
         </div>
-        <div className="grid grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-3 gap-3 text-sm">
           <Metric label="Привлекательность" value={score.attract != null ? String(score.attract) : '—'} />
           <Metric label="Исполнимость" value={score.feasible != null ? String(score.feasible) : '—'} />
           <Metric label="Уверенность оценки" value={`${score.confidence}%`}
             warn={score.confidence < 34} />
         </div>
         {score.nearestStationKm != null && (
-          <div className={`text-[11px] ${score.cannibalization ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
+          <div className={`text-xs ${score.cannibalization ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
             До ближайшей нашей станции {score.nearestStationKm} км
             {score.cannibalization ? ' — площадка делит трафик с действующей ЭЗС' : ''}
           </div>
         )}
         {score.unknown.length > 0 && (
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             Не хватает: {score.unknown.join('; ')}
           </div>
         )}
@@ -1383,23 +1383,23 @@ export function EconomicsTab({ site, companyId }: { site: SiteDetail; companyId:
 
       {/* Экономика */}
       {!e.ok ? (
-        <div className="rounded-lg border border-border p-3 text-xs text-muted-foreground">
+        <div className="rounded-lg border border-border p-3 text-sm text-muted-foreground">
           {e.message ?? 'Расчёт недоступен'}
         </div>
       ) : (
         <section className="rounded-lg border border-border">
-          <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40">
+          <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40">
             Оценка экономики — по фактическим сессиям сети
           </div>
           <div className="p-3 space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <Metric label="Тариф (факт)" value={`${e.tariff} ₽/кВт·ч`} />
               <Metric label="Входная цена" value={`${e.inputPrice} ₽/кВт·ч`} />
               <Metric label="Маржа с кВт·ч" value={`${e.marginPerKwh} ₽`} />
               <Metric label="Аренда" value={`${nf0.format(e.rentMonth ?? 0)} ₽/мес`} />
             </div>
 
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted-foreground border-b">
                   <th className="text-left py-1 font-medium">Сценарий</th>
@@ -1424,13 +1424,13 @@ export function EconomicsTab({ site, companyId }: { site: SiteDetail; companyId:
               </tbody>
             </table>
 
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               Капитальные затраты: {e.capex != null ? `${nf0.format(e.capex)} ₽` : 'не посчитаны'}
             </div>
 
             <div className="rounded border border-border bg-muted/20 p-2">
-              <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Допущения расчёта</div>
-              <ul className="space-y-0.5 text-[11px] text-muted-foreground list-disc pl-4">
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Допущения расчёта</div>
+              <ul className="space-y-0.5 text-xs text-muted-foreground list-disc pl-4">
                 {e.assumptions.map((a, i) => <li key={i}>{a}</li>)}
               </ul>
             </div>
@@ -1444,7 +1444,7 @@ export function EconomicsTab({ site, companyId }: { site: SiteDetail; companyId:
 function Metric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={`text-sm font-semibold ${warn ? 'text-amber-600 dark:text-amber-400' : ''}`}>{value}</div>
     </div>
   )
@@ -1468,13 +1468,13 @@ export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: s
   return (
     <div className="space-y-1.5">
       {rows.map((e) => (
-        <div key={e.id} className="flex gap-2 text-xs border-b border-border/30 pb-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-muted-foreground w-16 shrink-0 pt-0.5">
+        <div key={e.id} className="flex gap-2 text-sm border-b border-border/30 pb-1.5">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground w-16 shrink-0 pt-0.5">
             {KIND_LABEL[e.kind] ?? e.kind}
           </span>
           <div className="min-w-0 flex-1">
             <div className="break-words">{e.text || '—'}</div>
-            <div className="text-[10px] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               {fmtDate(e.createdAt)}{e.author ? ` · ${e.author}` : ''}
             </div>
           </div>
@@ -1486,8 +1486,16 @@ export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: s
 
 /* ── Мелочи ─────────────────────────────────────────────────────────────── */
 
+/**
+ * Подпись поля в формах проекта.
+ *
+ * Был свой Label на 10 px капсом — из-за него раздел читался мельче остального
+ * пространства (у ui-Label 14 px). Капс оставили как метку служебного текста, но
+ * подняли до 12 px: ниже начинается «мелкий шрифт», о который спотыкается любой,
+ * кто сидит с этим экраном полдня.
+ */
 export function Label({ children }: { children: ReactNode }) {
-  return <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">{children}</div>
+  return <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{children}</div>
 }
 
 export function fmtDate(iso: string | null | undefined): string {

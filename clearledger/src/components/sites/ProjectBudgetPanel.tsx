@@ -34,7 +34,7 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-4">
       <div>
         <h2 className="text-base font-semibold">Бюджет</h2>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           План {money(d.planTotal)} · факт {money(d.factTotal)}. Капвложения войдут в стоимость
           объектов, расходы периода — нет.
         </p>
@@ -52,8 +52,8 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Card>
               <CardContent className="p-3">
-                <div className="text-xs font-semibold mb-1">Капвложения (счёт 08 → стоимость объекта)</div>
-                <div className="text-xs text-muted-foreground">
+                <div className="text-sm font-semibold mb-1">Капвложения (счёт 08 → стоимость объекта)</div>
+                <div className="text-sm text-muted-foreground">
                   план <span className="font-mono text-foreground">{money(d.capital.plan)}</span> ·
                   {' '}факт <span className="font-mono text-foreground">{money(d.capital.fact)}</span>
                 </div>
@@ -61,8 +61,8 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
             </Card>
             <Card>
               <CardContent className="p-3">
-                <div className="text-xs font-semibold mb-1">Расходы периода</div>
-                <div className="text-xs text-muted-foreground">
+                <div className="text-sm font-semibold mb-1">Расходы периода</div>
+                <div className="text-sm text-muted-foreground">
                   план <span className="font-mono text-foreground">{money(d.expense.plan)}</span> ·
                   {' '}факт <span className="font-mono text-foreground">{money(d.expense.fact)}</span>
                 </div>
@@ -72,8 +72,8 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
 
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40">По статьям</div>
-              <table className="w-full text-xs">
+              <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40">По статьям</div>
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="text-muted-foreground border-b">
                     <th className="text-left px-3 py-1.5 font-medium">Статья</th>
@@ -96,7 +96,7 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
                       <td className="px-3 py-1.5 text-right font-mono">{money(i.fact)}</td>
                       <td className={`px-3 py-1.5 text-right font-mono ${i.variance > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
                         {i.variance > 0 ? '+' : ''}{money(i.variance)}
-                        {i.variancePct != null && <span className="text-[10px]"> ({i.variancePct}%)</span>}
+                        {i.variancePct != null && <span className="text-xs"> ({i.variancePct}%)</span>}
                       </td>
                     </tr>
                   ))}
@@ -107,12 +107,12 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
 
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40">
+              <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40">
                 Состояние проектов — что будет с деньгами
               </div>
               <div className="p-3 space-y-1.5">
                 {d.buckets.map((b) => (
-                  <div key={b.key} className="flex items-center justify-between text-xs">
+                  <div key={b.key} className="flex items-center justify-between text-sm">
                     <span className={b.key === 'closed' && b.fact > 0 ? 'text-amber-700 dark:text-amber-400' : ''}>
                       {b.label}
                     </span>

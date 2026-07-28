@@ -102,24 +102,24 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
     <div className="p-4 space-y-3">
       {/* Шапка проекта: всё, что нужно знать до открытия вкладок */}
       <div className="flex flex-wrap items-start gap-3">
-        <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={onBack}>
+        <Button variant="ghost" size="sm" className="h-8 px-2 text-sm" onClick={onBack}>
           <ArrowLeft className="h-3.5 w-3.5 mr-1" />К списку
         </Button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-xs text-muted-foreground">{s.projectNo ?? '—'}</span>
+            <span className="font-mono text-sm text-muted-foreground">{s.projectNo ?? '—'}</span>
             <h2 className="text-base font-semibold truncate">
               {s.title || s.fullAddress || s.address || [s.region, s.city].filter(Boolean).join(', ') || 'Проект'}
             </h2>
-            <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[s.stage]?.cls ?? ''}`}
+            <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[s.stage]?.cls ?? ''}`}
               title={STAGE_META[s.stage]?.hint}>{s.stageLabel}</span>
             {s.phase && (
-              <span className={`text-[11px] rounded border px-1.5 py-0.5 ${PHASE_META[s.phase]?.cls ?? ''}`}>
+              <span className={`text-xs rounded border px-1.5 py-0.5 ${PHASE_META[s.phase]?.cls ?? ''}`}>
                 {s.phaseLabel ?? PHASE_META[s.phase]?.label}
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground mt-0.5">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-0.5">
             <span className="inline-flex items-center gap-1">
               <MapPin className="h-3 w-3" />{[s.region, s.city, s.address].filter(Boolean).join(', ') || '—'}
             </span>
@@ -152,7 +152,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
         {PROJECT_TABS.map((t) => (
           <button key={t.k} type="button" onClick={() => onTab(t.k)}
             title={pending.has(t.k) ? 'Здесь есть незакрытые пункты текущей стадии' : undefined}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
             {t.label}
             {pending.has(t.k) && (
               <span className={`h-1.5 w-1.5 rounded-full ${tab === t.k ? 'bg-primary-foreground/80' : 'bg-amber-500'}`} />
@@ -199,7 +199,7 @@ function NextStepBar({ site, onGoTab }: {
   const leadTab = lead ? GATE_TAB[lead.doc ? 'doc' : lead.equipment ? 'equipment' : lead.manual ? 'manual' : 'field'] : undefined
 
   return (
-    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium">Сейчас: {site.stageLabel}</span>
         {gate.canAdvance ? (
@@ -218,14 +218,14 @@ function NextStepBar({ site, onGoTab }: {
           <span>Ближайший шаг: {lead.label}</span>
           <button type="button"
             onClick={() => onGoTab(leadTab ?? 'work')}
-            className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:border-primary/60 hover:text-foreground">
+            className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
             {lead.doc ? 'Приложить документ'
               : lead.equipment ? 'Открыть оборудование'
               : lead.manual ? 'Отметить в чек-листе' : 'Заполнить в паспорте'}
           </button>
           {!lead.manual && !lead.doc && !lead.equipment && (
             <button type="button" onClick={() => onGoTab('passport')}
-              className="rounded border border-border px-1.5 py-0.5 text-[11px] hover:border-primary/60 hover:text-foreground">
+              className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
               Открыть паспорт
             </button>
           )}

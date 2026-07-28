@@ -74,12 +74,12 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold">Обзор</h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             {nf0.format(d.active)} в работе · {nf0.format(d.live)} в эксплуатации ·
             {' '}{nf0.format(d.archived)} отклонено. Срок ввода определяет присоединение, а не стройка.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="h-8 text-xs"
+        <Button variant="outline" size="sm" className="h-8 text-sm"
           onClick={() => exportPortfolioXlsx(companyId).catch((e) =>
             toast.error(e instanceof Error ? e.message : 'Выгрузка не удалась'))}>
           <Download className="h-3.5 w-3.5 mr-1" />Выгрузить портфель
@@ -91,8 +91,8 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
         <CardContent className="p-0">
           <div className="px-3 py-2 border-b bg-muted/40 flex items-center gap-2">
             <AlertTriangle className={`h-3.5 w-3.5 ${d.atRisk > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`} />
-            <span className="text-xs font-semibold">Требует внимания</span>
-            <span className="text-[11px] text-muted-foreground ml-auto">
+            <span className="text-sm font-semibold">Требует внимания</span>
+            <span className="text-xs text-muted-foreground ml-auto">
               {d.atRisk > 0 ? `${nf0.format(d.atRisk)} проектов со сорванным сроком` : 'сорванных сроков нет'}
             </span>
           </div>
@@ -107,7 +107,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                   <button type="button" onClick={() => toggle(`risk:${a.key}`)}
                     className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-muted/40 transition-colors">
                     <span className="font-mono text-sm w-14 shrink-0 text-right">{nf0.format(a.count)}</span>
-                    <span className="text-xs flex-1 min-w-0">
+                    <span className="text-sm flex-1 min-w-0">
                       {a.label}
                       <span className="text-muted-foreground"> — {a.hint}</span>
                     </span>
@@ -130,14 +130,14 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
       <Card>
         <CardContent className="p-0">
           <div className="px-3 py-2 border-b bg-muted/40 flex items-center gap-2">
-            <span className="text-xs font-semibold">Воронка: где стоим и куда не проходим</span>
+            <span className="text-sm font-semibold">Воронка: где стоим и куда не проходим</span>
             {d.bottleneck && d.bottleneck.stuck > 0 && (
-              <span className="text-[11px] text-amber-700 dark:text-amber-400 ml-auto">
+              <span className="text-xs text-amber-700 dark:text-amber-400 ml-auto">
                 узкое место — «{d.bottleneck.label}»: {nf0.format(d.bottleneck.stuck)} стоят больше 90 дней
               </span>
             )}
           </div>
-          <table className="w-full text-xs">
+          <table className="w-full text-sm">
             <thead>
               <tr className="text-muted-foreground border-b">
                 <th className="text-left px-3 py-1.5 font-medium">Стадия</th>
@@ -157,7 +157,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                       <span className="inline-flex items-center gap-1.5">
                         <span className={`h-2 w-2 rounded-full ${STAGE_META[f.stage]?.dot ?? 'bg-zinc-400'}`} />
                         {f.label}
-                        <span className={`text-[10px] rounded border px-1 ${PHASE_META[f.phase ?? '']?.cls ?? 'text-muted-foreground'}`}>
+                        <span className={`text-xs rounded border px-1 ${PHASE_META[f.phase ?? '']?.cls ?? 'text-muted-foreground'}`}>
                           {PHASE_META[f.phase ?? '']?.label ?? ''}
                         </span>
                       </span>
@@ -165,11 +165,11 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                     <td className="px-3 py-1.5 text-right font-mono">{nf0.format(f.count)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
                       {f.medianDays ? f.medianDays : '—'}
-                      {f.normDays != null && <span className="text-[10px]"> / {f.normDays}</span>}
+                      {f.normDays != null && <span className="text-xs"> / {f.normDays}</span>}
                     </td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
                       {f.conversion != null ? `${f.conversion}%` : '—'}
-                      {f.visited > 0 && <span className="text-[10px]"> ({f.advanced}/{f.visited})</span>}
+                      {f.visited > 0 && <span className="text-xs"> ({f.advanced}/{f.visited})</span>}
                     </td>
                     <td className={`px-3 py-1.5 text-right font-mono ${f.stuck ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
                       {f.stuck || '—'}
@@ -197,7 +197,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
               ))}
             </tbody>
           </table>
-          <div className="px-3 py-2 text-[10px] text-muted-foreground border-t">
+          <div className="px-3 py-2 text-xs text-muted-foreground border-t">
             «Проходят дальше» — доля проектов, побывавших на стадии и ушедших вперёд (по истории
             переходов). «Медиана» — сколько стадия занимает по факту, а не сколько числится сейчас.
           </div>
@@ -208,7 +208,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
         {/* КОГДА СТАНЦИИ */}
         <Card>
           <CardContent className="p-0">
-            <div className="px-3 py-2 border-b bg-muted/40 text-xs font-semibold">Когда ждать станции</div>
+            <div className="px-3 py-2 border-b bg-muted/40 text-sm font-semibold">Когда ждать станции</div>
             {d.forecast.length === 0 && d.commissioned.length === 0 ? (
               <Empty text="Прогноз строится по срокам техприсоединения и поставки оборудования. Пока эти даты не заполнены в карточках, ждать нечего." />
             ) : (
@@ -218,7 +218,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                 ))}
                 {d.commissioned.length > 0 && (
                   <>
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground pt-1">Введено фактически</div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground pt-1">Введено фактически</div>
                     {d.commissioned.map((c) => (
                       <Row key={`c-${c.bucket}`} label={c.bucket} value={c.count} tone="fact" />
                     ))}
@@ -234,9 +234,9 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
           <CardContent className="p-0">
             <div className="px-3 py-2 border-b bg-muted/40 flex items-center gap-1.5">
               <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-xs font-semibold">Движение за 30 дней</span>
+              <span className="text-sm font-semibold">Движение за 30 дней</span>
             </div>
-            <div className="p-3 grid grid-cols-2 gap-3 text-xs">
+            <div className="p-3 grid grid-cols-2 gap-3 text-sm">
               <Metric label="Заведено проектов" value={d.movement.added_30}
                 hint={d.movement.added_30 >= d.total ? 'банк загружен одним импортом' : `за 90 дней ${d.movement.added_90}`} />
               <Metric label="Продвинулось по воронке" value={d.movement.moved_30} />
@@ -253,8 +253,8 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
         {/* КТО ВЕДЁТ */}
         <Card>
           <CardContent className="p-0">
-            <div className="px-3 py-2 border-b bg-muted/40 text-xs font-semibold">Кто ведёт</div>
-            <table className="w-full text-xs">
+            <div className="px-3 py-2 border-b bg-muted/40 text-sm font-semibold">Кто ведёт</div>
+            <table className="w-full text-sm">
               <tbody>
                 {d.owners.map((o) => (
                   <tr key={o.owner} className="border-b border-border/30">
@@ -273,15 +273,15 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
         {/* ДЕНЬГИ */}
         <Card>
           <CardContent className="p-0">
-            <div className="px-3 py-2 border-b bg-muted/40 text-xs font-semibold">Деньги портфеля</div>
+            <div className="px-3 py-2 border-b bg-muted/40 text-sm font-semibold">Деньги портфеля</div>
             {d.budget.plan === 0 && d.budget.fact === 0 && d.budget.equipment === 0 ? (
               <Empty text="Бюджет ведётся в карточке проекта: статьи плана и факта на вкладке «Учёт», стоимость оборудования — на вкладке «Оборудование». Пока не заполнено." />
             ) : (
-              <div className="p-3 space-y-2 text-xs">
+              <div className="p-3 space-y-2 text-sm">
                 <Line label="План по статьям" value={money(d.budget.plan)} />
                 <Line label="Факт по статьям" value={money(d.budget.fact)} />
                 <Line label="Оборудование в заказе" value={money(d.budget.equipment)} />
-                <div className="text-[10px] text-muted-foreground pt-1">
+                <div className="text-xs text-muted-foreground pt-1">
                   Бюджет заполнен у {nf0.format(d.budget.sites)} проектов из {nf0.format(d.active)}.
                 </div>
               </div>
@@ -314,20 +314,20 @@ function Drill({ companyId, risk, stage, count, onAll }: {
     <div className="bg-muted/20 border-t border-border/40">
       {rows.map((s) => (
         <button key={s.id} type="button" onClick={() => openProject(s.id)}
-          className="w-full flex items-center gap-3 px-3 py-1.5 text-left text-xs hover:bg-muted/50 border-b border-border/20">
+          className="w-full flex items-center gap-3 px-3 py-1.5 text-left text-sm hover:bg-muted/50 border-b border-border/20">
           <span className="font-mono w-32 shrink-0 text-muted-foreground">{s.projectNo ?? '—'}</span>
           <span className="flex-1 min-w-0 truncate">
             {s.title || s.address || s.installPlace || s.fullAddress || '—'}
             <span className="text-muted-foreground"> · {s.city ?? s.region ?? ''}</span>
           </span>
-          <span className={`text-[10px] rounded border px-1 shrink-0 ${STAGE_META[s.stage]?.cls ?? ''}`}>
+          <span className={`text-xs rounded border px-1 shrink-0 ${STAGE_META[s.stage]?.cls ?? ''}`}>
             {s.stageLabel}
           </span>
           <span className="w-32 shrink-0 truncate text-muted-foreground">{s.ownerName ?? 'без ответственного'}</span>
         </button>
       ))}
       <button type="button" onClick={onAll}
-        className="w-full px-3 py-1.5 text-left text-[11px] text-primary hover:underline inline-flex items-center gap-1">
+        className="w-full px-3 py-1.5 text-left text-xs text-primary hover:underline inline-flex items-center gap-1">
         <ExternalLink className="h-3 w-3" />
         {count > rows.length ? `Показаны ${rows.length} из ${nf0.format(count)} — открыть весь список` : 'Открыть в реестре'}
       </button>
@@ -336,18 +336,18 @@ function Drill({ companyId, risk, stage, count, onAll }: {
 }
 
 function Empty({ text }: { text: string }) {
-  return <div className="px-3 py-6 text-center text-xs text-muted-foreground">{text}</div>
+  return <div className="px-3 py-6 text-center text-sm text-muted-foreground">{text}</div>
 }
 
 function Row({ label, value, tone }: { label: string; value: number; tone: 'plan' | 'fact' }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs w-24 shrink-0">{label}</span>
+      <span className="text-sm w-24 shrink-0">{label}</span>
       <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
         <div className={`h-full ${tone === 'fact' ? 'bg-emerald-500' : 'bg-blue-500'}`}
           style={{ width: `${Math.min(100, value * 12)}%` }} />
       </div>
-      <span className="font-mono text-xs text-muted-foreground w-10 text-right">{nf0.format(value)}</span>
+      <span className="font-mono text-sm text-muted-foreground w-10 text-right">{nf0.format(value)}</span>
     </div>
   )
 }
@@ -355,9 +355,9 @@ function Row({ label, value, tone }: { label: string; value: number; tone: 'plan
 function Metric({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="text-lg font-semibold leading-tight">{nf0.format(value)}</div>
-      {hint && <div className="text-[10px] text-muted-foreground">{hint}</div>}
+      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
     </div>
   )
 }

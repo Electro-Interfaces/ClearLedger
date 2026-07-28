@@ -60,11 +60,11 @@ function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) =>
         return (
           <div key={st} className="min-w-[240px] max-w-[280px] flex-1 rounded-lg border border-border bg-muted/20">
             <div className="px-2.5 py-1.5 border-b flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+              <span className="inline-flex items-center gap-1.5 text-sm font-medium">
                 <span className={`h-2 w-2 rounded-full ${STAGE_META[st]?.dot ?? 'bg-zinc-400'}`} />
                 {STAGE_META[st]?.label ?? st}
               </span>
-              <span className="font-mono text-[11px] text-muted-foreground">{list.length}</span>
+              <span className="font-mono text-xs text-muted-foreground">{list.length}</span>
             </div>
             <div className="p-1.5 space-y-1.5 max-h-[70vh] overflow-y-auto">
               {list.slice(0, 50).map((s) => {
@@ -73,20 +73,20 @@ function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) =>
                   <button key={s.id} type="button" onClick={() => onOpen(s.id)}
                     className="w-full text-left rounded-md border border-border bg-background px-2 py-1.5 hover:border-primary/50 transition-colors">
                     <div className="flex items-center justify-between gap-1">
-                      <span className="font-mono text-[10px] text-muted-foreground">{s.projectNo ?? '—'}</span>
-                      {late && <span className="text-[10px] text-red-600 dark:text-red-400">просрочен шаг</span>}
+                      <span className="font-mono text-xs text-muted-foreground">{s.projectNo ?? '—'}</span>
+                      {late && <span className="text-xs text-red-600 dark:text-red-400">просрочен шаг</span>}
                     </div>
-                    <div className="text-xs truncate" title={s.fullAddress ?? s.address ?? ''}>
+                    <div className="text-sm truncate" title={s.fullAddress ?? s.address ?? ''}>
                       {s.title || s.address || s.installPlace || s.city || '—'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground truncate">
+                    <div className="text-xs text-muted-foreground truncate">
                       {s.city ?? s.region ?? ''}{s.ownerName ? ` · ${s.ownerName}` : ' · без ответственного'}
                     </div>
                   </button>
                 )
               })}
               {list.length > 50 && (
-                <div className="px-1 py-1 text-[10px] text-muted-foreground">
+                <div className="px-1 py-1 text-xs text-muted-foreground">
                   показаны первые 50 из {list.length} — сузьте фильтр
                 </div>
               )}
@@ -164,27 +164,27 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Select value={phase || '__all__'} onValueChange={(v) => { setPhase(v === '__all__' ? '' : v); reset() }}>
-          <SelectTrigger className="h-8 w-[210px] text-xs"><SelectValue placeholder="Все этапы" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[210px] text-sm"><SelectValue placeholder="Все этапы" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__" className="text-xs">Все этапы ({nf0.format(pf.data?.active ?? 0)})</SelectItem>
+            <SelectItem value="__all__" className="text-sm">Все этапы ({nf0.format(pf.data?.active ?? 0)})</SelectItem>
             {(pf.data?.phases ?? []).filter((p) => p.key !== 'closed').map((p) => (
-              <SelectItem key={p.key} value={p.key} className="text-xs">{p.label} ({p.count})</SelectItem>
+              <SelectItem key={p.key} value={p.key} className="text-sm">{p.label} ({p.count})</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
         <Select value={ownerId || '__all__'} onValueChange={(v) => { setOwnerId(v === '__all__' ? '' : v); reset() }}>
-          <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue placeholder="Любой ответственный" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[180px] text-sm"><SelectValue placeholder="Любой ответственный" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__" className="text-xs">Любой ответственный</SelectItem>
+            <SelectItem value="__all__" className="text-sm">Любой ответственный</SelectItem>
             {(members.data ?? []).map((m) => (
-              <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+              <SelectItem key={m.id} value={m.id} className="text-sm">{m.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
         <button type="button" onClick={() => { setOverdue((v) => !v); reset() }}
-          className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${overdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+          className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${overdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Просрочено
         </button>
 
@@ -194,7 +194,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
           {([['table', 'Таблица'], ['board', 'Доска']] as const).map(([v, label]) => (
             <button key={v} type="button" onClick={() => setView(v)}
-              className={`px-2 py-1 text-xs rounded-[5px] ${view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              className={`px-2 py-1 text-sm rounded-[5px] ${view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
               {label}
             </button>
           ))}
@@ -203,20 +203,20 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }}
-            placeholder="Адрес, город, собственник" className="h-8 w-[220px] pl-7 pr-7 text-xs" />
+            placeholder="Адрес, город, собственник" className="h-8 w-[220px] pl-7 pr-7 text-sm" />
           {search && <button type="button" onClick={() => { setSearch(''); reset() }}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
         </div>
-        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCreating(true)}>
+        <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => setCreating(true)}>
           <Plus className="h-3.5 w-3.5 mr-1" />Новый проект
         </Button>
         {risk && (
           <button type="button" onClick={clearRisk}
-            className="px-2.5 py-1 text-xs rounded-md border border-primary bg-primary/10 text-primary">
+            className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">
             фильтр из обзора ✕
           </button>
         )}
-        <span className="text-[11px] text-muted-foreground ml-auto">
+        <span className="text-xs text-muted-foreground ml-auto">
           {q.isLoading ? '…' : `${nf0.format(rows.length)} проектов`}
         </span>
       </div>
@@ -224,18 +224,18 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       {/* Раздача проектов пачкой: по одному триста карточек не назначить, и
           «кто ведёт» остаётся пустым, а с ним половина строк «что горит». */}
       {picked.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
           <span className="font-medium">Выбрано {picked.size}</span>
           <Select value={assignTo} onValueChange={setAssignTo}>
-            <SelectTrigger className="h-7 w-[220px] text-xs"><SelectValue placeholder="Ответственный" /></SelectTrigger>
+            <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue placeholder="Ответственный" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="__none__" className="text-xs">— снять ответственного</SelectItem>
+              <SelectItem value="__none__" className="text-sm">— снять ответственного</SelectItem>
               {(members.data ?? []).map((m) => (
-                <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+                <SelectItem key={m.id} value={m.id} className="text-sm">{m.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" className="h-7 text-xs" disabled={!assignTo || mAssign.isPending}
+          <Button size="sm" className="h-8 text-sm" disabled={!assignTo || mAssign.isPending}
             onClick={() => mAssign.mutate()}>
             {mAssign.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Назначить
           </Button>
@@ -255,7 +255,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           ) : rows.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">Проектов не найдено</div>
           ) : (
-            <table className="w-full text-xs">
+            <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/20 text-muted-foreground">
                   <th className="w-8 p-2">
@@ -293,13 +293,13 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                       </td>
                       <td className="p-2">
                         {s.phase && (
-                          <span className={`text-[11px] rounded border px-1.5 py-0.5 ${PHASE_META[s.phase]?.cls ?? ''}`}>
+                          <span className={`text-xs rounded border px-1.5 py-0.5 ${PHASE_META[s.phase]?.cls ?? ''}`}>
                             {s.phaseLabel ?? PHASE_META[s.phase]?.label}
                           </span>
                         )}
                       </td>
                       <td className="p-2">
-                        <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
+                        <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
                           {s.stageLabel}
                         </span>
                       </td>
@@ -320,10 +320,10 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       </Card>
 
       {pages > 1 && !phase && (
-        <div className="flex items-center justify-end gap-2 text-xs">
-          <Button variant="outline" size="sm" className="h-7 px-2" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
+        <div className="flex items-center justify-end gap-2 text-sm">
+          <Button variant="outline" size="sm" className="h-8 px-2" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
           <span className="text-muted-foreground">стр. {page} из {pages}</span>
-          <Button variant="outline" size="sm" className="h-7 px-2" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
+          <Button variant="outline" size="sm" className="h-8 px-2" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
         </div>
       )}
 

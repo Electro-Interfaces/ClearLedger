@@ -53,7 +53,7 @@ export function AwaitingAccountingPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-3">
       <div>
         <h2 className="text-base font-semibold">Ждёт учёта</h2>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           Где проект ушёл вперёд, а бухгалтерия об этом ещё не знает. Всего расхождений: {nf0.format(totalIssues)}.
         </p>
       </div>
@@ -67,11 +67,11 @@ export function AwaitingAccountingPanel({ companyId }: { companyId: string }) {
           <CardContent className="p-0">
             <div className="px-3 py-2 border-b bg-muted/40 flex items-center gap-2">
               <g.icon className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-              <span className="text-xs font-semibold">{g.title}</span>
-              <span className="font-mono text-xs text-muted-foreground ml-auto">{nf0.format(g.items.length)}</span>
+              <span className="text-sm font-semibold">{g.title}</span>
+              <span className="font-mono text-sm text-muted-foreground ml-auto">{nf0.format(g.items.length)}</span>
             </div>
-            <div className="px-3 py-1.5 text-[11px] text-muted-foreground border-b">{g.hint}</div>
-            <table className="w-full text-xs">
+            <div className="px-3 py-1.5 text-xs text-muted-foreground border-b">{g.hint}</div>
+            <table className="w-full text-sm">
               <tbody>
                 {g.items.slice(0, 100).map((s) => (
                   <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
@@ -81,7 +81,7 @@ export function AwaitingAccountingPanel({ companyId }: { companyId: string }) {
                       {s.address ?? '—'}<span className="text-muted-foreground"> · {s.city ?? ''}</span>
                     </td>
                     <td className="p-2 w-40">
-                      <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
+                      <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
                         {s.stageLabel}
                       </span>
                     </td>
@@ -90,7 +90,7 @@ export function AwaitingAccountingPanel({ companyId }: { companyId: string }) {
               </tbody>
             </table>
             {g.items.length > 100 && (
-              <div className="px-3 py-2 text-[11px] text-muted-foreground border-t">
+              <div className="px-3 py-2 text-xs text-muted-foreground border-t">
                 Показаны первые 100 из {nf0.format(g.items.length)}.
               </div>
             )}

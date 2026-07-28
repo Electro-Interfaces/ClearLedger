@@ -52,7 +52,7 @@ export function ProjectPhaseStrip({ current, counts, onPick, note }: {
             <div key={p.key} className="flex items-center gap-1 shrink-0">
               <button type="button" disabled={!clickable} onClick={() => onPick?.(p.key)}
                 title={p.hint}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors
                   ${state === 'current' ? 'bg-primary/10 text-primary font-medium'
                     : state === 'done' ? 'text-emerald-600 dark:text-emerald-400'
                     : state === 'future' ? 'text-muted-foreground'
@@ -63,17 +63,17 @@ export function ProjectPhaseStrip({ current, counts, onPick, note }: {
                   {i + 1}. {p.label}
                 </span>
                 {counts && (
-                  <span className="font-mono text-[11px] text-muted-foreground">
+                  <span className="font-mono text-xs text-muted-foreground">
                     {counts[p.key] ?? 0}
                   </span>
                 )}
               </button>
-              {i < PHASES.length - 1 && <span className="text-muted-foreground/40 text-xs">→</span>}
+              {i < PHASES.length - 1 && <span className="text-muted-foreground/40 text-sm">→</span>}
             </div>
           )
         })}
       </div>
-      {note && <div className="text-[10px] text-muted-foreground mt-1">{note}</div>}
+      {note && <div className="text-xs text-muted-foreground mt-1">{note}</div>}
     </div>
   )
 }
