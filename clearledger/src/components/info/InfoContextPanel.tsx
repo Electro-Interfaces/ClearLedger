@@ -31,7 +31,12 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   // и подсказка в них обязана знать, где человек, а не считать всё Учётом.
   const product = productForPath(pathname)
   const appCode = appCodeForPath(pathname)
-  const sectionKey = params.get('sub')
+  // Ключ места двухуровневый: раздел плюс вкладка карточки («pr_project:work»).
+  // Без вкладки панель на «Паспорте» и на «Документах» показывала одно и то же —
+  // общую статью раздела, хотя вопросы у человека там разные.
+  const sub = params.get('sub')
+  const tab = params.get('ptab')
+  const sectionKey = sub && tab ? `${sub}:${tab}` : sub
 
   const ctx = useQuery({
     queryKey: ['info-ctx', companyId, appCode, sectionKey],
