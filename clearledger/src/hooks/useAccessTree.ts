@@ -10,6 +10,7 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { isApiEnabled } from '@/services/apiClient'
 import { getAccessCatalog } from '@/services/registryService'
+import { listSsoApps } from '@/services/ssoService'
 import { productModules } from '@/config/productAccess'
 import { ACCESS_MODULES } from '@/config/accessModules'
 
@@ -18,6 +19,8 @@ export interface AccessApp {
   app: string; name: string; groups: AccessGroup[]; count: number
   /** Имя значка из реестра (`eco_apps.icon`) — продукты показываются значками в матрице. */
   icon?: string
+  /** Слой рабочего стола: приложение, сервис контейнера или управление пространством. */
+  layer?: 'admin' | 'service' | 'app'
 }
 
 export function useAccessTree(companyId: string) {
@@ -28,6 +31,19 @@ export function useAccessTree(companyId: string) {
     staleTime: 5 * 60_000,
     retry: false,
   })
+  // Слой берём из каталога стола — там он и определяется (`INTERNAL_LAYERS`, env
+  // `SSO_APPS`). Второй ручки не нужно: тот же запрос уже кэширован лаунчером и столом.
+  const layersQ = useQuery({
+    queryKey: ['sso-apps', companyId],
+    queryFn: () => listSsoApps(companyId),
+    enabled: isApiEnabled() && !!companyId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const layers = useMemo(
+    () => new Map((layersQ.data?.apps ?? []).map((a) => [a.code, a.layer ?? 'app'] as const)),
+    [layersQ.data],
+  )
   const tree = useMemo<AccessApp[]>(() => {
     const catalog = q.data ?? (q.isLoading ? [] : [{
       // Офлайн-контур: реестр недоступен — остаются модули Учёта (legacy-каталог).
@@ -50,8 +66,9 @@ export function useAccessTree(companyId: string) {
       return {
         app: app.app, name: app.name, icon: app.icon, groups,
         count: groups.reduce((s, g) => s + g.modules.length, 0),
+        layer: layers.get(app.app) ?? 'app',
       }
     })
-  }, [q.data, q.isLoading])
+  }, [q.data, q.isLoading, layers])
   return { tree, isLoading: q.isLoading }
 }
