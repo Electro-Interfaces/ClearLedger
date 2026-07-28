@@ -1037,6 +1037,65 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.30: единый справочник видов договоров и роли сторон.
+        #
+        # Вид договора хранился свободным текстом, и один вид писался по-разному:
+        # «Сервисное обслуживание», «Сервис», «Техническое обслуживание ЭЗС» —
+        # три написания, по которым считают охват и обязательства. Теперь код,
+        # название и основание по ГК; исходный текст остаётся в contracts.type,
+        # чтобы разбор можно было проверить и ничего не потерять.
+        #
+        # Роль контрагента намеренно не хранится в его карточке: один и тот же
+        # бывает арендодателем по одному договору, поставщиком по другому и
+        # покупателем по третьему. Роль — свойство участия в договоре.
+        for stmt in (
+            """
+            CREATE TABLE IF NOT EXISTS contract_types (
+              code        TEXT PRIMARY KEY,
+              label       TEXT NOT NULL,
+              gk_basis    TEXT,
+              direction   TEXT,
+              sort_order  INT NOT NULL DEFAULT 100,
+              is_active   BOOLEAN NOT NULL DEFAULT true
+            )
+            """,
+            """
+            INSERT INTO contract_types (code, label, gk_basis, direction, sort_order) VALUES
+              ('rent',             'Аренда',                    'гл. 34 ГК РФ',     'in',  10),
+              ('energy_supply',    'Энергоснабжение',           '§ 6 гл. 30 ГК РФ', 'in',  20),
+              ('works',            'Подряд и монтаж',           'гл. 37 ГК РФ',     'in',  30),
+              ('supply',           'Поставка оборудования',     '§ 3 гл. 30 ГК РФ', 'in',  40),
+              ('maintenance',      'Техническое обслуживание',  'гл. 39 ГК РФ',     'in',  50),
+              ('services',         'Возмездное оказание услуг', 'гл. 39 ГК РФ',     'any', 60),
+              ('contact_center',   'Услуги контакт-центра',     'гл. 39 ГК РФ',     'in',  70),
+              ('agency',           'Агентский договор',         'гл. 52 ГК РФ',     'any', 80),
+              ('sale',             'Купля-продажа',             'гл. 30 ГК РФ',     'any', 90),
+              ('charging_service', 'Зарядка электромобилей',    'гл. 39 ГК РФ',     'out', 100),
+              ('other',            'Иное',                       NULL,              'any', 200)
+            ON CONFLICT (code) DO UPDATE
+              SET label = EXCLUDED.label, gk_basis = EXCLUDED.gk_basis,
+                  direction = EXCLUDED.direction, sort_order = EXCLUDED.sort_order
+            """,
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS type_code TEXT REFERENCES contract_types(code)",
+            "CREATE INDEX IF NOT EXISTS idx_contracts_type_code ON contracts (company_id, type_code)",
+            # Разбор накопленного текста. Список закрытый: что не опознано, остаётся
+            # без кода и видно запросом, а не растворяется в «прочем».
+            """
+            UPDATE contracts SET type_code = CASE
+                WHEN type ILIKE '%аренд%'                                      THEN 'rent'
+                WHEN type ILIKE '%энергоснабж%' OR type ILIKE '%электроэнерг%' THEN 'energy_supply'
+                WHEN type ILIKE '%монтаж%' OR type ILIKE '%подряд%'            THEN 'works'
+                WHEN type ILIKE '%поставка%'                                   THEN 'supply'
+                WHEN type ILIKE '%сервис%' OR type ILIKE '%обслуживан%'        THEN 'maintenance'
+                WHEN type ILIKE '%зарядк%'                                     THEN 'charging_service'
+                WHEN type ILIKE '%эквайринг%' OR type ILIKE '%ОФД%'            THEN 'services'
+                ELSE NULL
+              END
+            WHERE type_code IS NULL AND type IS NOT NULL
+            """,
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""
