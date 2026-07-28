@@ -69,7 +69,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">Портфель проектов</h2>
+          <h2 className="text-base font-semibold">Обзор</h2>
           <p className="text-xs text-muted-foreground">
             {nf0.format(d.active)} в работе · {nf0.format(d.live)} в эксплуатации ·
             {' '}{nf0.format(d.archived)} отклонено. Срок ввода определяет присоединение, а не стройка.

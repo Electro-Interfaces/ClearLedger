@@ -33,7 +33,7 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
   return (
     <div className="p-4 space-y-4">
       <div>
-        <h2 className="text-base font-semibold">Бюджет портфеля</h2>
+        <h2 className="text-base font-semibold">Бюджет</h2>
         <p className="text-xs text-muted-foreground">
           План {money(d.planTotal)} · факт {money(d.factTotal)}. Капвложения войдут в стоимость
           объектов, расходы периода — нет.

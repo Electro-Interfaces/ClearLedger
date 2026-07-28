@@ -26,11 +26,14 @@ export const MODE_LABELS: Record<CoreMode, string> = {
 
 // Подписи под-разделов по режимам (ключ = ключ под-вида в панели).
 const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
+  // Подписи те же, что в меню (`SITES_MENU`): хлебная крошка и пункт меню должны
+  // называться одинаково, иначе человек не понимает, где он оказался.
   projects: {
-    pr_portfolio: 'Обзор портфеля', pr_project: 'Проекты', pr_projects: 'Проекты',
-    sites_overview: 'Воронка подбора', sites_list: 'Банк площадок',
+    pr_portfolio: 'Обзор', pr_project: 'Проекты', pr_projects: 'Проекты',
+    sites_overview: 'Воронка', sites_list: 'Площадки',
     sites_priority: 'Приоритеты', sites_map: 'Карта',
-    pr_tp: 'Присоединение', pr_equipment: 'Оборудование', pr_accounting: 'Ждёт учёта',
+    pr_tp: 'Присоединение', pr_equipment: 'Оборудование',
+    pr_budget: 'Бюджет', pr_accounting: 'Ждёт учёта',
   },
   management: {
     overview: 'Обзор', map: 'Карта', transactions: 'Реестр операций',

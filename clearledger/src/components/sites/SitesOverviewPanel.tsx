@@ -86,7 +86,7 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
     <div className="p-4 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">Воронка подбора площадок</h2>
+          <h2 className="text-base font-semibold">Воронка</h2>
           <p className="text-xs text-muted-foreground">
             Первый этап проекта: от лида до решения строить. Дальше проект уходит в оформление
             земли и реализацию — весь путь виден в карточке проекта, вкладка «Схема».

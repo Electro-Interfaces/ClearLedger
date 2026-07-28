@@ -73,7 +73,7 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
   return (
     <div className="p-4 space-y-3">
       <div>
-        <h2 className="text-base font-semibold">Банк площадок</h2>
+        <h2 className="text-base font-semibold">Площадки</h2>
         <p className="text-xs text-muted-foreground">
           Первый этап проекта — где строить. Каждая площадка это проект на ранней стадии:
           клик открывает его рабочий экран, Alt+клик — быстрый просмотр.
