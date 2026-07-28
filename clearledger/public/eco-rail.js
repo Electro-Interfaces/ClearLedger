@@ -325,13 +325,15 @@
 
       root.innerHTML = `
         <style>
-          :host{ display:block; font:inherit; color:inherit;
-                 border-top:1px solid rgba(127,127,127,.28); margin-top:8px; padding-top:8px }
-          .head{ padding:6px 12px; font-size:11px; font-weight:600; letter-spacing:.12em;
-                 text-transform:uppercase; opacity:.55 }
+          :host{ display:block; font:inherit; color:inherit }
+          /* Заголовок блока — 12px при .75: на 11px и .55 подпись читал только тот,
+             кто знал, что она там есть (контраст ниже порога AA). Разделителя сверху
+             больше нет: в отдельной колонке пространства отделять не от чего. */
+          .head{ padding:8px 12px; font-size:12px; font-weight:600; letter-spacing:.08em;
+                 text-transform:uppercase; opacity:.75 }
           a{ display:flex; align-items:center; gap:12px; padding:8px 12px; margin:1px 0;
              border-radius:6px; font-size:14px; font-weight:500; text-decoration:none;
-             color:inherit; opacity:.7; transition:opacity .15s, background .15s }
+             color:inherit; opacity:.85; transition:opacity .15s, background .15s }
           a:hover{ opacity:1; background:rgba(127,127,127,.14) }
           a.narrow{ justify-content:center; padding:8px 0 }
           svg{ width:16px; height:16px; flex:none }
