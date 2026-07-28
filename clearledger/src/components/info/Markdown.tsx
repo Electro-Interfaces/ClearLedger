@@ -111,6 +111,20 @@ export function Markdown({ content }: { content: string }) {
       blocks.push(<div key={key} className={cls}>{inline(h[2], key)}</div>)
       return
     }
+    // Иллюстрация отдельной строкой: скриншот экрана с выносками — обычный приём
+    // инструкций, и он не должен превращаться в ссылку посреди абзаца.
+    const img = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(line.trim())
+    if (img) {
+      flushList(`${key}-l`)
+      blocks.push(
+        <figure key={key} className="my-3">
+          <img src={img[2]} alt={img[1]} loading="lazy" referrerPolicy="no-referrer"
+            className="w-full rounded-lg border border-border/60" />
+          {img[1] && <figcaption className="mt-1 text-[11px] text-muted-foreground">{img[1]}</figcaption>}
+        </figure>,
+      )
+      return
+    }
     if (/^\s*[-*]\s+/.test(line)) { list.push(line.replace(/^\s*[-*]\s+/, '')); return }
     if (/^>\s?/.test(line)) {
       flushList(`${key}-l`)
@@ -121,6 +135,8 @@ export function Markdown({ content }: { content: string }) {
       )
       return
     }
+    const num = /^\s*\d+[.)]\s+(.*)$/.exec(line)
+    if (num) { list.push(num[1]); return }
     flushList(`${key}-l`)
     blocks.push(<p key={key} className="my-1.5 leading-relaxed">{inline(line, key)}</p>)
   })

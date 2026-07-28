@@ -11,7 +11,9 @@ import { PanelRight } from 'lucide-react'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { ChatPanel } from '@/components/chat/ChatPanel'
-import { TicketsPanel, InfoPanel } from './InteractionPanels'
+import { TicketsPanel } from './InteractionPanels'
+import { InfoCenter } from '@/components/info/InfoCenter'
+import { useCompany } from '@/contexts/CompanyContext'
 
 const TITLES: Record<string, string> = { chat: 'Чат', tickets: 'Заявки', help: 'Инфо' }
 
@@ -64,19 +66,28 @@ export function InteractionModal() {
         </DialogContent>
       </Dialog>
 
-      {/* Инфо — модалка-destination (modal=true) */}
+      {/* Инфо — модалка-destination (modal=true): полный центр знания, а не
+          страничка «о системе». Дерево слева, статья справа — из шапки человек
+          идёт искать сам, поэтому ему нужен весь состав, а не подборка. */}
       <Dialog open={section === 'help' && isOpen} onOpenChange={(o) => { if (!o) closeInteraction() }}>
-        <DialogContent className="p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 w-screen h-[100dvh] max-w-none max-h-none rounded-none sm:w-[92vw] sm:max-w-3xl sm:h-[82vh] sm:max-h-[82vh] sm:rounded-xl overflow-hidden flex flex-col">
+        <DialogContent className="p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 w-screen h-[100dvh] max-w-none max-h-none rounded-none sm:w-[94vw] sm:max-w-6xl sm:h-[88vh] sm:max-h-[88vh] sm:rounded-xl overflow-hidden flex flex-col">
           {DockButton}
           <DialogHeader className="px-4 py-3 border-b border-border/50 shrink-0 text-left">
-            <DialogTitle className="text-foreground text-base">Инфо — о системе и подсказки</DialogTitle>
-            <DialogDescription className="sr-only">Справка и сведения о приложении</DialogDescription>
+            <DialogTitle className="text-foreground text-base">Инфо — база знаний и инструкции</DialogTitle>
+            <DialogDescription className="sr-only">Знание пространства: инструкции, нормы и документы компании</DialogDescription>
           </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {section === 'help' && <InfoPanel />}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {section === 'help' && <InfoModalBody />}
           </div>
         </DialogContent>
       </Dialog>
     </>
   )
+}
+
+/** Тело окна «Инфо»: тот же центр знания, что открывается со стола. */
+function InfoModalBody() {
+  const { companyId } = useCompany()
+  if (!companyId) return null
+  return <InfoCenter companyId={companyId} variant="modal" />
 }
