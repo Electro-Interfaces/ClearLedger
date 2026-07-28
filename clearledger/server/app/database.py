@@ -313,6 +313,9 @@ async def create_all() -> None:
             "REFERENCES counterparties(id) ON DELETE SET NULL",
             # Скоуп данных: объекты, которые видит участник (NULL = вся сеть компании).
             "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS object_scope JSONB",
+            # Основание допуска: договоры, по которым человек работает в пространстве.
+            # Не права — справка «на каком основании он здесь» (docs/SPACE.md §4).
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS contract_ids JSONB",
             # v2.2: приглашения сотрудников по email.
             "CREATE TABLE IF NOT EXISTS invitations ("
             "  id UUID PRIMARY KEY,"

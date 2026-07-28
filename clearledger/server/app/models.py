@@ -155,6 +155,11 @@ class UserCompany(Base):
     # экраны», скоуп — «по каким объектам»: подрядчику нужен «Парк оборудования», но
     # только на своих пяти станциях. Механика — `app/scope.py`.
     object_scope: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # ОСНОВАНИЕ: договоры (`contracts.id`), по которым человек допущен в пространство.
+    # Это справка, а не права — доступ даёт роль, а здесь видно, ЧЕМ он обоснован:
+    # у подрядчика это его договор обслуживания. Список, потому что оснований бывает
+    # несколько (рамочный плюс на объект); NULL или пусто — основание не указано.
+    contract_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

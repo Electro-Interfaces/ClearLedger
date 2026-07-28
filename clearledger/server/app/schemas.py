@@ -148,6 +148,16 @@ class MemberScopeUpdate(BaseModel):
     object_scope: list[str] | None = None
 
 
+class MemberContractsUpdate(BaseModel):
+    """Основание допуска: договоры, по которым участник работает в пространстве.
+
+    Не права и не скоуп — справка «почему он здесь»: у подрядчика это его договор
+    обслуживания. Оснований бывает несколько; пусто = основание не указано.
+    """
+    company_id: str
+    contract_ids: list[str] | None = None
+
+
 # ===== Роли доступа (hybrid RBAC) =====
 
 class CompanyRoleResponse(BaseModel):
@@ -183,6 +193,7 @@ class UserAdminResponse(BaseModel):
     role_id: str | None = None      # назначенная именованная роль доступа (company_roles)
     role_name: str | None = None    # имя назначенной роли (для UI)
     object_scope: list[str] | None = None  # скоуп данных: объекты; null = вся сеть
+    contract_ids: list[str] | None = None  # основание допуска: договоры (справка, не права)
     is_superadmin: bool
     companies: list[CompanyMembership] = []
 
