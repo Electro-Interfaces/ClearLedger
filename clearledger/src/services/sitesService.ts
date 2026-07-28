@@ -87,8 +87,16 @@ export interface SiteRow {
   comment: string | null
 }
 
-/** Пункт чек-листа гейта: `manual` — проверяется глазами, остальное — по полям. */
-export interface GateItem { key: string; label: string; manual: boolean; done: boolean; required: boolean; doc: string | null; equipment?: boolean }
+/**
+ * Пункт чек-листа согласования ЗУ: `key` — номер задачи по регламенту («3.12»),
+ * `role` — ответственное подразделение, `manual` — проверяется глазами,
+ * остальное закрывается заполненными графами, документом или поставкой.
+ */
+export interface GateItem {
+  key: string; label: string; manual: boolean; done: boolean; required: boolean
+  doc: string | null; equipment?: boolean
+  role?: string | null; phase?: string | null; phaseLabel?: string | null
+}
 export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
   /** Обязательные незакрытые пункты — они держат переход вперёд. */
@@ -120,6 +128,23 @@ export interface SiteDetail extends SiteRow {
   tpCost: number | null
   tpTermMonths: number | null
   locationId: string | null
+  // условия площадки и субсидия (требования программы: 149 кВт, 24/7, 2 места)
+  subsidyPlanned: boolean | null
+  subsidyAmount: number | null
+  parkingSpots: number | null
+  access24x7: boolean | null
+  hasLighting: boolean | null
+  hasInternet: boolean | null
+  commissionedOn: string | null
+  // графы чек-листа согласования: экономика этапа 3, условия площадки, контакты
+  inputPriceKwth: number | null
+  smrCost: number | null
+  longTermContract: boolean | null
+  hasVideo: boolean | null
+  hasMobile: boolean | null
+  ownerContact: string | null
+  sourceCompany: string | null
+  sourcePerson: string | null
 }
 
 export interface SiteEvent {

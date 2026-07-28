@@ -901,6 +901,32 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.26: все 55 обязательных граф «Банка данных ЗУ» (чек-лист согласования
+        # ЗУ под ЭЗС, РусГидро). Часть граф уже приезжала в `raw`, но не имела
+        # своего поля — значит не считалась, не фильтровалась и не закрывала гейт.
+        # Паспорт питающей сети и деньги ТУ идут в карточку присоединения: это её
+        # предмет, а не свойство участка.
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS input_price_kwth NUMERIC(12,4)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS smr_cost NUMERIC(16,2)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS long_term_contract BOOLEAN",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS has_video BOOLEAN",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS has_mobile BOOLEAN",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS owner_contact TEXT",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS source_company VARCHAR(300)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS source_person TEXT",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS substation_owner VARCHAR(200)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS line_owner VARCHAR(200)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS transformer_kva VARCHAR(80)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS line_type VARCHAR(120)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS extra_power_possible BOOLEAN",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS transformer_swap_possible BOOLEAN",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS works_cost NUMERIC(16,2)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS total_cost NUMERIC(16,2)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS applicant_term_months DOUBLE PRECISION",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

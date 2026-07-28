@@ -109,8 +109,13 @@ TC_STATUSES = [
 TC_LABELS = {s["key"]: s["label"] for s in TC_STATUSES}
 TC_FIELDS = {"status", "grid_operator", "application_no", "application_date", "specs_no",
              "specs_date", "contract_no", "contract_date", "power_kwt", "voltage", "cost",
-             "due_date", "done_date", "needs_reconstruction", "note"}
-_TC_NUM = {"power_kwt", "cost"}
+             "due_date", "done_date", "needs_reconstruction", "note",
+             # паспорт питающей сети и деньги ТУ (графы AQ–BA банка ЗУ)
+             "substation_owner", "line_owner", "transformer_kva", "line_type",
+             "extra_power_possible", "transformer_swap_possible",
+             "works_cost", "total_cost", "applicant_term_months"}
+_TC_NUM = {"power_kwt", "cost", "works_cost", "total_cost", "applicant_term_months"}
+_TC_BOOL_FIELDS = {"needs_reconstruction", "extra_power_possible", "transformer_swap_possible"}
 
 
 def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
@@ -127,6 +132,13 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "cost": float(tc.cost) if tc.cost is not None else None,
         "dueDate": tc.due_date, "doneDate": tc.done_date,
         "needsReconstruction": tc.needs_reconstruction, "note": tc.note,
+        "substationOwner": tc.substation_owner, "lineOwner": tc.line_owner,
+        "transformerKva": tc.transformer_kva, "lineType": tc.line_type,
+        "extraPowerPossible": tc.extra_power_possible,
+        "transformerSwapPossible": tc.transformer_swap_possible,
+        "worksCost": float(tc.works_cost) if tc.works_cost is not None else None,
+        "totalCost": float(tc.total_cost) if tc.total_cost is not None else None,
+        "applicantTermMonths": tc.applicant_term_months,
         "overdue": overdue,
     }
 
@@ -158,7 +170,7 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                 setattr(tc, f, float(str(v).replace(",", ".").replace(" ", "")))
             except ValueError:
                 pass
-        elif f == "needs_reconstruction":
+        elif f in _TC_BOOL_FIELDS:
             setattr(tc, f, bool(v))
         else:
             setattr(tc, f, str(v))

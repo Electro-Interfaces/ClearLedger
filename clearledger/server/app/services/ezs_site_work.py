@@ -20,63 +20,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsSite, EzsSiteEvent, User
+from app.services.ezs_checklist import PHASE_LABELS_DOC, gates_by_stage
 from app.services.ezs_sites import STAGE_LABELS, STAGE_ORDER, _site_out
 
 # ── Гейты: что должно быть готово, чтобы уйти с этой стадии дальше ──────────
-# Ключ пункта → как он проверяется. `field` — пункт закрывается автоматически,
-# когда поле заполнено; `manual` — отмечается галочкой (проверку глазами
-# автоматом не подтвердить).
-# `required` — без этого пункта переход вперёд заблокирован (обход возможен только
-# с обоснованием и правами админа компании). Остальные пункты — рекомендации:
-# они показывают качество проработки, но не держат проект.
-GATES: dict[str, list[dict[str, Any]]] = {
-    "lead": [
-        {"key": "address", "label": "Адрес и место установки", "field": "address_any", "required": True},
-        {"key": "source", "label": "Кто предоставил площадку", "manual": True},
-    ],
-    "screening": [
-        {"key": "coords", "label": "Координаты на карте", "field": "lat", "required": True},
-        {"key": "place_kind", "label": "Тип места (город / трасса)", "field": "place_kind", "required": True},
-        {"key": "demand", "label": "Оценка спроса и конкурентов рядом", "manual": True},
-    ],
-    "negotiation": [
-        {"key": "owner", "label": "Собственник установлен", "field": "owner", "required": True},
-        {"key": "contact", "label": "Контакт представителя получен", "manual": True},
-        {"key": "consent", "label": "Принципиальное согласие", "manual": True, "required": True},
-        {"key": "rate", "label": "Ориентир по ставке аренды", "field": "rent_rate"},
-    ],
-    "dd": [
-        {"key": "power", "label": "Свободная мощность, кВт", "field": "free_power_num", "required": True},
-        {"key": "tp_cost", "label": "Стоимость техприсоединения", "field": "tp_cost", "required": True},
-        {"key": "tp_term", "label": "Срок мероприятий, мес.", "field": "tp_term_months"},
-        {"key": "control", "label": "Форма контроля участка", "field": "control_form", "required": True},
-        {"key": "legal", "label": "Право проверено (ЕГРН, ВРИ, обременения)", "manual": True, "required": True},
-    ],
-    "decision": [
-        {"key": "capex", "label": "Затраты на подключение посчитаны", "field": "connection_cost", "required": True},
-        {"key": "plan", "label": "План ЭЗС и мощности", "field": "planned_power_kwt", "required": True},
-        {"key": "verdict", "label": "Инвестиционное решение принято", "manual": True, "required": True},
-    ],
-    "contracting": [
-        {"key": "contract", "label": "Договор подписан", "field": "contract_start", "required": True},
-        {"key": "term", "label": "Срок договора зафиксирован", "field": "contract_end", "required": True},
-        {"key": "doc_contract", "label": "Скан договора приложен", "doc": "contract", "required": True},
-    ],
-    "construction": [
-        {"key": "contractor", "label": "Подрядчик определён", "field": "contractor", "required": True},
-        {"key": "doc_tu", "label": "ТУ приложены", "doc": "tu"},
-        {"key": "tp_done", "label": "Техприсоединение исполнено", "manual": True, "required": True},
-        {"key": "equipment", "label": "Оборудование поставлено", "equipment": True, "required": True},
-        {"key": "smr", "label": "СМР завершены", "manual": True, "required": True},
-    ],
-    "commissioning": [
-        {"key": "pnr", "label": "Пусконаладка выполнена", "manual": True, "required": True},
-        {"key": "act", "label": "Акт приёмки приложен", "doc": "act", "required": True},
-    ],
-    "live": [
-        {"key": "location", "label": "Объект заведён в реестре сети", "field": "location_id", "required": True},
-    ],
-}
+# Собираются из чек-листа согласования ЗУ (регламент РусГидро, `ezs_checklist`):
+# пункт гейта = задача чек-листа со своим номером («3.12») и ответственным.
+# До 28.07.2026 здесь лежал наш собственный список — он был короче регламента и
+# называл вещи иначе, из-за чего сверить работу с бумагой было нельзя.
+#
+# Как проверяется пункт: `field`/`fields` — автоматически по заполненным графам,
+# `doc` — приложенным документом, `equipment` — поставкой оборудования,
+# `manual` — галочкой. `required` держит переход вперёд (обход — с обоснованием).
+GATES: dict[str, list[dict[str, Any]]] = gates_by_stage()
 
 # Поля, которые можно править из карточки.
 EDITABLE_FIELDS = {
@@ -91,11 +47,15 @@ EDITABLE_FIELDS = {
     # проект: имя, субсидия, ввод в эксплуатацию
     "title", "subsidy_planned", "parking_spots", "access_24x7", "has_lighting",
     "has_internet", "subsidy_amount", "commissioned_on",
+    # графы чек-листа согласования (v2.26)
+    "input_price_kwth", "smr_cost", "long_term_contract", "has_video", "has_mobile",
+    "owner_contact", "source_company", "source_person",
 }
-_BOOL = {"subsidy_planned", "access_24x7", "has_lighting", "has_internet"}
+_BOOL = {"subsidy_planned", "access_24x7", "has_lighting", "has_internet",
+         "long_term_contract", "has_video", "has_mobile"}
 _NUMERIC = {"lat", "lon", "area_m2", "free_power_num", "distance_to_tp_m", "tp_cost",
             "tp_term_months", "connection_cost", "rent_cost_month", "rent_rate",
-            "planned_power_kwt"}
+            "planned_power_kwt", "input_price_kwth", "smr_cost"}
 _INT = {"planned_ezs_count", "parking_spots"}
 _UUID_FIELDS = {"owner_user_id", "location_id"}
 
@@ -126,11 +86,18 @@ def gate_state(site: EzsSite, stage: str | None = None,
         elif it.get("equipment"):
             # Закрывается не галочкой, а фактом: все нужные позиции поставлены.
             done = bool(equipment_supplied)
+        elif it.get("fields"):
+            # Задача чек-листа закрывается набором граф («аренда И срок договора»):
+            # половина заполненных граф — это невыполненный пункт, а не «почти».
+            done = all(_field_filled(site, f) for f in it["fields"])
         else:
             done = _field_filled(site, it["field"])
         out.append({"key": it["key"], "label": it["label"], "manual": bool(it.get("manual")),
                     "doc": it.get("doc"), "equipment": bool(it.get("equipment")),
-                    "required": bool(it.get("required")), "done": done})
+                    "required": bool(it.get("required")), "done": done,
+                    "role": it.get("role"),
+                    "phase": it.get("phase"),
+                    "phaseLabel": PHASE_LABELS_DOC.get(it.get("phase", ""), "")})
     blocking = [i["label"] for i in out if i["required"] and not i["done"]]
     return {
         "stage": st, "stageLabel": STAGE_LABELS.get(st, st),
@@ -412,6 +379,13 @@ def site_out_full(site: EzsSite, owner_name: str | None = None,
         "freePowerNum": site.free_power_num, "distanceToTpM": site.distance_to_tp_m,
         "tpCost": float(site.tp_cost) if site.tp_cost is not None else None,
         "tpTermMonths": site.tp_term_months,
+        # графы чек-листа согласования (v2.26)
+        "inputPriceKwth": float(site.input_price_kwth) if site.input_price_kwth is not None else None,
+        "smrCost": float(site.smr_cost) if site.smr_cost is not None else None,
+        "longTermContract": site.long_term_contract,
+        "hasVideo": site.has_video, "hasMobile": site.has_mobile,
+        "ownerContact": site.owner_contact, "sourceCompany": site.source_company,
+        "sourcePerson": site.source_person,
         "locationId": str(site.location_id) if site.location_id else None,
         "manualFields": site.manual_fields or [],
         "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=equipment_supplied),

@@ -15,7 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import EzsSite, User
-from app.services import ezs_project, ezs_site_analysis, ezs_site_work, ezs_sites
+from app.services import (
+    ezs_checklist, ezs_project, ezs_site_analysis, ezs_site_work, ezs_sites,
+)
 
 router = APIRouter(prefix="/sites", tags=["Площадки ЭЗС (Банк ЗУ)"])
 
@@ -80,6 +82,16 @@ async def list_gates(user: User = Depends(get_current_user)):
                     "items": ezs_site_work.GATES.get(s, [])}
                    for s in ezs_sites.ALL_STAGES],
     }
+
+
+@router.get("/meta/checklist")
+async def checklist_meta(user: User = Depends(get_current_user)):
+    """Регламент согласования ЗУ целиком: 8 этапов, задачи, ответственные.
+
+    Гейты стадий — тот же чек-лист, разложенный по воронке; здесь он в порядке
+    документа, чтобы сверять работу с бумагой отдела развития.
+    """
+    return ezs_checklist.checklist_meta()
 
 
 @router.post("", status_code=201)

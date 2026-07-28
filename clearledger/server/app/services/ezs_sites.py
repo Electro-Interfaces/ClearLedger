@@ -121,12 +121,29 @@ def _match_field(h: str) -> str | None:
         ("route", ("трасса",)),
         ("coords_raw", ("координат",)),
         ("map_url", ("ссылка на карт",)),
+        ("owner_contact", ("контакт представителя собственника",)),
+        ("source_company", ("предоставившего зу - компания", "предоставившего зу — компания",
+                            "предоставивший зу - компания", "предоставивший зу — компания")),
+        ("source_person", ("предоставившего зу - фио", "предоставившего зу — фио",
+                           "предоставивший зу - фио", "предоставивший зу — фио")),
         ("owner", ("собственник",)),
         ("brand", ("бренд",)),
         ("area_m2", ("площадь",)),
         ("free_power_kwt", ("свободная мощность",)),
         ("rent_cost_month", ("стоимость аренды",)),
+        ("input_price_kwth", ("входная стоимость",)),
+        ("tp_cost", ("стоимость техприса",)),
+        ("smr_cost", ("стоимость смр",)),
+        # Порядок важен: «итого затраты на подключение (ТУ)» — отдельная графа
+        # этапа 5, а не то же самое, что затраты этапа 3 по техпрису.
+        ("tu_total_cost", ("итого затраты на подключение (ту)",)),
         ("connection_cost", ("итого затраты на подключ",)),
+        ("distance_to_tp_m", ("расстояние до тп",)),
+        ("tp_reconstruction", ("реконструкция тп",)),
+        ("long_term_contract", ("долгосрочный договор",)),
+        ("has_video", ("видеонаблюдение",)),
+        ("access_24x7", ("свободный доступ",)),
+        ("has_mobile", ("сотовая связь",)),
         ("planned_power_kwt", ("мощность эзс к установке",)),
         ("planned_ezs_count", ("кол-во эзс",)),
         ("ports_gbt", ("порты эзс - gbt", "порты эзс gbt")),
@@ -136,6 +153,16 @@ def _match_field(h: str) -> str | None:
         ("supplier", ("поставщик",)),
         ("contractor", ("подрядчик",)),
         ("tech_conn_type", ("тип технологического присоед",)),
+        ("substation_owner", ("принадлежность подстанции",)),
+        ("line_owner", ("принадлежность кл",)),
+        ("transformer_kva", ("мощность силового трансформатора",)),
+        ("line_type", ("тип и сечение кл",)),
+        ("extra_power_possible", ("возможность доп",)),
+        ("transformer_swap_possible", ("возможность замены трансформатора",)),
+        ("tu_contract_cost", ("стоимость договора с электросетевой",)),
+        ("tu_works_cost", ("стоимость мероприятий общества",)),
+        ("tp_term_months", ("сроки мероприятий электросетевой",)),
+        ("applicant_term_months", ("сроки мероприятий заявителя",)),
         ("dop_service", ("доп.сервис", "доп сервис")),
         ("archive_reason", ("причина согласия", "причина отказа")),
         ("cadastral_no", ("кадастров",)),
@@ -174,6 +201,23 @@ def _num(v: Any) -> float | None:
 def _int(v: Any) -> int | None:
     n = _num(v)
     return int(round(n)) if n is not None else None
+
+
+def _bool(v: Any) -> bool | None:
+    """«да»/«есть»/«+» → True, «нет»/«отсутствует»/«-» → False, прочее → None.
+
+    В графах вида «Свободный доступ (да/нет)» пишут и «для электромобилей», и
+    «?». Такое значение не «нет» — это «не выяснено», иначе площадка молча
+    получит отказной признак и уедет из выборки.
+    """
+    t = _norm(v)
+    if not t:
+        return None
+    if t.startswith(("да", "есть", "имеет", "+")):
+        return True
+    if t.startswith(("нет", "отсут", "-", "не ")):
+        return False
+    return None
 
 
 def _coords(v: Any) -> tuple[float | None, float | None]:
@@ -474,7 +518,42 @@ _FILL_FIELDS = (
     "ports_ccs", "ports_chademo", "ports_type", "supplier", "contractor",
     "tu_status", "tech_conn_type", "dop_service", "comment", "archive_reason",
     "cadastral_no", "lat", "lon", "region_norm", "region_id",
+    # графы чек-листа согласования, добавленные v2.26
+    "free_power_num", "input_price_kwth", "tp_cost", "smr_cost", "distance_to_tp_m",
+    "tp_term_months", "long_term_contract", "has_video", "access_24x7", "has_mobile",
+    "owner_contact", "source_company", "source_person",
 )
+
+# Графы, которые описывают ПРИСОЕДИНЕНИЕ, а не участок: они едут в карточку
+# `ezs_tech_connections` (поле модели → ключ из `_match_field`).
+_TC_FROM_IMPORT = {
+    "needs_reconstruction": "tp_reconstruction",
+    "substation_owner": "substation_owner",
+    "line_owner": "line_owner",
+    "transformer_kva": "transformer_kva",
+    "line_type": "line_type",
+    "extra_power_possible": "extra_power_possible",
+    "transformer_swap_possible": "transformer_swap_possible",
+    "cost": "tu_contract_cost",
+    "works_cost": "tu_works_cost",
+    "total_cost": "tu_total_cost",
+    "applicant_term_months": "applicant_term_months",
+}
+_TC_BOOL = {"needs_reconstruction", "extra_power_possible", "transformer_swap_possible"}
+_TC_NUM = {"cost", "works_cost", "total_cost", "applicant_term_months"}
+
+
+def _tc_values(vals: dict[str, Any]) -> dict[str, Any]:
+    """Значения карточки присоединения из строки файла (пустые ключи опускаем)."""
+    out: dict[str, Any] = {}
+    for field, src in _TC_FROM_IMPORT.items():
+        v = vals.get(src)
+        if v is None or str(v).strip() == "":
+            continue
+        parsed = _bool(v) if field in _TC_BOOL else (_num(v) if field in _TC_NUM else _s(v, 200))
+        if parsed is not None:
+            out[field] = parsed
+    return out
 
 
 async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_run: bool) -> dict[str, Any]:
@@ -501,7 +580,10 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
         "created": 0, "updated": 0, "unchanged": 0, "stageMoved": 0, "reactivated": 0,
         "archived": 0, "fileDuplicates": [], "nearConflicts": [],
         "regionsUnmatched": [], "skippedNoKey": 0, "withCadastral": 0,
+        "techConnections": {"created": 0, "updated": 0},
     }
+    # Карточки присоединения пишем после flush: у новых площадок id ещё нет.
+    tc_pending: list[tuple[Any, dict[str, Any]]] = []
     seen_in_file: dict[str, str] = {}   # dedup_key → адрес первой строки
     touched: set[int] = set()           # площадки, уже обработанные этой загрузкой
     # События истории пишем после commit площадок: у новых записей id появляется
@@ -580,7 +662,22 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                 "owner": _s(vals.get("owner"), 400), "brand": _s(vals.get("brand"), 160),
                 "area_m2": _num(vals.get("area_m2")), "ownership": _s(vals.get("ownership"), 60),
                 "free_power_kwt": _s(vals.get("free_power_kwt"), 80),
+                # Мощность в файле пишут текстом («100кВт», «60-80 квт»): числом
+                # берём первое значение, иначе гейт стадии dd не закрыть ничем.
+                "free_power_num": _num(vals.get("free_power_kwt")),
                 "connection_cost": _num(vals.get("connection_cost")),
+                "input_price_kwth": _num(vals.get("input_price_kwth")),
+                "tp_cost": _num(vals.get("tp_cost")),
+                "smr_cost": _num(vals.get("smr_cost")),
+                "distance_to_tp_m": _num(vals.get("distance_to_tp_m")),
+                "tp_term_months": _num(vals.get("tp_term_months")),
+                "long_term_contract": _bool(vals.get("long_term_contract")),
+                "has_video": _bool(vals.get("has_video")),
+                "access_24x7": _bool(vals.get("access_24x7")),
+                "has_mobile": _bool(vals.get("has_mobile")),
+                "owner_contact": _s(vals.get("owner_contact")),
+                "source_company": _s(vals.get("source_company"), 300),
+                "source_person": _s(vals.get("source_person")),
                 "rent_cost_month": _num(vals.get("rent_cost_month")),
                 "planned_power_kwt": _num(vals.get("planned_power_kwt")),
                 "planned_ezs_count": _int(vals.get("planned_ezs_count")),
@@ -665,6 +762,10 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                     found.last_seen_at = now
                 touched.add(id(found))
 
+            tc_vals = _tc_values(vals)
+            if tc_vals:
+                tc_pending.append((site if found is None else found, tc_vals))
+
             if lat is not None:
                 report["withCoords"] += 1
             cnt += 1
@@ -680,8 +781,48 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
         for site, kind, text_, frm, to in events:
             db.add(EzsSiteEvent(company_id=company_id, site_id=site.id, kind=kind,
                                 text=text_, from_stage=frm, to_stage=to))
+        await _sync_tech_connections(db, company_id, tc_pending, now, report)
         await db.commit()
+    else:
+        # В предпросмотре считаем, сколько карточек присоединения появилось бы.
+        report["techConnections"]["created"] = len(tc_pending)
     return report
+
+
+async def _sync_tech_connections(db: AsyncSession, company_id, pending: list[tuple[Any, dict[str, Any]]],
+                                 now: datetime, report: dict[str, Any]) -> None:
+    """Заводит карточку присоединения по данным файла и дополняет пустые поля.
+
+    Заполненное НЕ перетираем: карточку ведут руками (переписка с сетевой
+    организацией, номера ТУ), а файл знает только то, что снял отдел развития
+    на осмотре.
+    """
+    from app.models import EzsTechConnection
+
+    if not pending:
+        return
+    site_ids = {s.id for s, _ in pending}
+    existing = {tc.site_id: tc for tc in (await db.execute(
+        select(EzsTechConnection).where(
+            EzsTechConnection.company_id == company_id,
+            EzsTechConnection.site_id.in_(site_ids)))).scalars()}
+    for site, vals in pending:
+        tc = existing.get(site.id)
+        if tc is None:
+            tc = EzsTechConnection(company_id=company_id, site_id=site.id,
+                                   status="draft", created_at=now, **vals)
+            db.add(tc)
+            existing[site.id] = tc
+            report["techConnections"]["created"] += 1
+            continue
+        changed = False
+        for f, v in vals.items():
+            if getattr(tc, f, None) is None:
+                setattr(tc, f, v)
+                changed = True
+        if changed:
+            tc.updated_at = now
+            report["techConnections"]["updated"] += 1
 
 
 def _place_kind(v: Any) -> str | None:

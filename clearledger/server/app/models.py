@@ -3956,6 +3956,20 @@ class EzsSite(Base):
     distance_to_tp_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     tp_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     tp_term_months: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # ── графы банка ЗУ, обязательные по чек-листу согласования (docx РусГидро) ──
+    # Экономика этапа 3: входная цена электроэнергии и стоимость строймонтажа —
+    # без них «Итого затраты на подключение» нечем разложить.
+    input_price_kwth: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)  # R
+    smr_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)          # T
+    # Условия площадки, которые проверяет отдел развития глазами (этап 2/3).
+    long_term_contract: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # Y
+    has_video: Mapped[bool | None] = mapped_column(Boolean, nullable=True)           # Z
+    has_mobile: Mapped[bool | None] = mapped_column(Boolean, nullable=True)          # AB
+    # Контакты этапа 3. Держим текстом: в файле это «Иванов 8-900-…, ТЦ Маяк» —
+    # разбирать на карточки нечего, но без контакта переговоры вести некому.
+    owner_contact: Mapped[str | None] = mapped_column(Text, nullable=True)           # AC
+    source_company: Mapped[str | None] = mapped_column(String(300), nullable=True)   # AD
+    source_person: Mapped[str | None] = mapped_column(Text, nullable=True)           # AE
     # ── субсидия: требования программы = обязательные параметры проекта ──
     # Мощность от 149 кВт, круглосуточный доступ, минимум два машино-места,
     # обязательство эксплуатировать 5 лет (см. docs/SITES_PROJECT_LIFECYCLE.md).
@@ -4079,6 +4093,20 @@ class EzsTechConnection(Base):
     done_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     needs_reconstruction: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── паспорт питающей сети (графы AQ–AV банка ЗУ, этап 2 чек-листа) ──
+    # Отдел развития снимает эти параметры на осмотре: от них зависит, хватит ли
+    # мощности без реконструкции и во что обойдётся присоединение.
+    substation_owner: Mapped[str | None] = mapped_column(String(200), nullable=True)   # AQ
+    line_owner: Mapped[str | None] = mapped_column(String(200), nullable=True)         # AR
+    transformer_kva: Mapped[str | None] = mapped_column(String(80), nullable=True)     # AS (в файле «63 кВА»)
+    line_type: Mapped[str | None] = mapped_column(String(120), nullable=True)          # AT
+    extra_power_possible: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # AU
+    transformer_swap_possible: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # AV
+    # ── стоимость и сроки мероприятий ТУ (AX–BA, этап 5) ──
+    # `cost` = договор с сетевой организацией (AW), это её часть работ.
+    works_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)    # AX
+    total_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)    # AY
+    applicant_term_months: Mapped[float | None] = mapped_column(Float, nullable=True)  # BA
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

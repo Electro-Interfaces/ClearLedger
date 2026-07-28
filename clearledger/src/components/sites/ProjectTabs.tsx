@@ -133,7 +133,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
       {/* Гейт текущей стадии */}
       <section className="rounded-lg border border-border">
         <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
-          <span>Гейт стадии «{gate.stageLabel}»</span>
+          <span>Чек-лист согласования · стадия «{gate.stageLabel}»</span>
           <span className={`font-mono ${gate.done === gate.total ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
             {gate.done} / {gate.total}
           </span>
@@ -141,22 +141,25 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         <div className="p-2 space-y-1">
           {gate.items.length === 0 && <div className="text-xs text-muted-foreground px-1 py-1">Для этой стадии проверок нет.</div>}
           {gate.items.map((it) => (
-            <div key={it.key} className="flex items-center gap-2 text-xs px-1 py-0.5">
+            <div key={it.key} className="flex items-start gap-2 text-xs px-1 py-0.5">
               {it.manual ? (
                 <button type="button" disabled={mGate.isPending}
                   onClick={() => mGate.mutate({ key: it.key, done: !it.done })}
-                  className="shrink-0 text-muted-foreground hover:text-foreground">
+                  className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground">
                   {it.done ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Circle className="h-3.5 w-3.5" />}
                 </button>
               ) : (
-                <span className="shrink-0">
+                <span className="shrink-0 mt-0.5">
                   {it.done ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Circle className="h-3.5 w-3.5 text-muted-foreground" />}
                 </span>
               )}
+              {/* Номер пункта регламента: по нему сверяются с бумагой отдела развития. */}
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground mt-0.5 w-8"
+                title={it.phaseLabel ? `Этап ${it.phase}. ${it.phaseLabel}` : undefined}>{it.key}</span>
               <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
-              {it.required && <span className="text-[10px] text-red-500/80" title="Обязательно для перехода">обязательно</span>}
-              {it.doc && <span className="text-[10px] text-muted-foreground">— вкладка «Документы»</span>}
-              {!it.manual && !it.doc && <span className="text-[10px] text-muted-foreground">— из полей паспорта</span>}
+              {it.role && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
+              {it.required && <span className="text-[10px] text-red-500/80 shrink-0 mt-0.5" title="Обязательно для перехода">обязательно</span>}
+              {it.doc && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">— вкладка «Документы»</span>}
             </div>
           ))}
         </div>
@@ -276,7 +279,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
 /* ── Вкладка «Паспорт» ──────────────────────────────────────────────────── */
 
-const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select'; options?: string[] }[] }[] = [
+const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select' | 'bool'; options?: string[] }[] }[] = [
   {
     title: 'Объект',
     fields: [
@@ -326,6 +329,36 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
       { k: 'comment', label: 'Комментарий', type: 'area' },
     ],
   },
+  {
+    // Этап 2 чек-листа: что осматривают на площадке. Заодно требования
+    // программы субсидирования — по ним площадка либо проходит, либо нет.
+    title: 'Условия площадки',
+    fields: [
+      { k: 'access24x7', label: 'Свободный доступ (24/7)', type: 'bool' },
+      { k: 'hasVideo', label: 'Видеонаблюдение', type: 'bool' },
+      { k: 'hasMobile', label: 'Сотовая связь', type: 'bool' },
+      { k: 'hasInternet', label: 'Проводной интернет (LAN)', type: 'bool' },
+      { k: 'hasLighting', label: 'Освещение', type: 'bool' },
+      { k: 'parkingSpots', label: 'Парковочных мест', type: 'number' },
+      { k: 'subsidyPlanned', label: 'Планируется субсидия', type: 'bool' },
+      { k: 'subsidyAmount', label: 'Сумма субсидии, ₽', type: 'number' },
+      { k: 'dopService', label: 'Доп. сервис (магазин, кафе, WC)' },
+    ],
+  },
+  {
+    // Этап 3 чек-листа: экономика подключения и с кем разговаривали.
+    title: 'Экономика и контакты',
+    fields: [
+      { k: 'inputPriceKwth', label: 'Входная стоимость, ₽/кВт·ч', type: 'number' },
+      { k: 'smrCost', label: 'Стоимость СМР, ₽', type: 'number' },
+      { k: 'rentCostMonth', label: 'Аренда, ₽/мес', type: 'number' },
+      { k: 'longTermContract', label: 'Долгосрочный договор', type: 'bool' },
+      { k: 'ownerContact', label: 'Контакт представителя собственника', type: 'area' },
+      { k: 'sourceCompany', label: 'Предоставивший ЗУ — компания' },
+      { k: 'sourcePerson', label: 'Предоставивший ЗУ — ФИО' },
+      { k: 'commissionedOn', label: 'Дата ввода в эксплуатацию', type: 'date' },
+    ],
+  },
 ]
 
 // camelCase карточки → snake_case API.
@@ -339,7 +372,17 @@ const API_FIELD: Record<string, string> = {
   plannedPowerKwt: 'planned_power_kwt', tuStatus: 'tu_status', fullAddress: 'full_address',
   mapUrl: 'map_url', rentCostMonth: 'rent_cost_month', dopService: 'dop_service',
   archiveReason: 'archive_reason',
+  // графы чек-листа согласования
+  inputPriceKwth: 'input_price_kwth', smrCost: 'smr_cost', longTermContract: 'long_term_contract',
+  hasVideo: 'has_video', hasMobile: 'has_mobile', hasInternet: 'has_internet',
+  hasLighting: 'has_lighting', access24x7: 'access_24x7', parkingSpots: 'parking_spots',
+  subsidyPlanned: 'subsidy_planned', subsidyAmount: 'subsidy_amount',
+  commissionedOn: 'commissioned_on', ownerContact: 'owner_contact',
+  sourceCompany: 'source_company', sourcePerson: 'source_person',
 }
+
+// Булево поле в паспорте: сервер принимает «да»/«нет», хранит true/false.
+const BOOL_LABEL = (v: unknown) => (v === true ? 'да' : v === false ? 'нет' : '')
 
 export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -361,6 +404,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
   const val = (k: string) => {
     if (k in draft) return draft[k]
     const v = site[k as keyof SiteDetail]
+    if (typeof v === 'boolean') return BOOL_LABEL(v)   // «да»/«нет», а не «true»
     return v === null || v === undefined ? '' : String(v)
   }
   const manual = useMemo(() => new Set(site.manualFields ?? []), [site.manualFields])
@@ -393,13 +437,15 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                   {f.type === 'area' ? (
                     <Textarea rows={2} className="text-xs min-h-[46px]" value={val(key)}
                       onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))} />
-                  ) : f.type === 'select' ? (
+                  ) : f.type === 'select' || f.type === 'bool' ? (
                     <Select value={val(key) || '__none__'}
                       onValueChange={(v) => setDraft((d) => ({ ...d, [key]: v === '__none__' ? '' : v }))}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__" className="text-xs">—</SelectItem>
-                        {(f.options ?? []).map((o) => <SelectItem key={o} value={o} className="text-xs">{o}</SelectItem>)}
+                        {(f.type === 'bool' ? ['да', 'нет'] : f.options ?? []).map((o) => (
+                          <SelectItem key={o} value={o} className="text-xs">{o}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   ) : (
