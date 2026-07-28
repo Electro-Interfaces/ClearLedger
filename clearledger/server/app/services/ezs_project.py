@@ -940,6 +940,77 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id) -> bytes:
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
     ws.freeze_panes = "A2"
 
+    # Лист бюджета: одна строка — статья затрат проекта. Раньше выгрузка отдавала
+    # только итог план/факт на проект, и разобраться, ЧТО именно подорожало, было
+    # нельзя, а капвложения не отделялись от расходов периода.
+    costs = (await db.execute(text("""
+        select s.project_no, coalesce(s.address, s.full_address) as address, s.stage,
+               c.kind, c.title, c.plan_amount, c.fact_amount, c.doc_ref
+        from ezs_site_costs c join ezs_sites s on s.id = c.site_id
+        where c.company_id = :cid
+        order by s.project_no, c.created_at
+    """), {"cid": company_id})).mappings().all()
+    wsc = wb.create_sheet("Бюджет")
+    cost_headers = ["Проект", "Адрес", "Стадия", "Статья", "Судьба затрат", "Описание",
+                    "План", "Факт", "Отклонение", "Основание факта"]
+    wsc.append(cost_headers)
+    for c in wsc[1]:
+        c.font = Font(bold=True)
+    for r in costs:
+        plan = float(r["plan_amount"] or 0)
+        fact = float(r["fact_amount"] or 0)
+        wsc.append([
+            r["project_no"], r["address"], STAGE_LABELS.get(r["stage"], r["stage"]),
+            COST_LABELS.get(r["kind"], r["kind"]),
+            "капвложение" if COST_CAPITAL.get(r["kind"]) else "расход периода",
+            r["title"], plan or None, fact or None,
+            round(fact - plan, 2) if (plan or fact) else None, r["doc_ref"],
+        ])
+    for i, w in enumerate([16, 40, 16, 24, 18, 30, 14, 14, 14, 24], start=1):
+        wsc.column_dimensions[wsc.cell(row=1, column=i).column_letter].width = w
+    wsc.freeze_panes = "A2"
+
+    # Лист присоединений: срок проекта определяет именно оно, а в выгрузке
+    # портфеля от него помещались четыре колонки.
+    tcs = (await db.execute(text("""
+        select s.project_no, coalesce(s.address, s.full_address) as address, s.stage,
+               t.status, t.grid_operator, t.application_no, t.application_date,
+               t.specs_no, t.specs_date, t.contract_no, t.contract_date,
+               t.power_kwt, t.voltage, t.cost, t.works_cost, t.total_cost,
+               t.due_date, t.done_date, t.needs_reconstruction, t.applicant_term_months,
+               t.substation_owner, t.transformer_kva
+        from ezs_tech_connections t join ezs_sites s on s.id = t.site_id
+        where t.company_id = :cid
+        order by s.project_no
+    """), {"cid": company_id})).mappings().all()
+    wst = wb.create_sheet("Присоединение")
+    tc_headers = ["Проект", "Адрес", "Стадия", "Статус ТП", "Сетевая организация",
+                  "Заявка №", "Заявка от", "ТУ №", "ТУ от", "Договор ТП №", "Договор от",
+                  "Мощность, кВт", "Напряжение", "Договор с сетевой, ₽",
+                  "Мероприятия Общества, ₽", "Итого ТУ, ₽", "Срок мероприятий",
+                  "Факт исполнения", "Реконструкция ТП", "Срок заявителя, мес.",
+                  "Принадлежность ПС", "Трансформатор"]
+    wst.append(tc_headers)
+    for c in wst[1]:
+        c.font = Font(bold=True)
+    for r in tcs:
+        wst.append([
+            r["project_no"], r["address"], STAGE_LABELS.get(r["stage"], r["stage"]),
+            TC_LABELS.get(r["status"], r["status"]), r["grid_operator"],
+            r["application_no"], r["application_date"], r["specs_no"], r["specs_date"],
+            r["contract_no"], r["contract_date"],
+            float(r["power_kwt"] or 0) or None, r["voltage"],
+            float(r["cost"] or 0) or None, float(r["works_cost"] or 0) or None,
+            float(r["total_cost"] or 0) or None,
+            r["due_date"], r["done_date"],
+            "да" if r["needs_reconstruction"] else ("нет" if r["needs_reconstruction"] is False else ""),
+            r["applicant_term_months"], r["substation_owner"], r["transformer_kva"],
+        ])
+    for i, w in enumerate([16, 36, 16, 20, 26, 14, 12, 14, 12, 14, 12, 12, 12,
+                           18, 20, 16, 14, 14, 16, 16, 20, 16], start=1):
+        wst.column_dimensions[wst.cell(row=1, column=i).column_letter].width = w
+    wst.freeze_panes = "A2"
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
