@@ -15,7 +15,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Loader2, X, BookOpen, ChevronLeft, ExternalLink } from 'lucide-react'
 import { getInfoContext, getInfoArticle } from '@/services/infoService'
-import { productForPath } from '@/config/spaceProducts'
+import { appCodeForPath, productForPath } from '@/config/spaceProducts'
 import { Markdown } from './Markdown'
 
 export function InfoContextPanel({ companyId, onClose, embedded = false }: {
@@ -26,9 +26,11 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   const navigate = useNavigate()
   const [openId, setOpenId] = useState<string | null>(null)
 
-  // Контекст = продукт по маршруту + раздел рабочей области из `?sub=`.
+  // Контекст = приложение по маршруту + раздел рабочей области из `?sub=`.
+  // Приложение — не только продукт разреза: «Управление» и «Данные» тоже реестровые,
+  // и подсказка в них обязана знать, где человек, а не считать всё Учётом.
   const product = productForPath(pathname)
-  const appCode = product?.code ?? 'ledger'
+  const appCode = appCodeForPath(pathname)
   const sectionKey = params.get('sub')
 
   const ctx = useQuery({

@@ -172,6 +172,27 @@ export function productPagePath(product: SpaceProduct, path: string): string {
 /** Код страницы для прав и меню: сегмент пути (`/files` → `files`, `/1c/export` → `1c`). */
 export const pageCode = (path: string) => path.replace(/^\//, '').split('/')[0]
 
+/**
+ * Код приложения по адресу — для контекстной подсказки «Инфо».
+ *
+ * Продуктами разреза дело не ограничивается: «Управление», «Данные», Чаты и сам
+ * «Инфо» — тоже приложения реестра, и подсказка в них должна знать, где человек.
+ * Без этого в «Управлении» контекст молча считался Учётом.
+ */
+const ROUTE_APPS: [string, string][] = [
+  ['/admin', 'admin'], ['/data', 'data'], ['/messages', 'chat'],
+  ['/info', 'info'], ['/workspace', 'ledger'],
+]
+
+export function appCodeForPath(pathname: string): string {
+  const product = productForPath(pathname)
+  if (product) return product.code
+  for (const [prefix, code] of ROUTE_APPS) {
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return code
+  }
+  return 'ledger'
+}
+
 /** Продукт по маршруту или странице (`/finance`, `/finance/files`, `/organization`). */
 export function productForPath(pathname: string): SpaceProduct | null {
   for (const p of SPACE_PRODUCTS) {

@@ -53,6 +53,7 @@
     company: '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/>',
     network: '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
     map: '<path d="m15 5-6-3-6 3v16l6-3 6 3 6-3V2z"/><path d="M15 5v16"/><path d="M9 2v16"/>',
+    book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>',
   }
 
   /**
@@ -345,4 +346,139 @@
   }
 
   customElements.define('eco-nav', EcoNav)
+
+  /**
+   * `<eco-info>` — кнопка «Инфо» и контекстная панель знания пространства.
+   *
+   * Стандарт один на все приложения контейнера (docs/INFO.md): человек видит
+   * подсказку там, где работает, а не ищет её в отдельном приложении. Ядро
+   * отвечает за содержание, приложение — только за место кнопки в своей шапке:
+   *
+   *   <eco-info app="support" section="tickets"></eco-info>
+   *
+   * `app`     — код продукта в реестре пространства (обязателен);
+   * `section` — ключ раздела рабочей области, если приложение умеет его назвать.
+   *
+   * Панель — оверлей справа внутри теневого дерева: чужие стили её не ломают, а
+   * она не ломает вёрстку приложения. Нет токена Ядра — кнопки нет вовсе.
+   */
+  class EcoInfo extends HTMLElement {
+    #open = false
+    #items = null
+    #article = null
+    #loading = false
+
+    static observedAttributes = ['app', 'section', 'label']
+
+    connectedCallback() { this.render() }
+
+    attributeChangedCallback(name) {
+      // Сменилась рабочая область — подборка устарела, тянем заново при открытии.
+      if (name === 'app' || name === 'section') { this.#items = null; this.#article = null }
+      this.render()
+    }
+
+    async #load() {
+      const app = this.getAttribute('app')
+      if (!app || this.#loading) return
+      this.#loading = true
+      this.render()
+      try {
+        const section = this.getAttribute('section')
+        const qs = new URLSearchParams({ app_code: app })
+        if (section) qs.set('section_key', section)
+        const d = await core(`/api/info/context?${qs}`)
+        this.#items = d && d.items ? d.items : []
+      } catch { this.#items = [] }
+      this.#loading = false
+      this.render()
+    }
+
+    async #openArticle(id) {
+      this.#loading = true; this.render()
+      try { this.#article = await core(`/api/info/articles/${id}`) } catch { this.#article = null }
+      this.#loading = false
+      this.render()
+    }
+
+    #toggle() {
+      this.#open = !this.#open
+      this.#article = null
+      if (this.#open && this.#items === null) this.#load()
+      else this.render()
+    }
+
+    render() {
+      const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' })
+      // Без токена Ядра знание недоступно: человек вошёл прямой формой приложения.
+      if (!token() || !this.getAttribute('app')) { this.style.display = 'none'; root.innerHTML = ''; return }
+      this.style.display = ''
+      const label = this.getAttribute('label') || 'Инфо'
+      const items = this.#items || []
+      const a = this.#article
+
+      root.innerHTML = `
+        <style>
+          :host{ display:inline-flex; font:inherit; color:inherit }
+          button.b{ display:inline-flex; align-items:center; gap:8px; padding:8px 12px;
+                    border-radius:10px; border:1px solid rgba(127,127,127,.35);
+                    background:transparent; color:inherit; font:inherit; font-size:14px;
+                    cursor:pointer; transition:background .15s }
+          button.b:hover{ background:rgba(127,127,127,.14) }
+          .scrim{ position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:2147483000 }
+          .panel{ position:fixed; top:0; right:0; bottom:0; width:min(420px,100vw);
+                  background:var(--eco-info-bg,#fff); color:inherit; z-index:2147483001;
+                  display:flex; flex-direction:column; box-shadow:-8px 0 24px rgba(0,0,0,.18) }
+          @media (prefers-color-scheme: dark){ .panel{ background:var(--eco-info-bg,#0f1115) } }
+          .head{ display:flex; align-items:center; gap:8px; padding:10px 12px;
+                 border-bottom:1px solid rgba(127,127,127,.25); font-size:13px; font-weight:600 }
+          .head button{ background:none; border:0; color:inherit; cursor:pointer; opacity:.6; font-size:16px }
+          .body{ flex:1; overflow-y:auto; padding:12px; font-size:13px; line-height:1.55 }
+          .card{ display:block; width:100%; text-align:left; margin:0 0 8px; padding:8px 10px;
+                 border:1px solid rgba(127,127,127,.28); border-radius:8px; background:transparent;
+                 color:inherit; font:inherit; cursor:pointer }
+          .card:hover{ border-color:rgba(80,130,255,.6) }
+          .t{ font-weight:600; font-size:13px }
+          .s{ opacity:.7; font-size:12px; margin-top:2px }
+          .m{ opacity:.55; font-size:11px; margin-top:2px }
+          .empty{ opacity:.7; font-size:12px }
+          svg{ width:16px; height:16px; flex:none }
+          pre{ white-space:pre-wrap; font:inherit }
+        </style>
+        <button class="b" part="button" title="${escapeHtml(label)}">
+          ${svg(ICONS.book)}<span>${escapeHtml(label)}</span>
+        </button>
+        ${this.#open ? `
+          <div class="scrim" data-close></div>
+          <aside class="panel" role="dialog" aria-label="Инфо">
+            <div class="head">
+              ${a ? '<button data-back title="Назад">‹</button>' : ''}
+              <span style="flex:1">${a ? escapeHtml(a.title) : escapeHtml(label)}</span>
+              <button data-close title="Закрыть">✕</button>
+            </div>
+            <div class="body">
+              ${this.#loading ? '<div class="empty">загружаем…</div>' : a
+                ? `<div class="m">${escapeHtml(a.kindLabel || '')}${a.docNumber ? ' · ' + escapeHtml(a.docNumber) : ''}</div><pre>${escapeHtml(a.bodyMd || '')}</pre>`
+                : items.length
+                  ? items.map((i) => `
+                      <button class="card" data-id="${escapeHtml(i.id)}">
+                        <span class="t">${escapeHtml(i.title)}</span>
+                        ${i.summary ? `<span class="s">${escapeHtml(i.summary)}</span>` : ''}
+                        <span class="m">${escapeHtml(i.kindLabel || '')}${i.exact ? ' · этот раздел' : ''}</span>
+                      </button>`).join('')
+                  : '<div class="empty">Для этой рабочей области пояснений пока нет. Знание пространства ведётся в приложении «Инфо».</div>'}
+            </div>
+          </aside>` : ''}
+      `
+      root.querySelector('button.b').onclick = () => this.#toggle()
+      root.querySelectorAll('[data-close]').forEach((el) => { el.onclick = () => this.#toggle() })
+      const back = root.querySelector('[data-back]')
+      if (back) back.onclick = () => { this.#article = null; this.render() }
+      root.querySelectorAll('.card').forEach((el) => {
+        el.onclick = () => this.#openArticle(el.getAttribute('data-id'))
+      })
+    }
+  }
+
+  customElements.define('eco-info', EcoInfo)
 })()
