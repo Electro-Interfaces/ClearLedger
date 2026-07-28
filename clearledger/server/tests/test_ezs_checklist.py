@@ -150,3 +150,23 @@ def test_типы_проектов_согласованы():
         assert KIND_START_STAGE[kind] == "decision", kind
     # Приостановка и отмена — разные режимы: у них разные последствия для счёта 08.
     assert {m["key"] for m in CLOSE_MODES} == {"on_hold", "archive"}
+
+
+def test_срок_мероприятий_зеркалится_из_присоединения():
+    """Пункт 5.6 ждёт срок в графе площадки, а вводят его во вкладке «Присоединение».
+
+    Считаем месяцы так же, как это делает `upsert_tech_connection`: без зеркала
+    человек заполняет присоединение целиком, а чек-лист требует «зафиксировать срок».
+    """
+    from datetime import date as _d
+
+    def months(app_date: str, due: str) -> float | None:
+        days = (_d.fromisoformat(due) - _d.fromisoformat(app_date)).days
+        return round(days / 30.44, 1) if days > 0 else None
+
+    assert months("2026-07-10", "2026-11-30") == 4.7   # 143 дня ≈ 4,7 месяца
+    assert months("2026-11-30", "2026-07-10") is None      # срок раньше заявки — не срок
+    # Пункт 5.6 действительно смотрит в графу площадки, а не в присоединение.
+    t56 = next(t for t in TASKS if t["key"] == "5.6")
+    assert t56["field"] == "tp_term_months"
+    assert hasattr(EzsSite, "tp_term_months") and hasattr(EzsTechConnection, "applicant_term_months")

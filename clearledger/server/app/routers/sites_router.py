@@ -361,8 +361,11 @@ async def site_economics(
     site = await _owned(db, cid, site_id)
     bench = await ezs_site_analysis.region_benchmarks(db, cid)
     near = await ezs_site_analysis.nearest_station_km(db, cid)
+    # Факт капвложений точнее плана: пока стройка не закрыта, берём план.
+    costs = await ezs_project.list_costs(db, cid, site.id)
+    capex_budget = costs["capitalFact"] or costs["capitalPlan"] or None
     return {
-        "economics": ezs_site_analysis.economics(site, bench),
+        "economics": ezs_site_analysis.economics(site, bench, capex_budget=capex_budget),
         "score": ezs_site_analysis.score_site(site, near_km=near.get(str(site_id)), bench=bench),
         "quadrants": ezs_site_analysis.QUADRANTS,
     }

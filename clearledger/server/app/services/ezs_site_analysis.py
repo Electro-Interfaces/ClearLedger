@@ -266,7 +266,8 @@ def _num(v: Any) -> float | None:
 
 
 # ── Экономика площадки ─────────────────────────────────────────────────────
-def economics(site: EzsSite, bench: dict[str, Any]) -> dict[str, Any]:
+def economics(site: EzsSite, bench: dict[str, Any],
+              capex_budget: float | None = None) -> dict[str, Any]:
     """Оценка окупаемости на фактических данных сети. Возвращает и допущения."""
     region = site.region_norm or site.region
     reg = _region_bench(bench, region)
@@ -302,10 +303,17 @@ def economics(site: EzsSite, bench: dict[str, Any]) -> dict[str, Any]:
     if rent == 0:
         assumptions.append("аренда не указана — принята нулевой")
 
-    capex = _num(site.connection_cost) or _num(site.tp_cost)
-    if capex is None:
-        assumptions.append("капитальные затраты не посчитаны — срок окупаемости не считается")
-    assumptions.append("стоимость оборудования и СМР в расчёт не входит — только подключение")
+    # Бюджет проекта полнее паспорта: в нём и подключение, и оборудование, и СМР.
+    # Пока его не завели — считаем по графам подключения, как раньше.
+    if capex_budget:
+        capex = capex_budget
+        assumptions.append("капитальные затраты — из бюджета проекта (все статьи капвложений)")
+    else:
+        capex = _num(site.connection_cost) or _num(site.tp_cost)
+        if capex is None:
+            assumptions.append("капитальные затраты не посчитаны — срок окупаемости не считается")
+        assumptions.append("стоимость оборудования и СМР в расчёт не входит — только подключение: "
+                           "заведите бюджет проекта, чтобы окупаемость считалась по нему")
 
     # Выработка станций сети распределена крайне неравномерно (медиана 164,
     # верхняя четверть 500+ кВт·ч/мес). Одна цифра тут врёт в обе стороны,

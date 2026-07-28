@@ -143,28 +143,37 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         </div>
         <div className="p-2 space-y-1">
           {gate.items.length === 0 && <div className="text-xs text-muted-foreground px-1 py-1">Для этой стадии проверок нет.</div>}
-          {gate.items.map((it) => (
-            <div key={it.key} className="flex items-start gap-2 text-xs px-1 py-0.5">
-              {it.manual ? (
-                <button type="button" disabled={mGate.isPending}
-                  onClick={() => mGate.mutate({ key: it.key, done: !it.done })}
-                  className="shrink-0 mt-0.5 text-muted-foreground hover:text-foreground">
-                  {it.done ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Circle className="h-3.5 w-3.5" />}
-                </button>
-              ) : (
+          {gate.items.map((it) => {
+            // Ручной пункт отмечают кликом по всей строке: значок 14 px — цель,
+            // в которую на ноутбуке промахиваются, а по тексту кликают первым делом.
+            // Автоматический не кликается вовсе — и должен сам сказать, чем закроется,
+            // иначе человек жмёт по нему и считает, что система не работает.
+            const Row = it.manual ? 'button' : 'div'
+            const source = it.doc ? 'вкладка «Документы»'
+              : it.equipment ? 'вкладка «Оборудование»'
+              : !it.manual ? 'заполняется в паспорте' : null
+            return (
+              <Row key={it.key} type={it.manual ? 'button' : undefined}
+                disabled={it.manual ? mGate.isPending : undefined}
+                onClick={it.manual ? () => mGate.mutate({ key: it.key, done: !it.done }) : undefined}
+                title={it.manual ? 'Отметить вручную' : `Закроется само: ${source}`}
+                className={`flex w-full items-start gap-2 text-left text-xs px-1 py-1 rounded ${
+                  it.manual ? 'hover:bg-muted/60 cursor-pointer' : ''}`}>
                 <span className="shrink-0 mt-0.5">
-                  {it.done ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Circle className="h-3.5 w-3.5 text-muted-foreground" />}
+                  {it.done
+                    ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                    : <Circle className={`h-3.5 w-3.5 ${it.manual ? '' : 'text-muted-foreground/50'}`} />}
                 </span>
-              )}
-              {/* Номер пункта регламента: по нему сверяются с бумагой отдела развития. */}
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground mt-0.5 w-8"
-                title={it.phaseLabel ? `Этап ${it.phase}. ${it.phaseLabel}` : undefined}>{it.key}</span>
-              <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
-              {it.role && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
-              {it.required && <span className="text-[10px] text-red-500/80 shrink-0 mt-0.5" title="Обязательно для перехода">обязательно</span>}
-              {it.doc && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">— вкладка «Документы»</span>}
-            </div>
-          ))}
+                {/* Номер пункта регламента: по нему сверяются с бумагой отдела развития. */}
+                <span className="shrink-0 font-mono text-[10px] text-muted-foreground mt-0.5 w-8"
+                  title={it.phaseLabel ? `Этап ${it.phase}. ${it.phaseLabel}` : undefined}>{it.key}</span>
+                <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
+                {it.role && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
+                {it.required && <span className="text-[10px] text-red-500/80 shrink-0 mt-0.5" title="Обязательно для перехода">обязательно</span>}
+                {source && <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">— {source}</span>}
+              </Row>
+            )
+          })}
         </div>
       </section>
 
@@ -595,6 +604,37 @@ export function TechConnectionTab({ site, companyId, onDone }: {
             onChange={(e) => set('note', e.target.value)} />
         </div>
       </section>
+
+      {/* Паспорт питающей сети — графы AQ–BA банка ЗУ. Приезжают из файла отдела
+          развития и до сих пор нигде не показывались: без владельца ТП и запаса
+          мощности нельзя ни оценить срок, ни понять, к кому идти за резервом. */}
+      <section className="rounded-lg border border-border p-3 space-y-2">
+        <div className="text-xs font-semibold">Питающая сеть и деньги ТУ</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <Field2 label="Владелец ТП" v={val('substation_owner', tc?.substationOwner)} on={(v) => set('substation_owner', v)} />
+          <Field2 label="Владелец линии" v={val('line_owner', tc?.lineOwner)} on={(v) => set('line_owner', v)} />
+          <Field2 label="Трансформатор, кВА" v={val('transformer_kva', tc?.transformerKva)} on={(v) => set('transformer_kva', v)} />
+          <Field2 label="Тип линии" v={val('line_type', tc?.lineType)} on={(v) => set('line_type', v)} />
+          <Field2 label="Срок заявителя, мес." v={val('applicant_term_months', tc?.applicantTermMonths)} on={(v) => set('applicant_term_months', v)} />
+          <div />
+          <Field2 label="Стоимость работ, ₽" v={val('works_cost', tc?.worksCost)} on={(v) => set('works_cost', v)} />
+          <Field2 label="Итого по ТУ, ₽" v={val('total_cost', tc?.totalCost)} on={(v) => set('total_cost', v)} />
+          <div className="flex flex-col justify-end gap-1 pb-1">
+            <label className="flex items-center gap-1.5 text-xs">
+              <input type="checkbox"
+                checked={Boolean(('extra_power_possible' in draft) ? draft.extra_power_possible : tc?.extraPowerPossible)}
+                onChange={(e) => set('extra_power_possible', e.target.checked)} />
+              Есть запас мощности
+            </label>
+            <label className="flex items-center gap-1.5 text-xs">
+              <input type="checkbox"
+                checked={Boolean(('transformer_swap_possible' in draft) ? draft.transformer_swap_possible : tc?.transformerSwapPossible)}
+                onChange={(e) => set('transformer_swap_possible', e.target.checked)} />
+              Возможна замена трансформатора
+            </label>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
@@ -666,35 +706,37 @@ export function EquipmentTab({ site, companyId, onDone }: {
         </span>
       </div>
 
+      {/* px-2 на каждой ячейке: без него «Кол-во» и «Поставщик» читаются как
+          «Кол-воПоставщик» — колонки стоят впритык, разделителя нет. */}
       {eq.items.length > 0 && (
         <table className="w-full text-xs">
           <thead>
             <tr className="text-muted-foreground border-b">
-              <th className="text-left py-1 font-medium">Оборудование</th>
-              <th className="text-right py-1 font-medium">кВт</th>
-              <th className="text-right py-1 font-medium">Кол-во</th>
-              <th className="text-left py-1 font-medium">Поставщик</th>
-              <th className="text-left py-1 font-medium">Поставка</th>
-              <th className="text-right py-1 font-medium">Стоимость</th>
-              <th className="text-left py-1 font-medium">Статус</th>
+              <th className="text-left px-2 py-1 font-medium">Оборудование</th>
+              <th className="text-right px-2 py-1 font-medium">кВт</th>
+              <th className="text-right px-2 py-1 font-medium">Кол-во</th>
+              <th className="text-left px-2 py-1 font-medium">Поставщик</th>
+              <th className="text-left px-2 py-1 font-medium">Поставка</th>
+              <th className="text-right px-2 py-1 font-medium">Стоимость</th>
+              <th className="text-left px-2 py-1 font-medium">Статус</th>
               <th />
             </tr>
           </thead>
           <tbody>
             {eq.items.map((e) => (
               <tr key={e.id} className="border-b border-border/30">
-                <td className="py-1.5">
+                <td className="px-2 py-1.5">
                   {e.title ?? '—'}
                   {e.manufacturer && <span className="text-muted-foreground"> · {e.manufacturer}</span>}
                 </td>
-                <td className="py-1.5 text-right font-mono">{e.powerKwt ?? '—'}</td>
-                <td className="py-1.5 text-right font-mono">{e.qty}</td>
-                <td className="py-1.5 text-muted-foreground">{e.supplier ?? '—'}</td>
-                <td className={`py-1.5 font-mono ${e.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                <td className="px-2 py-1.5 text-right font-mono">{e.powerKwt ?? '—'}</td>
+                <td className="px-2 py-1.5 text-right font-mono">{e.qty}</td>
+                <td className="px-2 py-1.5 text-muted-foreground">{e.supplier ?? '—'}</td>
+                <td className={`px-2 py-1.5 font-mono ${e.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
                   {e.suppliedDate ? `\u2713 ${e.suppliedDate}` : (e.dueDate ?? '—')}
                 </td>
-                <td className="py-1.5 text-right font-mono">{e.price != null ? nf0.format(e.price) : '—'}</td>
-                <td className="py-1.5">
+                <td className="px-2 py-1.5 text-right font-mono">{e.price != null ? nf0.format(e.price) : '—'}</td>
+                <td className="px-2 py-1.5">
                   <Select value={e.status} onValueChange={(v) => setStatus(e.id, v)}>
                     <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -933,6 +975,15 @@ function ProjectLifecycleSection({ site, companyId, onDone }: {
             )}
           </div>
         ))}
+        {/* Пока карточку ведут на площадке, а не на проекте: у второго проекта на
+            месте нет своего чек-листа. Молчать об этом нельзя — заведут ретрофит и
+            будут ждать, что работа пойдёт сама. */}
+        {rows.length > 1 && (
+          <div className="text-[11px] text-muted-foreground">
+            Чек-лист и стадии этой карточки относятся к первому проекту места.
+            Работу по следующему ведут здесь же — отдельного рабочего места у него пока нет.
+          </div>
+        )}
 
         {!open ? (
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setOpen(true)}>

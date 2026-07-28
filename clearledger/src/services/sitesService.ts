@@ -404,6 +404,11 @@ export interface TechConnection {
   powerKwt: number | null; voltage: string | null; cost: number | null
   dueDate: string | null; doneDate: string | null
   needsReconstruction: boolean | null; note: string | null; overdue: boolean
+  // паспорт питающей сети и деньги ТУ — графы AQ–BA банка ЗУ
+  substationOwner: string | null; lineOwner: string | null
+  transformerKva: number | null; lineType: string | null
+  extraPowerPossible: boolean | null; transformerSwapPossible: boolean | null
+  worksCost: number | null; totalCost: number | null; applicantTermMonths: number | null
   // в реестре присоединений добавляются поля проекта
   projectNo?: string | null; title?: string | null; region?: string | null
   city?: string | null; address?: string | null; stage?: string; stageLabel?: string

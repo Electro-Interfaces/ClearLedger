@@ -183,6 +183,19 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         else:
             setattr(tc, f, str(v))
     tc.updated_at = datetime.now(timezone.utc)
+    # Пункт 5.6 гейта («фиксация сроков мероприятий ТУ») смотрит в графу площадки,
+    # а срок задают здесь — месяцами заявителя или датой мероприятий. Без зеркала
+    # человек заполняет присоединение целиком, а чек-лист продолжает требовать срок.
+    if site.tp_term_months is None:
+        months = tc.applicant_term_months
+        if months is None and tc.due_date and tc.application_date:
+            try:
+                days = (date.fromisoformat(tc.due_date) - date.fromisoformat(tc.application_date)).days
+                months = round(days / 30.44, 1) if days > 0 else None
+            except ValueError:
+                months = None
+        if months:
+            site.tp_term_months = months
     await db.flush()
     if created:
         await log_event(db, site, "note", text="Заведено техприсоединение", user=user)
