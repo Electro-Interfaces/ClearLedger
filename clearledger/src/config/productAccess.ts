@@ -19,8 +19,8 @@
  */
 import { navByPath } from './navigation'
 import {
-  CHARGE_SESSIONS_MENU, CORP_MENU, CORP_KEYS, ENERGY_MGMT, EQUIPMENT_MENU,
-  MARKETING_MENU, MARKETING_KEYS, OPS_MONITOR_MENU, SITES_MENU,
+  CHARGE_SESSIONS_MENU, ENERGY_MGMT, EQUIPMENT_MENU,
+  OPS_MONITOR_MENU, SITES_MENU,
 } from './workspaceMenus'
 import { STORE_MENU } from './storeCatalog'
 import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
@@ -60,13 +60,11 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(OPS_MONITOR_MENU), ...items(EQUIPMENT_MENU),
     ...items(ENERGY_MGMT, 'Хозяйство'),
   ],
-  sales:
-    // Корпоратив и маркетинг ушли в свои продукты — в «Продажах» их пунктов нет.
-    items(CHARGE_SESSIONS_MENU.filter(
-      (m) => !CORP_KEYS.includes(m.key) && !MARKETING_KEYS.includes(m.key))),
-  corp: items(CORP_MENU),
+  // Коммерция (тарифы, ЮЛ, ФЛ), сегментация и веб-аналитика вернулись в «Продажи»
+  // (28.07.2026). «Корпоративного процессинга» и «Маркетинга» в карте прав нет: пока
+  // это заставка «в подключении», право выдаётся на продукт целиком.
+  sales: [...items(CHARGE_SESSIONS_MENU), ...pages(['/metrika'])],
   shop: items(STORE_MENU),
-  marketing: [...items(MARKETING_MENU), ...pages(['/metrika'])],
   finance: [
     // «Финансовый» и «Налоговый» сняты с витрины (workspaceSections) — прав на них нет:
     // роль не должна раздавать доступ к разделу, которого в интерфейсе не существует.

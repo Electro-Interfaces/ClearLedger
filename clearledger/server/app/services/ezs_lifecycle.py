@@ -59,12 +59,113 @@ CLOSE_MODES = [
 
 
 async def next_no(db: AsyncSession, company_id) -> str:
+    """Следующий номер проекта года — по обеим таблицам сразу.
+
+    Номера живут в двух местах: у проектов-записей (`ezs_sites`) и у спутников
+    (`ezs_projects`). Считать максимум только по одной — значит однажды выдать
+    занятый номер, а на нём стоит уникальный индекс.
+    """
     prefix = project_no_prefix()
-    last = (await db.execute(
+    last_p = (await db.execute(
         select(func.max(EzsProject.project_no)).where(
             EzsProject.company_id == company_id,
             EzsProject.project_no.like(f"{prefix}%")))).scalar()
-    return format_project_no(prefix, parse_project_seq(last) + 1)
+    last_s = (await db.execute(
+        select(func.max(EzsSite.project_no)).where(
+            EzsSite.company_id == company_id,
+            EzsSite.project_no.like(f"{prefix}%")))).scalar()
+    seq = max(parse_project_seq(last_p), parse_project_seq(last_s))
+    return format_project_no(prefix, seq + 1)
+
+
+# Что новая работа берёт с прежней. Это свойства МЕСТА: они не меняются от того,
+# что станцию модернизируют. Всё остальное — стадия, гейты, документы, деньги,
+# присоединение, оборудование, дата ввода — у новой работы своё, с чистого листа.
+_PLACE_FIELDS = (
+    "region", "region_norm", "city", "address", "full_address", "install_place",
+    "place_kind", "route", "lat", "lon", "map_url", "cadastral_no", "area_m2",
+    "owner", "brand", "ownership", "control_form", "land_category", "permitted_use",
+    "owner_contact", "source_company", "source_person",
+)
+
+
+async def start_successor(db: AsyncSession, company_id, *, source: EzsSite, kind: str,
+                          reason: str | None, user: User | None) -> dict[str, Any]:
+    """Завести новую работу на действующем объекте: модернизация, перенос, демонтаж.
+
+    Это полноценный проект со своим номером, своим бюджетом и своей датой ввода,
+    а не приписка к прежнему. По ФСБУ 26/2020 модернизация — отдельное капвложение
+    со своей датой решения; стирать дату ввода первой стройки нельзя.
+
+    Место копируется (адрес и право те же), работа начинается со стадии «Решение»:
+    площадку выбирать не нужно, она известна из прошлой жизни объекта.
+    """
+    from app.services.ezs_site_work import log_event
+
+    if kind not in KIND_LABELS or kind == "new_build":
+        return {"ok": False, "message": "Для новой работы на объекте нужен тип: модернизация, перенос или демонтаж"}
+    if not source.location_id:
+        return {"ok": False, "message": "Объект сети не привязан: сначала свяжите проект с объектом"}
+    if not (reason or "").strip():
+        return {"ok": False, "message": "Нужно основание: что случилось и зачем новая работа"}
+
+    loc = (await db.execute(select(ServiceLocation).where(
+        ServiceLocation.company_id == company_id,
+        ServiceLocation.id == source.location_id))).scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    site = EzsSite(
+        company_id=company_id,
+        project_no=await next_no(db, company_id),
+        title=f"{KIND_LABELS[kind]}: {loc.name if loc else (source.title or source.address or '')}".strip(),
+        stage=KIND_START_STAGE[kind], stage_since=date.today().isoformat(),
+        location_id=source.location_id,
+        owner_user_id=source.owner_user_id,
+        next_action=reason.strip(),
+        created_at=now, updated_at=now,
+    )
+    for f in _PLACE_FIELDS:
+        setattr(site, f, getattr(source, f, None))
+    # Место человек не вводил руками — значит и «ручными» эти графы считать нельзя,
+    # иначе импорт перестанет их обновлять у новой записи.
+    site.manual_fields = []
+    db.add(site)
+    await db.flush()
+
+    await log_event(db, site, "note", user=user,
+                    text=f"Заведена работа «{KIND_LABELS[kind]}» на объекте "
+                         f"{loc.name if loc else source.location_id}. Основание: {reason.strip()}")
+    await log_event(db, source, "note", user=user,
+                    text=f"На этом объекте заведена работа {site.project_no} — {KIND_LABELS[kind]}")
+    # Спутник — ради истории капвложений объекта: отчёты по проектам читают её.
+    p = EzsProject(
+        company_id=company_id, site_id=site.id, location_id=source.location_id,
+        kind=kind, project_no=site.project_no, title=site.title,
+        stage=site.stage, stage_since=site.stage_since,
+        created_at=now, updated_at=now,
+    )
+    db.add(p)
+    return {"ok": True, "siteId": str(site.id), "projectNo": site.project_no,
+            "kind": kind, "kindLabel": KIND_LABELS[kind]}
+
+
+async def works_on_location(db: AsyncSession, company_id, location_id: str) -> list[dict[str, Any]]:
+    """Все работы на объекте: стройка, модернизации, переносы — по порядку.
+
+    Ключ — объект сети, а не место: после ввода именно он опознаёт станцию, и
+    история «что с ней делали» собирается вокруг него.
+    """
+    rows = (await db.execute(
+        select(EzsSite).where(
+            EzsSite.company_id == company_id,
+            EzsSite.location_id == str(location_id))
+        .order_by(EzsSite.created_at))).scalars().all()
+    return [{
+        "id": str(s.id), "projectNo": s.project_no, "title": s.title,
+        "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
+        "commissionedOn": s.commissioned_on,
+        "archiveReason": s.archive_reason,
+    } for s in rows]
 
 
 def _out(p: EzsProject, *, site: EzsSite | None = None,

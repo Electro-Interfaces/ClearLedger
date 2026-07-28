@@ -131,17 +131,8 @@ export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
 ]
 export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
 
-// Продукты, выделенные из «Продаж» (решение МАГа 27.07.2026): работа с юрлицами и
-// маркетинг — отдельные рабочие места со своими людьми, а не вкладки коммерции.
-export const CORP_MENU: CentralMenuItem[] = [
-  { key: 'cs_clients',    label: 'Тарифные планы', group: 'Коммерция' },
-  { key: 'cs_corporate',  label: 'Юрлица',         group: 'Коммерция' },
-  { key: 'cs_retail',     label: 'Частные лица',   group: 'Коммерция' },
-]
-export const CORP_KEYS = CORP_MENU.map((m) => m.key)
-
-export const MARKETING_MENU: CentralMenuItem[] = [
-  { key: 'cs_abcxyz',  label: 'ABC-XYZ станций', group: 'Сегментация' },
-  { key: 'cs_trend',   label: 'Динамика 2024+',  group: 'Сегментация' },
-]
-export const MARKETING_KEYS = MARKETING_MENU.map((m) => m.key)
+// Состав «Продаж» — полный, как в Ledger РусГидро (решение МАГа 28.07.2026). Раньше
+// тарифы, корпоратив и ФЛ вычитались в «Корпоративный процессинг», а ABC-XYZ и динамика
+// в «Маркетинг», и коммерсант получал обрезанное рабочее место: чтобы посмотреть цену
+// рядом с загрузкой сети, надо было уходить в другой продукт. Оба продукта остаются в
+// реестре пространства, но пока показывают заставку «в подключении» (WorkspaceLayout).

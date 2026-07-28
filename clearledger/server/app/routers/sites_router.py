@@ -122,6 +122,37 @@ async def start_project(
     return res["project"]
 
 
+@router.post("/{site_id}/successor", status_code=201)
+async def start_successor(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Завести новую работу на действующем объекте: модернизация, перенос, демонтаж.
+
+    Возвращает id нового ПРОЕКТА — у него своё рабочее место, свой бюджет и своя
+    дата ввода. Прежний проект не трогаем: его дата ввода остаётся фактом.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_lifecycle.start_successor(
+        db, cid, source=site, kind=str(payload.get("kind") or "retrofit"),
+        reason=payload.get("reason"), user=user)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("message", "Не удалось завести работу"))
+    await db.commit()
+    return res
+
+
+@router.get("/locations/{location_id}/works")
+async def works_on_location(
+    location_id: str, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Что делали с этим объектом: стройка, модернизации, переносы — по порядку."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_lifecycle.works_on_location(db, cid, location_id)
+
+
 @router.post("/projects/{project_id}/close")
 async def close_project(
     project_id: uuid.UUID, payload: dict, company_id: str = Query(...),

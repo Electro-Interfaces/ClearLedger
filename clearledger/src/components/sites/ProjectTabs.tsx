@@ -32,7 +32,7 @@ import {
   getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
   patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
-  linkContract, linkLocation, getProjects, getProjectKinds, startProject,
+  linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext,
 } from '@/services/sitesService'
@@ -40,6 +40,7 @@ import { getContracts, getCounterparties } from '@/services/referenceService'
 import { loadLocations } from '@/services/locationService'
 
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
+import { useOpenProject } from './useOpenProject'
 
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение на размещение', 'собственность', 'соглашение с ТЦ']
@@ -1003,95 +1004,106 @@ function LinkPicker({ label, options, onPick, pending }: {
 }
 
 /**
- * Жизненный цикл места: сколько проектов на нём было и что можно завести сейчас.
+ * Работы на объекте: что с ним делали и что можно завести сейчас.
  *
- * Возврат из эксплуатации — НЕ откат стадии назад, а новый проект на том же
- * объекте: старый остаётся закрытым со своей датой ввода. По ФСБУ 26/2020
- * модернизация действующего объекта — отдельное капвложение со своей датой
- * решения, а не продолжение прежнего.
+ * Ключ — объект сети, а не место: после ввода именно он опознаёт станцию, и
+ * история «стройка → модернизация → перенос» собирается вокруг него.
+ *
+ * Новая работа — полноценный проект со своим номером, бюджетом и датой ввода,
+ * а не приписка к прежнему. По ФСБУ 26/2020 модернизация действующего объекта —
+ * отдельное капвложение со своей датой решения; дату ввода первой стройки
+ * стирать нельзя, она факт.
  */
-function ProjectLifecycleSection({ site, companyId, onDone }: {
+function ObjectWorksSection({ site, companyId, onDone }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
   const [kind, setKind] = useState('retrofit')
   const [reason, setReason] = useState('')
   const [open, setOpen] = useState(false)
-  const projects = useQuery({
-    queryKey: ['site-projects', companyId, site.id],
-    queryFn: () => getProjects(companyId, { siteId: site.id }),
+  const openProject = useOpenProject()
+  const works = useQuery({
+    queryKey: ['location-works', companyId, site.locationId],
+    queryFn: () => getLocationWorks(companyId, site.locationId as string),
+    enabled: !!site.locationId,
   })
   const kinds = useQuery({
     queryKey: ['project-kinds', companyId],
     queryFn: () => getProjectKinds(companyId),
   })
   const mStart = useMutation({
-    mutationFn: () => startProject(companyId, site.id, {
-      kind, location_id: site.locationId, reason: reason.trim() || undefined,
-    }),
-    onSuccess: async (p) => {
-      toast.success(`Заведён проект ${p.projectNo} — ${p.kindLabel}`)
+    mutationFn: () => startSuccessor(companyId, site.id, { kind, reason: reason.trim() }),
+    onSuccess: async (r) => {
+      toast.success(`Заведена работа ${r.projectNo} — ${r.kindLabel}`)
       setOpen(false); setReason('')
-      await projects.refetch(); await onDone()
+      await works.refetch(); await onDone()
+      // Сразу открываем новую работу: человек завёл её, чтобы ею заниматься.
+      openProject(r.siteId)
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось завести проект'),
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось завести работу'),
   })
 
-  const rows = projects.data ?? []
+  // Пока объект не привязан, работать не с чем: станции ещё нет.
+  if (!site.locationId) {
+    return (
+      <section className="rounded-lg border border-border">
+        <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40">Работы на объекте</div>
+        <div className="p-3 text-sm text-muted-foreground">
+          Объект сети не привязан — это первая стройка на месте. Модернизацию, перенос
+          или демонтаж заводят после ввода станции: они относятся к объекту, а не к месту.
+        </div>
+      </section>
+    )
+  }
+
+  const rows = works.data ?? []
   return (
     <section className="rounded-lg border border-border">
       <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
-        <span>Проекты на этом месте</span>
+        <span>Работы на объекте</span>
         <span className="font-mono text-muted-foreground">{rows.length}</span>
       </div>
       <div className="p-3 space-y-2">
-        {rows.length === 0 && <div className="text-sm text-muted-foreground">Проектов пока нет.</div>}
-        {rows.map((p) => (
-          <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-mono">{p.projectNo ?? '—'}</span>
-            <span>{p.kindLabel}</span>
-            <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[p.stage]?.cls ?? ''}`}>
-              {p.stageLabel}
-            </span>
-            {p.commissionedOn && <span className="text-muted-foreground">введён {p.commissionedOn}</span>}
-            {p.closedReason && (
-              <span className="text-muted-foreground" title={`Решение от ${p.closedOn ?? '—'}`}>
-                · {p.closedReason}
+        {rows.map((w) => {
+          const here = w.id === site.id
+          return (
+            <div key={w.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <button type="button" disabled={here} onClick={() => openProject(w.id)}
+                className={`font-mono ${here ? '' : 'text-primary hover:underline'}`}>
+                {w.projectNo ?? '—'}
+              </button>
+              <span className={here ? 'font-medium' : ''}>{w.title ?? '—'}</span>
+              <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[w.stage]?.cls ?? ''}`}>
+                {w.stageLabel}
               </span>
-            )}
-          </div>
-        ))}
-        {/* Пока карточку ведут на площадке, а не на проекте: у второго проекта на
-            месте нет своего чек-листа. Молчать об этом нельзя — заведут ретрофит и
-            будут ждать, что работа пойдёт сама. */}
-        {rows.length > 1 && (
-          <div className="text-xs text-muted-foreground">
-            Чек-лист и стадии этой карточки относятся к первому проекту места.
-            Работу по следующему ведут здесь же — отдельного рабочего места у него пока нет.
-          </div>
-        )}
+              {w.commissionedOn && <span className="text-muted-foreground">введён {w.commissionedOn}</span>}
+              {w.archiveReason && <span className="text-muted-foreground">· {w.archiveReason}</span>}
+              {here && <span className="text-xs text-muted-foreground">— открыт сейчас</span>}
+            </div>
+          )
+        })}
 
         {!open ? (
           <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => setOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" />Завести проект на этом месте
+            <Plus className="h-3.5 w-3.5 mr-1" />Завести работу на объекте
           </Button>
         ) : (
           <div className="rounded-md border border-border p-2 space-y-2">
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <Label>Тип проекта</Label>
+                <Label>Вид работы</Label>
                 <Select value={kind} onValueChange={setKind}>
                   <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(kinds.data?.kinds ?? []).map((k) => (
+                    {(kinds.data?.kinds ?? []).filter((k) => k.key !== 'new_build').map((k) => (
                       <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              <Input className="h-8 text-sm flex-1 min-w-[220px]" value={reason}
+              <Input className="h-8 text-sm flex-1 min-w-[240px]" value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder="Основание: что случилось и зачем новый проект" />
-              <Button size="sm" className="h-8 text-sm" disabled={mStart.isPending}
+                placeholder="Основание: что случилось и зачем эта работа" />
+              <Button size="sm" className="h-8 text-sm" disabled={mStart.isPending || !reason.trim()}
                 onClick={() => mStart.mutate()}>
                 {mStart.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Завести
               </Button>
@@ -1099,11 +1111,9 @@ function ProjectLifecycleSection({ site, companyId, onDone }: {
                 onClick={() => setOpen(false)}>отмена</button>
             </div>
             <p className="text-xs text-muted-foreground">
-              {kind === 'new_build'
-                ? 'Новая очередь на том же месте — отдельный проект со своей воронкой.'
-                : 'Работа с действующим объектом: старый проект остаётся закрытым, этот начинается со стадии «Решение».'}
-              {!site.locationId && kind !== 'new_build' &&
-                ' Сначала привяжите объект сети — без него такой проект не завести.'}
+              Откроется новый проект со стадии «Решение»: место известно из прошлой жизни
+              объекта, а бюджет, документы и дата ввода у этой работы свои. Прежний проект
+              остаётся как есть — его дата ввода не меняется.
             </p>
           </div>
         )}
@@ -1199,7 +1209,7 @@ export function AccountingTab({ site, companyId, onDone }: {
         </p>
       </section>
 
-      <ProjectLifecycleSection site={site} companyId={companyId} onDone={onDone} />
+      <ObjectWorksSection site={site} companyId={companyId} onDone={onDone} />
 
       {/* субсидия */}
       <section className="rounded-lg border border-border">

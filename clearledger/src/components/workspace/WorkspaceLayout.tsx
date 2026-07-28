@@ -4,7 +4,9 @@
  */
 
 import { useSearchParams } from 'react-router-dom'
+import { Building2, Megaphone, type LucideIcon } from 'lucide-react'
 import { useMaxWidth } from '@/hooks/use-mobile'
+import { EmptyState } from '@/components/common/EmptyState'
 import { useWorkspace, WorkspaceProvider, type CoreMode } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import {
@@ -19,6 +21,36 @@ import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 import { WorkspaceModeSidebar } from './WorkspaceModeSidebar'
 import { useVisibleSections } from './workspaceSections'
+
+/**
+ * Продукт в подключении: рабочего места ещё нет, меню тоже — только заставка.
+ *
+ * Пустой продукт всё равно виден в рельсе: он заведён в реестре пространства, ему
+ * выдают права и его настраивают. Заставка честно говорит, что здесь пока пусто и
+ * где эти функции сейчас, — вместо пустой рабочей области.
+ */
+function ProductStub({ icon, title, description }: {
+  icon: LucideIcon; title: string; description: string
+}) {
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <EmptyState icon={icon} title={title} description={description} />
+    </div>
+  )
+}
+
+const CORP_STUB = {
+  icon: Building2,
+  title: 'Корпоративный процессинг — в подключении',
+  description: 'Рабочее место по юрлицам: договоры, лимиты и тарифные планы под ЮЛ. '
+    + 'Пока корпоративные клиенты, тарифы и частные лица ведутся в «Продажах».',
+}
+const MARKETING_STUB = {
+  icon: Megaphone,
+  title: 'Маркетинг — в подключении',
+  description: 'Кампании, акции и сегменты под рассылку. Сегментация сети (ABC-XYZ, '
+    + 'динамика) и Яндекс.Метрика пока живут в «Продажах».',
+}
 
 function WorkspaceContent() {
   // Компактная раскладка (горизонтальные полосы, без вертикального меню режимов)
@@ -86,10 +118,10 @@ function DesktopWorkspace() {
             {coreMode === 'projects' && <ManagementPanel mode="projects" />}
             {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
             {coreMode === 'store' && <StorePanel />}
-            {/* Корпоратив и маркетинг — те же панели ЭЗС-продаж, роутинг идёт по
-                ключу подраздела, поэтому панель одна на все три рабочих места. */}
-            {coreMode === 'corporate' && <ManagementPanel mode="corporate" />}
-            {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
+            {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
+                разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
+            {coreMode === 'corporate' && <ProductStub {...CORP_STUB} />}
+            {coreMode === 'marketing' && <ProductStub {...MARKETING_STUB} />}
             {coreMode === 'financial' && <FinancialPanel />}
             {coreMode === 'accounting' && <AccountingPanel />}
             {coreMode === 'tax' && <TaxPanel />}
@@ -170,8 +202,8 @@ function MobileWorkspace() {
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {coreMode === 'store' && <StorePanel />}
-        {coreMode === 'corporate' && <ManagementPanel mode="corporate" />}
-        {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
+        {coreMode === 'corporate' && <ProductStub {...CORP_STUB} />}
+        {coreMode === 'marketing' && <ProductStub {...MARKETING_STUB} />}
         {coreMode === 'financial' && <FinancialPanel />}
         {coreMode === 'accounting' && <AccountingPanel />}
         {coreMode === 'tax' && <TaxPanel />}

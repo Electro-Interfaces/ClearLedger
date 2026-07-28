@@ -687,6 +687,31 @@ export async function startProject(
   return post(`/api/sites/${siteId}/projects?company_id=${companyId}`, body)
 }
 
+/** Работа на объекте: стройка, модернизация, перенос — по порядку. */
+export interface LocationWork {
+  id: string; projectNo: string | null; title: string | null
+  stage: SiteStage; stageLabel: string
+  commissionedOn: string | null; archiveReason: string | null
+}
+
+export async function getLocationWorks(
+  companyId: string, locationId: string,
+): Promise<LocationWork[]> {
+  return get(`/api/sites/locations/${encodeURIComponent(locationId)}/works`, { company_id: companyId })
+}
+
+/**
+ * Завести новую работу на действующем объекте — модернизацию, перенос, демонтаж.
+ *
+ * Создаёт ПРОЕКТ со своим номером и рабочим экраном, а не приписку к прежнему:
+ * по ФСБУ 26/2020 это отдельное капвложение со своей датой решения.
+ */
+export async function startSuccessor(
+  companyId: string, siteId: string, body: { kind: string; reason: string },
+): Promise<{ siteId: string; projectNo: string; kind: string; kindLabel: string }> {
+  return post(`/api/sites/${siteId}/successor?company_id=${companyId}`, body)
+}
+
 /** Приостановить (`on_hold`) или отменить (`archive`) проект — с причиной. */
 export async function closeProject(
   companyId: string, projectId: string, mode: 'on_hold' | 'archive', reason: string,

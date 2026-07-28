@@ -24,8 +24,7 @@ import {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
-  CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS, CORP_MENU, CORP_KEYS,
-  MARKETING_MENU, MARKETING_KEYS,
+  CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
 } from '@/config/workspaceMenus'
 import { productForMode, productModuleAllowed } from '@/config/productAccess'
 
@@ -38,8 +37,7 @@ export {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
-  CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS, CORP_MENU, CORP_KEYS,
-  MARKETING_MENU, MARKETING_KEYS,
+  CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
 }
 
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
@@ -80,11 +78,9 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Управленческий» (mode=operations) — энергозакупка/аренда (реальные реестры).
   const mgmtItems: CentralMenuItem[] = [
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
-    // Из меню ЭЗС-продаж вычтено то, что стало отдельными продуктами (корпоратив,
-    // маркетинг): один и тот же экран не должен открываться из двух рабочих мест.
-    ...(isEnergy
-      ? CHARGE_SESSIONS_MENU.filter((m) => !CORP_KEYS.includes(m.key) && !MARKETING_KEYS.includes(m.key))
-      : []),
+    // Меню ЭЗС-продаж целиком: сеть, аналитика сессий и коммерция (тарифы, ЮЛ, ФЛ)
+    // — одно рабочее место коммерсанта, как в Ledger РусГидро.
+    ...(isEnergy ? CHARGE_SESSIONS_MENU : []),
   ]
   // «Управленческий» у ГИГ (fuel) = хозяйственные отношения компании (договоры/аренда),
   // не баланс (концепт МАГа 13.07.2026): контроль топлива уже живёт в «Продажах»,
@@ -128,12 +124,13 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     icon: BarChart3, items: isEnergy ? SITES_ANALYTICS_MENU : [], connected: isEnergy }
   const ops: WorkspaceSection   = { mode: 'operations', label: 'Управленческий', icon: Gauge,        items: opsItems, connected: opsItems.length > 0 }
   const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
-  // Корпоративный процессинг и Маркетинг — свои рабочие места (energy): те же панели,
-  // но открываются из своего продукта, а не как вкладки внутри «Продаж».
+  // Корпоративный процессинг и Маркетинг — продукты в подключении (решение МАГа
+  // 28.07.2026): свои экраны ещё не сделаны, а коммерческие разделы вернулись в
+  // «Продажи». Меню у них нет — рабочая область показывает заставку.
   const corporate: WorkspaceSection = { mode: 'corporate', label: 'Корпоративный процессинг',
-    icon: Building2, items: isEnergy ? CORP_MENU : [], connected: isEnergy }
+    icon: Building2, items: [], connected: isEnergy }
   const marketing: WorkspaceSection = { mode: 'marketing', label: 'Маркетинг',
-    icon: Megaphone, items: isEnergy ? MARKETING_MENU : [], connected: isEnergy }
+    icon: Megaphone, items: [], connected: isEnergy }
   const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
   // Разделы продукта «Данные» (energy): без них рабочее место открывалось панелью

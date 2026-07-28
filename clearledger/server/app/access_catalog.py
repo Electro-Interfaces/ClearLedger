@@ -52,7 +52,10 @@ SYSTEM_ROLES_ENERGY: list[dict] = [
     {"name": "Проектный офис", "modules": ["projects"]},
     {"name": "Инженер эксплуатации", "modules": ["ops"]},
     {"name": "Коммерция", "modules": ["sales", "corp"]},
-    {"name": "Маркетолог", "modules": ["marketing"]},
+    # Маркетолог смотрит сегментацию сети и веб-аналитику — они живут разделами
+    # «Продаж» (28.07.2026); ключ `marketing` оставлен на будущий продукт.
+    {"name": "Маркетолог", "modules": [
+        "marketing", "sales:cs_abcxyz", "sales:cs_trend", "sales:metrika"]},
     {"name": "Бухгалтер", "modules": ["finance"]},
     {"name": "Оператор данных", "modules": ["data"]},
     {"name": "Диспетчер поддержки", "modules": ["support", "chat"]},
