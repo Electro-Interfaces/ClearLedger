@@ -33,7 +33,7 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div data-zone="Судьба денег: капвложения и расходы" className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 className="text-base font-semibold">Бюджет</h2>
           <p className="text-sm text-muted-foreground">

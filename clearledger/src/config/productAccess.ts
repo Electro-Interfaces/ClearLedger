@@ -20,7 +20,7 @@
 import { navByPath } from './navigation'
 import {
   ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
-  SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
+  SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
 } from './workspaceMenus'
 import { STORE_MENU } from './storeCatalog'
 import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
@@ -73,6 +73,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...pages(['/metrika']),
   ],
   shop: items(STORE_MENU),
+  marketing: items(MARKET_MENU, 'Рынок'),
   finance: [
     // «Финансовый» и «Налоговый» сняты с витрины (workspaceSections) — прав на них нет:
     // роль не должна раздавать доступ к разделу, которого в интерфейсе не существует.

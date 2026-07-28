@@ -10,7 +10,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceSubView, useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { workspaceModeForKey } from '@/config/workspaceMenus'
 import { productForMode } from '@/config/productAccess'
-import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS, EQUIPMENT_KEYS, SITES_KEYS } from './workspaceSections'
+import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS, EQUIPMENT_KEYS, SITES_KEYS, MARKET_KEYS } from './workspaceSections'
+import { MarketRouter } from '@/components/market/MarketRouter'
 import { EquipmentRouter } from '@/components/equipment/EquipmentRouter'
 import { SitesRouter } from '@/components/sites/SitesRouter'
 import { ChargeSalesRouter } from './ChargeSalesRouter'
@@ -163,6 +164,10 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   // Банк ЗУ (energy): площадки под установку ЭЗС — девелоперский пайплайн.
   if (SITES_KEYS.includes(activeTab)) {
     return <div className="h-full overflow-y-auto"><SitesRouter tab={activeTab} companyId={companyId} /></div>
+  }
+  // Рынок вокруг сети (продукт «Маркетинг», docs/MARKET.md).
+  if (MARKET_KEYS.includes(activeTab)) {
+    return <div className="h-full overflow-hidden"><MarketRouter tab={activeTab} /></div>
   }
   if (CHARGE_SESSIONS_KEYS.includes(activeTab)) {
     return <div className="h-full overflow-y-auto"><ChargeSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} /></div>

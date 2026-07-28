@@ -18,12 +18,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import InfoArticle, InfoBinding, InfoCategory
+from app.services.info_seed_projects import ARTICLES as PROJECT_ARTICLES
+from app.services.info_seed_projects import CATEGORY as PROJECTS_CATEGORY
 
 PROFILE = "energy"
 
 # Разделы дерева для отраслевого профиля.
 CATEGORIES = [
     {"title": "Пространство компании", "sort": 5},
+    # Помощь по «Проектам» — отдельным разделом: её открывают чаще всего,
+    # и ей место выше отраслевых норм, а не среди них.
+    {"title": PROJECTS_CATEGORY, "sort": 8},
     {"title": "Проекты и стройка сети", "sort": 10},
     {"title": "Технологическое присоединение", "sort": 20},
     {"title": "Земля и договоры", "sort": 30},
@@ -314,6 +319,12 @@ ARTICLES: list[dict[str, Any]] = [
 """,
     },
 ]
+
+
+# Помощь по продукту живёт отдельным файлом (): её пишут
+# и правят чаще остального знания, и держать её в общем списке значит каждый раз
+# пролистывать нормативку.
+ARTICLES += [{**a, "category": PROJECTS_CATEGORY} for a in PROJECT_ARTICLES]
 
 
 async def seed_info(db: AsyncSession) -> dict[str, int]:

@@ -26,6 +26,7 @@ import {
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
+  MARKET_MENU, MARKET_KEYS,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
 // панелей; секции собираются из трёх меню разделов.
@@ -42,6 +43,7 @@ export {
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
+  MARKET_MENU, MARKET_KEYS,
 }
 
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
@@ -142,8 +144,9 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Продажи». Меню у них нет — рабочая область показывает заставку.
   const corporate: WorkspaceSection = { mode: 'corporate', label: 'Процессинг',
     icon: Building2, items: [], connected: isEnergy }
-  const marketing: WorkspaceSection = { mode: 'marketing', label: 'Маркетинг',
-    icon: Megaphone, items: [], connected: isEnergy }
+  // «Маркетинг» получил первый рабочий раздел — рынок вокруг сети (docs/MARKET.md).
+  const marketing: WorkspaceSection = { mode: 'marketing', label: 'Рынок',
+    icon: Megaphone, items: isEnergy ? MARKET_MENU : [], connected: isEnergy }
   const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
   // Разделы продукта «Данные» (energy): без них рабочее место открывалось панелью

@@ -96,7 +96,7 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
           {/* Поле матрицы: ось X — исполнимость, ось Y — привлекательность */}
           <Card>
             <CardContent className="p-0">
-              <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
+              <div data-zone="Карта решений: две оси и четыре действия" className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
                 Карта решений — каждая точка это проект
               </div>
               <div className="p-4">

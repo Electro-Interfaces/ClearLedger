@@ -4815,3 +4815,147 @@ class InfoBinding(Base):
     __table_args__ = (
         Index("ix_info_binding_ctx", "app_code", "section_key"),
     )
+
+
+# ===========================================================================
+# РЫНОК (продукт «Маркетинг», docs/MARKET.md)
+# Внешний мир вокруг нашей сети: чужие станции, точки притяжения, их цены и
+# состояние. Живёт ОТДЕЛЬНО от реестра объектов (`service_locations`): у нашего
+# объекта есть паспорт, договоры и ответственные, у чужого — только наблюдения
+# и гипотезы. Смешать их значит однажды выставить счёт по чужой станции.
+# ===========================================================================
+class MarketOperator(Base):
+    """Оператор рынка — чья это точка (конкурент, партнёр, мы сами).
+
+    Отдельная сущность, а не строка в карточке: политику цен и динамику открытий
+    смотрят ПО ОПЕРАТОРУ («что делает конкурент»), а не по одной точке.
+    """
+    __tablename__ = "market_operators"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    short_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Кто он нам: competitor | partner | own (наша же сеть — чтобы карта была полной) | other
+    relation: Mapped[str] = mapped_column(String(20), nullable=False, default="competitor")
+    site_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_market_operator_company", "company_id", "relation"),
+    )
+
+
+class MarketSite(Base):
+    """Точка рынка: чужая ЭЗС, торговый центр, парковка, АЗС — всё, что объясняет
+    спрос или занимает территорию.
+
+    Решение МАГа 28.07.2026: берём не только зарядки. Торговый центр не конкурент,
+    но именно он объясняет, ПОЧЕМУ в этом месте заряжают, и он же кандидат под
+    размещение. Поэтому вид точки — открытый список, а роль (конкурент или точка
+    притяжения) выводится из вида и оператора, а не задаётся отдельным флагом.
+
+    Связь с нашим миром — `location_id`: если точка оказалась нашим объектом
+    (импорт приносит наши и чужие вперемешку), она помечается и на карте не двоится.
+    """
+    __tablename__ = "market_sites"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True, index=True)
+    # ezs | mall | parking | fuel | hotel | office | other
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="ezs")
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    address: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Numeric(10, 7), nullable=True)
+    # Гексагон хранения (H3 res 8; на трассах res 7) — ключ агрегации фактов во
+    # времени: он не меняется, когда рядом открывается новая станция.
+    hex_id: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    # Только для ЭЗС: чем оснащена точка. Порты и мощность решают, конкурент это нам
+    # или другой класс сервиса (медленная AC-зарядка у ТЦ — не конкурент быстрой DC).
+    ports: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_power_kw: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    connectors: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    opened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO-дата открытия
+    closed_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active|planned|closed
+    # Наш объект, если точка — это мы.
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True, index=True)
+    # ── происхождение факта (принцип 2 docs/MARKET.md) ──
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
+    source_ref: Mapped[str | None] = mapped_column(String(400), nullable=True)   # ссылка/идентификатор в источнике
+    source_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=50)  # 100 партнёр/API … 20 парсинг
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Ручная правка сильнее машинной: импорт её не затирает, а показывает расхождение.
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Ключ дедупа: округлённая координата + вид (две карты дают одну точку).
+    dedup_key: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_market_site_company_kind", "company_id", "kind", "status"),
+        Index("ix_market_site_geo", "company_id", "city"),
+    )
+
+
+class MarketObservation(Base):
+    """Наблюдение по точке: цена, доступность, состояние — на конкретную дату.
+
+    Отдельная сущность, а не поля в карточке (решение МАГа 28.07.2026): наблюдения
+    приходят из разных рук — сервис на выезде, маркетинг, партнёр, парсер, — и у
+    каждого свой возраст и своя достоверность. Цена конкурента без даты и автора
+    опаснее её отсутствия: выглядит достоверной, а решение по ней ошибочно.
+
+    История наблюдений — материал для «эластичности»: что стало с нашими сессиями
+    после того, как сосед изменил тариф.
+    """
+    __tablename__ = "market_observations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # price | availability | equipment | closed | opened | photo | note
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="price")
+    observed_on: Mapped[str] = mapped_column(String(10), nullable=False)   # ISO-дата наблюдения
+    # ── цена как её увидели и как привели к сравнимой (принцип 3 docs/MARKET.md) ──
+    price_value: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    price_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)   # kwh | session | minute
+    price_per_kwh: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    basis: Mapped[str | None] = mapped_column(String(120), nullable=True)  # «DC 60+ кВт, будни днём»
+    connector_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    power_kw: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    # ── происхождение ──
+    # manual | service_visit | marketing | partner | import | parser
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    source_ref: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    # confirmed (два источника) | single | conflict
+    confidence: Mapped[str] = mapped_column(String(12), nullable=False, default="single")
+    snapshot_url: Mapped[str | None] = mapped_column(String(400), nullable=True)  # снимок первоисточника
+    author_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    author_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_market_obs_site_date", "site_id", "observed_on"),
+        Index("ix_market_obs_company_kind", "company_id", "kind", "observed_on"),
+    )

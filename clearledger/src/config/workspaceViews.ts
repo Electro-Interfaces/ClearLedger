@@ -74,6 +74,10 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     eq_movements: 'Движения', eq_spares: 'ЗИП и запчасти',
   },
   ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда' },
+  marketing: {
+    mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
+    mk_operators: 'Операторы', mk_observations: 'Наблюдения',
+  },
   store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),
   financial: {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',

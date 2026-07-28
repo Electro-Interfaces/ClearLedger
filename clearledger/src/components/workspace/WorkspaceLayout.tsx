@@ -115,7 +115,7 @@ function DesktopWorkspace() {
             {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
                 разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
             {coreMode === 'corporate' && <ProductStub code="corp" />}
-            {coreMode === 'marketing' && <ProductStub code="marketing" />}
+            {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
             {coreMode === 'financial' && <FinancialPanel />}
             {coreMode === 'accounting' && <AccountingPanel />}
             {coreMode === 'tax' && <TaxPanel />}
@@ -201,7 +201,7 @@ function MobileWorkspace() {
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {coreMode === 'store' && <StorePanel />}
         {coreMode === 'corporate' && <ProductStub code="corp" />}
-        {coreMode === 'marketing' && <ProductStub code="marketing" />}
+        {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
         {coreMode === 'financial' && <FinancialPanel />}
         {coreMode === 'accounting' && <AccountingPanel />}
         {coreMode === 'tax' && <TaxPanel />}

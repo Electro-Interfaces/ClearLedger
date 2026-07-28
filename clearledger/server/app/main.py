@@ -64,6 +64,7 @@ from app.routers import (
     reconcile_rules_router,
     locations_router,
     location_types_router,
+    market_router,
     metrika_router,
     netservice_router,
     notifications_router,
@@ -256,6 +257,8 @@ app.include_router(meetings_router.router, prefix=API_PREFIX)
 app.include_router(chat_router.router, prefix=API_PREFIX)
 app.include_router(notifications_router.router, prefix=API_PREFIX)  # Оповещения пространства
 app.include_router(metrika_router.router, prefix=API_PREFIX)
+# Рынок вокруг сети (продукт «Маркетинг», docs/MARKET.md): чужие точки и наблюдения.
+app.include_router(market_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

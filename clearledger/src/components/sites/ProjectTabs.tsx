@@ -142,7 +142,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
     <div className="space-y-4">
       {/* Гейт текущей стадии */}
       <section className="rounded-lg border border-border">
-        <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <div data-zone="Чек-лист стадии по регламенту" className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
           <span>Чек-лист согласования · стадия «{gate.stageLabel}»</span>
           <span className={`font-mono ${gate.done === gate.total ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
             {gate.done} / {gate.total}
@@ -191,7 +191,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
           одинаково. Теперь вперёд — кнопкой, а прыжок через стадию, пауза и отказ —
           отдельно, по явному запросу. */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-sm font-semibold">Стадия</div>
+        <div data-zone="Перевод на следующую стадию" className="text-sm font-semibold">Стадия</div>
         {!otherStage && nextStage ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" className="h-8 text-sm"
@@ -279,7 +279,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
       {/* Ответственный и следующий шаг */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-sm font-semibold">Кто ведёт и что дальше</div>
+        <div data-zone="Ответственный и следующий шаг" className="text-sm font-semibold">Кто ведёт и что дальше</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <div>
             <Label>Ответственный</Label>
@@ -987,7 +987,7 @@ function LinkPicker({ label, options, onPick, pending }: {
       <Input autoFocus className="h-8 text-sm" placeholder="Поиск…"
         value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="max-h-48 overflow-y-auto">
-        {found.length === 0 && <div className="text-xs text-muted-foreground px-1 py-2">Ничего не найдено.</div>}
+        {found.length === 0 && <div data-zone="Работы на объекте: модернизации" className="text-xs text-muted-foreground px-1 py-2">Ничего не найдено.</div>}
         {found.map((o) => (
           <button key={o.id} type="button" disabled={pending}
             onClick={() => { onPick(o.id); setOpen(false) }}
@@ -1161,7 +1161,7 @@ export function AccountingTab({ site, companyId, onDone }: {
     <div className="space-y-3">
       {/* связи с учётом */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div className="text-sm font-semibold">Записи в учёте</div>
+        <div data-zone="Связь с учётом: договор и объект" className="text-sm font-semibold">Записи в учёте</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
             <Label>Договор на землю</Label>

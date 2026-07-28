@@ -150,7 +150,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
 
       {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
           девять одинаковых кнопок не подсказывают, с какой начинать. */}
-      <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
+      <div data-zone="Разделы проекта: точка = есть незакрытое" className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
         {PROJECT_TABS.map((t) => (
           <button key={t.k} type="button" onClick={() => onTab(t.k)}
             title={pending.has(t.k) ? 'Здесь есть незакрытые пункты текущей стадии' : undefined}
@@ -201,7 +201,7 @@ function NextStepBar({ site, onGoTab }: {
   const leadTab = lead ? GATE_TAB[lead.doc ? 'doc' : lead.equipment ? 'equipment' : lead.manual ? 'manual' : 'field'] : undefined
 
   return (
-    <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+    <div data-zone="Что делать сейчас" className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium">Сейчас: {site.stageLabel}</span>
         {gate.canAdvance ? (
