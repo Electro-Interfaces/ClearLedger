@@ -14,6 +14,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2 } from 'lucide-react'
+import { ExportButton } from './ExportButton'
 import { getCostsReport } from '@/services/sitesService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -32,12 +33,15 @@ export function ProjectBudgetPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-4">
-      <div>
-        <h2 className="text-base font-semibold">Бюджет</h2>
-        <p className="text-sm text-muted-foreground">
-          План {money(d.planTotal)} · факт {money(d.factTotal)}. Капвложения войдут в стоимость
-          объектов, расходы периода — нет.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold">Бюджет</h2>
+          <p className="text-sm text-muted-foreground">
+            План {money(d.planTotal)} · факт {money(d.factTotal)}. Капвложения войдут в стоимость
+            объектов, расходы периода — нет.
+          </p>
+        </div>
+        <ExportButton companyId={companyId} report="budget" fileName="budget.xlsx" />
       </div>
 
       {empty ? (

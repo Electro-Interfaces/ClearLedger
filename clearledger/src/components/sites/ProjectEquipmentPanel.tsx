@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, AlertTriangle } from 'lucide-react'
+import { ExportButton } from './ExportButton'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import { getEquipmentReport, STAGE_META, type SiteStage } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
@@ -35,12 +36,15 @@ export function ProjectEquipmentPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      <div>
-        <h2 className="text-base font-semibold">Оборудование проектов</h2>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+        <h2 className="text-base font-semibold">Оборудование</h2>
         <p className="text-sm text-muted-foreground">
           Часть этапа реализации, свод по всем проектам: потребность → заказ → поставка → монтаж.
           Позиции ведутся в самом проекте, вкладка «Оборудование». Строка ведёт в проект.
         </p>
+        </div>
+        <ExportButton companyId={companyId} report="equipment" fileName="equipment.xlsx" />
       </div>
 
       <ProjectPhaseStrip current="build"

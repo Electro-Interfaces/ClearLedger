@@ -16,7 +16,7 @@ import { MainLayout } from '@/components/layout/MainLayout'
 import { TabFilterSync } from '@/components/layout/TabFilterSync'
 import { DocumentTitle } from '@/components/layout/DocumentTitle'
 import { OneCAutoSync } from '@/components/onec/OneCAutoSync'
-import { WorkspaceLayout } from '@/components/workspace/WorkspaceLayout'
+import { WorkspaceLayout, ProductStub } from '@/components/workspace/WorkspaceLayout'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Loader2 } from 'lucide-react'
 
@@ -201,6 +201,12 @@ const router = createBrowserRouter([
             path: `${p.route}${path}`,
             element: <RequireApp code={p.code}>{SPACE_PAGE_ELEMENTS[path]}</RequireApp>,
           }))),
+          // Продукты, заведённые в реестре, но пока без своих экранов: маршрут нужен —
+          // иначе плитка со стола вела бы в «страница не найдена». За ним заставка,
+          // объясняющая, что здесь появится (`PRODUCT_SETUP_NOTE`).
+          { path: '/netlink', element: <RequireApp code="netlink"><ProductStub code="netlink" /></RequireApp> },
+          { path: '/accounting', element: <RequireApp code="accounting"><ProductStub code="accounting" /></RequireApp> },
+          { path: '/diagnostics', element: <RequireApp code="diag"><ProductStub code="diag" /></RequireApp> },
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },

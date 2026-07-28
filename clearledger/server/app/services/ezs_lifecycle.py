@@ -118,6 +118,7 @@ async def start_successor(db: AsyncSession, company_id, *, source: EzsSite, kind
         company_id=company_id,
         project_no=await next_no(db, company_id),
         title=f"{KIND_LABELS[kind]}: {loc.name if loc else (source.title or source.address or '')}".strip(),
+        kind=kind,
         stage=KIND_START_STAGE[kind], stage_since=date.today().isoformat(),
         location_id=source.location_id,
         owner_user_id=source.owner_user_id,

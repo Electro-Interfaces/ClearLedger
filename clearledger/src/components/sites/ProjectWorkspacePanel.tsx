@@ -141,8 +141,10 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
       </div>
 
       {/* Где проект в жизненном цикле — видно на любой вкладке */}
-      <ProjectPhaseStrip current={s.phase ?? undefined}
-        note="Подбор площадки — первый этап этого же проекта, дальше земля, реализация и ввод." />
+      <ProjectPhaseStrip current={s.phase ?? undefined} kind={s.kind}
+        note={s.kind && s.kind !== 'new_build'
+          ? 'Работа на действующем объекте: место известно, подбор площадки не нужен.'
+          : 'Подбор площадки — первый этап этого же проекта, дальше земля, реализация и ввод.'} />
 
       <NextStepBar site={s} onGoTab={onTab} />
 

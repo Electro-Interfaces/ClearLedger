@@ -12,6 +12,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, FileWarning, MapPinOff, PackageX } from 'lucide-react'
+import { ExportButton } from './ExportButton'
 import { getAwaitingAccounting, STAGE_META, type SiteStage } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { useOpenProject } from './useOpenProject'
@@ -51,11 +52,14 @@ export function AwaitingAccountingPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      <div>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
         <h2 className="text-base font-semibold">Ждёт учёта</h2>
         <p className="text-sm text-muted-foreground">
           Где проект ушёл вперёд, а бухгалтерия об этом ещё не знает. Всего расхождений: {nf0.format(totalIssues)}.
         </p>
+        </div>
+        <ExportButton companyId={companyId} report="accounting" fileName="awaiting_accounting.xlsx" />
       </div>
 
       {totalIssues === 0 ? (

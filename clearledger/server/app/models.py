@@ -3877,6 +3877,10 @@ class EzsSite(Base):
     # переписке и на совещании; UUID для этого не годится.
     project_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)   # имя проекта
+    # Вид работы: new_build | retrofit | relocation | decommission. Без него
+    # модернизация действующего объекта выглядела обычной стройкой, и карточка
+    # рисовала ей этап «Подбор площадки», которого в этой работе не было.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="new_build")
     stage: Mapped[str] = mapped_column(String(16), nullable=False, default="lead")
     stage_since: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO-дата входа в стадию
     prev_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)    # откуда пришла

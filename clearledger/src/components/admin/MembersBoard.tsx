@@ -46,6 +46,9 @@ import { AccessTreeGrid } from './AccessTreeGrid'
 import { ObjectScopeDialog } from './ObjectScopeDialog'
 import { PartyBadge } from '@/components/chat/PartyBadge'
 
+/** Столбцы одного слоя: значки продуктов, отделённые от соседнего слоя чертой. */
+interface ColumnGroup { key: string; label: string; apps: AccessApp[] }
+
 export function MembersBoard({
   companyId, canManage, selfId, party = 'internal', toolbar,
 }: {
@@ -120,6 +123,18 @@ export function MembersBoard({
     return [...byOrg.entries()].sort(([a], [b]) => a.localeCompare(b, 'ru')).map(([key, g]) => ({ key, ...g }))
   }, [party, filtered])
 
+  /**
+   * Столбцы группами по слою: приложения-разрезы, сервисы контейнера (чат, заявки,
+   * конференции) и управление пространством — разные вещи, и «может ли подрядчик
+   * писать в чат» не должно теряться в общем ряду значков.
+   */
+  const columnGroups = useMemo(() => ([
+    { key: 'app', label: 'Приложения' },
+    { key: 'service', label: 'Сервисы' },
+    { key: 'admin', label: 'Управление' },
+  ] as const).map((g) => ({ ...g, apps: tree.filter((a) => (a.layer ?? 'app') === g.key) }))
+    .filter((g) => g.apps.length), [tree])
+
   /** Полный доступ — у администратора и суперадмина: галочки им не нужны. */
   const isFullByRole = (u: AdminUser) => u.is_superadmin || u.role === 'admin'
   const effective = (u: AdminUser): string[] | null =>
@@ -188,7 +203,7 @@ export function MembersBoard({
       </div>
 
       <div className="rounded-xl border border-border">
-        <HeaderRow apps={tree} loading={treeLoading} />
+        <HeaderRow groups={columnGroups} loading={treeLoading} />
         <div className="divide-y divide-border/60">
           {q.isLoading && (
             <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
@@ -233,7 +248,7 @@ export function MembersBoard({
             return (
               <Fragment key={u.id}>
                 <MemberRow
-                  u={u} apps={tree} keys={effective(u)} full={isFullByRole(u)}
+                  u={u} groups={columnGroups} keys={effective(u)} full={isFullByRole(u)}
                   locked={locked(u)} changed={dirty.includes(u.id)}
                   expanded={!!expanded[u.id]} party={party}
                   onExpand={() => setExpanded((e) => ({ ...e, [u.id]: !e[u.id] }))}
@@ -289,22 +304,29 @@ export function MembersBoard({
 }
 
 /** Шапка матрицы: продукты значками — имена в заголовках столбцов не помещаются. */
-function HeaderRow({ apps, loading }: { apps: AccessApp[]; loading: boolean }) {
+function HeaderRow({ groups, loading }: { groups: ColumnGroup[]; loading: boolean }) {
   return (
-    <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+    <div className="flex items-end gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
       <span className="w-5 shrink-0" />
-      <span className="min-w-0 flex-1">Участник</span>
-      <span className="hidden w-[150px] shrink-0 xl:block">Кто это</span>
-      <span className="flex shrink-0 items-center">
-        {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-        {apps.map((a) => {
-          const Icon = appIcon(a.icon)
-          return (
-            <span key={a.app} className="flex w-8 justify-center" title={a.name}>
-              <Icon className="h-3.5 w-3.5" />
+      <span className="min-w-0 flex-1 pb-0.5">Участник</span>
+      <span className="hidden w-[150px] shrink-0 pb-0.5 xl:block">Кто это</span>
+      <span className="flex shrink-0 items-end">
+        {loading && <Loader2 className="mb-0.5 h-3.5 w-3.5 animate-spin" />}
+        {groups.map((g) => (
+          <span key={g.key} className="flex flex-col items-center border-l border-border/50 px-1 first:border-l-0">
+            <span className="text-[9px] leading-tight tracking-normal text-muted-foreground/70">{g.label}</span>
+            <span className="flex">
+              {g.apps.map((a) => {
+                const Icon = appIcon(a.icon)
+                return (
+                  <span key={a.app} className="flex w-8 justify-center pt-0.5" title={a.name}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                )
+              })}
             </span>
-          )
-        })}
+          </span>
+        ))}
       </span>
       <span className="hidden w-[132px] shrink-0 lg:block">Права</span>
       <span className="w-[92px] shrink-0 text-right">Объекты</span>
@@ -314,10 +336,10 @@ function HeaderRow({ apps, loading }: { apps: AccessApp[]; loading: boolean }) {
 }
 
 function MemberRow({
-  u, apps, keys, full, locked, changed, expanded, party, onExpand, onToggleApp, onCard,
+  u, groups, keys, full, locked, changed, expanded, party, onExpand, onToggleApp, onCard,
   companyId, onSaved, contracts,
 }: {
-  u: AdminUser; apps: AccessApp[]; keys: string[] | null; full: boolean; locked: boolean
+  u: AdminUser; groups: ColumnGroup[]; keys: string[] | null; full: boolean; locked: boolean
   changed: boolean; expanded: boolean; party: 'internal' | 'external'
   onExpand: () => void; onToggleApp: (app: string) => void; onCard: () => void
   companyId: string; onSaved: () => void; contracts: SpaceContract[]
@@ -371,9 +393,13 @@ function MemberRow({
       </span>
 
       <span className="flex shrink-0 items-center">
-        {apps.map((a) => (
-          <AppCell key={a.app} state={appState(keys, a.app)} name={a.name}
-            locked={locked || full} onClick={() => onToggleApp(a.app)} />
+        {groups.map((g) => (
+          <span key={g.key} className="flex border-l border-border/40 px-1 first:border-l-0">
+            {g.apps.map((a) => (
+              <AppCell key={a.app} state={appState(keys, a.app)} name={a.name}
+                locked={locked || full} onClick={() => onToggleApp(a.app)} />
+            ))}
+          </span>
         ))}
       </span>
 

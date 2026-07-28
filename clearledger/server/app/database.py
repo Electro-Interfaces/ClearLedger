@@ -1020,6 +1020,23 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.29: вид работы у проекта. Место и работа на нём — одна сущность
+        # (решение 28.07.2026), поэтому вид переехал на неё: без него модернизация
+        # действующего объекта не отличалась от новой стройки и получала этап
+        # «Подбор площадки», которого в ней нет. Существующие записи — стройки:
+        # они и заводились подбором площадки.
+        for stmt in (
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'new_build'",
+            # Преемники (модернизация, перенос, демонтаж) уже помечены в спутнике —
+            # переносим вид оттуда, чтобы заведённые до миграции не потерялись.
+            """
+            UPDATE ezs_sites s SET kind = p.kind
+              FROM ezs_projects p
+             WHERE p.site_id = s.id AND p.kind <> 'new_build' AND s.kind = 'new_build'
+            """,
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

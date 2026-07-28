@@ -4,9 +4,9 @@
  */
 
 import { useSearchParams } from 'react-router-dom'
-import { Building2, Megaphone, type LucideIcon } from 'lucide-react'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { EmptyState } from '@/components/common/EmptyState'
+import { PRODUCT_SETUP_NOTE } from '@/config/spaceProducts'
 import { useWorkspace, WorkspaceProvider, type CoreMode } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import {
@@ -29,27 +29,14 @@ import { useVisibleSections } from './workspaceSections'
  * выдают права и его настраивают. Заставка честно говорит, что здесь пока пусто и
  * где эти функции сейчас, — вместо пустой рабочей области.
  */
-function ProductStub({ icon, title, description }: {
-  icon: LucideIcon; title: string; description: string
-}) {
+export function ProductStub({ code }: { code: string }) {
+  const note = PRODUCT_SETUP_NOTE[code]
+  if (!note) return null
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <EmptyState icon={icon} title={title} description={description} />
+      <EmptyState icon={note.icon} title={note.title} description={note.description} />
     </div>
   )
-}
-
-const CORP_STUB = {
-  icon: Building2,
-  title: 'Корпоративный процессинг — в подключении',
-  description: 'Рабочее место по юрлицам: договоры, лимиты и тарифные планы под ЮЛ. '
-    + 'Пока корпоративные клиенты, тарифы и частные лица ведутся в «Продажах».',
-}
-const MARKETING_STUB = {
-  icon: Megaphone,
-  title: 'Маркетинг — в подключении',
-  description: 'Кампании, акции и сегменты под рассылку. Сегментация сети (ABC-XYZ, '
-    + 'динамика) и Яндекс.Метрика пока живут в «Продажах».',
 }
 
 function WorkspaceContent() {
@@ -127,8 +114,8 @@ function DesktopWorkspace() {
             {coreMode === 'store' && <StorePanel />}
             {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
                 разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
-            {coreMode === 'corporate' && <ProductStub {...CORP_STUB} />}
-            {coreMode === 'marketing' && <ProductStub {...MARKETING_STUB} />}
+            {coreMode === 'corporate' && <ProductStub code="corp" />}
+            {coreMode === 'marketing' && <ProductStub code="marketing" />}
             {coreMode === 'financial' && <FinancialPanel />}
             {coreMode === 'accounting' && <AccountingPanel />}
             {coreMode === 'tax' && <TaxPanel />}
@@ -213,8 +200,8 @@ function MobileWorkspace() {
         {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {coreMode === 'store' && <StorePanel />}
-        {coreMode === 'corporate' && <ProductStub {...CORP_STUB} />}
-        {coreMode === 'marketing' && <ProductStub {...MARKETING_STUB} />}
+        {coreMode === 'corporate' && <ProductStub code="corp" />}
+        {coreMode === 'marketing' && <ProductStub code="marketing" />}
         {coreMode === 'financial' && <FinancialPanel />}
         {coreMode === 'accounting' && <AccountingPanel />}
         {coreMode === 'tax' && <TaxPanel />}

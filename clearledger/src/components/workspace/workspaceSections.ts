@@ -137,10 +137,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const opsEconomy: WorkspaceSection = { mode: 'ops_economy', label: 'Хозяйство',
     icon: Receipt, items: isEnergy ? energyOps : [], connected: energyOps.length > 0 }
   const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
-  // Корпоративный процессинг и Маркетинг — продукты в подключении (решение МАГа
+  // Процессинг и Маркетинг — продукты в подключении (решение МАГа
   // 28.07.2026): свои экраны ещё не сделаны, а коммерческие разделы вернулись в
   // «Продажи». Меню у них нет — рабочая область показывает заставку.
-  const corporate: WorkspaceSection = { mode: 'corporate', label: 'Корпоративный процессинг',
+  const corporate: WorkspaceSection = { mode: 'corporate', label: 'Процессинг',
     icon: Building2, items: [], connected: isEnergy }
   const marketing: WorkspaceSection = { mode: 'marketing', label: 'Маркетинг',
     icon: Megaphone, items: [], connected: isEnergy }

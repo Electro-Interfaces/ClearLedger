@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { ExportButton } from './ExportButton'
 import {
   getSites, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner,
   PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage, type SiteRow,
@@ -248,6 +249,8 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => setCreating(true)}>
           <Plus className="h-3.5 w-3.5 mr-1" />Новый проект
         </Button>
+        {/* Реестр тоже уходит на совещание — своей выгрузкой, а не пересказом. */}
+        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" />
         {risk && (
           <button type="button" onClick={clearRisk}
             className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">

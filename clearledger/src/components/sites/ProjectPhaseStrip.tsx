@@ -31,29 +31,38 @@ export const PHASES: PhaseStripItem[] = [
 
 const PHASE_ORDER = PHASES.map((p) => p.key)
 
-export function ProjectPhaseStrip({ current, counts, onPick, note }: {
+export function ProjectPhaseStrip({ current, counts, onPick, note, kind }: {
   /** Этап текущего проекта — подсвечивается как «сейчас». */
   current?: string | null
   /** Сколько проектов на каждом этапе (обзорные экраны). */
   counts?: Record<string, number>
   onPick?: (phase: string) => void
   note?: string
+  /** Вид работы: у модернизации, переноса и демонтажа подбора площадки не было. */
+  kind?: string | null
 }) {
   const curIdx = current ? PHASE_ORDER.indexOf(current) : -1
+  // Работа с действующим объектом начинается с решения: место известно из прошлой
+  // жизни станции. Показывать ей «Подбор площадки» как пройденный этап — врать:
+  // его не проходили. Помечаем как неприменимый.
+  const skipSelect = !!kind && kind !== 'new_build'
 
   return (
     <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
       <div className="flex items-center gap-1 overflow-x-auto">
         {PHASES.map((p, i) => {
-          const state = curIdx < 0 ? 'plain' : i < curIdx ? 'done' : i === curIdx ? 'current' : 'future'
+          const na = skipSelect && p.key === 'select'
+          const state = na ? 'na'
+            : curIdx < 0 ? 'plain' : i < curIdx ? 'done' : i === curIdx ? 'current' : 'future'
           const Icon = state === 'done' ? CheckCircle2 : state === 'current' ? Play : Circle
-          const clickable = !!onPick
+          const clickable = !!onPick && !na
           return (
             <div key={p.key} className="flex items-center gap-1 shrink-0">
               <button type="button" disabled={!clickable} onClick={() => onPick?.(p.key)}
-                title={p.hint}
+                title={na ? 'Этой работе подбор площадки не нужен: место известно из прошлой жизни объекта' : p.hint}
                 className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-sm transition-colors
-                  ${state === 'current' ? 'bg-primary/10 text-primary font-medium'
+                  ${state === 'na' ? 'text-muted-foreground/45 line-through'
+                    : state === 'current' ? 'bg-primary/10 text-primary font-medium'
                     : state === 'done' ? 'text-emerald-600 dark:text-emerald-400'
                     : state === 'future' ? 'text-muted-foreground'
                     : 'text-foreground'}

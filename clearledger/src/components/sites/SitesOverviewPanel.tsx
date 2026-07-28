@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2, Upload, MapPin, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
+import { ExportButton } from './ExportButton'
 import { sitesModeForKey } from '@/config/workspaceMenus'
 import {
   getSitesOverview, getSitesGaps, importSitesXlsx, STAGE_META,
@@ -100,7 +101,8 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
             земли и реализацию — весь путь виден в карточке проекта, вкладка «Схема».
           </p>
         </div>
-        <div>
+        <div className="flex items-center gap-2">
+          <ExportButton companyId={companyId} report="funnel" fileName="funnel.xlsx" />
           <input ref={fileRef} type="file" accept=".xlsx,.xls" hidden onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
           <Button variant="outline" size="sm" className="h-8 text-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
             {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}

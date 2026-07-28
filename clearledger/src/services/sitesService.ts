@@ -38,6 +38,8 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
 
 export interface SiteRow {
   id: string
+  /** Вид работы: new_build | retrofit | relocation | decommission. */
+  kind?: string
   projectNo?: string | null
   title?: string | null
   phase?: string | null
@@ -529,12 +531,18 @@ export async function getPhaseDurations(companyId: string): Promise<PhaseDuratio
   return get('/api/sites/phase-durations', { company_id: companyId })
 }
 
-/** Выгрузка портфеля в xlsx — то, что уходит на совещание. */
-export async function exportPortfolioXlsx(companyId: string): Promise<void> {
+/**
+ * Выгрузка экрана в xlsx.
+ *
+ * `report`: portfolio | funnel | matrix | budget | accounting | tech-connections
+ * | equipment. Один клиент на все выгрузки — иначе на каждый экран пишется своя
+ * копия качания блоба, и они разъезжаются по мелочам (имя файла, обработка 401).
+ */
+export async function exportXlsx(companyId: string, report: string, fileName?: string): Promise<void> {
   const { getToken } = await import('./apiClient')
   const token = getToken()
   const base = import.meta.env.VITE_API_URL ?? ''
-  const res = await fetch(`${base}/api/sites/export/portfolio?company_id=${companyId}`, {
+  const res = await fetch(`${base}/api/sites/export/${report}?company_id=${companyId}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
   if (!res.ok) throw new Error(`Выгрузка не удалась (${res.status})`)
@@ -542,11 +550,16 @@ export async function exportPortfolioXlsx(companyId: string): Promise<void> {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'projects_portfolio.xlsx'
+  a.download = fileName ?? `${report}.xlsx`
   document.body.appendChild(a)
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+/** Выгрузка портфеля в xlsx — то, что уходит на совещание. */
+export async function exportPortfolioXlsx(companyId: string): Promise<void> {
+  return exportXlsx(companyId, 'portfolio', 'projects_portfolio.xlsx')
 }
 
 export async function getAwaitingAccounting(companyId: string): Promise<AwaitingAccounting> {

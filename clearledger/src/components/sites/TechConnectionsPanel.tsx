@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, AlertTriangle } from 'lucide-react'
+import { ExportButton } from './ExportButton'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import {
   getTechConnections, getTechConnectionsByOperator, STAGE_META, type SiteStage,
@@ -116,12 +117,15 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      <div>
-        <h2 className="text-base font-semibold">Технологическое присоединение</h2>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+        <h2 className="text-base font-semibold">Присоединение</h2>
         <p className="text-sm text-muted-foreground">
           Часть этапа реализации, свод по всем проектам: заявка → ТУ → договор → мероприятия
           сетевой. Именно этот срок определяет, когда станция выйдет в сеть. Строка ведёт в проект.
         </p>
+        </div>
+        <ExportButton companyId={companyId} report="tech-connections" fileName="tech_connections.xlsx" />
       </div>
 
       <ProjectPhaseStrip current="build"

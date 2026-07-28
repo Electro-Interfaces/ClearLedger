@@ -24,22 +24,26 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (AccountingDoc, ChargeSession, Company, CompanyRole, Connector,
-                        Contract, CorporateClient, Counterparty, EzsEquipmentUnit, EzsProject,
-                        EzsSite, HubexTask, InfoArticle, MatrixGroupRoom, MetrikaConnection,
+from app.models import (AccountingDoc, App, AppCompanyLink, Channel, ChargeSession, Company,
+                        CompanyRole, Contract, CorporateClient, Counterparty, EzsEquipmentUnit,
+                        EzsProject, EzsSite, InfoArticle, MatrixGroupRoom, MetrikaConnection,
                         ServiceLocation, SourceFile, User, UserCompany)
+from app.services import sso
+from app.services.space_projection import _internal_base_url
 
 WINDOW_DAYS = 30
 ONLINE_WINDOW_MINUTES = 6
-# Стадии проекта, на которых работа идёт (остальные — закрытые и архив).
-LIVE_PROJECT_STAGES = ("lead", "screening", "negotiation", "decision",
+# Стол не должен ждать приложение, которое молчит: без цифр карточка переживёт, а
+# крутящийся первый экран — нет.
+APP_TIMEOUT = httpx.Timeout(3.0)
+# Активная воронка проекта (`services/sitesService.ts` FUNNEL_STAGES без «В эксплуатации»);
+# «Заморожен» и «Архив» в работу не считаем — по ним никто сегодня не действует.
+LIVE_PROJECT_STAGES = ("lead", "screening", "negotiation", "dd", "decision",
                        "contracting", "construction", "commissioning")
-# Заявка HubEx считается закрытой по названию статуса — справочник статусов ведёт
-# сама HubEx, поэтому сверяем по подстроке, а не по коду.
-CLOSED_TASK_MARKERS = ("закрыт", "выполнен", "отменен", "отменён")
 
 
 async def desk_summary(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any]:
@@ -110,17 +114,33 @@ async def _admin(db: AsyncSession, cid: uuid.UUID, online_since: datetime) -> di
 
 
 async def _data(db: AsyncSession, cid: uuid.UUID, since: datetime) -> dict[str, Any]:
-    total = await _count(db, Connector, cid)
-    active = await _count(db, Connector, cid, Connector.status == "active")
-    # Загрузки за окно — по файлам приёмки: «когда последний раз приезжали данные».
-    files = int((await db.execute(
-        select(func.count()).select_from(SourceFile)
+    # Считаем КАНАЛЫ, а не `connectors`: живая цепочка приёма — Источник → Канал → Разрез,
+    # старая таблица коннекторов у разрезанного профиля пустая и врала бы нулём.
+    channels = await _count(db, Channel, cid)
+    row = (await db.execute(
+        select(func.count(), func.max(SourceFile.created_at))
         .where(SourceFile.company_id == cid, SourceFile.created_at >= since)
-    )).scalar() or 0)
+    )).first()
+    files, last_at = (row or (0, None))
     return {"metrics": [
-        _m("коннекторов", f"{_n(active)}/{_n(total)}", "ok" if active else "warn"),
+        _m("каналов приёма", _n(channels), "ok" if channels else "warn"),
         _m(f"загрузок за {WINDOW_DAYS} дн", _n(files), None if files else "warn"),
+        _m("последняя", *_freshness(last_at)),
     ]}
+
+
+def _freshness(last_at: datetime | None) -> tuple[str, str | None]:
+    """Свежесть данных словами: «сегодня» важнее даты — по ней видно, живой ли приём."""
+    if last_at is None:
+        return "нет", "warn"
+    if last_at.tzinfo is None:
+        last_at = last_at.replace(tzinfo=timezone.utc)
+    days = (datetime.now(timezone.utc) - last_at).days
+    if days <= 0:
+        return "сегодня", "ok"
+    if days == 1:
+        return "вчера", "ok"
+    return f"{days} дн назад", "warn" if days > 7 else None
 
 
 async def _info(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
@@ -193,15 +213,43 @@ async def _marketing(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
 
 
 async def _support(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
-    total = await _count(db, HubexTask, cid)
+    """Заявки Координатора.
+
+    Своей базы у Ядра тут нет: заявки живут в приложении, поэтому спрашиваем его тем же
+    служебным каналом, что и проекцию (RS256-токен, внутренний адрес). Приложение молчит
+    или старой версии — карточка останется без цифр, но стол не сломается.
+    """
+    row = (await db.execute(
+        select(App, AppCompanyLink)
+        .join(AppCompanyLink, AppCompanyLink.app_id == App.id)
+        .where(AppCompanyLink.company_id == cid, App.code == "support")
+    )).first()
+    if row is None:
+        return {"metrics": []}
+    app_row, link = row
+    token = sso.sign_service_token(aud="support", scope="projection")
+    if not token:
+        return {"metrics": []}
+    url = f"{_internal_base_url(app_row, 'support')}/api/v1/eco/summary"
+    try:
+        async with httpx.AsyncClient(timeout=APP_TIMEOUT) as client:
+            resp = await client.get(url, params={"companyId": link.external_company_id},
+                                    headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code >= 400:
+            return {"metrics": []}
+        tickets = (resp.json() or {}).get("tickets") or {}
+    except (httpx.HTTPError, ValueError):
+        return {"metrics": []}
+
+    total = int(tickets.get("total") or 0)
     if not total:
         return {"metrics": []}
-    closed_filter = [func.lower(func.coalesce(HubexTask.status, "")).not_like(f"%{m}%")
-                     for m in CLOSED_TASK_MARKERS]
-    open_tasks = await _count(db, HubexTask, cid, *closed_filter)
+    open_tasks = int(tickets.get("open") or 0)
+    fresh = int(tickets.get("fresh") or 0)
     return {"metrics": [
         _m("заявок всего", _n(total)),
         _m("в работе", _n(open_tasks), "warn" if open_tasks else "ok"),
+        _m("новых", _n(fresh), "warn" if fresh else None),
     ]}
 
 

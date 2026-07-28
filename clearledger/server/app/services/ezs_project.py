@@ -1378,3 +1378,157 @@ async def project_context(db: AsyncSession, company_id, site: EzsSite) -> dict[s
         "eqStatuses": EQ_STATUSES,
         "costKinds": COST_KINDS,
     }
+
+
+# ── Выгрузки экранов ───────────────────────────────────────────────────────
+# Каждая аналитика обязана уметь «дать таблицу»: совещание идёт по Excel, и
+# если выгрузки нет, цифры руками переписывают в свой файл — а он тут же
+# расходится с системой. Один сборщик на все экраны, чтобы формат был общим.
+
+def build_xlsx(sheets: list[dict[str, Any]]) -> bytes:
+    """Книга из листов: `{title, headers, rows, widths?}`.
+
+    Первая строка жирная и закреплена, ширины по месту — иначе выгрузку
+    открывают и первым делом растягивают колонки.
+    """
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+
+    wb = Workbook()
+    for i, sh in enumerate(sheets):
+        ws = wb.active if i == 0 else wb.create_sheet()
+        ws.title = sh["title"][:31]
+        ws.append(list(sh["headers"]))
+        for c in ws[1]:
+            c.font = Font(bold=True)
+            c.alignment = Alignment(vertical="center", wrap_text=True)
+        for r in sh["rows"]:
+            ws.append(list(r))
+        for idx, w in enumerate(sh.get("widths") or [], start=1):
+            ws.column_dimensions[ws.cell(row=1, column=idx).column_letter].width = w
+        ws.freeze_panes = "A2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def export_funnel_xlsx(db: AsyncSession, company_id) -> bytes:
+    """Воронка: сколько стоит на стадии, сколько идёт дольше нормы, по регионам."""
+    from app.services.ezs_sites import sites_overview
+
+    ov = await sites_overview(db, company_id)
+    pf = await portfolio_overview(db, company_id)
+    by_stage = {f["stage"]: f for f in pf.get("funnel", [])}
+    rows = []
+    for f in ov["funnel"]:
+        p = by_stage.get(f["stage"], {})
+        rows.append([
+            f["label"], f["hint"], f["count"],
+            p.get("medianDays"), p.get("normDays"),
+            p.get("stuck"), p.get("passRate"),
+        ])
+    regions = [[r["region"], r["count"]] for r in ov["byRegion"]]
+    return build_xlsx([
+        {"title": "Воронка",
+         "headers": ["Стадия", "Смысл", "Сейчас", "Медиана, дн", "Норматив, дн",
+                     "Дольше нормы", "Проходят дальше"],
+         "rows": rows, "widths": [22, 40, 10, 14, 14, 14, 16]},
+        {"title": "Регионы", "headers": ["Регион", "Проектов"],
+         "rows": regions, "widths": [34, 12]},
+    ])
+
+
+async def export_matrix_xlsx(db: AsyncSession, company_id) -> bytes:
+    """Приоритеты: обе оси, уверенность, решение и чего не хватает."""
+    from app.services.ezs_site_analysis import QUADRANTS, priority_matrix
+
+    m = await priority_matrix(db, company_id)
+    labels = {q["key"]: q["label"] for q in QUADRANTS}
+    rows = [[
+        i["projectNo"], i["title"], i["region"], i["city"], i["address"],
+        i["stageLabel"], i["attract"], i["feasible"], i["confidence"],
+        i["nearestStationKm"], "да" if i["cannibalization"] else "",
+        labels.get(i["quadrant"], i["quadrant"]), "; ".join(i["unknown"]),
+    ] for i in m["items"]]
+    return build_xlsx([{
+        "title": "Приоритеты",
+        "headers": ["Проект", "Название", "Регион", "Город", "Адрес", "Стадия",
+                    "Привлекательность", "Исполнимость", "Уверенность, %",
+                    "До сети, км", "Каннибализация", "Решение", "Чего не хватает"],
+        "rows": rows,
+        "widths": [16, 24, 22, 18, 40, 16, 18, 16, 15, 13, 15, 22, 46],
+    }])
+
+
+async def export_budget_xlsx(db: AsyncSession, company_id) -> bytes:
+    """Бюджет портфеля: статьи с судьбой денег и корзины по состоянию проектов."""
+    rep = await costs_report(db, company_id)
+    rows = [[
+        i["label"], "капвложение" if i["capital"] else "расход периода",
+        i["sites"], i["plan"], i["fact"], i["fact"] - i["plan"],
+    ] for i in rep["byKind"]]
+    buckets = [[
+        {"active": "В работе", "on_hold": "Приостановлены (на счёте 08)",
+         "closed": "Отменены (подлежат списанию)"}.get(k, k), v["plan"], v["fact"],
+    ] for k, v in rep["buckets"].items()]
+    return build_xlsx([
+        {"title": "По статьям",
+         "headers": ["Статья", "Судьба", "Проектов", "План, ₽", "Факт, ₽", "Отклонение, ₽"],
+         "rows": rows, "widths": [34, 18, 12, 16, 16, 16]},
+        {"title": "Состояние", "headers": ["Состояние проектов", "План, ₽", "Факт, ₽"],
+         "rows": buckets, "widths": [34, 16, 16]},
+    ])
+
+
+async def export_accounting_xlsx(db: AsyncSession, company_id) -> bytes:
+    """Ждёт учёта: где проект ушёл вперёд, а бухгалтерия об этом не знает."""
+    rep = await awaiting_accounting(db, company_id)
+    rows = [[
+        i["projectNo"], i["title"], i["stageLabel"], i["reason"], i["hint"],
+    ] for i in rep["items"]]
+    return build_xlsx([{
+        "title": "Ждёт учёта",
+        "headers": ["Проект", "Название", "Стадия", "Расхождение", "Что сделать"],
+        "rows": rows, "widths": [16, 30, 18, 40, 46],
+    }])
+
+
+async def export_tech_connections_xlsx(db: AsyncSession, company_id) -> bytes:
+    """Присоединения: заявки, ТУ, договоры, сроки и просрочки по сетевым."""
+    rep = await tech_connections_report(db, company_id)
+    rows = [[
+        i["projectNo"], i["title"], i["region"], i["city"],
+        i["statusLabel"], i["gridOperator"], i["applicationNo"], i["applicationDate"],
+        i["specsNo"], i["specsDate"], i["contractNo"], i["contractDate"],
+        i["powerKwt"], i["cost"], i["dueDate"], i["doneDate"],
+        "да" if i["overdue"] else "",
+    ] for i in rep["items"]]
+    return build_xlsx([{
+        "title": "Присоединение",
+        "headers": ["Проект", "Название", "Регион", "Город", "Статус", "Сетевая",
+                    "№ заявки", "Дата заявки", "№ ТУ", "Дата ТУ", "№ договора",
+                    "Дата договора", "Мощность, кВт", "Стоимость, ₽",
+                    "Срок мероприятий", "Исполнено", "Просрочено"],
+        "rows": rows,
+        "widths": [16, 26, 22, 18, 18, 26, 18, 13, 18, 13, 18, 13, 14, 14, 16, 13, 12],
+    }])
+
+
+async def export_equipment_xlsx(db: AsyncSession, company_id) -> bytes:
+    """Оборудование проектов: что заказано, что пришло, что смонтировано."""
+    rep = await equipment_report(db, company_id)
+    rows = [[
+        i["projectNo"], i["projectTitle"], i["city"], i["title"], i["manufacturer"],
+        i["powerKwt"], i["qty"], i["supplier"], i["price"],
+        i["statusLabel"], i["dueDate"], i["suppliedDate"], "да" if i["overdue"] else "",
+    ] for i in rep["items"]]
+    return build_xlsx([{
+        "title": "Оборудование",
+        "headers": ["Проект", "Название проекта", "Город", "Оборудование", "Производитель",
+                    "Мощность, кВт", "Кол-во", "Поставщик", "Стоимость, ₽",
+                    "Статус", "Плановая поставка", "Поставлено", "Просрочено"],
+        "rows": rows,
+        "widths": [16, 26, 18, 30, 20, 14, 10, 24, 14, 16, 16, 13, 12],
+    }])

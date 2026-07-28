@@ -19,7 +19,7 @@ import {
   LayoutGrid, ExternalLink, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
-  Building2, ShoppingCart, Megaphone,
+  Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -28,6 +28,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, hasSideButton, type SsoApp } from '@/services/ssoService'
 import { PRODUCT_READINESS, READINESS_LABEL, type Readiness } from '@/config/spaceProducts'
+import { getDeskSummary, type DeskMetric } from '@/services/spaceDeskService'
 
 /** База сборки SPA (`/ClearLedger/`) — новая вкладка открывается по полному адресу. */
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -52,6 +53,9 @@ const ICONS: Record<string, typeof FileText> = {
   'building-2': Building2,
   'shopping-cart': ShoppingCart,
   'megaphone': Megaphone,
+  'network': Network,
+  'calculator': Calculator,
+  'stethoscope': Stethoscope,
 }
 
 interface TileProps {
@@ -61,6 +65,7 @@ interface TileProps {
   badge?: string
   busy?: boolean
   readiness?: Readiness
+  metrics?: DeskMetric[]
   onClick: () => void
 }
 
@@ -72,19 +77,36 @@ const DOT_CLASS: Record<Readiness, string> = {
 }
 
 /**
- * Плитка продукта — строка с названием; пояснение живёт во всплывающей подсказке.
- *
- * Описания в реестре длинные («Стройка сети: подбор площадок, портфель проектов,
- * присоединение, ввод») — в строку они не помещаются НИКОГДА, и обрезка многоточием
- * съедала половину смысла. Отдать им вторую строку значит вернуть высоту, из-за
- * которой стол и уезжал в прокрутку. Продукт выбирают по имени, а описание нужно
- * один раз — при первом знакомстве; подсказка для этого и существует.
- *
- * Имя не обрезаем: колонка не уже 200 px, а имена короткие («Эксплуатация» — самое
- * длинное). Если чьё-то окажется длиннее — перенесётся на вторую строку, но останется
- * читаемым, а не спрячется за многоточием.
+ * Приложения клиентской стороны: продать, обслужить, поддержать. Остальные продукты —
+ * внутренний контур (стройка сети, эксплуатация, связь, деньги). Деление по контуру,
+ * а не по слою: слой говорит, ЧТО это (ядро/сервис/приложение), контур — про чей день.
  */
-function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: TileProps) {
+const COMMERCE_APPS = ['sales', 'shop', 'corp', 'support', 'marketing']
+
+/** Тон показателя: цветом выделяем только то, что требует внимания или радует. */
+const TONE_CLASS: Record<string, string> = {
+  ok: 'text-emerald-500',
+  warn: 'text-amber-500',
+  bad: 'text-red-500',
+}
+
+/**
+ * Карточка продукта: имя, точка готовности и два-три показателя его контура.
+ *
+ * Плитка была строкой с названием — стол отвечал только «куда войти». Администратору
+ * нужен и второй ответ: что за плиткой живёт. Поэтому под именем идут цифры из самого
+ * продукта (люди, объекты, сессии, заявки, свежесть данных) — по ним видно, где работа
+ * идёт, а где пусто, не заходя внутрь.
+ *
+ * Описание из реестра длинное («Стройка сети: подбор площадок, портфель проектов…») и в
+ * карточку не помещается — оно осталось в подсказке; строку заняли показатели, потому
+ * что их читают каждый день, а описание один раз.
+ *
+ * Показателей нет (мост, пустой продукт) — карточка честно остаётся без цифр: место
+ * держит подпись состояния, а не выдуманный ноль.
+ */
+function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, metrics, onClick }: TileProps) {
+  const shown = (metrics ?? []).slice(0, 3)
   return (
     <button
       type="button"
@@ -92,7 +114,7 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: 
       disabled={busy}
       title={[title, subtitle, badge, readiness && READINESS_LABEL[readiness]]
         .filter(Boolean).join(' · ')}
-      className="group relative flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left
+      className="group relative flex flex-col gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-left
                  transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60"
     >
       {/* Готовность продукта — точка в углу. Расшифровка в подсказке плитки: цвет
@@ -101,13 +123,34 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: 
         <span aria-hidden="true"
           className={`absolute right-2 top-2 size-2 rounded-full ${DOT_CLASS[readiness]}`} />
       )}
-      <span className="shrink-0 rounded-lg bg-primary/10 p-2 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
-        {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
+      <span className="flex items-center gap-2.5">
+        <span className="shrink-0 rounded-lg bg-primary/10 p-1.5 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
+        </span>
+        <span className="min-w-0 flex-1 pr-3 text-sm font-medium leading-snug">{title}</span>
+        {/* Свой вход — значком, а не подписью: важен при первом знакомстве, а места
+            в строке занимает как буква. Расшифровка — в подсказке всей плитки. */}
+        {badge && <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />}
       </span>
-      <span className="min-w-0 flex-1 text-sm font-medium leading-snug">{title}</span>
-      {/* Свой вход — значком, а не подписью: важен при первом знакомстве, а места
-          в строке занимает как буква. Расшифровка — в подсказке всей плитки. */}
-      {badge && <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />}
+      {shown.length > 0 ? (
+        <span className="flex items-end gap-3 border-t border-border/60 pt-1.5">
+          {shown.map((m) => (
+            <span key={m.label} className="min-w-0 flex-1">
+              <span className={`block truncate text-[13px] font-semibold leading-tight tabular-nums
+                                ${m.tone ? TONE_CLASS[m.tone] ?? '' : ''}`}>
+                {m.value}
+              </span>
+              <span className="block truncate text-[10px] leading-tight text-muted-foreground/70">
+                {m.label}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span className="block border-t border-border/60 pt-1.5 text-[10px] leading-tight text-muted-foreground/60">
+          {subtitle}
+        </span>
+      )}
     </button>
   )
 }
@@ -118,18 +161,24 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: 
  * набирает столько колонок, сколько влезает, поэтому широкий экран показывает слой
  * одной строкой, а узкий — переносит.
  */
-function Section({ title, hint, children, grow }: {
+function Section({ title, hint, children, grow, divider }: {
   title: string; hint?: string; children: React.ReactNode; grow?: boolean
+  /** Линия сверху — граница уровня стола (Ядро · Сервисы · Приложения). */
+  divider?: boolean
 }) {
   return (
-    <section className={`grid gap-x-4 gap-y-2 md:grid-cols-[132px_1fr] ${grow ? 'min-h-0' : ''}`}>
+    <section className={`grid gap-x-4 gap-y-2 md:grid-cols-[132px_1fr]
+                         ${divider ? 'border-t border-border/60 pt-4' : ''}
+                         ${grow ? 'min-h-0' : ''}`}>
       <div className="md:pt-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
         {hint && <p className="mt-0.5 hidden text-[11px] text-muted-foreground/50 md:block">{hint}</p>}
       </div>
       {/* Прокрутка достаётся только слою, который может вырасти (приложения), и только
           когда он действительно не помещается: шапка и остальные слои остаются на месте. */}
-      <div className={`grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2 ${grow ? 'min-h-0 overflow-y-auto pr-1' : ''}`}>
+      {/* Колонка чуть шире прежней: в карточке теперь строка показателей, и на 200 px
+          три числа с подписями наезжали друг на друга. */}
+      <div className={`grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-2 ${grow ? 'min-h-0 overflow-y-auto pr-1' : ''}`}>
         {children}
       </div>
     </section>
@@ -148,6 +197,14 @@ export function EcosystemHomePage() {
     enabled: isApiEnabled(),
     staleTime: 5 * 60_000,
   })
+  // Показатели продуктов — отдельным запросом: каталог плиток приходит первым и стол
+  // рисуется сразу, цифры доезжают следом (все они COUNT'ы, но ждать их незачем).
+  const desk = useQuery({
+    queryKey: ['desk-summary', companyId],
+    queryFn: () => getDeskSummary(companyId),
+    enabled: isApiEnabled() && !!companyId,
+    staleTime: 60_000,
+  })
   // RBAC-гейт стола: allowed_apps — коды, доступных ролью в компании (null = не ограничено,
   // напр. админ). Бэкенд уже отфильтровал apps; здесь гейтим внутренние плитки Ledger и Чат.
   const allowed = q.data?.allowed_apps ?? null
@@ -156,6 +213,10 @@ export function EcosystemHomePage() {
   const management = all.filter((a) => a.layer === 'admin')
   const services = all.filter((a) => a.layer === 'service')
   const apps = all.filter((a) => a.layer !== 'service' && a.layer !== 'admin')
+  // Два контура приложений: обращённый к клиенту (продать, обслужить) и внутренний
+  // (построить, содержать, посчитать). Порядок внутри — из реестра, как и был.
+  const commerce = apps.filter((a) => COMMERCE_APPS.includes(a.code))
+  const internal = apps.filter((a) => !COMMERCE_APPS.includes(a.code))
 
   /**
    * Открыть продукт. Рабочее место уходит в НОВУЮ вкладку (решение МАГа 27.07.2026):
@@ -199,6 +260,7 @@ export function EcosystemHomePage() {
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
         busy={busy === a.code}
         readiness={PRODUCT_READINESS[a.code]}
+        metrics={desk.data?.products[a.code]?.metrics}
         onClick={() => openProduct(a)}
       />
     )
@@ -244,20 +306,29 @@ export function EcosystemHomePage() {
             Учёт и Чаты рисовались хардкодом, и в списке приложений их не было: состав
             стола расходился с реестром. Теперь источник один. */}
         {management.length > 0 && (
-          <Section title="Управление">
+          <Section title="Ядро системы">
             {management.map((a) => <ProductTile key={a.code} a={a} />)}
           </Section>
         )}
 
         {services.length > 0 && (
-          <Section title="Сервисы экосистемы" hint="общие для всех приложений">
+          <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
             {services.map((a) => <ProductTile key={a.code} a={a} />)}
           </Section>
         )}
 
-        {/* Слой приложений растёт вместе с пространством — прокрутка достаётся ему. */}
-        <Section title="Приложения" grow>
-          {apps.map((a) => <ProductTile key={a.code} a={a} />)}
+        {/* Приложения разведены по двум контурам (решение МАГа 28.07.2026): клиентская
+            сторона и внутренняя. Один список из десяти плиток не читался — рядом
+            стояли «Продажи» и «Бухгалтерия», между которыми нет ничего общего. */}
+        {commerce.length > 0 && (
+          <Section title="Клиенты и продажи" hint="кому продаём и как обслуживаем" divider>
+            {commerce.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
+
+        {/* Второй контур растёт вместе с пространством — прокрутка достаётся ему. */}
+        <Section title="Сеть и учёт" hint="чем владеем и как считаем" grow divider>
+          {internal.map((a) => <ProductTile key={a.code} a={a} />)}
           {q.isLoading && (
             <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> Загрузка каталога…

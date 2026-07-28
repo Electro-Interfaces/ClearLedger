@@ -293,6 +293,39 @@ async def export_portfolio(
     )
 
 
+# Выгрузка любого экрана раздела: совещание идёт по Excel, и если таблицы нет,
+# цифры переписывают руками в свой файл — а он назавтра расходится с системой.
+_EXPORTS = {
+    "funnel": ("Воронка", "funnel"),
+    "matrix": ("Приоритеты", "priorities"),
+    "budget": ("Бюджет", "budget"),
+    "accounting": ("Ждёт учёта", "awaiting_accounting"),
+    "tech-connections": ("Присоединение", "tech_connections"),
+    "equipment": ("Оборудование", "equipment"),
+}
+
+
+@router.get("/export/{report}")
+async def export_report(
+    report: str, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Выгрузка экрана в xlsx: воронка, приоритеты, бюджет, учёт, ТП, оборудование."""
+    from fastapi.responses import Response
+
+    if report not in _EXPORTS:
+        raise HTTPException(404, "Неизвестный отчёт")
+    cid = await assert_company_member(company_id, user, db)
+    _, fname = _EXPORTS[report]
+    fn = getattr(ezs_project, f"export_{report.replace('-', '_')}_xlsx")
+    data = await fn(db, cid)
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}.xlsx"'},
+    )
+
+
 @router.get("/equipment")
 async def equipment_report(
     company_id: str = Query(...),

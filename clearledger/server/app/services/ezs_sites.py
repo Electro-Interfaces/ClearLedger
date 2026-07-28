@@ -1067,6 +1067,8 @@ async def list_sites(
 def _site_out(s: EzsSite) -> dict[str, Any]:
     return {
         "id": str(s.id), "projectNo": s.project_no, "title": s.title,
+        # Вид работы: карточка по нему понимает, был ли подбор площадки вообще.
+        "kind": s.kind or "new_build",
         "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
         "phase": STAGE_PHASE.get(s.stage), "phaseLabel": PHASE_LABELS.get(STAGE_PHASE.get(s.stage, "")),
         "stageSince": s.stage_since, "prevStage": s.prev_stage,

@@ -7,7 +7,17 @@
 """
 
 from app.routers.sso_router import INTERNAL_ROUTES
-from app.services.app_registry import _CARVED_PRODUCTS, _default_app_on
+from app.services.app_registry import _CARVED_PRODUCTS, _SETUP_PRODUCTS, _default_app_on
+
+
+def test_setup_products_have_route_and_follow_profile():
+    """Продукт «на вырост» («Сеть передачи данных», «Бухгалтерия») заведён в реестре,
+    но экранов ещё не имеет: маршрут обязан существовать — иначе плитка со стола ведёт
+    в «страница не найдена», а не в заставку «в подключении»."""
+    for code in _SETUP_PRODUCTS:
+        assert code in INTERNAL_ROUTES, code
+        assert _default_app_on(code, "energy") is True, code
+        assert _default_app_on(code, "fuel") is False, code
 
 
 def test_carved_products_only_for_energy():

@@ -21,6 +21,7 @@ import {
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
+import { ExportButton } from './ExportButton'
 import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -56,15 +57,18 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
             × исполнимость (мощность, деньги, право). Клик по строке открывает проект.
           </p>
         </div>
-        <Select value={region || '__all__'} onValueChange={(v) => setRegion(v === '__all__' ? '' : v)}>
-          <SelectTrigger className="h-8 w-[200px] text-sm"><SelectValue placeholder="Все регионы" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__" className="text-sm">Все регионы</SelectItem>
-            {(ov.data?.byRegion ?? []).map((r) => (
-              <SelectItem key={r.region} value={r.region} className="text-sm">{r.region} ({r.count})</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <ExportButton companyId={companyId} report="matrix" fileName="priorities.xlsx" />
+          <Select value={region || '__all__'} onValueChange={(v) => setRegion(v === '__all__' ? '' : v)}>
+            <SelectTrigger className="h-8 w-[200px] text-sm"><SelectValue placeholder="Все регионы" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__" className="text-sm">Все регионы</SelectItem>
+              {(ov.data?.byRegion ?? []).map((r) => (
+                <SelectItem key={r.region} value={r.region} className="text-sm">{r.region} ({r.count})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <ProjectPhaseStrip current="select"

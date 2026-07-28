@@ -21,7 +21,7 @@
  * Разрез включён только у профиля `energy` (сеть ЭЗС). У топливного профиля (ГИГ) состав
  * другой — там «Учёт» остаётся единым продуктом со всеми разделами, как раньше.
  */
-import { Map, Network } from 'lucide-react'
+import { Building2, Calculator, Map, Megaphone, Network, Stethoscope, type LucideIcon } from 'lucide-react'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { navByPath, type NavItemDef } from './navigation'
 
@@ -82,10 +82,10 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
-    // Корпоративный процессинг — работа с юрлицами: договоры, лимиты, тарифные планы
-    // под ЮЛ. Продукт в подключении: своих экранов ещё нет, а коммерческие разделы
-    // живут в «Продажах» (решение МАГа 28.07.2026) — рабочая область даёт заставку.
-    code: 'corp', route: '/corporate', label: 'Корпоративный процессинг',
+    // Процессинг — работа с юрлицами: договоры, лимиты, тарифные планы под ЮЛ. Продукт
+    // в подключении: своих экранов ещё нет, а коммерческие разделы живут в «Продажах»
+    // (решение МАГа 28.07.2026) — рабочая область даёт заставку.
+    code: 'corp', route: '/corporate', label: 'Процессинг',
     modes: ['corporate'], paths: [],
     objectTabs: ['passport', 'contracts', 'sales'],
   },
@@ -160,12 +160,53 @@ export const PRODUCT_READINESS: Record<string, Readiness> = {
   projects: 'ready', ops: 'partial', sales: 'ready',
   corp: 'draft', shop: 'draft', marketing: 'draft',
   support: 'ready', finance: 'draft',
+  netlink: 'draft', accounting: 'draft', diag: 'draft',
 }
 
 export const READINESS_LABEL: Record<Readiness, string> = {
   ready: 'рабочий продукт',
   partial: 'в развитии',
   draft: 'в подключении',
+}
+
+/**
+ * Что показать вместо рабочего места продукта, которого ещё нет.
+ *
+ * Продукт заведён в реестре (его видно на столе, ему выдают права, его настраивают),
+ * но экранов у него пока нет. Пустая рабочая область читалась бы как поломка, поэтому
+ * каждый такой продукт объясняет, что здесь появится и где эти функции сейчас.
+ */
+export const PRODUCT_SETUP_NOTE: Record<string, { icon: LucideIcon; title: string; description: string }> = {
+  corp: {
+    icon: Building2,
+    title: 'Процессинг — в подключении',
+    description: 'Рабочее место по юрлицам: договоры, лимиты и тарифные планы под ЮЛ. '
+      + 'Пока корпоративные клиенты, тарифы и частные лица ведутся в «Продажах».',
+  },
+  diag: {
+    icon: Stethoscope,
+    title: 'Диагностика — в подключении',
+    description: 'Как работает система: состояние служб и интеграций, очереди и ошибки '
+      + 'загрузки, свежесть данных, отчёты для разбора инцидентов.',
+  },
+  marketing: {
+    icon: Megaphone,
+    title: 'Маркетинг — в подключении',
+    description: 'Кампании, акции и сегменты под рассылку. Сегментация сети (ABC-XYZ, '
+      + 'динамика) и Яндекс.Метрика пока живут в «Продажах».',
+  },
+  netlink: {
+    icon: Network,
+    title: 'Сеть передачи данных — в подключении',
+    description: 'Связь объектов: узлы и каналы, VPN, удалённый доступ к оборудованию, '
+      + 'обновления на местах. Движок — ElsyPlus Link, подключается отдельно.',
+  },
+  accounting: {
+    icon: Calculator,
+    title: 'Бухгалтерия — в подключении',
+    description: 'Первичка, проводки и обмен с 1С. Сейчас счётная сторона видна '
+      + 'в «Финансах»: договоры, контрагенты и выгрузка.',
+  },
 }
 
 /** Профиль компании, для которого разрез включён. */

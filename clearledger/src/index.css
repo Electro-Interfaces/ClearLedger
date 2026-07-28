@@ -578,3 +578,30 @@
   color: hsl(var(--foreground));
   background: transparent;
 }
+
+/* ── Печать и сохранение в PDF ─────────────────────────────────────────────
+   Отчёт руководителю печатают из браузера: диалог печати умеет «Сохранить как
+   PDF», и кириллица в нём правильная без шрифтовых пакетов на сервере.
+   На лист должна уйти рабочая область — меню, рельсы, фильтры и кнопки на
+   бумаге бесполезны, а места занимают половину страницы. */
+@media print {
+  [data-zone="Навигация приложения"],
+  [data-zone="Разделы учёта"],
+  [data-zone="Подразделы"],
+  header, nav, aside,
+  .no-print { display: none !important; }
+
+  html, body { background: #fff !important; }
+  main, [role="main"] { overflow: visible !important; }
+  * {
+    overflow: visible !important;
+    color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    print-color-scheme: light;
+  }
+  /* Карточку и таблицу не режем между страницами — строка, разорванная пополам,
+     читается как ошибка данных. */
+  table { break-inside: auto; }
+  tr, .rounded-lg { break-inside: avoid; }
+  @page { margin: 12mm; size: A4 landscape; }
+}
