@@ -209,6 +209,9 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
  * квадранте и подпись осей за пределами поля.
  */
 const AXIS_TICKS = [0, 25, 50, 75, 100]
+// Высота поля: на ноутбуке (768 px) фиксированные 400 px уводили шкалу X и нижние
+// квадранты под сгиб — приходилось скроллить, чтобы прочитать собственную карту.
+const PLOT_H = 'min(340px, 38vh)' 
 
 function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: string) => void }) {
   if (items.length === 0) {
@@ -216,23 +219,21 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
       Оценённых проектов нет — сначала нужно добрать данные (мощность, стоимость подключения, право).
     </div>
   }
-  const count = (fn: (i: MatrixItem) => boolean) => items.filter(fn).length
-  const hi = (v: number | null) => (v ?? 0) >= 50
-  const quads = [
-    { key: 'bottleneck', label: 'Расшивать узкое место', cls: 'text-amber-700 dark:text-amber-400',
-      pos: 'left-2 top-2', n: count((i) => hi(i.attract) && !hi(i.feasible)) },
-    { key: 'do_now', label: 'Делать сейчас', cls: 'text-emerald-700 dark:text-emerald-400',
-      pos: 'right-2 top-2 text-right', n: count((i) => hi(i.attract) && hi(i.feasible)) },
-    { key: 'reject', label: 'Кандидат на отказ', cls: 'text-red-600 dark:text-red-400',
-      pos: 'left-2 bottom-2', n: count((i) => !hi(i.attract) && !hi(i.feasible)) },
-    { key: 'cheap', label: 'Дешёвый опцион', cls: 'text-sky-700 dark:text-sky-400',
-      pos: 'right-2 bottom-2 text-right', n: count((i) => !hi(i.attract) && hi(i.feasible)) },
+  // Считаем по тому же признаку, что и карточки сверху (`item.quadrant` с сервера).
+  // Свой порог «50 по обеим осям» давал другие числа — на одном экране два разных
+  // ответа на один вопрос, и непонятно, какому верить.
+  const n = (k: Quadrant) => items.filter((i) => i.quadrant === k).length
+  const quads: { key: Quadrant; pos: string; cls: string }[] = [
+    { key: 'unblock', pos: 'left-2 top-2', cls: 'text-amber-700 dark:text-amber-400' },
+    { key: 'do_now', pos: 'right-2 top-2 text-right', cls: 'text-emerald-700 dark:text-emerald-400' },
+    { key: 'drop', pos: 'left-2 bottom-2', cls: 'text-red-600 dark:text-red-400' },
+    { key: 'option', pos: 'right-2 bottom-2 text-right', cls: 'text-sky-700 dark:text-sky-400' },
   ]
 
   return (
     <div className="flex gap-2">
       {/* Шкала привлекательности слева: без чисел точку нельзя прочитать. */}
-      <div className="relative w-7 shrink-0" style={{ height: 400 }}>
+      <div className="relative w-7 shrink-0" style={{ height: PLOT_H }}>
         {AXIS_TICKS.map((t) => (
           <span key={t} className="absolute right-0 text-xs tabular-nums text-muted-foreground"
             style={{ bottom: `calc(${t}% - 0.5em)` }}>{t}</span>
@@ -240,7 +241,7 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="relative w-full rounded-md border border-border" style={{ height: 400 }}>
+        <div className="relative w-full rounded-md border border-border" style={{ height: PLOT_H }}>
           {/* фон квадрантов */}
           <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
             <div className="bg-amber-500/[0.05]" />
@@ -260,7 +261,7 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
 
           {quads.map((qd) => (
             <span key={qd.key} className={`absolute ${qd.pos} ${qd.cls} text-xs`}>
-              {qd.label} <span className="tabular-nums opacity-70">· {qd.n}</span>
+              {QUADRANT_META[qd.key].label} <span className="tabular-nums opacity-70">· {n(qd.key)}</span>
             </span>
           ))}
 
