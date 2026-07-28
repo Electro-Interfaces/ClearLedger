@@ -120,6 +120,38 @@ async def current_project(db: AsyncSession, company_id, site_id) -> EzsProject |
         .limit(1))).scalars().first()
 
 
+# Поля, которыми проект-первенец повторяет свою площадку. Переходный период:
+# карточку по-прежнему ведут на площадке, а проект обязан быть её зеркалом,
+# иначе история объекта и второй проект на месте окажутся мимо данных.
+_MIRRORED = (
+    "project_no", "title", "stage", "stage_since", "prev_stage", "owner_user_id",
+    "next_action", "next_action_due", "last_touch_at", "hold_until", "gates",
+    "commissioned_on", "contract_id",
+)
+
+
+async def sync_from_site(db: AsyncSession, company_id, site: EzsSite) -> EzsProject:
+    """Создать проект площадки, если его нет, и подтянуть в него поля площадки.
+
+    Зеркалим только ПЕРВЫЙ проект (`new_build`): у ретрофита своя стадия и свой
+    ответственный, и правка площадки не должна их переписывать.
+    """
+    p = (await db.execute(
+        select(EzsProject).where(
+            EzsProject.company_id == company_id, EzsProject.site_id == site.id,
+            EzsProject.kind == "new_build")
+        .order_by(EzsProject.created_at).limit(1))).scalars().first()
+    if p is None:
+        p = EzsProject(company_id=company_id, site_id=site.id, kind="new_build",
+                       stage=site.stage or "lead")
+        db.add(p)
+    for f in _MIRRORED:
+        setattr(p, f, getattr(site, f, None))
+    p.location_id = site.location_id
+    p.updated_at = datetime.now(timezone.utc)
+    return p
+
+
 async def start_project(db: AsyncSession, company_id, *, site: EzsSite, kind: str,
                         title: str | None, location_id: str | None,
                         reason: str | None, user: User | None) -> dict[str, Any]:

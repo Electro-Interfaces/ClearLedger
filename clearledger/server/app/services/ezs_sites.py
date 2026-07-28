@@ -831,6 +831,12 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
             db.add(EzsSiteEvent(company_id=company_id, site_id=site.id, kind=kind,
                                 text=text_, from_stage=frm, to_stage=to))
         await _sync_tech_connections(db, company_id, tc_pending, now, report)
+        # Проект на каждую новую площадку: без него запись не попадёт ни в
+        # реестр проектов, ни в историю объекта.
+        from app.services.ezs_lifecycle import sync_from_site
+        for site, kind, _t, _f, _to in events:
+            if kind == "import":
+                await sync_from_site(db, company_id, site)
         await db.commit()
     else:
         # В предпросмотре считаем, сколько карточек присоединения появилось бы.

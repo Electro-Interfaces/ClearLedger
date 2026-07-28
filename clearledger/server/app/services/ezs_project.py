@@ -911,6 +911,8 @@ async def link_contract(db: AsyncSession, company_id, site: EzsSite, contract_id
     await log_event(db, site, "note", user=user,
                     text=f"Привязан договор № {c.number} от {c.date}"
                          + (f" ({c.basis})" if c.basis else ""))
+    from app.services.ezs_lifecycle import sync_from_site
+    await sync_from_site(db, company_id, site)
     return {"ok": True, "contract": {"id": str(c.id), "number": c.number, "date": c.date,
                                      "basis": c.basis, "validUntil": c.valid_until}}
 
@@ -927,6 +929,8 @@ async def link_location(db: AsyncSession, company_id, site: EzsSite, location_id
     if not site.commissioned_on:
         site.commissioned_on = date.today().isoformat()
     await log_event(db, site, "note", user=user, text=f"Связан объект сети: {loc.name}")
+    from app.services.ezs_lifecycle import sync_from_site
+    await sync_from_site(db, company_id, site)
     return {"ok": True, "location": {"id": str(loc.id), "name": loc.name, "code": loc.code}}
 
 

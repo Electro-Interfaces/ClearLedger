@@ -196,6 +196,8 @@ async def update_site(db: AsyncSession, site: EzsSite, patch: dict[str, Any],
         site.updated_at = datetime.now(timezone.utc)
         site.last_touch_at = datetime.now(timezone.utc)
         await log_event(db, site, "edit", text=", ".join(changed), user=user)
+        from app.services.ezs_lifecycle import sync_from_site
+        await sync_from_site(db, site.company_id, site)
     return {"changed": changed}
 
 
@@ -263,6 +265,10 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
     db.add(site)
     await db.flush()
     await log_event(db, site, "note", text="Площадка заведена вручную", user=user)
+    # У места сразу появляется первый проект: без него площадка не попадёт ни в
+    # историю объекта, ни в реестр проектов.
+    from app.services.ezs_lifecycle import sync_from_site
+    await sync_from_site(db, site.company_id, site)
     return site
 
 
@@ -331,6 +337,8 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
         await log_event(db, site, "gate", user=user,
                         text=f"Обход обязательных пунктов ({'; '.join(gate['blocking'])}): {reason}")
     await log_event(db, site, "stage", text=note, from_stage=prev, to_stage=stage, user=user)
+    from app.services.ezs_lifecycle import sync_from_site
+    await sync_from_site(db, site.company_id, site)
     return {"moved": True, "missing": missing, "overridden": bool(forward and gate["blocking"] and override),
             "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok)}
 
