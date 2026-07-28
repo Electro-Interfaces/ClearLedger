@@ -218,6 +218,10 @@ async def upsert_article(db: AsyncSession, company_id, payload: dict[str, Any],
     a.doc_number = payload.get("doc_number") or None
     a.effective_date = payload.get("effective_date") or None
     a.source_url = payload.get("source_url") or None
+    # Документ, который ведёт процесс в приложении. Поле есть в модели и в выдаче,
+    # но при сохранении молча терялось: регламент выглядел обычной статьёй, и связь
+    # «документ ↔ чек-лист гейтов» не работала.
+    a.process_ref = payload.get("process_ref") or None
     a.tags = payload.get("tags") or None
     a.category_id = _uuid.UUID(str(payload["category_id"])) if payload.get("category_id") else None
     a.updated_by = user.id if user is not None else None
