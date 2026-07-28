@@ -138,9 +138,9 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
               <tr className="text-muted-foreground border-b">
                 <th className="text-left px-3 py-1.5 font-medium">Стадия</th>
                 <th className="text-right px-3 py-1.5 font-medium">Сейчас</th>
-                <th className="text-right px-3 py-1.5 font-medium">Медиана, дн</th>
+                <th className="text-right px-3 py-1.5 font-medium">Медиана / норма, дн</th>
                 <th className="text-right px-3 py-1.5 font-medium">Проходят дальше</th>
-                <th className="text-right px-3 py-1.5 font-medium">Стоят &gt; 90 дн</th>
+                <th className="text-right px-3 py-1.5 font-medium" title="Дольше норматива стадии по регламенту">Дольше нормы</th>
                 <th className="px-3 py-1.5" />
               </tr>
             </thead>
@@ -161,6 +161,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                     <td className="px-3 py-1.5 text-right font-mono">{nf0.format(f.count)}</td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
                       {f.medianDays ? f.medianDays : '—'}
+                      {f.normDays != null && <span className="text-[10px]"> / {f.normDays}</span>}
                     </td>
                     <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
                       {f.conversion != null ? `${f.conversion}%` : '—'}

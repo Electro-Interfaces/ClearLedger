@@ -199,6 +199,42 @@ async def update_site(db: AsyncSession, site: EzsSite, patch: dict[str, Any],
     return {"changed": changed}
 
 
+async def bulk_assign(db: AsyncSession, company_id, site_ids: list[Any],
+                      owner_user_id: Any, user: User | None) -> dict[str, Any]:
+    """Назначить ответственного пачкой.
+
+    По одному это не делается: после первой загрузки банка без владельца сразу
+    три сотни проектов, и «кто ведёт» пустует, пока их не раздали. Назначение —
+    ручное поле, поэтому попадает в `manual_fields` и импортом не сбивается.
+    """
+    if not site_ids:
+        return {"assigned": 0}
+    owner = None
+    if owner_user_id not in (None, "", "none"):
+        owner = _coerce("owner_user_id", owner_user_id)
+        if owner is None:
+            return {"assigned": 0, "error": "Пользователь не опознан"}
+        member = (await db.execute(select(User.id).where(User.id == owner))).scalar_one_or_none()
+        if member is None:
+            return {"assigned": 0, "error": "Пользователь не найден"}
+    rows = (await db.execute(select(EzsSite).where(
+        EzsSite.company_id == company_id, EzsSite.id.in_(site_ids)))).scalars().all()
+    now = datetime.now(timezone.utc)
+    name = None
+    if owner is not None:
+        name = (await db.execute(
+            select(func.coalesce(User.name, User.email)).where(User.id == owner))).scalar()
+    for s in rows:
+        if s.owner_user_id == owner:
+            continue
+        s.owner_user_id = owner
+        s.manual_fields = sorted(set(s.manual_fields or []) | {"owner_user_id"})
+        s.updated_at = now
+        await log_event(db, s, "edit", user=user,
+                        text=f"Ответственный: {name}" if name else "Ответственный снят")
+    return {"assigned": len(rows)}
+
+
 async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
                       user: User | None) -> EzsSite:
     """Новая площадка руками. Лид может прийти не файлом, а звонком."""

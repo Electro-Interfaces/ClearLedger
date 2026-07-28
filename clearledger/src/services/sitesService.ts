@@ -479,6 +479,8 @@ export interface PortfolioOverview {
     stage: SiteStage; label: string; phase: string | null; count: number
     medianDays: number; visited: number; advanced: number
     conversion: number | null; stuck: number
+    /** Норматив стадии из регламента согласования, дней. */
+    normDays?: number
   }[]
   bottleneck: PortfolioOverview['funnel'][number] | null
   forecast: { bucket: string; count: number }[]
@@ -625,6 +627,15 @@ export async function saveCost(
 
 export async function deleteCost(companyId: string, id: string, costId: string): Promise<unknown> {
   return del(`/api/sites/${id}/costs/${costId}?company_id=${companyId}`)
+}
+
+/** Назначить (или снять, `ownerId = null`) ответственного пачкой проектов. */
+export async function bulkAssignOwner(
+  companyId: string, siteIds: string[], ownerId: string | null,
+): Promise<{ assigned: number }> {
+  return post(`/api/sites/bulk/assign?company_id=${companyId}`, {
+    site_ids: siteIds, owner_user_id: ownerId,
+  })
 }
 
 export async function linkContract(companyId: string, id: string, contractId: string): Promise<unknown> {

@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import json
 import uuid as _uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -27,6 +28,7 @@ from app.models import (
     ServiceLocation, User,
 )
 from app.services.ezs_site_work import log_event
+from app.services.ezs_checklist import norm_days
 from app.services.ezs_sites import (
     PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE,
 )
@@ -569,12 +571,18 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
                and e.status in ('planned','ordered') and e.due_date < :today)    as eq_overdue,
           (select count(*) from active where owner_user_id is null)         as no_owner,
           (select count(*) from active where next_action is null)           as no_next,
+          -- Просрочка стадии считается по НОРМАТИВУ СВОЕЙ стадии (регламент
+          -- согласования ЗУ), а не по общему порогу: «1–4 недели» на переговоры
+          -- и «до 6 месяцев» на присоединение — разные вещи, и общие 90 дней
+          -- врали в обе стороны.
           (select count(*) from active
-             where coalesce(stage_since, '1970-01-01') < :d90)              as stuck_90,
+             where stage_since is not null
+               and (current_date - stage_since::date) > (:norms::jsonb ->> stage)::int) as stage_overdue,
           (select count(*) from active
              where coalesce(to_char(last_touch_at, 'YYYY-MM-DD'), '1970-01-01') < :d30) as no_touch_30
     """), {"cid": company_id, "active": STAGE_ORDER, "today": today,
-           "d30": d30, "d90": d90})).mappings().one()
+           "d30": d30, "norms": json.dumps(
+               {s: norm_days(s) for s in STAGE_ORDER})})).mappings().one()
 
     attention = [
         {"key": "step_overdue", "label": "Просрочен следующий шаг", "count": int(risks["step_overdue"]),
@@ -583,8 +591,8 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
          "hint": "срок мероприятий сетевой прошёл", "filter": "tp"},
         {"key": "eq_overdue", "label": "Просрочена поставка оборудования", "count": int(risks["eq_overdue"]),
          "hint": "плановая дата поставки прошла", "filter": "equipment"},
-        {"key": "stuck_90", "label": "Стоят на стадии больше 90 дней", "count": int(risks["stuck_90"]),
-         "hint": "движения по воронке нет три месяца", "filter": ""},
+        {"key": "stage_overdue", "label": "Стадия идёт дольше норматива", "count": int(risks["stage_overdue"]),
+         "hint": "срок стадии по регламенту вышел, движения нет", "filter": ""},
         {"key": "no_touch_30", "label": "Без касаний больше 30 дней", "count": int(risks["no_touch_30"]),
          "hint": "никто не разговаривал с собственником", "filter": ""},
         {"key": "no_owner", "label": "Без ответственного", "count": int(risks["no_owner"]),
@@ -622,12 +630,14 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         select(EzsSite.stage, func.count().label("n"))
         .where(EzsSite.company_id == company_id).group_by(EzsSite.stage))).all()}
 
+    # Застрявшие — по нормативу своей стадии (см. `STAGE_NORM_DAYS`).
     stuck_by_stage = {r["stage"]: int(r["n"]) for r in (await db.execute(text("""
         select stage, count(*) n from ezs_sites
-        where company_id = :cid and stage = any(:active)
-          and coalesce(stage_since, '1970-01-01') < :d90
+        where company_id = :cid and stage = any(:active) and stage_since is not null
+          and (current_date - stage_since::date) > (:norms::jsonb ->> stage)::int
         group by 1
-    """), {"cid": company_id, "active": STAGE_ORDER, "d90": d90})).mappings().all()}
+    """), {"cid": company_id, "active": STAGE_ORDER,
+           "norms": json.dumps({s: norm_days(s) for s in STAGE_ORDER})})).mappings().all()}
 
     funnel = []
     for st in STAGE_ORDER:
@@ -641,6 +651,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
             "visited": visited, "advanced": advanced,
             "conversion": round(advanced / visited * 100) if visited else None,
             "stuck": stuck_by_stage.get(st, 0),
+            "normDays": norm_days(st),
         })
     # Узкое место — стадия с наибольшим числом застрявших; при равенстве берём
     # ту, где дольше медиана. Считаем только по активным стадиям с проектами.

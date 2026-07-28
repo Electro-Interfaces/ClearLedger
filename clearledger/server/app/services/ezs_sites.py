@@ -984,8 +984,15 @@ def _risk_conditions(risk: str) -> list[Any]:
         return [*active, S.owner_user_id.is_(None)]
     if risk == "no_next":
         return [*active, S.next_action.is_(None)]
-    if risk == "stuck_90":
-        return [*active, func.coalesce(S.stage_since, "1970-01-01") < d90]
+    if risk in ("stage_overdue", "stuck_90"):   # старый ключ — из закладок и ссылок
+        # Норматив своей стадии, как в обзоре портфеля: сравниваем через SQL,
+        # чтобы условие считалось одинаково в обоих местах.
+        from sqlalchemy import Date, Integer, case, cast, literal
+        from app.services.ezs_checklist import norm_days as _norm
+        norm = case(*[(S.stage == st, literal(_norm(st))) for st in STAGE_ORDER],
+                    else_=literal(90))
+        return [*active, S.stage_since.is_not(None),
+                (func.current_date() - cast(S.stage_since, Date)) > cast(norm, Integer)]
     if risk == "no_touch_30":
         return [*active, func.coalesce(
             func.to_char(S.last_touch_at, "YYYY-MM-DD"), "1970-01-01") < d30]

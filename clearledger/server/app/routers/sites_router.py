@@ -94,6 +94,25 @@ async def checklist_meta(user: User = Depends(get_current_user)):
     return ezs_checklist.checklist_meta()
 
 
+@router.post("/bulk/assign")
+async def bulk_assign(
+    payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Назначить ответственного сразу нескольким проектам.
+
+    `owner_user_id: null` снимает ответственного. Раздача трёхсот проектов по
+    одному — не работа, а повод не начинать вести их вовсе.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    ids = [uuid.UUID(str(i)) for i in (payload.get("site_ids") or [])]
+    res = await ezs_site_work.bulk_assign(db, cid, ids, payload.get("owner_user_id"), user)
+    if res.get("error"):
+        raise HTTPException(400, res["error"])
+    await db.commit()
+    return res
+
+
 @router.post("", status_code=201)
 async def create_site(
     payload: dict, company_id: str = Query(...),

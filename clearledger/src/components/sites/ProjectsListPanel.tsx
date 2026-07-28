@@ -7,14 +7,15 @@
  */
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import {
-  getSites, getPortfolio, getSiteMembers, PHASE_META, STAGE_META,
+  getSites, getPortfolio, getSiteMembers, bulkAssignOwner, PHASE_META, STAGE_META,
   type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
@@ -28,6 +29,8 @@ const today = () => new Date().toISOString().slice(0, 10)
 export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const [phase, setPhase] = useState('')
   const [ownerId, setOwnerId] = useState('')
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [assignTo, setAssignTo] = useState('')
   const [overdue, setOverdue] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -72,6 +75,17 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const total = q.data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE))
   const reset = () => setPage(1)
+
+  const mAssign = useMutation({
+    mutationFn: () => bulkAssignOwner(companyId, [...picked],
+      assignTo === '__none__' ? null : assignTo),
+    onSuccess: async (r) => {
+      toast.success(`Назначено: ${r.assigned}`)
+      setPicked(new Set()); setAssignTo('')
+      await q.refetch()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось назначить'),
+  })
 
   return (
     <div className="p-4 space-y-3">
@@ -122,6 +136,29 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         </span>
       </div>
 
+      {/* Раздача проектов пачкой: по одному триста карточек не назначить, и
+          «кто ведёт» остаётся пустым, а с ним половина строк «что горит». */}
+      {picked.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-xs">
+          <span className="font-medium">Выбрано {picked.size}</span>
+          <Select value={assignTo} onValueChange={setAssignTo}>
+            <SelectTrigger className="h-7 w-[220px] text-xs"><SelectValue placeholder="Ответственный" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__" className="text-xs">— снять ответственного</SelectItem>
+              {(members.data ?? []).map((m) => (
+                <SelectItem key={m.id} value={m.id} className="text-xs">{m.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" className="h-7 text-xs" disabled={!assignTo || mAssign.isPending}
+            onClick={() => mAssign.mutate()}>
+            {mAssign.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Назначить
+          </Button>
+          <button type="button" className="text-muted-foreground hover:text-foreground"
+            onClick={() => setPicked(new Set())}>сбросить</button>
+        </div>
+      )}
+
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           {q.isLoading ? (
@@ -132,6 +169,11 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/20 text-muted-foreground">
+                  <th className="w-8 p-2">
+                    <input type="checkbox" className="cursor-pointer"
+                      checked={picked.size > 0 && picked.size === rows.length}
+                      onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
+                  </th>
                   <th className="text-left p-2 font-medium">Проект</th>
                   <th className="text-left p-2 font-medium">Объект</th>
                   <th className="text-left p-2 font-medium">Этап</th>
@@ -147,6 +189,14 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                   return (
                     <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
                       onClick={(ev) => (ev.altKey ? setDetailId(s.id) : openProject(s.id))}>
+                      <td className="p-2" onClick={(ev) => ev.stopPropagation()}>
+                        <input type="checkbox" className="cursor-pointer" checked={picked.has(s.id)}
+                          onChange={(e) => setPicked((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.add(s.id); else next.delete(s.id)
+                            return next
+                          })} />
+                      </td>
                       <td className="p-2 whitespace-nowrap font-mono">{s.projectNo ?? '—'}</td>
                       <td className="p-2 max-w-[300px] truncate" title={s.fullAddress ?? s.address ?? ''}>
                         {s.title || s.address || s.installPlace || s.fullAddress || '—'}
