@@ -28,6 +28,9 @@ export interface AdminUser {
   // Скоуп данных: объекты, по которым человек видит данные; null = вся сеть компании.
   // Ортогонален правам: modules — какие экраны, object_scope — по каким объектам.
   object_scope?: string[] | null
+  // Основание допуска: договоры, по которым человек здесь работает. Не права и не
+  // скоуп — справка «почему он в пространстве»; у своих сотрудников обычно пусто.
+  contract_ids?: string[] | null
   is_superadmin: boolean
   companies: MembershipRef[]
 }
@@ -119,6 +122,15 @@ export async function setMemberScope(
 ): Promise<AdminUser> {
   return put<AdminUser>(`/api/users/${id}/scope`, {
     company_id: companyId, object_scope: objectScope,
+  })
+}
+
+/** Основание допуска: договоры, по которым участник работает. Справка, а не права. */
+export async function setMemberContracts(
+  id: string, companyId: string, contractIds: string[] | null,
+): Promise<AdminUser> {
+  return put<AdminUser>(`/api/users/${id}/contracts`, {
+    company_id: companyId, contract_ids: contractIds,
   })
 }
 

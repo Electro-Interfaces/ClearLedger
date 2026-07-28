@@ -15,12 +15,13 @@ from app.access_catalog import sanitize_modules
 from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
-from app.models import Counterparty, Company, CompanyRole, ServiceLocation, User, UserCompany
+from app.models import Contract, Counterparty, Company, CompanyRole, ServiceLocation, User, UserCompany
 from app.utils import resolve_company_id, resolve_org_id
 from app.schemas import (
     CompanyMembership,
     GrantCompanyBody,
     MemberAccessUpdate,
+    MemberContractsUpdate,
     MemberModulesUpdate,
     MemberScopeUpdate,
     UserAdminResponse,
@@ -93,6 +94,7 @@ async def _resp(
     org_id: str | None = None
     org_name: str | None = None
     object_scope: list[str] | None = None
+    contract_ids: list[str] | None = None
     if scope_cid is not None:
         m = await db.get(UserCompany, (u.id, scope_cid))
         if m is not None:
@@ -102,6 +104,8 @@ async def _resp(
             # Скоуп отдаём как есть: на админа он не действует, но админом человек
             # может перестать быть — заранее заданный список тогда пригодится.
             object_scope = [str(x) for x in (m.object_scope or [])] or None
+            # Основание допуска — справка, а не права: отдаём всем, включая админов.
+            contract_ids = [str(x) for x in (getattr(m, "contract_ids", None) or [])] or None
             party_type = getattr(m, "party_type", None) or "internal"
             if m.organization_id is not None:
                 org = await db.get(Counterparty, m.organization_id)
@@ -117,6 +121,7 @@ async def _resp(
         id=str(u.id), email=u.email, name=u.name,
         role=role, position=position, modules=modules,
         role_id=role_id_str, role_name=role_name, object_scope=object_scope,
+        contract_ids=contract_ids,
         party_type=party_type, organization_id=org_id, organization_name=org_name,
         is_superadmin=u.is_superadmin, companies=memberships,
     )
@@ -350,6 +355,48 @@ async def set_member_scope(
     await log_audit(db, actor=current_user, company_id=cid, action="member.scope",
                     target=(target.email if target else user_id),
                     details={"objects": len(ids) if ids else "вся сеть"})
+    await db.commit()
+    return await _resp(target, db, scope_cid=cid)
+
+
+@router.put("/{user_id}/contracts", response_model=UserAdminResponse)
+async def set_member_contracts(
+    user_id: str,
+    payload: MemberContractsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Основание допуска участника: договоры, по которым он работает в пространстве.
+
+    Справка, а не права: список ничего не открывает и не закрывает — он отвечает на
+    вопрос «на каком основании этот человек здесь». Поэтому пустой список законен и
+    означает «основание не указано», а не «доступа нет».
+    """
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    cid = await require_company_admin(payload.company_id, current_user, db)
+    m = await db.get(UserCompany, (uid, cid))
+    if m is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не член компании")
+    target = await db.get(User, uid)
+    # Договор обязан быть из этой же компании: иначе в карточке человека появилось бы
+    # основание из чужого пространства, и понять, откуда оно, было бы нельзя.
+    ids: list[str] = []
+    raw = [str(x).strip() for x in (payload.contract_ids or []) if str(x).strip()]
+    if raw:
+        try:
+            wanted = [uuid.UUID(x) for x in raw]
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID договора")
+        own = (await db.execute(select(Contract.id).where(
+            Contract.company_id == cid, Contract.id.in_(wanted)))).scalars().all()
+        ids = [str(x) for x in own]
+    m.contract_ids = ids or None
+    await log_audit(db, actor=current_user, company_id=cid, action="member.contracts",
+                    target=(target.email if target else user_id),
+                    details={"contracts": len(ids) if ids else "не указано"})
     await db.commit()
     return await _resp(target, db, scope_cid=cid)
 

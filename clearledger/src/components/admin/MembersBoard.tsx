@@ -38,7 +38,7 @@ import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
 import * as roleService from '@/services/roleService'
 import type { CompanyRole } from '@/services/roleService'
-import { listSpaceOrganizations } from '@/services/spaceObjectsService'
+import { listSpaceContracts, listSpaceOrganizations, type SpaceContract } from '@/services/spaceObjectsService'
 import { useAccessTree, type AccessApp } from '@/hooks/useAccessTree'
 import { appIcon } from '@/config/appIcons'
 import { appState, toggleAccessKey, sameAccess, type AppAccess } from '@/lib/accessKeys'
@@ -78,8 +78,21 @@ export function MembersBoard({
     enabled: canManage,
     retry: false,
   })
+  // Договоры — основание допуска внешних участников: у своих сотрудников оснований
+  // не спрашивают, поэтому реестр тянем только в разделе компаний.
+  const contractsQ = useQuery({
+    queryKey: ['space-contracts', companyId],
+    queryFn: () => listSpaceContracts(companyId),
+    enabled: canManage && party === 'external',
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
   const { tree, isLoading: treeLoading } = useAccessTree(companyId)
   const roles = rolesQ.data ?? []
+  const contracts = contractsQ.data ?? []
+  /** Договоры конкретной компании-партнёра — её основание работать в пространстве. */
+  const contractsOf = (orgId?: string | null) =>
+    orgId ? contracts.filter((c) => c.counterpartyId === orgId) : []
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['team-members', companyId] })
 
@@ -208,6 +221,11 @@ export function MembersBoard({
                       — укажите компанию, иначе в чатах и заявках человек без стороны
                     </span>
                   )}
+                  {/* Договоры компании — то, на каком основании её люди здесь вообще
+                      появились. Сам допуск даёт роль, договор объясняет «почему». */}
+                  {g.kind === 'partner' && (
+                    <ContractsHint items={contractsOf(g.rows[0]?.organization_id)} />
+                  )}
                 </div>
               )
             }
@@ -222,6 +240,7 @@ export function MembersBoard({
                   onToggleApp={(app) => toggle(u, app, app)}
                   onCard={() => setCardFor(u.id)}
                   companyId={companyId} onSaved={refresh}
+                  contracts={contractsOf(u.organization_id)}
                 />
                 {expanded[u.id] && (
                   <MemberAccessPanel
@@ -258,7 +277,8 @@ export function MembersBoard({
           {card && (
             <MemberCard
               u={card} companyId={companyId} canManage={canManage} isSelf={card.id === selfId}
-              roles={roles} orgs={orgsQ.data ?? []} onSaved={refresh}
+              roles={roles} orgs={orgsQ.data ?? []} contracts={contractsOf(card.organization_id)}
+              onSaved={refresh}
               onClose={() => setCardFor(null)}
             />
           )}
@@ -295,13 +315,14 @@ function HeaderRow({ apps, loading }: { apps: AccessApp[]; loading: boolean }) {
 
 function MemberRow({
   u, apps, keys, full, locked, changed, expanded, party, onExpand, onToggleApp, onCard,
-  companyId, onSaved,
+  companyId, onSaved, contracts,
 }: {
   u: AdminUser; apps: AccessApp[]; keys: string[] | null; full: boolean; locked: boolean
   changed: boolean; expanded: boolean; party: 'internal' | 'external'
   onExpand: () => void; onToggleApp: (app: string) => void; onCard: () => void
-  companyId: string; onSaved: () => void
+  companyId: string; onSaved: () => void; contracts: SpaceContract[]
 }) {
+  const basis = contracts.filter((c) => u.contract_ids?.includes(c.id))
   return (
     <div className={`flex items-center gap-2 px-3 py-2 transition-colors ${
       changed ? 'bg-primary/5' : 'hover:bg-accent/30'
@@ -327,12 +348,26 @@ function MemberRow({
       </button>
 
       <span className="hidden w-[150px] shrink-0 xl:block">
-        {party === 'external'
-          ? <PartyBadge party={{
+        {party === 'external' ? (
+          <>
+            <PartyBadge party={{
               partyType: u.party_type ?? 'internal', role: u.role,
               orgName: u.organization_name, position: u.position,
             }} />
-          : <span className="truncate text-xs text-muted-foreground">{u.position || '— должность —'}</span>}
+            {/* Основание допуска: по какому договору человек здесь. Пусто — не запрет,
+                а вопрос к администратору: почему у подрядчика нет основания. */}
+            {u.party_type === 'partner' && (
+              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground"
+                title={basis.map((c) => `№${c.number} от ${c.date}`).join(', ')}>
+                {basis.length
+                  ? `${basis.map((c) => `№${c.number}`).slice(0, 2).join(', ')}${basis.length > 2 ? ` +${basis.length - 2}` : ''}`
+                  : <span className="text-amber-500/90">без основания</span>}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="truncate text-xs text-muted-foreground">{u.position || '— должность —'}</span>
+        )}
       </span>
 
       <span className="flex shrink-0 items-center">
@@ -449,11 +484,11 @@ function MemberAccessPanel({
 
 /** Карточка участника: кто он и на каком основании здесь. Права — в матрице. */
 function MemberCard({
-  u, companyId, canManage, isSelf, roles, orgs, onSaved, onClose,
+  u, companyId, canManage, isSelf, roles, orgs, contracts, onSaved, onClose,
 }: {
   u: AdminUser; companyId: string; canManage: boolean; isSelf: boolean
   roles: CompanyRole[]; orgs: { id: string; name: string; shortName?: string | null }[]
-  onSaved: () => void; onClose: () => void
+  contracts: SpaceContract[]; onSaved: () => void; onClose: () => void
 }) {
   const [name, setName] = useState(u.name)
   const [position, setPosition] = useState(u.position ?? '')
@@ -467,6 +502,11 @@ function MemberCard({
   const setAccess = useMutation({
     mutationFn: (roleId: string) => userService.setMemberAccess(u.id, companyId, { mode: 'role', roleId }),
     onSuccess: () => { toast.success('Роль назначена'); onSaved() },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  const setContracts = useMutation({
+    mutationFn: (ids: string[]) => userService.setMemberContracts(u.id, companyId, ids),
+    onSuccess: () => onSaved(),
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
   const remove = useMutation({
@@ -551,6 +591,49 @@ function MemberCard({
           </p>
         </section>
 
+        {/* Основание — только у людей компаний-партнёров: свой сотрудник работает здесь
+            по трудовому договору, и спрашивать его основание незачем. */}
+        {u.party_type === 'partner' && (
+          <section className="space-y-2">
+            <SectionTitle>Основание</SectionTitle>
+            {!u.organization_id ? (
+              <p className="text-[11px] text-amber-500/90">
+                Сначала укажите компанию — договоры берутся из её карточки.
+              </p>
+            ) : contracts.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                У компании нет договоров в реестре пространства («Управление → Договоры и оборудование»).
+              </p>
+            ) : (
+              <div className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
+                {contracts.map((c) => {
+                  const on = !!u.contract_ids?.includes(c.id)
+                  return (
+                    <button key={c.id} type="button" disabled={!editable || setContracts.isPending}
+                      onClick={() => setContracts.mutate(on
+                        ? (u.contract_ids ?? []).filter((x) => x !== c.id)
+                        : [...(u.contract_ids ?? []), c.id])}
+                      className={`flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+                        on ? 'border-primary/40 bg-primary/10' : 'border-border hover:bg-accent/40'
+                      } ${c.isClosed ? 'opacity-60' : ''}`}>
+                      <span className="min-w-0">
+                        <span className="font-medium">№{c.number}</span>
+                        <span className="text-muted-foreground"> от {c.date}</span>
+                        {c.type && <span className="block truncate text-[11px] text-muted-foreground">{c.type}</span>}
+                      </span>
+                      {on && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Договор ничего не открывает и не закрывает — он объясняет, почему человек
+              допущен в пространство. Оснований может быть несколько.
+            </p>
+          </section>
+        )}
+
         {u.role !== 'admin' && !u.is_superadmin && (
           <section className="space-y-3">
             <SectionTitle>Права</SectionTitle>
@@ -600,6 +683,20 @@ function MemberCard({
         )}
       </div>
     </div>
+  )
+}
+
+/** Договоры компании-партнёра в шапке её группы: на чём держится присутствие людей. */
+function ContractsHint({ items }: { items: SpaceContract[] }) {
+  if (!items.length) return null
+  const open = items.filter((c) => !c.isClosed)
+  const shown = (open.length ? open : items).slice(0, 3)
+  return (
+    <span className="truncate text-xs font-normal text-muted-foreground"
+      title={items.map((c) => `№${c.number} от ${c.date}${c.isClosed ? ' (закрыт)' : ''}`).join('\n')}>
+      · договоры: {shown.map((c) => `№${c.number}`).join(', ')}
+      {items.length > shown.length ? ` +${items.length - shown.length}` : ''}
+    </span>
   )
 }
 
