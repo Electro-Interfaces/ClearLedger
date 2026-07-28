@@ -56,8 +56,10 @@ function items(list: { key: string; label: string; group?: string }[], group?: s
  */
 export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   projects: items(SITES_MENU),
+  // Группы матрицы = разделы продукта: строка права стоит там же, где пункт в меню.
   ops: [
-    ...items(OPS_MONITOR_MENU), ...items(EQUIPMENT_MENU),
+    ...items(OPS_MONITOR_MENU, 'Мониторинг'),
+    ...items(EQUIPMENT_MENU, 'Оборудование'),
     ...items(ENERGY_MGMT, 'Хозяйство'),
   ],
   // Коммерция (тарифы, ЮЛ, ФЛ), сегментация и веб-аналитика вернулись в «Продажи»

@@ -216,21 +216,40 @@ const AXIS_TICKS = [0, 25, 50, 75, 100]
 const PLOT_H = 'min(340px, 38vh)' 
 
 function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: string) => void }) {
+  // Разобранный кластер: какие проекты стоят в одной точке поля.
+  const [openCluster, setOpenCluster] = useState<string | null>(null)
+
+  // Баллы дискретны и часто совпадают: пять проектов с одинаковой оценкой рисуются
+  // друг на друге, и кликнуть можно только в верхний. Собираем такие в один
+  // кружок с числом — он раскрывается списком, из которого выбирают проект.
+  const clusters = useMemo(() => {
+    const map = new Map<string, { x: number; y: number; items: MatrixItem[] }>()
+    for (const it of items) {
+      const x = Math.min(98, Math.max(2, it.feasible ?? 0))
+      const y = Math.min(98, Math.max(2, it.attract ?? 0))
+      // Шаг сетки 3 балла: ближе этого точки визуально всё равно сливаются.
+      const key = `${Math.round(x / 3)}:${Math.round(y / 3)}`
+      const c = map.get(key)
+      if (c) c.items.push(it)
+      else map.set(key, { x, y, items: [it] })
+    }
+    return [...map.entries()].map(([key, c]) => ({ key, ...c }))
+  }, [items])
+
   if (items.length === 0) {
     return <div className="py-10 text-center text-sm text-muted-foreground">
       Оценённых проектов нет — сначала нужно добрать данные (мощность, стоимость подключения, право).
     </div>
   }
   // Считаем по тому же признаку, что и карточки сверху (`item.quadrant` с сервера).
-  // Свой порог «50 по обеим осям» давал другие числа — на одном экране два разных
-  // ответа на один вопрос, и непонятно, какому верить.
   const n = (k: Quadrant) => items.filter((i) => i.quadrant === k).length
   const quads: { key: Quadrant; pos: string; cls: string }[] = [
-    { key: 'unblock', pos: 'left-2 top-2', cls: 'text-amber-700 dark:text-amber-400' },
-    { key: 'do_now', pos: 'right-2 top-2 text-right', cls: 'text-emerald-700 dark:text-emerald-400' },
+    { key: 'unblock', pos: 'left-2 top-2', cls: 'text-amber-600 dark:text-amber-400' },
+    { key: 'do_now', pos: 'right-2 top-2 text-right', cls: 'text-emerald-600 dark:text-emerald-400' },
     { key: 'drop', pos: 'left-2 bottom-2', cls: 'text-red-600 dark:text-red-400' },
-    { key: 'option', pos: 'right-2 bottom-2 text-right', cls: 'text-sky-700 dark:text-sky-400' },
+    { key: 'option', pos: 'right-2 bottom-2 text-right', cls: 'text-sky-600 dark:text-sky-400' },
   ]
+  const open = clusters.find((c) => c.key === openCluster)
 
   return (
     <div className="flex gap-2">
@@ -243,46 +262,50 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="relative w-full rounded-md border border-border" style={{ height: PLOT_H }}>
-          {/* фон квадрантов */}
-          <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
-            <div className="bg-amber-500/[0.05]" />
-            <div className="bg-emerald-500/[0.06]" />
-            <div className="bg-red-400/[0.05]" />
-            <div className="bg-sky-500/[0.05]" />
-          </div>
-          {/* сетка по 25 и оси-разделители по 50 — они и есть границы квадрантов */}
+        <div className="relative w-full rounded-md border border-border bg-card" style={{ height: PLOT_H }}>
+          {/* Поле нейтральное. Цветная заливка квадрантов давала грязные оттенки
+              на тёмной теме и спорила с цветом точек: область теперь читается по
+              подписи в углу и разделителям на 50, а цвет остаётся у данных. */}
           {AXIS_TICKS.slice(1, -1).map((t) => (
-            <div key={`v${t}`} className={`absolute top-0 bottom-0 ${t === 50 ? 'border-l border-border' : 'border-l border-border/30'}`}
+            <div key={`v${t}`} className={`absolute top-0 bottom-0 ${t === 50 ? 'border-l-2 border-border' : 'border-l border-border/25'}`}
               style={{ left: `${t}%` }} />
           ))}
           {AXIS_TICKS.slice(1, -1).map((t) => (
-            <div key={`h${t}`} className={`absolute left-0 right-0 ${t === 50 ? 'border-t border-border' : 'border-t border-border/30'}`}
+            <div key={`h${t}`} className={`absolute left-0 right-0 ${t === 50 ? 'border-t-2 border-border' : 'border-t border-border/25'}`}
               style={{ bottom: `${t}%` }} />
           ))}
 
           {quads.map((qd) => (
-            <span key={qd.key} className={`absolute ${qd.pos} ${qd.cls} text-xs`}>
-              {QUADRANT_META[qd.key].label} <span className="tabular-nums opacity-70">· {n(qd.key)}</span>
+            <span key={qd.key}
+              className={`absolute ${qd.pos} ${qd.cls} inline-flex items-center gap-1.5 rounded bg-background/80 px-1.5 py-0.5 text-xs`}>
+              <span className={`h-2 w-2 rounded-full ${QUADRANT_META[qd.key].dot}`} />
+              {QUADRANT_META[qd.key].label}
+              <span className="tabular-nums opacity-70">· {n(qd.key)}</span>
             </span>
           ))}
 
-          {/* Точки. Размер — уверенность оценки; обводка цветом фона, иначе на
-              тёмной теме точка сливается с квадрантом. Позиция зажата в поле:
-              проект с нулём по оси иначе наполовину уезжал за край. */}
-          {items.map((it) => {
-            const x = Math.min(98, Math.max(2, it.feasible ?? 0))
-            const y = Math.min(98, Math.max(2, it.attract ?? 0))
-            const size = 8 + (it.confidence / 100) * 6
+          {/* Точка или кластер. Размер — уверенность оценки; обводка цветом фона,
+              иначе на тёмной теме кружок сливается с полем. */}
+          {clusters.map((c) => {
+            const many = c.items.length > 1
+            const it = c.items[0]
+            const size = many ? 20 : 9 + (it.confidence / 100) * 6
+            const active = openCluster === c.key
             return (
-              <button key={it.id} type="button" onClick={() => onPick(it.id)}
-                title={`${it.projectNo ?? ''} ${it.city ?? it.region ?? ''} — привлекательность ${it.attract}, исполнимость ${it.feasible}, уверенность ${it.confidence}%`}
-                className={`absolute rounded-full ring-1 ring-background transition-transform hover:z-10 hover:scale-150 ${QUADRANT_META[it.quadrant].dot}`}
+              <button key={c.key} type="button"
+                onClick={() => (many ? setOpenCluster(active ? null : c.key) : onPick(it.id))}
+                title={many
+                  ? `${c.items.length} проекта в одной точке — нажмите, чтобы выбрать`
+                  : `${it.projectNo ?? ''} ${it.city ?? it.region ?? ''} — привлекательность ${it.attract}, исполнимость ${it.feasible}, уверенность ${it.confidence}%`}
+                className={`absolute flex items-center justify-center rounded-full ring-1 ring-background transition-transform hover:z-10 hover:scale-125
+                  ${QUADRANT_META[it.quadrant].dot} ${active ? 'z-20 ring-2 ring-primary scale-110' : ''}`}
                 style={{
-                  left: `calc(${x}% - ${size / 2}px)`,
-                  bottom: `calc(${y}% - ${size / 2}px)`,
+                  left: `calc(${c.x}% - ${size / 2}px)`,
+                  bottom: `calc(${c.y}% - ${size / 2}px)`,
                   width: size, height: size,
-                }} />
+                }}>
+                {many && <span className="text-[11px] font-semibold text-white">{c.items.length}</span>}
+              </button>
             )
           })}
         </div>
@@ -298,6 +321,29 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
           <span>↑ привлекательность: спрос, покрытие, тип места</span>
           <span>исполнимость: мощность, деньги, право →</span>
         </div>
+
+        {/* Разобранный кластер: из него и выбирают конкретный проект. */}
+        {open && (
+          <div className="mt-2 rounded-md border border-primary/40 bg-primary/5 p-2">
+            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {open.items.length} проекта с одинаковой оценкой
+                (привлекательность {open.items[0].attract}, исполнимость {open.items[0].feasible})
+              </span>
+              <button type="button" className="ml-auto hover:text-foreground"
+                onClick={() => setOpenCluster(null)}>свернуть</button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {open.items.map((it) => (
+                <button key={it.id} type="button" onClick={() => onPick(it.id)}
+                  className="rounded border border-border bg-background px-2 py-1 text-xs hover:border-primary/60">
+                  <span className="font-mono">{it.projectNo ?? '—'}</span>
+                  <span className="text-muted-foreground"> · {it.city ?? it.region ?? '—'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

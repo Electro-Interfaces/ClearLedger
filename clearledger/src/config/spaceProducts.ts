@@ -60,9 +60,11 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     objectTabs: ['passport', 'equipment', 'integrations'],
   },
   {
-    // Эксплуатация — железо и его состояние: мониторинг сети, парк, склады, ЗИП.
+    // Эксплуатация — железо и его состояние. Три раздела в рельсе: «Мониторинг» (что с
+    // сетью и её данными), «Оборудование» (склад железа), «Хозяйство» (деньги площадок:
+    // закупка э/э и аренда). `operations` — исторический код первого раздела.
     code: 'ops', route: '/operations', label: 'Эксплуатация',
-    modes: ['operations'], paths: [],
+    modes: ['operations', 'ops_equipment', 'ops_economy'], paths: [],
     objectTabs: ['passport', 'equipment', 'integrations', 'diagnostics'],
   },
   {
@@ -135,6 +137,36 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     objectTabs: ['passport', 'integrations', 'diagnostics'],
   },
 ]
+
+/**
+ * Готовность продукта — точка на плитке рабочего стола.
+ *
+ * Это свойство ПЛАТФОРМЫ, а не компании: «Финансы» одинаково не доделаны у всех, кому
+ * их включили, поэтому карта живёт здесь, а не в реестре пространства. Человек на столе
+ * должен понимать, куда идёт: в рабочий продукт, в развивающийся или в заготовку —
+ * иначе плитки выглядят одинаково готовыми, а половина из них показывает заставку.
+ *
+ *   ready   — рабочий продукт, им пользуются;
+ *   partial — работает, но наполняется;
+ *   draft   — заведён, содержимого пока нет.
+ *
+ * Состояния на 28.07.2026 расставлены МАГом. Меняется одним значением в этой карте.
+ */
+export type Readiness = 'ready' | 'partial' | 'draft'
+
+export const PRODUCT_READINESS: Record<string, Readiness> = {
+  admin: 'ready', data: 'partial', info: 'partial',
+  chat: 'ready', plan: 'partial', conf: 'draft',
+  projects: 'ready', ops: 'partial', sales: 'ready',
+  corp: 'draft', shop: 'draft', marketing: 'draft',
+  support: 'ready', finance: 'draft',
+}
+
+export const READINESS_LABEL: Record<Readiness, string> = {
+  ready: 'рабочий продукт',
+  partial: 'в развитии',
+  draft: 'в подключении',
+}
 
 /** Профиль компании, для которого разрез включён. */
 const CARVED_PROFILE = 'energy'

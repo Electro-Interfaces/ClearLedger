@@ -32,30 +32,50 @@ export const MGMT_MENU: CentralMenuItem[] = [
 ]
 export const MGMT_MENU_KEYS = MGMT_MENU.map((m) => m.key)
 
-// Энергомодули раздела «Управленческий» (демо-витрины, подключаются через каталог).
+/**
+ * «Эксплуатация» (energy) — три раздела продукта, как у «Продаж» (28.07.2026):
+ * «Мониторинг» — что с сетью и её данными, «Оборудование» — склад железа,
+ * «Хозяйство» — деньги площадок (закупка э/э и аренда по договорам).
+ *
+ * Раньше это были три группы гармошки под одним разделом, который к тому же звался
+ * «Управленческий» — именем, которого нет ни у продукта, ни в разговоре инженера.
+ */
+// ХОЗЯЙСТВО — подключаемые модули денежного контура площадок.
 export const ENERGY_MGMT: CentralMenuItem[] = [
   { key: 'procurement',  label: 'Энергозакупка' },
   { key: 'rent',         label: 'Аренда' },
 ]
 export const ENERGY_MGMT_KEYS = ENERGY_MGMT.map((m) => m.key)
 
-// Мониторинг сети ЭЗС — ядро «Эксплуатации» (не отключается каталогом модулей).
+// МОНИТОРИНГ — ядро «Эксплуатации» (не отключается каталогом модулей).
 export const OPS_MONITOR_MENU: CentralMenuItem[] = [
-  { key: 'ops_overview',     label: 'Обзор',          group: 'Мониторинг' },
-  { key: 'ops_balance',      label: 'Баланс (факт)',  group: 'Мониторинг' },
-  { key: 'ops_completeness', label: 'Полнота данных', group: 'Мониторинг' },
+  { key: 'ops_overview',     label: 'Обзор' },
+  { key: 'ops_balance',      label: 'Баланс (факт)' },
+  { key: 'ops_completeness', label: 'Полнота данных' },
 ]
 
-// Складской учёт оборудования ЭЗС (energy): станции-железки на складах/в ремонте,
-// движения жизненного цикла, ЗИП. Ядро раздела «Управленческий», группа «Оборудование».
+// ОБОРУДОВАНИЕ — складской учёт железа ЭЗС (energy): станции на складах/в ремонте,
+// движения жизненного цикла, ЗИП.
 export const EQUIPMENT_MENU: CentralMenuItem[] = [
-  { key: 'eq_fleet',      label: 'Парк оборудования',  group: 'Оборудование' },
-  { key: 'eq_warehouses', label: 'Склады и остатки',   group: 'Оборудование' },
-  { key: 'eq_supplies',   label: 'Поставки и возвраты', group: 'Оборудование' },
-  { key: 'eq_movements',  label: 'Движения',           group: 'Оборудование' },
-  { key: 'eq_spares',     label: 'ЗИП и запчасти',     group: 'Оборудование' },
+  { key: 'eq_fleet',      label: 'Парк оборудования' },
+  { key: 'eq_warehouses', label: 'Склады и остатки' },
+  { key: 'eq_supplies',   label: 'Поставки и возвраты' },
+  { key: 'eq_movements',  label: 'Движения' },
+  { key: 'eq_spares',     label: 'ЗИП и запчасти' },
 ]
 export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
+
+/** Пункты «Эксплуатации» всех трёх разделов — для роутера и нормализации ссылок. */
+export const OPS_KEYS = [
+  ...OPS_MONITOR_MENU.map((m) => m.key), ...EQUIPMENT_KEYS, ...ENERGY_MGMT_KEYS,
+]
+
+/** Раздел «Эксплуатации», которому принадлежит пункт. */
+export function opsModeForKey(key: string): 'operations' | 'ops_equipment' | 'ops_economy' {
+  if (EQUIPMENT_KEYS.includes(key)) return 'ops_equipment'
+  if (ENERGY_MGMT_KEYS.includes(key)) return 'ops_economy'
+  return 'operations'
+}
 
 // Банк ЗУ — площадки (земельные участки) под установку ЭЗС: девелоперский
 // пайплайн развития сети (МЕСТА, где сеть строится, на стадиях проработка →
@@ -168,6 +188,20 @@ export function salesModeForKey(key: string): 'management' | 'sales_sessions' | 
   if (SALES_SESSIONS_MENU.some((m) => m.key === key)) return 'sales_sessions'
   if (SALES_COMMERCE_MENU.some((m) => m.key === key)) return 'sales_commerce'
   return 'management'
+}
+
+/**
+ * Раздел, которому принадлежит пункт меню, — по всем продуктам с разделами.
+ *
+ * Нужен там, где пункт приходит извне: старая ссылка, закреплённый экран, переход
+ * из соседней панели. Без этого пункт из чужого раздела молча подменялся первым
+ * пунктом текущего — закладка «Тарифы» открывала «Обзор».
+ */
+export function workspaceModeForKey(key: string): string | null {
+  if (CHARGE_SESSIONS_KEYS.includes(key)) return salesModeForKey(key)
+  if (OPS_KEYS.includes(key)) return opsModeForKey(key)
+  if (SITES_KEYS.includes(key)) return sitesModeForKey(key)
+  return null
 }
 
 // Состав «Продаж» — полный, как в Ledger РусГидро (решение МАГа 28.07.2026). Раньше

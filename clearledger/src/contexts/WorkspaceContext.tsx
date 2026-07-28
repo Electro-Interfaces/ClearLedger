@@ -11,9 +11,11 @@ import { useSearchParams } from 'react-router-dom'
 // `sales_sessions`/`sales_commerce` — то же для «Продаж»: `management` остался
 // разделом «Сеть» (у топливного профиля — весь его «Продажи»), к нему добавились
 // «Сессии» и «Коммерция» (решение МАГа 28.07.2026).
-export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'operations' | 'projects' | 'projects_analytics' | 'store' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
+// `ops_equipment`/`ops_economy` — то же для «Эксплуатации»: `operations` остался
+// разделом «Мониторинг» (у топливного профиля — его «Управленческий»).
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
 
-const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'operations', 'projects', 'projects_analytics', 'store', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
 function readMode(sp: URLSearchParams): CoreMode {
   const m = sp.get('mode')
   return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'

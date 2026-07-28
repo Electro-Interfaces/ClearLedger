@@ -117,6 +117,9 @@ function DesktopWorkspace() {
             {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
             {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
             {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+            {/* «Оборудование» и «Хозяйство» — разделы «Эксплуатации», та же панель. */}
+            {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
+            {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
             {/* «Работа» и «Аналитика» — два раздела одного продукта: панель одна,
                 различаются составом пунктов (см. workspaceSections). */}
             {coreMode === 'projects' && <ManagementPanel mode="projects" />}
@@ -206,6 +209,8 @@ function MobileWorkspace() {
         {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
         {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+        {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
+        {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {coreMode === 'store' && <StorePanel />}
         {coreMode === 'corporate' && <ProductStub {...CORP_STUB} />}

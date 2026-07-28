@@ -15,7 +15,11 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   management: 'Продажи',
   sales_sessions: 'Продажи · Сессии',
   sales_commerce: 'Продажи · Коммерция',
+  // Три раздела «Эксплуатации»; `operations` — код первого («Мониторинг» у energy,
+  // «Управленческий» у топливного профиля).
   operations: 'Управленческий',
+  ops_equipment: 'Эксплуатация · Оборудование',
+  ops_economy: 'Эксплуатация · Хозяйство',
   projects: 'Проекты · Работа',
   projects_analytics: 'Проекты · Аналитика',
   store: 'Магазин',
@@ -62,11 +66,14 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   },
   operations: {
     ops_overview: 'Обзор', ops_balance: 'Баланс (факт)', ops_completeness: 'Полнота данных',
+    balance: 'Баланс ЭЗС', contracts: 'Договоры и аренда',
+  },
+  ops_equipment: {
     eq_fleet: 'Парк оборудования', eq_warehouses: 'Склады и остатки',
     eq_supplies: 'Поставки и возвраты',
     eq_movements: 'Движения', eq_spares: 'ЗИП и запчасти',
-    procurement: 'Энергозакупка', rent: 'Аренда', balance: 'Баланс ЭЗС', contracts: 'Договоры и аренда',
   },
+  ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда' },
   store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),
   financial: {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',

@@ -8,10 +8,8 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceSubView, useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
-import { salesModeForKey } from '@/config/workspaceMenus'
-
-/** Разделы продукта «Продажи» — между ними ходит нормализация пункта (см. ниже). */
-const SALES_MODES: CoreMode[] = ['management', 'sales_sessions', 'sales_commerce']
+import { workspaceModeForKey } from '@/config/workspaceMenus'
+import { productForMode } from '@/config/productAccess'
 import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS, EQUIPMENT_KEYS, SITES_KEYS } from './workspaceSections'
 import { EquipmentRouter } from '@/components/equipment/EquipmentRouter'
 import { SitesRouter } from '@/components/sites/SitesRouter'
@@ -115,12 +113,13 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   const { period, stationCode } = useFilters()
   const { companyId, company } = useCompany()
   const { setCoreMode } = useWorkspace()
-  // Пункт «Продаж» из ЧУЖОГО раздела (старая ссылка или закреплённый экран, где все
-  // пункты жили под `mode=management`) — уводим в его раздел, а не молча открываем
+  // Пункт из ЧУЖОГО раздела ТОГО ЖЕ продукта (старая ссылка или закреплённый экран,
+  // где все пункты жили под одним `mode`) — уводим в его раздел, а не молча открываем
   // первый пункт текущего: иначе закладка «Тарифы» открывала бы «Обзор».
-  const ownerMode = CHARGE_SESSIONS_KEYS.includes(tab) ? salesModeForKey(tab) : null
+  const ownerMode = workspaceModeForKey(tab)
   useEffect(() => {
-    if (ownerMode && ownerMode !== mode && SALES_MODES.includes(mode)) setCoreMode(ownerMode)
+    if (!ownerMode || ownerMode === mode) return
+    if (productForMode(ownerMode) === productForMode(mode)) setCoreMode(ownerMode as CoreMode)
   }, [ownerMode, mode, setCoreMode])
   const activeTab = menuKeys.includes(tab) ? tab : (menuKeys[0] ?? 'balance')
 

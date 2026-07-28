@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -85,19 +85,14 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
     ...(isEnergy ? SALES_NETWORK_MENU : []),
   ]
-  // «Управленческий» у ГИГ (fuel) = хозяйственные отношения компании (договоры/аренда),
-  // не баланс (концепт МАГа 13.07.2026): контроль топлива уже живёт в «Продажах»,
-  // «Баланс АЗС» из этого раздела убран. У energy — энергозакупка/аренда/баланс ЭЗС.
-  // Меню «Управленческого» (energy) — три группы:
-  //   МОНИТОРИНГ — ядро раздела (не отключаемое): светофор проблем + энергобаланс + полнота;
-  //   ОБОРУДОВАНИЕ — складской контур железа (тоже ядро);
-  //   ХОЗЯЙСТВО — подключаемые модули денежного контура площадок (энергозакупка,
-  //   аренда) + витрина баланса ЭЗС.
+  // «Эксплуатация» (energy) разложена на три раздела продукта: «Мониторинг» — что с
+  // сетью и её данными, «Оборудование» — склад железа, «Хозяйство» — деньги площадок
+  // (энергозакупка и аренда, подключаемые модули). У ГИГ (fuel) раздел один и остаётся
+  // «Управленческим»: там это хозяйственные отношения компании (договоры/аренда), не
+  // баланс (концепт МАГа 13.07.2026) — контроль топлива живёт в «Продажах».
   const energyOps = ENERGY_MGMT.filter((m) => on(m.key))
-    .map((m) => ({ ...m, group: 'Хозяйство' }))
   const opsItems: CentralMenuItem[] = [
-    ...(isEnergy ? [...OPS_MONITOR_MENU, ...EQUIPMENT_MENU] : []),
-    ...energyOps,
+    ...(isEnergy ? OPS_MONITOR_MENU : []),
     ...(!isEnergy && on('ops_contracts') ? [{ key: 'contracts', label: 'Договоры и аренда' }] : []),
     // «Баланс ЭЗС» (демо-витрина BalanceVitrine на DEMO_EZS) убран — реальный
     // пообъектный баланс живёт в «Мониторинг → Баланс (факт)» (ops_balance).
@@ -134,7 +129,13 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: isEnergy ? SITES_WORK_MENU : [], connected: isEnergy }
   const projectsAnalytics: WorkspaceSection = { mode: 'projects_analytics', label: 'Аналитика',
     icon: BarChart3, items: isEnergy ? SITES_ANALYTICS_MENU : [], connected: isEnergy }
-  const ops: WorkspaceSection   = { mode: 'operations', label: 'Управленческий', icon: Gauge,        items: opsItems, connected: opsItems.length > 0 }
+  const ops: WorkspaceSection = { mode: 'operations', label: isEnergy ? 'Мониторинг' : 'Управленческий',
+    icon: Gauge, items: opsItems, connected: opsItems.length > 0 }
+  const opsEquipment: WorkspaceSection = { mode: 'ops_equipment', label: 'Оборудование',
+    icon: Boxes, items: isEnergy ? EQUIPMENT_MENU : [], connected: isEnergy }
+  // «Хозяйство» — подключаемые модули: нет ни одного включённого, раздела нет.
+  const opsEconomy: WorkspaceSection = { mode: 'ops_economy', label: 'Хозяйство',
+    icon: Receipt, items: isEnergy ? energyOps : [], connected: energyOps.length > 0 }
   const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
   // Корпоративный процессинг и Маркетинг — продукты в подключении (решение МАГа
   // 28.07.2026): свои экраны ещё не сделаны, а коммерческие разделы вернулись в
@@ -157,7 +158,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
   const all = isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
-       projects, projectsAnalytics, ops, store, acc, exp, normalize, reconcile]
+       projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
+       store, acc, exp, normalize, reconcile]
     : [sales, store, ops, acc, exp]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый

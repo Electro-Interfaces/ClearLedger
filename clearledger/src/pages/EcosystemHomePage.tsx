@@ -59,7 +59,15 @@ interface TileProps {
   icon: typeof FileText
   badge?: string
   busy?: boolean
+  readiness?: Readiness
   onClick: () => void
+}
+
+/** Точка готовности: зелёная — рабочий, жёлтая — в развитии, красная — в подключении. */
+const DOT_CLASS: Record<Readiness, string> = {
+  ready: 'bg-emerald-500',
+  partial: 'bg-amber-400',
+  draft: 'bg-red-500',
 }
 
 /**
