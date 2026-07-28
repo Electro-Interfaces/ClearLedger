@@ -86,10 +86,11 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
         {/* Стадий десять — таблице хватает селекта; счётчики берём из обзора,
             чтобы не гадать, где сейчас работа. */}
         <Select value={stage || '__all__'} onValueChange={(v) => { setStage(v === '__all__' ? '' : v as SiteStage | 'active'); reset() }}>
-          <SelectTrigger className="h-8 w-[210px] text-sm"><SelectValue placeholder="Все стадии" /></SelectTrigger>
+          <SelectTrigger className="h-8 w-[200px] text-sm"><SelectValue placeholder="Все стадии" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="__all__" className="text-sm">Все стадии ({nf0.format(ov.data?.total ?? 0)})</SelectItem>
-            <SelectItem value="active" className="text-sm">В работе — активные ({nf0.format(ov.data?.active ?? 0)})</SelectItem>
+            {/* Коротко: «В работе — активные» на 14 px уже не влезало в поле. */}
+            <SelectItem value="active" className="text-sm">В работе ({nf0.format(ov.data?.active ?? 0)})</SelectItem>
             {FUNNEL_STAGES.map((s) => (
               <SelectItem key={s} value={s} className="text-sm">
                 {STAGE_META[s].label} ({nf0.format(stageCount(s))})
