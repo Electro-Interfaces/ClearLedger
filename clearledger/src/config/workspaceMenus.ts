@@ -219,6 +219,7 @@ export function workspaceModeForKey(key: string): string | null {
  * пункт не служебный: без него цифры на карте — чужие слухи с неизвестным возрастом.
  */
 export const MARKET_MENU: CentralMenuItem[] = [
+  { key: 'mk_position',     label: 'Позиция' },
   { key: 'mk_map',          label: 'Карта рынка' },
   { key: 'mk_sites',        label: 'Точки рынка' },
   { key: 'mk_operators',    label: 'Операторы' },

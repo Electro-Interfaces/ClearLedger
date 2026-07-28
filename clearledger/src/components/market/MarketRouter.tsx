@@ -22,6 +22,9 @@ import {
   listMarketSites, listMarketOperators, listMarketObservations,
   SITE_KIND_LABEL, CHANNEL_LABEL, type MarketSite, type MarketSiteKind,
 } from '@/services/marketService'
+import { MarketPositionPanel } from './MarketPositionPanel'
+import { MarketImportDialog } from './MarketImportDialog'
+import { MarketOcmButton } from './MarketOcmButton'
 import { MarketSiteDialog } from './MarketSiteDialog'
 import { MarketObservationDialog } from './MarketObservationDialog'
 
@@ -181,6 +184,12 @@ function MarketSites() {
               Наблюдение
             </button>
           } />
+          <MarketOcmButton />
+          <MarketImportDialog trigger={
+            <button type="button" className="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
+              Импорт списком
+            </button>
+          } />
           <MarketSiteDialog trigger={
             <button type="button" className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
               <Plus className="size-3.5" /> Точка рынка
@@ -337,6 +346,7 @@ function MarketObservations() {
 /** Тонкий роутер продукта: пункт меню → панель (как в «Продажах»). */
 export function MarketRouter({ tab }: { tab: string }) {
   switch (tab) {
+    case 'mk_position': return <MarketPositionPanel />
     case 'mk_map': return <MarketMap />
     case 'mk_sites': return <MarketSites />
     case 'mk_operators': return <MarketOperators />

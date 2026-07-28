@@ -158,7 +158,7 @@ export const PRODUCT_READINESS: Record<string, Readiness> = {
   admin: 'ready', data: 'partial', info: 'partial',
   chat: 'ready', plan: 'partial', conf: 'draft',
   projects: 'ready', ops: 'partial', sales: 'ready',
-  corp: 'draft', shop: 'draft', marketing: 'draft',
+  corp: 'draft', shop: 'draft', marketing: 'partial',
   support: 'ready', finance: 'draft',
   netlink: 'draft', accounting: 'draft', diag: 'draft',
 }

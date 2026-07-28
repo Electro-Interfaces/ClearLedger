@@ -124,3 +124,52 @@ export const createMarketObservation = (companyId: string, body: Record<string, 
 export const patchMarketSite = (companyId: string, siteId: string, body: Record<string, unknown>) =>
   patch<{ id: string; verifiedAt: string }>(
     `/api/market/sites/${siteId}?company_id=${encodeURIComponent(companyId)}`, body)
+
+/** Сосед по окружению объекта: чужая точка в радиусе с её ценой и расстоянием. */
+export interface MarketNeighbour {
+  id: string
+  name: string
+  kind: MarketSiteKind
+  distanceKm: number
+  ports: number | null
+  pricePerKwh: number | null
+  observedOn: string | null
+}
+
+/** Строка «Позиции»: наш объект + наши продажи + рынок вокруг него. */
+export interface MarketPositionRow {
+  locationId: string
+  name: string
+  code: string
+  city: string | null
+  lat: number | null
+  lon: number | null
+  hasGeo: boolean
+  sessions: number
+  energyKwh: number
+  revenue: number
+  ourPricePerKwh: number | null
+  rivals: number
+  rivalPorts: number
+  attractors: number
+  marketPricePerKwh: number | null
+  priceGapPct: number | null
+  neighbours: MarketNeighbour[]
+}
+
+export const getMarketPosition = (companyId: string, params?: { days?: number; radius_km?: number }) =>
+  get<{ days: number; radiusKm: number; objects: MarketPositionRow[]; total: number }>(
+    '/api/market/position', { company_id: companyId, ...params })
+
+export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
+  post<{ created: number; updated: number; observations: number }>(
+    `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })
+
+/** Импорт из Open Charge Map — открытого реестра ЭЗС с официальным API. */
+export const ocmStatus = (companyId: string) =>
+  get<{ configured: boolean }>('/api/market/ocm/status', { company_id: companyId })
+
+export const ocmImportNetwork = (companyId: string, padding = 0.15) =>
+  post<{ areas: number; cities: number; found: number; created: number; updated: number
+         prices: number; skippedOurs: number; problems: string[] }>(
+    `/api/market/ocm/import-network?company_id=${encodeURIComponent(companyId)}&padding=${padding}`, {})

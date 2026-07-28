@@ -30,8 +30,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (AccountingDoc, App, AppCompanyLink, Channel, ChargeSession, Company,
                         CompanyRole, Contract, CorporateClient, Counterparty, EzsEquipmentUnit,
-                        EzsProject, EzsSite, InfoArticle, MatrixGroupRoom, MetrikaConnection,
-                        ServiceLocation, SourceFile, User, UserCompany)
+                        EzsProject, EzsSite, InfoArticle, MarketObservation, MarketSite,
+                        MatrixGroupRoom, MetrikaConnection, ServiceLocation, SourceFile, User,
+                        UserCompany)
 from app.services import sso
 from app.services.space_projection import _internal_base_url
 
@@ -205,10 +206,25 @@ async def _corp(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
 
 
 async def _marketing(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
-    connected = await _count(db, MetrikaConnection, cid, MetrikaConnection.enabled.is_(True))
+    """Рынок вокруг сети: сколько чужого мы видим и насколько свежо (docs/MARKET.md)."""
+    sites = await _count(db, MarketSite, cid, MarketSite.status != "closed")
+    rivals = await _count(db, MarketSite, cid, MarketSite.status != "closed",
+                          MarketSite.kind == "ezs", MarketSite.location_id.is_(None))
+    last_obs = (await db.execute(
+        select(func.max(MarketObservation.observed_on))
+        .where(MarketObservation.company_id == cid))).scalar()
+    if not sites:
+        # Рынок пуст — честно говорим об этом состоянием подключения Метрики, а не нулями.
+        connected = await _count(db, MetrikaConnection, cid, MetrikaConnection.enabled.is_(True))
+        return {"metrics": [
+            _m("точек рынка", "0", "warn"),
+            _m("Яндекс.Метрика", "подключена" if connected else "нет",
+               "ok" if connected else "warn"),
+        ]}
     return {"metrics": [
-        _m("Яндекс.Метрика", "подключена" if connected else "не подключена",
-           "ok" if connected else "warn"),
+        _m("точек рынка", _n(sites)),
+        _m("чужих ЭЗС", _n(rivals), "warn" if rivals else None),
+        _m("наблюдение", last_obs or "нет", None if last_obs else "warn"),
     ]}
 
 

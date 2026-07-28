@@ -75,7 +75,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   },
   ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда' },
   marketing: {
-    mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
+    mk_position: 'Позиция', mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
     mk_operators: 'Операторы', mk_observations: 'Наблюдения',
   },
   store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),
