@@ -25,14 +25,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle,
-  Upload, Trash2, Lock, Link as LinkIcon,
+  Upload, Trash2, Lock, Link as LinkIcon, Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
   patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
-  linkContract, linkLocation,
+  linkContract, linkLocation, getProjects, getProjectKinds, startProject,
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext,
 } from '@/services/sitesService'
@@ -862,6 +862,107 @@ function LinkPicker({ label, options, onPick, pending }: {
   )
 }
 
+/**
+ * Жизненный цикл места: сколько проектов на нём было и что можно завести сейчас.
+ *
+ * Возврат из эксплуатации — НЕ откат стадии назад, а новый проект на том же
+ * объекте: старый остаётся закрытым со своей датой ввода. По ФСБУ 26/2020
+ * модернизация действующего объекта — отдельное капвложение со своей датой
+ * решения, а не продолжение прежнего.
+ */
+function ProjectLifecycleSection({ site, companyId, onDone }: {
+  site: SiteDetail; companyId: string; onDone: () => Promise<void>
+}) {
+  const [kind, setKind] = useState('retrofit')
+  const [reason, setReason] = useState('')
+  const [open, setOpen] = useState(false)
+  const projects = useQuery({
+    queryKey: ['site-projects', companyId, site.id],
+    queryFn: () => getProjects(companyId, { siteId: site.id }),
+  })
+  const kinds = useQuery({
+    queryKey: ['project-kinds', companyId],
+    queryFn: () => getProjectKinds(companyId),
+  })
+  const mStart = useMutation({
+    mutationFn: () => startProject(companyId, site.id, {
+      kind, location_id: site.locationId, reason: reason.trim() || undefined,
+    }),
+    onSuccess: async (p) => {
+      toast.success(`Заведён проект ${p.projectNo} — ${p.kindLabel}`)
+      setOpen(false); setReason('')
+      await projects.refetch(); await onDone()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось завести проект'),
+  })
+
+  const rows = projects.data ?? []
+  return (
+    <section className="rounded-lg border border-border">
+      <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <span>Проекты на этом месте</span>
+        <span className="font-mono text-muted-foreground">{rows.length}</span>
+      </div>
+      <div className="p-3 space-y-2">
+        {rows.length === 0 && <div className="text-xs text-muted-foreground">Проектов пока нет.</div>}
+        {rows.map((p) => (
+          <div key={p.id} className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-mono">{p.projectNo ?? '—'}</span>
+            <span>{p.kindLabel}</span>
+            <span className={`text-[11px] rounded border px-1.5 py-0.5 ${STAGE_META[p.stage]?.cls ?? ''}`}>
+              {p.stageLabel}
+            </span>
+            {p.commissionedOn && <span className="text-muted-foreground">введён {p.commissionedOn}</span>}
+            {p.closedReason && (
+              <span className="text-muted-foreground" title={`Решение от ${p.closedOn ?? '—'}`}>
+                · {p.closedReason}
+              </span>
+            )}
+          </div>
+        ))}
+
+        {!open ? (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" />Завести проект на этом месте
+          </Button>
+        ) : (
+          <div className="rounded-md border border-border p-2 space-y-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <Label>Тип проекта</Label>
+                <Select value={kind} onValueChange={setKind}>
+                  <SelectTrigger className="h-8 w-[220px] text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(kinds.data?.kinds ?? []).map((k) => (
+                      <SelectItem key={k.key} value={k.key} className="text-xs">{k.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Input className="h-8 text-xs flex-1 min-w-[220px]" value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Основание: что случилось и зачем новый проект" />
+              <Button size="sm" className="h-8 text-xs" disabled={mStart.isPending}
+                onClick={() => mStart.mutate()}>
+                {mStart.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Завести
+              </Button>
+              <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => setOpen(false)}>отмена</button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {kind === 'new_build'
+                ? 'Новая очередь на том же месте — отдельный проект со своей воронкой.'
+                : 'Работа с действующим объектом: старый проект остаётся закрытым, этот начинается со стадии «Решение».'}
+              {!site.locationId && kind !== 'new_build' &&
+                ' Сначала привяжите объект сети — без него такой проект не завести.'}
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export function AccountingTab({ site, companyId, onDone }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
@@ -948,6 +1049,8 @@ export function AccountingTab({ site, companyId, onDone }: {
           не должен наполняться побочным эффектом смены статуса проекта.
         </p>
       </section>
+
+      <ProjectLifecycleSection site={site} companyId={companyId} onDone={onDone} />
 
       {/* субсидия */}
       <section className="rounded-lg border border-border">

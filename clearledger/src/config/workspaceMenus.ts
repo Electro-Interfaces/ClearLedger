@@ -72,6 +72,7 @@ export const SITES_MENU: CentralMenuItem[] = [
   { key: 'sites_map',      label: 'Карта',           group: 'Этап проекта · Подбор площадки' },
   { key: 'pr_tp',          label: 'Присоединение',   group: 'Этап проекта · Реализация' },
   { key: 'pr_equipment',   label: 'Оборудование',    group: 'Этап проекта · Реализация' },
+  { key: 'pr_budget',      label: 'Бюджет портфеля', group: 'Связь с учётом' },
   { key: 'pr_accounting',  label: 'Ждёт учёта',      group: 'Связь с учётом' },
 ]
 export const SITES_KEYS = SITES_MENU.map((m) => m.key)

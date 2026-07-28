@@ -633,6 +633,72 @@ export async function deleteCost(companyId: string, id: string, costId: string):
   return del(`/api/sites/${id}/costs/${costId}?company_id=${companyId}`)
 }
 
+export interface ProjectRow {
+  id: string; siteId: string; locationId: string | null
+  kind: string; kindLabel: string
+  projectNo: string | null; title: string | null
+  stage: SiteStage; stageLabel: string; stageSince: string | null
+  closedReason: string | null; closedOn: string | null
+  ownerName: string | null; nextAction: string | null; nextActionDue: string | null
+  commissionedOn: string | null
+  site: { id: string; address: string | null; city: string | null; region: string | null } | null
+  location: { id: string; code: string; name: string } | null
+  createdAt: string | null
+}
+
+export interface CostsReport {
+  items: { kind: string; label: string; capital: boolean; plan: number; fact: number
+           variance: number; variancePct: number | null; sites: number }[]
+  capital: { plan: number; fact: number }
+  expense: { plan: number; fact: number }
+  buckets: { key: string; label: string; plan: number; fact: number }[]
+  planTotal: number; factTotal: number
+}
+
+/** Проекты одной площадки или одного объекта сети — история места и актива. */
+export async function getProjects(
+  companyId: string, params: { siteId?: string; locationId?: string; kind?: string } = {},
+): Promise<ProjectRow[]> {
+  return get<ProjectRow[]>('/api/sites/projects', {
+    company_id: companyId, site_id: params.siteId, location_id: params.locationId,
+    kind: params.kind,
+  })
+}
+
+export async function getProjectKinds(companyId: string): Promise<{
+  kinds: { key: string; label: string; hint: string; startStage: string }[]
+  closeModes: { key: string; label: string; hint: string }[]
+}> {
+  return get('/api/sites/meta/project-kinds', { company_id: companyId })
+}
+
+/** Завести на площадке новый проект (вторая очередь, модернизация, демонтаж). */
+export async function startProject(
+  companyId: string, siteId: string,
+  body: { kind: string; title?: string; location_id?: string | null; reason?: string },
+): Promise<ProjectRow> {
+  return post(`/api/sites/${siteId}/projects?company_id=${companyId}`, body)
+}
+
+/** Приостановить (`on_hold`) или отменить (`archive`) проект — с причиной. */
+export async function closeProject(
+  companyId: string, projectId: string, mode: 'on_hold' | 'archive', reason: string,
+): Promise<ProjectRow> {
+  return post(`/api/sites/projects/${projectId}/close?company_id=${companyId}`, { mode, reason })
+}
+
+/** Вернуть объект из эксплуатации в проектный контур новым проектом. */
+export async function reopenFromOperation(
+  companyId: string, locationId: string, kind: string, reason: string,
+): Promise<ProjectRow> {
+  return post(`/api/sites/projects/reopen?company_id=${companyId}`,
+    { location_id: locationId, kind, reason })
+}
+
+export async function getCostsReport(companyId: string): Promise<CostsReport> {
+  return get<CostsReport>('/api/sites/costs/report', { company_id: companyId })
+}
+
 /** Назначить (или снять, `ownerId = null`) ответственного пачкой проектов. */
 export async function bulkAssignOwner(
   companyId: string, siteIds: string[], ownerId: string | null,
