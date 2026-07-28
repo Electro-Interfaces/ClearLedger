@@ -12,6 +12,18 @@ COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 
 COPY . .
+
+# ПУСТОЙ VITE_API_URL — не «дефолт», а демо-режим: isApiEnabled() становится false,
+# фронт перестаёт спрашивать сервер и показывает заглушки (пользователь Demo, компания
+# «ООО ГИГ (ГазИнвестГрупп)» из config/companies.ts). В пространстве заказчика это
+# выглядит как чужой бренд на его домене. Так сломался v63 (28.07.2026).
+# Для контейнера значение — ORIGIN: https://<домен>. Демо-сборка возможна, но только
+# осознанно: ALLOW_DEMO=1.
+ARG ALLOW_DEMO=
+RUN test -n "$VITE_API_URL" -o -n "$ALLOW_DEMO" || { \
+      echo "ОШИБКА СБОРКИ: VITE_API_URL пуст — фронт уйдёт в демо-режим (Demo / чужая компания-заглушка)." >&2; \
+      echo "Боевая сборка: --build-arg VITE_API_URL=https://<домен>" >&2; \
+      echo "Демо намеренно:  --build-arg ALLOW_DEMO=1" >&2; exit 1; }
 RUN npm run build
 
 # ─── runtime ─────────────────────────────────────────────────────────
