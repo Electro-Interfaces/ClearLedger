@@ -272,6 +272,20 @@ async def equipment_report(
     return await ezs_project.equipment_report(db, cid)
 
 
+@router.get("/costs/report")
+async def costs_report(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Бюджет портфеля по статьям: план, факт, отклонение.
+
+    Капвложения и расходы периода разделены: у них разная судьба при отмене
+    проекта, и складывать их в одну сумму нельзя.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.costs_report(db, cid)
+
+
 @router.get("/awaiting-accounting")
 async def awaiting_accounting(
     company_id: str = Query(...),

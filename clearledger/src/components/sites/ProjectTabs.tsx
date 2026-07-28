@@ -1023,24 +1023,47 @@ function BudgetEditor({ site, companyId, ctx, onDone }: {
               <th className="text-left py-1 font-medium">Описание</th>
               <th className="text-right py-1 font-medium">План</th>
               <th className="text-right py-1 font-medium">Факт</th>
+              <th className="text-right py-1 font-medium">Отклонение</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {ctx.costs.items.map((c) => (
-              <tr key={c.id} className="border-b border-border/30">
-                <td className="py-1.5">{c.kindLabel}</td>
-                <td className="py-1.5 text-muted-foreground">{c.title ?? '—'}</td>
-                <td className="py-1.5 text-right font-mono">{c.plan != null ? nf0.format(c.plan) : '—'}</td>
-                <td className="py-1.5 text-right font-mono">{c.fact != null ? nf0.format(c.fact) : '—'}</td>
-                <td className="py-1.5 text-right">
-                  <button type="button" onClick={() => remove(c.id)}
-                    className="text-muted-foreground hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
-                </td>
-              </tr>
-            ))}
+            {ctx.costs.items.map((c) => {
+              const diff = c.fact != null && c.plan != null ? c.fact - c.plan : null
+              return (
+                <tr key={c.id} className="border-b border-border/30">
+                  <td className="py-1.5">
+                    {c.kindLabel}
+                    {/* Капвложение пойдёт в стоимость объекта (08 → 01), расход
+                        периода — нет. При отмене проекта их судьба разная. */}
+                    <span className="ml-1 text-[10px] text-muted-foreground"
+                      title={c.capital
+                        ? 'Капвложение: войдёт в стоимость объекта, при отмене проекта списывается'
+                        : 'Расход периода: в стоимость объекта не входит'}>
+                      {c.capital ? '· капвложение' : '· расход периода'}
+                    </span>
+                  </td>
+                  <td className="py-1.5 text-muted-foreground">{c.title ?? '—'}</td>
+                  <td className="py-1.5 text-right font-mono">{c.plan != null ? nf0.format(c.plan) : '—'}</td>
+                  <td className="py-1.5 text-right font-mono">{c.fact != null ? nf0.format(c.fact) : '—'}</td>
+                  <td className={`py-1.5 text-right font-mono ${diff && diff > 0 ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                    {diff != null ? `${diff > 0 ? '+' : ''}${nf0.format(diff)}` : '—'}
+                  </td>
+                  <td className="py-1.5 text-right">
+                    <button type="button" onClick={() => remove(c.id)}
+                      className="text-muted-foreground hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
+      )}
+      {ctx.costs.items.length > 0 && (
+        <div className="flex flex-wrap gap-4 text-[11px] text-muted-foreground">
+          <span>Капвложения: план {nf0.format(ctx.costs.capitalPlan ?? 0)} ₽ · факт {nf0.format(ctx.costs.capitalFact ?? 0)} ₽</span>
+          <span>Расходы периода: план {nf0.format(ctx.costs.expensePlan ?? 0)} ₽ · факт {nf0.format(ctx.costs.expenseFact ?? 0)} ₽</span>
+        </div>
       )}
       <div className="flex flex-wrap items-end gap-2">
         <div>

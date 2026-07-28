@@ -347,15 +347,24 @@ async def equipment_report(db: AsyncSession, company_id) -> dict[str, Any]:
 
 
 # ── Бюджет ─────────────────────────────────────────────────────────────────
+# `capital` — попадает ли статья в стоимость будущего объекта (счёт 08 → 01) или
+# остаётся расходом периода. Это не оформление, а развилка учёта: по ФСБУ 26/2020
+# в капвложения идёт то, что приводит объект в состояние, пригодное к
+# использованию, а управленческие расходы и потери от простоев (п. 16) — нет.
+# У отменённого проекта капитализированное списывается (Дт 91.02 Кт 08), расходы
+# периода списаны уже тогда, когда были понесены.
 COST_KINDS = [
-    {"key": "tp", "label": "Техприсоединение"},
-    {"key": "equipment", "label": "Оборудование"},
-    {"key": "smr", "label": "СМР и монтаж"},
-    {"key": "design", "label": "Проектирование"},
-    {"key": "rent", "label": "Аренда (за период стройки)"},
-    {"key": "other", "label": "Прочее"},
+    {"key": "tp", "label": "Техприсоединение", "capital": True},
+    {"key": "equipment", "label": "Оборудование", "capital": True},
+    {"key": "smr", "label": "СМР и монтаж", "capital": True},
+    {"key": "design", "label": "Проектирование", "capital": True},
+    {"key": "rent", "label": "Аренда (за период стройки)", "capital": True},
+    {"key": "survey", "label": "Изыскания и экспертизы", "capital": True},
+    {"key": "admin", "label": "Сопровождение и администрирование", "capital": False},
+    {"key": "other", "label": "Прочее", "capital": False},
 ]
 COST_LABELS = {c["key"]: c["label"] for c in COST_KINDS}
+COST_CAPITAL = {c["key"]: bool(c["capital"]) for c in COST_KINDS}
 
 
 async def list_costs(db: AsyncSession, company_id, site_id) -> dict[str, Any]:
@@ -364,14 +373,88 @@ async def list_costs(db: AsyncSession, company_id, site_id) -> dict[str, Any]:
         .order_by(EzsSiteCost.created_at))).scalars().all()
     items = [{
         "id": str(c.id), "kind": c.kind, "kindLabel": COST_LABELS.get(c.kind, c.kind),
+        "capital": COST_CAPITAL.get(c.kind, False),
         "title": c.title, "docRef": c.doc_ref, "note": c.note,
         "plan": float(c.plan_amount) if c.plan_amount is not None else None,
         "fact": float(c.fact_amount) if c.fact_amount is not None else None,
     } for c in rows]
+
+    def total(field: str, capital: bool | None = None) -> float:
+        return round(sum(i[field] or 0 for i in items
+                         if capital is None or i["capital"] is capital), 2)
+
     return {
         "items": items,
-        "planTotal": round(sum(i["plan"] or 0 for i in items), 2),
-        "factTotal": round(sum(i["fact"] or 0 for i in items), 2),
+        "planTotal": total("plan"), "factTotal": total("fact"),
+        # Разделение для моста в учёт: капитализируемое пойдёт в стоимость
+        # объекта, расходы периода — нет; при отмене проекта их судьба разная.
+        "capitalPlan": total("plan", True), "capitalFact": total("fact", True),
+        "expensePlan": total("plan", False), "expenseFact": total("fact", False),
+    }
+
+
+async def costs_report(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Бюджет портфеля: по статьям, с отклонением плана и факта.
+
+    Отдельно капвложения и расходы периода — это разные судьбы денег, и в одну
+    сумму их складывать нельзя. Отдельно — «в работе» и «отменённые»: у вторых
+    капитализированные затраты подлежат списанию, и сумма по ним отвечает на
+    вопрос «во что обошлись несостоявшиеся проекты».
+    """
+    rows = (await db.execute(text("""
+        select c.kind,
+               case when s.stage = any(:active) then 'active'
+                    when s.stage = 'on_hold' then 'on_hold' else 'closed' end as bucket,
+               count(distinct c.site_id) sites,
+               coalesce(sum(c.plan_amount), 0) plan,
+               coalesce(sum(c.fact_amount), 0) fact
+        from ezs_site_costs c join ezs_sites s on s.id = c.site_id
+        where c.company_id = :cid
+        group by 1, 2
+    """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()
+
+    by_kind: dict[str, dict[str, Any]] = {}
+    buckets = {"active": {"plan": 0.0, "fact": 0.0}, "on_hold": {"plan": 0.0, "fact": 0.0},
+               "closed": {"plan": 0.0, "fact": 0.0}}
+    for r in rows:
+        k = r["kind"]
+        item = by_kind.setdefault(k, {
+            "kind": k, "label": COST_LABELS.get(k, k), "capital": COST_CAPITAL.get(k, False),
+            "plan": 0.0, "fact": 0.0, "sites": 0,
+        })
+        item["plan"] += float(r["plan"] or 0)
+        item["fact"] += float(r["fact"] or 0)
+        item["sites"] += int(r["sites"] or 0)
+        b = buckets[r["bucket"]]
+        b["plan"] += float(r["plan"] or 0)
+        b["fact"] += float(r["fact"] or 0)
+
+    items = []
+    for it in by_kind.values():
+        it["plan"] = round(it["plan"], 2)
+        it["fact"] = round(it["fact"], 2)
+        it["variance"] = round(it["fact"] - it["plan"], 2)
+        # Процент отклонения без плана бессмыслен: делить не на что.
+        it["variancePct"] = round(it["variance"] / it["plan"] * 100, 1) if it["plan"] else None
+        items.append(it)
+    items.sort(key=lambda i: -(i["plan"] or 0))
+
+    cap = {"plan": round(sum(i["plan"] for i in items if i["capital"]), 2),
+           "fact": round(sum(i["fact"] for i in items if i["capital"]), 2)}
+    exp = {"plan": round(sum(i["plan"] for i in items if not i["capital"]), 2),
+           "fact": round(sum(i["fact"] for i in items if not i["capital"]), 2)}
+    return {
+        "items": items,
+        "capital": cap, "expense": exp,
+        "buckets": [
+            {"key": "active", "label": "В работе", **{k: round(v, 2) for k, v in buckets["active"].items()}},
+            {"key": "on_hold", "label": "Приостановлены (остаются на счёте 08)",
+             **{k: round(v, 2) for k, v in buckets["on_hold"].items()}},
+            {"key": "closed", "label": "Отменены (подлежат списанию)",
+             **{k: round(v, 2) for k, v in buckets["closed"].items()}},
+        ],
+        "planTotal": round(cap["plan"] + exp["plan"], 2),
+        "factTotal": round(cap["fact"] + exp["fact"], 2),
     }
 
 

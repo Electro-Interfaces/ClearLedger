@@ -423,6 +423,8 @@ export interface SiteEquipment {
 export interface SiteCost {
   id: string; kind: string; kindLabel: string; title: string | null
   plan: number | null; fact: number | null; docRef: string | null; note: string | null
+  /** Капвложение (счёт 08 → стоимость объекта) или расход периода. */
+  capital: boolean
 }
 
 export interface SubsidyCheck {
@@ -437,14 +439,16 @@ export interface ProjectContext {
   phases: { key: string; label: string; hint: string; stages: { stage: SiteStage; label: string }[] }[]
   techConnection: TechConnection | null
   equipment: { items: SiteEquipment[]; priceTotal: number; allSupplied: boolean; allInstalled: boolean }
-  costs: { items: SiteCost[]; planTotal: number; factTotal: number }
+  costs: { items: SiteCost[]; planTotal: number; factTotal: number
+           capitalPlan?: number; capitalFact?: number
+           expensePlan?: number; expenseFact?: number }
   subsidy: SubsidyCheck
   contract: { id: string; number: string; date: string; basis: string | null; validUntil: string | null; type: string | null } | null
   location: { id: string; name: string; code: string; status: string | null } | null
   docKinds: { key: string; label: string }[]
   tcStatuses: { key: string; label: string }[]
   eqStatuses: { key: string; label: string }[]
-  costKinds: { key: string; label: string }[]
+  costKinds: { key: string; label: string; capital?: boolean }[]
 }
 
 export interface Portfolio {
