@@ -1442,10 +1442,12 @@ async def export_funnel_xlsx(db: AsyncSession, company_id) -> bytes:
 
 async def export_matrix_xlsx(db: AsyncSession, company_id) -> bytes:
     """Приоритеты: обе оси, уверенность, решение и чего не хватает."""
-    from app.services.ezs_site_analysis import QUADRANTS, priority_matrix
+    from app.services.ezs_site_analysis import priority_matrix
 
     m = await priority_matrix(db, company_id)
-    labels = {q["key"]: q["label"] for q in QUADRANTS}
+    # Подписи квадрантов берём из самого ответа: там они уже посчитаны вместе со
+    # счётчиками, и второй источник рано или поздно с ним разойдётся.
+    labels = {q["key"]: q["label"] for q in m.get("quadrants", [])}
     rows = [[
         i["projectNo"], i["title"], i["region"], i["city"], i["address"],
         i["stageLabel"], i["attract"], i["feasible"], i["confidence"],
@@ -1466,13 +1468,11 @@ async def export_budget_xlsx(db: AsyncSession, company_id) -> bytes:
     """Бюджет портфеля: статьи с судьбой денег и корзины по состоянию проектов."""
     rep = await costs_report(db, company_id)
     rows = [[
-        i["label"], "капвложение" if i["capital"] else "расход периода",
-        i["sites"], i["plan"], i["fact"], i["fact"] - i["plan"],
-    ] for i in rep["byKind"]]
-    buckets = [[
-        {"active": "В работе", "on_hold": "Приостановлены (на счёте 08)",
-         "closed": "Отменены (подлежат списанию)"}.get(k, k), v["plan"], v["fact"],
-    ] for k, v in rep["buckets"].items()]
+        i["label"], "капвложение" if i.get("capital") else "расход периода",
+        i.get("sites"), i.get("plan"), i.get("fact"),
+        (i.get("fact") or 0) - (i.get("plan") or 0),
+    ] for i in rep["items"]]
+    buckets = [[b["label"], b["plan"], b["fact"]] for b in rep["buckets"]]
     return build_xlsx([
         {"title": "По статьям",
          "headers": ["Статья", "Судьба", "Проектов", "План, ₽", "Факт, ₽", "Отклонение, ₽"],
@@ -1485,13 +1485,24 @@ async def export_budget_xlsx(db: AsyncSession, company_id) -> bytes:
 async def export_accounting_xlsx(db: AsyncSession, company_id) -> bytes:
     """Ждёт учёта: где проект ушёл вперёд, а бухгалтерия об этом не знает."""
     rep = await awaiting_accounting(db, company_id)
-    rows = [[
-        i["projectNo"], i["title"], i["stageLabel"], i["reason"], i["hint"],
-    ] for i in rep["items"]]
+    # Расхождения приходят тремя списками по виду — в таблице это одна колонка,
+    # иначе на листе три пустых блока вместо одного читаемого перечня.
+    groups = {
+        "contractMissing": "Нет договора на землю",
+        "locationMissing": "Нет объекта сети",
+        "supplyMissing": "Оборудование не поставлено",
+    }
+    rows = []
+    for key, label in groups.items():
+        for i in rep.get(key) or []:
+            rows.append([
+                i.get("projectNo"), i.get("title") or i.get("address"),
+                i.get("stageLabel"), label, i.get("hint") or "",
+            ])
     return build_xlsx([{
         "title": "Ждёт учёта",
-        "headers": ["Проект", "Название", "Стадия", "Расхождение", "Что сделать"],
-        "rows": rows, "widths": [16, 30, 18, 40, 46],
+        "headers": ["Проект", "Название", "Стадия", "Расхождение", "Подробности"],
+        "rows": rows, "widths": [16, 30, 18, 34, 46],
     }])
 
 
