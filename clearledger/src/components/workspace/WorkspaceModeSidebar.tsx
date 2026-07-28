@@ -108,10 +108,10 @@ export function WorkspaceModeSidebar() {
     }
     return (
       <nav data-zone="Подразделы" data-zone-side className="flex flex-col gap-0.5 py-3 px-2.5 border-r border-border bg-card shrink-0 w-56 overflow-y-auto">
-        <div className="flex items-center justify-between gap-2 px-1 pb-1">
-          <span className="px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/75">
-            {section.label}
-          </span>
+        {/* Имя продукта здесь не пишем: оно уже стоит крупно в шапке слева и в
+            рельсе продуктов. Три «Проекты» подряд на одном экране — шум, из-за
+            которого не читаются собственно разделы. */}
+        <div className="flex items-center justify-end gap-2 px-1 pb-1">
           <button onClick={toggleCollapsed} title="Свернуть меню"
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors">
             <PanelLeftClose className="h-4 w-4" />
