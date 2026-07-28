@@ -35,15 +35,15 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    "finance": "/finance", "data": "/data", "info": "/info"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
-INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "chat": "service",
-                   "info": "service",
+INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin",
+                   "chat": "service",
                    "ledger": "app", "projects": "app", "ops": "app",
                    "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
                    "finance": "app"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
 INTERNAL_SORT = {"admin": 5, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "finance": 25,
-                 "chat": 30, "info": 35, "plan": 40, "conf": 50, "data": 60}
+                 "chat": 30, "plan": 40, "conf": 50, "data": 60, "info": 62}
 
 
 @router.get("/apps")
