@@ -695,6 +695,23 @@ export async function reopenFromOperation(
     { location_id: locationId, kind, reason })
 }
 
+export interface GridOperatorsReport {
+  items: {
+    operator: string; counterpartyId: string | null
+    total: number; done: number; rejected: number; overdue: number; inProgress: number
+    costSum: number; totalCostSum: number; powerSum: number
+    daysToSpecs: number | null; daysToDone: number | null
+    costPerKwt: number | null; rejectPct: number | null
+  }[]
+  substationOwners: { owner: string; count: number }[]
+  total: number; withOperator: number; hint: string | null
+}
+
+/** Присоединения в разрезе сетевой организации: сроки, стоимость, отказы. */
+export async function getTechConnectionsByOperator(companyId: string): Promise<GridOperatorsReport> {
+  return get<GridOperatorsReport>('/api/sites/tech-connections/by-operator', { company_id: companyId })
+}
+
 export async function getCostsReport(companyId: string): Promise<CostsReport> {
   return get<CostsReport>('/api/sites/costs/report', { company_id: companyId })
 }

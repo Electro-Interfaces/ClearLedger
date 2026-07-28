@@ -36,7 +36,7 @@ import {
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext,
 } from '@/services/sitesService'
-import { getContracts } from '@/services/referenceService'
+import { getContracts, getCounterparties } from '@/services/referenceService'
 import { loadLocations } from '@/services/locationService'
 
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
@@ -504,6 +504,12 @@ export function TechConnectionTab({ site, companyId, onDone }: {
   })
   const [draft, setDraft] = useState<Record<string, string | boolean>>({})
   useEffect(() => setDraft({}), [ctx.data])
+  // Справочник для подсказки по сетевой организации: разрез аналитики строится
+  // по её имени, поэтому его нужно писать одинаково.
+  const counterparties = useQuery({
+    queryKey: ['contract-counterparties', companyId],
+    queryFn: () => getCounterparties(companyId),
+  })
 
   const m = useMutation({
     mutationFn: () => saveTechConnection(companyId, site.id, draft),
@@ -554,8 +560,15 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         </div>
         <div className="md:col-span-2">
           <Label>Сетевая организация</Label>
-          <Input className="h-8 text-xs" value={val('grid_operator', tc?.gridOperator)}
+          {/* Подсказка из справочника контрагентов: одна и та же сетевая, записанная
+              пятью способами, рассыпает разрез по срокам и стоимости. Свободный ввод
+              оставлен — новую организацию заводить прямо здесь никто не запрещает. */}
+          <Input className="h-8 text-xs" list="grid-operators"
+            value={val('grid_operator', tc?.gridOperator)}
             placeholder="Россети Урал" onChange={(e) => set('grid_operator', e.target.value)} />
+          <datalist id="grid-operators">
+            {(counterparties.data ?? []).map((c) => <option key={c.id} value={c.name} />)}
+          </datalist>
         </div>
         <Field2 label="№ заявки" v={val('application_no', tc?.applicationNo)} on={(v) => set('application_no', v)} />
         <Field2 label="Дата заявки" type="date" v={val('application_date', tc?.applicationDate)} on={(v) => set('application_date', v)} />

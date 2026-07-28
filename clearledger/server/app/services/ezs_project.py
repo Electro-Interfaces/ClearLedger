@@ -222,6 +222,107 @@ async def tech_connections_report(db: AsyncSession, company_id) -> dict[str, Any
     }
 
 
+async def tech_connections_by_operator(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Присоединения в разрезе сетевой организации.
+
+    Сетевая — первый разрез этой части работы, а не подпись в карточке: процессы,
+    сроки и стоимость у разных сетевых различаются в разы, и «сколько ждать» без
+    ответа «у кого» ничего не значит. Считаем то, что определяет план проекта:
+    сколько заявок в работе, за сколько дней доходят до ТУ и до исполнения,
+    сколько стоит присоединение и как часто приходит отказ.
+
+    Отдельно — владелец подстанции и линии (графы осмотра AQ–AR): у собственных
+    сетей «Общество» присоединение идёт иначе, чем через чужую организацию.
+    """
+    rows = (await db.execute(text("""
+        select coalesce(nullif(trim(t.grid_operator), ''), '— не указана') as operator,
+               t.grid_operator_counterparty_id as counterparty_id,
+               t.status,
+               t.application_date, t.specs_date, t.due_date, t.done_date,
+               t.cost, t.total_cost, t.power_kwt,
+               s.stage
+        from ezs_tech_connections t join ezs_sites s on s.id = t.site_id
+        where t.company_id = :cid
+    """), {"cid": company_id})).mappings().all()
+
+    def days(a: str | None, b: str | None) -> int | None:
+        if not a or not b:
+            return None
+        try:
+            return (date.fromisoformat(b[:10]) - date.fromisoformat(a[:10])).days
+        except ValueError:
+            return None
+
+    def median(xs: list[int]) -> int | None:
+        if not xs:
+            return None
+        xs = sorted(xs)
+        mid = len(xs) // 2
+        return xs[mid] if len(xs) % 2 else (xs[mid - 1] + xs[mid]) // 2
+
+    today = date.today().isoformat()
+    agg: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        a = agg.setdefault(r["operator"], {
+            "operator": r["operator"],
+            "counterpartyId": str(r["counterparty_id"]) if r["counterparty_id"] else None,
+            "total": 0, "done": 0, "rejected": 0, "overdue": 0, "inProgress": 0,
+            "costSum": 0.0, "totalCostSum": 0.0, "powerSum": 0.0,
+            "_toSpecs": [], "_toDone": [],
+        })
+        a["total"] += 1
+        if r["status"] == "done":
+            a["done"] += 1
+        elif r["status"] == "rejected":
+            a["rejected"] += 1
+        elif r["status"] != "draft":
+            a["inProgress"] += 1
+        if r["due_date"] and not r["done_date"] and r["due_date"] < today \
+                and r["status"] not in ("done", "rejected"):
+            a["overdue"] += 1
+        a["costSum"] += float(r["cost"] or 0)
+        a["totalCostSum"] += float(r["total_cost"] or 0)
+        a["powerSum"] += float(r["power_kwt"] or 0)
+        d1 = days(r["application_date"], r["specs_date"])
+        if d1 is not None:
+            a["_toSpecs"].append(d1)
+        d2 = days(r["application_date"], r["done_date"])
+        if d2 is not None:
+            a["_toDone"].append(d2)
+
+    items = []
+    for a in agg.values():
+        to_specs, to_done = a.pop("_toSpecs"), a.pop("_toDone")
+        a["daysToSpecs"] = median(to_specs)
+        a["daysToDone"] = median(to_done)
+        a["costSum"] = round(a["costSum"], 2)
+        a["totalCostSum"] = round(a["totalCostSum"], 2)
+        # Стоимость на киловатт — единственная цифра, которую можно сравнивать
+        # между сетевыми: сами суммы зависят от мощности площадки.
+        a["costPerKwt"] = (round(a["totalCostSum"] / a["powerSum"], 2)
+                           if a["powerSum"] and a["totalCostSum"] else None)
+        a["rejectPct"] = round(a["rejected"] / a["total"] * 100, 1) if a["total"] else None
+        items.append(a)
+    items.sort(key=lambda i: -i["total"])
+
+    owners = [{"owner": r["owner"], "count": int(r["n"])} for r in (await db.execute(text("""
+        select coalesce(nullif(trim(substation_owner), ''), '— не указан') as owner, count(*) n
+        from ezs_tech_connections where company_id = :cid group by 1 order by 2 desc limit 15
+    """), {"cid": company_id})).mappings().all()]
+
+    named = sum(i["total"] for i in items if i["operator"] != "— не указана")
+    return {
+        "items": items,
+        "substationOwners": owners,
+        "total": sum(i["total"] for i in items),
+        "withOperator": named,
+        # Честная подпись под пустым разрезом: считать по сетевой можно только то,
+        # у чего сетевая названа.
+        "hint": ("Сетевая организация не заполнена ни в одной карточке — разрез "
+                 "появится, когда её начнут указывать." if named == 0 else None),
+    }
+
+
 # ── Оборудование проекта ───────────────────────────────────────────────────
 EQ_STATUSES = [
     {"key": "planned", "label": "Запланировано"},

@@ -10,12 +10,92 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, AlertTriangle } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
-import { getTechConnections, STAGE_META, type SiteStage } from '@/services/sitesService'
+import {
+  getTechConnections, getTechConnectionsByOperator, STAGE_META, type SiteStage,
+} from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+
+/**
+ * Разрез по сетевым организациям.
+ *
+ * Средний срок присоединения по всей сети — бесполезная величина: у разных
+ * сетевых он отличается в разы, как и стоимость. Сравнивать суммы напрямую
+ * тоже нельзя (они зависят от мощности площадки), поэтому рядом стоимость на
+ * киловатт.
+ */
+function GridOperators({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['pr-tc-operators', companyId],
+    queryFn: () => getTechConnectionsByOperator(companyId),
+  })
+  const d = q.data
+  if (!d || d.total === 0) return null
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="px-3 py-2 text-xs font-semibold border-b bg-muted/40 flex items-center justify-between">
+          <span>По сетевым организациям</span>
+          <span className="font-mono text-muted-foreground">
+            {d.withOperator} из {d.total} с названной сетевой
+          </span>
+        </div>
+        {d.hint ? (
+          <div className="p-3 text-xs text-muted-foreground">
+            {d.hint}
+            {d.substationOwners.length > 0 && (
+              <div className="mt-2">
+                По данным осмотра известен владелец подстанции:{' '}
+                {d.substationOwners.slice(0, 5).map((o) => `${o.owner} (${o.count})`).join(' · ')}
+              </div>
+            )}
+          </div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted-foreground border-b">
+                <th className="text-left px-3 py-1.5 font-medium">Сетевая организация</th>
+                <th className="text-right px-3 py-1.5 font-medium">Заявок</th>
+                <th className="text-right px-3 py-1.5 font-medium">В работе</th>
+                <th className="text-right px-3 py-1.5 font-medium">Исполнено</th>
+                <th className="text-right px-3 py-1.5 font-medium" title="Просрочен срок мероприятий">Просрочено</th>
+                <th className="text-right px-3 py-1.5 font-medium" title="Медиана дней от заявки до ТУ">До ТУ, дн</th>
+                <th className="text-right px-3 py-1.5 font-medium" title="Медиана дней от заявки до исполнения">До факта, дн</th>
+                <th className="text-right px-3 py-1.5 font-medium">₽ / кВт</th>
+                <th className="text-right px-3 py-1.5 font-medium">Отказы</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.items.map((o) => (
+                <tr key={o.operator} className="border-b border-border/30">
+                  <td className="px-3 py-1.5">{o.operator}</td>
+                  <td className="px-3 py-1.5 text-right font-mono">{o.total}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{o.inProgress}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{o.done}</td>
+                  <td className={`px-3 py-1.5 text-right font-mono ${o.overdue ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                    {o.overdue || '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{o.daysToSpecs ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{o.daysToDone ?? '—'}</td>
+                  <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                    {o.costPerKwt != null ? nf0.format(o.costPerKwt) : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                    {o.rejectPct != null && o.rejected ? `${o.rejectPct}%` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 export function TechConnectionsPanel({ companyId }: { companyId: string }) {
   const [status, setStatus] = useState('')
@@ -46,6 +126,8 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
 
       <ProjectPhaseStrip current="build"
         note="Третий этап тех же проектов. Строка ведёт в проект целиком." />
+
+      <GridOperators companyId={companyId} />
 
       {d.total === 0 ? (
         <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">

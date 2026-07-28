@@ -272,6 +272,20 @@ async def equipment_report(
     return await ezs_project.equipment_report(db, cid)
 
 
+@router.get("/tech-connections/by-operator")
+async def tech_connections_by_operator(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Присоединения по сетевым организациям: сроки, стоимость, отказы.
+
+    Сроки и цены у разных сетевых различаются в разы, поэтому «сколько ждать ТУ»
+    без ответа «у кого» — бесполезная средняя по больнице.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_project.tech_connections_by_operator(db, cid)
+
+
 @router.get("/costs/report")
 async def costs_report(
     company_id: str = Query(...),
