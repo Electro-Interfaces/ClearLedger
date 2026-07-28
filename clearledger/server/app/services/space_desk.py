@@ -28,8 +28,10 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import (AccountingDoc, App, AppCompanyLink, Channel, ChargeSession, Company,
+from app.models import (AccountingDoc, App, AppCompanyLink, CbMovementDoc, CbNomenclature,
+                        Channel, ChargeSession, Company,
                         CompanyRole, Contract, CorporateClient, Counterparty, EzsEquipmentUnit,
+                        FuelShift, FuelShiftSale, StockOnHand,
                         EzsProject, EzsSite, InfoArticle, MarketObservation, MarketSite,
                         MatrixGroupRoom, MetrikaConnection, ServiceLocation, SourceFile, User,
                         UserCompany)
@@ -60,7 +62,8 @@ async def desk_summary(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any
         "chat": await _chat(db, company_id),
         "projects": await _projects(db, company_id),
         "ops": await _ops(db, company_id),
-        "sales": await _sales(db, company_id, since),
+        "sales": await _sales(db, company_id, since, getattr(company, "profile_id", None)),
+        "shop": await _shop(db, company_id),
         "corp": await _corp(db, company_id),
         "marketing": await _marketing(db, company_id),
         "support": await _support(db, company_id),
@@ -182,7 +185,15 @@ async def _ops(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
     ]}
 
 
-async def _sales(db: AsyncSession, cid: uuid.UUID, since: datetime) -> dict[str, Any]:
+async def _sales(db: AsyncSession, cid: uuid.UUID, since: datetime,
+                 profile_id: str | None = None) -> dict[str, Any]:
+    """Продажи: у сети ЭЗС это зарядные сессии, у розницы нефтепродуктов — смены АЗС.
+
+    Продукт один и тот же, но торгуют компании разным: у ГИГ зарядных сессий нет вовсе,
+    и карточка стояла бы пустой при 23 тысячах продаж по сменам.
+    """
+    if profile_id == "fuel":
+        return await _fuel_sales(db, cid, since)
     # naive-датой лежит время МСК — сравниваем без tz, как везде в аналитике сессий.
     since_naive = since.replace(tzinfo=None)
     row = (await db.execute(
@@ -197,6 +208,45 @@ async def _sales(db: AsyncSession, cid: uuid.UUID, since: datetime) -> dict[str,
         _m(f"сессий за {WINDOW_DAYS} дн", _n(sessions)),
         _m("кВтч", _n(energy)),
         _m("выручка", _short_money(float(amount))),
+    ]}
+
+
+async def _fuel_sales(db: AsyncSession, cid: uuid.UUID, since: datetime) -> dict[str, Any]:
+    """Топливо за окно: закрытые смены, литры и выручка. Дата — у смены, не у продажи."""
+    shifts = select(FuelShift.id).where(
+        FuelShift.company_id == cid, FuelShift.closed_at >= since)
+    row = (await db.execute(
+        select(func.count(func.distinct(FuelShiftSale.shift_id)),
+               func.coalesce(func.sum(FuelShiftSale.liters), 0),
+               func.coalesce(func.sum(FuelShiftSale.amount), 0))
+        .where(FuelShiftSale.company_id == cid, FuelShiftSale.shift_id.in_(shifts))
+    )).first()
+    shift_count, liters, amount = (row or (0, 0, 0))
+    if not shift_count:
+        return {"metrics": []}
+    return {"metrics": [
+        _m(f"смен за {WINDOW_DAYS} дн", _n(shift_count)),
+        _m("литров", _n(liters)),
+        _m("выручка", _short_money(float(amount))),
+    ]}
+
+
+async def _shop(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
+    """Магазин: сопутка и общепит. Товарный контур живёт остатками и движением, а не
+    окном в 30 дней — документы приходят из ЦБ пачками, и «за месяц» врало бы в дни
+    между выгрузками."""
+    items = await _count(db, CbNomenclature, cid)
+    if not items:
+        return {"metrics": []}
+    stock = (await db.execute(
+        select(func.coalesce(func.sum(StockOnHand.quantity * StockOnHand.retail_price), 0))
+        .where(StockOnHand.company_id == cid)
+    )).scalar() or 0
+    docs = await _count(db, CbMovementDoc, cid)
+    return {"metrics": [
+        _m("позиций в номенклатуре", _n(items)),
+        _m("остаток в ценах продажи", _short_money(float(stock))),
+        _m("документов движения", _n(docs)),
     ]}
 
 
