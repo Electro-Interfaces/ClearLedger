@@ -16,7 +16,7 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import EzsSite, User
 from app.services import (
-    ezs_checklist, ezs_project, ezs_site_analysis, ezs_site_work, ezs_sites,
+    ezs_checklist, ezs_lifecycle, ezs_project, ezs_site_analysis, ezs_site_work, ezs_sites,
 )
 
 router = APIRouter(prefix="/sites", tags=["Площадки ЭЗС (Банк ЗУ)"])
@@ -82,6 +82,86 @@ async def list_gates(user: User = Depends(get_current_user)):
                     "items": ezs_site_work.GATES.get(s, [])}
                    for s in ezs_sites.ALL_STAGES],
     }
+
+
+@router.get("/meta/project-kinds")
+async def project_kinds(user: User = Depends(get_current_user)):
+    """Типы проектов и режимы закрытия — для форм заведения и остановки."""
+    return {"kinds": ezs_lifecycle.PROJECT_KINDS, "closeModes": ezs_lifecycle.CLOSE_MODES}
+
+
+@router.get("/projects")
+async def list_projects(
+    company_id: str = Query(...),
+    site_id: uuid.UUID | None = Query(None, description="проекты одной площадки"),
+    location_id: str | None = Query(None, description="проекты одного объекта сети"),
+    kind: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """История места или актива: сколько проектов на нём было и чем кончились."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_lifecycle.list_projects(
+        db, cid, site_id=site_id, location_id=location_id, kind=kind)
+
+
+@router.post("/{site_id}/projects", status_code=201)
+async def start_project(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Завести на площадке новый проект (вторая очередь, модернизация, демонтаж)."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_lifecycle.start_project(
+        db, cid, site=site, kind=str(payload.get("kind") or "new_build"),
+        title=payload.get("title"), location_id=payload.get("location_id"),
+        reason=payload.get("reason"), user=user)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("message", "Не удалось завести проект"))
+    await db.commit()
+    return res["project"]
+
+
+@router.post("/projects/{project_id}/close")
+async def close_project(
+    project_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Приостановить или отменить проект.
+
+    Разные вещи: приостановка держит капвложения на счёте 08, отмена без
+    перспектив возобновления — основание списать их в периоде решения.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    from app.models import EzsProject
+    p = (await db.execute(select(EzsProject).where(
+        EzsProject.company_id == cid, EzsProject.id == project_id))).scalar_one_or_none()
+    if p is None:
+        raise HTTPException(404, "Проект не найден")
+    res = await ezs_lifecycle.close_project(
+        db, cid, p, mode=str(payload.get("mode") or ""), reason=str(payload.get("reason") or ""),
+        user=user)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("message", "Не удалось закрыть проект"))
+    await db.commit()
+    return res["project"]
+
+
+@router.post("/projects/reopen")
+async def reopen_from_operation(
+    payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Вернуть объект из эксплуатации в проектный контур новым проектом."""
+    cid = await assert_company_member(company_id, user, db)
+    res = await ezs_lifecycle.reopen_from_operation(
+        db, cid, str(payload.get("location_id") or ""),
+        kind=str(payload.get("kind") or "retrofit"),
+        reason=str(payload.get("reason") or ""), user=user)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("message", "Не удалось вернуть объект в проекты"))
+    await db.commit()
+    return res["project"]
 
 
 @router.get("/meta/checklist")

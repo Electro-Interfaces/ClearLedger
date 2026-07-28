@@ -940,6 +940,60 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.27: три сущности вместо одной — площадка (место) / проект (временное
+        # предприятие) / объект сети (актив). Таблицу `ezs_projects` создаёт
+        # create_all; здесь чиним типы и заводим по проекту на каждую площадку,
+        # чтобы ничего не потерялось при переходе.
+        for stmt in (
+            # `service_locations.id` — строковый nanoid: колонка UUID делала связь
+            # проекта с объектом физически невозможной (значений 0, приведение
+            # безопасно).
+            "ALTER TABLE ezs_sites ALTER COLUMN location_id TYPE VARCHAR(40) "
+            "USING location_id::text",
+            # Проект на каждую существующую площадку: номер, стадия и ведение
+            # переезжают как есть, тип — новое строительство.
+            """
+            INSERT INTO ezs_projects (
+                id, company_id, site_id, location_id, kind, project_no, title,
+                stage, stage_since, prev_stage, owner_user_id, next_action,
+                next_action_due, last_touch_at, hold_until, gates, commissioned_on,
+                contract_id, created_at, updated_at)
+            SELECT gen_random_uuid(), s.company_id, s.id, s.location_id, 'new_build',
+                   s.project_no, s.title, s.stage, s.stage_since, s.prev_stage,
+                   s.owner_user_id, s.next_action, s.next_action_due, s.last_touch_at,
+                   s.hold_until, s.gates, s.commissioned_on, s.contract_id,
+                   COALESCE(s.created_at, now()), s.updated_at
+            FROM ezs_sites s
+            WHERE NOT EXISTS (SELECT 1 FROM ezs_projects p WHERE p.site_id = s.id)
+            """,
+            # Спутники проекта знают свой проект: пока связь идёт через площадку,
+            # второй проект на том же месте склеился бы с первым.
+            "ALTER TABLE ezs_site_docs ADD COLUMN IF NOT EXISTS project_id UUID "
+            "REFERENCES ezs_projects(id) ON DELETE CASCADE",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS project_id UUID "
+            "REFERENCES ezs_projects(id) ON DELETE CASCADE",
+            "ALTER TABLE ezs_site_equipment ADD COLUMN IF NOT EXISTS project_id UUID "
+            "REFERENCES ezs_projects(id) ON DELETE CASCADE",
+            "ALTER TABLE ezs_site_costs ADD COLUMN IF NOT EXISTS project_id UUID "
+            "REFERENCES ezs_projects(id) ON DELETE CASCADE",
+            "ALTER TABLE ezs_site_events ADD COLUMN IF NOT EXISTS project_id UUID "
+            "REFERENCES ezs_projects(id) ON DELETE CASCADE",
+            # Существующие спутники относятся к первому (единственному) проекту площадки.
+            "UPDATE ezs_site_docs d SET project_id = p.id FROM ezs_projects p "
+            "WHERE p.site_id = d.site_id AND d.project_id IS NULL",
+            "UPDATE ezs_tech_connections t SET project_id = p.id FROM ezs_projects p "
+            "WHERE p.site_id = t.site_id AND t.project_id IS NULL",
+            "UPDATE ezs_site_equipment e SET project_id = p.id FROM ezs_projects p "
+            "WHERE p.site_id = e.site_id AND e.project_id IS NULL",
+            "UPDATE ezs_site_costs c SET project_id = p.id FROM ezs_projects p "
+            "WHERE p.site_id = c.site_id AND c.project_id IS NULL",
+            "UPDATE ezs_site_events ev SET project_id = p.id FROM ezs_projects p "
+            "WHERE p.site_id = ev.site_id AND ev.project_id IS NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ezs_project_no "
+            "ON ezs_projects (company_id, project_no) WHERE project_no IS NOT NULL",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

@@ -3981,8 +3981,12 @@ class EzsSite(Base):
     subsidy_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     commissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # дата ввода
     # ── замыкание цикла: построенная площадка = объект сети + договор в учёте ──
-    location_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    # ⚠ `service_locations.id` — строковый nanoid, а не UUID. Колонка была объявлена
+    # UUID, и связь физически не записывалась: `link_location` падал на типе, а
+    # обязательный пункт регламента 8.8 «Объект заведён в реестре сети» закрыть
+    # было нечем. Тип исправлен миграцией v2.27.
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
     # Договор на землю в учёте. Через contract_locations связать нельзя: там ключ
     # на станцию, которой у проекта ещё нет.
     contract_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -4001,6 +4005,66 @@ class EzsSite(Base):
     )
 
 
+class EzsProject(Base):
+    """Проект на площадке — временное предприятие с началом и концом.
+
+    Разделение трёх сущностей (решение 28.07.2026): **площадка** (`ezs_sites`)
+    это место и живёт всегда; **проект** — то, что на ней делают, и он
+    закрывается; **объект** (`service_locations`) — актив, который переживает
+    свои проекты и принимает новые.
+
+    Зачем: пока проект был той же строкой, что и площадка, станцию нельзя было
+    вернуть из эксплуатации на доработку — только откатить стадию назад, стирая
+    историю ввода. По ФСБУ 26/2020 модернизация действующего объекта — это новое
+    капвложение со своей датой решения, а не продолжение старого; по FERC замена
+    узла = списание старой единицы плюс капитализация новой. Поэтому ретрофит,
+    релокация и демонтаж — НОВЫЙ проект со ссылкой на тот же объект.
+
+    Первый проект площадки создаётся из неё самой (миграция v2.27 завела по
+    проекту на каждую существующую запись), поэтому `site_id` обязателен, а
+    `location_id` появляется при вводе в эксплуатацию.
+    """
+    __tablename__ = "ezs_projects"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Объект сети: у стройки появляется в конце, у ретрофита известен с начала.
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    # new_build | retrofit | relocation | decommission
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="new_build")
+    project_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="lead")
+    stage_since: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    prev_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Причина, по которой проект остановлен. Для «отменён» это основание списания
+    # капвложений (Дт 91.02 Кт 08), поэтому дату решения храним отдельно.
+    closed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    next_action: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    next_action_due: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    last_touch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hold_until: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    gates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    commissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_ezs_project_company_stage", "company_id", "stage"),
+        Index("ix_ezs_project_site", "site_id"),
+        Index("ix_ezs_project_location", "location_id"),
+    )
+
+
 class EzsSiteEvent(Base):
     """Событие площадки: смена стадии, касание, заметка, правка, импорт.
 
@@ -4015,6 +4079,10 @@ class EzsSiteEvent(Base):
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     site_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Проект, к которому относится запись. Через площадку связывать нельзя:
+    # второй проект на том же месте (ретрофит) склеился бы с первым.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_projects.id", ondelete="CASCADE"), nullable=True, index=True)
     # stage | touch | note | edit | import | gate
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="note")
     from_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
@@ -4044,6 +4112,10 @@ class EzsSiteDoc(Base):
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     site_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Проект, к которому относится запись. Через площадку связывать нельзя:
+    # второй проект на том же месте (ретрофит) склеился бы с первым.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_projects.id", ondelete="CASCADE"), nullable=True, index=True)
     file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="SET NULL"), nullable=True)
     # egrn | site_plan | photo | offer | contract | tu | tp_contract | project | act_mount | act | other
@@ -4074,6 +4146,10 @@ class EzsTechConnection(Base):
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     site_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Проект, к которому относится запись. Через площадку связывать нельзя:
+    # второй проект на том же месте (ретрофит) склеился бы с первым.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_projects.id", ondelete="CASCADE"), nullable=True, index=True)
     # draft | applied | specs (ТУ получены) | contract | in_progress | done | rejected
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
     grid_operator: Mapped[str | None] = mapped_column(String(300), nullable=True)  # сетевая организация
@@ -4133,6 +4209,10 @@ class EzsSiteEquipment(Base):
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     site_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Проект, к которому относится запись. Через площадку связывать нельзя:
+    # второй проект на том же месте (ретрофит) склеился бы с первым.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_projects.id", ondelete="CASCADE"), nullable=True, index=True)
     # planned | ordered | supplied | installed | cancelled
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="planned")
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)      # что именно
@@ -4169,6 +4249,10 @@ class EzsSiteCost(Base):
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     site_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Проект, к которому относится запись. Через площадку связывать нельзя:
+    # второй проект на том же месте (ретрофит) склеился бы с первым.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_projects.id", ondelete="CASCADE"), nullable=True, index=True)
     # tp | equipment | smr | design | rent | other
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)

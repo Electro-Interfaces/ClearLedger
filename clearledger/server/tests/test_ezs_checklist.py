@@ -134,3 +134,19 @@ def test_разбор_значений_из_файла():
     # «для электромобилей» — не «нет»: это невыясненное значение.
     assert _bool("для электромобилей") is None
     assert _bool("?") is None
+
+
+def test_типы_проектов_согласованы():
+    from app.services.ezs_lifecycle import (
+        CLOSE_MODES, KIND_LABELS, KIND_START_STAGE, PROJECT_KINDS,
+    )
+    # Возврат из эксплуатации начинается с решения, а не с подбора площадки:
+    # место уже выбрано в прошлой жизни объекта.
+    for k in PROJECT_KINDS:
+        assert k["startStage"] in ALL_STAGES, k["key"]
+        assert KIND_LABELS[k["key"]] == k["label"]
+    assert KIND_START_STAGE["new_build"] == "lead"
+    for kind in ("retrofit", "relocation", "decommission"):
+        assert KIND_START_STAGE[kind] == "decision", kind
+    # Приостановка и отмена — разные режимы: у них разные последствия для счёта 08.
+    assert {m["key"] for m in CLOSE_MODES} == {"on_hold", "archive"}
