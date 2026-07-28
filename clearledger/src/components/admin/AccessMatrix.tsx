@@ -23,6 +23,7 @@ import { Check, ChevronDown, ChevronRight, Loader2, ShieldCheck, Table2 } from '
 import * as roleService from '@/services/roleService'
 import type { CompanyRole } from '@/services/roleService'
 import { useAccessTree } from '@/hooks/useAccessTree'
+import { toggleAccessKey } from '@/lib/accessKeys'
 
 /** Набор ключей роли → правки. null = полный доступ (отмечено всё, менять нечего). */
 type Draft = Record<string, string[] | null>
@@ -54,16 +55,7 @@ export function AccessMatrix({ companyId, roles, canManage }: {
       // Полный доступ правится только через карточку роли: снятие одной галочки
       // превратило бы «все модули» в длинный явный список — это не то, чего ждут.
       if (cur === null) return d
-      const set = new Set(cur)
-      if (set.has(key)) {
-        set.delete(key)
-        if (key === app) for (const k of [...set]) if (k.startsWith(`${app}:`)) set.delete(k)
-      } else {
-        set.add(key)
-        // Отметили продукт целиком — частные разделы избыточны, чистим шум.
-        if (key === app) for (const k of [...set]) if (k.startsWith(`${app}:`)) set.delete(k)
-      }
-      return { ...d, [role.id]: [...set] }
+      return { ...d, [role.id]: toggleAccessKey(cur, key, app) }
     })
   }
 

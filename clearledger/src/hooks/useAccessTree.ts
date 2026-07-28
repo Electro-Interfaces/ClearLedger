@@ -14,7 +14,11 @@ import { productModules } from '@/config/productAccess'
 import { ACCESS_MODULES } from '@/config/accessModules'
 
 export interface AccessGroup { name: string; modules: { key: string; code: string; name: string }[] }
-export interface AccessApp { app: string; name: string; groups: AccessGroup[]; count: number }
+export interface AccessApp {
+  app: string; name: string; groups: AccessGroup[]; count: number
+  /** Имя значка из реестра (`eco_apps.icon`) — продукты показываются значками в матрице. */
+  icon?: string
+}
 
 export function useAccessTree(companyId: string) {
   const q = useQuery({
@@ -43,7 +47,10 @@ export function useAccessTree(companyId: string) {
       } else {
         for (const m of app.modules) push('Разделы', m)
       }
-      return { app: app.app, name: app.name, groups, count: groups.reduce((s, g) => s + g.modules.length, 0) }
+      return {
+        app: app.app, name: app.name, icon: app.icon, groups,
+        count: groups.reduce((s, g) => s + g.modules.length, 0),
+      }
     })
   }, [q.data, q.isLoading])
   return { tree, isLoading: q.isLoading }
