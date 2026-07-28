@@ -249,7 +249,6 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
     { key: 'drop', pos: 'left-2 bottom-2', cls: 'text-red-600 dark:text-red-400' },
     { key: 'option', pos: 'right-2 bottom-2 text-right', cls: 'text-sky-600 dark:text-sky-400' },
   ]
-  const open = clusters.find((c) => c.key === openCluster)
 
   return (
     <div className="flex gap-2">
@@ -291,21 +290,48 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
             const it = c.items[0]
             const size = many ? 20 : 9 + (it.confidence / 100) * 6
             const active = openCluster === c.key
+            // Список открывается вплотную к точке. Уводить его вниз под карту
+            // нельзя: выбор уезжает за экран, и до него надо ещё доскроллить.
+            // У края поля разворачиваем в другую сторону, иначе он обрежется.
+            const toLeft = c.x > 62
+            const toDown = c.y > 62
             return (
-              <button key={c.key} type="button"
-                onClick={() => (many ? setOpenCluster(active ? null : c.key) : onPick(it.id))}
-                title={many
-                  ? `${c.items.length} проекта в одной точке — нажмите, чтобы выбрать`
-                  : `${it.projectNo ?? ''} ${it.city ?? it.region ?? ''} — привлекательность ${it.attract}, исполнимость ${it.feasible}, уверенность ${it.confidence}%`}
-                className={`absolute flex items-center justify-center rounded-full ring-1 ring-background transition-transform hover:z-10 hover:scale-125
-                  ${QUADRANT_META[it.quadrant].dot} ${active ? 'z-20 ring-2 ring-primary scale-110' : ''}`}
-                style={{
-                  left: `calc(${c.x}% - ${size / 2}px)`,
-                  bottom: `calc(${c.y}% - ${size / 2}px)`,
-                  width: size, height: size,
-                }}>
-                {many && <span className="text-[11px] font-semibold text-white">{c.items.length}</span>}
-              </button>
+              <div key={c.key} className={`absolute ${active ? 'z-30' : ''}`}
+                style={{ left: `${c.x}%`, bottom: `${c.y}%` }}>
+                <button type="button"
+                  onClick={() => (many ? setOpenCluster(active ? null : c.key) : onPick(it.id))}
+                  title={many
+                    ? `${c.items.length} проекта в одной точке — нажмите, чтобы выбрать`
+                    : `${it.projectNo ?? ''} ${it.city ?? it.region ?? ''} — привлекательность ${it.attract}, исполнимость ${it.feasible}, уверенность ${it.confidence}%`}
+                  className={`absolute flex items-center justify-center rounded-full ring-1 ring-background transition-transform hover:z-10 hover:scale-125
+                    ${QUADRANT_META[it.quadrant].dot} ${active ? 'ring-2 ring-primary scale-110' : ''}`}
+                  style={{ left: -size / 2, bottom: -size / 2, width: size, height: size }}>
+                  {many && <span className="text-[11px] font-semibold text-white">{c.items.length}</span>}
+                </button>
+
+                {active && many && (
+                  <div className="absolute w-[230px] rounded-md border border-primary/50 bg-popover p-2 shadow-lg"
+                    style={{
+                      [toLeft ? 'right' : 'left']: 14,
+                      [toDown ? 'top' : 'bottom']: 14,
+                    } as React.CSSProperties}>
+                    <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>привл. {it.attract} · исполн. {it.feasible}</span>
+                      <button type="button" className="ml-auto hover:text-foreground"
+                        onClick={() => setOpenCluster(null)} aria-label="Закрыть">✕</button>
+                    </div>
+                    <div className="max-h-40 space-y-0.5 overflow-y-auto">
+                      {c.items.map((p) => (
+                        <button key={p.id} type="button" onClick={() => onPick(p.id)}
+                          className="block w-full truncate rounded px-1.5 py-1 text-left text-xs hover:bg-muted">
+                          <span className="font-mono">{p.projectNo ?? '—'}</span>
+                          <span className="text-muted-foreground"> · {p.city ?? p.region ?? '—'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )
           })}
         </div>
@@ -322,28 +348,6 @@ function MatrixPlot({ items, onPick }: { items: MatrixItem[]; onPick: (id: strin
           <span>исполнимость: мощность, деньги, право →</span>
         </div>
 
-        {/* Разобранный кластер: из него и выбирают конкретный проект. */}
-        {open && (
-          <div className="mt-2 rounded-md border border-primary/40 bg-primary/5 p-2">
-            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
-              <span>
-                {open.items.length} проекта с одинаковой оценкой
-                (привлекательность {open.items[0].attract}, исполнимость {open.items[0].feasible})
-              </span>
-              <button type="button" className="ml-auto hover:text-foreground"
-                onClick={() => setOpenCluster(null)}>свернуть</button>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {open.items.map((it) => (
-                <button key={it.id} type="button" onClick={() => onPick(it.id)}
-                  className="rounded border border-border bg-background px-2 py-1 text-xs hover:border-primary/60">
-                  <span className="font-mono">{it.projectNo ?? '—'}</span>
-                  <span className="text-muted-foreground"> · {it.city ?? it.region ?? '—'}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )

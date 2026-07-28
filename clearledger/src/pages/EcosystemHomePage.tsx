@@ -27,6 +27,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, hasSideButton, type SsoApp } from '@/services/ssoService'
+import { PRODUCT_READINESS, READINESS_LABEL, type Readiness } from '@/config/spaceProducts'
 
 /** База сборки SPA (`/ClearLedger/`) — новая вкладка открывается по полному адресу. */
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -83,16 +84,23 @@ const DOT_CLASS: Record<Readiness, string> = {
  * длинное). Если чьё-то окажется длиннее — перенесётся на вторую строку, но останется
  * читаемым, а не спрячется за многоточием.
  */
-function Tile({ title, subtitle, icon: Icon, badge, busy, onClick }: TileProps) {
+function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, onClick }: TileProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={busy}
-      title={[title, subtitle, badge].filter(Boolean).join(' · ')}
-      className="group flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left
+      title={[title, subtitle, badge, readiness && READINESS_LABEL[readiness]]
+        .filter(Boolean).join(' · ')}
+      className="group relative flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left
                  transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60"
     >
+      {/* Готовность продукта — точка в углу. Расшифровка в подсказке плитки: цвет
+          читается с одного взгляда, слова нужны только при первом знакомстве. */}
+      {readiness && (
+        <span aria-hidden="true"
+          className={`absolute right-2 top-2 size-2 rounded-full ${DOT_CLASS[readiness]}`} />
+      )}
       <span className="shrink-0 rounded-lg bg-primary/10 p-2 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
         {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
       </span>
@@ -190,6 +198,7 @@ export function EcosystemHomePage() {
         icon={ICONS[a.icon] ?? LayoutGrid}
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
         busy={busy === a.code}
+        readiness={PRODUCT_READINESS[a.code]}
         onClick={() => openProduct(a)}
       />
     )

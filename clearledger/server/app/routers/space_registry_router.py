@@ -23,7 +23,8 @@ from app.database import get_db
 from app.models import App, AppCompanyLink, Company, User, UserCompany
 from app.services import space_map as space_map_service
 from app.services import (
-    space_connectors, space_data_model, space_links, space_projection, space_registry,
+    space_connectors, space_data_model, space_desk, space_links, space_projection,
+    space_registry,
 )
 
 router = APIRouter(prefix="/registry", tags=["ElsyPlus Core — реестр объектов"])
@@ -189,6 +190,20 @@ async def space_map(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Нужны права администратора компании")
         cids = list(rows)
     return await space_map_service.space_map(db, cids)
+
+
+@router.get("/desk")
+async def desk(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Показатели продуктов для рабочего стола: что живёт за каждой плиткой.
+
+    Читает любой член компании — стол видят все, и цифры те же, что человек и так
+    увидит внутри продукта; какие плитки ему показать, решает каталог `/api/sso/apps`.
+    """
+    cid = await _member(company_id, user, db)
+    return await space_desk.desk_summary(db, cid)
 
 
 @router.get("/organizations")
