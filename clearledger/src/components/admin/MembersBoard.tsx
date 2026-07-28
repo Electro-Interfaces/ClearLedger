@@ -31,8 +31,8 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import {
-  Building2, Check, ChevronDown, ChevronRight, Circle, KeyRound, LifeBuoy, Loader2,
-  Minus, Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, X,
+  Building2, Check, ChevronDown, ChevronRight, KeyRound, LifeBuoy, Loader2,
+  Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, X,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
@@ -48,6 +48,10 @@ import { PartyBadge } from '@/components/chat/PartyBadge'
 
 /** Столбцы одного слоя: значки продуктов, отделённые от соседнего слоя чертой. */
 interface ColumnGroup { key: string; label: string; apps: AccessApp[] }
+
+/** Ширина блока клеток: клетка 32px + по 4px отступа с каждой стороны группы. */
+const colsWidth = (groups: ColumnGroup[]) =>
+  groups.reduce((w, g) => w + g.apps.length * 32 + 8, 0)
 
 export function MembersBoard({
   companyId, canManage, selfId, party = 'internal', toolbar,
@@ -158,6 +162,19 @@ export function MembersBoard({
     setKeys(u, toggleAccessKey(base, key, app))
   }
 
+  // Роль назначается сразу, без черновика: это готовый набор целиком, а не правка
+  // отдельных клеток — копить тут нечего.
+  const setRole = useMutation({
+    mutationFn: ({ id, roleId }: { id: string; roleId: string }) =>
+      userService.setMemberAccess(id, companyId, { mode: 'role', roleId }),
+    onSuccess: (_data, v) => {
+      toast.success('Роль назначена')
+      setDraft((d) => { const n = { ...d }; delete n[v.id]; return n })
+      refresh()
+    },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+
   const save = async () => {
     setSaving(true)
     try {
@@ -200,6 +217,36 @@ export function MembersBoard({
           )}
           {toolbar}
         </div>
+      </div>
+
+      {/* Без этой строки матрица читается как отчёт: клетки выглядят одинаково
+          «нарисованными», и неочевидно, что они кликаются, а разделы лежат глубже. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-[4px] border border-primary bg-primary text-primary-foreground">
+            <Check className="h-2.5 w-2.5" strokeWidth={3} />
+          </span>
+          продукт целиком
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-[4px] border border-primary/70 bg-primary/20">
+            <span className="h-1 w-1 rounded-full bg-primary" />
+          </span>
+          часть разделов
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-4 w-4 rounded-[4px] border border-dashed border-muted-foreground/40" />
+          нет доступа
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-flex h-4 w-4 items-center justify-center rounded-[4px] border border-primary/30 bg-primary/10 text-primary/50">
+            <Check className="h-2.5 w-2.5" />
+          </span>
+          доступ не настроен — открыто всё
+        </span>
+        <span className="text-muted-foreground/80">
+          Клетка переключается нажатием. Разделы внутри продукта — стрелка слева или колонка «Права».
+        </span>
       </div>
 
       <div className="rounded-xl border border-border">
@@ -260,7 +307,8 @@ export function MembersBoard({
                 {expanded[u.id] && (
                   <MemberAccessPanel
                     u={u} companyId={companyId} keys={effective(u)} full={isFullByRole(u)}
-                    locked={locked(u)} apps={tree}
+                    locked={locked(u)} apps={tree} roles={roles}
+                    onRole={(roleId) => setRole.mutate({ id: u.id, roleId })}
                     onToggle={(key, app) => toggle(u, key, app)}
                     onSetAll={() => setKeys(u, null)}
                     onSetNone={() => setKeys(u, [])}
@@ -279,10 +327,7 @@ export function MembersBoard({
           ? `Внешних участников: ${members.length} из ${groups?.length ?? 0} компаний`
           : `Сотрудников: ${members.length}`}
         {filtered.length !== members.length ? ` · показано ${filtered.length}` : ''}
-        {' · '}<Check className="inline h-3 w-3 text-primary" /> продукт целиком
-        {' · '}<Circle className="inline h-2.5 w-2.5 fill-primary/60 text-primary/60" /> отдельные разделы
-        {' · '}<Minus className="inline h-3 w-3" /> нет доступа
-        {' · администратор организации видит всё'}
+        {' · администратор организации видит все продукты — ограничить его можно, переведя в «Сотрудники» в карточке'}
       </p>
 
       <Sheet open={!!card} onOpenChange={(o) => { if (!o) setCardFor(null) }}>
@@ -392,29 +437,50 @@ function MemberRow({
         )}
       </span>
 
-      <span className="flex shrink-0 items-center">
-        {groups.map((g) => (
-          <span key={g.key} className="flex border-l border-border/40 px-1 first:border-l-0">
-            {g.apps.map((a) => (
-              <AppCell key={a.app} state={appState(keys, a.app)} name={a.name}
-                locked={locked || full} onClick={() => onToggleApp(a.app)} />
-            ))}
-          </span>
-        ))}
-      </span>
+      {/* У администратора все клетки всегда отмечены — ряд одинаковых галочек выглядел
+          так, будто ему что-то раздали вручную, и путался с настраиваемым доступом.
+          Вместо ряда — одна плашка на ту же ширину. */}
+      {full ? (
+        <span className="flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-dashed border-primary/25 bg-primary/5 py-1 text-[11px] text-muted-foreground"
+          style={{ width: colsWidth(groups) }}>
+          <ShieldCheck className="h-3.5 w-3.5 text-primary/70" />
+          {u.is_superadmin ? 'владелец контейнера — полный доступ' : 'администратор — полный доступ'}
+        </span>
+      ) : (
+        <span className="flex shrink-0 items-center">
+          {groups.map((g) => (
+            <span key={g.key} className="flex border-l border-border/40 px-1 first:border-l-0">
+              {g.apps.map((a) => (
+                <AppCell key={a.app} state={appState(keys, a.app)} name={a.name}
+                  locked={locked} implicit={keys === null} onClick={() => onToggleApp(a.app)} />
+              ))}
+            </span>
+          ))}
+        </span>
+      )}
 
-      <span className="hidden w-[132px] shrink-0 lg:block">
-        {full
-          ? <span className="text-[11px] text-muted-foreground">все продукты</span>
-          : u.role_name
-            ? <Badge className="gap-1 text-[10px]"><KeyRound className="h-3 w-3" />{u.role_name}</Badge>
-            : keys === null
-              ? <span className="text-[11px] text-muted-foreground">все продукты</span>
-              : keys.length === 0
-                ? <span className="text-[11px] text-destructive/80">нет доступа</span>
-                : <span className="text-[11px] text-muted-foreground">
-                    свой набор · {keys.filter((k) => !k.includes(':')).length}/{keys.filter((k) => k.includes(':')).length}
-                  </span>}
+      {/* Права — не подпись, а вход в настройку: сам текст раскрывает разделы, потому
+          что стрелку слева в строке из полутора десятков клеток никто не замечает. */}
+      <span className="hidden w-[150px] shrink-0 lg:block">
+        {full ? (
+          <span className="text-[11px] text-muted-foreground">все продукты и разделы</span>
+        ) : (
+          <button type="button" onClick={onExpand}
+            className="flex items-center gap-1 rounded px-1 py-0.5 text-left text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+            title="Открыть разделы внутри продуктов">
+            {u.role_name
+              ? <Badge className="gap-1 text-[10px]"><KeyRound className="h-3 w-3" />{u.role_name}</Badge>
+              : keys === null
+                ? <span className="text-amber-500/90">не настроен</span>
+                : keys.length === 0
+                  ? <span className="text-destructive/80">нет доступа</span>
+                  : <span>
+                      продуктов: {keys.filter((k) => !k.includes(':')).length}
+                      {keys.some((k) => k.includes(':')) ? ` · разделов: ${keys.filter((k) => k.includes(':')).length}` : ''}
+                    </span>}
+            {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+          </button>
+        )}
       </span>
 
       <span className="w-[92px] shrink-0 text-right">
@@ -433,23 +499,33 @@ function MemberRow({
   )
 }
 
-function AppCell({ state, name, locked, onClick }: {
+/**
+ * Клетка доступа. Состояния должны различаться ИЗДАЛЕКА, иначе строка из полутора
+ * десятков клеток читается как один узор: залитый квадрат — весь продукт, точка на
+ * бледном фоне — часть разделов, пустой пунктир — доступа нет.
+ */
+function AppCell({ state, name, locked, implicit, onClick }: {
   state: AppAccess; name: string; locked: boolean; onClick: () => void
+  /** Доступ никто не настраивал: прав нет — значит открыто всё. Не то же, что выдали. */
+  implicit?: boolean
 }) {
   const title = locked
-    ? `${name} — правится в карточке`
-    : state === 'full' ? `${name}: продукт целиком — снять`
-      : state === 'part' ? `${name}: отдельные разделы — открыть весь продукт`
-        : `${name}: нет доступа — открыть`
+    ? `${name} — полный доступ администратора`
+    : implicit ? `${name}: доступ не настроен, поэтому открыт. Нажмите, чтобы оставить только нужные продукты`
+      : state === 'full' ? `${name}: открыт весь продукт. Нажмите, чтобы закрыть`
+        : state === 'part' ? `${name}: открыты отдельные разделы. Нажмите, чтобы открыть продукт целиком`
+          : `${name}: доступа нет. Нажмите, чтобы открыть`
   return (
     <span className="flex w-8 justify-center">
       <button type="button" onClick={onClick} disabled={locked} title={title}
-        className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-colors ${
-          state === 'none' ? 'border-border' : 'border-primary/50 bg-primary/15'
-        } ${locked ? 'cursor-default opacity-60' : 'cursor-pointer hover:border-primary/60'}`}>
-        {state === 'full' && <Check className="h-3.5 w-3.5 text-primary" />}
-        {state === 'part' && <Circle className="h-2.5 w-2.5 fill-primary/70 text-primary/70" />}
-        {state === 'none' && <Minus className="h-3 w-3 text-muted-foreground/40" />}
+        className={`inline-flex h-6 w-6 items-center justify-center rounded-[5px] border transition-all ${
+          implicit ? 'border-primary/30 bg-primary/10 text-primary/50'
+            : state === 'full' ? 'border-primary bg-primary text-primary-foreground'
+              : state === 'part' ? 'border-primary/70 bg-primary/20'
+                : 'border-dashed border-muted-foreground/40 bg-transparent'
+        } ${locked ? 'cursor-default opacity-45' : 'cursor-pointer hover:ring-2 hover:ring-primary/30'}`}>
+        {(state === 'full' || implicit) && <Check className="h-3.5 w-3.5" strokeWidth={implicit ? 2 : 3} />}
+        {state === 'part' && !implicit && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
       </button>
     </span>
   )
@@ -457,10 +533,12 @@ function AppCell({ state, name, locked, onClick }: {
 
 /** Разворот строки: разделы внутри продуктов — то, чего не помещается в матрицу. */
 function MemberAccessPanel({
-  u, companyId, keys, full, locked, apps, onToggle, onSetAll, onSetNone, onReset, changed,
+  u, companyId, keys, full, locked, apps, roles, onRole, onToggle, onSetAll, onSetNone,
+  onReset, changed,
 }: {
   u: AdminUser; companyId: string; keys: string[] | null; full: boolean; locked: boolean
-  apps: AccessApp[]; onToggle: (key: string, app: string) => void
+  apps: AccessApp[]; roles: CompanyRole[]; onRole: (roleId: string) => void
+  onToggle: (key: string, app: string) => void
   onSetAll: () => void; onSetNone: () => void; onReset: () => void; changed: boolean
 }) {
   const sel = useMemo(() => new Set(keys ?? apps.map((a) => a.app)), [keys, apps])
@@ -475,9 +553,22 @@ function MemberAccessPanel({
       ) : (
         <>
           <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            {/* Готовая роль — самый быстрый способ настроить нового человека; галочки
+                ниже нужны, когда типовой набор не подходит. */}
+            <span className="flex items-center gap-1.5">
+              <span className="text-muted-foreground">Роль:</span>
+              <Select value={u.role_id ?? ''} disabled={locked || !roles.length} onValueChange={onRole}>
+                <SelectTrigger className="h-7 w-[190px] text-xs">
+                  <SelectValue placeholder={u.modules == null ? 'все продукты' : 'личный набор'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {roles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </span>
             {u.role_name && !changed && (
               <span className="text-muted-foreground">
-                Права от роли <span className="font-medium text-foreground">«{u.role_name}»</span> — правка галочек сделает личный набор.
+                правка галочек сделает личный набор
               </span>
             )}
             {changed && (
