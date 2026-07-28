@@ -855,8 +855,19 @@ async def create_all() -> None:
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS title VARCHAR(300)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_ezs_site_project_no "
             "ON ezs_sites (company_id, project_no) WHERE project_no IS NOT NULL",
+            # Нумерация продолжается ОТ УЖЕ ВЫДАННЫХ номеров, а не с единицы:
+            # иначе площадка без номера (такие приносил импорт до v51) получала
+            # «ЭЗС-2026-0001», который давно занят, и весь старт падал на
+            # uq_ezs_site_project_no — с ним падало всё приложение.
             """
-            WITH numbered AS (
+            WITH taken AS (
+                SELECT company_id,
+                       to_char(COALESCE(first_seen_at, created_at), 'YYYY') AS yr,
+                       COALESCE(MAX(NULLIF(split_part(project_no, '-', 3), '')::int), 0) AS mx
+                FROM ezs_sites
+                WHERE project_no LIKE 'ЭЗС-%'
+                GROUP BY 1, 2
+            ), numbered AS (
                 SELECT id, company_id,
                        to_char(COALESCE(first_seen_at, created_at), 'YYYY') AS yr,
                        row_number() OVER (
@@ -865,8 +876,10 @@ async def create_all() -> None:
                 FROM ezs_sites WHERE project_no IS NULL
             )
             UPDATE ezs_sites s SET project_no = 'ЭЗС-' || numbered.yr || '-' ||
-                   lpad(numbered.n::text, 4, '0')
-            FROM numbered WHERE numbered.id = s.id
+                   lpad((COALESCE(taken.mx, 0) + numbered.n)::text, 4, '0')
+            FROM numbered LEFT JOIN taken
+              ON taken.company_id = numbered.company_id AND taken.yr = numbered.yr
+            WHERE numbered.id = s.id
             """,
             # Субсидия и замыкание на учёт (таблицы ezs_site_docs /
             # ezs_tech_connections / ezs_site_costs создаёт create_all).
