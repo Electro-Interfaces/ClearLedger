@@ -11,13 +11,13 @@
  * Блок без данных не рисует нули, а честно говорит, чем его наполнить: экран из
  * нулей выглядит работающим и потому опаснее пустого места.
  */
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Loader2, Download, AlertTriangle, ChevronRight, ChevronDown, TrendingUp, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
-import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import {
   getPortfolioOverview, getSites, exportPortfolioXlsx, PHASE_META, STAGE_META,
   type PortfolioOverview,
@@ -26,21 +26,31 @@ import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const money = (v: number) => `${nf0.format(Math.round(v))} ₽`
-// Куда ведёт строка «Требует внимания».
+// Куда ведёт строка «Требует внимания». Ключ вкладки — ИЗ МЕНЮ (`SITES_MENU`):
+// пункт называется `pr_project`, и опечатка `pr_projects` молча возвращала
+// пользователя на сам обзор (несуществующий ключ схлопывается в первый пункт).
+// `risk` — фильтр, который реестр обязан применить, иначе откроется не тот список.
 const RISK_TARGET: Record<string, { tab: string; hint: string }> = {
-  step_overdue: { tab: 'pr_projects', hint: 'реестр проектов, фильтр просрочки' },
+  step_overdue: { tab: 'pr_project', hint: 'реестр проектов, фильтр просрочки' },
   tp_overdue: { tab: 'pr_tp', hint: 'реестр присоединений' },
   eq_overdue: { tab: 'pr_equipment', hint: 'реестр оборудования' },
-  stuck_90: { tab: 'pr_projects', hint: 'реестр проектов' },
-  no_touch_30: { tab: 'pr_projects', hint: 'реестр проектов' },
-  no_owner: { tab: 'pr_projects', hint: 'реестр проектов' },
-  no_next: { tab: 'pr_projects', hint: 'реестр проектов' },
+  stuck_90: { tab: 'pr_project', hint: 'реестр проектов' },
+  no_touch_30: { tab: 'pr_project', hint: 'реестр проектов' },
+  no_owner: { tab: 'pr_project', hint: 'реестр проектов' },
+  no_next: { tab: 'pr_project', hint: 'реестр проектов' },
 }
 
 export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
-  // Без списка ключей из workspaceSections: тот модуль тянет панели, а панели —
-  // его, и на цикле импортов экран уходил в вечную загрузку.
-  const [, setTab] = useWorkspaceSubView('pr_portfolio')
+  const [, setParams] = useSearchParams()
+  /** Уйти в другой реестр с фильтром: `sub` и `risk` пишем одной правкой URL. */
+  const goTo = useCallback((tab: string, risk?: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('sub', tab)
+      if (risk) next.set('risk', risk); else next.delete('risk')
+      return next
+    }, { replace: true })
+  }, [setParams])
   // Цифра без списка — это загадка: любую строку можно раскрыть и увидеть,
   // какие именно проекты за ней стоят.
   const [open, setOpen] = useState<string | null>(null)
@@ -103,7 +113,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                   </button>
                   {open === `risk:${a.key}` && (
                     <Drill companyId={companyId} risk={a.key} count={a.count}
-                      onAll={() => setTab(RISK_TARGET[a.key]?.tab ?? 'pr_projects')} />
+                      onAll={() => goTo(RISK_TARGET[a.key]?.tab ?? 'pr_project', a.key)} />
                   )}
                 </div>
               ))}
@@ -176,7 +186,7 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
                 <tr key={`d-${f.stage}`}>
                   <td colSpan={6} className="p-0">
                     <Drill companyId={companyId} stage={f.stage} count={f.count}
-                      onAll={() => setTab('pr_projects')} />
+                      onAll={() => goTo('pr_project')} />
                   </td>
                 </tr>
               ))}

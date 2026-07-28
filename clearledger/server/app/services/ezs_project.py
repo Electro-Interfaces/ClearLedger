@@ -375,9 +375,11 @@ async def upsert_cost(db: AsyncSession, company_id, site: EzsSite, payload: dict
         row = (await db.execute(select(EzsSiteCost).where(
             EzsSiteCost.company_id == company_id, EzsSiteCost.site_id == site.id,
             EzsSiteCost.id == _uuid.UUID(str(cid))))).scalar_one_or_none()
+    created = row is None
     if row is None:
         row = EzsSiteCost(company_id=company_id, site_id=site.id)
         db.add(row)
+    was = (row.plan_amount, row.fact_amount)
     row.kind = str(payload.get("kind") or "other")
     row.title = payload.get("title") or None
     row.doc_ref = payload.get("doc_ref") or None
@@ -391,16 +393,36 @@ async def upsert_cost(db: AsyncSession, company_id, site: EzsSite, payload: dict
                 setattr(row, f, float(str(v).replace(",", ".").replace(" ", "")))
             except ValueError:
                 setattr(row, f, None)
+    # Бюджет — единственное, что правилось молча: кто и на сколько поменял сумму,
+    # восстановить было нельзя. Пишем суммы «было → стало» прямо в текст события.
+    label = COST_LABELS.get(row.kind, row.kind)
+    if created:
+        await log_event(db, site, "note", user=user,
+                        text=f"Бюджет: добавлена статья «{label}» — "
+                             f"план {_money(row.plan_amount)}, факт {_money(row.fact_amount)}")
+    elif was != (row.plan_amount, row.fact_amount):
+        await log_event(db, site, "note", user=user,
+                        text=f"Бюджет «{label}»: план {_money(was[0])} → {_money(row.plan_amount)}, "
+                             f"факт {_money(was[1])} → {_money(row.fact_amount)}")
     await db.flush()
     return {"id": str(row.id)}
 
 
-async def delete_cost(db: AsyncSession, company_id, site_id, cost_id) -> bool:
+def _money(v: Any) -> str:
+    return "—" if v is None else f"{float(v):,.0f} ₽".replace(",", " ")
+
+
+async def delete_cost(db: AsyncSession, company_id, site_id, cost_id,
+                      site: EzsSite | None = None, user: User | None = None) -> bool:
     row = (await db.execute(select(EzsSiteCost).where(
         EzsSiteCost.company_id == company_id, EzsSiteCost.site_id == site_id,
         EzsSiteCost.id == cost_id))).scalar_one_or_none()
     if row is None:
         return False
+    if site is not None:
+        await log_event(db, site, "note", user=user,
+                        text=f"Бюджет: удалена статья «{COST_LABELS.get(row.kind, row.kind)}» "
+                             f"(план {_money(row.plan_amount)}, факт {_money(row.fact_amount)})")
     await db.delete(row)
     return True
 
@@ -467,10 +489,13 @@ async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
                        "stages": [{"stage": s, "label": STAGE_LABELS[s],
                                    "count": by_stage.get(s, 0)} for s in p["stages"]]})
 
+    # Деньги портфеля — про то, что в работе. Затраты отклонённых и замороженных
+    # проектов в общей сумме растворяли реальный бюджет и завышали его.
     money = (await db.execute(text("""
-        select coalesce(sum(plan_amount), 0) plan, coalesce(sum(fact_amount), 0) fact
-        from ezs_site_costs where company_id = :cid
-    """), {"cid": company_id})).mappings().one()
+        select coalesce(sum(c.plan_amount), 0) plan, coalesce(sum(c.fact_amount), 0) fact
+        from ezs_site_costs c join ezs_sites s on s.id = c.site_id
+        where c.company_id = :cid and s.stage <> all(:closed)
+    """), {"cid": company_id, "closed": ["archive", "on_hold"]})).mappings().one()
 
     tc = (await db.execute(text("""
         select count(*) total,
@@ -685,15 +710,20 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     """), {"cid": company_id, "active": STAGE_ORDER, "today": today})).mappings().all()
 
     # ── 6. Деньги ──────────────────────────────────────────────────────────
+    # Только проекты в работе: затраты отклонённых и замороженных — это другая
+    # история (по ФСБУ 26/2020 их судьба решается отдельно), и в бюджете портфеля
+    # они завышали цифру.
     money = (await db.execute(text("""
-        select coalesce(sum(plan_amount), 0) plan, coalesce(sum(fact_amount), 0) fact,
-               count(distinct site_id) sites
-        from ezs_site_costs where company_id = :cid
-    """), {"cid": company_id})).mappings().one()
+        select coalesce(sum(c.plan_amount), 0) plan, coalesce(sum(c.fact_amount), 0) fact,
+               count(distinct c.site_id) sites
+        from ezs_site_costs c join ezs_sites s on s.id = c.site_id
+        where c.company_id = :cid and s.stage = any(:active)
+    """), {"cid": company_id, "active": STAGE_ORDER})).mappings().one()
     eq_money = (await db.execute(text("""
-        select coalesce(sum(price * qty), 0) total from ezs_site_equipment
-        where company_id = :cid and status <> 'cancelled'
-    """), {"cid": company_id})).scalar()
+        select coalesce(sum(e.price * e.qty), 0) total
+        from ezs_site_equipment e join ezs_sites s on s.id = e.site_id
+        where e.company_id = :cid and e.status <> 'cancelled' and s.stage = any(:active)
+    """), {"cid": company_id, "active": STAGE_ORDER})).scalar()
 
     active_total = sum(counts.get(s, 0) for s in STAGE_ORDER)
     return {
@@ -831,7 +861,12 @@ async def awaiting_accounting(db: AsyncSession, company_id) -> dict[str, Any]:
         select s.id, s.project_no, s.city, s.address
         from ezs_sites s
         where s.company_id = :cid and s.stage in ('construction','commissioning','live')
-          and not exists (select 1 from ezs_supply_documents d where d.company_id = s.company_id)
+          -- Поставка ищется у ЭТОГО проекта, а не у компании: подзапрос без связи
+          -- по site_id отвечал «поставки есть» на весь список, стоило появиться
+          -- одному документу в компании, и раздел молча пустел.
+          and not exists (
+              select 1 from ezs_site_equipment e
+              where e.site_id = s.id and e.status in ('supplied', 'installed'))
         limit 200
     """), {"cid": company_id})).mappings().all()
 

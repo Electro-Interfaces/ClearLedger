@@ -21,7 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsSite, EzsSiteEvent, User
 from app.services.ezs_checklist import PHASE_LABELS_DOC, gates_by_stage
-from app.services.ezs_sites import STAGE_LABELS, STAGE_ORDER, _site_out
+from app.services.ezs_sites import (
+    STAGE_LABELS, STAGE_ORDER, _site_out, format_project_no, parse_project_seq,
+    project_no_prefix,
+)
 
 # ── Гейты: что должно быть готово, чтобы уйти с этой стадии дальше ──────────
 # Собираются из чек-листа согласования ЗУ (регламент РусГидро, `ezs_checklist`):
@@ -115,18 +118,11 @@ async def next_project_no(db: AsyncSession, company_id) -> str:
     Считаем максимум по году, а не количество: удалённые проекты не должны
     возвращать номер в оборот — на него уже могли сослаться в переписке.
     """
-    year = date.today().year
-    prefix = f"ЭЗС-{year}-"
+    prefix = project_no_prefix()
     last = (await db.execute(
         select(func.max(EzsSite.project_no)).where(
             EzsSite.company_id == company_id, EzsSite.project_no.like(f"{prefix}%")))).scalar()
-    n = 0
-    if last:
-        try:
-            n = int(str(last).rsplit("-", 1)[1])
-        except (IndexError, ValueError):
-            n = 0
-    return f"{prefix}{n + 1:04d}"
+    return format_project_no(prefix, parse_project_seq(last) + 1)
 
 
 async def site_doc_kinds(db: AsyncSession, site_id) -> set[str]:

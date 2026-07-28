@@ -8,7 +8,10 @@
 """
 from app.models import EzsSite, EzsTechConnection
 from app.services.ezs_checklist import TASKS, checklist_meta, gates_by_stage
-from app.services.ezs_sites import ALL_STAGES, _bool, _match_field, _num, _tc_values
+from app.services.ezs_sites import (
+    ALL_STAGES, _bool, _match_field, _num, _tc_values,
+    format_project_no, parse_project_seq, project_no_prefix,
+)
 
 # Заголовки листа «Банк данных ЗУ сводный» — все 55 обязательных граф.
 BANK_HEADERS = [
@@ -107,6 +110,17 @@ def test_карточка_тп_из_файла_режется_по_длине_к
     assert tc["needs_reconstruction"] is False
     assert tc["cost"] == 43837.22
     assert tc["applicant_term_months"] == 24
+
+
+def test_номер_проекта_счётчиком():
+    # Импорт раздаёт номера из одного максимума: формат обязан совпадать с тем,
+    # что выдаёт ручное создание, иначе следующий максимум не распознается.
+    prefix = project_no_prefix()
+    assert prefix.startswith("ЭЗС-") and prefix.endswith("-")
+    assert format_project_no(prefix, 42).endswith("-0042")
+    assert parse_project_seq(format_project_no(prefix, 42)) == 42
+    assert parse_project_seq(None) == 0
+    assert parse_project_seq("мусор") == 0
 
 
 def test_разбор_значений_из_файла():

@@ -25,16 +25,19 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle,
-  Upload, Trash2, Lock,
+  Upload, Trash2, Lock, Link as LinkIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
   patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
+  linkContract, linkLocation,
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
   type SiteDetail, type SiteStage, type ProjectContext,
 } from '@/services/sitesService'
+import { getContracts } from '@/services/referenceService'
+import { loadLocations } from '@/services/locationService'
 
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 
@@ -807,12 +810,86 @@ export function DocsTab({ site, companyId, onDone }: {
 
 /* ── Вкладка «Учёт» ─────────────────────────────────────────────────────── */
 
+/**
+ * Привязка проекта к записи учёта (договор аренды земли, объект сети).
+ *
+ * До 28.07.2026 ручки привязки существовали, а пути к ним из интерфейса не было:
+ * экран «Ждёт учёта» просил «привязать договор в карточке проекта», а кнопки там
+ * не было ни одной. Поиск — по уже заведённым записям: учётный контур наполняется
+ * в своих разделах, здесь только связь.
+ */
+function LinkPicker({ label, options, onPick, pending }: {
+  label: string
+  options: { id: string; title: string; hint?: string }[]
+  onPick: (id: string) => void
+  pending: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const found = useMemo(() => {
+    const s = q.trim().toLowerCase()
+    const list = s ? options.filter((o) => `${o.title} ${o.hint ?? ''}`.toLowerCase().includes(s)) : options
+    return list.slice(0, 20)
+  }, [options, q])
+
+  if (!open) {
+    return (
+      <Button variant="outline" size="sm" className="h-7 text-xs mt-1"
+        disabled={pending} onClick={() => setOpen(true)}>
+        {pending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <LinkIcon className="h-3.5 w-3.5 mr-1" />}
+        {label}
+      </Button>
+    )
+  }
+  return (
+    <div className="mt-1 rounded-md border border-border p-2 space-y-1">
+      <Input autoFocus className="h-7 text-xs" placeholder="Поиск…"
+        value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="max-h-48 overflow-y-auto">
+        {found.length === 0 && <div className="text-[11px] text-muted-foreground px-1 py-2">Ничего не найдено.</div>}
+        {found.map((o) => (
+          <button key={o.id} type="button" disabled={pending}
+            onClick={() => { onPick(o.id); setOpen(false) }}
+            className="w-full text-left text-xs px-1 py-1 rounded hover:bg-muted/60">
+            {o.title}
+            {o.hint && <span className="text-muted-foreground"> · {o.hint}</span>}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(false)}>Отмена</button>
+    </div>
+  )
+}
+
 export function AccountingTab({ site, companyId, onDone }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
   const ctx = useQuery({
     queryKey: ['site-project', companyId, site.id],
     queryFn: () => getProjectContext(companyId, site.id),
+  })
+  // Списки тянем только когда связи ещё нет — иначе это лишние запросы на каждом
+  // открытии вкладки у давно привязанного проекта.
+  const contracts = useQuery({
+    queryKey: ['contracts', companyId],
+    queryFn: () => getContracts(companyId),
+    enabled: !ctx.data?.contract,
+  })
+  const locations = useQuery({
+    queryKey: ['locations', companyId],
+    queryFn: () => loadLocations(companyId),
+    enabled: !ctx.data?.location,
+  })
+  const mLinkContract = useMutation({
+    mutationFn: (contractId: string) => linkContract(companyId, site.id, contractId),
+    onSuccess: async () => { toast.success('Договор привязан'); await onDone(); await ctx.refetch() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось привязать договор'),
+  })
+  const mLinkLocation = useMutation({
+    mutationFn: (locationId: string) => linkLocation(companyId, site.id, locationId),
+    onSuccess: async () => { toast.success('Объект сети привязан'); await onDone(); await ctx.refetch() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось привязать объект'),
   })
   if (ctx.isLoading || !ctx.data) {
     return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -834,8 +911,17 @@ export function AccountingTab({ site, companyId, onDone }: {
                 {d.contract.validUntil && <span className="text-muted-foreground"> · до {d.contract.validUntil}</span>}
               </div>
             ) : (
-              <div className="text-amber-600 dark:text-amber-400">
-                не привязан{site.contractStart ? ' — а договор уже подписан' : ''}
+              <div>
+                <div className="text-amber-600 dark:text-amber-400">
+                  не привязан{site.contractStart ? ' — а договор уже подписан' : ''}
+                </div>
+                <LinkPicker label="Привязать договор" pending={mLinkContract.isPending}
+                  onPick={(id) => mLinkContract.mutate(id)}
+                  options={(contracts.data ?? []).map((c) => ({
+                    id: c.id,
+                    title: `№ ${c.number}${c.date ? ` от ${c.date}` : ''}`,
+                    hint: c.type,
+                  }))} />
               </div>
             )}
           </div>
@@ -844,7 +930,16 @@ export function AccountingTab({ site, companyId, onDone }: {
             {d.location ? (
               <div>{d.location.name} <span className="text-muted-foreground">({d.location.code})</span></div>
             ) : (
-              <div className="text-muted-foreground">не связан — проект ещё не стал станцией</div>
+              <div>
+                <div className="text-muted-foreground">не связан — проект ещё не стал станцией</div>
+                {/* Пункт регламента 8.8 закрывается именно этой связью: пока кнопки
+                    не было, обязательный пункт стадии «В эксплуатации» закрыть было нечем. */}
+                <LinkPicker label="Привязать объект сети" pending={mLinkLocation.isPending}
+                  onPick={(id) => mLinkLocation.mutate(id)}
+                  options={(locations.data ?? []).map((l) => ({
+                    id: l.id, title: l.name, hint: l.code,
+                  }))} />
+              </div>
             )}
           </div>
         </div>
@@ -1084,6 +1179,7 @@ function Metric({ label, value, warn }: { label: string; value: string; warn?: b
 
 const KIND_LABEL: Record<string, string> = {
   stage: 'Стадия', touch: 'Касание', note: 'Заметка', edit: 'Правка', import: 'Импорт', gate: 'Гейт',
+  doc: 'Документ',
 }
 
 export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: string }) {

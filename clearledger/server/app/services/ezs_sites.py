@@ -543,6 +543,27 @@ _TC_BOOL = {"needs_reconstruction", "extra_power_possible", "transformer_swap_po
 _TC_NUM = {"cost", "works_cost", "total_cost", "applicant_term_months"}
 
 
+# ── Номер проекта ──────────────────────────────────────────────────────────
+# Формат один на все пути заведения (импорт и ручное создание), поэтому живёт
+# здесь: `ezs_site_work.next_project_no` его переиспользует.
+def project_no_prefix() -> str:
+    return f"ЭЗС-{date.today().year}-"
+
+
+def format_project_no(prefix: str, n: int) -> str:
+    return f"{prefix}{n:04d}"
+
+
+def parse_project_seq(value: str | None) -> int:
+    """Порядковый номер из «ЭЗС-2026-0042» → 42; мусор → 0."""
+    if not value:
+        return 0
+    try:
+        return int(str(value).rsplit("-", 1)[1])
+    except (IndexError, ValueError):
+        return 0
+
+
 def _tc_values(vals: dict[str, Any]) -> dict[str, Any]:
     """Значения карточки присоединения из строки файла (пустые ключи опускаем).
 
@@ -596,6 +617,16 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
     }
     # Карточки присоединения пишем после flush: у новых площадок id ещё нет.
     tc_pending: list[tuple[Any, dict[str, Any]]] = []
+    # Номер проекта выдаём и импортированным площадкам: без него карточка — не
+    # проект, а строка файла (в переписке и на совещании её нечем назвать), и
+    # пункт регламента 2.1 «Регистрация локации в банке ЗУ» не закрывается никогда.
+    # Максимум берём один раз и раздаём счётчиком: SELECT max на каждую строку
+    # при 1000 строках файла — тысяча лишних запросов.
+    no_prefix = project_no_prefix()
+    no_seq = parse_project_seq((await db.execute(
+        select(func.max(EzsSite.project_no)).where(
+            EzsSite.company_id == company_id,
+            EzsSite.project_no.like(f"{no_prefix}%")))).scalar())
     seen_in_file: dict[str, str] = {}   # dedup_key → адрес первой строки
     touched: set[int] = set()           # площадки, уже обработанные этой загрузкой
     # События истории пишем после commit площадок: у новых записей id появляется
@@ -742,8 +773,14 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                     key, fields["full_address"] or fields["address"] or f"{sn}:{ri}")
 
             if found is None:
+                no_seq += 1
                 site = EzsSite(
-                    company_id=company_id, stage=stage, stage_since=today,
+                    company_id=company_id, stage=stage,
+                    project_no=format_project_no(no_prefix, no_seq),
+                    # Дата входа в стадию — дата поступления из файла, если она есть.
+                    # Дата импорта на её месте делает все площадки «свежими»: срок в
+                    # стадии считается от заливки, и «стоит 90 дней» не находит никого.
+                    stage_since=fields.get("received_date") or today,
                     dedup_key=key, source_sheet=sn, row_no=ri, raw=raw,
                     first_seen_at=now, last_seen_at=now, updated_at=now, **fields)
                 if not dry_run:

@@ -17,7 +17,7 @@ import { AwaitingAccountingPanel } from './AwaitingAccountingPanel'
 
 export function SitesRouter({ tab, companyId }: { tab: string; companyId: string }) {
   // Один пункт: без выбранного проекта — реестр, с выбранным — рабочий экран.
-  if (tab === 'pr_project' || tab === 'pr_projects') return <ProjectWorkspacePanel companyId={companyId} />
+  if (tab === 'pr_project') return <ProjectWorkspacePanel companyId={companyId} />
   if (tab === 'pr_tp') return <TechConnectionsPanel companyId={companyId} />
   if (tab === 'pr_equipment') return <ProjectEquipmentPanel companyId={companyId} />
   if (tab === 'pr_accounting') return <AwaitingAccountingPanel companyId={companyId} />

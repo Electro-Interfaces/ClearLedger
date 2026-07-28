@@ -453,8 +453,8 @@ async def del_cost(
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     cid = await assert_company_member(company_id, user, db)
-    await _owned(db, cid, site_id)
-    ok = await ezs_project.delete_cost(db, cid, site_id, cost_id)
+    site = await _owned(db, cid, site_id)
+    ok = await ezs_project.delete_cost(db, cid, site_id, cost_id, site=site, user=user)
     if not ok:
         raise HTTPException(404, "Статья не найдена")
     await db.commit()
