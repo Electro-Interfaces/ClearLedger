@@ -47,6 +47,7 @@ from app.routers import (
     onec_router,
     equipment_router,
     sites_router,
+    info_router,
     sso_router,
     app_registry_router,
     space_registry_router,
@@ -132,6 +133,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"seed_apps пропущен: {e}")
 
+    # Знание пространства: платформенные статьи отрасли (docs/INFO.md). Документы
+    # самой компании сюда не входят — их заводят в пространстве.
+    async with async_session_factory() as session:
+        try:
+            from app.services.info_seed import seed_info
+            res = await seed_info(session)
+            await session.commit()
+            logger.info(f"Знание отрасли засеяно: {res}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"seed_info пропущен: {e}")
+
     # Сброс зависших прогонов: при рестарте фоновые задачи прерываются, их
     # ChannelSyncLog остаётся в 'running' навсегда — помечаем как прерванные.
     async with async_session_factory() as session:
@@ -213,6 +225,7 @@ app.include_router(online_reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(ops_router.router, prefix=API_PREFIX)  # управленческий кокпит ЭЗС
 app.include_router(equipment_router.router, prefix=API_PREFIX)  # складской учёт оборудования ЭЗС
 app.include_router(sites_router.router, prefix=API_PREFIX)  # банк ЗУ: площадки под установку ЭЗС
+app.include_router(info_router.router, prefix=API_PREFIX)   # «Инфо»: знание пространства
 app.include_router(sso_router.router, prefix=API_PREFIX)  # SSO ElsyPlus (Фаза 0): лаунчер + handoff + JWKS
 app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
 app.include_router(space_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр объектов пространства

@@ -994,6 +994,29 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.28: «Инфо» — знание пространства (таблицы создаёт create_all).
+        # Полнотекстовый поиск по-русски: заголовок весомее тела, теги — третьим
+        # весом. Без него поиск по 500 статьям превращается в LIKE по всей базе.
+        for stmt in (
+            "ALTER TABLE info_articles ADD COLUMN IF NOT EXISTS search_tsv tsvector",
+            """
+            CREATE OR REPLACE FUNCTION info_articles_tsv_update() RETURNS trigger AS $$
+            BEGIN
+              NEW.search_tsv :=
+                setweight(to_tsvector('russian', coalesce(NEW.title, '')), 'A') ||
+                setweight(to_tsvector('russian', coalesce(NEW.summary, '')), 'A') ||
+                setweight(to_tsvector('russian', coalesce(NEW.body_md, '')), 'B') ||
+                setweight(to_tsvector('russian', coalesce(NEW.doc_number, '')), 'C');
+              RETURN NEW;
+            END $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS info_articles_tsv_trg ON info_articles",
+            "CREATE TRIGGER info_articles_tsv_trg BEFORE INSERT OR UPDATE ON info_articles "
+            "FOR EACH ROW EXECUTE FUNCTION info_articles_tsv_update()",
+            "CREATE INDEX IF NOT EXISTS ix_info_articles_tsv ON info_articles USING GIN(search_tsv)",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

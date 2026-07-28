@@ -89,6 +89,11 @@ _APPS: list[dict[str, Any]] = [
     # было вовсе: роль не могла ни дать к ним доступ, ни отобрать.
     {"code": "chat", "name": "Чаты", "icon": "message-circle", "sort": 30,
      "desc": "Переписка и темы в пространстве компании", "modules": []},
+    # «Инфо» — знание пространства: инструкции по продуктам, отраслевые нормы и
+    # документы компании. Одно приложение на всё пространство, но открывается и
+    # контекстно — правой панелью того рабочего места, где человек сейчас (docs/INFO.md).
+    {"code": "info", "name": "Инфо", "icon": "book-open", "sort": 35,
+     "desc": "Инструкции, нормы и документы компании — там, где они нужны", "modules": []},
     {"code": "plan", "name": "Заявки", "icon": "clipboard-list", "sort": 40,
      "desc": "Задачи и заявки пространства", "modules": []},
     {"code": "conf", "name": "Конференции", "icon": "video", "sort": 50,
@@ -151,7 +156,9 @@ async def seed_apps(db: AsyncSession) -> None:
 _CARVED_PRODUCTS = {"projects", "ops", "sales", "corp", "shop", "marketing", "finance", "data"}
 _CARVED_PROFILE = "energy"
 # Всегда: управление пространством + универсальные продукты (чаты, заявки, конференции).
-_ALWAYS_ON = {"admin", "chat", "plan", "conf"}
+# «Инфо» — всегда: знание нужно из любого рабочего места с первого дня,
+# и правая панель подсказки без подключённого продукта работать не будет.
+_ALWAYS_ON = {"admin", "chat", "plan", "conf", "info"}
 
 
 def _default_app_on(code: str, profile_id: str | None = None) -> bool:

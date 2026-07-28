@@ -35,6 +35,7 @@ const AdminLayout = lazy(() => import('@/components/layout/AdminLayout').then((m
 const AdminSectionPage = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminSectionPage })))
 const AdminHomeRedirect = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminHomeRedirect })))
 const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
+const InfoPage = lazy(() => import('@/pages/InfoPage').then((m) => ({ default: m.InfoPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
 const ReferencesPage = lazy(() => import('@/pages/oneC/ReferencesPage').then((m) => ({ default: m.ReferencesPage })))
@@ -203,6 +204,9 @@ const router = createBrowserRouter([
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },
+          // «Инфо» — знание пространства: то же приложение, что открывается
+          // подсказкой в рабочей области, только целиком (docs/INFO.md).
+          { path: '/info', element: <LazyPage><InfoPage /></LazyPage> },
           { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
           { path: '/connectors', element: <LazyPage><ChannelsPage /></LazyPage> },
           { path: '/metrika', element: <LazyPage><MetrikaPage /></LazyPage> },
