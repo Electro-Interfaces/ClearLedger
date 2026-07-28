@@ -23,7 +23,7 @@ import { routeAllowed } from '@/config/accessModules'
 import {
   SPACE_LINKS, isCarvedProfile, productForPath, productNav, spaceNav,
 } from '@/config/spaceProducts'
-import { productModuleAllowed } from '@/config/productAccess'
+import { productModuleAllowed, productHasModule } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
 
 /** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения.
@@ -91,9 +91,13 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
     // «Финансовый» и «Налоговый» сняты с витрины, и пункт вёл бы в пустоту.
     // Раздел, у которого все под-пункты закрыты ролью, приходит из хука пустым — такой
     // пункт не показываем, он открывал бы витрину без единого доступного экрана.
+    // Право спрашиваем только у разделов, которые ЕСТЬ в карте прав («Финансы»,
+    // «Данные»): у «Продаж» и «Проектов» правами гейтятся пункты внутри раздела, а
+    // закрытый целиком раздел приходит из хука как `restricted` — этого достаточно.
     const modes = sections
       .filter((s) => product.modes.includes(s.mode))
-      .filter((s) => productModuleAllowed(product.code, s.mode, canModule) && !s.restricted)
+      .filter((s) => !s.restricted && (!productHasModule(product.code, s.mode)
+        || productModuleAllowed(product.code, s.mode, canModule)))
     const urlMode = new URLSearchParams(search).get('mode')
     const activeMode = modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode
     const onProductRoute = pathname === product.route

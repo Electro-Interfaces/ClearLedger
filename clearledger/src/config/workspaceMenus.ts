@@ -112,24 +112,63 @@ export function sitesModeForKey(key: string): 'projects' | 'projects_analytics' 
   return SITES_ANALYTICS_MENU.some((m) => m.key === key) ? 'projects_analytics' : 'projects'
 }
 
-// Анализ зарядных сессий ЭЗС (реальные данные, для energy-профиля).
-// Сгруппировано по смыслу (заголовки групп рисует сайдбар по полю group):
-//   СЕТЬ — состояние сети (обзор + карта);
-//   АНАЛИТИКА СЕССИЙ — агрегаты (Сессии: внутр. табы) + построчный реестр;
-//   КОММЕРЦИЯ — цена (тарифы) и клиентские направления (ЮЛ/ФЛ).
-export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
-  { key: 'cs_dashboard',  label: 'Обзор',         group: 'Сеть' },
-  { key: 'cs_map',        label: 'Карта',         group: 'Сеть' },
-  { key: 'cs_trend',      label: 'Динамика 2024+', group: 'Сеть' },
-  { key: 'cs_abcxyz',     label: 'ABC-XYZ станций', group: 'Сеть' },
-  { key: 'cs_sessions',    label: 'Сессии',        group: 'Аналитика сессий' },
-  { key: 'cs_reliability', label: 'Надёжность',    group: 'Аналитика сессий' },
-  { key: 'cs_list',        label: 'Реестр сессий', group: 'Аналитика сессий' },
-  { key: 'cs_clients',    label: 'Тарифы',        group: 'Коммерция' },
-  { key: 'cs_corporate',  label: 'Корпоратив',    group: 'Коммерция' },
-  { key: 'cs_retail',     label: 'Частные лица',  group: 'Коммерция' },
+/**
+ * «Продажи» (energy) — три раздела продукта, каждый со своими пунктами.
+ *
+ * Раньше это был один список из десяти пунктов, а половина экранов пряталась во
+ * внутренних табах: под пунктом «Сессии» жили четыре разных вопроса, под «Частными
+ * лицами» — семь. В меню их не было, и руководитель их просто не находил.
+ *
+ * Граница простая: **пункт меню** — самостоятельный вопрос, с которым приходят («где
+ * сеть простаивает», «кто наши клиенты», «сколько стоит киловатт»); у него есть имя и
+ * ссылка. **Таб** — другой угол на тот же вопрос в одном разборе: общий фильтр, общий
+ * заголовок, переключаются туда-сюда за один заход. Поэтому «Разрезы» и «Сравнение
+ * периодов» стали пунктами, а пять углов «Надёжности» и пять видов цены — остались
+ * табами (решение МАГа 28.07.2026).
+ */
+// СЕТЬ — что происходит с сетью целиком: деньги, география, тренд, качество.
+export const SALES_NETWORK_MENU: CentralMenuItem[] = [
+  { key: 'cs_dashboard',   label: 'Обзор' },
+  { key: 'cs_map',         label: 'Карта' },
+  // «Динамика 2024+» — длинный горизонт на склейке сводной выработки и сессий; тренд
+  // самих сессий с YoY живёт в разделе «Сессии». Это разные экраны, не дубль.
+  { key: 'cs_trend',       label: 'Динамика 2024+' },
+  { key: 'cs_abcxyz',      label: 'ABC-XYZ станций' },
+  { key: 'cs_reliability', label: 'Надёжность' },
 ]
-export const CHARGE_SESSIONS_KEYS = CHARGE_SESSIONS_MENU.map((m) => m.key)
+
+// СЕССИИ — как заряжают: разрезы спроса, время, тренд, сравнение, построчный реестр.
+export const SALES_SESSIONS_MENU: CentralMenuItem[] = [
+  { key: 'cs_breakdown', label: 'Разрезы' },
+  { key: 'cs_time',      label: 'Время и загрузка' },
+  { key: 'cs_dynamics',  label: 'Тренд и YoY' },
+  { key: 'cs_compare',   label: 'Сравнение периодов' },
+  { key: 'cs_list',      label: 'Реестр сессий' },
+]
+
+// КОММЕРЦИЯ — кто платит и по какой цене.
+export const SALES_COMMERCE_MENU: CentralMenuItem[] = [
+  { key: 'cs_clients',   label: 'Тарифы' },
+  { key: 'cs_corporate', label: 'Корпоратив' },
+  { key: 'cs_retail',    label: 'Частные лица' },
+  { key: 'cs_segments',  label: 'Сегменты и когорты' },
+]
+
+// Общий список — для карты прав и роутера панелей: право на пункт и то, какая панель
+// его рисует, от раздела не зависят.
+export const CHARGE_SESSIONS_MENU: CentralMenuItem[] = [
+  ...SALES_NETWORK_MENU, ...SALES_SESSIONS_MENU, ...SALES_COMMERCE_MENU,
+]
+// `cs_sessions` в меню больше нет (распался на «Разрезы»/«Время»/«Сравнение»), но
+// остаётся живым ключом: на него выданы права и ведут старые ссылки.
+export const CHARGE_SESSIONS_KEYS = [...CHARGE_SESSIONS_MENU.map((m) => m.key), 'cs_sessions']
+
+/** Раздел «Продаж», которому принадлежит пункт: переход между разделами меняет и `mode`. */
+export function salesModeForKey(key: string): 'management' | 'sales_sessions' | 'sales_commerce' {
+  if (SALES_SESSIONS_MENU.some((m) => m.key === key)) return 'sales_sessions'
+  if (SALES_COMMERCE_MENU.some((m) => m.key === key)) return 'sales_commerce'
+  return 'management'
+}
 
 // Состав «Продаж» — полный, как в Ledger РусГидро (решение МАГа 28.07.2026). Раньше
 // тарифы, корпоратив и ФЛ вычитались в «Корпоративный процессинг», а ABC-XYZ и динамика

@@ -112,6 +112,10 @@ function DesktopWorkspace() {
             {coreMode === 'normalize' && <NormalizationPanel />}
             {coreMode === 'reconcile' && <ReconciliationPanel />}
             {coreMode === 'management' && <ManagementPanel />}
+            {/* «Сессии» и «Коммерция» — разделы того же продукта: панель одна,
+                различаются составом пунктов (см. workspaceSections). */}
+            {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
+            {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
             {coreMode === 'operations' && <ManagementPanel mode="operations" />}
             {/* «Работа» и «Аналитика» — два раздела одного продукта: панель одна,
                 различаются составом пунктов (см. workspaceSections). */}
@@ -199,6 +203,8 @@ function MobileWorkspace() {
         {coreMode === 'normalize' && <NormalizationPanel />}
         {coreMode === 'reconcile' && <ReconciliationPanel />}
         {coreMode === 'management' && <ManagementPanel />}
+        {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
+        {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {coreMode === 'store' && <StorePanel />}

@@ -98,6 +98,18 @@ export function productModules(code: string): ProductModuleDef[] {
 export const hasProductModules = (code: string) => (PRODUCT_MODULES[code]?.length ?? 0) > 0
 
 /**
+ * Есть ли у продукта такой модуль в карте прав.
+ *
+ * Разделы рабочей области (`mode`) модулями бывают НЕ всегда: у «Финансов» и «Данных»
+ * пункт меню и есть раздел (`accounting`, `normalize`), а у «Продаж» и «Проектов»
+ * правами гейтятся пункты ВНУТРИ разделов, а сами разделы кода в карте не имеют.
+ * Спрашивать право на такой раздел бессмысленно — ответ всегда «нет», и рельс прятал
+ * разделы у всех, кому роль дала не весь продукт, а его пункты.
+ */
+export const productHasModule = (appCode: string, moduleCode: string) =>
+  (PRODUCT_MODULES[appCode] ?? []).some((m) => m.code === moduleCode)
+
+/**
  * Пускать ли на пункт `moduleCode` продукта `appCode`.
  *
  * Правило «отсутствие ограничения = полный доступ»: если роль дала продукт целиком

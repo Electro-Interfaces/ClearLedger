@@ -10,7 +10,11 @@ import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { STORE_MENU } from './storeCatalog'
 
 export const MODE_LABELS: Record<CoreMode, string> = {
+  // Три раздела «Продаж». `management` — исторический код первого: у сети ЭЗС это
+  // «Сеть», у топливного профиля — весь его раздел «Продажи».
   management: 'Продажи',
+  sales_sessions: 'Продажи · Сессии',
+  sales_commerce: 'Продажи · Коммерция',
   operations: 'Управленческий',
   projects: 'Проекты · Работа',
   projects_analytics: 'Проекты · Аналитика',
@@ -44,7 +48,17 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     'by-month': 'По месяцам', channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы', margin: 'Маржа и цены',
     purchases: 'Поступления', tanks: 'Контроль баланса', balance: 'Баланс',
     procurement: 'Энергозакупка', rent: 'Аренда',
-    cs_dashboard: 'Обзор сети', cs_map: 'Карта', cs_trend: 'Динамика 2024+', cs_abcxyz: 'ABC-XYZ станций', cs_list: 'Реестр сессий', cs_sessions: 'Сессии', cs_reliability: 'Надёжность', cs_clients: 'Тарифы', cs_corporate: 'Корпоратив', cs_retail: 'Частные лица',
+    cs_dashboard: 'Обзор', cs_map: 'Карта', cs_trend: 'Динамика 2024+',
+    cs_abcxyz: 'ABC-XYZ станций', cs_reliability: 'Надёжность',
+  },
+  sales_sessions: {
+    cs_breakdown: 'Разрезы', cs_time: 'Время и загрузка', cs_dynamics: 'Тренд и YoY',
+    cs_compare: 'Сравнение периодов', cs_list: 'Реестр сессий',
+    cs_sessions: 'Разрезы',  // старая ссылка ?sub=cs_sessions
+  },
+  sales_commerce: {
+    cs_clients: 'Тарифы', cs_corporate: 'Корпоратив',
+    cs_retail: 'Частные лица', cs_segments: 'Сегменты и когорты',
   },
   operations: {
     ops_overview: 'Обзор', ops_balance: 'Баланс (факт)', ops_completeness: 'Полнота данных',

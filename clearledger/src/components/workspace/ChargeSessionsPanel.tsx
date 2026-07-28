@@ -2608,16 +2608,10 @@ function StationReliabilityModal({ station, companyId, dateFrom, dateTo, onClose
   )
 }
 
-// Внутренние табы пункта «Сессии». «Разрезы» — единая таблица с селектором разреза
-// (станция/коннектор/регион/тариф/клиент). Сетевой «Обзор» (cs_dashboard),
-// «Надёжность» (cs_reliability), Клиенты/Корпоратив — отдельные пункты меню.
-const SUB_TABS: { k: string; label: string }[] = [
-  { k: 'breakdown',  label: 'Разрезы' },
-  { k: 'time',       label: 'Время и загрузка' },
-  { k: 'dynamics',   label: 'Динамика (тренд)' },
-  { k: 'compare',    label: 'Сравнение периодов' },
-]
-
+// Виды сессий. «Разрезы» — единая таблица с селектором разреза (станция/коннектор/
+// регион/тариф/клиент). Каждый вид приходит СВОИМ пунктом раздела «Сессии»
+// (28.07.2026): раньше это были табы под одним пунктом «Сессии», и четырёх разных
+// вопросов в меню не было видно.
 function subView(sub: string, p: { companyId: string; dateFrom: string; dateTo: string }): { title: string; node: ReactNode } {
   const { companyId, dateFrom, dateTo } = p
   switch (sub) {

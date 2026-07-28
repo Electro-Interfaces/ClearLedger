@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone, Sparkles, GitCompare } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -25,7 +25,10 @@ import {
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
+  SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
 } from '@/config/workspaceMenus'
+// CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
+// панелей; секции собираются из трёх меню разделов.
 import { productForMode, productModuleAllowed } from '@/config/productAccess'
 
 /* ── Наборы под-разделов ── */
@@ -38,6 +41,7 @@ export {
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
+  SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
 }
 
 // Меню бухгалтерского (mode=accounting) собирается из включённых компонентов модуля
@@ -74,13 +78,12 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     return m ? isModuleConnected(conn, m, company.profileId) : false
   }
 
-  // «Продажи» (mode=management) — аналитика продаж: топливный P&L + сессии ЭЗС.
+  // Первый раздел «Продаж»: у топливного профиля — весь его P&L, у energy — «Сеть»
+  // (остальные пункты ЭЗС-продаж живут в разделах «Сессии» и «Коммерция»).
   // «Управленческий» (mode=operations) — энергозакупка/аренда (реальные реестры).
   const mgmtItems: CentralMenuItem[] = [
     ...(on('mgmt_pnl') ? MGMT_MENU : []),
-    // Меню ЭЗС-продаж целиком: сеть, аналитика сессий и коммерция (тарифы, ЮЛ, ФЛ)
-    // — одно рабочее место коммерсанта, как в Ledger РусГидро.
-    ...(isEnergy ? CHARGE_SESSIONS_MENU : []),
+    ...(isEnergy ? SALES_NETWORK_MENU : []),
   ]
   // «Управленческий» у ГИГ (fuel) = хозяйственные отношения компании (договоры/аренда),
   // не баланс (концепт МАГа 13.07.2026): контроль топлива уже живёт в «Продажах»,
@@ -113,7 +116,16 @@ export function useWorkspaceSections(): WorkspaceSection[] {
       )
     : []
 
-  const sales: WorkspaceSection = { mode: 'management', label: 'Продажи',        icon: BarChart3,    items: mgmtItems, connected: mgmtItems.length > 0 }
+  // «Продажи» разложены на три раздела продукта (energy): «Сеть» — состояние и деньги
+  // сети, «Сессии» — как заряжают, «Коммерция» — кто платит и по какой цене. В левой
+  // рельсе это три пункта, их содержимое — во второй панели. У топливного профиля
+  // раздел один и называется по продукту.
+  const sales: WorkspaceSection = { mode: 'management', label: isEnergy ? 'Сеть' : 'Продажи',
+    icon: BarChart3, items: mgmtItems, connected: mgmtItems.length > 0 }
+  const salesSessions: WorkspaceSection = { mode: 'sales_sessions', label: 'Сессии',
+    icon: Activity, items: isEnergy ? SALES_SESSIONS_MENU : [], connected: isEnergy }
+  const salesCommerce: WorkspaceSection = { mode: 'sales_commerce', label: 'Коммерция',
+    icon: Wallet, items: isEnergy ? SALES_COMMERCE_MENU : [], connected: isEnergy }
   // «Проекты» — стройка сети: от подбора участка до ввода станции в эксплуатацию.
   // Только у energy: у топливного профиля своего девелоперского контура нет.
   // Два раздела на один продукт: «Работа» — где ведут дела, «Аналитика» — где
@@ -144,7 +156,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // Порядок разделов: топливный профиль (ГИГ) — Продажи → Магазин → Управленческий →
   // Бухгалтерский (порядок МАГа 13.07.2026); energy (РусГидро, без магазина) — как было.
   const all = isEnergy
-    ? [sales, corporate, marketing, projects, projectsAnalytics, ops, store, acc, exp, normalize, reconcile]
+    ? [sales, salesSessions, salesCommerce, corporate, marketing,
+       projects, projectsAnalytics, ops, store, acc, exp, normalize, reconcile]
     : [sales, store, ops, acc, exp]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый
