@@ -161,6 +161,8 @@ export const PRODUCT_READINESS: Record<string, Readiness> = {
   corp: 'draft', shop: 'draft', marketing: 'partial',
   support: 'ready', finance: 'draft',
   netlink: 'draft', accounting: 'draft', diag: 'draft',
+  // Мосты на действующие инстансы: продукты рабочие, просто живут за пределами контейнера.
+  monitor: 'ready', processing: 'ready',
 }
 
 export const READINESS_LABEL: Record<Readiness, string> = {

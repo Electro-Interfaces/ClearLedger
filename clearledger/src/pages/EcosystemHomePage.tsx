@@ -81,7 +81,7 @@ const DOT_CLASS: Record<Readiness, string> = {
  * внутренний контур (стройка сети, эксплуатация, связь, деньги). Деление по контуру,
  * а не по слою: слой говорит, ЧТО это (ядро/сервис/приложение), контур — про чей день.
  */
-const COMMERCE_APPS = ['sales', 'shop', 'corp', 'support', 'marketing']
+const COMMERCE_APPS = ['sales', 'shop', 'corp', 'support', 'marketing', 'monitor', 'processing']
 
 /** Тон показателя: цветом выделяем только то, что требует внимания или радует. */
 const TONE_CLASS: Record<string, string> = {
