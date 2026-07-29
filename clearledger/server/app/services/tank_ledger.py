@@ -50,6 +50,17 @@ ARITHMETIC_TOLERANCE_L = 0.5   # книга обязана сходиться т
 CONTINUITY_TOLERANCE_L = 0.5   # стык смен тоже арифметика, а не измерение
 FACT_TOLERANCE_L = 50.0        # замер — измерение, у него есть погрешность
 
+# Замер, превышающий наибольший книжный остаток резервуара более чем в
+# FACT_SANITY_RATIO раз, физически невозможен: в резервуар столько не входит.
+# Такие показания в данных ГИГ есть и они характерны — АЗС 8 резервуар 2 отдаёт
+# 53 763,0 л при уровне 262 мм (при нормальных 18–25 тыс. л на уровне 1040–1291 мм),
+# причём ровно одно и то же значение в разных сменах: прибор «залип». Раньше такой
+# замер шёл в расчёт как настоящий и давал «35 695 л излишка» из ниоткуда, а
+# ведомость инвентаризации предложила бы оприходовать эти литры.
+# Вместимость оцениваем по КНИГЕ: она ведётся арифметикой и в порядке величин
+# надёжна, тогда как замер — это то, что мы как раз проверяем.
+FACT_SANITY_RATIO = 1.15
+
 
 def _ru(v: float, digits: int = 1) -> str:
     """Число по-русски: пробел между тысячами, запятая перед дробью.
@@ -314,20 +325,42 @@ async def build_tank_ledger(
         chain_breaks: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
         worst_fact = 0.0
         worst_fact_shift: int | None = None
+        # Вместимость резервуара по книге — ею отбраковываются невозможные замеры.
+        capacity = max((max(_f(t.volume_start), _f(t.volume_end)) for t, _s, _st in chain),
+                       default=0.0)
+        fact_limit = capacity * FACT_SANITY_RATIO if capacity > 0 else None
+        suspect_facts = 0
+
+        def _sane_fact(v: Any) -> float | None:
+            """Замер или None, если показание невозможно физически.
+
+            Ноль — «уровнемер не дал показание», а не пустой резервуар (иначе книга
+            − факт = вся ёмкость). Превышение вместимости — залипшее показание
+            прибора: в резервуар столько не входит.
+            """
+            f = _n(v) or None
+            if f is None:
+                return None
+            if fact_limit is not None and f > fact_limit:
+                return None
+            return f
 
         for tank, shift, _station in chain:
             book_start = _f(tank.volume_start)
             book_end = _f(tank.volume_end)
             receipts = _f(tank.volume_received)
             sales = _f(tank.sales)
-            # `or None`: ноль в замере — это «уровнемер не дал показание», а не
-            # пустой резервуар. Иначе книга − факт = весь книжный остаток и в
-            # недостачу попадает вся ёмкость (как идиома приёма в fuel_shift_refresh).
-            fact_end = _n(tank.fact_volume) or None
+            fact_end = _sane_fact(tank.fact_volume)
+            fact_raw = _n(tank.fact_volume) or None
+            # Показание есть, но невозможно — это не «нет замера», а поломка прибора:
+            # отдельное замечание, адресат — эксплуатация, а не бухгалтерия.
+            fact_suspect = fact_end is None and fact_raw is not None
+            if fact_suspect:
+                suspect_facts += 1
             # Факт на начало смены = замер конца предыдущей смены по этому же
             # резервуару (STS даёт один замер на смену — на сдачу/конец; замер
             # начала и есть замер конца предыдущей, как книга нач = книга кон пред.).
-            fact_start = (_n(prev.fact_volume) or None) if prev is not None else None
+            fact_start = _sane_fact(prev.fact_volume) if prev is not None else None
 
             # 1. Арифметика книги внутри смены.
             arithmetic_gap = round(book_start + receipts - sales - book_end, 2)
@@ -381,7 +414,7 @@ async def build_tank_ledger(
                         continuity_gap,
                         book_start=book_start,
                         prev_book_end=_f(prev.volume_end) if prev is not None else 0.0,
-                        prev_fact=_n(prev.fact_volume) or None if prev is not None else None,
+                        prev_fact=_sane_fact(prev.fact_volume) if prev is not None else None,
                         receipts_between=_receipts_between(
                             station_code,
                             prev_shift.opened_at if prev_shift else None,
@@ -425,6 +458,22 @@ async def build_tank_ledger(
                 if abs(fact_gap) > abs(worst_fact):
                     worst_fact = fact_gap
                     worst_fact_shift = int(shift.shift_number)
+            if fact_suspect:
+                issues.append({
+                    "kind": "fact_suspect", "reason": (
+                        f"уровнемер отдал {_ru(fact_raw or 0, 1)} л при уровне "
+                        f"{_ru(_f(tank.level_end), 0)} мм — в резервуар входит около "
+                        f"{_ru(capacity, 0)} л. Показание в расчёт не берётся, "
+                        "прибор требует проверки"),
+                    "type": "fact_suspect",
+                    "station_code": station_code, "station_name": station_name,
+                    "tank_number": tank_no, "fuel_name": (tank.fuel_type or "—").strip(),
+                    "shift_number": int(shift.shift_number),
+                    "date": shift.opened_at.date().isoformat() if shift.opened_at else None,
+                    "gap_liters": round((fact_raw or 0) - book_end, 1),
+                    "detail": (f"замер {_ru(fact_raw or 0, 1)} л против книги "
+                               f"{_ru(book_end, 1)} л — больше вместимости резервуара"),
+                })
 
             # Разрыв ЦЕПОЧКИ учёта: станцию переустановили (нумерация смен началась
             # заново), книгу обнулили или в резервуаре сменилось топливо. Через такой
@@ -454,6 +503,9 @@ async def build_tank_ledger(
                 "book_end": round(book_end, 1),
                 "fact_start": round(fact_start, 1) if fact_start is not None else None,
                 "fact_end": round(fact_end, 1) if fact_end is not None else None,
+                # Что отдал прибор и приняли ли мы это за замер.
+                "fact_raw": round(fact_raw, 1) if fact_raw is not None else None,
+                "fact_suspect": fact_suspect,
                 "fact_gap": fact_gap,
                 "fact_gap_start": fact_gap_start,
                 "fact_gap_delta": fact_gap_delta,
@@ -567,6 +619,8 @@ async def build_tank_ledger(
             # Разрывы цепочки: сколько раз история резервуара начиналась заново и на
             # какую величину «склеилась». Без этого перенумерация станции читается
             # как недостача в десятки тысяч литров.
+            "suspect_facts": suspect_facts,
+            "capacity_hint": round(capacity, 0) if capacity else None,
             "chain_resets": chain_resets,
             "chain_jump": round(chain_jump_sum, 1) if chain_resets else None,
             "worst_fact_gap": round(worst_fact, 1) if worst_fact else 0.0,

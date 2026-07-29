@@ -627,6 +627,10 @@ export interface TankLedgerRow {
   chain_break?: boolean
   /** Величина склейки на разрыве — не движение топлива, а артефакт стыка. */
   chain_jump?: number | null
+  /** Что отдал уровнемер (даже если показание отбраковано как невозможное). */
+  fact_raw?: number | null
+  /** Показание больше вместимости резервуара — в расчёт не взято, прибор неисправен. */
+  fact_suspect?: boolean
   /** Начало смены минус конец предыдущей. Не ноль — между сменами правка мимо учёта. */
   continuity_gap: number | null
   /** Причина разрыва стыка: delivery | renumber | book_reset | pulled_to_fact | gap | manual | fuel_change | unexplained. */
@@ -683,6 +687,9 @@ export interface TankLedgerTank {
   /** Сколько раз история резервуара начиналась заново и на сколько «склеилась». */
   chain_resets?: number
   chain_jump?: number | null
+  /** Недостоверных показаний уровнемера за период и оценка вместимости по книге. */
+  suspect_facts?: number
+  capacity_hint?: number | null
   worst_fact_gap: number
   worst_fact_shift: number | null
 }
@@ -880,7 +887,13 @@ export interface InventoryDraftResponse {
     /** К оформлению за вычетом закрытого прошлыми ведомостями. */
     adjustment_open: number
     tanks_with_prior: number
+    /** Резервуары, выпавшие из ведомости из-за неисправного уровнемера. */
+    skipped_suspect?: number
   }
+  suspect?: {
+    station_code: number; station_name: string; tank_number: number; fuel_name: string
+    fact_volume: number; book_volume: number; capacity_hint: number; reason: string
+  }[]
 }
 
 export interface InventoryGroup {

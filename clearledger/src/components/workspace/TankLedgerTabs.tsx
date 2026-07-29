@@ -65,6 +65,8 @@ const BREAK_KINDS: Record<string, { label: string; tone: string; hard: boolean }
   pulled_to_fact:{ label: 'списано на станции',  tone: 'text-amber-600 dark:text-amber-400', hard: true },
   manual:        { label: 'ручная правка',       tone: 'text-amber-600 dark:text-amber-400', hard: true },
   unexplained:   { label: 'требует разбора',     tone: 'text-amber-600 dark:text-amber-400', hard: true },
+  // Не разрыв стыка, а поломка прибора: показание больше вместимости резервуара.
+  fact_suspect:  { label: 'прибор неисправен',   tone: 'text-red-600 dark:text-red-400',     hard: true },
 }
 
 /** Есть ли в смене «жёсткое» замечание — сломанный счёт (не погрешность замера). */
@@ -831,7 +833,15 @@ function GroupBlock({ group, tol, tols, onPick, sort }: {
                 </span>
               ) : r.fact_start != null ? L1(r.fact_start) : '—'}
             </Td>
-            <Td right>{r.fact_end != null ? L1(r.fact_end) : '—'}</Td>
+            <Td right>
+              {r.fact_suspect ? (
+                <span className="text-red-500"
+                  title={`Уровнемер отдал ${nf1.format(r.fact_raw ?? 0)} л — больше вместимости резервуара. Показание в расчёт не взято.`}>
+                  {nf1.format(r.fact_raw ?? 0)} л
+                  <span className="ml-1 text-[10px]">прибор врёт</span>
+                </span>
+              ) : r.fact_end != null ? L1(r.fact_end) : '—'}
+            </Td>
             {/* Расхождение на входе и на выходе — это СОСТОЯНИЕ (в нём сидит
                 накопленное ранее), а Δ — то, что произошло именно в эту смену.
                 Без разделения одна цифра «книга − факт» читается как результат

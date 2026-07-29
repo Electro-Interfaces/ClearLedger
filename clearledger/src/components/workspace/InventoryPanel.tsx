@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 import { TankCardDialog, type TankRef } from './TankCardDialog'
 import {
   cancelInventory, getInventories, getInventoryDraft, saveInventory,
-  type InventoryDraftRow, type InventoryGroup,
+  type InventoryDraftResponse, type InventoryDraftRow, type InventoryGroup,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -53,10 +53,14 @@ export function InventoryPanel({ companyId, dateFrom, dateTo, stationCodes, fuel
   })
 
   const [totals, setTotals] = useState<{ adjustment_open: number; tanks_with_prior: number } | null>(null)
+  // Резервуары, не попавшие в ведомость из-за неисправного уровнемера: их надо
+  // промерить вручную, иначе они молча выпадут из инвентаризации.
+  const [suspect, setSuspect] = useState<NonNullable<InventoryDraftResponse['suspect']>>([])
   const draftMut = useMutation({
     mutationFn: () => getInventoryDraft({ date, stationCodes, fuelCodes }),
     onSuccess: (d) => {
       setDraft(d.rows)
+      setSuspect(d.suspect ?? [])
       setTotals({ adjustment_open: d.totals.adjustment_open, tanks_with_prior: d.totals.tanks_with_prior })
       // Уже проведённые на эту дату строки снимаем сразу: повторное проведение
       // перезапишет их теми же цифрами, но в отчётности это выглядит как новая
@@ -156,6 +160,29 @@ export function InventoryPanel({ companyId, dateFrom, dateTo, stationCodes, fuel
               </Button>
             </div>
           </div>
+
+          {/* Резервуары с неисправным прибором: в ведомость не попали, но и молча
+              пропасть не должны — их мерят вручную. */}
+          {suspect.length > 0 && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs">
+              <div className="flex items-start gap-2 text-red-500">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {suspect.length} резервуар(ов) не в ведомости: уровнемер отдаёт больше,
+                  чем входит в резервуар. Замерить вручную и внести отдельно.
+                </span>
+              </div>
+              <ul className="mt-1.5 space-y-0.5 pl-5 text-[11px] text-muted-foreground">
+                {suspect.map((s) => (
+                  <li key={`${s.station_code}:${s.tank_number}`}>
+                    {s.station_name} · рез. №{s.tank_number} · {s.fuel_name}: прибор{' '}
+                    {nf0.format(s.fact_volume)} л, книга {nf0.format(s.book_volume)} л,
+                    вместимость около {nf0.format(s.capacity_hint)} л
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Предупреждение о двойном списании — самая дорогая ошибка ведомости:
               расхождение в источнике накапливается, и закрытое прошлой ведомостью

@@ -25,6 +25,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import FuelShift, FuelStation, FuelTank, FuelTankInventory
+# Порог достоверности замера — общий с книгой резервуара: два разных порога дали
+# бы ведомость, расходящуюся с экраном, по которому её сверяют.
+from app.services.tank_ledger import FACT_SANITY_RATIO
 
 
 def _f(v: Any) -> float:
@@ -98,11 +101,34 @@ async def build_draft(
         ))).scalars().all()
     }
 
+    # Вместимость резервуара по книге — ею отбраковываем невозможные замеры.
+    # Уровнемер на АЗС 8 рез.2 отдаёт 53 763 л при уровне 262 мм (входит ~25 000 л):
+    # взяв это за факт, ведомость предложила бы оприходовать 28 тысяч литров,
+    # которых нет. Логика и порог — те же, что в книге резервуара (tank_ledger).
+    capacity: dict[tuple[int, int], float] = {}
+    for tank, shift, station in records:
+        key = (int(station.code), int(tank.tank_number))
+        capacity[key] = max(capacity.get(key, 0.0),
+                            _f(tank.volume_start), _f(tank.volume_end))
+
     rows: list[dict[str, Any]] = []
     sum_adj_vol = 0.0
+    skipped_suspect: list[dict[str, Any]] = []
     for (st_code, tank_no), (tank, shift, station) in sorted(last.items()):
         book_v = _f(tank.volume_end)
         fact_v = _f(tank.fact_volume)
+        cap = capacity.get((st_code, int(tank_no)), 0.0)
+        if cap > 0 and fact_v > cap * FACT_SANITY_RATIO:
+            # Мерить нечем: показание прибора невозможно. В ведомость не берём и
+            # говорим об этом прямо — иначе резервуар молча исчезнет из списка.
+            skipped_suspect.append({
+                "station_code": st_code, "station_name": station.name or f"АЗС {st_code}",
+                "tank_number": int(tank_no), "fuel_name": (tank.fuel_type or "—").strip(),
+                "fact_volume": round(fact_v, 1), "book_volume": round(book_v, 1),
+                "capacity_hint": round(cap, 0),
+                "reason": "показание уровнемера больше вместимости резервуара — прибор требует проверки",
+            })
+            continue
         adj_v = round(fact_v - book_v, 2)
         book_m = _n(tank.mass_end)
         fact_m = _n(tank.fact_mass)
@@ -156,7 +182,11 @@ async def build_draft(
             # К оформлению за вычетом того, что закрыли прошлые ведомости.
             "adjustment_open": round(sum(r["adjustment_open"] for r in rows), 1),
             "tanks_with_prior": sum(1 for r in rows if r["prior_date"]),
+            "skipped_suspect": len(skipped_suspect),
         },
+        # Резервуары, выпавшие из ведомости из-за неисправного прибора: их надо
+        # промерить вручную, иначе они просто не попадут в инвентаризацию.
+        "suspect": skipped_suspect,
     }
 
 
