@@ -571,7 +571,7 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
                 const tr = TREND_VIEW[i.trend ?? 'flat'] ?? TREND_VIEW.flat
                 return (
                   <tr key={i.key} className="border-b border-border/50 hover:bg-muted/25">
-                    {dim !== 'fuel' && <Td>{i.station_label ?? i.label}</Td>}
+                    {dim !== 'fuel' && <Td>{i.station_label ?? '—'}</Td>}
                     {dim !== 'station' && (
                       <Td className="text-muted-foreground">{i.fuel_name ?? '—'}</Td>
                     )}

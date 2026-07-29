@@ -41,6 +41,19 @@ from app.services.fuel_sales_analytics import CARD, FuelSalesAnalytics
 
 T = FuelTransaction
 
+
+def _station_title(code: int, names: dict[int, str]) -> str:
+    """Имя станции для таблиц: код в скобках — только если его нет в названии.
+
+    У ГИГ станции названы «АЗС №208», и приписка «(208)» повторяла тот же номер
+    второй раз в каждой строке. Код нужен там, где название его не содержит
+    (безымянные и импортированные точки), — тогда скобки остаются.
+    """
+    name = names.get(code)
+    if not name:
+        return f"АЗС {code}"
+    return name if str(code) in name else f"{name} ({code})"
+
 # ─── ABC-XYZ: пороги и подписи (те же, что у сети ЭЗС) ────────────────────
 ABC_LABELS = {"A": "A — лидеры", "B": "B — середина", "C": "C — хвост"}
 XYZ_LABELS = {
@@ -429,7 +442,7 @@ class FuelNetworkAnalytics:
 
     # ─── ABC-XYZ ────────────────────────────────────────────────────────
 
-    @cached_report("fuel:abcxyz")
+    @cached_report("fuel:abcxyz:v2")
     async def abc_xyz(self, company_id, date_from: date, date_to: date,
                       dimension: str = "station_fuel", bucket: str = "week",
                       measure: str = "amount",
@@ -476,7 +489,7 @@ class FuelNetworkAnalytics:
             if dimension == "fuel":
                 return str(k[0])
             code = int(k[0])
-            st = f"{names.get(code) or 'АЗС'} ({code})"
+            st = _station_title(code, names)
             return st if dimension == "station" else f"{st} · {k[1]}"
 
         b_from, b_to, n_b = _full_buckets(date_from, date_to, bucket)
@@ -515,7 +528,7 @@ class FuelNetworkAnalytics:
                 # Станция и вид топлива — РАЗДЕЛЬНО, а не одной строкой «АЗС · ДТ»:
                 # это две сущности, по каждой сортируют и сравнивают. `label`
                 # остаётся для заголовков и выгрузки.
-                "station_label": (f"{names.get(int(k[0])) or 'АЗС'} ({int(k[0])})"
+                "station_label": (_station_title(int(k[0]), names)
                                   if dimension != "fuel" else None),
                 "fuel_name": str(k[1]) if dimension == "station_fuel" else (
                     str(k[0]) if dimension == "fuel" else None),
