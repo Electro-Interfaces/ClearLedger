@@ -86,6 +86,9 @@ DELIVERY_TOLERANCE = 0.02      # ТТН признаём совпавшей пр
 RENUMBER_DROP = 50             # номер смены упал больше чем на столько → сброс счётчика
 LONG_PAUSE_HOURS = 36          # пауза между сменами, после которой цепочка рвётся штатно
 MANUAL_ROUND_STEP = 50.0       # «круглый» разрыв — подпись человека, а не расходомера
+# Причины, при которых цепочка «замер предыдущей смены → книга следующей» рвётся:
+# сравнивать их между собой нельзя, это разные истории одного резервуара.
+CHAIN_BREAK_KINDS = {"renumber", "book_reset", "fuel_change"}
 
 
 def _is_round(v: float) -> bool:
@@ -299,6 +302,9 @@ async def build_tank_ledger(
         sum_receipts = sum_sales = 0.0
         sum_mass_receipts = sum_mass_sales = 0.0
         arithmetic_breaks = continuity_breaks = fact_breaks = 0
+        # Разрывы цепочки учёта и суммарная величина склейки на них.
+        chain_resets = 0
+        chain_jump_sum = 0.0
         # Ведомости этого резервуара и расхождение на момент последней из них.
         tank_inventories = inventories.get((station_code, tank_no), [])
         inv_dates = {d for d, _ in tank_inventories}
@@ -420,6 +426,20 @@ async def build_tank_ledger(
                     worst_fact = fact_gap
                     worst_fact_shift = int(shift.shift_number)
 
+            # Разрыв ЦЕПОЧКИ учёта: станцию переустановили (нумерация смен началась
+            # заново), книгу обнулили или в резервуаре сменилось топливо. Через такой
+            # разрыв расхождение не «набегает»: замер относится к старой цепочке, а
+            # книга уже к новой, и их разница — артефакт склейки, а не движение
+            # топлива. Раньше эта разница попадала в прирост за смену, и месяц с
+            # перенумерацией показывал «12 202 л недостачи» при итоге по резервуару
+            # 153 л, а раскладка не сходилась на ту же величину.
+            chain_break = bool(fuel_changed or (break_kind in CHAIN_BREAK_KINDS))
+            chain_jump = fact_gap_delta if chain_break else None
+            if chain_break:
+                fact_gap_delta = None
+                chain_resets += 1
+                chain_jump_sum += chain_jump or 0.0
+
             rows.append({
                 "station_code": station_code, "station_name": station_name,
                 "tank_number": tank_no,
@@ -438,6 +458,10 @@ async def build_tank_ledger(
                 "fact_gap_start": fact_gap_start,
                 "fact_gap_delta": fact_gap_delta,
                 "arithmetic_gap": arithmetic_gap,
+                # Цепочка учёта прервана: сопоставлять замер с книгой через этот стык
+                # нельзя. `chain_jump` — величина склейки, показывается отдельно.
+                "chain_break": chain_break,
+                "chain_jump": round(chain_jump, 1) if chain_jump is not None else None,
                 "continuity_gap": continuity_gap,
                 "continuity_kind": break_kind,
                 "continuity_reason": break_reason,
@@ -540,6 +564,11 @@ async def build_tank_ledger(
             "arithmetic_breaks": arithmetic_breaks,
             "continuity_breaks": continuity_breaks,
             "fact_breaks": fact_breaks,
+            # Разрывы цепочки: сколько раз история резервуара начиналась заново и на
+            # какую величину «склеилась». Без этого перенумерация станции читается
+            # как недостача в десятки тысяч литров.
+            "chain_resets": chain_resets,
+            "chain_jump": round(chain_jump_sum, 1) if chain_resets else None,
             "worst_fact_gap": round(worst_fact, 1) if worst_fact else 0.0,
             "worst_fact_shift": worst_fact_shift,
         })

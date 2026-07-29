@@ -622,6 +622,11 @@ export interface TankLedgerRow {
   fact_gap_delta: number | null
   /** (начало + приход − отпуск) − конец. Не ноль — отчёт внутренне противоречив. */
   arithmetic_gap: number
+  /** Цепочка учёта прервана (перенумерация, обнуление книги, смена топлива):
+   *  замер предыдущей смены и книга этой относятся к разным историям. */
+  chain_break?: boolean
+  /** Величина склейки на разрыве — не движение топлива, а артефакт стыка. */
+  chain_jump?: number | null
   /** Начало смены минус конец предыдущей. Не ноль — между сменами правка мимо учёта. */
   continuity_gap: number | null
   /** Причина разрыва стыка: delivery | renumber | book_reset | pulled_to_fact | gap | manual | fuel_change | unexplained. */
@@ -675,6 +680,9 @@ export interface TankLedgerTank {
   arithmetic_breaks: number
   continuity_breaks: number
   fact_breaks: number
+  /** Сколько раз история резервуара начиналась заново и на сколько «склеилась». */
+  chain_resets?: number
+  chain_jump?: number | null
   worst_fact_gap: number
   worst_fact_shift: number | null
 }

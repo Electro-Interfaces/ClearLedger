@@ -99,14 +99,20 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
     (t) => t.station_code === target?.station_code && t.tank_number === target?.tank_number),
     [diag.data, target])
 
-  /** Сколько расхождения набежало в каждом месяце и где оно скакнуло. */
+  /** Сколько расхождения набежало в каждом месяце и где оно скакнуло.
+   *  Смены с разрывом цепочки (перенумерация, обнуление книги, смена топлива) в
+   *  прирост НЕ входят: там замер и книга из разных историй резервуара. */
   const byMonth = useMemo(() => {
-    const acc = new Map<string, { delta: number; shifts: number; measured: number; jump: TankLedgerRow | null }>()
+    const acc = new Map<string, {
+      delta: number; shifts: number; measured: number
+      jump: TankLedgerRow | null; chain: TankLedgerRow | null
+    }>()
     for (const r of rows) {
       if (!r.opened_at) continue
       const ym = r.opened_at.slice(0, 7)
-      const e = acc.get(ym) ?? { delta: 0, shifts: 0, measured: 0, jump: null }
+      const e = acc.get(ym) ?? { delta: 0, shifts: 0, measured: 0, jump: null, chain: null }
       e.shifts += 1
+      if (r.chain_break) e.chain = r
       if (r.fact_gap_delta != null) {
         e.delta += r.fact_gap_delta
         e.measured += 1
@@ -117,28 +123,54 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
     return [...acc.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [rows])
 
+  /** Разрывы цепочки: где история резервуара начиналась заново. */
+  const chainRows = useMemo(() => rows.filter((r) => r.chain_break), [rows])
+  const chainJumpSum = chainRows.reduce((s, r) => s + (r.chain_jump ?? 0), 0)
+
+  /** Дата смены — «смена №4» после перенумерации сама по себе ничего не говорит. */
+  const shiftDate = (r: TankLedgerRow) =>
+    r.opened_at ? new Date(r.opened_at).toLocaleDateString('ru-RU') : '—'
+
   /** Первая смена периода, где расхождение уже перешло допуск — точка появления. */
   const firstBad = useMemo(() => rows.find(
     (r) => r.fact_gap != null && Math.abs(r.fact_gap) > tol) ?? null, [rows, tol])
   const noFact = useMemo(() => rows.filter((r) => r.fact_end == null).length, [rows])
 
-  /** Раскладка «набежавшего за период» по обстоятельствам смен. */
+  /** Раскладка расхождения. Считается от ТОЧКИ ОТСЧЁТА: это начало периода, а если
+   *  учёт по резервуару начинался заново — первая смена после последнего разрыва.
+   *  Складывать приросты через разрыв нельзя: до и после него книга описывает разные
+   *  истории, и сумма не сходится с итогом (у АЗС 8 рез.6 расходилась на 12 тыс. л). */
   const parts = useMemo(() => {
     if (!tank) return []
+    const lastResetIdx = rows.reduce((acc, r, i) => (r.chain_break ? i : acc), -1)
+    const tail = lastResetIdx >= 0 ? rows.slice(lastResetIdx) : rows
+    // База: расхождение на первой смене нового отсчёта (после разрыва) либо то, с
+    // которым резервуар вошёл в период.
+    const base = lastResetIdx >= 0
+      ? (tail.find((r) => r.fact_gap != null)?.fact_gap ?? 0)
+      : (tank.fact_gap_opening ?? 0)
+
     let defects = 0, onReceipts = 0, clean = 0
-    for (const r of rows) {
+    // Прирост базовой смены уже сидит в `base` — считаем со следующей.
+    for (const r of tail.slice(1)) {
       const d = r.fact_gap_delta
       if (d == null) continue
       const broken = Math.abs(r.arithmetic_gap) > 0.5
         || (r.continuity_kind != null && DEFECT_KINDS.has(r.continuity_kind))
-        || r.fuel_changed
       if (broken) defects += d
       else if (r.receipts > 1) onReceipts += d
       else clean += d
     }
     return [
-      { key: 'opening', label: 'Было на входе', value: tank.fact_gap_opening ?? 0, defect: false,
-        hint: 'расхождение пришло из прошлого периода — вопрос не этого разбора' },
+      {
+        key: 'base',
+        label: lastResetIdx >= 0 ? 'На старте нового учёта' : 'Было на входе',
+        value: base,
+        defect: false,
+        hint: lastResetIdx >= 0
+          ? `с этим расхождением резервуар пошёл после перезапуска учёта ${shiftDate(rows[lastResetIdx])} — прошлая история к нему не складывается`
+          : 'расхождение пришло из прошлого периода — вопрос не этого разбора',
+      },
       { key: 'defects', label: 'Дефекты учёта', value: defects, defect: true,
         hint: 'смены со сломанной арифметикой, разрывом стыка или ручной правкой: правится в отчётах, а не списанием' },
       { key: 'receipts', label: 'В сменах со сливом', value: onReceipts, defect: false,
@@ -148,9 +180,12 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
     ]
   }, [tank, rows])
 
+  // Ось — ДАТА, а не номер смены: после перенумерации номера идут 7331, 4, 5…,
+  // и график читался как прыжок назад во времени.
   const chart = useMemo(() => rows
     .filter((r) => r.fact_end != null)
     .map((r) => ({
+      x: r.opened_at ? r.opened_at.slice(0, 10) : String(r.shift_number),
       shift: r.shift_number,
       Книга: Math.round(r.book_end),
       Замер: Math.round(r.fact_end as number),
@@ -189,8 +224,12 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
       title={target
         ? `${tank?.station_name ?? target.station_name ?? `АЗС ${target.station_code}`} · резервуар №${target.tank_number}${tank?.fuel_name ? ` · ${tank.fuel_name}` : ''}`
         : ''}
+      // «смены 7326–32» после перенумерации читается как ошибка: номер упал. Пишем
+      // диапазон только когда нумерация непрерывна, иначе говорим об этом прямо.
       subtitle={tank
-        ? `${tank.shifts} смен · смены ${tank.first_shift}–${tank.last_shift} · период ${dateFrom} — ${dateTo}`
+        ? `${tank.shifts} смен · ${chainRows.length > 0
+            ? 'нумерация смен прерывалась'
+            : `смены ${tank.first_shift}–${tank.last_shift}`} · период ${dateFrom} — ${dateTo}`
         : `период ${dateFrom} — ${dateTo}`}
       badges={nature && (
         <>
@@ -279,19 +318,29 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
                         {gapWord(m.delta)}
                       </td>
                       <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                        {m.chain && (
+                          // Разрыв цепочки в этом месяце — главное объяснение: пока он
+                          // не назван, «смена №4 · 11 853 л недостача» выглядит бредом.
+                          <button type="button" onClick={() => onPickShift?.(m.chain as TankLedgerRow)}
+                            className="mb-0.5 block text-left text-amber-500 underline-offset-2 hover:underline">
+                            учёт начат заново: смена №{m.chain.shift_number} от {shiftDate(m.chain)}
+                            {m.chain.continuity_kind === 'renumber' ? ' — станцию переустановили, нумерация смен пошла с начала'
+                              : m.chain.continuity_kind === 'book_reset' ? ' — книгу обнулили на станции'
+                              : m.chain.fuel_changed ? ' — в резервуаре сменилось топливо' : ''}
+                          </button>
+                        )}
                         {m.jump && Math.abs(m.jump.fact_gap_delta ?? 0) > tol ? (
                           <button type="button" onClick={() => onPickShift?.(m.jump as TankLedgerRow)}
                             className="text-left underline-offset-2 hover:text-foreground hover:underline">
-                            смена №{m.jump.shift_number} · {gapWord(m.jump.fact_gap_delta)}
+                            смена №{m.jump.shift_number} от {shiftDate(m.jump)} · {gapWord(m.jump.fact_gap_delta)}
                             {m.jump.receipts > 1 && ' · при сливе'}
                             {m.jump.continuity_kind && ` · ${m.jump.continuity_kind === 'delivery' ? 'слив между сменами'
                               : m.jump.continuity_kind === 'manual' ? 'ручная правка'
-                              : m.jump.continuity_kind === 'book_reset' ? 'сброс книги'
-                              : m.jump.continuity_kind === 'renumber' ? 'перенумерация'
                               : m.jump.continuity_kind === 'pulled_to_fact' ? 'списано на станции'
+                              : m.jump.continuity_kind === 'unexplained' ? 'без объяснения'
                               : m.jump.continuity_kind}`}
                           </button>
-                        ) : '—'}
+                        ) : !m.chain && '—'}
                       </td>
                     </tr>
                   ))}
@@ -321,6 +370,28 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
                       <td className="px-3 py-2 text-[11px] text-muted-foreground">{p.hint}</td>
                     </tr>
                   ))}
+                  {chainRows.length > 0 && (
+                    // Склейка на разрыве — не топливо и не часть суммы. Показывается
+                    // справкой: сколько «прыгнуло» на стыке двух разных историй.
+                    <tr className="border-b border-border/60 bg-amber-500/5">
+                      <td className="px-3 py-2 font-medium">
+                        Учёт начинался заново
+                        <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                          {chainRows.length === 1 ? '1 раз' : `${chainRows.length} раза`}
+                        </span>
+                      </td>
+                      <td className="w-36 px-3 py-2 text-right font-medium tabular-nums text-amber-500">
+                        скачок {nf0.format(Math.abs(chainJumpSum))} л
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-muted-foreground">
+                        {chainRows.map((r) => `смена №${r.shift_number} от ${shiftDate(r)}`).join(', ')}
+                        {chainRows[0]?.continuity_kind === 'renumber' && ' — станцию переустановили, нумерация смен пошла с начала'}
+                        {chainRows[0]?.continuity_kind === 'book_reset' && ' — книгу обнулили на станции'}.
+                        {' '}В сумму не входит: замер до разрыва и книга после — разные истории
+                        резервуара, списывать эту величину нечего.
+                      </td>
+                    </tr>
+                  )}
                   {tank.inventory_adjustment != null && (
                     <tr className="border-b border-border/60 bg-muted/20">
                       <td className="px-3 py-2 font-medium">Оформлено ведомостями</td>
@@ -340,9 +411,11 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
                     <td className="px-3 py-2 text-[11px] text-muted-foreground">
                       {Math.abs(residual) <= Math.max(tol, Math.abs(tank.fact_gap ?? 0) * 0.02)
                         ? 'раскладка сходится с итогом'
-                        : noFact > 0
-                          ? `не разложилось ${nf0.format(Math.abs(residual))} л: ${noFact} смен без замера — в них прирост посчитать нечем`
-                          : `не разложилось ${nf0.format(Math.abs(residual))} л — цепочка смен в периоде неполная`}
+                        : chainRows.length > 0
+                          ? `не разложилось ${nf0.format(Math.abs(residual))} л: учёт начинался заново — приросты до и после разрыва между собой не складываются`
+                          : noFact > 0
+                            ? `не разложилось ${nf0.format(Math.abs(residual))} л: ${noFact} смен без замера — в них прирост посчитать нечем`
+                            : `не разложилось ${nf0.format(Math.abs(residual))} л — цепочка смен в периоде неполная`}
                     </td>
                   </tr>
                 </tbody>
@@ -360,12 +433,19 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chart} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-border" />
-                    <XAxis dataKey="shift" tick={{ fontSize: 10 }} stroke="currentColor" className="text-muted-foreground" />
+                    <XAxis dataKey="x" tick={{ fontSize: 10 }} stroke="currentColor" className="text-muted-foreground"
+                           tickFormatter={(v: string) => (v.length === 10
+                             ? new Date(v).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : v)}
+                           minTickGap={24} />
                     <YAxis tick={{ fontSize: 10 }} width={52} stroke="currentColor" className="text-muted-foreground" />
                     <RTooltip
                       contentStyle={{ fontSize: 11, borderRadius: 8, background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
                       formatter={(v, n) => [`${nf0.format(Number(v ?? 0))} л`, n]}
-                      labelFormatter={(l) => `смена ${l}`}
+                      labelFormatter={(l, p) => {
+                        const shift = (p?.[0]?.payload as { shift?: number } | undefined)?.shift
+                        const date = String(l).length === 10 ? new Date(String(l)).toLocaleDateString('ru-RU') : String(l)
+                        return shift ? `${date} · смена №${shift}` : date
+                      }}
                     />
                     <Line type="monotone" dataKey="Книга" stroke="hsl(var(--primary))" dot={false} strokeWidth={1.5} />
                     <Line type="monotone" dataKey="Замер" stroke="#f59e0b" dot={false} strokeWidth={1.5} />
