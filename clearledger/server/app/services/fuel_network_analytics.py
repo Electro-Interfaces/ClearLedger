@@ -512,6 +512,11 @@ class FuelNetworkAnalytics:
                 "key": "|".join(str(x) for x in k),
                 "label": _label(k),
                 "station_code": int(k[0]) if dimension != "fuel" else None,
+                # Станция и вид топлива — РАЗДЕЛЬНО, а не одной строкой «АЗС · ДТ»:
+                # это две сущности, по каждой сортируют и сравнивают. `label`
+                # остаётся для заголовков и выгрузки.
+                "station_label": (f"{names.get(int(k[0])) or 'АЗС'} ({int(k[0])})"
+                                  if dimension != "fuel" else None),
                 "fuel_name": str(k[1]) if dimension == "station_fuel" else (
                     str(k[0]) if dimension == "fuel" else None),
                 "measure": round(m, 2),

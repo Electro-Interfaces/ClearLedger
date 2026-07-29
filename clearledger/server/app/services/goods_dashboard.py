@@ -283,6 +283,41 @@ class GoodsDashboardService:
             out.append(m)
         return out
 
+    async def _release_cost_unit(self, df: date, dt: date,
+                                 stations: list[str] | None) -> dict[str, float]:
+        """Себестоимость порции блюда по документу выпуска: Σ(Сумма)/Σ(Количество) по GUID.
+
+        Это готовая себестоимость от самой 1С, посчитанная по тем же техкартам и по
+        правилам списания — то есть ровно то, чем закрывается смена. Сборка по ТТК из
+        средних закупок остаётся запасным путём: она даёт нижнюю границу и рвётся целиком,
+        если хоть у одного ингредиента нет ни одной накладной за период (сироп на два
+        грамма обнулял себестоимость всего капучино).
+
+        Дедуп документов по `ИсточникUUID` — как в `_load_purchases`: один документ мог
+        прицепиться к двум смежным сменам.
+        """
+        if getattr(self, "_release_cache", None) is None:
+            self._release_cache = (await self.session.execute(select(DataEntry).where(
+                DataEntry.company_id == self.company_id, DataEntry.layer == "clean",
+                DataEntry.doc_type_id == "production_release"))).scalars().all()
+        selected = self._select(self._release_cache, df, dt, stations)
+        agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # ref → [сумма, кол-во]
+        seen: set[str] = set()
+        for i, m in enumerate(selected):
+            doc = m.get("Документ") or {}
+            uid = str(doc.get("ИсточникUUID") or "") or f"__rel{i}"
+            if uid in seen:
+                continue
+            seen.add(uid)
+            for ln in doc.get("ВыпускБлюд") or []:
+                ref = str(ln.get("Номенклатура") or "")
+                qty = float(ln.get("Количество") or 0)
+                if not ref or qty <= 0:
+                    continue
+                agg[ref][0] += float(ln.get("Сумма") or 0)
+                agg[ref][1] += qty
+        return {ref: s / q for ref, (s, q) in agg.items() if q > 0}
+
     async def _names(self) -> dict:
         if getattr(self, "_names_cache", None) is not None:
             return self._names_cache
@@ -424,6 +459,11 @@ class GoodsDashboardService:
                 "sku_costed": len(costed),
                 "revenue": round(sum(r["revenue"] for r in rows), 2),
                 "revenue_net": round(sum(r["revenue_net"] for r in rows), 2),
+                # Выручка ТЕХ блюд, по которым известна себестоимость: фудкост и прибыль
+                # считаются от неё, а не от общей. Пока это не отдавалось наружу, плитки
+                # «прибыль» и «выручка» стояли рядом на разных базах и читались как
+                # рентабельность в разы ниже фактической.
+                "revenue_costed": round(sum(r["revenue"] for r in rows if r["cost"] is not None), 2),
                 "cogs_costed": round(sum(r["cogs"] for r in costed), 2),
                 "margin_costed": round(margin_costed, 2),
                 "margin_pct_costed": round(100 * margin_costed / net_costed, 1) if net_costed else None,
@@ -948,6 +988,8 @@ class GoodsDashboardService:
         себестоимостью на порцию) и дневная динамика продаж (для раскрытия строки)."""
         sale_metas = self._select(await self._load(), date_from, date_to, stations)
         avgc = {g: c[0] for g, c in (await self._cost_unit_map()).items()}  # закуп-net all-time
+        # Себестоимость от 1С по документу выпуска — то, чем реально закрывается смена.
+        rel = await self._release_cost_unit(date_from, date_to, stations)
         nom = await self._names()
 
         def _dish():
@@ -996,7 +1038,16 @@ class GoodsDashboardService:
         for g, d in dishes.items():
             nnn = nom.get(g)
             qty, rev, revnet = d["qty"], d["rev"], d["revnet"]
-            cost = d["cost"] if d["covered"] else None
+            # Порядок источников: выпуск 1С → сборка по ТТК (только при полном покрытии).
+            # Сборка занижена по природе (средняя закупка вместо себестоимости списания),
+            # поэтому она запасная, а не основная.
+            unit = rel.get(g)
+            if unit is not None:
+                cost, cost_source = unit * qty, "release"
+            elif d["covered"]:
+                cost, cost_source = d["cost"], "ttk"
+            else:
+                cost, cost_source = None, None
             margin = (revnet - cost) if cost is not None else None
             food_cost = (100 * cost / revnet) if cost is not None and revnet else None
             margin_pct = (100 * margin / revnet) if margin is not None and revnet else None
@@ -1039,6 +1090,10 @@ class GoodsDashboardService:
                 "popularity_pct": round(pop, 1),
                 "menu_class": cls,
                 "coverage": round(100 * d["coverage"]),
+                # Чем посчитана себестоимость: выпуском 1С или сборкой по ТТК. На экране
+                # это подпись под цифрой — иначе непонятно, почему у соседних блюд
+                # разная точность.
+                "cost_source": cost_source,
                 # OB-3: 60–89% покрытия — себестоимость частичная, показываем как
                 # «предварительную» (в costed-маржу не входит, cost=None выше).
                 "preliminary": (not d["covered"]) and d["coverage"] >= 0.6,
@@ -1057,6 +1112,11 @@ class GoodsDashboardService:
                 "dishes_costed": sum(1 for r in rows if r["cost"] is not None),
                 "revenue": round(sum(r["revenue"] for r in rows), 2),
                 "revenue_net": round(sum(r["revenue_net"] for r in rows), 2),
+                # Выручка ТЕХ блюд, по которым известна себестоимость: фудкост и прибыль
+                # считаются от неё, а не от общей. Пока это не отдавалось наружу, плитки
+                # «прибыль» и «выручка» стояли рядом на разных базах и читались как
+                # рентабельность в разы ниже фактической.
+                "revenue_costed": round(sum(r["revenue"] for r in rows if r["cost"] is not None), 2),
                 "portions": round(sum(r["qty"] for r in rows), 2),
                 "cost": round(tot_cost, 2),
                 "margin": round(tot_revnet_costed - tot_cost, 2),

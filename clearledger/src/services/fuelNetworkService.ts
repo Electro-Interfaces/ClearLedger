@@ -105,6 +105,8 @@ export interface AbcItem {
   key: string
   label: string
   station_code: number | null
+  /** Станция и вид топлива приходят раздельно — это две колонки, не одна строка. */
+  station_label: string | null
   fuel_name: string | null
   measure: number
   amount: number

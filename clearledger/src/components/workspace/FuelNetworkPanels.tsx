@@ -554,7 +554,13 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
           <table className="w-full min-w-[820px] text-xs">
             <thead>
               <tr className="border-b bg-muted/35 text-muted-foreground">
-                <Th>Позиция</Th><Th>Класс</Th><Th right>Выручка, ₽</Th>
+                {dim !== 'fuel' && <Th>АЗС</Th>}
+                {dim !== 'station' && <Th>Топливо</Th>}
+                {/* Столбец класса не нужен, когда таблица УЖЕ отфильтрована по
+                    классу: шестнадцать одинаковых бейджей ничего не сообщают,
+                    а класс назван в заголовке карточки. */}
+                {!cell && <Th>Класс</Th>}
+                <Th right>Выручка, ₽</Th>
                 <Th right>Доля</Th><Th right>Накопл.</Th><Th right>Литры</Th>
                 <Th right>Наливы</Th><Th right>Карт</Th>
                 <Th right>Разброс</Th><Th right>Тренд</Th>
@@ -565,14 +571,19 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
                 const tr = TREND_VIEW[i.trend ?? 'flat'] ?? TREND_VIEW.flat
                 return (
                   <tr key={i.key} className="border-b border-border/50 hover:bg-muted/25">
-                    <Td>{i.label}</Td>
-                    <Td>
-                      <span title={i.hint}
-                        className={cn('rounded px-1.5 py-0.5 font-semibold',
-                          i.xyz === '—' ? 'bg-muted/60 text-muted-foreground' : 'bg-primary/10 text-primary')}>
-                        {i.xyz === '—' ? `${i.abc}·—` : i.abc + i.xyz}
-                      </span>
-                    </Td>
+                    {dim !== 'fuel' && <Td>{i.station_label ?? i.label}</Td>}
+                    {dim !== 'station' && (
+                      <Td className="text-muted-foreground">{i.fuel_name ?? '—'}</Td>
+                    )}
+                    {!cell && (
+                      <Td>
+                        <span title={i.hint}
+                          className={cn('rounded px-1.5 py-0.5 font-semibold',
+                            i.xyz === '—' ? 'bg-muted/60 text-muted-foreground' : 'bg-primary/10 text-primary')}>
+                          {i.xyz === '—' ? `${i.abc}·—` : i.abc + i.xyz}
+                        </span>
+                      </Td>
+                    )}
                     <Td right className="font-medium">{money(i.amount)}</Td>
                     <Td right>
                       {/* Бар внутри ячейки — доля читается взглядом, а не сравнением цифр. */}

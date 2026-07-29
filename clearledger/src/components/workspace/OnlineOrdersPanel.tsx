@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertCircle, Pause, Play, RefreshCw, Search, Smartphone } from 'lucide-react'
+import {
+  AlertCircle, CheckCircle, Pause, Play, RefreshCw, Search, Smartphone, Timer, XCircle,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { FuelBadge } from '@/components/common/FuelBadge'
 import { cn } from '@/lib/utils'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import {
@@ -22,12 +25,14 @@ const PAGE_SIZE = 100
 
 type OrderStatus = 'completed' | 'pending' | 'failed' | 'cancelled' | 'unknown'
 
-const statusMeta: Record<OrderStatus, { label: string; className: string }> = {
-  completed: { label: 'Выполнен', className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500' },
-  pending: { label: 'Ожидание', className: 'border-amber-500/40 bg-amber-500/10 text-amber-500' },
-  failed: { label: 'Ошибка', className: 'border-red-500/40 bg-red-500/10 text-red-500' },
-  cancelled: { label: 'Отменён', className: 'border-muted-foreground/40 bg-muted text-muted-foreground' },
-  unknown: { label: 'Не определён', className: 'border-border bg-muted text-muted-foreground' },
+/** Иконка в бейдже — как в «Мониторе»: статус читается и без различения цвета
+ *  (PRODUCT.md: цвет не может быть единственным носителем состояния). */
+const statusMeta: Record<OrderStatus, { label: string; className: string; icon: ReactNode }> = {
+  completed: { label: 'Выполнен', className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500', icon: <CheckCircle className="h-3 w-3" /> },
+  pending: { label: 'Ожидание', className: 'border-amber-500/40 bg-amber-500/10 text-amber-500', icon: <Timer className="h-3 w-3" /> },
+  failed: { label: 'Ошибка', className: 'border-red-500/40 bg-red-500/10 text-red-500', icon: <XCircle className="h-3 w-3" /> },
+  cancelled: { label: 'Отменён', className: 'border-muted-foreground/40 bg-muted text-muted-foreground', icon: <AlertCircle className="h-3 w-3" /> },
+  unknown: { label: 'Не определён', className: 'border-border bg-muted text-muted-foreground', icon: <AlertCircle className="h-3 w-3" /> },
 }
 
 function orderStatus(value: string | null): OrderStatus {
@@ -77,6 +82,13 @@ function orderPrice(order: LoadedOnlineOrder) {
   if (order.actual_volume > 0) return order.actual_sum / order.actual_volume
   if (order.ordered_volume > 0) return order.ordered_sum / order.ordered_volume
   return 0
+}
+
+/** Факт разошёлся с заказом — суммы янтарные (приём «Монитора»): это первое, что
+ *  ищут в заказе, и цвет отмечает обе суммы сразу, а не одну колонку. */
+function mismatchClass(order: LoadedOnlineOrder) {
+  if (order.actual_volume <= 0) return ''
+  return Math.abs(order.actual_volume - order.ordered_volume) > 0.01 ? 'text-amber-500' : ''
 }
 
 function DetailField({ label, value }: { label: string; value: string | number }) {
@@ -143,6 +155,24 @@ export function OnlineOrdersPanel({ companyId, dateFrom, dateTo, stationCode }: 
   }, [queryParams, refetchOrders])
 
   const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data])
+
+  // Заказы, приехавшие последним обновлением, помечаются на 5 секунд: экран
+  // живёт в фоне и обновляется сам, без отметки прирост незаметен. Приём
+  // «Монитора»; здесь без пульсации — раздел не должен мигать в углу глаза.
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set())
+  const seenIds = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const ids = new Set(orders.map((order) => order.id))
+    const known = seenIds.current
+    seenIds.current = ids
+    if (!known) return // первая загрузка: подсвечивать нечего
+    const added = [...ids].filter((id) => !known.has(id))
+    if (added.length === 0) return
+    setFreshIds(new Set(added))
+    const timer = setTimeout(() => setFreshIds(new Set()), 5000)
+    return () => clearTimeout(timer)
+  }, [orders])
+
   const selectedOrder = useMemo(
     () => orders.find((order) => order.id === selectedId) ?? null,
     [orders, selectedId],
@@ -179,13 +209,15 @@ export function OnlineOrdersPanel({ companyId, dateFrom, dateTo, stationCode }: 
   const currentPage = Math.min(page, pages - 1)
   const visible = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
 
+  // Копейки и доли литра в сводке — шум: она про порядок величин, точность
+  // живёт в строках и в расшифровке заказа.
   const summary = [
     ['Заказов', number0.format(stats.count)],
     ['Выполнено', number0.format(stats.completed)],
     ['Ожидают', number0.format(stats.pending)],
     ['Ошибки / отмены', number0.format(stats.problem)],
-    ['Отпуск', `${volume.format(stats.volume)} л`],
-    ['Сумма', `${number2.format(stats.amount)} ₽`],
+    ['Отпуск', `${number0.format(Math.round(stats.volume))} л`],
+    ['Сумма', `${number0.format(Math.round(stats.amount))} ₽`],
   ]
 
   return (
@@ -198,7 +230,7 @@ export function OnlineOrdersPanel({ companyId, dateFrom, dateTo, stationCode }: 
               Онлайн-заказы MSTO
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Заказы агрегаторов за рабочий период. Строка открывается выбором, без отдельной кнопки.
+              Заказы агрегаторов за рабочий период. Строка открывает расшифровку.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
