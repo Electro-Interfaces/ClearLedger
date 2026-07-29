@@ -59,7 +59,7 @@ export function MainLayout() {
   useEffect(() => {
     const ok = pathAllowed(location.pathname, company.profileId, canApp,
       (p) => routeAllowed(p, companyModules),
-      (app, code) => productModuleAllowed(app, code, canModule))
+      (app, code) => productModuleAllowed(app, code, canModule, company.profileId))
     if (!ok) navigate(homePath(company.profileId), { replace: true })
     // canApp пересоздаётся каждый рендер — в зависимостях его нет намеренно,
     // источник его данных (companyModules/профиль) в списке присутствует.

@@ -102,7 +102,7 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
         <div>
           <h3 className="text-base font-semibold flex items-center gap-2">
             {s.violations > 0 ? <ShieldAlert className="h-4 w-4 text-red-400/90" /> : <ShieldCheck className="h-4 w-4 text-emerald-300/80" />}
-            МРЦ табака — контроль
+            МРЦ табака
           </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Продажа выше максимальной розничной цены — нарушение. Розница ЦБ vs справочник МРЦ.

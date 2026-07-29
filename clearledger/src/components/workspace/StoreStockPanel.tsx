@@ -68,7 +68,7 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold">Остатки — достоверный (регистры ЦБ)</h3>
+            <h3 className="text-base font-semibold">Остатки</h3>
             <SnapshotBadge at={data.snapshot_at} />
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">

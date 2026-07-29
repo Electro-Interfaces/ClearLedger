@@ -1,6 +1,7 @@
 /**
- * Тонкий роутер раздела «Продажи» ГИГ (fuel): раздаёт подразделы MGMT_MENU по
- * панелям. Группы меню: Сеть · Аналитика · Коммерция · Товародвижение.
+ * Тонкий роутер приложения «Топливо» (fuel, ГИГ): раздаёт пункты MGMT_MENU по
+ * панелям. Разделы: Сеть · Аналитика · Коммерция · Товародвижение — каждый стоит в
+ * рельсе приложения, роутер один на все четыре (ключ пункта однозначен).
  *
  * Вынесен из ManagementPanel (AccountingPanels.tsx) по прецеденту
  * ChargeSalesRouter — правка внутренностей панелей не задевает диспетчеризацию.
@@ -35,10 +36,15 @@ export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode 
     case 'fuel-tariffs':   return <FuelTariffsPanel {...p} />
     case 'fuel-corporate': return <FuelCorporatePanel {...p} />
     case 'fuel-retail':    return <FuelRetailPanel {...p} />
-    // Товародвижение
+    // Товародвижение. «Приёмка», «Расхождения» и «Инвентаризация» — те же экраны,
+    // что раньше были табами «Контроля баланса»: панель одна (общий фильтр станций и
+    // топлива, шапка баланса), различается набором видов (см. FuelBalancePanel).
     case 'margin':         return <MarginDecisionPanel {...p} />
     case 'purchases':      return <ReceiptsSection />
+    case 'intake':         return <FuelBalancePanel {...p} view="intake" />
     case 'tanks':          return <FuelBalancePanel {...p} />
+    case 'variances':      return <FuelBalancePanel {...p} view="variances" />
+    case 'inventory':      return <FuelBalancePanel {...p} view="inventory" />
     default:               return null
   }
 }

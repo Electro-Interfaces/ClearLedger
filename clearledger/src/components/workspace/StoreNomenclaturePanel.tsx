@@ -52,7 +52,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
   return (
     <div className="p-6 space-y-4">
       <div>
-        <h3 className="text-base font-semibold">Номенклатура — справочник товаров</h3>
+        <h3 className="text-base font-semibold">Номенклатура</h3>
         <p className="text-xs text-muted-foreground">Мастер-НСИ из ЦБ ЭЛСИ.АЗК. Клик по строке — полная карточка товара: паспорт, штрихкоды, цена/остаток, продажи, поставки, движение, ТТК, МРЦ.</p>
       </div>
 

@@ -7,14 +7,16 @@
  * под-раздел в заголовок не попадает (не критично).
  */
 import type { CoreMode } from '@/contexts/WorkspaceContext'
-import { STORE_MENU } from './storeCatalog'
+import { STORE_MENU, storeMenu } from './storeCatalog'
 
 export const MODE_LABELS: Record<CoreMode, string> = {
-  // Три раздела «Продаж». `management` — исторический код первого: у сети ЭЗС это
-  // «Сеть», у топливного профиля — весь его раздел «Продажи».
-  management: 'Продажи',
-  sales_sessions: 'Продажи · Сессии',
-  sales_commerce: 'Продажи · Коммерция',
+  // Разделы продукта продаж. `management` — исторический код первого («Сеть» у обоих
+  // профилей). Подписи нейтральны: у ЭЗС второй раздел зовётся «Сессии», у «Топлива» —
+  // «Аналитика», и заголовок закладки почти всегда берётся по пункту (SUB_LABELS).
+  management: 'Сеть',
+  sales_sessions: 'Аналитика продаж',
+  sales_commerce: 'Коммерция',
+  sales_goods: 'Товародвижение',
   // Три раздела «Эксплуатации»; `operations` — код первого («Мониторинг» у energy,
   // «Управленческий» у топливного профиля).
   operations: 'Управленческий',
@@ -23,6 +25,10 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   projects: 'Проекты · Работа',
   projects_analytics: 'Проекты · Аналитика',
   store: 'Магазин',
+  store_stock: 'Магазин · Склад',
+  store_closing: 'Магазин · Закрытие',
+  store_catalog: 'Магазин · Каталог',
+  store_marking: 'Магазин · Маркировка',
   corporate: 'Процессинг',
   marketing: 'Маркетинг',
   financial: 'Финансовый',
@@ -45,12 +51,16 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     pr_portfolio: 'Обзор', sites_overview: 'Воронка', sites_priority: 'Приоритеты',
     pr_budget: 'Бюджет', pr_accounting: 'Ждёт учёта',
   },
+  // Подписи двух профилей лежат в одном режиме: коды не пересекаются, а старые
+  // закладки «Топлива» (все 12 пунктов жили под `management`) продолжают
+  // подписываться правильно — даже когда пункт уехал в свой раздел.
   management: {
     overview: 'Обзор', map: 'Карта', transactions: 'Реестр операций',
     fills: 'Реализация', 'fuel-tariffs': 'Тарифы', 'fuel-corporate': 'Корпоратив', 'fuel-retail': 'Частные лица',
     'by-station': 'По станциям', 'by-fuel': 'По топливу',
     'by-month': 'По месяцам', channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы', margin: 'Маржа и цены',
-    purchases: 'Поступления', tanks: 'Контроль баланса', balance: 'Баланс',
+    purchases: 'Поступления', intake: 'Приёмка и сливы', tanks: 'Контроль баланса',
+    variances: 'Расхождения', inventory: 'Инвентаризация', balance: 'Баланс',
     procurement: 'Энергозакупка', rent: 'Аренда',
     cs_dashboard: 'Обзор', cs_map: 'Карта', cs_trend: 'Динамика 2024+',
     cs_abcxyz: 'ABC-XYZ станций', cs_reliability: 'Надёжность',
@@ -59,10 +69,17 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     cs_breakdown: 'Разрезы', cs_time: 'Время и загрузка', cs_dynamics: 'Тренд и YoY',
     cs_compare: 'Сравнение периодов', cs_list: 'Реестр сессий',
     cs_sessions: 'Разрезы',  // старая ссылка ?sub=cs_sessions
+    fills: 'Реализация', transactions: 'Реестр операций',
+    channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы',
   },
   sales_commerce: {
     cs_clients: 'Тарифы', cs_corporate: 'Корпоратив',
     cs_retail: 'Частные лица', cs_segments: 'Сегменты и когорты',
+    'fuel-tariffs': 'Тарифы', 'fuel-corporate': 'Корпоратив', 'fuel-retail': 'Частные лица',
+  },
+  sales_goods: {
+    margin: 'Маржа и цены', purchases: 'Поступления', intake: 'Приёмка и сливы',
+    tanks: 'Контроль баланса', variances: 'Расхождения', inventory: 'Инвентаризация',
   },
   operations: {
     ops_overview: 'Обзор', ops_balance: 'Баланс (факт)', ops_completeness: 'Полнота данных',
@@ -79,6 +96,10 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     mk_operators: 'Операторы', mk_observations: 'Наблюдения',
   },
   store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),
+  store_stock: Object.fromEntries(storeMenu('store_stock').map((m) => [m.key, m.label])),
+  store_closing: Object.fromEntries(storeMenu('store_closing').map((m) => [m.key, m.label])),
+  store_catalog: Object.fromEntries(storeMenu('store_catalog').map((m) => [m.key, m.label])),
+  store_marking: Object.fromEntries(storeMenu('store_marking').map((m) => [m.key, m.label])),
   financial: {
     overview: 'Обзор', cashflow: 'Денежный поток', receivables: 'Дебиторка', payables: 'Кредиторка',
   },

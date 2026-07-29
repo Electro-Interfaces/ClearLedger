@@ -27,7 +27,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, authorizeApp, hasSideButton, type SsoApp } from '@/services/ssoService'
-import { PRODUCT_READINESS, READINESS_LABEL, type Readiness } from '@/config/spaceProducts'
+import { READINESS_LABEL, productReadiness, type Readiness } from '@/config/spaceProducts'
 import { getDeskSummary, type DeskMetric } from '@/services/spaceDeskService'
 
 /** База сборки SPA (`/ClearLedger/`) — новая вкладка открывается по полному адресу. */
@@ -259,7 +259,7 @@ export function EcosystemHomePage() {
         icon={ICONS[a.icon] ?? LayoutGrid}
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
         busy={busy === a.code}
-        readiness={PRODUCT_READINESS[a.code]}
+        readiness={productReadiness(a.code, company.profileId)}
         metrics={desk.data?.products[a.code]?.metrics}
         onClick={() => openProduct(a)}
       />

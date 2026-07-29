@@ -34,7 +34,7 @@ export function MobileBottomNav() {
     { label: 'Настройки', path: '/settings', icon: Settings },
   ].filter((i) => pathAllowed(i.path, company.profileId, canApp,
     (p) => routeAllowed(p, companyModules),
-    (app, code) => productModuleAllowed(app, code, canModule)))
+    (app, code) => productModuleAllowed(app, code, canModule, company.profileId)))
 
   return (
     <nav

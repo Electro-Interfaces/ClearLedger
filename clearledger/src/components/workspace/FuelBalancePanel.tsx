@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
-  Activity, BookOpen, CircleCheckBig, ClipboardCheck, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
-  TriangleAlert, Truck, Warehouse, X,
+  Activity, BookOpen, CircleCheckBig, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
+  TriangleAlert, Warehouse, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -130,10 +130,47 @@ function Empty({ text }: { text: string }) {
   return <div className="p-10 text-center text-sm text-muted-foreground">{text}</div>
 }
 
-export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
+/**
+ * Виды панели = пункты «Товародвижения», которые раньше были её табами.
+ *
+ * Предмет у них разный (претензия поставщику · поиск причины · ведомость бухгалтеру),
+ * поэтому в меню они стоят отдельными пунктами. Панель осталась одна: фильтр станций
+ * и топлива, расчёт баланса и шапка с итогами нужны всем четырём одинаково — иначе
+ * пришлось бы четырежды повторить фильтр и четырежды считать одно и то же.
+ */
+export type FuelBalanceView = 'balance' | 'intake' | 'variances' | 'inventory'
+
+const VIEW_TABS: Record<FuelBalanceView, string[]> = {
+  balance: ['journal', 'book_tanks', 'summary'],
+  intake: ['receipts'],
+  variances: ['book_issues', 'causes'],
+  inventory: ['inventory'],
+}
+
+const VIEW_HEAD: Record<FuelBalanceView, { title: string; hint: string }> = {
+  balance: {
+    title: 'Контроль топливного баланса',
+    hint: 'Первый остаток + поступления − реализация − последний остаток · расчёт по каждому резервуару',
+  },
+  intake: {
+    title: 'Приёмка и сливы',
+    hint: 'Ошибки слива бензовозов по каждой ТТН · считается по массе, а не по объёму накладной',
+  },
+  variances: {
+    title: 'Расхождения книги и факта',
+    hint: 'Замечания по стыку смен и поведение расхождения во времени: дрейф, скачок, шум',
+  },
+  inventory: {
+    title: 'Инвентаризация резервуаров',
+    hint: 'Ведомость корректировок книги на фактический замер: излишки к оприходованию, недостачи к списанию',
+  },
+}
+
+export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance' }: {
   companyId: string
   dateFrom: string
   dateTo: string
+  view?: FuelBalanceView
 }) {
   const { stationCode, locationIds } = useFilters()
   const locations = useLocations()
@@ -240,18 +277,22 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold">Контроль топливного баланса</h2>
+            <h2 className="text-base font-semibold">{VIEW_HEAD[view].title}</h2>
             {query.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-label="Обновление данных" /> : null}
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">Первый остаток + поступления − реализация − последний остаток · расчёт по каждому резервуару</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{VIEW_HEAD[view].hint}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-8" onClick={() => query.refetch()} disabled={query.isFetching}>
             <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', query.isFetching && 'animate-spin')} />Обновить
           </Button>
-          <Button variant="outline" size="sm" className="h-8" onClick={exportXlsx} disabled={exporting || data.tanks.length === 0}>
-            {exporting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}Экспорт
-          </Button>
+          {/* Выгрузка — книга остатков (свод · резервуары · разрывы): она про баланс,
+              на «Приёмке» и «Инвентаризации» отдала бы не то, что человек видит. */}
+          {view === 'balance' && (
+            <Button variant="outline" size="sm" className="h-8" onClick={exportXlsx} disabled={exporting || data.tanks.length === 0}>
+              {exporting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}Экспорт
+            </Button>
+          )}
         </div>
       </div>
 
@@ -286,35 +327,39 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
             </CardContent>
           </Card>
 
-          <div className={cn(
-            'flex items-start gap-3 rounded-lg border px-4 py-3 text-sm',
-            issues === 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-500/35 bg-amber-500/5',
-          )}>
-            {issues === 0 ? <CircleCheckBig className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /> : <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />}
-            <div className="min-w-0">
-              <div className="font-medium">{issues === 0 ? 'Последовательность остатков подтверждена' : `Найдены замечания: ${issues}`}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                Проверено переходов между сменами: {nf0.format(data.integrity.continuity_checks)}. Допуск: ±{nf1.format(data.method.continuity_tolerance_liters)} л.
-                {issues > 0 ? ` Суммарный разрыв: ${fmtLiters(data.integrity.continuity_gap_liters)}; смен топлива: ${data.integrity.fuel_changes}.` : ''}
+          {/* Плашка целостности — про стык смен: она объясняет цифры баланса и
+              расхождений. На «Приёмке» и «Инвентаризации» это чужой сюжет. */}
+          {(view === 'balance' || view === 'variances') && (
+            <div className={cn(
+              'flex items-start gap-3 rounded-lg border px-4 py-3 text-sm',
+              issues === 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-500/35 bg-amber-500/5',
+            )}>
+              {issues === 0 ? <CircleCheckBig className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" /> : <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />}
+              <div className="min-w-0">
+                <div className="font-medium">{issues === 0 ? 'Последовательность остатков подтверждена' : `Найдены замечания: ${issues}`}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  Проверено переходов между сменами: {nf0.format(data.integrity.continuity_checks)}. Допуск: ±{nf1.format(data.method.continuity_tolerance_liters)} л.
+                  {issues > 0 ? ` Суммарный разрыв: ${fmtLiters(data.integrity.continuity_gap_liters)}; смен топлива: ${data.integrity.fuel_changes}.` : ''}
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Один ряд вкладок. Журнал по сменам — первым: он отвечает на главный
-              вопрос (стык смен, книга ↔ факт). «По резервуарам» и «Замечания» —
-              срезы той же книги (заменили прежние «Резервуары»/«Разрывы», которые
-              показывали то же в литрах, но без фактического замера). «АЗС × топливо»
-              оставлен как обзорный свод прихода-расхода. */}
-          <Tabs defaultValue="journal">
-            <TabsList variant="line" className="h-9">
-              <TabsTrigger value="journal"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Журнал по сменам</TabsTrigger>
-              <TabsTrigger value="book_tanks"><Warehouse className="mr-1.5 h-3.5 w-3.5" />По резервуарам <span className="ml-1 text-muted-foreground">{data.tanks.length}</span></TabsTrigger>
-              <TabsTrigger value="book_issues"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Замечания</TabsTrigger>
-              <TabsTrigger value="receipts"><Truck className="mr-1.5 h-3.5 w-3.5" />Приёмка (сливы)</TabsTrigger>
-              <TabsTrigger value="causes"><Activity className="mr-1.5 h-3.5 w-3.5" />Причины</TabsTrigger>
-              <TabsTrigger value="inventory"><ClipboardCheck className="mr-1.5 h-3.5 w-3.5" />Инвентаризация</TabsTrigger>
-              <TabsTrigger value="summary"><Database className="mr-1.5 h-3.5 w-3.5" />АЗС × топливо <span className="ml-1 text-muted-foreground">{data.lines.length}</span></TabsTrigger>
-            </TabsList>
+          {/* Виды раздела. Табами остались только разрезы ОДНОЙ книги остатков:
+              журнал по сменам (стык смен, книга ↔ факт), тот же журнал по резервуарам
+              и обзорный свод «АЗС × топливо». Приёмка, причины и инвентаризация ушли
+              в свои пункты меню — у них другой предмет и другой адресат.
+              Единственный вид ряда вкладок не рисует: заголовок уже сказал, где мы. */}
+          <Tabs defaultValue={VIEW_TABS[view][0]}>
+            {VIEW_TABS[view].length > 1 && (
+              <TabsList variant="line" className="h-9">
+                {VIEW_TABS[view].includes('journal') && <TabsTrigger value="journal"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Журнал по сменам</TabsTrigger>}
+                {VIEW_TABS[view].includes('book_tanks') && <TabsTrigger value="book_tanks"><Warehouse className="mr-1.5 h-3.5 w-3.5" />По резервуарам <span className="ml-1 text-muted-foreground">{data.tanks.length}</span></TabsTrigger>}
+                {VIEW_TABS[view].includes('book_issues') && <TabsTrigger value="book_issues"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Замечания</TabsTrigger>}
+                {VIEW_TABS[view].includes('causes') && <TabsTrigger value="causes"><Activity className="mr-1.5 h-3.5 w-3.5" />Причины</TabsTrigger>}
+                {VIEW_TABS[view].includes('summary') && <TabsTrigger value="summary"><Database className="mr-1.5 h-3.5 w-3.5" />АЗС × топливо <span className="ml-1 text-muted-foreground">{data.lines.length}</span></TabsTrigger>}
+              </TabsList>
+            )}
             <TabsContent value="journal" className="mt-3">
               <TankLedgerTabs view="journal"
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
@@ -360,9 +405,11 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo }: {
             <TabsContent value="summary" className="mt-3"><Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0"><SummaryTable rows={data.lines} totals={data.totals} /></CardContent></Card></TabsContent>
           </Tabs>
 
-          <div className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
-            В расчёте используются первый и последний остатки каждого физического резервуара за период. Положительное отклонение — недостача, отрицательное — излишек. Нормы естественной убыли и ручные корректировки пока не применяются.
-          </div>
+          {(view === 'balance' || view === 'variances') && (
+            <div className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
+              В расчёте используются первый и последний остатки каждого физического резервуара за период. Положительное отклонение — недостача, отрицательное — излишек. Нормы естественной убыли и ручные корректировки пока не применяются.
+            </div>
+          )}
         </>
       )}
     </div>

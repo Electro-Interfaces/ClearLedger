@@ -75,10 +75,12 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // Состав полный (28.07.2026): сеть, сессии, коммерция и Яндекс.Метрика — всё, чем
     // живёт коммерсант, в одном рабочем месте. Три раздела в рельсе: «Сеть» (что с
     // сетью), «Сессии» (как заряжают), «Коммерция» (кто платит и по какой цене).
-    // `management` — исторический код первого раздела, у топливного профиля это весь
-    // его «Учёт → Продажи»; переименовывать его значило бы сломать старые ссылки.
+    // `management` — исторический код первого раздела; переименовывать его значило бы
+    // сломать старые ссылки. У розницы нефтепродуктов продукт зовётся «Топливо»
+    // (`LABEL_BY_PROFILE`) и имеет четвёртый раздел «Товародвижение» (`sales_goods`):
+    // топливо — товар, у него есть приход, книга остатков и инвентаризация.
     code: 'sales', route: '/sales', label: 'Продажи',
-    modes: ['management', 'sales_sessions', 'sales_commerce'], paths: ['/metrika'],
+    modes: ['management', 'sales_sessions', 'sales_commerce', 'sales_goods'], paths: ['/metrika'],
     objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
@@ -90,9 +92,12 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     objectTabs: ['passport', 'contracts', 'sales'],
   },
   {
-    // Интернет-магазин — товарный контур на объектах: витрина, номенклатура, заказы.
-    code: 'shop', route: '/shop', label: 'Интернет-магазин',
-    modes: ['store'], paths: [],
+    // Магазин — товароучёт сопутки и общепита на объектах. Пять разделов в рельсе:
+    // «Торговля» (деньги и спрос), «Склад» (остаток и движение), «Закрытие» (чем закрыт
+    // день и что уехало в бухгалтерию), «Каталог» (карточка товара), «Маркировка»
+    // (регуляторика). Состав — в config/storeCatalog.ts, второго источника нет.
+    code: 'shop', route: '/shop', label: 'Магазин',
+    modes: ['store', 'store_stock', 'store_closing', 'store_catalog', 'store_marking'], paths: [],
     objectTabs: ['passport', 'sales'],
   },
   {
@@ -165,6 +170,26 @@ export const PRODUCT_READINESS: Record<string, Readiness> = {
   monitor: 'ready', processing: 'ready',
 }
 
+/**
+ * Готовность у профиля своя: один и тот же код продукта в разных отраслевых решениях
+ * наполнен по-разному. У розницы нефтепродуктов «Магазин» — рабочий контур с товарами,
+ * движением и потерями, а «Бухгалтерский» несёт десятки тысяч документов; на энергетике
+ * оба — заготовки. Пока карта была одна на платформу, самые нагруженные продукты ГИГ
+ * горели красным «в подключении», а единственная заглушка — жёлтым.
+ */
+const READINESS_BY_PROFILE: Record<string, Record<string, Readiness>> = {
+  fuel: {
+    sales: 'ready', shop: 'ready', finance: 'ready',
+    ops: 'draft',        // единственный пункт — «Договоры и аренда», за ним заставка
+    data: 'partial',     // приём работает, но нормализация и сверка ещё не разложены
+  },
+}
+
+export function productReadiness(code: string, profileId?: string | null): Readiness | undefined {
+  const byProfile = profileId ? READINESS_BY_PROFILE[profileId] : undefined
+  return byProfile?.[code] ?? PRODUCT_READINESS[code]
+}
+
 export const READINESS_LABEL: Record<Readiness, string> = {
   ready: 'рабочий продукт',
   partial: 'в развитии',
@@ -225,6 +250,27 @@ const CARVED_PROFILES = new Set(['energy', 'fuel'])
 
 export function isCarvedProfile(profileId: string | null | undefined): boolean {
   return CARVED_PROFILES.has(profileId ?? '')
+}
+
+/**
+ * Имя продукта в профиле компании — зеркало серверной карты
+ * (`services/app_registry._BY_PROFILE`), по которой названы плитки стола и рельса.
+ *
+ * Без неё внутри приложения оставалось имя из этой карты: на столе плитка «Топливо»,
+ * а в шапке открытого продукта, в заголовке вкладки браузера и в закладках — «Продажи».
+ * Одно и то же рабочее место называлось двумя именами.
+ */
+const LABEL_BY_PROFILE: Record<string, Record<string, string>> = {
+  fuel: {
+    sales: 'Топливо', shop: 'Магазин', ops: 'Управленческий', finance: 'Бухгалтерский',
+  },
+}
+
+export function productLabel(
+  product: Pick<SpaceProduct, 'code' | 'label'>,
+  profileId?: string | null,
+): string {
+  return LABEL_BY_PROFILE[profileId ?? '']?.[product.code] ?? product.label
 }
 
 /**

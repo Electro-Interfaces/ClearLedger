@@ -10,7 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
-import { BarChart3, Gauge, BookOpen, FileOutput, ShoppingCart, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt } from 'lucide-react'
+import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -19,13 +19,14 @@ import type { CentralMenuItem } from './CentralPanelLayout'
 import { getWorkspaceModule } from '@/config/workspaceModules'
 import { useModuleConnections, isModuleConnected, isComponentEnabled } from '@/services/moduleConnectionService'
 import { getModuleComponentDefs } from '@/config/moduleComponents'
-import { STORE_MENU } from '@/config/storeCatalog'
+import { STORE_SECTIONS, storeMenu } from '@/config/storeCatalog'
 import {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
+  FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   MARKET_MENU, MARKET_KEYS,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
@@ -43,6 +44,7 @@ export {
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
+  FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   MARKET_MENU, MARKET_KEYS,
 }
 
@@ -80,13 +82,13 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     return m ? isModuleConnected(conn, m, company.profileId) : false
   }
 
-  // Первый раздел «Продаж»: у топливного профиля — весь его P&L, у energy — «Сеть»
-  // (остальные пункты ЭЗС-продаж живут в разделах «Сессии» и «Коммерция»).
-  // «Управленческий» (mode=operations) — энергозакупка/аренда (реальные реестры).
-  const mgmtItems: CentralMenuItem[] = [
-    ...(on('mgmt_pnl') ? MGMT_MENU : []),
-    ...(isEnergy ? SALES_NETWORK_MENU : []),
-  ]
+  // Первый раздел продукта продаж — «Сеть» у обоих профилей: у energy это ЭЗС-меню,
+  // у топливного — обзор и карта сети АЗС (остальные его пункты живут в разделах
+  // «Аналитика», «Коммерция» и «Товародвижение», см. workspaceMenus).
+  const fuelSales = on('mgmt_pnl')
+  const mgmtItems: CentralMenuItem[] = isEnergy
+    ? SALES_NETWORK_MENU
+    : (fuelSales ? FUEL_NETWORK_MENU : [])
   // «Эксплуатация» (energy) разложена на три раздела продукта: «Мониторинг» — что с
   // сетью и её данными, «Оборудование» — склад железа, «Хозяйство» — деньги площадок
   // (энергозакупка и аренда, подключаемые модули). У ГИГ (fuel) раздел один и остаётся
@@ -113,16 +115,23 @@ export function useWorkspaceSections(): WorkspaceSection[] {
       )
     : []
 
-  // «Продажи» разложены на три раздела продукта (energy): «Сеть» — состояние и деньги
-  // сети, «Сессии» — как заряжают, «Коммерция» — кто платит и по какой цене. В левой
-  // рельсе это три пункта, их содержимое — во второй панели. У топливного профиля
-  // раздел один и называется по продукту.
-  const sales: WorkspaceSection = { mode: 'management', label: isEnergy ? 'Сеть' : 'Продажи',
+  // Продукт продаж разложен на разделы у обоих профилей: у ЭЗС «Сеть» — состояние и
+  // деньги сети, «Сессии» — как заряжают, «Коммерция» — кто платит и по какой цене;
+  // у «Топлива» (fuel) — «Сеть», «Аналитика», «Коммерция», «Товародвижение».
+  // В левой рельсе это пункты, их содержимое — во второй панели.
+  const sales: WorkspaceSection = { mode: 'management', label: 'Сеть',
     icon: BarChart3, items: mgmtItems, connected: mgmtItems.length > 0 }
-  const salesSessions: WorkspaceSection = { mode: 'sales_sessions', label: 'Сессии',
-    icon: Activity, items: isEnergy ? SALES_SESSIONS_MENU : [], connected: isEnergy }
+  const salesSessionItems = isEnergy ? SALES_SESSIONS_MENU : (fuelSales ? FUEL_ANALYTICS_MENU : [])
+  const salesSessions: WorkspaceSection = { mode: 'sales_sessions',
+    label: isEnergy ? 'Сессии' : 'Аналитика',
+    icon: Activity, items: salesSessionItems, connected: salesSessionItems.length > 0 }
+  const salesCommerceItems = isEnergy ? SALES_COMMERCE_MENU : (fuelSales ? FUEL_COMMERCE_MENU : [])
   const salesCommerce: WorkspaceSection = { mode: 'sales_commerce', label: 'Коммерция',
-    icon: Wallet, items: isEnergy ? SALES_COMMERCE_MENU : [], connected: isEnergy }
+    icon: Wallet, items: salesCommerceItems, connected: salesCommerceItems.length > 0 }
+  // «Товародвижение» — только у топливного профиля: топливо это товар, у ЭЗС товара нет.
+  const salesGoodsItems = !isEnergy && fuelSales ? FUEL_GOODS_MENU : []
+  const salesGoods: WorkspaceSection = { mode: 'sales_goods', label: 'Товародвижение',
+    icon: Truck, items: salesGoodsItems, connected: salesGoodsItems.length > 0 }
   // «Проекты» — стройка сети: от подбора участка до ввода станции в эксплуатацию.
   // Только у energy: у топливного профиля своего девелоперского контура нет.
   // Два раздела на один продукт: «Работа» — где ведут дела, «Аналитика» — где
@@ -138,7 +147,14 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Хозяйство» — подключаемые модули: нет ни одного включённого, раздела нет.
   const opsEconomy: WorkspaceSection = { mode: 'ops_economy', label: 'Хозяйство',
     icon: Receipt, items: isEnergy ? energyOps : [], connected: energyOps.length > 0 }
-  const store: WorkspaceSection = { mode: 'store',      label: 'Магазин',        icon: ShoppingCart, items: storeOn ? STORE_MENU : [], connected: storeOn }
+  // Магазин разложен на пять разделов рельсы (решение МАГа 29.07.2026): «Торговля» —
+  // деньги и спрос, «Склад» — остаток и движение, «Закрытие» — чем закрыт день и что
+  // уехало в бухгалтерию, «Каталог» — карточка товара, «Маркировка» — что мы должны
+  // государству. Раньше это были 25 пунктов одним списком с гармошкой заголовков.
+  const storeSections: WorkspaceSection[] = STORE_SECTIONS.map((sec) => ({
+    mode: sec.mode, label: sec.label, icon: sec.icon,
+    items: storeOn ? storeMenu(sec.mode) : [], connected: storeOn,
+  }))
   // Процессинг и Маркетинг — продукты в подключении (решение МАГа
   // 28.07.2026): свои экраны ещё не сделаны, а коммерческие разделы вернулись в
   // «Продажи». Меню у них нет — рабочая область показывает заставку.
@@ -162,8 +178,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const all = isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
-       store, acc, exp, normalize, reconcile]
-    : [sales, store, ops, acc, exp]
+       storeSections[0], acc, exp, normalize, reconcile]
+    : [sales, salesSessions, salesCommerce, salesGoods, ...storeSections, ops, acc, exp]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый
   // пункт ни в гармошке, ни в контенте. Гейт есть только у продуктов разреза: там код
@@ -173,7 +189,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   return all.map((s) => {
     const app = productForMode(s.mode)
     if (!app || !s.items.length) return s
-    const items = s.items.filter((i) => productModuleAllowed(app, i.key, canModule))
+    const items = s.items.filter((i) => productModuleAllowed(app, i.key, canModule, company.profileId))
     return items.length === s.items.length ? s : { ...s, items, restricted: items.length === 0 }
   })
 }
@@ -190,8 +206,14 @@ export function useVisibleSections(): WorkspaceSection[] {
   const { company, companyModules } = useCompany()
   const { lockedModes } = useWorkspace()
   const carved = carvedModes(company.profileId)
+  // Legacy-ключи Учёта (`management`, `store`, `accounting`) — только для профиля без
+  // разреза. У разрезанного права выдаются ключами продуктов (`sales`, `shop`), и
+  // старый гейт закрывал разделы любому, кому назначили роль: рельс раздел показывал,
+  // а вторая панель приходила пустой. Права разделов здесь уже проверены
+  // `productModuleAllowed` (см. useWorkspaceSections).
+  const legacyGate = !isCarvedProfile(company.profileId)
   return useWorkspaceSections()
-    .filter((s) => modeAllowed(s.mode, companyModules))
+    .filter((s) => !legacyGate || modeAllowed(s.mode, companyModules))
     .filter((s) => (lockedModes ? lockedModes.includes(s.mode) : !carved.has(s.mode)))
 }
 

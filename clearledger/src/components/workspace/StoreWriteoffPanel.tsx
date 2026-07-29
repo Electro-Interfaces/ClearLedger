@@ -47,7 +47,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
     <div className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold inline-flex items-center gap-2">Списания — причины и потери <SnapshotBadge at={data.snapshot_at} /></h3>
+          <h3 className="text-base font-semibold inline-flex items-center gap-2">Списания <SnapshotBadge at={data.snapshot_at} /></h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Реестр списаний из ЦБ + разбор причин (недостача из инвентаризации, брак, срок годности…).
             Клик по документу — строки. {reason && <>Фильтр: <b>{reason}</b> <button className="underline ml-1" onClick={() => setReason(null)}>сбросить</button></>}

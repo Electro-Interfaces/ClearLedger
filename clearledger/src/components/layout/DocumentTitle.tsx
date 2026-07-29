@@ -9,14 +9,14 @@ import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { useCompany } from '@/contexts/CompanyContext'
-import { isCarvedProfile, productForPath } from '@/config/spaceProducts'
+import { isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
 
 function screenName(pathname: string, profileId: string | null | undefined): string {
   if (pathname === '/') return 'Рабочее пространство'
   if (pathname.startsWith('/admin')) return 'Управление'
   if (pathname.startsWith('/messages')) return 'Чаты'
   const product = isCarvedProfile(profileId) ? productForPath(pathname) : null
-  if (product) return product.label
+  if (product) return productLabel(product, profileId)
   return 'Учёт'
 }
 

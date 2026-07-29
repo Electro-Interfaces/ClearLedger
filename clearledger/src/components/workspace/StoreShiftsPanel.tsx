@@ -43,7 +43,7 @@ export function StoreShiftsPanel({ companyId, dateFrom, dateTo, stations }: { co
     <div ref={ref} className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Смены — составной документ</h3>
+          <h3 className="text-base font-semibold">Смены</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             Смена как организующая единица: продажи + возвраты + приходы + инвентаризации + списания за смену.
             Приходы/инвентаризации связаны по дате и станции (в ЦБ отдельные документы).

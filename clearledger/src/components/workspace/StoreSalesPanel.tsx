@@ -71,7 +71,7 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
     <div ref={ref} className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Продажи — анализ по срезам</h3>
+          <h3 className="text-base font-semibold">Продажи</h3>
           <p className="text-xs text-muted-foreground">
             Крутите продажи сопутки/общепита по любой группировке. НДС-разрез — для сверки с учётной политикой.
           </p>

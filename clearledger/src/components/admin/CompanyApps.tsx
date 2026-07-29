@@ -20,11 +20,13 @@ import {
 } from '@/services/registryService'
 import { AppCatalogSection } from './AppCatalog'
 import { productModules } from '@/config/productAccess'
+import { useCompany } from '@/contexts/CompanyContext'
 
 export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
   companyId: string; canManage: boolean; isSuperadmin?: boolean
 }) {
   const qc = useQueryClient()
+  const { company } = useCompany()
   const key = ['company-apps', companyId]
   const q = useQuery({ queryKey: key, queryFn: () => listCompanyApps(companyId) })
 
@@ -53,9 +55,11 @@ export function CompanyApps({ companyId, canManage, isSuperadmin = false }: {
   // Состав продукта берём из той же карты, что рисует меню и матрицу прав
   // (`productAccess`): иначе «какие модули подключены» и «на что можно выдать право»
   // отвечали бы разными списками.
+  // Профиль берём у активной компании: у пространства она одна, а состав продукта
+  // от профиля зависит («Топливо» у розницы состоит не из ЭЗС-меню).
   const sectionsOf = (code: string) => {
     const groups: { name: string; items: string[] }[] = []
-    for (const m of productModules(code)) {
+    for (const m of productModules(code, company.profileId)) {
       const last = groups[groups.length - 1]
       if (last && last.name === m.group) last.items.push(m.label)
       else groups.push({ name: m.group, items: [m.label] })

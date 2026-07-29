@@ -637,7 +637,7 @@ export function StoreDedupPanel() {
       <div className="flex items-start gap-3">
         <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary shrink-0"><CopyCheck className="size-5" /></div>
         <div className="min-w-0">
-          <h3 className="text-base font-semibold">Контроль дублей номенклатуры</h3>
+          <h3 className="text-base font-semibold">Дубли</h3>
           <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">
             Цепочка Нефтосервер → локальная 1С 208 → ЦБ. Один товар под кодами 008/208/ЦБ, касса бьёт удалённый дубль, рассинхрон цен — видно наглядно, отмечается статусами.
             Префикс кода — нумерация карточки, не станция: «008…» тоже бьётся кассой 208. Разрез даёт склад привязки, поэтому по умолчанию показан только контур 208.

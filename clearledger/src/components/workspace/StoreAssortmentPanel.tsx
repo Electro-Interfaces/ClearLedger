@@ -102,7 +102,7 @@ export function StoreAssortmentPanel({ companyId, dateFrom, dateTo, stations }: 
     <div ref={ref} className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Ассортимент — ABC × XYZ</h3>
+          <h3 className="text-base font-semibold">Ассортимент</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {data.period.from} – {data.period.to}. ABC (вклад в выручку) × XYZ (стабильность спроса), оборачиваемость
             на реальном остатке, GMROI. Клик по ячейке матрицы или товару. Неликвиды — только в «Всё вместе».

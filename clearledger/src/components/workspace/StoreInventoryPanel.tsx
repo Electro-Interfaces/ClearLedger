@@ -45,7 +45,7 @@ export function StoreInventoryPanel({ companyId, dateFrom, dateTo }: { companyId
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold">Инвентаризация — недостачи и излишки</h3>
+            <h3 className="text-base font-semibold">Инвентаризация</h3>
             <SnapshotBadge at={data.snapshot_at} />
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">

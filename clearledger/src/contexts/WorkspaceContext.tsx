@@ -13,9 +13,15 @@ import { useSearchParams } from 'react-router-dom'
 // «Сессии» и «Коммерция» (решение МАГа 28.07.2026).
 // `ops_equipment`/`ops_economy` — то же для «Эксплуатации»: `operations` остался
 // разделом «Мониторинг» (у топливного профиля — его «Управленческий»).
-export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
+// `store_stock`/`store_closing`/`store_catalog`/`store_marking` — разделы «Магазина»:
+// склад, закрытие дня, карточка товара, маркировка. `store` остался кодом первого
+// раздела («Торговля») — по нему идут старые ссылки и ключ доступа.
+// `sales_goods` — «Товародвижение» «Топлива» (fuel): топливо как товар — маржа,
+// приход, книга резервуаров. У ЭЗС такого раздела нет: там продают киловатт-часы,
+// склада и приёмки не бывает.
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_stock' | 'store_closing' | 'store_catalog' | 'store_marking' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
 
-const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
 function readMode(sp: URLSearchParams): CoreMode {
   const m = sp.get('mode')
   return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'
@@ -67,7 +73,7 @@ interface WorkspaceContextType {
 
   /** Режим центральной панели — конвейер слева направо */
   coreMode: CoreMode
-  setCoreMode: (mode: CoreMode) => void
+  setCoreMode: (mode: CoreMode, sub?: string) => void
   /** Разделы, которыми ограничена оболочка: рабочая область открыта как отдельный
    *  продукт пространства (напр. «Финансы» на `/finance`), и переключаться можно
    *  только внутри его разделов. `null` — Учёт со всеми своими разделами. */
@@ -105,12 +111,17 @@ export function WorkspaceProvider({ children, lockModes }: { children: ReactNode
   const coreMode = lockModes
     ? (lockModes.includes(urlMode) ? urlMode : lockModes[0])
     : urlMode
-  const setCoreMode = useCallback((mode: CoreMode) => {
+  // `sub` необязателен: без него раздел открывается со своего первого пункта, с ним —
+  // на нужном. Второе понадобилось, когда пункт живёт в чужом разделе: старая ссылка
+  // `?mode=store&sub=inventory` должна привести в «Склад» НА «Инвентаризацию», а не
+  // просто в «Склад» — иначе закладка каждый раз падает на первый пункт.
+  const setCoreMode = useCallback((mode: CoreMode, sub?: string) => {
     if (lockModes && !lockModes.includes(mode)) return   // за пределы продукта не пускаем
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('mode', mode)
-      next.delete('sub')   // новый режим — со своего под-раздела по умолчанию
+      if (sub) next.set('sub', sub)
+      else next.delete('sub')   // без пункта — со своего под-раздела по умолчанию
       return next
     }, { replace: true })
   }, [setSearchParams, lockModes])

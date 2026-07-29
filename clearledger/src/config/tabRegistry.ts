@@ -7,7 +7,7 @@
  */
 import { matchPath } from 'react-router-dom'
 import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone } from 'lucide-react'
-import { SPACE_PRODUCTS, SPACE_PAGES } from './spaceProducts'
+import { SPACE_PRODUCTS, SPACE_PAGES, productLabel } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
   mainNavItems, dataItems, oneCItems, settingsItems,
@@ -59,13 +59,19 @@ export interface ResolvedTab {
   closable: boolean      // «Рабочий стол» (/) незакрываем
 }
 
-/** Метаданные вкладки для пути, либо null если путь не табуется (напр. 404). */
-export function resolveTab(pathname: string): ResolvedTab | null {
+/**
+ * Метаданные вкладки для пути, либо null если путь не табуется (напр. 404).
+ *
+ * `profileId` нужен только имени продукта: у розницы нефтепродуктов «Продажи» зовутся
+ * «Топливо», и вкладка обязана называться так же, как шапка и плитка на столе.
+ */
+export function resolveTab(pathname: string, profileId?: string | null): ResolvedTab | null {
   const stat = STATIC[pathname]
   if (stat) {
+    const product = SPACE_PRODUCTS.find((p) => p.route === pathname)
     return {
       key: pathname,
-      title: stat.label,
+      title: product ? productLabel(product, profileId) : stat.label,
       icon: stat.icon,
       workspace: WORKSPACE_PATHS.has(pathname),
       fuelOnly: FUEL_ONLY.has(pathname),
@@ -103,7 +109,9 @@ export interface ViewDescriptor {
  * короткое имя активного пункта меню («Операции», «Карта», «Дебиторка»).
  * null — вид не закрепляется (напр. 404).
  */
-export function describeView(pathname: string, search: string): ViewDescriptor | null {
+export function describeView(
+  pathname: string, search: string, profileId?: string | null,
+): ViewDescriptor | null {
   if (pathname === '/') {
     const sp = new URLSearchParams(search)
     const modeRaw = sp.get('mode')
@@ -114,7 +122,7 @@ export function describeView(pathname: string, search: string): ViewDescriptor |
       : 'Рабочий стол'
     return { key: pathname + search, pathname, title }
   }
-  const resolved = resolveTab(pathname)
+  const resolved = resolveTab(pathname, profileId)
   if (!resolved) return null
   return { key: pathname + search, pathname, title: resolved.title }
 }

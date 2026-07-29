@@ -13,6 +13,7 @@ import { getAccessCatalog } from '@/services/registryService'
 import { listSsoApps } from '@/services/ssoService'
 import { productModules } from '@/config/productAccess'
 import { ACCESS_MODULES } from '@/config/accessModules'
+import { useCompany } from '@/contexts/CompanyContext'
 
 export interface AccessGroup { name: string; modules: { key: string; code: string; name: string }[] }
 export interface AccessApp {
@@ -24,6 +25,11 @@ export interface AccessApp {
 }
 
 export function useAccessTree(companyId: string) {
+  // Состав продукта зависит от профиля компании: у розницы нефтепродуктов «Топливо»
+  // состоит из своих четырёх разделов, а не из ЭЗС-меню. Профиль берём у активной
+  // компании — у пространства она одна.
+  const { company } = useCompany()
+  const profileId = company.profileId
   const q = useQuery({
     queryKey: ['access-catalog', companyId],
     queryFn: () => getAccessCatalog(companyId),
@@ -51,7 +57,7 @@ export function useAccessTree(companyId: string) {
       modules: ACCESS_MODULES.map((m) => ({ key: `ledger:${m.key}`, code: m.key, name: m.label })),
     }])
     return catalog.map((app) => {
-      const local = productModules(app.app)
+      const local = productModules(app.app, profileId)
       const groups: AccessGroup[] = []
       const push = (group: string, mod: { key: string; code: string; name: string }) => {
         const last = groups[groups.length - 1]
@@ -69,6 +75,6 @@ export function useAccessTree(companyId: string) {
         layer: layers.get(app.app) ?? 'app',
       }
     })
-  }, [q.data, q.isLoading, layers])
+  }, [q.data, q.isLoading, layers, profileId])
   return { tree, isLoading: q.isLoading }
 }

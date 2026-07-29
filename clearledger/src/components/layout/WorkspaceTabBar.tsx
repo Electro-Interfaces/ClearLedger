@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useTabs } from '@/contexts/TabsContext'
+import { useCompany } from '@/contexts/CompanyContext'
 import { resolveTab, describeView } from '@/config/tabRegistry'
 import { cn } from '@/lib/utils'
 
@@ -13,9 +14,10 @@ export function WorkspaceTabBar() {
   const { tabs, pinTab, closeTab, isPinned } = useTabs()
   const navigate = useNavigate()
   const location = useLocation()
+  const { company } = useCompany()
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const activeKey = location.pathname + location.search
-  const current = describeView(location.pathname, location.search)
+  const current = describeView(location.pathname, location.search, company.profileId)
   const currentPinned = current ? isPinned(current.key) : false
   const canPin = !!current && !currentPinned
 
@@ -74,7 +76,7 @@ export function WorkspaceTabBar() {
       <ScrollArea className="h-9 min-w-0 flex-1">
         <div role="tablist" aria-label="Закреплённые экраны" className="flex h-9 min-w-max items-center gap-1 pr-2">
           {tabs.map((tab, index) => {
-            const meta = resolveTab(tab.pathname)
+            const meta = resolveTab(tab.pathname, company.profileId)
             const Icon = meta?.icon
             const active = tab.key === activeKey
             return (

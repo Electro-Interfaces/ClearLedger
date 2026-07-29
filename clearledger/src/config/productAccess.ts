@@ -21,8 +21,9 @@ import { navByPath } from './navigation'
 import {
   ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
+  FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
 } from './workspaceMenus'
-import { STORE_MENU } from './storeCatalog'
+import { storeMenu } from './storeCatalog'
 import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
 
 export interface ProductModuleDef {
@@ -72,7 +73,13 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(SALES_COMMERCE_MENU, 'Коммерция'),
     ...pages(['/metrika']),
   ],
-  shop: items(STORE_MENU),
+  shop: [
+    ...items(storeMenu('store'), 'Торговля'),
+    ...items(storeMenu('store_stock'), 'Склад'),
+    ...items(storeMenu('store_closing'), 'Закрытие'),
+    ...items(storeMenu('store_catalog'), 'Каталог'),
+    ...items(storeMenu('store_marking'), 'Маркировка'),
+  ],
   marketing: items(MARKET_MENU, 'Рынок'),
   finance: [
     // «Финансовый» и «Налоговый» сняты с витрины (workspaceSections) — прав на них нет:
@@ -97,14 +104,44 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
 const SPACE_MODULES: ProductModuleDef[] = pages(SPACE_PAGES).map(
   (m) => ({ ...m, group: 'Пространство' }))
 
+/** Состав продукта с учётом профиля компании (см. PRODUCT_MODULES_BY_PROFILE). */
+function ownModules(code: string, profileId?: string | null): ProductModuleDef[] {
+  return PRODUCT_MODULES_BY_PROFILE[profileId ?? '']?.[code] ?? PRODUCT_MODULES[code] ?? []
+}
+
 /** Модули продукта для матрицы доступа (пусто — продукт даётся целиком). */
-export function productModules(code: string): ProductModuleDef[] {
-  const own = PRODUCT_MODULES[code]
-  return own ? [...own, ...SPACE_MODULES] : []
+export function productModules(code: string, profileId?: string | null): ProductModuleDef[] {
+  const own = ownModules(code, profileId)
+  return own.length ? [...own, ...SPACE_MODULES] : []
 }
 
 /** Есть ли у продукта разбиение на модули (иначе право = продукт целиком). */
-export const hasProductModules = (code: string) => (PRODUCT_MODULES[code]?.length ?? 0) > 0
+export const hasProductModules = (code: string, profileId?: string | null) =>
+  ownModules(code, profileId).length > 0
+
+/**
+ * Состав продукта, когда в профиле он про другое.
+ *
+ * Разрез у профилей разный: у розницы нефтепродуктов «Топливо» состоит не из ЭЗС-меню
+ * (`cs_*`), а из своих четырёх разделов. Без этой карты матрица «Роли и доступ» у ГИГ
+ * показывала пункты, которых в интерфейсе нет, а любой выданный гранулярный ключ
+ * обнулял человеку всё меню продукта: `productModuleAllowed` спрашивал право на код,
+ * которого в карте не было (находка аудита 29.07.2026, B1).
+ *
+ * Группы = разделы продукта: строка права стоит там же, где пункт в меню.
+ */
+const PRODUCT_MODULES_BY_PROFILE: Record<string, Record<string, ProductModuleDef[]>> = {
+  fuel: {
+    sales: [
+      ...items(FUEL_NETWORK_MENU, 'Сеть'),
+      ...items(FUEL_ANALYTICS_MENU, 'Аналитика'),
+      ...items(FUEL_COMMERCE_MENU, 'Коммерция'),
+      ...items(FUEL_GOODS_MENU, 'Товародвижение'),
+    ],
+    // «Управленческий» топливного профиля — хозяйственные отношения компании.
+    ops: [{ code: 'contracts', label: 'Договоры и аренда', group: 'Разделы' }],
+  },
+}
 
 /**
  * Есть ли у продукта такой модуль в карте прав.
@@ -115,8 +152,8 @@ export const hasProductModules = (code: string) => (PRODUCT_MODULES[code]?.lengt
  * Спрашивать право на такой раздел бессмысленно — ответ всегда «нет», и рельс прятал
  * разделы у всех, кому роль дала не весь продукт, а его пункты.
  */
-export const productHasModule = (appCode: string, moduleCode: string) =>
-  (PRODUCT_MODULES[appCode] ?? []).some((m) => m.code === moduleCode)
+export const productHasModule = (appCode: string, moduleCode: string, profileId?: string | null) =>
+  ownModules(appCode, profileId).some((m) => m.code === moduleCode)
 
 /**
  * Пускать ли на пункт `moduleCode` продукта `appCode`.
@@ -130,8 +167,9 @@ export function productModuleAllowed(
   appCode: string,
   moduleCode: string,
   canModule: (app: string, module: string) => boolean,
+  profileId?: string | null,
 ): boolean {
-  if (!hasProductModules(appCode)) return true
+  if (!hasProductModules(appCode, profileId)) return true
   return canModule(appCode, moduleCode)
 }
 

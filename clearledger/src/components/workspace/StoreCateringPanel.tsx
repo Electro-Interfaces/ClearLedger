@@ -77,7 +77,7 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
     <div ref={ref} className="p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Общепит — инжиниринг меню</h3>
+          <h3 className="text-base font-semibold">Общепит</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {data.period.from} – {data.period.to}. Блюда по популярности × маржинальности; клик по строке —
             свойства блюда (состав ТТК и динамика продаж). Фудкост — по ингредиентам × закупочной себестоимости.

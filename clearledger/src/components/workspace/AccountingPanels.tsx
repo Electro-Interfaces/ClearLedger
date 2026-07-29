@@ -105,8 +105,9 @@ function EnergyMgmtVitrine({ tab }: { tab: string }) {
 export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {}) {
   // Меню (под-разделы) собирается из подключённых модулей в общем хуке — им же
   // рисуется гармошка в левом вертикальном меню. Здесь — только контент.
-  // Параметр mode: 'management' («Продажи») или 'operations' («Управленческий»)
-  // — панель одна, роутинг пунктов (сессии/энергомодули/баланс/P&L) общий.
+  // Параметр mode — раздел продукта: у продаж это 'management' («Сеть»),
+  // 'sales_sessions', 'sales_commerce' и 'sales_goods' («Товародвижение» у «Топлива»),
+  // у эксплуатации 'operations' и соседние. Панель одна, роутинг пунктов общий.
   const sections = useWorkspaceSections()
   const menu = sections.find((s) => s.mode === mode)?.items ?? []
   const menuKeys = menu.map((m) => m.key)

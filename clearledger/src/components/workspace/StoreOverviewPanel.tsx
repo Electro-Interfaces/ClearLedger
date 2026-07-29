@@ -1,5 +1,5 @@
 /**
- * «Обзор магазина» — executive-дашборд сопутки/общепита (форк FuelOverviewPanel).
+ * «Обзор» — executive-дашборд сопутки/общепита (форк FuelOverviewPanel).
  * Данные: /api/store/overview (GoodsDashboardService из DataEntry clean канала ЦБ).
  * KPI на продажах: выручка/чистая/НДС/средний чек≈/смены/позиции + структура категорий,
  * оплаты (нал/безнал), дневная динамика. Маржа/ABC — следующий блок (FIFO).
@@ -62,12 +62,12 @@ export function StoreOverviewPanel({ companyId, dateFrom, dateTo, stations }: {
     <div ref={ref} className="p-6 space-y-5 max-w-6xl">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-base font-semibold">Обзор магазина</h3>
+          <h3 className="text-base font-semibold">Обзор</h3>
           <p className="text-xs text-muted-foreground">
             Сопутка + общепит · {data.period.from} – {data.period.to} · {op.shifts_count} смен · {op.stations_count} АЗС
           </p>
         </div>
-        <ExportButton title="Обзор магазина" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
+        <ExportButton title="Обзор" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
       </div>
 
       {empty ? (

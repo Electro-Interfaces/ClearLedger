@@ -49,7 +49,7 @@ interface TabsContextType {
 
 const TabsContext = createContext<TabsContextType | null>(null)
 
-function loadTabs(companyId: string): TabDescriptor[] {
+function loadTabs(companyId: string, profileId?: string | null): TabDescriptor[] {
   if (!companyId || companyId === '_') return [HOME_TAB]
   const raw = getItem<unknown>(storageKey(companyId), [])
   const persisted = Array.isArray(raw) ? (raw as Partial<TabDescriptor>[]) : []
@@ -59,7 +59,7 @@ function loadTabs(companyId: string): TabDescriptor[] {
     if (!t || typeof t.key !== 'string' || t.key === HOME || seen.has(t.key)) continue
     const pathname = typeof t.pathname === 'string' ? t.pathname : t.key.split('?')[0]
     const search = t.key.startsWith(pathname) ? t.key.slice(pathname.length) : ''
-    const view = describeView(pathname, search)
+    const view = describeView(pathname, search, profileId)
     if (!view) continue
     seen.add(view.key)
     list.push({ ...view, closable: true })
@@ -74,8 +74,8 @@ function persistTabs(companyId: string, tabs: TabDescriptor[]) {
 }
 
 export function TabsProvider({ children }: { children: ReactNode }) {
-  const { companyId } = useCompany()
-  const [tabs, setTabs] = useState(() => loadTabs(companyId))
+  const { companyId, company } = useCompany()
+  const [tabs, setTabs] = useState(() => loadTabs(companyId, company.profileId))
 
   const pinTab = useCallback((view: ViewDescriptor) => {
     if (tabs.some((tab) => tab.key === view.key)) return 'exists'

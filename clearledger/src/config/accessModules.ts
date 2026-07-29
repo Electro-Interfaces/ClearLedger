@@ -92,7 +92,11 @@ export function moduleAllowed(key: string, modules: AccessSet): boolean {
 /** Разрешён ли режим рабочего пространства (management/financial/accounting/tax). */
 export function modeAllowed(mode: string, modules: AccessSet): boolean {
   if (!modules) return true
-  const def = ACCESS_MODULES.find((m) => m.mode === mode)
+  // Разделы «Магазина» (store_stock, store_closing, …) — один ключ доступа `store`:
+  // незнакомый режим здесь разрешён по умолчанию, и без этой строки роль без магазина
+  // увидела бы четыре его раздела из пяти.
+  const root = mode.startsWith('store_') ? 'store' : mode
+  const def = ACCESS_MODULES.find((m) => m.mode === root)
   return def ? ledgerKeyAllowed(def.key, modules) : true
 }
 

@@ -10,8 +10,8 @@
  * иначе меню задвоится).
  */
 
-import { useMemo } from 'react'
-import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
+import { useEffect, useMemo } from 'react'
+import { useWorkspace, useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useLocations } from '@/hooks/useLocations'
@@ -33,7 +33,10 @@ import { StoreMrcPanel } from './StoreMrcPanel'
 import { StoreShiftsPanel } from './StoreShiftsPanel'
 import { BpExportPanel } from './BpExportPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
-import { STORE_KEYS, STORE_DEFAULT_KEY, getStoreView, type StoreStatus, type StoreView } from '@/config/storeCatalog'
+import {
+  STORE_KEYS, STORE_MODES, getStoreView, storeDefaultKey, storeModeForKey,
+  type StoreMode, type StoreStatus, type StoreView,
+} from '@/config/storeCatalog'
 
 // Под-экраны, работающие на реестре SKU (/api/store/skus).
 const SKU_MODES: Record<string, SkuMode> = {
@@ -104,7 +107,18 @@ function ViewScaffold({ view }: { view: StoreView }) {
 }
 
 export function StorePanel() {
-  const [sub] = useWorkspaceSubView(STORE_DEFAULT_KEY, STORE_KEYS)
+  // Раздел магазина = coreMode; валидные пункты — только его собственные. Иначе в
+  // «Складе» остался бы валидным «Цены и маржа» из «Торговли».
+  const { coreMode, setCoreMode } = useWorkspace()
+  const mode: StoreMode = (STORE_MODES.includes(coreMode) ? coreMode : 'store') as StoreMode
+  const [raw] = useWorkspaceSubView(storeDefaultKey(mode), STORE_KEYS)
+  // Пункт из ЧУЖОГО раздела — старая ссылка (?mode=store&sub=inventory) или закладка:
+  // уводим в его раздел ВМЕСТЕ с пунктом, а не на первый экран раздела.
+  const owner = storeModeForKey(raw)
+  useEffect(() => {
+    if (owner !== mode) setCoreMode(owner, raw)
+  }, [owner, mode, raw, setCoreMode])
+  const sub = owner === mode ? raw : storeDefaultKey(mode)
   const { period, locationIds, regionIds } = useFilters()
   const { companyId, company } = useCompany()
   const locations = useLocations()
@@ -254,7 +268,7 @@ export function StorePanel() {
     )
   }
 
-  const view = getStoreView(sub) ?? getStoreView(STORE_DEFAULT_KEY)!
+  const view = getStoreView(sub) ?? getStoreView('overview')!
   return (
     <div className="h-full overflow-y-auto p-6">
       <ViewScaffold view={view} />

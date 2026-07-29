@@ -16,6 +16,7 @@ import { NormalizationPanel } from './NormalizationPanel'
 import { ReconciliationPanel } from './ReconciliationPanel'
 import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
 import { StorePanel } from './StorePanel'
+import { STORE_MODES } from '@/config/storeCatalog'
 import { ExportLayerPanel } from './ExportLayerPanel'
 import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
@@ -99,10 +100,12 @@ function DesktopWorkspace() {
             {coreMode === 'normalize' && <NormalizationPanel />}
             {coreMode === 'reconcile' && <ReconciliationPanel />}
             {coreMode === 'management' && <ManagementPanel />}
-            {/* «Сессии» и «Коммерция» — разделы того же продукта: панель одна,
-                различаются составом пунктов (см. workspaceSections). */}
+            {/* Разделы того же продукта: панель одна, различаются составом пунктов
+                (см. workspaceSections). У ЭЗС это «Сессии» и «Коммерция», у «Топлива» —
+                «Аналитика», «Коммерция» и «Товародвижение». */}
             {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
             {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
+            {coreMode === 'sales_goods' && <ManagementPanel mode="sales_goods" />}
             {coreMode === 'operations' && <ManagementPanel mode="operations" />}
             {/* «Оборудование» и «Хозяйство» — разделы «Эксплуатации», та же панель. */}
             {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
@@ -111,7 +114,7 @@ function DesktopWorkspace() {
                 различаются составом пунктов (см. workspaceSections). */}
             {coreMode === 'projects' && <ManagementPanel mode="projects" />}
             {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
-            {coreMode === 'store' && <StorePanel />}
+            {STORE_MODES.includes(coreMode) && <StorePanel />}
             {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
                 разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
             {coreMode === 'corporate' && <ProductStub code="corp" />}
@@ -195,11 +198,12 @@ function MobileWorkspace() {
         {coreMode === 'management' && <ManagementPanel />}
         {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
         {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
+        {coreMode === 'sales_goods' && <ManagementPanel mode="sales_goods" />}
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
         {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
         {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
-        {coreMode === 'store' && <StorePanel />}
+        {STORE_MODES.includes(coreMode) && <StorePanel />}
         {coreMode === 'corporate' && <ProductStub code="corp" />}
         {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
         {coreMode === 'financial' && <FinancialPanel />}

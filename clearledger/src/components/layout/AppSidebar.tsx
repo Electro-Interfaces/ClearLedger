@@ -96,19 +96,19 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
     // закрытый целиком раздел приходит из хука как `restricted` — этого достаточно.
     const modes = sections
       .filter((s) => product.modes.includes(s.mode))
-      .filter((s) => !s.restricted && (!productHasModule(product.code, s.mode)
-        || productModuleAllowed(product.code, s.mode, canModule)))
+      .filter((s) => !s.restricted && (!productHasModule(product.code, s.mode, company.profileId)
+        || productModuleAllowed(product.code, s.mode, canModule, company.profileId)))
     const urlMode = new URLSearchParams(search).get('mode')
     const activeMode = modes.some((s) => s.mode === urlMode) ? urlMode : modes[0]?.mode
     const onProductRoute = pathname === product.route
     // Страницы («Документы», «Коннекторы») — тоже право: код = сегмент ИСХОДНОГО пути.
-    const allowedPage = (code: string) => productModuleAllowed(product.code, code, canModule)
+    const allowedPage = (code: string) => productModuleAllowed(product.code, code, canModule, company.profileId)
     const items = productNav(product, allowedPage, company.profileId)
     // Функции Ядра — одни на все рабочие места (`SPACE_PAGES`), поэтому отдельным блоком
     // ниже разделов и страниц продукта: сверху то, чем человек занят, ниже — пространство.
     const spaceItems = spaceNav(product, allowedPage)
     const links = SPACE_LINKS.filter(
-      (l) => canApp(l.app) && productModuleAllowed(l.app, l.module, canModule))
+      (l) => canApp(l.app) && productModuleAllowed(l.app, l.module, canModule, company.profileId))
     return (
       <>
         <SidebarGroup className="py-0">

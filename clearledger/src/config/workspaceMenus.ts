@@ -9,28 +9,65 @@
  */
 import type { CentralMenuItem } from '@/components/workspace/CentralPanelLayout'
 
-// Управленческий контур сети АЗС (нефтепродукты). Сгруппировано по смыслу
-// (заголовки групп рисует сайдбар по полю group, по образцу ЭЗС):
-//   СЕТЬ — состояние сети (обзор + карта);
-//   АНАЛИТИКА — реализация (внутр. табы: разрезы/время/динамика/сравнение),
-//     построчный реестр, каналы оплаты, онлайн-заказы;
-//   КОММЕРЦИЯ — цена (тарифы) и клиентские направления (корпоратив/розница);
-//   ТОВАРОДВИЖЕНИЕ — маржа, поступления ТТН, контроль баланса.
+/**
+ * «Топливо» (fuel, ГИГ) — четыре раздела продукта, по образцу «Продаж» ЭЗС
+ * (решение МАГа 29.07.2026). Раньше все 12 пунктов жили одним разделом
+ * `management` и разбирались группами-гармошками во второй панели, а верхний
+ * уровень нёс ровно один пункт, дословно повторяющий имя продукта. Теперь группы
+ * подняты в рельсу приложения: раздел выбирается там, его пункты — во второй
+ * панели, гармошки не нужны.
+ *
+ *   СЕТЬ            — состояние сети: обзор и карта;
+ *   АНАЛИТИКА       — как продают: реализация, реестр, каналы оплаты, онлайн-заказы;
+ *   КОММЕРЦИЯ       — цена и клиенты: тарифы, корпоратив, частные лица;
+ *   ТОВАРОДВИЖЕНИЕ  — топливо как товар: маржа, приход, книга резервуаров.
+ *
+ * Поля `group` здесь нет: группой стал сам раздел.
+ */
+export const FUEL_NETWORK_MENU: CentralMenuItem[] = [
+  { key: 'overview',       label: 'Обзор' },
+  { key: 'map',            label: 'Карта' },
+]
+export const FUEL_ANALYTICS_MENU: CentralMenuItem[] = [
+  { key: 'fills',          label: 'Реализация' },
+  { key: 'transactions',   label: 'Реестр операций' },
+  { key: 'channels',       label: 'Каналы продаж' },
+  { key: 'online-orders',  label: 'Онлайн-заказы' },
+]
+export const FUEL_COMMERCE_MENU: CentralMenuItem[] = [
+  { key: 'fuel-tariffs',   label: 'Тарифы' },
+  { key: 'fuel-corporate', label: 'Корпоратив' },
+  { key: 'fuel-retail',    label: 'Частные лица' },
+]
+/**
+ * Товародвижение. Три пункта подняты из табов «Контроля баланса»: приёмка
+ * бензовозов, разбор расхождений и инвентаризация — самостоятельные предметы со
+ * своими данными и своим адресатом (претензия поставщику, поиск причины,
+ * ведомость бухгалтеру), а не разрезы книги остатков. Разрезы самой книги
+ * (журнал смен, по резервуарам, АЗС × топливо) табами и остались.
+ */
+export const FUEL_GOODS_MENU: CentralMenuItem[] = [
+  { key: 'margin',         label: 'Маржа и цены' },
+  { key: 'purchases',      label: 'Поступления' },
+  { key: 'intake',         label: 'Приёмка и сливы' },
+  { key: 'tanks',          label: 'Контроль баланса' },
+  { key: 'variances',      label: 'Расхождения' },
+  { key: 'inventory',      label: 'Инвентаризация' },
+]
+
+/** Все пункты «Топлива» — для роутера панелей и старых закладок (`?sub=`). */
 export const MGMT_MENU: CentralMenuItem[] = [
-  { key: 'overview',       label: 'Обзор',            group: 'Сеть' },
-  { key: 'map',            label: 'Карта',            group: 'Сеть' },
-  { key: 'fills',          label: 'Реализация',       group: 'Аналитика' },
-  { key: 'transactions',   label: 'Реестр операций',  group: 'Аналитика' },
-  { key: 'channels',       label: 'Каналы продаж',    group: 'Аналитика' },
-  { key: 'online-orders',  label: 'Онлайн-заказы',    group: 'Аналитика' },
-  { key: 'fuel-tariffs',   label: 'Тарифы',           group: 'Коммерция' },
-  { key: 'fuel-corporate', label: 'Корпоратив',       group: 'Коммерция' },
-  { key: 'fuel-retail',    label: 'Частные лица',     group: 'Коммерция' },
-  { key: 'margin',         label: 'Маржа и цены',     group: 'Товародвижение' },
-  { key: 'purchases',      label: 'Поступления',      group: 'Товародвижение' },
-  { key: 'tanks',          label: 'Контроль баланса', group: 'Товародвижение' },
+  ...FUEL_NETWORK_MENU, ...FUEL_ANALYTICS_MENU, ...FUEL_COMMERCE_MENU, ...FUEL_GOODS_MENU,
 ]
 export const MGMT_MENU_KEYS = MGMT_MENU.map((m) => m.key)
+
+/** Раздел «Топлива», которому принадлежит пункт (для старых ссылок и закладок). */
+export function fuelModeForKey(key: string): 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' {
+  if (FUEL_ANALYTICS_MENU.some((m) => m.key === key)) return 'sales_sessions'
+  if (FUEL_COMMERCE_MENU.some((m) => m.key === key)) return 'sales_commerce'
+  if (FUEL_GOODS_MENU.some((m) => m.key === key)) return 'sales_goods'
+  return 'management'
+}
 
 /**
  * «Эксплуатация» (energy) — три раздела продукта, как у «Продаж» (28.07.2026):
@@ -201,6 +238,10 @@ export function workspaceModeForKey(key: string): string | null {
   if (CHARGE_SESSIONS_KEYS.includes(key)) return salesModeForKey(key)
   if (OPS_KEYS.includes(key)) return opsModeForKey(key)
   if (SITES_KEYS.includes(key)) return sitesModeForKey(key)
+  // Пункты «Топлива» (fuel): те же четыре раздела, что и в рельсе. Ключи с ЭЗС не
+  // пересекаются, а совпадение с чужим продуктом безопасно — переход разрешён только
+  // внутри одного продукта (см. ManagementPanel).
+  if (MGMT_MENU_KEYS.includes(key)) return fuelModeForKey(key)
   return null
 }
 

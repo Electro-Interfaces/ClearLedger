@@ -61,7 +61,7 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
   return (
     <div className="p-6 space-y-4">
       <div>
-        <h3 className="text-base font-semibold">Переоценка — изменения розничных цен</h3>
+        <h3 className="text-base font-semibold">Переоценка</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
           Реестр переоценок из ЦБ: старая→новая цена, Δ%, влияние на стоимость остатка. Клик по документу — строки.
           {reason && <> Фильтр: <b>{reason}</b> <button className="underline ml-1" onClick={() => setReason(null)}>сбросить</button></>}

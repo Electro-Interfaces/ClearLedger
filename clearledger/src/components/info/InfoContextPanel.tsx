@@ -15,7 +15,8 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Loader2, X, BookOpen, ChevronLeft, ExternalLink } from 'lucide-react'
 import { getInfoContext, getInfoArticle } from '@/services/infoService'
-import { appCodeForPath, productForPath } from '@/config/spaceProducts'
+import { appCodeForPath, productForPath, productLabel } from '@/config/spaceProducts'
+import { useCompany } from '@/contexts/CompanyContext'
 import { Markdown } from './Markdown'
 
 export function InfoContextPanel({ companyId, onClose, embedded = false }: {
@@ -24,6 +25,7 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
   const navigate = useNavigate()
+  const { company } = useCompany()
   const [openId, setOpenId] = useState<string | null>(null)
 
   // Контекст = приложение по маршруту + раздел рабочей области из `?sub=`.
@@ -63,7 +65,8 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
           <BookOpen className="h-4 w-4 text-muted-foreground" />
         )}
         <span className="flex-1 truncate text-xs font-semibold">
-          {openId ? (article.data?.title ?? 'Статья') : `Инфо · ${product?.label ?? 'рабочая область'}`}
+          {openId ? (article.data?.title ?? 'Статья')
+            : `Инфо · ${product ? productLabel(product, company.profileId) : 'рабочая область'}`}
         </span>
         <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label="Закрыть">
           <X className="h-4 w-4" />

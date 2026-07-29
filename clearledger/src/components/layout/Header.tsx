@@ -9,7 +9,7 @@ import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useCompany } from '@/contexts/CompanyContext'
-import { isCarvedProfile, productForPath } from '@/config/spaceProducts'
+import { isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AppLauncher } from '@/components/layout/AppLauncher'
 import { DeskButton } from '@/components/layout/DeskButton'
@@ -49,7 +49,7 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
                 («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
             <div className="hidden sm:flex flex-col leading-none">
               <h1 className="font-semibold tracking-tight text-foreground text-lg">
-                {product ? product.label : `${ECOSYSTEM_BRAND} Учёт`}
+                {product ? productLabel(product, company.profileId) : `${ECOSYSTEM_BRAND} Учёт`}
               </h1>
               <p className="text-xs text-muted-foreground">
                 {product ? ECOSYSTEM_BRAND : `v${APP_VERSION}`}
