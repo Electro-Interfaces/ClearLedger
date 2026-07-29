@@ -15,11 +15,10 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query'
 import {
   Loader2, ArrowUp, ArrowDown, ArrowUpDown, Download, Search, X,
-  ChevronLeft, ChevronRight, RefreshCw, Activity, Filter, FileSpreadsheet, FileText,
+  ChevronLeft, ChevronRight, RefreshCw, Filter, FileSpreadsheet, FileText,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -315,69 +314,46 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
         </div>
       </header>
 
-      <Card className="overflow-hidden border-border/80 bg-card/80">
-        <CardContent className="p-3">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <span>Фильтры</span>
-              <span className={cn('rounded-md px-2 py-0.5 text-xs font-normal',
-                activeFilterCount ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground')}>
-                {activeFilterCount ? `Активно: ${activeFilterCount}` : 'Все операции'}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {hasFilters && (
-                <Button variant="outline" size="sm" className="h-8" onClick={resetAll}>
-                  <X className="mr-1.5 h-3.5 w-3.5" />Очистить фильтры
-                </Button>
-              )}
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
-                {isFetching && <><Loader2 className="h-3.5 w-3.5 animate-spin" />Обновление</>}
-              </span>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="ops-station" className="text-xs text-muted-foreground">АЗС</Label>
-              <Select value={station} onValueChange={setStation}>
-                <SelectTrigger id="ops-station" className="h-9 w-[190px] text-sm"><SelectValue placeholder="Все АЗС" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Все АЗС</SelectItem>
-                  {(filtersQ.data?.stations ?? []).map((s) => <SelectItem key={s.code} value={String(s.code)}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="ops-status" className="text-xs text-muted-foreground">Статус</Label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger id="ops-status" className="h-9 w-[160px] text-sm"><SelectValue placeholder="Все" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>Все</SelectItem>
-                  {Object.entries(STATUS_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="min-w-[260px] flex-1 space-y-1">
-              <Label htmlFor="ops-search" className="text-xs text-muted-foreground">Поиск</Label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input id="ops-search" value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-                  placeholder="Чек, смена, карта, АЗС — «смена 9 азс 6 чек 42»" className="h-9 pl-8 text-sm" />
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Полоса отбора. Заголовка «Фильтры» здесь нет: он уже стоит на рельсе
+          рабочей области сверху, а второй такой же читается как чужой блок. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <Select value={station} onValueChange={setStation}>
+          <SelectTrigger aria-label="АЗС" className="h-9 w-[190px] text-sm"><SelectValue placeholder="Все АЗС" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Все АЗС</SelectItem>
+            {(filtersQ.data?.stations ?? []).map((s) => <SelectItem key={s.code} value={String(s.code)}>{s.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger aria-label="Статус операции" className="h-9 w-[150px] text-sm"><SelectValue placeholder="Любой статус" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Любой статус</SelectItem>
+            {Object.entries(STATUS_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <div className="relative min-w-[260px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} aria-label="Поиск операции"
+            placeholder="Чек, смена, карта, АЗС — «смена 9 азс 6 чек 42»" className="h-9 pl-8 text-sm" />
+        </div>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" className="h-9 px-2.5" onClick={resetAll}>
+            <X className="mr-1.5 h-3.5 w-3.5" />Сбросить{activeFilterCount > 1 ? ` (${activeFilterCount})` : ''}
+          </Button>
+        )}
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+          {isFetching && <><Loader2 className="h-3.5 w-3.5 animate-spin" />Обновление</>}
+        </span>
+      </div>
 
       {hasPeriodData && (
-        <div className="space-y-4">
-          <section className="space-y-2" aria-label="Виды топлива">
-            <div className="flex items-center gap-2 px-1">
-              <h3 className="text-base font-medium text-foreground/80">Виды топлива</h3>
-              <span className="text-xs text-muted-foreground">выберите один или несколько элементов</span>
-            </div>
-            <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(fuelKpis.length, 1), 6)}, minmax(0, 1fr))` }}>
+        <div className="space-y-3">
+          <section className="space-y-1.5" aria-label="Разрез по видам топлива">
+            <h3 className="px-0.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+              Виды топлива <span className="normal-case tracking-normal">· плитка включает разрез в отбор</span>
+            </h3>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
               {fuelKpis.map((f) => (
                 <KpiFuelCard key={f.fuel} fuel={f.fuel} selected={fuelNames.has(f.fuel)}
                   volume={f.liters} cost={f.amount} count={f.count} onClick={toggleFuel} />
@@ -385,19 +361,16 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
             </div>
           </section>
 
-          <section className="space-y-2" aria-label="Способы оплаты">
-            <div className="flex items-center gap-2 px-1">
-              <h3 className="text-base font-medium text-foreground/80">Способы оплаты</h3>
-              <span className="text-xs text-muted-foreground">выберите один или несколько элементов</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <section className="space-y-1.5" aria-label="Разрез по способам оплаты">
+            <h3 className="px-0.5 text-[11px] uppercase tracking-wider text-muted-foreground">Способы оплаты</h3>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
               {primaryCards.map((p) => (
                 <KpiPaymentCard key={p.payment} payment={p.payment} selected={payments.has(p.payment)}
                   volume={p.liters} cost={p.amount} count={p.count} onClick={togglePayment} />
               ))}
             </div>
             {restCards.length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
                 {restCards.map((p) => (
                   <KpiPaymentChip key={p.payment} payment={p.payment} selected={payments.has(p.payment)}
                     volume={p.liters} cost={p.amount} count={p.count} onClick={togglePayment} />
@@ -406,35 +379,27 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
             )}
           </section>
 
-          <section className="space-y-2" aria-label="Итого">
-            <div className="flex items-center gap-3 px-1">
-              <h3 className="text-base font-medium text-foreground/80">Итого</h3>
-              <span className="text-sm">
-                {hasKpiFilter ? (
-                  <><span className="text-muted-foreground">выбрано: </span>
-                    <span className="font-bold text-primary">{[...fuelNames, ...payments].join(', ')}</span></>
-                ) : <span className="text-muted-foreground">не выбрано</span>}
-              </span>
+          {/* Подытог разрезов — строка, а не карточка: это сумма плиток над ней,
+              и по весу она обязана стоять ниже их, как итоговая строка таблицы. */}
+          <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-t border-border/60 px-0.5 pt-2.5">
+            <div className="flex items-baseline gap-2 text-sm">
+              <span className="text-muted-foreground">Итого</span>
+              <span className="tabular-nums text-foreground">{nf0.format(totalKpi.count)} операций</span>
+              {hasKpiFilter && (
+                <>
+                  <span className="truncate text-primary">{[...fuelNames, ...payments].join(' · ')}</span>
+                  <button type="button" onClick={resetKpi}
+                    className="rounded text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    снять разрезы
+                  </button>
+                </>
+              )}
             </div>
-            <Card
-              className={cn('transition-all duration-300',
-                hasKpiFilter ? 'cursor-pointer border-2 border-primary/45 bg-primary/5 hover:shadow-lg' : 'bg-card')}
-              onClick={hasKpiFilter ? resetKpi : undefined}
-              title={hasKpiFilter ? 'Снять фильтры разрезов' : undefined}
-            >
-              <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-foreground/80">{nf0.format(totalKpi.count)} операций</span>
-                  {hasKpiFilter && <span className="text-xs text-primary">нажмите, чтобы снять разрезы</span>}
-                </div>
-                <div className="flex gap-6 text-right">
-                  <div className="text-base font-semibold tabular-nums text-foreground">{fmtLiters(totalKpi.liters)}</div>
-                  <div className="text-base font-semibold tabular-nums text-foreground">{fmtMoney(totalKpi.amount)} ₽</div>
-                </div>
-              </CardContent>
-            </Card>
-          </section>
+            <div className="flex items-baseline gap-6 tabular-nums">
+              <span className="text-sm text-muted-foreground">{fmtLiters(totalKpi.liters)}</span>
+              <span className="text-base font-semibold text-foreground">{fmtMoney(totalKpi.amount)} ₽</span>
+            </div>
+          </div>
         </div>
       )}
 
