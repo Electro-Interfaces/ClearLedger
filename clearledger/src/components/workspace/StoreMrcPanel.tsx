@@ -6,6 +6,8 @@
  * Данные: /api/store/mrc, /api/store/mrc/import (GoodsDashboardService).
  */
 import { useMemo, useRef, useState } from 'react'
+import { rowDrill } from './rowDrill'
+import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ShieldAlert, ShieldCheck, Upload, Loader2, FileWarning } from 'lucide-react'
 import { getStoreMrc, importStoreMrc, type MrcItem, type MrcImportRow, type MrcImportResult } from '@/services/storeService'
@@ -47,6 +49,8 @@ function parseCsv(text: string): MrcImportRow[] {
 }
 
 export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
+  // Строка = товар: раскрывается его карточка (та же, что в «Ассортименте»).
+  const [openSku, setOpenSku] = useState<string | null>(null)
   void dateFrom; void dateTo // контроль МРЦ — на текущей рознице, период не нужен
   const qc = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -173,7 +177,9 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
               </thead>
               <tbody>
                 {items.slice(0, 500).map((i: MrcItem) => (
-                  <tr key={i.ref} className={`border-t border-border/30 ${i.over ? 'bg-red-400/[0.06]' : ''}`}>
+                  <tr key={i.ref}
+                      {...rowDrill(() => setOpenSku(i.ref), `${i.name} — карточка товара`,
+                        `border-t border-border/30 ${i.over ? 'bg-red-400/[0.06]' : ''}`)}>
                     <td className="px-3 py-1.5">{i.name}</td>
                     <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{i.barcode ?? '—'}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(i.mrc)}</td>
@@ -196,6 +202,10 @@ export function StoreMrcPanel({ companyId, dateFrom, dateTo }: { companyId: stri
             {items.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет строк под фильтром.</div>}
           </div>
         </>
+      )}
+      {openSku && (
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo}
+          onClose={() => setOpenSku(null)} />
       )}
     </div>
   )

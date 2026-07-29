@@ -7,6 +7,8 @@
  * Данные: /api/store/skus (GoodsDashboardService.sku_analytics). Имена — из кеша НСИ ЦБ.
  */
 import { useState, type ReactNode } from 'react'
+import { rowDrill } from './rowDrill'
+import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreSkus, type StoreSku } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
@@ -98,6 +100,8 @@ const TITLES: Record<SkuMode, string> = {
 export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode, stations }: {
   companyId: string; dateFrom: string; dateTo: string; mode: SkuMode; stations?: string[]
 }) {
+  // Строка = товар: раскрывается его карточка (та же, что в «Ассортименте»).
+  const [openSku, setOpenSku] = useState<string | null>(null)
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-skus', companyId, dateFrom, dateTo, stations],
     queryFn: () => getStoreSkus(dateFrom, dateTo, { stations }),
@@ -173,7 +177,9 @@ export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode, stations }: {
           </thead>
           <tbody>
             {skus.slice(0, 300).map((s) => (
-              <tr key={s.guid} className="border-t border-border/30 hover:bg-accent/20">
+              <tr key={s.guid}
+                  {...rowDrill(() => setOpenSku(s.guid), `${s.name} — карточка товара`,
+                    'border-t border-border/30')}>
                 {cols.map((c) => (
                   <td key={c.key} className={`px-3 py-1.5 ${c.num ? 'text-right tabular-nums' : ''} ${c.cls?.(s) ?? ''}`}>
                     {c.render(s)}
@@ -192,6 +198,10 @@ export function StoreSkuPanel({ companyId, dateFrom, dateTo, mode, stations }: {
           <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет данных за период (поставьте апрель — локальная копия ЦБ до 29.04).</div>
         )}
       </div>
+      {openSku && (
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo}
+          onClose={() => setOpenSku(null)} />
+      )}
     </div>
   )
 }

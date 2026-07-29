@@ -7,6 +7,8 @@
  * Отрицательные остатки — норма для розничных АЗС (учёт по средней) → флаг.
  */
 import { useMemo, useState } from 'react'
+import { rowDrill } from './rowDrill'
+import { SkuDetailModal } from './SkuDetailModal'
 import { useQuery } from '@tanstack/react-query'
 import { getStoreStock, type StoreStockItem } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
@@ -17,7 +19,9 @@ const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractio
 
 type MarkedFilter = 'all' | 'marked' | 'plain'
 
-export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom?: string; dateTo?: string }) {
+  // Строка = товар: раскрывается его карточка (та же, что в «Ассортименте»).
+  const [openSku, setOpenSku] = useState<string | null>(null)
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
   const [q, setQ] = useState('')
   const [marked, setMarked] = useState<MarkedFilter>('all')
@@ -139,7 +143,9 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
           </thead>
           <tbody>
             {items.slice(0, 400).map((i) => (
-              <tr key={i.guid} className="border-t border-border/30 hover:bg-accent/20">
+              <tr key={i.guid}
+                  {...rowDrill(() => setOpenSku(i.guid), `${i.name} — карточка товара`,
+                    'border-t border-border/30')}>
                 <td className="px-3 py-1.5">
                   {i.name}
                   {i.weighed && <span className="ml-1 text-[10px] text-muted-foreground/60" title="весовой — остаток в базовых единицах">вес.</span>}
@@ -167,6 +173,10 @@ export function StoreStockPanel({ companyId }: { companyId: string; dateFrom?: s
           </div>
         )}
       </div>
+      {openSku && (
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''}
+          onClose={() => setOpenSku(null)} />
+      )}
     </div>
   )
 }

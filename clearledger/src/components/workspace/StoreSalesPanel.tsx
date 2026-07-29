@@ -14,6 +14,9 @@ import { Kpi } from './analytics/Kpi'
 import { seriesColor } from './analytics/palette'
 import { ExportButton } from './analytics/ExportButton'
 import { useScopeSubtitle } from '@/hooks/useScopeReset'
+import { rowDrill } from './rowDrill'
+import { SkuDetailModal } from './SkuDetailModal'
+import { ShiftDetailModal } from './ShiftDetailModal'
 import {
   getStoreSales, type SalesGroupBy, type SalesCategory, type SalesMarked,
 } from '@/services/storeService'
@@ -56,6 +59,10 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
   const [category, setCategory] = useState<SalesCategory>('all')
   const [marked, setMarked] = useState<SalesMarked>('all')
   const [q, setQ] = useState('')
+  // Что раскрыто по клику: товар (GUID номенклатуры) или смена (ключ смены).
+  // Ключ приходит в `g.key` от сервера и годится обеим ручкам как есть.
+  const [openSku, setOpenSku] = useState<string | null>(null)
+  const [openShift, setOpenShift] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const scopeSub = useScopeSubtitle()
 
@@ -140,7 +147,14 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
               </thead>
               <tbody>
                 {data.groups.slice(0, 300).map((g, i) => (
-                  <tr key={g.key} className="border-t border-border/30 hover:bg-accent/20">
+                  <tr key={g.key}
+                      {...rowDrill(
+                        groupBy === 'sku' ? () => setOpenSku(g.key)
+                        : groupBy === 'shift' ? () => setOpenShift(g.key)
+                        : null,
+                        `${g.label} — раскрыть`,
+                        'border-t border-border/30',
+                      )}>
                     <td className="px-3 py-1.5">{g.label}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(g.revenue)}</td>
                     <td className="px-3 py-1.5">
@@ -169,6 +183,16 @@ export function StoreSalesPanel({ companyId, dateFrom, dateTo, stations }: { com
             )}
           </div>
         </>
+      )}
+      {/* Расшифровка строки: товар и смена — единственные группировки, за которыми стоит
+          сущность; у остальных строка агрегатная и по клику не раскрывается. */}
+      {openSku && (
+        <SkuDetailModal guid={openSku} dateFrom={dateFrom} dateTo={dateTo}
+          onClose={() => setOpenSku(null)} />
+      )}
+      {openShift && (
+        <ShiftDetailModal shiftKey={openShift} companyId={companyId}
+          onClose={() => setOpenShift(null)} />
       )}
     </div>
   )
