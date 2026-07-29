@@ -602,11 +602,41 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             <Cell label="Расхождение с замером" value={nf0.format(t.fact_breaks)}
                   hint={`свыше ${nf0.format(tol)} л за смену`} />
           </div>
+
+          {/* Разрывы по причинам. «760 разрывов» одной цифрой не говорят, что делать:
+              перенумерация станции и молчаливое списание — разные адресаты и разные
+              решения, а топлива касается только часть из них. */}
+          {t.continuity_kinds && Object.keys(t.continuity_kinds).length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-card/60 px-3 py-2">
+              <span className="mr-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+                Стык смен — по причинам
+              </span>
+              {Object.entries(t.continuity_kinds)
+                .sort((a, b) => b[1].count - a[1].count)
+                .map(([kind, agg]) => {
+                  const meta = BREAK_KINDS[kind]
+                  return (
+                    <span key={kind}
+                      title={`${nf0.format(agg.count)} разрывов на ${nf0.format(Math.abs(agg.liters))} л суммарно`}
+                      className={cn('rounded-md border px-2 py-0.5 text-[11px]',
+                        meta?.hard ? 'border-amber-500/40 text-amber-500' : 'border-border text-muted-foreground')}>
+                      {meta?.label ?? kind}{' '}
+                      <span className="tabular-nums">{nf0.format(agg.count)}</span>
+                      <span className="ml-1 opacity-70">· {nf0.format(Math.abs(agg.liters))} л</span>
+                    </span>
+                  )
+                })}
+              <span className="ml-auto text-[11px] text-muted-foreground">
+                подсвечено янтарным — требует решения; остальное объяснено событиями станции
+              </span>
+            </div>
+          )}
+
           <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full min-w-[900px] text-xs">
+            <table className="w-full min-w-[1000px] text-xs">
               <thead className="bg-muted/40 text-muted-foreground">
                 <tr>
-                  <Th>Тип</Th><Th>АЗС</Th><Th>Резервуар</Th><Th>Смена</Th><Th>Дата</Th>
+                  <Th>Тип</Th><Th>Причина</Th><Th>АЗС</Th><Th>Резервуар</Th><Th>Смена</Th><Th>Дата</Th>
                   <Th right>Расхождение</Th><Th>Что не сходится</Th>
                 </tr>
               </thead>
@@ -642,16 +672,30 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                           : issue.type === 'fuel_change' ? 'смена топлива' : 'стык смен'}
                       </Badge>
                     </Td>
+                    {/* Причина — то, что превращает «разрыв 22 642 л» из бреда в
+                        событие: перенумерацию станции не ищут как утечку. */}
+                    <Td>
+                      {issue.kind ? (
+                        <span className={cn('whitespace-nowrap', BREAK_KINDS[issue.kind]?.tone ?? 'text-muted-foreground')}>
+                          {BREAK_KINDS[issue.kind]?.label ?? issue.kind}
+                        </span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </Td>
                     <Td>{issue.station_name}</Td>
                     <Td>№{issue.tank_number} · {issue.fuel_name}</Td>
                     <Td>№{issue.shift_number}</Td>
                     <Td>{issue.date ? new Date(issue.date).toLocaleDateString('ru-RU') : '—'}</Td>
                     <Td right className="font-medium">{nf1.format(issue.gap_liters)} л</Td>
-                    <Td className="text-muted-foreground">{issue.detail}</Td>
+                    <Td className="text-muted-foreground">
+                      {issue.detail}
+                      {issue.reason && (
+                        <span className="mt-0.5 block text-[11px] text-foreground/70">{issue.reason}</span>
+                      )}
+                    </Td>
                   </tr>
                 ))}
                 {data.issues.length === 0 && (
-                  <tr><td colSpan={7} className="p-6 text-center text-muted-foreground">
+                  <tr><td colSpan={8} className="p-6 text-center text-muted-foreground">
                     Замечаний нет: книга сходится и стыкуется между сменами
                   </td></tr>
                 )}
@@ -694,7 +738,7 @@ function GroupBlock({ group, tol, tols, onPick, sort }: {
     <>
       {/* Разделитель-заголовок группы: какой резервуар и его итог за период. */}
       <tr className="border-t-2 border-border bg-muted/30">
-        <td colSpan={12} className="px-2.5 py-2">
+        <td colSpan={15} className="px-2.5 py-2">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="font-semibold">
               {head.station_name} · резервуар №{head.tank_number} · {head.fuel_name}

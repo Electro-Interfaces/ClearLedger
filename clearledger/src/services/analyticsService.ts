@@ -690,6 +690,10 @@ export interface TankLedgerIssue {
   date: string | null
   gap_liters: number
   detail: string
+  /** Причина разрыва стыка: delivery | renumber | book_reset | pulled_to_fact | … */
+  kind?: string | null
+  /** Человеческая формулировка причины (номер ТТН, номера смен, объём). */
+  reason?: string | null
 }
 
 export interface TankLedgerResponse {
@@ -702,6 +706,8 @@ export interface TankLedgerResponse {
     mass_receipts: number; mass_sales: number
     tanks: number; shifts: number
     arithmetic_breaks: number; continuity_breaks: number; fact_breaks: number
+    /** Разрывы стыка по причинам: «774 разрыва» одной цифрой не говорят, что делать. */
+    continuity_kinds?: Record<string, { count: number; liters: number }>
   }
   tanks: TankLedgerTank[]
   rows: TankLedgerRow[]

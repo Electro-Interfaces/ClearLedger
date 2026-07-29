@@ -51,6 +51,18 @@ CONTINUITY_TOLERANCE_L = 0.5   # стык смен тоже арифметика
 FACT_TOLERANCE_L = 50.0        # замер — измерение, у него есть погрешность
 
 
+def _ru(v: float, digits: int = 1) -> str:
+    """Число по-русски: пробел между тысячами, запятая перед дробью.
+
+    Питоновский `{:,.1f}` даёт «23,627.7» — русский читатель видит здесь 23 целых
+    и 627 тысячных, то есть 23 литра вместо 23 627. Именно так объяснения замечаний
+    и превращались в «какой-то бред»: расхождение в 22 тысячи литров выглядело
+    цифрами меньше сотни.
+    """
+    s = f"{v:,.{digits}f}".replace(",", " ").replace(".", ",")
+    return s
+
+
 def _f(v: Any) -> float:
     return float(v) if v is not None else 0.0
 
@@ -94,9 +106,9 @@ def _manual_note(gap: float, book_start: float, prev_book_end: float) -> str | N
     if not _is_whole(gap):
         return None
     if _is_round(gap):
-        return f"ручная правка на {gap:+,.0f} л — круглое значение"
+        return f"ручная правка на {'+' if gap > 0 else '−'}{_ru(abs(gap), 0)} л — круглое значение"
     if not _is_whole(book_start) or not _is_whole(prev_book_end):
-        return (f"ручная правка на {gap:+,.0f} л — ровно целые литры "
+        return (f"ручная правка на {'+' if gap > 0 else '−'}{_ru(abs(gap), 0)} л — ровно целые литры "
                 "при дробных остатках (ввод с клавиатуры, не прибор)")
     return None
 
@@ -120,13 +132,13 @@ def _classify_break(
     #    5 АЗС × 3 резервуара, 84 016 л, в тех же сменах отрицательный остаток.
     if book_start == 0 and prev_book_end > 100:
         return ("book_reset", "книга обнулена: начало смены 0 при остатке "
-                              f"{prev_book_end:,.0f} л — переинициализация учёта на станции")
+                              f"{_ru(prev_book_end, 0)} л — переинициализация учёта на станции")
     # Обратная сторона того же сбоя: книга закрылась нулём, а следующая смена
     # открылась нормальным остатком. Без этой ветки «восстановление» выглядело
     # необъяснённым, хотя это второй шаг той же переинициализации.
     if prev_book_end == 0 and book_start > 100:
         return ("book_reset", f"книга восстановлена после обнуления: предыдущая смена "
-                              f"закрыта нулём, эта открыта остатком {book_start:,.0f} л")
+                              f"закрыта нулём, эта открыта остатком {_ru(book_start, 0)} л")
     if book_start < 0 or prev_book_end < 0:
         return ("book_reset", "отрицательный остаток в книге — отчёт недостоверен")
     # 3. Слив между сменами. Сначала — прямая привязка: накладная сама указывает
@@ -136,29 +148,29 @@ def _classify_break(
     if gap > 0 and receipts_linked:
         for vol, ttn in receipts_linked:
             if vol > 0 and abs(vol - gap) <= max(1.0, gap * DELIVERY_TOLERANCE):
-                return ("delivery", f"слив между сменами: накладная {ttn} на {vol:,.0f} л "
+                return ("delivery", f"слив между сменами: накладная {ttn} на {_ru(vol, 0)} л "
                                     "закреплена за этой сменой и резервуаром — объём попал "
                                     "в начальный остаток, а не в приход")
         if receipts_in_shift == 0:
             total = sum(v for v, _ in receipts_linked)
             if abs(total - gap) <= max(1.0, gap * DELIVERY_TOLERANCE):
                 ttns = ", ".join(sorted({t for _, t in receipts_linked}))
-                return ("delivery", f"слив между сменами: накладные {ttns} на {total:,.0f} л "
+                return ("delivery", f"слив между сменами: накладные {ttns} на {_ru(total, 0)} л "
                                     "за смену, приход в резервуаре не отражён")
     # Запасной путь — по времени и объёму (для записей без привязки к смене).
     #    ГИГ АЗС 207 13.06: ТТН 9303 — АИ-92 10 431 л и АИ-95 8 210 л, литр в литр.
     if gap > 0 and receipts_between:
         for vol, ttn in receipts_between:
             if vol > 0 and abs(vol - gap) <= max(1.0, gap * DELIVERY_TOLERANCE):
-                return ("delivery", f"слив между сменами: ТТН {ttn} на {vol:,.0f} л — "
+                return ("delivery", f"слив между сменами: ТТН {ttn} на {_ru(vol, 0)} л — "
                                     "объём не попал в приход закрытой смены")
     # 4. Книга подтянута к замеру: расхождение списано на станции молча.
     if prev_fact and abs(book_start - prev_fact) <= 1.0:
-        return ("pulled_to_fact", f"книга подтянута к замеру ({prev_fact:,.0f} л): "
+        return ("pulled_to_fact", f"книга подтянута к замеру ({_ru(prev_fact, 0)} л): "
                                   "расхождение списано на станции, минуя инвентаризацию")
     # 5. Длинная пауза — смены за промежуток отсутствуют, сверять нечего.
     if hours_gap is not None and hours_gap > LONG_PAUSE_HOURS:
-        return ("gap", f"пауза {hours_gap:,.0f} ч между сменами — смены за этот срок нет")
+        return ("gap", f"пауза {_ru(hours_gap, 0)} ч между сменами — смены за этот срок нет")
     # 6. Ручная правка: разрыв целым числом литров при дробных остатках.
     #    ГИГ АЗС 208/209/9008 — основная масса разрывов именно такая.
     note = _manual_note(gap, book_start, prev_book_end)
@@ -344,8 +356,8 @@ async def build_tank_ledger(
                     "shift_number": int(shift.shift_number),
                     "date": shift.opened_at.date().isoformat() if shift.opened_at else None,
                     "gap_liters": arithmetic_gap,
-                    "detail": (f"начало {book_start:,.1f} + приход {receipts:,.1f} "
-                               f"− отпуск {sales:,.1f} ≠ конец {book_end:,.1f}"),
+                    "detail": (f"начало {_ru(book_start, 1)} + приход {_ru(receipts, 1)} "
+                               f"− отпуск {_ru(sales, 1)} ≠ конец {_ru(book_end, 1)}"),
                 })
             # Тип разрыва: без него все причины выглядят одинаково «разрыв N л»,
             # хотя слив между сменами и молчаливое списание — разные адресаты.
@@ -392,9 +404,11 @@ async def build_tank_ledger(
                     "prev_shift_number": int(prev_shift.shift_number) if prev_shift else None,
                     "date": shift.opened_at.date().isoformat() if shift.opened_at else None,
                     "gap_liters": continuity_gap,
-                    "detail": (f"конец смены {prev_shift.shift_number if prev_shift else '—'} "
-                               f"{_f(prev.volume_end):,.1f} ≠ начало смены "
-                               f"{shift.shift_number} {book_start:,.1f}"
+                    # Номер смены отделён от литров: «конец смены 7332 23 627,7»
+                    # читалось как одно число из двух склеенных.
+                    "detail": (f"смена №{prev_shift.shift_number if prev_shift else '—'} закрыта "
+                               f"{_ru(_f(prev.volume_end), 1)} л, смена №{shift.shift_number} открыта "
+                               f"{_ru(book_start, 1)} л"
                                + (" · смена вида топлива" if fuel_changed else "")),
                 }
                 issues.append(issue_entry)
