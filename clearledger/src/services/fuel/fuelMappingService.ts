@@ -506,7 +506,7 @@ export const getShiftDashboard = (dateFrom: string, dateTo: string,
     compare: opts?.compare ? 'true' : undefined,
   })
 
-// ─── Реестр пооперационных транзакций (наливов) ───
+// ─── Реестр пооперационных транзакций (реализаций) ───
 export interface FuelTxRow {
   id: string
   ext_id: number
@@ -529,7 +529,7 @@ export interface FuelTxRow {
   amount: number
   mass: number | null
   density: number | null
-  /** Заказ клиента до налива («залей на 1000 ₽»), если был. */
+  /** Заказ клиента до отпуска («залей на 1000 ₽»), если был. */
   order_qty: number | null
   order_cost: number | null
   status: string
@@ -576,7 +576,7 @@ export const getFuelTxRows = (p: FuelTxRowsParams) =>
 export const getFuelTxFilters = (dateFrom: string, dateTo: string) =>
   get<FuelTxFilters>('/api/fuel/transactions/filters', { date_from: dateFrom, date_to: dateTo })
 
-/** Дата выдачи купона, которым оплачен налив (живёт только в STS). */
+/** Дата выдачи купона, которым оплачена реализация (живёт только в STS). */
 export const getFuelTxCoupon = (stationCode: number, dt: string, number: string) =>
   get<{ issued_at: string | null }>('/api/fuel/transactions/coupon', {
     station_code: stationCode, dt, number,
@@ -638,7 +638,7 @@ export const getSalesChannelsAnalytics = (p: SalesChannelsParams) =>
     pay_types: p.payTypes?.length ? p.payTypes.join(',') : undefined,
   })
 
-// Загрузка наливов из STS (фон) + статус прогона
+// Загрузка реализаций из STS (фон) + статус прогона
 export interface FuelTxSyncStatus { running: boolean; stations_done: number; stations_total: number; loaded: number; message: string }
 export const syncFuelTransactions = (body: { date_from?: string; date_to?: string; all_period?: boolean; station_codes?: number[] }) =>
   post<{ status: string }>('/api/fuel/transactions/sync', body)
@@ -654,8 +654,25 @@ export interface FuelMapStation {
   transactions: number
   liters: number
   amount: number
+  cards: number
+  last_at: string | null
+  /** Метрики, не следующие за размером станции: чек, цена, интенсивность. */
+  avg_check: number
+  avg_price: number
+  fills_per_day: number
+  /** Прошлый период той же длины и рост к нему (null — сравнивать не с чем). */
+  prev_amount: number
+  growth_pct: number | null
+  /** Структура спроса: ведущий продукт и его доля в выручке станции. */
+  top_fuel: string | null
+  top_fuel_pct: number | null
+  by_fuel: { fuel_name: string; amount: number; liters: number }[]
 }
-export interface FuelMapResp { stations: FuelMapStation[]; with_coords: number; total: number }
+export interface FuelMapResp {
+  stations: FuelMapStation[]; with_coords: number; total: number
+  days: number
+  prev_period: { from: string; to: string }
+}
 export const getFuelStationsMap = (dateFrom: string, dateTo: string) =>
   get<FuelMapResp>('/api/fuel/stations/map', { date_from: dateFrom, date_to: dateTo })
 export const syncFuelStationsGeo = () =>

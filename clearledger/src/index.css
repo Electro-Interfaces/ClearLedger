@@ -612,6 +612,22 @@
 }
 .cl-map-label.leaflet-tooltip::before { display: none; }
 
+/* Число станций внутри маркера-группы: подпись сидит В круге, поэтому без
+   подложки, рамки и хвостика — иначе поверх маркера появляется второй объект. */
+.cl-map-count.leaflet-tooltip {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0;
+  pointer-events: none;
+}
+.cl-map-count.leaflet-tooltip::before { display: none; }
+/* Группа кликабельна — курсор обязан это показать. */
+.cl-map-cluster { cursor: zoom-in; }
+
 /* ── Печать и сохранение в PDF ─────────────────────────────────────────────
    Отчёт руководителю печатают из браузера: диалог печати умеет «Сохранить как
    PDF», и кириллица в нём правильная без шрифтовых пакетов на сервере.

@@ -70,6 +70,7 @@ from app.services.fuel_costing import FuelCostingService
 from app.services.fuel_dashboard import FuelDashboardService
 from app.services.fuel_mappings import MappingContext, build_sales_agg, load_mapping_context
 from app.services.fuel_network_analytics import FuelNetworkAnalytics
+from app.services.fuel_pricing import FuelPricing
 from app.services.fuel_sales_analytics import FuelSalesAnalytics
 from app.services.payment_normalize import normalize_payment_method
 from app.services.sts_client import (
@@ -2489,7 +2490,7 @@ async def inventory_list(
 
 
 # ═══════════════════════════════════════════════════════════════
-# Пооперационные транзакции (наливы) — STS /v2/transactions
+# Пооперационные транзакции (реализации) — STS /v2/transactions
 # ═══════════════════════════════════════════════════════════════
 
 # Прогресс фонового синка транзакций по компании (в памяти воркера).
@@ -2504,7 +2505,7 @@ class TxSyncRequest(BaseModel):
 
 
 async def _tx_sync_bg(company_id, date_from, date_to, station_codes, all_period):
-    """Фоновая загрузка наливов: по станциям × помесячным окнам, дедуп по STS id."""
+    """Фоновая загрузка реализаций: по станциям × помесячным окнам, дедуп по STS id."""
     from app.services.fuel_transactions import (
         resolve_sts, list_stations, ingest_station_window, month_windows,
     )
@@ -2546,7 +2547,7 @@ async def _tx_sync_bg(company_id, date_from, date_to, station_codes, all_period)
                     _TX_SYNC[key].update({"loaded": loaded})
                 _TX_SYNC[key].update({"stations_done": idx + 1, "loaded": loaded})
             if loaded:
-                # новые наливы → инвалидация версионного кеша аналитики продаж
+                # новые реализации → инвалидация версионного кеша аналитики продаж
                 await bump_version(db, company_id)
             _TX_SYNC[key] = {"running": False, "stations_done": total, "stations_total": total,
                              "loaded": loaded, "message": f"готово: {loaded} реализаций"}
@@ -2561,7 +2562,7 @@ async def transactions_sync(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Запустить фоновую загрузку пооперационных транзакций (наливов) из STS /v2/transactions."""
+    """Запустить фоновую загрузку пооперационных транзакций (реализаций) из STS /v2/transactions."""
     cid = await _company_id(user, db)
     key = str(cid)
     if _TX_SYNC.get(key, {}).get("running"):
@@ -2670,7 +2671,7 @@ async def transactions_rows(
     limit: int = Query(100, le=1000), offset: int = Query(0),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Построчный реестр наливов (пооперационно) — серверная пагинация/фильтры/сортировка.
+    """Построчный реестр реализаций (пооперационно) — серверная пагинация/фильтры/сортировка.
     fuel_codes/pay_types — CSV (мультивыбор через KPI-карточки); shift/receipt/pos/card —
     точные поля умного поиска, search — свободный остаток строки."""
     cid = await _company_id(user, db)
@@ -2712,14 +2713,14 @@ async def transactions_rows(
 
 @router.get("/transactions/coupon")
 async def transactions_coupon(
-    station_code: int = Query(...), dt: str = Query(..., description="время налива, ISO"),
-    number: str = Query(..., description="номер купона из налива"),
+    station_code: int = Query(...), dt: str = Query(..., description="время реализации, ISO"),
+    number: str = Query(..., description="номер купона из реализации"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Дата выдачи купона, которым оплачен налив (STS /v1/coupons).
+    """Дата выдачи купона, которым оплачена реализация (STS /v1/coupons).
 
-    В наливе остаётся только номер; когда купон выдан, знает лишь справочник STS.
-    Ищем по станции налива за 30 дней до него (срок жизни купона по умолчанию 7
+    В реализации остаётся только номер; когда купон выдан, знает лишь справочник STS.
+    Ищем по станции реализации за 30 дней до него (срок жизни купона по умолчанию 7
     дней, запас на «долгие»), как это делает «Монитор».
     """
     from app.services.fuel_transactions import resolve_sts
@@ -2731,7 +2732,7 @@ async def transactions_coupon(
     try:
         op_dt = datetime.fromisoformat(dt)
     except ValueError:
-        raise HTTPException(400, "Неверный формат времени налива")
+        raise HTTPException(400, "Неверный формат времени реализации")
     beg = (op_dt - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
     end = (op_dt + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     for sysid in conn["systems"]:
@@ -2755,11 +2756,11 @@ async def coupons_journal(
     """Журнал купонов (сдача топливом) — STS /v1/coupons за период.
 
     Купоны не материализуются в Ledger: это живой остаток обязательства перед
-    клиентом, он меняется при каждом наливе, и хранить его копию значило бы
+    клиентом, он меняется при каждом отпуске, и хранить его копию значило бы
     показывать вчерашний долг. Читаем напрямую, ответ отдаёт всю сеть системы
     одним запросом.
 
-    Дата реализации берётся из наливов: у купонной операции в `card` лежит номер
+    Дата реализации берётся из реализаций: у купонной операции в `card` лежит номер
     купона, и по нему видно, когда купон отоварили, — в «Мониторе» эта колонка
     пустует, потому что STS её не отдаёт вовсе.
     """
@@ -2784,7 +2785,7 @@ async def coupons_journal(
     names = {int(s.code): s.name for s in (await db.execute(
         select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
 
-    # Когда купон отоварили: последний налив с этим номером карты и оплатой «Купон».
+    # Когда купон отоварили: последний реализация с этим номером карты и оплатой «Купон».
     numbers = {str(c.get("number")) for c in raw if c.get("number") is not None}
     redeemed: dict[str, str] = {}
     if numbers:
@@ -2956,7 +2957,7 @@ async def sales_channels(
 
 
 # ═══════════════════════════════════════════════════════════════
-# Аналитика продаж по наливам (раздел «Продажи» → «Аналитика» / «Коммерция»)
+# Аналитика продаж по реализациям (раздел «Продажи» → «Аналитика» / «Коммерция»)
 # ═══════════════════════════════════════════════════════════════
 
 _FA_GROUPS = {"station", "fuel", "pay_type", "channel", "segment", "hour", "weekday",
@@ -2987,7 +2988,7 @@ async def analytics_fills(
     dim: str | None = Query(None), dim_val: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Разрез наливов: выручка/литры/наливы/ср.чек/ср.налив/ср.цена по группе.
+    """Разрез реализаций: выручка/литры/реализации/ср.чек/ср.реализация/ср.цена по группе.
 
     `dim`/`dim_val` — сужение до одного значения ДРУГОГО разреза (провал вглубь).
     """
@@ -3012,7 +3013,7 @@ async def analytics_fills_timeseries(
     card: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Динамика метрики наливов по бакетам; series_by → multi-series (топ-N + «Прочие»)."""
+    """Динамика метрики реализаций по бакетам; series_by → multi-series (топ-N + «Прочие»)."""
     cid = await _company_id(user, db)
     _fa_check(bucket, _FA_BUCKETS, "bucket")
     _fa_check(metric, _FA_METRICS, "metric")
@@ -3080,7 +3081,7 @@ async def analytics_fills_heatmap(
     segment: str | None = Query(None), channel: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Матрица час (0–23) × день недели (1=Пн..7=Вс) по наливам."""
+    """Матрица час (0–23) × день недели (1=Пн..7=Вс) по реализациям."""
     cid = await _company_id(user, db)
     _fa_check(metric, _FA_METRICS, "metric")
     df, dt = _fa_dates(date_from, date_to)
@@ -3143,7 +3144,7 @@ async def analytics_pumps(
     segment: str | None = Query(None), channel: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Загрузка ТРК и пистолетов: наливов в сутки на единицу, простой, молчащие."""
+    """Загрузка ТРК и пистолетов: реализаций в сутки на единицу, простой, молчащие."""
     cid = await _company_id(user, db)
     _fa_check(level, _FN_LEVELS, "level")
     df, dt = _fa_dates(date_from, date_to)
@@ -3159,7 +3160,7 @@ async def analytics_silent(
     fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Станции, ТРК и пистолеты без единого налива за период (с историей до него)."""
+    """Станции, ТРК и пистолеты без единой реализации за период (с историей до него)."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
     return await FuelNetworkAnalytics(db).silent(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
@@ -3210,7 +3211,7 @@ async def analytics_visits(
     segment: str | None = Query(None), channel: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Приезды вместо наливов: склейка соседних наливов карты на одной станции."""
+    """Приезды вместо реализаций: склейка соседних реализаций карты на одной станции."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
     return await FuelNetworkAnalytics(db).visits(
@@ -3267,6 +3268,47 @@ async def tariffs_timeseries(
     df, dt = _fa_dates(date_from, date_to)
     return await FuelSalesAnalytics(db).price_timeseries(
         cid, df, dt, bucket=bucket, fuel_codes=tuple(_csv_ints(fuel_codes)))
+
+
+# ─── Ценообразование: решение о цене, а не атрибут продажи ────────────────
+# Отдельный сервис (fuel_pricing), потому что разрезы продаж отвечают «по какой цене
+# продали», а эти три ручки — «кто, когда и на сколько цену двинул и что вышло».
+
+
+@router.get("/pricing/changes")
+async def pricing_changes(
+    date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Журнал изменений цены: было → стало, шаг, удержание, реакция объёма, волны."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelPricing(db).changes(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
+
+
+@router.get("/pricing/calendar")
+async def pricing_calendar(
+    date_from: str = Query(...), date_to: str = Query(...),
+    fuel_code: int = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Матрица станция × день по одному виду топлива: как волна идёт по сети."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelPricing(db).calendar(cid, df, dt, fuel_code=fuel_code)
+
+
+@router.get("/pricing/spread")
+async def pricing_spread(
+    date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Разброс цен по сети на конец периода: размах, ранг станции, возраст цены."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelPricing(db).spread(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/corporate/overview")
@@ -3386,34 +3428,87 @@ async def stations_map(
     date_from: str = Query(...), date_to: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """АЗС с координатами + метрики за период (наливы/объём/выручка) — для Карты АЗС."""
+    """АЗС с координатами и метрики за период — для Карты АЗС.
+
+    Выручка, реализации и объём отвечают на ОДИН вопрос («насколько станция большая»)
+    и рисуют три почти одинаковых картинки. Чтобы карта отвечала на разные
+    вопросы, к ним добавлены величины, которые не следуют за размером станции:
+    средний чек и цена (какой клиент и по какой цене заправляется), интенсивность
+    (реализаций в сутки — сравнивает станции при разной длине периода), динамика к
+    прошлому периоду (кто растёт, кто падает) и ведущий вид топлива (структура
+    спроса: дизельная точка на трассе и бензиновая в городе — разный бизнес).
+    """
     cid = await _company_id(user, db)
     d0, d1 = date.fromisoformat(date_from), date.fromisoformat(date_to)
     T = FuelTransaction
+    days = max(1, (d1 - d0).days + 1)
+    # База сравнения — предыдущий отрезок той же длины, встык к выбранному.
+    p1 = d0 - timedelta(days=1)
+    p0 = p1 - timedelta(days=days - 1)
+
+    def _window(a: date, b: date):
+        return [T.company_id == cid,
+                T.dt >= datetime(a.year, a.month, a.day),
+                T.dt <= datetime(b.year, b.month, b.day, 23, 59, 59)]
+
     agg = (await db.execute(select(
         T.station_code, func.count().label("n"),
         func.coalesce(func.sum(T.liters), 0).label("l"),
         func.coalesce(func.sum(T.amount), 0).label("a"),
-    ).where(
-        T.company_id == cid,
-        T.dt >= datetime(d0.year, d0.month, d0.day),
-        T.dt <= datetime(d1.year, d1.month, d1.day, 23, 59, 59),
-    ).group_by(T.station_code))).all()
+        func.count(func.distinct(func.nullif(func.trim(T.card), ""))).label("cards"),
+        func.max(T.dt).label("last_at"),
+    ).where(*_window(d0, d1)).group_by(T.station_code))).all()
+    prev = {int(r.station_code): float(r.a) for r in (await db.execute(select(
+        T.station_code, func.coalesce(func.sum(T.amount), 0).label("a"),
+    ).where(*_window(p0, p1)).group_by(T.station_code))).all()}
+    # Структура спроса: разбивка выручки по видам топлива внутри станции.
+    mix_rows = (await db.execute(select(
+        T.station_code, func.coalesce(T.fuel_name, "—").label("fuel"),
+        func.coalesce(func.sum(T.amount), 0).label("a"),
+        func.coalesce(func.sum(T.liters), 0).label("l"),
+    ).where(*_window(d0, d1)).group_by(T.station_code, func.coalesce(T.fuel_name, "—")))).all()
+    mix: dict[int, list[dict]] = {}
+    for r in mix_rows:
+        mix.setdefault(int(r.station_code), []).append(
+            {"fuel_name": str(r.fuel), "amount": round(float(r.a), 2), "liters": round(float(r.l), 1)})
+
     m = {int(r.station_code): r for r in agg}
     stations = (await db.execute(select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()
     out = []
     for s in stations:
-        r = m.get(int(s.code))
+        code = int(s.code)
+        r = m.get(code)
+        amount = round(float(r.a), 2) if r else 0.0
+        liters = round(float(r.l), 2) if r else 0.0
+        fills = int(r.n) if r else 0
+        prev_amount = round(prev.get(code, 0.0), 2)
+        by_fuel = sorted(mix.get(code, []), key=lambda x: -x["amount"])
+        top = by_fuel[0] if by_fuel else None
         out.append({
             "code": s.code, "name": s.name, "address": s.address,
             "latitude": float(s.latitude) if s.latitude is not None else None,
             "longitude": float(s.longitude) if s.longitude is not None else None,
-            "transactions": int(r.n) if r else 0,
-            "liters": round(float(r.l), 2) if r else 0.0,
-            "amount": round(float(r.a), 2) if r else 0.0,
+            "transactions": fills,
+            "liters": liters,
+            "amount": amount,
+            "cards": int(r.cards) if r else 0,
+            "last_at": r.last_at.isoformat() if r and r.last_at else None,
+            "avg_check": round(amount / fills, 2) if fills else 0.0,
+            "avg_price": round(amount / liters, 2) if liters else 0.0,
+            "fills_per_day": round(fills / days, 2),
+            "prev_amount": prev_amount,
+            # Рост в процентах к прошлому периоду; None — сравнивать не с чем
+            # (станция открылась внутри периода), и это НЕ то же самое, что ноль.
+            "growth_pct": (round((amount - prev_amount) / prev_amount * 100, 1)
+                           if prev_amount > 0 else None),
+            "top_fuel": top["fuel_name"] if top else None,
+            "top_fuel_pct": (round(top["amount"] / amount * 100, 1)
+                             if top and amount > 0 else None),
+            "by_fuel": by_fuel,
         })
     with_coords = sum(1 for s in out if s["latitude"] is not None)
-    return {"stations": out, "with_coords": with_coords, "total": len(out)}
+    return {"stations": out, "with_coords": with_coords, "total": len(out),
+            "days": days, "prev_period": {"from": p0.isoformat(), "to": p1.isoformat()}}
 
 
 # ═══════════════════════════════════════════════════════════════
