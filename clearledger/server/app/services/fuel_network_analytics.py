@@ -561,6 +561,11 @@ class FuelNetworkAnalytics:
                 if not chunk:
                     continue
                 s = sum(c["measure"] for c in chunk)
+                # Номер группы проставляем самой позиции: иначе фронт делил бы
+                # список второй раз, своей копией правила, и «Верхние 20 %» в
+                # карточке разошлись бы с «Верхними 20 %» в таблице.
+                for c in chunk:
+                    c["quintile"] = q + 1
                 quintiles.append({
                     "quintile": q + 1, "count": len(chunk),
                     "measure": round(s, 2),

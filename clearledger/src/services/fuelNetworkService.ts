@@ -126,6 +126,8 @@ export interface AbcItem {
   hint: string
   share_pct: number
   cum_share_pct: number
+  /** Группа концентрации (1 — верхние 20 % по выручке): считает сервер. */
+  quintile?: number
 }
 
 export interface AbcResponse {

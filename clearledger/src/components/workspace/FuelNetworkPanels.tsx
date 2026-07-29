@@ -335,6 +335,10 @@ const XYZ_COL = [
   { k: 'Z', title: 'Z — рваный', sub: '> 50 %' },
 ]
 
+/** Подписи групп концентрации — одни на карточку и на заголовок таблицы. */
+const QUINTILE_LABELS = ['Верхние 20 %', 'Следующие 20 %', 'Средние 20 %',
+  'Предпоследние 20 %', 'Нижние 20 %']
+
 const TREND_VIEW: Record<string, { sign: string; cls: string; label: string }> = {
   up: { sign: '↗', cls: 'text-emerald-400', label: 'растёт' },
   down: { sign: '↘', cls: 'text-rose-400', label: 'падает' },
@@ -351,9 +355,16 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
 }) {
   const [dim, setDim] = useState<AbcDimension>('station_fuel')
   const [bucket, setBucket] = useState<'week' | 'month'>('week')
-  // Выбранная клетка матрицы фильтрует таблицу: классификация без связи со
-  // списком — картинка, по которой нельзя работать.
-  const [cell, setCell] = useState<string | null>(null)
+  /**
+   * Что оставлено в таблице. Фильтруют ОБА среза — и клетка матрицы, и группа
+   * концентрации: две карточки рядом про одни и те же позиции, и если кликается
+   * только одна, вторая читается как сломанная. Выбор один за раз — пересечение
+   * «класс AY ∩ верхние 20 %» человек не заказывал, а объяснять пустой результат
+   * пришлось бы отдельно.
+   */
+  const [sel, setSel] = useState<{ kind: 'cell'; key: string } | { kind: 'quintile'; n: number } | null>(null)
+  const cell = sel?.kind === 'cell' ? sel.key : null
+  const quintile = sel?.kind === 'quintile' ? sel.n : null
   const scope = useFuelScope()
   const ref = useRef<HTMLDivElement>(null)
   const q = useQuery({
@@ -368,7 +379,9 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
 
   const byCell = new Map(data.matrix.map((m) => [m.cell, m]))
   const maxShare = Math.max(...data.matrix.map((m) => m.share_pct), 0.01)
-  const rows = cell ? data.items.filter((i) => i.abc + i.xyz === cell) : data.items
+  const rows = cell ? data.items.filter((i) => i.abc + i.xyz === cell)
+    : quintile ? data.items.filter((i) => i.quintile === quintile)
+    : data.items
   const unclassified = data.items.filter((i) => i.xyz === '—')
   const tail = data.items.filter((i) => i.abc === 'C')
   const tailShare = tail.reduce((s, i) => s + i.share_pct, 0)
@@ -384,9 +397,9 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
           + ` · в расчёте ${data.buckets} полных ${bucketWord}`
           + (data.data_through ? ` · данные по ${data.data_through.slice(8, 10)}.${data.data_through.slice(5, 7)}` : '')}
         exportEl={() => ref.current}>
-        <Toggle value={dim} onChange={(v) => { setDim(v); setCell(null) }} title="Единица классификации"
+        <Toggle value={dim} onChange={(v) => { setDim(v); setSel(null) }} title="Единица классификации"
           opts={[{ v: 'station_fuel', label: 'АЗС × топливо' }, { v: 'station', label: 'АЗС' }, { v: 'fuel', label: 'Топливо' }]} />
-        <Toggle value={bucket} onChange={(v) => { setBucket(v); setCell(null) }} title="Шаг сетки для расчёта разброса"
+        <Toggle value={bucket} onChange={(v) => { setBucket(v); setSel(null) }} title="Шаг сетки для расчёта разброса"
           opts={[{ v: 'week', label: 'Недели' }, { v: 'month', label: 'Месяцы' }]} />
       </Head>
 
@@ -422,8 +435,8 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
         <Card><CardContent className="pt-4">
           <div className="mb-3 flex items-baseline justify-between">
             <span className="text-sm font-medium">Матрица классов</span>
-            {cell && (
-              <button onClick={() => setCell(null)}
+            {sel && (
+              <button onClick={() => setSel(null)}
                 className="text-xs text-primary hover:underline">Показать все</button>
             )}
           </div>
@@ -451,7 +464,7 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
                   const active = cell === key
                   return (
                     <button key={key} type="button" disabled={!count}
-                      onClick={() => setCell(active ? null : key)}
+                      onClick={() => setSel(active ? null : { kind: 'cell', key })}
                       title={m?.hint || 'Позиций этого класса нет'}
                       aria-pressed={active}
                       className={cn(
@@ -491,18 +504,24 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
           </p>
           <div className="space-y-1.5">
             {data.quintiles.map((qq, idx) => {
-              const label = ['Верхние 20 %', 'Следующие 20 %', 'Средние 20 %',
-                'Предпоследние 20 %', 'Нижние 20 %'][idx] ?? `${qq.quintile}-я группа`
+              const label = QUINTILE_LABELS[idx] ?? `${qq.quintile}-я группа`
+              const active = quintile === qq.quintile
               return (
-                <div key={qq.quintile} className="flex items-center gap-2 text-xs">
-                  <span className="w-36 shrink-0 text-muted-foreground">{label}</span>
+                <button key={qq.quintile} type="button" aria-pressed={active}
+                  onClick={() => setSel(active ? null : { kind: 'quintile', n: qq.quintile })}
+                  title={`Оставить в таблице только эти позиции (${qq.count})`}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs transition-colors',
+                    active ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted/40',
+                  )}>
+                  <span className={cn('w-36 shrink-0', active ? 'font-medium text-primary' : 'text-muted-foreground')}>{label}</span>
                   <div className="h-5 flex-1 overflow-hidden rounded bg-muted/40">
-                    <div className="h-full rounded-r-[3px] bg-blue-500/70"
+                    <div className={cn('h-full rounded-r-[3px]', active ? 'bg-primary' : 'bg-blue-500/70')}
                       style={{ width: `${Math.max(1.5, Math.min(100, qq.share_pct))}%` }} />
                   </div>
                   <span className="w-14 shrink-0 text-right font-medium tabular-nums">{nf1.format(qq.share_pct)} %</span>
                   <span className="w-16 shrink-0 text-right text-muted-foreground">{qq.count} поз.</span>
-                </div>
+                </button>
               )
             })}
           </div>
@@ -511,6 +530,7 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
               Верхняя пятая часть даёт {nf1.format(data.quintiles[0].share_pct)} % выручки,
               нижняя — {nf1.format(data.quintiles[4].share_pct)} %. Средняя по сети такие
               полюса смешивает: решения принимаются по верхушке и по хвосту.
+              Нажмите группу, чтобы оставить её позиции в таблице.
             </p>
           )}
         </CardContent></Card>
@@ -519,11 +539,13 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
       <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
           <span className="text-sm font-medium">
-            {cell ? `Класс ${cell}` : 'Все позиции'}
+            {cell ? `Класс ${cell}`
+              : quintile ? QUINTILE_LABELS[quintile - 1] ?? `Группа ${quintile}`
+              : 'Все позиции'}
             <span className="ml-2 text-xs font-normal text-muted-foreground">{rows.length}</span>
           </span>
-          {cell && (
-            <button onClick={() => setCell(null)} className="text-xs text-primary hover:underline">
+          {sel && (
+            <button onClick={() => setSel(null)} className="text-xs text-primary hover:underline">
               Снять фильтр
             </button>
           )}
