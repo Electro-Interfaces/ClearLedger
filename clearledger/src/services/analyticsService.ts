@@ -373,7 +373,7 @@ export async function getStationsModel(companyId: string): Promise<ChargeModelRe
 }
 
 /** Модели данных топливного контура (ГИГ) для «Нормализации» — тот же контракт.
- *  dataset: shifts (смены STS + наливы) | receipts (ТТН) | sidegoods (сопутка/общепит ЦБ). */
+ *  dataset: shifts (смены STS + реализации) | receipts (ТТН) | sidegoods (сопутка/общепит ЦБ). */
 export type FuelModelDataset = 'shifts' | 'receipts' | 'sidegoods'
 export async function getFuelModel(companyId: string, dataset: FuelModelDataset): Promise<ChargeModelResponse> {
   return get<ChargeModelResponse>('/api/analytics/fuel/model', { company_id: companyId, dataset })
@@ -849,12 +849,24 @@ export interface InventoryDraftRow {
   adjustment_mass: number | null
   kind: 'излишек' | 'недостача' | 'сходится'
   already_confirmed: boolean
+  /** Прошлая ведомость по резервуару: когда и на сколько. */
+  prior_date: string | null
+  prior_adjustment: number | null
+  /** Расхождение, которое та ведомость закрыла. */
+  prior_gap: number | null
+  /** К оформлению сейчас: накопленное минус закрытое прошлой ведомостью. */
+  adjustment_open: number
 }
 
 export interface InventoryDraftResponse {
   inventory_date: string
   rows: InventoryDraftRow[]
-  totals: { tanks: number; surplus_tanks: number; shortfall_tanks: number; adjustment_volume: number }
+  totals: {
+    tanks: number; surplus_tanks: number; shortfall_tanks: number; adjustment_volume: number
+    /** К оформлению за вычетом закрытого прошлыми ведомостями. */
+    adjustment_open: number
+    tanks_with_prior: number
+  }
 }
 
 export interface InventoryGroup {
@@ -891,6 +903,16 @@ export async function getInventories(p: {
 }): Promise<{ inventories: InventoryGroup[] }> {
   return get('/api/fuel/inventory', {
     ...(p.stationCodes?.length ? { station_codes: p.stationCodes.join(',') } : {}),
+  })
+}
+
+/** Отмена проведённой ведомости: без неё ошибку в ней не исправить. */
+export async function cancelInventory(p: {
+  date: string; stationCodes?: number[]
+}): Promise<{ cancelled: number; inventory_date: string }> {
+  return post('/api/fuel/inventory/cancel', {
+    date: p.date,
+    ...(p.stationCodes?.length ? { station_codes: p.stationCodes } : {}),
   })
 }
 

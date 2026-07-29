@@ -69,8 +69,25 @@ async def build_draft(
 
     # По резервуару берём ПОСЛЕДНЮЮ смену на дату (список уже упорядочен по времени).
     last: dict[tuple[int, int], tuple] = {}
+    # Заодно — последняя смена на дату КАЖДОЙ прошлой ведомости: по ней видно, какое
+    # расхождение та ведомость закрыла.
+    by_date: dict[tuple[int, int, date], tuple] = {}
     for tank, shift, station in records:
-        last[(int(station.code), int(tank.tank_number))] = (tank, shift, station)
+        key = (int(station.code), int(tank.tank_number))
+        last[key] = (tank, shift, station)
+        if shift.opened_at:
+            by_date[(key[0], key[1], shift.opened_at.date())] = (tank, shift, station)
+
+    # Ведомости ПРОШЛЫХ дат. Расхождение в источнике накапливается — книга к замеру
+    # не приводится, и списанное ранее продолжает сидеть в цифре «факт − книга».
+    # Без этой поправки ведомость второй раз списывает уже оформленную недостачу.
+    last_prior: dict[tuple[str, int], FuelTankInventory] = {}
+    for r in (await db.execute(select(FuelTankInventory).where(
+        FuelTankInventory.company_id == company_id,
+        FuelTankInventory.status == "confirmed",
+        FuelTankInventory.inventory_date < inventory_date,
+    ).order_by(FuelTankInventory.inventory_date))).scalars().all():
+        last_prior[(str(r.station_id), int(r.tank_number))] = r  # остаётся самая поздняя
 
     # Уже проведённые инвентаризации на эту дату — чтобы показать статус.
     existing = {
@@ -91,6 +108,17 @@ async def build_draft(
         fact_m = _n(tank.fact_mass)
         adj_m = round(fact_m - book_m, 3) if (book_m is not None and fact_m is not None) else None
         prev = existing.get((str(station.id), int(tank_no)))
+        # Что закрыла последняя прошлая ведомость и сколько набежало после неё.
+        # `adjustment_open` — то, что подлежит оформлению сейчас; `adjustment_volume`
+        # оставлен как есть (всё накопленное), чтобы обе величины были на виду.
+        earlier = last_prior.get((str(station.id), int(tank_no)))
+        adj_open = adj_v
+        earlier_gap: float | None = None
+        if earlier is not None:
+            at = by_date.get((st_code, int(tank_no), earlier.inventory_date))
+            if at is not None:
+                earlier_gap = round(_f(at[0].fact_volume) - _f(at[0].volume_end), 2)
+                adj_open = round(adj_v - earlier_gap, 2)
         sum_adj_vol += adj_v
         rows.append({
             "station_id": str(station.id),
@@ -109,6 +137,12 @@ async def build_draft(
             "adjustment_mass": round(adj_m, 1) if adj_m is not None else None,
             "kind": "излишек" if adj_v > 0.05 else "недостача" if adj_v < -0.05 else "сходится",
             "already_confirmed": bool(prev and prev.status == "confirmed"),
+            # Прошлая ведомость по этому резервуару: когда, на сколько и какое
+            # расхождение она закрыла.
+            "prior_date": earlier.inventory_date.isoformat() if earlier else None,
+            "prior_adjustment": round(_f(earlier.adjustment_volume), 1) if earlier else None,
+            "prior_gap": earlier_gap,
+            "adjustment_open": adj_open,
         })
 
     return {
@@ -119,6 +153,9 @@ async def build_draft(
             "surplus_tanks": sum(1 for r in rows if r["adjustment_volume"] > 0.05),
             "shortfall_tanks": sum(1 for r in rows if r["adjustment_volume"] < -0.05),
             "adjustment_volume": round(sum_adj_vol, 1),
+            # К оформлению за вычетом того, что закрыли прошлые ведомости.
+            "adjustment_open": round(sum(r["adjustment_open"] for r in rows), 1),
+            "tanks_with_prior": sum(1 for r in rows if r["prior_date"]),
         },
     }
 
@@ -165,6 +202,36 @@ async def save(
         saved += 1
     await db.commit()
     return {"saved": saved, "inventory_date": inventory_date.isoformat()}
+
+
+async def cancel(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    inventory_date: date,
+    *,
+    station_codes: list[int] | None = None,
+) -> dict[str, Any]:
+    """Отменить проведённую ведомость на дату (целиком или по выбранным АЗС).
+
+    Без отмены ошибку в ведомости нельзя исправить: повторное проведение на ту же
+    дату перезапишет строки, но если резервуар попал в ведомость по недосмотру, из
+    неё его уже не убрать. Удаляем строки, а не помечаем — ведомость это факт
+    оформления, а «отменённый факт оформления» в отчётности читается как оформленный.
+    """
+    q = select(FuelTankInventory).where(
+        FuelTankInventory.company_id == company_id,
+        FuelTankInventory.inventory_date == inventory_date,
+    )
+    if station_codes:
+        ids = (await db.execute(select(FuelStation.id).where(
+            FuelStation.company_id == company_id,
+            FuelStation.code.in_([int(c) for c in station_codes])))).scalars().all()
+        q = q.where(FuelTankInventory.station_id.in_(ids))
+    rows = (await db.execute(q)).scalars().all()
+    for row in rows:
+        await db.delete(row)
+    await db.commit()
+    return {"cancelled": len(rows), "inventory_date": inventory_date.isoformat()}
 
 
 async def list_inventories(

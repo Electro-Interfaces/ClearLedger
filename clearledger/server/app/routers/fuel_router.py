@@ -2489,6 +2489,29 @@ async def inventory_list(
     return await list_inventories(db, cid, station_codes=codes)
 
 
+class InventoryCancelRequest(BaseModel):
+    date: str
+    station_codes: list[int] | None = None
+
+
+@router.post("/inventory/cancel")
+async def inventory_cancel(
+    body: InventoryCancelRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отменить проведённую ведомость на дату — иначе ошибку в ней не исправить."""
+    from datetime import date as _date
+    from app.services.tank_inventory import cancel
+
+    cid = await _company_id(user, db)
+    result = await cancel(db, cid, _date.fromisoformat(body.date),
+                          station_codes=body.station_codes)
+    await bump_version(db, cid)
+    await db.commit()
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════
 # Пооперационные транзакции (реализации) — STS /v2/transactions
 # ═══════════════════════════════════════════════════════════════
@@ -2988,7 +3011,7 @@ async def analytics_fills(
     dim: str | None = Query(None), dim_val: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Разрез реализаций: выручка/литры/реализации/ср.чек/ср.реализация/ср.цена по группе.
+    """Разрез реализаций: выручка/литры/реализации/ср.чек/ср.заправка/ср.цена по группе.
 
     `dim`/`dim_val` — сужение до одного значения ДРУГОГО разреза (провал вглубь).
     """
@@ -3462,11 +3485,16 @@ async def stations_map(
         T.station_code, func.coalesce(func.sum(T.amount), 0).label("a"),
     ).where(*_window(p0, p1)).group_by(T.station_code))).all()}
     # Структура спроса: разбивка выручки по видам топлива внутри станции.
+    # Выражение группировки — ОДИН объект на select и group_by: два одинаковых
+    # coalesce дают разные bind-параметры, и Postgres отвечает «must appear in the
+    # GROUP BY clause». Из-за этого ручка падала, а карта показывала пустое
+    # состояние «нет АЗС с координатами» — хотя координаты у 12 станций есть.
+    fuel_col = func.coalesce(T.fuel_name, "—")
     mix_rows = (await db.execute(select(
-        T.station_code, func.coalesce(T.fuel_name, "—").label("fuel"),
+        T.station_code, fuel_col.label("fuel"),
         func.coalesce(func.sum(T.amount), 0).label("a"),
         func.coalesce(func.sum(T.liters), 0).label("l"),
-    ).where(*_window(d0, d1)).group_by(T.station_code, func.coalesce(T.fuel_name, "—")))).all()
+    ).where(*_window(d0, d1)).group_by(T.station_code, fuel_col))).all()
     mix: dict[int, list[dict]] = {}
     for r in mix_rows:
         mix.setdefault(int(r.station_code), []).append(

@@ -12,6 +12,7 @@ import { TankLedgerTabs } from '@/components/workspace/TankLedgerTabs'
 import { ReceiptAnalysisPanel } from '@/components/workspace/ReceiptAnalysisPanel'
 import { VarianceCausesPanel } from '@/components/workspace/VarianceCausesPanel'
 import { InventoryPanel } from '@/components/workspace/InventoryPanel'
+import { GoodsRouteBar, type GoodsStep } from '@/components/workspace/GoodsRouteBar'
 import { useFilters } from '@/contexts/FilterContext'
 import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 import { useLocations } from '@/hooks/useLocations'
@@ -283,8 +284,21 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
 
   const variance = data.totals.variance_liters
   const issues = data.integrity.issues_total
+  // Шаг маршрута: у панели один вид на пункт, кроме `balance` — он и есть «Контроль».
+  const step: GoodsStep = view === 'balance' ? 'tanks' : view
   return (
     <div className="space-y-4 p-4">
+      {/* Порядок работы разделa: пять пунктов — это один сценарий, а не пять экранов. */}
+      <GoodsRouteBar
+        current={step}
+        counters={{
+          tanks: issues > 0 ? { value: issues, unit: 'замеч.', alarm: true } : null,
+          variances: data.integrity.continuity_breaks > 0
+            ? { value: data.integrity.continuity_breaks, unit: 'разр.', alarm: true } : null,
+          inventory: data.integrity.unique_tanks
+            ? { value: data.integrity.unique_tanks, unit: 'рез.' } : null,
+        }}
+      />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -324,7 +338,11 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
         </span>
       </div>
 
-      {data.tanks.length === 0 ? <Card><Empty text="Нет данных по резервуарам за выбранный период и фильтры" /></Card> : (
+      {/* Пустые резервуары глушат только то, что из них считается. «Приёмка» живёт на
+          накладных, «Инвентаризация» на замерах — им пустой баланс не мешает, а раньше
+          оба экрана показывали «нет данных по резервуарам» и выглядели сломанными. */}
+      {data.tanks.length === 0 && (view === 'balance' || view === 'variances')
+        ? <Card><Empty text="Нет данных по резервуарам за выбранный период и фильтры" /></Card> : (
         <>
           <Card className="gap-0 py-0">
             <CardContent className="grid grid-cols-2 p-0 md:grid-cols-4 xl:grid-cols-7">

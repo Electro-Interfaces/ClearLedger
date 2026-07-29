@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { TankShiftDialog } from './TankShiftDialog'
+import { TankCardDialog } from './TankCardDialog'
 import {
   getTankLedger, type TankLedgerResponse, type TankLedgerRow, type TankLedgerTank,
 } from '@/services/analyticsService'
@@ -188,6 +189,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   const [fIssue, setFIssue] = useState<IssueFilter>('all')
   const [fShift, setFShift] = useState('')         // поиск по номеру смены
   const [picked, setPicked] = useState<TankLedgerRow | null>(null)  // строка в разборе
+  const [pickedTank, setPickedTank] = useState<TankLedgerTank | null>(null)  // резервуар в разборе
   const [sort, setSort] = useState<Sort | null>(null)               // null = хронология
 
   const query = useQuery({
@@ -507,7 +509,16 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
               </thead>
               <tbody>
                 {data.tanks.map((tank) => (
-                  <tr key={`${tank.station_code}:${tank.tank_number}`} className="border-t">
+                  <tr
+                    key={`${tank.station_code}:${tank.tank_number}`}
+                    tabIndex={0}
+                    aria-haspopup="dialog"
+                    onClick={() => setPickedTank(tank)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPickedTank(tank) }
+                    }}
+                    className="cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
                     <Td>{tank.station_name}</Td>
                     <Td>№{tank.tank_number}</Td>
                     <Td>{tank.fuel_name}</Td>
@@ -636,6 +647,20 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
 
       {/* Разбор строки журнала: три контроля раздельно + накладные, масса, физика. */}
       <TankShiftDialog row={picked} tol={tol} onClose={() => setPicked(null)} />
+      {/* Разбор резервуара целиком: раскладка расхождения, природа, динамика,
+          условия замера, накладные. Строки берём из уже загруженного журнала. */}
+      <TankCardDialog
+        tank={pickedTank}
+        rows={pickedTank
+          ? (data.rows ?? []).filter((r) => r.station_code === pickedTank.station_code
+              && r.tank_number === pickedTank.tank_number)
+          : []}
+        tol={tol}
+        companyId={companyId}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onClose={() => setPickedTank(null)}
+      />
     </div>
   )
 }
