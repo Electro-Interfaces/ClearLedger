@@ -426,7 +426,7 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
             </TabsContent>
             <TabsContent value="inventory" className="mt-3">
               <InventoryPanel
-                companyId={companyId} dateTo={dateTo}
+                companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
                 fuelCodes={effectiveFuels}
               />

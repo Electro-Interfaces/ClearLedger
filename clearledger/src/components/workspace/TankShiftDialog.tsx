@@ -10,7 +10,7 @@
  */
 import { AlertTriangle, Check } from 'lucide-react'
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DetailPane } from './DetailPane'
 import { cn } from '@/lib/utils'
 import type { TankLedgerRow } from '@/services/analyticsService'
 
@@ -106,20 +106,21 @@ export function TankShiftDialog({ row, tol, onClose }: {
   const hasMass = row.mass_start != null || row.mass_end != null || row.fact_mass != null
 
   return (
-    <Dialog open={!!row} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="flex max-h-[85dvh] w-[94vw] max-w-2xl flex-col overflow-hidden border-border bg-card sm:max-w-2xl">
-        <DialogHeader className="shrink-0">
-          <DialogTitle className="text-base">
-            {row.station_name} · резервуар №{row.tank_number} · {row.fuel_name}
-          </DialogTitle>
-          <p className="text-xs text-muted-foreground">
-            Смена №{row.shift_number}
-            {row.opened_at && ` · открыта ${new Date(row.opened_at).toLocaleString('ru-RU')}`}
-            {row.closed_at && ` · закрыта ${new Date(row.closed_at).toLocaleString('ru-RU')}`}
-          </p>
-        </DialogHeader>
-
-        <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
+    // Немодально: смены разбирают подряд, и таблица под панелью обязана оставаться
+    // живой — иначе на каждую строку приходится закрывать окно (см. DetailPane).
+    <DetailPane
+      open={!!row}
+      onClose={onClose}
+      title={`${row.station_name} · резервуар №${row.tank_number} · ${row.fuel_name}`}
+      subtitle={
+        <>
+          Смена №{row.shift_number}
+          {row.opened_at && ` · открыта ${new Date(row.opened_at).toLocaleString('ru-RU')}`}
+          {row.closed_at && ` · закрыта ${new Date(row.closed_at).toLocaleString('ru-RU')}`}
+        </>
+      }
+    >
+        <div className="space-y-2.5">
           {/* 1. Арифметика книги — счёт внутри смены, обязан сходиться точно. */}
           <Block title="Движение книги за смену"
                  badge={<Verdict ok={!ariBad} text={ariBad ? 'счёт не сходится' : 'счёт сходится'} />}>
@@ -262,7 +263,6 @@ export function TankShiftDialog({ row, tol, onClose }: {
                   tone={row.water_volume ? 'text-amber-600 dark:text-amber-400' : undefined} />
           </Block>
         </div>
-      </DialogContent>
-    </Dialog>
+    </DetailPane>
   )
 }

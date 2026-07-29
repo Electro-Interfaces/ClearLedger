@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { TankCardDialog, type TankRef } from './TankCardDialog'
 import {
   cancelInventory, getInventories, getInventoryDraft, saveInventory,
   type InventoryDraftRow, type InventoryGroup,
@@ -29,14 +30,17 @@ const L = (v: number | null | undefined) => (v == null ? '—' : `${nf0.format(v
 
 interface Props {
   companyId: string
+  /** Начало периода рабочей области — нужно разбору резервуара по строке. */
+  dateFrom?: string
   dateTo: string
   stationCodes: number[]
   fuelCodes: number[]
 }
 
-export function InventoryPanel({ companyId, dateTo, stationCodes, fuelCodes }: Props) {
+export function InventoryPanel({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }: Props) {
   const qc = useQueryClient()
   const [date, setDate] = useState(dateTo)
+  const [picked, setPicked] = useState<TankRef | null>(null)
   const [note, setNote] = useState('')
   const [draft, setDraft] = useState<InventoryDraftRow[] | null>(null)
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
@@ -184,15 +188,26 @@ export function InventoryPanel({ companyId, dateTo, stationCodes, fuelCodes }: P
                   const k = key(r)
                   const off = excluded.has(k)
                   return (
-                    <tr key={k} className={cn('border-t', off && 'opacity-40')}>
+                    // Клик по строке — разбор резервуара: перед списанием надо видеть,
+                    // из чего расхождение сложилось, а не только его величину.
+                    <tr
+                      key={k}
+                      onClick={() => setPicked({
+                        station_code: r.station_code, tank_number: r.tank_number,
+                        station_name: r.station_name, fuel_name: r.fuel_name,
+                      })}
+                      className={cn('cursor-pointer border-t transition-colors hover:bg-muted/40', off && 'opacity-40')}
+                    >
                       <Td>
-                        <Checkbox checked={!off} onCheckedChange={(v) => {
-                          setExcluded((prev) => {
-                            const n = new Set(prev)
-                            if (v) n.delete(k); else n.add(k)
-                            return n
-                          })
-                        }} />
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <Checkbox checked={!off} onCheckedChange={(v) => {
+                            setExcluded((prev) => {
+                              const n = new Set(prev)
+                              if (v) n.delete(k); else n.add(k)
+                              return n
+                            })
+                          }} />
+                        </span>
                       </Td>
                       <Td>{r.station_name}</Td>
                       <Td>№{r.tank_number}</Td>
@@ -304,6 +319,16 @@ export function InventoryPanel({ companyId, dateTo, stationCodes, fuelCodes }: P
           </div>
         )}
       </div>
+
+      {/* Разбор резервуара по строке ведомости: что списываем и откуда это взялось. */}
+      <TankCardDialog
+        target={picked}
+        tol={50}
+        companyId={companyId}
+        dateFrom={dateFrom ?? date}
+        dateTo={date}
+        onClose={() => setPicked(null)}
+      />
     </div>
   )
 }

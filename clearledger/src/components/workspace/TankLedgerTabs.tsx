@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { TankShiftDialog } from './TankShiftDialog'
-import { TankCardDialog } from './TankCardDialog'
+import { TankCardDialog, type TankRef } from './TankCardDialog'
 import {
   getTankLedger, type TankLedgerResponse, type TankLedgerRow, type TankLedgerTank,
 } from '@/services/analyticsService'
@@ -189,7 +189,8 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   const [fIssue, setFIssue] = useState<IssueFilter>('all')
   const [fShift, setFShift] = useState('')         // поиск по номеру смены
   const [picked, setPicked] = useState<TankLedgerRow | null>(null)  // строка в разборе
-  const [pickedTank, setPickedTank] = useState<TankLedgerTank | null>(null)  // резервуар в разборе
+  // Резервуар в разборе: храним только ссылку (АЗС + номер) — карточка сама грузит.
+  const [pickedTank, setPickedTank] = useState<TankRef | null>(null)
   const [sort, setSort] = useState<Sort | null>(null)               // null = хронология
 
   const query = useQuery({
@@ -611,7 +612,27 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
               </thead>
               <tbody>
                 {data.issues.map((issue, i) => (
-                  <tr key={i} className="border-t">
+                  // Замечание — это всегда конкретный резервуар: строка ведёт в его
+                  // разбор, а не оставляет менеджера искать его в журнале руками.
+                  <tr
+                    key={i}
+                    tabIndex={0}
+                    aria-haspopup="dialog"
+                    onClick={() => setPickedTank({
+                      station_code: issue.station_code, tank_number: issue.tank_number,
+                      station_name: issue.station_name, fuel_name: issue.fuel_name,
+                    })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setPickedTank({
+                          station_code: issue.station_code, tank_number: issue.tank_number,
+                          station_name: issue.station_name, fuel_name: issue.fuel_name,
+                        })
+                      }
+                    }}
+                    className="cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
                     <Td>
                       <Badge variant="outline" className={
                         issue.type === 'arithmetic' ? 'border-red-400/50 text-red-300/80'
@@ -647,19 +668,16 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
 
       {/* Разбор строки журнала: три контроля раздельно + накладные, масса, физика. */}
       <TankShiftDialog row={picked} tol={tol} onClose={() => setPicked(null)} />
-      {/* Разбор резервуара целиком: раскладка расхождения, природа, динамика,
-          условия замера, накладные. Строки берём из уже загруженного журнала. */}
+      {/* Разбор резервуара: свою историю карточка грузит сама — журнал режется на
+          5 000 строках, и у станции с сотнями смен её строк в нём не оказывается. */}
       <TankCardDialog
-        tank={pickedTank}
-        rows={pickedTank
-          ? (data.rows ?? []).filter((r) => r.station_code === pickedTank.station_code
-              && r.tank_number === pickedTank.tank_number)
-          : []}
+        target={pickedTank}
         tol={tol}
         companyId={companyId}
         dateFrom={dateFrom}
         dateTo={dateTo}
         onClose={() => setPickedTank(null)}
+        onPickShift={(r) => setPicked(r)}
       />
     </div>
   )

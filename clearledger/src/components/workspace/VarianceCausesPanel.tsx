@@ -15,8 +15,10 @@ import { Download, Loader2, TrendingDown, TrendingUp, Zap } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { TankCardDialog, type TankRef } from './TankCardDialog'
+import { TankShiftDialog } from './TankShiftDialog'
 import {
-  getVarianceDiagnostics, type VarianceDiagnosticsResponse, type VarianceNature,
+  getVarianceDiagnostics, type TankLedgerRow, type VarianceDiagnosticsResponse, type VarianceNature,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -46,6 +48,10 @@ interface Props {
 
 export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }: Props) {
   const [fNature, setFNature] = useState<'all' | VarianceNature>('all')
+  // Разбор открывается немодально: диагноз читают по одному резервуару, а список
+  // причин под панелью должен оставаться на месте.
+  const [picked, setPicked] = useState<TankRef | null>(null)
+  const [pickedShift, setPickedShift] = useState<TankLedgerRow | null>(null)
 
   const query = useQuery({
     queryKey: ['variance-diagnostics', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
@@ -133,11 +139,32 @@ export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes,
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={`${r.station_code}:${r.tank_number}`} className={cn(
-                'border-t',
-                r.nature === 'drift' && 'bg-red-500/5',
-                r.nature === 'jump' && 'bg-amber-500/5',
-              )}>
+              // Строка ведёт в разбор резервуара: «разовый скачок 11 923 л» без ответа
+              // на вопрос «в какой смене и при чём» — приговор без дела.
+              <tr
+                key={`${r.station_code}:${r.tank_number}`}
+                tabIndex={0}
+                aria-haspopup="dialog"
+                onClick={() => setPicked({
+                  station_code: r.station_code, tank_number: r.tank_number,
+                  station_name: r.station_name, fuel_name: r.fuel_name,
+                })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setPicked({
+                      station_code: r.station_code, tank_number: r.tank_number,
+                      station_name: r.station_name, fuel_name: r.fuel_name,
+                    })
+                  }
+                }}
+                className={cn(
+                  'cursor-pointer border-t transition-colors hover:bg-muted/40',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  r.nature === 'drift' && 'bg-red-500/5',
+                  r.nature === 'jump' && 'bg-amber-500/5',
+                )}
+              >
                 <Td>{r.station_name}</Td>
                 <Td>№{r.tank_number}</Td>
                 <Td>{r.fuel_name}</Td>
@@ -185,7 +212,20 @@ export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes,
         смены по массе не используется — книжная и фактическая масса считаются по
         разной плотности и дают ложные тонны. «Температура» — где объём гуляет, а
         масса держится: это тепловое расширение, а не потеря топлива.
+        {' '}Строка открывает разбор резервуара: когда возникло, в какой смене и из чего сложилось.
       </p>
+
+      <TankCardDialog
+        target={picked}
+        tol={data.tolerance.vol_liters}
+        companyId={companyId}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onClose={() => setPicked(null)}
+        onPickShift={(r) => setPickedShift(r)}
+      />
+      <TankShiftDialog row={pickedShift} tol={data.tolerance.vol_liters}
+                       onClose={() => setPickedShift(null)} />
     </div>
   )
 }

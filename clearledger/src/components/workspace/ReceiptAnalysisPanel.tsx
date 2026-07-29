@@ -15,8 +15,9 @@ import { Download, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { ReceiptDetailPane } from './ReceiptDetailPane'
 import {
-  getReceiptAnalysis, type ReceiptAnalysisResponse, type ReceiptClass,
+  getReceiptAnalysis, type ReceiptAnalysisResponse, type ReceiptAnalysisRow, type ReceiptClass,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -42,6 +43,8 @@ interface Props {
 
 export function ReceiptAnalysisPanel({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }: Props) {
   const [fClass, setFClass] = useState<'all' | ReceiptClass>('all')
+  // Разбор накладной — немодально: недоливы просматривают списком подряд.
+  const [picked, setPicked] = useState<ReceiptAnalysisRow | null>(null)
 
   const query = useQuery({
     queryKey: ['receipt-analysis', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
@@ -123,11 +126,23 @@ export function ReceiptAnalysisPanel({ companyId, dateFrom, dateTo, stationCodes
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={`${r.ttn}:${r.station_code}:${r.tank}:${i}`} className={cn(
-                'border-t',
-                r.klass === 'shortfall' && 'bg-red-500/5',
-                (r.klass === 'not_measured' || r.klass === 'broken_measure') && 'bg-amber-500/5',
-              )}>
+              // Строка открывает разбор накладной: «недолив 340 кг» само по себе не
+              // претензия — нужны масса, объём, плотность и что с этим делать.
+              <tr
+                key={`${r.ttn}:${r.station_code}:${r.tank}:${i}`}
+                tabIndex={0}
+                aria-haspopup="dialog"
+                onClick={() => setPicked(r)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPicked(r) }
+                }}
+                className={cn(
+                  'cursor-pointer border-t transition-colors hover:bg-muted/40',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  r.klass === 'shortfall' && 'bg-red-500/5',
+                  (r.klass === 'not_measured' || r.klass === 'broken_measure') && 'bg-amber-500/5',
+                )}
+              >
                 <Td>{r.ttn}</Td>
                 <Td>{r.date ? new Date(r.date).toLocaleDateString('ru-RU') : '—'}</Td>
                 <Td>{r.station_name}</Td>
@@ -163,7 +178,11 @@ export function ReceiptAnalysisPanel({ companyId, dateFrom, dateTo, stationCodes
         {' '}{nf1.format(data.tolerance.pct * 100)}% массы (не меньше {nf0.format(data.tolerance.min_kg)} кг).
         «Без замера» и «сорванный замер» — это не доказанная недостача, а
         ненадёжные данные приёмки: их нельзя предъявлять поставщику как недолив.
+        {' '}Строка открывает разбор накладной.
       </p>
+
+      <ReceiptDetailPane row={picked} tolPct={data.tolerance.pct} tolKg={data.tolerance.min_kg}
+                         onClose={() => setPicked(null)} />
     </div>
   )
 }
