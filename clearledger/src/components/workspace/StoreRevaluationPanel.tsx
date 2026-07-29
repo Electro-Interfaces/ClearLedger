@@ -19,10 +19,20 @@ function MoveList({ title, moves, up }: { title: string; moves: StoreRevalMove[]
       <div className="space-y-1.5">
         {moves.length === 0 && <div className="text-xs text-muted-foreground">Нет данных</div>}
         {moves.map((m) => (
-          <div key={m.name} className="flex items-center justify-between gap-2 text-xs">
+          <div key={m.ref ?? m.name} className="flex items-center justify-between gap-2 text-xs">
             <span className="truncate" title={m.name}>{m.name}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">{nf(m.old, 2)}→{nf(m.new, 2)}</span>
-            <span className={`shrink-0 tabular-nums w-16 text-right ${up ? 'text-emerald-300/80' : 'text-red-400/80'}`}>{pct(m.pct)}</span>
+            {/* Цена с единицей: у весового товара база — грамм, и «0,35» без единицы
+                читается как цена за килограмм (в имени карточки стоит «1 кг.»). */}
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {nf(m.old, 2)}→{nf(m.new, 2)}{m.unit ? ` ₽/${m.unit}` : ''}
+            </span>
+            {/* Сумма — главная величина: во столько обошлась переоценка на остатке той
+                даты. Процент рядом отвечает на «насколько», но сам по себе обманывает:
+                25 копеек за грамм дают +250%. */}
+            <span className={`shrink-0 tabular-nums w-24 text-right ${up ? 'text-emerald-300/80' : 'text-red-400/80'}`}>
+              {m.amount == null ? '—' : fmtMoney(m.amount)}
+            </span>
+            <span className="shrink-0 tabular-nums w-16 text-right text-muted-foreground">{pct(m.pct)}</span>
           </div>
         ))}
       </div>
@@ -53,7 +63,7 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
 
   const KPIS: { label: string; value: string; hint?: string; cls?: string }[] = [
     { label: 'Переоценок', value: nf(docs.length), hint: `${s.period_from ?? ''} – ${s.period_to ?? ''}` },
-    { label: 'Подорожаний / удешевлений', value: `${nf(s.up_lines)} / ${nf(s.down_lines)}`, hint: 'строк-изменений' },
+    { label: 'Строк подорожало / подешевело', value: `${nf(s.up_lines)} / ${nf(s.down_lines)}`, hint: 'строк в документах, не документов' },
     { label: 'Средн. изменение', value: s.avg_pct == null ? '—' : `${s.avg_pct > 0 ? '+' : ''}${nf(s.avg_pct, 1)}%`, cls: (s.avg_pct ?? 0) < 0 ? 'text-red-400/90' : 'text-emerald-300/90' },
     { label: 'Влияние на стоимость', value: s.value_impact === 0 ? '—' : fmtMoney(s.value_impact), hint: 'Σ Δцены × остаток', cls: s.value_impact < 0 ? 'text-red-400/90' : 'text-emerald-300/90' },
   ]
@@ -79,8 +89,8 @@ export function StoreRevaluationPanel({ companyId, dateFrom, dateTo }: { company
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <MoveList title="Сильнее всего подорожало" moves={data.top_up} up />
-        <MoveList title="Сильнее всего подешевело" moves={data.top_down} up={false} />
+        <MoveList title="Подорожание — дороже всего обошлось" moves={data.top_up} up />
+        <MoveList title="Удешевление — дороже всего обошлось" moves={data.top_down} up={false} />
       </div>
 
       {/* Направления (клик = фильтр) */}

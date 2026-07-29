@@ -316,7 +316,15 @@ export const getStoreTransfers = (opts?: { direction?: string; dateFrom?: string
 
 // ── Переоценка: изменения цен (старая→новая, Δ%) + подорожания/удешевления ──
 export interface StoreRevalLine { ref: string; name: string; old: number; new: number; delta: number; pct: number | null; qty: number }
-export interface StoreRevalMove { name: string; old: number; new: number; delta: number; pct: number | null }
+export interface StoreRevalMove {
+  name: string; old: number; new: number; delta: number; pct: number | null
+  /** GUID номенклатуры — ключ строки и вход в карточку товара. */
+  ref?: string | null
+  /** Базовая единица: у весового товара это грамм, без неё цена читается неверно. */
+  unit?: string | null
+  /** Во сколько обошлась переоценка: разница цены × количество в документе. */
+  amount?: number | null
+}
 export interface StoreRevalDoc {
   ref: string; number: string | null; date: string | null
   warehouse_code: string; warehouse_name: string | null

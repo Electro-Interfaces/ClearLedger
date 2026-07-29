@@ -283,9 +283,9 @@ class GoodsDashboardService:
             out.append(m)
         return out
 
-    async def _release_cost_unit(self, df: date, dt: date,
-                                 stations: list[str] | None) -> dict[str, float]:
-        """Себестоимость порции блюда по документу выпуска: Σ(Сумма)/Σ(Количество) по GUID.
+    async def _release_agg(self, df: date, dt: date,
+                           stations: list[str] | None) -> dict[str, list[float]]:
+        """Выпуск блюд за период: ref → [сумма себестоимости, количество порций].
 
         Это готовая себестоимость от самой 1С, посчитанная по тем же техкартам и по
         правилам списания — то есть ровно то, чем закрывается смена. Сборка по ТТК из
@@ -316,7 +316,12 @@ class GoodsDashboardService:
                     continue
                 agg[ref][0] += float(ln.get("Сумма") or 0)
                 agg[ref][1] += qty
-        return {ref: s / q for ref, (s, q) in agg.items() if q > 0}
+        return agg
+
+    async def _release_cost_unit(self, df: date, dt: date,
+                                 stations: list[str] | None) -> dict[str, float]:
+        """Себестоимость порции блюда: Σ(Сумма)/Σ(Количество) выпуска за период."""
+        return {ref: s / q for ref, (s, q) in (await self._release_agg(df, dt, stations)).items() if q > 0}
 
     async def _names(self) -> dict:
         if getattr(self, "_names_cache", None) is not None:
@@ -359,6 +364,16 @@ class GoodsDashboardService:
         for g, v in agg.items():
             if v[1] and (v[0] / v[1]) > 0:
                 cm[g] = (v[0] / v[1], "purchase", v[1])
+        # Блюдо не закупают — его выпускают: у ГИГ общепит продаётся как сопутствующий
+        # товар, а себестоимость 1С формирует по рецептуре в момент продажи (документ
+        # выпуска идёт порция в порцию с чеком — проверено, 1077 = 1077 за 29 дней).
+        # Для товарных экранов это и есть себестоимость SKU; без неё блюда (у ГИГ 30 шт,
+        # 166 тыс ₽ — 16% оборота) шли в «Ассортименте», «Ценах и марже», ABC-XYZ и
+        # карточке товара вовсе без маржи. Выпуск перекрывает закупку: у блюда с обоими
+        # источниками верна себестоимость производства, а не цена разовой перепродажи.
+        for g, (amt, qty) in (await self._release_agg(date(2000, 1, 1), date(2100, 1, 1), None)).items():
+            if qty > 0 and amt > 0:
+                cm[g] = (amt / qty, "release", qty)
         self._ccache = cm
         return cm
 
@@ -459,11 +474,6 @@ class GoodsDashboardService:
                 "sku_costed": len(costed),
                 "revenue": round(sum(r["revenue"] for r in rows), 2),
                 "revenue_net": round(sum(r["revenue_net"] for r in rows), 2),
-                # Выручка ТЕХ блюд, по которым известна себестоимость: фудкост и прибыль
-                # считаются от неё, а не от общей. Пока это не отдавалось наружу, плитки
-                # «прибыль» и «выручка» стояли рядом на разных базах и читались как
-                # рентабельность в разы ниже фактической.
-                "revenue_costed": round(sum(r["revenue"] for r in rows if r["cost"] is not None), 2),
                 "cogs_costed": round(sum(r["cogs"] for r in costed), 2),
                 "margin_costed": round(margin_costed, 2),
                 "margin_pct_costed": round(100 * margin_costed / net_costed, 1) if net_costed else None,
@@ -1515,14 +1525,21 @@ class GoodsDashboardService:
         for d in docs:
             reasons_all[d.reason or "—"]["count"] += 1
 
-        sel = [d for d in docs if (not reason or d.reason == reason)]
+        # Порядок обхода фиксируем: у зеркальных пар «уценка → возврат» модуль разницы
+        # одинаков, и без сортировки в топ попадала та строка, что первой пришла из
+        # скана — состав списка менялся между обновлениями сам по себе.
+        sel = sorted([d for d in docs if (not reason or d.reason == reason)],
+                     key=lambda d: (d.doc_date or '', d.number or ''))
 
         out_docs = []
         up_lines = down_lines = 0
         pct_sum = pct_n = 0.0
         impact = 0.0
         dates = []
-        best_by_sku: dict[str, dict] = {}  # SKU → строка с макс |delta|
+        # Единица берётся из справочника: у весового товара базовая единица — грамм,
+        # и «0,35» без неё читается как цена за килограмм (в имени карточки стоит «1 кг.»).
+        units = {ref: (n.unit or '') for ref, n in (await self._names()).items()}
+        best_by_sku: dict[str, dict] = {}  # SKU → строка с макс. рублёвой разницей
         for d in sel:
             impact += float(d.total_amount or 0)
             if d.doc_date:
@@ -1539,7 +1556,11 @@ class GoodsDashboardService:
                 prev = best_by_sku.get(k)
                 if prev is None or abs(delta) > abs(prev["delta"]):
                     best_by_sku[k] = {"name": ln.get("name"), "old": ln.get("old"),
-                                      "new": ln.get("new"), "delta": delta, "pct": ln.get("pct")}
+                                      "new": ln.get("new"), "delta": delta, "pct": ln.get("pct"),
+                                      "ref": ln.get("ref"), "unit": units.get(ln.get("ref") or "", ""),
+                                      # Деньги: разница цены × количество в документе — во
+                                      # столько обошлась переоценка на остатке той даты.
+                                      "amount": delta * float(ln.get("qty") or 0)}
             out_docs.append({
                 "ref": d.external_ref, "number": d.number, "date": d.doc_date,
                 "warehouse_code": d.warehouse_code, "warehouse_name": d.warehouse_name,
@@ -1550,8 +1571,13 @@ class GoodsDashboardService:
         out_docs.sort(key=lambda x: (x["date"] or ""), reverse=True)
 
         moves = list(best_by_sku.values())
-        top_up = sorted([m for m in moves if (m["pct"] or 0) > 0], key=lambda x: -(x["pct"] or 0))[:10]
-        top_down = sorted([m for m in moves if (m["pct"] or 0) < 0], key=lambda x: (x["pct"] or 0))[:10]
+        # Ранжируем по деньгам, а не по проценту: движение в 25 копеек за грамм давало
+        # +250% и вытесняло из списка переоценки на тысячи рублей. Процент остаётся
+        # подписью к сумме — он отвечает на «насколько», а сумма на «сколько это стоило».
+        top_up = sorted([m for m in moves if m["delta"] > 0],
+                        key=lambda x: (-abs(x["amount"]), -(x["pct"] or 0), x["name"] or ""))[:10]
+        top_down = sorted([m for m in moves if m["delta"] < 0],
+                          key=lambda x: (-abs(x["amount"]), x["pct"] or 0, x["name"] or ""))[:10]
         by_reason = [{"reason": r, "count": v["count"]}
                      for r, v in sorted(reasons_all.items(), key=lambda x: -x[1]["count"])]
 
