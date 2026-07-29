@@ -161,24 +161,21 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, metrics, on
  * набирает столько колонок, сколько влезает, поэтому широкий экран показывает слой
  * одной строкой, а узкий — переносит.
  */
-function Section({ title, hint, children, grow, divider }: {
-  title: string; hint?: string; children: React.ReactNode; grow?: boolean
+function Section({ title, hint, children, divider }: {
+  title: string; hint?: string; children: React.ReactNode
   /** Линия сверху — граница уровня стола (Ядро · Сервисы · Приложения). */
   divider?: boolean
 }) {
   return (
     <section className={`grid gap-x-4 gap-y-2 md:grid-cols-[132px_1fr]
-                         ${divider ? 'border-t border-border/60 pt-4' : ''}
-                         ${grow ? 'min-h-0' : ''}`}>
+                         ${divider ? 'border-t border-border/60 pt-4' : ''}`}>
       <div className="md:pt-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
         {hint && <p className="mt-0.5 hidden text-[11px] text-muted-foreground/50 md:block">{hint}</p>}
       </div>
-      {/* Прокрутка достаётся только слою, который может вырасти (приложения), и только
-          когда он действительно не помещается: шапка и остальные слои остаются на месте. */}
       {/* Колонка чуть шире прежней: в карточке теперь строка показателей, и на 200 px
           три числа с подписями наезжали друг на друга. */}
-      <div className={`grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-2 ${grow ? 'min-h-0 overflow-y-auto pr-1' : ''}`}>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-2">
         {children}
       </div>
     </section>
@@ -295,7 +292,10 @@ export function EcosystemHomePage() {
       {/* Ширину не режем до 1024: на широком экране это выталкивало продукты вниз
           при пустых полях по бокам. Предел нужен лишь чтобы строка плиток не
           растягивалась бесконечно на панорамных мониторах. */}
-      <main className="mx-auto flex w-full min-h-0 max-w-[1600px] flex-1 flex-col gap-5 px-4 py-5 sm:px-8">
+      {/* Прокручивается вся область стола, а не один слой: слоёв четыре, продуктов
+          двенадцать и число их растёт — при нехватке высоты верхние слои иначе просто
+          обрезаются, и добраться до них нечем. Шапка остаётся на месте. */}
+      <main className="mx-auto flex w-full min-h-0 max-w-[1600px] flex-1 flex-col gap-5 overflow-y-auto px-4 py-5 sm:px-8">
         {/* Приветствие — одна строка: компания уже названа в шапке, повторять её
             отдельным абзацем значит занять высоту ради того же слова. */}
         <h1 className="shrink-0 text-lg font-semibold">
@@ -327,7 +327,7 @@ export function EcosystemHomePage() {
         )}
 
         {/* Второй контур растёт вместе с пространством — прокрутка достаётся ему. */}
-        <Section title="Сеть и учёт" hint="чем владеем и как считаем" grow divider>
+        <Section title="Сеть и учёт" hint="чем владеем и как считаем" divider>
           {internal.map((a) => <ProductTile key={a.code} a={a} />)}
           {q.isLoading && (
             <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
