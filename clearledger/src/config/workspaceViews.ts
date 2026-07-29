@@ -58,7 +58,8 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     overview: 'Обзор', map: 'Карта', transactions: 'Реестр операций',
     fills: 'Реализация', 'fuel-tariffs': 'Тарифы', 'fuel-corporate': 'Корпоратив', 'fuel-retail': 'Частные лица',
     'by-station': 'По станциям', 'by-fuel': 'По топливу',
-    'by-month': 'По месяцам', channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы', margin: 'Маржа и цены',
+    'by-month': 'По месяцам', channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы',
+    coupons: 'Купоны', margin: 'Маржа и цены',
     purchases: 'Поступления', intake: 'Приёмка и сливы', tanks: 'Контроль баланса',
     variances: 'Расхождения', inventory: 'Инвентаризация', balance: 'Баланс',
     pumps: 'Загрузка ТРК', abcxyz: 'ABC-XYZ', visits: 'Приезды', clients: 'Клиенты и когорты',
@@ -71,7 +72,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     cs_compare: 'Сравнение периодов', cs_list: 'Реестр сессий',
     cs_sessions: 'Разрезы',  // старая ссылка ?sub=cs_sessions
     fills: 'Реализация', visits: 'Приезды', transactions: 'Реестр операций',
-    channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы',
+    channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы', coupons: 'Купоны',
   },
   sales_commerce: {
     cs_clients: 'Тарифы', cs_corporate: 'Корпоратив',

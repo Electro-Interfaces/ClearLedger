@@ -38,6 +38,9 @@ export const FUEL_ANALYTICS_MENU: CentralMenuItem[] = [
   { key: 'transactions',   label: 'Реестр операций' },
   { key: 'channels',       label: 'Каналы продаж' },
   { key: 'online-orders',  label: 'Онлайн-заказы' },
+  // Купон — сдача топливом: непогашенный остаток это долг сети перед клиентом,
+  // и живёт он не в наливах, а в справочнике STS.
+  { key: 'coupons',        label: 'Купоны' },
 ]
 export const FUEL_COMMERCE_MENU: CentralMenuItem[] = [
   { key: 'fuel-tariffs',   label: 'Тарифы' },

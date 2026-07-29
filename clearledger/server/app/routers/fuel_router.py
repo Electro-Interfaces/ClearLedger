@@ -2591,6 +2591,10 @@ async def transactions_count(
     return {"transactions": int(n or 0)}
 
 
+# Возраст, после которого активный купон считаем залежавшимся: срок жизни по
+# умолчанию в STS — 7 дней, дальше клиент за сдачей, скорее всего, не вернётся.
+COUPON_STALE_DAYS = 7
+
 _TX_SORT = {
     "dt": FuelTransaction.dt, "amount": FuelTransaction.amount,
     "liters": FuelTransaction.liters, "price": FuelTransaction.price,
@@ -2740,6 +2744,125 @@ async def transactions_coupon(
             if str(c.get("number")) == str(number):
                 return {"issued_at": c.get("dt")}
     return {"issued_at": None}
+
+
+@router.get("/coupons")
+async def coupons_journal(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_code: int | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Журнал купонов (сдача топливом) — STS /v1/coupons за период.
+
+    Купоны не материализуются в Ledger: это живой остаток обязательства перед
+    клиентом, он меняется при каждом наливе, и хранить его копию значило бы
+    показывать вчерашний долг. Читаем напрямую, ответ отдаёт всю сеть системы
+    одним запросом.
+
+    Дата реализации берётся из наливов: у купонной операции в `card` лежит номер
+    купона, и по нему видно, когда купон отоварили, — в «Мониторе» эта колонка
+    пустует, потому что STS её не отдаёт вовсе.
+    """
+    from app.services.fuel_transactions import resolve_sts
+    from app.services.sts_client import sts_get_coupons
+    cid = await _company_id(user, db)
+    conn = await resolve_sts(db, cid)
+    if conn is None:
+        return {"coupons": [], "stats": {}, "warning": "нет STS-источника у компании"}
+
+    d0, d1 = date.fromisoformat(date_from), date.fromisoformat(date_to)
+    beg, end = f"{d0.isoformat()} 00:00:00", f"{d1.isoformat()} 23:59:59"
+    raw: list[dict] = []
+    warning: str | None = None
+    for sysid in conn["systems"]:
+        try:
+            raw.extend(await sts_get_coupons(conn["base_url"], conn["login"], conn["pwd"],
+                                             sysid, station_code, beg, end))
+        except Exception as e:  # noqa: BLE001 — одна система недоступна, остальные отдаём
+            warning = f"STS не ответил по системе {sysid}: {str(e)[:80]}"
+
+    names = {int(s.code): s.name for s in (await db.execute(
+        select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
+
+    # Когда купон отоварили: последний налив с этим номером карты и оплатой «Купон».
+    numbers = {str(c.get("number")) for c in raw if c.get("number") is not None}
+    redeemed: dict[str, str] = {}
+    if numbers:
+        T = FuelTransaction
+        rows = (await db.execute(
+            select(T.card, func.max(T.dt)).where(
+                T.company_id == cid, T.card.in_(numbers),
+                func.coalesce(T.payment_method, T.pay_type_name).ilike("%купон%"),
+            ).group_by(T.card))).all()
+        redeemed = {r[0]: r[1].isoformat() for r in rows if r[0] and r[1]}
+
+    def _f(v) -> float:
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    out = []
+    for c in raw:
+        code = _int_or_none(c.get("station"))
+        svc = c.get("service") or {}
+        state = c.get("state") or {}
+        typ = c.get("type") or {}
+        usr = c.get("user") or {}
+        number = str(c.get("number")) if c.get("number") is not None else ""
+        out.append({
+            "number": number,
+            "dt": c.get("dt"),
+            "redeemed_at": redeemed.get(number),
+            "station_code": code,
+            "station_name": names.get(code) or (f"АЗС {code}" if code else "—"),
+            "pos": _int_or_none(c.get("pos")), "shift": _int_or_none(c.get("shift")),
+            "opernum": _int_or_none(c.get("opernum")),
+            "fuel_code": _int_or_none(svc.get("service_code")),
+            "fuel_name": svc.get("service_name"),
+            "price": _f(c.get("price")),
+            "qty_total": _f(c.get("qty_total")), "qty_used": _f(c.get("qty_used")),
+            "rest_qty": _f(c.get("rest_qty")),
+            "summ_total": _f(c.get("summ_total")), "summ_used": _f(c.get("summ_used")),
+            "rest_summ": _f(c.get("rest_summ")),
+            "state_id": _int_or_none(state.get("id")), "state_name": state.get("name") or "—",
+            "type_name": typ.get("name"), "author": usr.get("name"),
+            "comment": c.get("comment") or None,
+        })
+    out.sort(key=lambda r: r["dt"] or "", reverse=True)
+
+    # Активный купон (state_id = 0) — непогашенное обязательство перед клиентом;
+    # «просрочен» считаем по возрасту (у STS отдельного состояния для этого нет).
+    now = datetime.now(timezone.utc)
+    issued_liters = sum(r["qty_total"] for r in out)
+    active = [r for r in out if r["state_id"] == 0]
+    stale = 0
+    for r in active:
+        try:
+            issued_at = datetime.fromisoformat(r["dt"]) if r["dt"] else None
+        except (TypeError, ValueError):
+            continue
+        if issued_at is None:
+            continue
+        # STS отдаёт время без зоны; вычитание наивной даты из aware падает
+        # TypeError, и счётчик молча оставался нулевым.
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=timezone.utc)
+        if (now - issued_at).days > COUPON_STALE_DAYS:
+            stale += 1
+    return {
+        "coupons": out,
+        "stats": {
+            "issued": len(out), "issued_liters": round(issued_liters, 2),
+            "used": len([r for r in out if r["qty_used"] > 0]),
+            "used_liters": round(sum(r["qty_used"] for r in out), 2),
+            "active": len(active),
+            "active_liters": round(sum(r["rest_qty"] for r in active), 2),
+            "active_amount": round(sum(r["rest_summ"] for r in active), 2),
+            "stale": stale, "stale_days": COUPON_STALE_DAYS,
+        },
+        "warning": warning,
+    }
 
 
 @router.get("/transactions/filters")

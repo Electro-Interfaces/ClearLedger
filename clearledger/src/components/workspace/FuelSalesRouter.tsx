@@ -12,6 +12,7 @@ import { FuelFillsPanel } from './FuelFillsPanel'
 import { FuelTransactionsPanel } from './FuelTransactionsPanel'
 import { SalesChannelsPanel } from './SalesChannelsPanel'
 import { OnlineOrdersPanel } from './OnlineOrdersPanel'
+import { CouponsPanel } from './CouponsPanel'
 import { FuelTariffsPanel } from './FuelTariffsPanel'
 import { FuelCorporatePanel } from './FuelCorporatePanel'
 import { FuelRetailPanel } from './FuelRetailPanel'
@@ -38,6 +39,7 @@ export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode 
     case 'transactions':   return <FuelTransactionsPanel {...p} />
     case 'channels':       return <SalesChannelsPanel {...p} />
     case 'online-orders':  return <OnlineOrdersPanel {...p} stationCode={stationCode} />
+    case 'coupons':        return <CouponsPanel {...p} />
     // Коммерция
     case 'fuel-tariffs':   return <FuelTariffsPanel {...p} />
     case 'fuel-corporate': return <FuelCorporatePanel {...p} />

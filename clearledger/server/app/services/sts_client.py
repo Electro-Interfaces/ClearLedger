@@ -109,8 +109,10 @@ async def sts_get_coupons(
     """Купоны станции за период — STS /v1/coupons (dt_beg/dt_end как 'YYYY-MM-DD HH:MM:SS').
 
     Купоны живут только в STS: в наливе остаётся номер купона, а дату его выдачи
-    знает лишь этот справочник. Ответ — блоки по системам/станциям с массивом
-    `coupons`; возвращаем плоский список {number, dt, …}.
+    и остаток знает лишь этот справочник. Ответ — блоки по станциям
+    ({system, number, coupons[], total}); возвращаем плоский список, проставляя
+    каждому купону номер станции из блока (без него сеть не разложить по АЗС).
+    Без `station` STS отдаёт всю сеть системы одним запросом.
     """
     from urllib.parse import urlencode
     q: dict[str, Any] = {"system": system}
@@ -121,13 +123,17 @@ async def sts_get_coupons(
     if dt_end:
         q["dt_end"] = dt_end
     data = await _auth_get(base_url, login, password, f"/v1/coupons?{urlencode(q)}")
+    blocks = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
     flat: list[dict] = []
-    if isinstance(data, list):
-        for block in data:
-            if isinstance(block, dict):
-                flat.extend(c for c in (block.get("coupons") or []) if isinstance(c, dict))
-    elif isinstance(data, dict):
-        flat.extend(c for c in (data.get("coupons") or []) if isinstance(c, dict))
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        num = block.get("number", station)
+        for c in (block.get("coupons") or []):
+            if isinstance(c, dict):
+                item = dict(c)
+                item.setdefault("station", num)
+                flat.append(item)
     return flat
 
 
