@@ -105,14 +105,18 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
   const byMonth = useMemo(() => {
     const acc = new Map<string, {
       delta: number; shifts: number; measured: number
+      /** Состояние на конец месяца — последнее измеренное расхождение. Именно оно
+       *  переходит в следующий месяц; складывать состояния нельзя. */
+      state: number | null
       jump: TankLedgerRow | null; chain: TankLedgerRow | null
     }>()
     for (const r of rows) {
       if (!r.opened_at) continue
       const ym = r.opened_at.slice(0, 7)
-      const e = acc.get(ym) ?? { delta: 0, shifts: 0, measured: 0, jump: null, chain: null }
+      const e = acc.get(ym) ?? { delta: 0, shifts: 0, measured: 0, state: null, jump: null, chain: null }
       e.shifts += 1
       if (r.chain_break) e.chain = r
+      if (r.fact_gap != null) e.state = r.fact_gap
       if (r.fact_gap_delta != null) {
         e.delta += r.fact_gap_delta
         e.measured += 1
@@ -126,6 +130,10 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
   /** Разрывы цепочки: где история резервуара начиналась заново. */
   const chainRows = useMemo(() => rows.filter((r) => r.chain_break), [rows])
   const chainJumpSum = chainRows.reduce((s, r) => s + (r.chain_jump ?? 0), 0)
+  /** Месяц последнего перезапуска учёта: месяцы раньше него к итогу не относятся. */
+  const resetMonth = chainRows.length
+    ? chainRows[chainRows.length - 1].opened_at?.slice(0, 7) ?? null
+    : null
 
   /** Дата смены — «смена №4» после перенумерации сама по себе ничего не говорит. */
   const shiftDate = (r: TankLedgerRow) =>
@@ -279,6 +287,15 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
             <h3 className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
               Когда возникло
             </h3>
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              Каждая смена сверяется сама: книга и замер на начало, книга и замер на
+              конец. Расхождение — это <b>состояние</b> резервуара («Стало»), оно переходит
+              в следующую смену и по сменам НЕ складывается: два месяца по 200 л дают
+              не 400, а те же 200. Складывается только <b>изменение</b> — насколько
+              состояние выросло или сократилось. Смены без замера в изменение не входят:
+              их прирост измерить нечем.
+              {resetMonth && ' Месяцы до перезапуска учёта бледные: они относятся к прошлой истории резервуара и к сегодняшнему состоянию не относятся.'}
+            </p>
             {firstBad ? (
               <p className="mb-2 text-xs">
                 Расхождение впервые вышло за допуск {nf0.format(tol)} л в{' '}
@@ -301,21 +318,39 @@ export function TankCardDialog({ target, tol, companyId, dateFrom, dateTo, onClo
                   <tr>
                     <th className="px-3 py-1.5 text-left font-medium">Месяц</th>
                     <th className="px-3 py-1.5 text-right font-medium">Смен</th>
-                    <th className="px-3 py-1.5 text-right font-medium">Набежало</th>
+                    <th className="px-3 py-1.5 text-right font-medium"
+                        title="Насколько расхождение выросло или сократилось за месяц. Это не сумма расхождений по сменам.">
+                      Изменение
+                    </th>
+                    <th className="px-3 py-1.5 text-right font-medium"
+                        title="Состояние резервуара на конец месяца: столько числится сверх факта или недостаёт. Именно оно переходит в следующий месяц — состояния не складываются.">
+                      Стало
+                    </th>
                     <th className="px-3 py-1.5 text-left font-medium">Наибольший прыжок в месяце</th>
                   </tr>
                 </thead>
                 <tbody>
                   {byMonth.map(([ym, m]) => (
-                    <tr key={ym} className="border-t border-border/50">
+                    // Месяцы до последнего перезапуска учёта к текущему итогу не
+                    // относятся: тогда книга описывала другую историю резервуара.
+                    // Гасим их, иначе они читаются как слагаемые сегодняшней цифры.
+                    <tr key={ym} className={cn('border-t border-border/50',
+                      resetMonth && ym < resetMonth && 'opacity-45')}>
                       <td className="px-3 py-1.5 font-medium">{monthLabel(ym)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                         {m.shifts}{m.measured < m.shifts && (
                           <span className="ml-1 text-[10px]">({m.shifts - m.measured} без замера)</span>
                         )}
                       </td>
-                      <td className={cn('px-3 py-1.5 text-right font-medium tabular-nums', gapTone(m.delta, tol))}>
-                        {gapWord(m.delta)}
+                      <td className={cn('px-3 py-1.5 text-right tabular-nums', gapTone(m.delta, tol))}>
+                        {Math.abs(m.delta) < 0.5 ? 'без изменений'
+                          : `${m.delta > 0 ? '+' : '−'}${nf0.format(Math.abs(m.delta))} л`}
+                      </td>
+                      {/* Состояние на конец месяца. Рядом с изменением видно, что
+                          расхождение не накапливается сложением: два месяца по
+                          «+200 л» не дают 400 — во второй строке стоит то же 200. */}
+                      <td className={cn('px-3 py-1.5 text-right font-medium tabular-nums', gapTone(m.state, tol))}>
+                        {gapWord(m.state)}
                       </td>
                       <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
                         {m.chain && (

@@ -461,18 +461,22 @@ async def build_tank_ledger(
             if fact_suspect:
                 issues.append({
                     "kind": "fact_suspect", "reason": (
-                        f"уровнемер отдал {_ru(fact_raw or 0, 1)} л при уровне "
-                        f"{_ru(_f(tank.level_end), 0)} мм — в резервуар входит около "
-                        f"{_ru(capacity, 0)} л. Показание в расчёт не берётся, "
-                        "прибор требует проверки"),
+                        f"уровень {_ru(_f(tank.level_end), 0)} мм, по книге в резервуаре "
+                        f"{_ru(book_end, 0)} л — показание отброшено, в расчёт расхождения "
+                        "не входит"),
                     "type": "fact_suspect",
                     "station_code": station_code, "station_name": station_name,
                     "tank_number": tank_no, "fuel_name": (tank.fuel_type or "—").strip(),
                     "shift_number": int(shift.shift_number),
                     "date": shift.opened_at.date().isoformat() if shift.opened_at else None,
-                    "gap_liters": round((fact_raw or 0) - book_end, 1),
-                    "detail": (f"замер {_ru(fact_raw or 0, 1)} л против книги "
-                               f"{_ru(book_end, 1)} л — больше вместимости резервуара"),
+                    # НЕ расхождение: разница мусорного показания с книгой — не
+                    # величина недостачи, и в колонке «Расхождение» ей не место.
+                    # Само показание прибора отдаём отдельным полем.
+                    "gap_liters": None,
+                    "fact_raw": round(fact_raw or 0, 1),
+                    "capacity_hint": round(capacity, 0) if capacity else None,
+                    "detail": (f"уровнемер показал {_ru(fact_raw or 0, 0)} л — в резервуар "
+                               f"входит около {_ru(capacity, 0)} л"),
                 })
 
             # Разрыв ЦЕПОЧКИ учёта: станцию переустановили (нумерация смен началась
@@ -630,7 +634,9 @@ async def build_tank_ledger(
     # Сортировка: сначала то, где НЕПОКРЫТОЕ расхождение больше — именно с него
     # начинают разбор, а не с уже оформленного ведомостью.
     tanks_summary.sort(key=lambda r: -abs(r["fact_gap_open"] or r["fact_gap"] or 0))
-    issues.sort(key=lambda i: -abs(i["gap_liters"] or 0))
+    # Неисправный прибор — наверх: пока он врёт, расхождение по резервуару вообще
+    # не измерено, и разбирать литры бессмысленно. Дальше по величине разрыва.
+    issues.sort(key=lambda i: (i["type"] != "fact_suspect", -abs(i["gap_liters"] or 0)))
 
     totals = {
         "book_start": round(sum(t["book_start"] for t in tanks_summary), 1),

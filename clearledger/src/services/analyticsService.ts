@@ -695,7 +695,7 @@ export interface TankLedgerTank {
 }
 
 export interface TankLedgerIssue {
-  type: 'arithmetic' | 'continuity' | 'fuel_change'
+  type: 'arithmetic' | 'continuity' | 'fuel_change' | 'fact_suspect'
   station_code: number
   station_name: string
   tank_number: number
@@ -703,8 +703,13 @@ export interface TankLedgerIssue {
   shift_number: number
   prev_shift_number?: number | null
   date: string | null
-  gap_liters: number
+  /** У неисправного прибора расхождения нет: разница мусорного показания с книгой
+   *  не величина недостачи. */
+  gap_liters: number | null
   detail: string
+  /** Что показал уровнемер и сколько входит в резервуар (для type=fact_suspect). */
+  fact_raw?: number | null
+  capacity_hint?: number | null
   /** Причина разрыва стыка: delivery | renumber | book_reset | pulled_to_fact | … */
   kind?: string | null
   /** Человеческая формулировка причины (номер ТТН, номера смен, объём). */

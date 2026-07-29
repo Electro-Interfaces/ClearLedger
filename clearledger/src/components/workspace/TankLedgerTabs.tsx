@@ -667,10 +667,12 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                   >
                     <Td>
                       <Badge variant="outline" className={
-                        issue.type === 'arithmetic' ? 'border-red-400/50 text-red-300/80'
+                        issue.type === 'fact_suspect' ? 'border-red-500/60 text-red-400'
+                          : issue.type === 'arithmetic' ? 'border-red-400/50 text-red-300/80'
                           : issue.type === 'fuel_change' ? 'border-blue-400/50 text-blue-300/80'
                             : 'border-amber-400/50 text-amber-300/80'}>
-                        {issue.type === 'arithmetic' ? 'арифметика'
+                        {issue.type === 'fact_suspect' ? 'замер'
+                          : issue.type === 'arithmetic' ? 'арифметика'
                           : issue.type === 'fuel_change' ? 'смена топлива' : 'стык смен'}
                       </Badge>
                     </Td>
@@ -687,7 +689,11 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                     <Td>№{issue.tank_number} · {issue.fuel_name}</Td>
                     <Td>№{issue.shift_number}</Td>
                     <Td>{issue.date ? new Date(issue.date).toLocaleDateString('ru-RU') : '—'}</Td>
-                    <Td right className="font-medium">{nf1.format(issue.gap_liters)} л</Td>
+                    <Td right className="font-medium">
+                      {issue.gap_liters == null
+                        ? <span className="text-muted-foreground" title="показание прибора недостоверно — расхождение по этой смене не измерено">не измерено</span>
+                        : `${nf1.format(issue.gap_liters)} л`}
+                    </Td>
                     <Td className="text-muted-foreground">
                       {issue.detail}
                       {issue.reason && (
