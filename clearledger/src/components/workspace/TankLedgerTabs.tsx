@@ -45,8 +45,11 @@ function gapTone(v: number | null | undefined, tolerance: number): string {
   return v > 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
 }
 
-const ARI_TOL = 0.5   // арифметика книги — это счёт, любое отклонение = ошибка отчёта
-const CONT_TOL = 0.5  // стык смен — тоже счёт, не измерение
+/** Допуски приходят с сервера (`tolerances`) — это его правила счёта, а не наши.
+ *  Здесь только страховка на случай старого ответа: пока они были захардкожены,
+ *  фронт мог подсвечивать одно, а сервер считать замечания по другому порогу. */
+const TOL_FALLBACK = { ari: 0.5, cont: 0.5, fact: 50 }
+type Tols = { ari: number; cont: number; fact: number }
 
 /** Причины разрыва стыка. Разрыв — не один дефект: слив между сменами это работа
  *  приёмки, сброс счётчика — эксплуатации, а списание на станции — бухгалтерии.
@@ -64,9 +67,9 @@ const BREAK_KINDS: Record<string, { label: string; tone: string; hard: boolean }
 }
 
 /** Есть ли в смене «жёсткое» замечание — сломанный счёт (не погрешность замера). */
-function hasHardIssue(r: TankLedgerRow): boolean {
-  return Math.abs(r.arithmetic_gap) > ARI_TOL
-    || (r.continuity_gap != null && Math.abs(r.continuity_gap) > CONT_TOL)
+function hasHardIssue(r: TankLedgerRow, tols: Tols): boolean {
+  return Math.abs(r.arithmetic_gap) > tols.ari
+    || (r.continuity_gap != null && Math.abs(r.continuity_gap) > tols.cont)
     || r.fuel_changed
 }
 
@@ -194,7 +197,12 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   })
 
   const data = query.data
-  const tol = data?.tolerances.fact_liters ?? 50
+  const tols: Tols = {
+    ari: data?.tolerances?.arithmetic_liters ?? TOL_FALLBACK.ari,
+    cont: data?.tolerances?.continuity_liters ?? TOL_FALLBACK.cont,
+    fact: data?.tolerances?.fact_liters ?? TOL_FALLBACK.fact,
+  }
+  const tol = tols.fact
 
   // Сводка по резервуарам — для заголовков групп журнала и второго экрана.
   const tankByKey = useMemo(() => {
@@ -222,12 +230,12 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
 
   // Проходит ли строка через выбранное «замечание».
   const passIssue = useMemo(() => {
-    const contBad = (r: TankLedgerRow) => r.continuity_gap != null && Math.abs(r.continuity_gap) > CONT_TOL
-    const ariBad = (r: TankLedgerRow) => Math.abs(r.arithmetic_gap) > ARI_TOL
-    const factBad = (r: TankLedgerRow) => r.fact_gap != null && Math.abs(r.fact_gap) > tol
+    const contBad = (r: TankLedgerRow) => r.continuity_gap != null && Math.abs(r.continuity_gap) > tols.cont
+    const ariBad = (r: TankLedgerRow) => Math.abs(r.arithmetic_gap) > tols.ari
+    const factBad = (r: TankLedgerRow) => r.fact_gap != null && Math.abs(r.fact_gap) > tols.fact
     return (r: TankLedgerRow): boolean => {
       switch (fIssue) {
-        case 'issues': return hasHardIssue(r)
+        case 'issues': return hasHardIssue(r, tols)
         case 'continuity': return contBad(r)
         case 'arithmetic': return ariBad(r)
         case 'fact': return factBad(r)
@@ -299,10 +307,33 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
         <Cell
           label="Книга − факт"
           value={gapLabel(t.fact_gap)}
-          hint={`${nf3.format(Math.abs(t.fact_gap_pct))}% от отпуска`}
+          hint={t.inventory_adjustment
+            ? `оформлено ведомостями ${nf0.format(Math.abs(t.inventory_adjustment))} л`
+            : `${nf3.format(Math.abs(t.fact_gap_pct))}% от отпуска`}
           tone={gapTone(t.fact_gap, tol)}
         />
       </div>
+
+      {/* Непокрытое ведомостями — то, что реально идёт в следующую инвентаризацию.
+          Показываем отдельной строкой только когда ведомости уже есть: иначе это
+          дубль карточки «Книга − факт» и лишний шум. */}
+      {t.tanks_with_inventory > 0 && (
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 rounded-lg border border-border/70 bg-card/60 px-3 py-2 text-xs">
+          <span className="text-muted-foreground">
+            Инвентаризация проведена по {t.tanks_with_inventory} из {t.tanks} резервуаров
+          </span>
+          <span>
+            <span className="text-muted-foreground">оформлено: </span>
+            <span className="font-medium tabular-nums">{nf0.format(Math.abs(t.inventory_adjustment))} л</span>
+          </span>
+          <span>
+            <span className="text-muted-foreground">к разбору после ведомостей: </span>
+            <span className={cn('font-medium tabular-nums', gapTone(t.fact_gap_open, tol))}>
+              {gapLabel(t.fact_gap_open)}
+            </span>
+          </span>
+        </div>
+      )}
 
       {/* ── ЖУРНАЛ смена-за-сменой единой лентой ──────────────────────── */}
       {view === 'journal' && (
@@ -428,7 +459,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                 </thead>
                 <tbody>
                   {groups.map((g) => (
-                    <GroupBlock key={g.key} group={g} tol={tol} onPick={setPicked} sort={sort} />
+                    <GroupBlock key={g.key} group={g} tol={tol} tols={tols} onPick={setPicked} sort={sort} />
                   ))}
                 </tbody>
               </table>
@@ -470,6 +501,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                   <Th>АЗС</Th><Th>Резервуар</Th><Th>Топливо</Th>
                   <Th right>Книга нач.</Th><Th right>Приход</Th><Th right>Отпуск</Th>
                   <Th right>Книга кон.</Th><Th right>Факт</Th><Th right>Книга − факт</Th>
+                  <Th right>Оформлено</Th><Th right>К разбору</Th>
                   <Th right>Было на входе</Th><Th right>Смен</Th><Th>Замечания</Th>
                 </tr>
               </thead>
@@ -491,6 +523,21 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                           {nf3.format(Math.abs(tank.fact_gap_pct))}%
                         </span>
                       )}
+                    </Td>
+                    {/* Оформлено ведомостью — и что осталось к разбору. Иначе уже
+                        списанная недостача выглядит непогашенной и её списывают дважды. */}
+                    <Td right className="text-muted-foreground">
+                      {tank.inventory_adjustment != null ? (
+                        <span title={tank.inventory_date ? `ведомость от ${tank.inventory_date}` : undefined}>
+                          {nf0.format(Math.abs(tank.inventory_adjustment))} л
+                          <span className="ml-1 text-[10px]">
+                            {tank.inventory_adjustment > 0 ? 'оприходовано' : 'списано'}
+                          </span>
+                        </span>
+                      ) : '—'}
+                    </Td>
+                    <Td right className={cn('font-medium', gapTone(tank.fact_gap_open, tol))}>
+                      {gapLabel(tank.fact_gap_open)}
                     </Td>
                     <Td right className="text-muted-foreground">{gapLabel(tank.fact_gap_opening)}</Td>
                     <Td right>{tank.shifts}</Td>
@@ -522,9 +569,12 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
             </table>
           </div>
           <p className="mt-2 text-[11px] text-muted-foreground">
-            «Было на входе» — с каким расхождением резервуар вошёл в период. Если оно
-            близко к текущему, значит за период ничего не изменилось: вопрос старый и
-            решается инвентаризацией, а не поиском утечки.
+            «Книга − факт» — всё накопленное расхождение: книга в источнике к замеру не
+            приводится, и уже списанное продолжает в нём сидеть. «Оформлено» — что закрыто
+            проведёнными ведомостями, «К разбору» — что набежало после последней из них;
+            именно эта цифра идёт в следующую инвентаризацию. «Было на входе» — с каким
+            расхождением резервуар вошёл в период: если оно близко к текущему, вопрос
+            старый и решается ведомостью, а не поиском утечки.
           </p>
         </div>
       )}
@@ -591,8 +641,9 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
 }
 
 /** Блок одного резервуара в журнале: заголовок-итог + смены подряд. */
-function GroupBlock({ group, tol, onPick, sort }: {
-  group: Group; tol: number; onPick: (r: TankLedgerRow) => void; sort: Sort | null
+function GroupBlock({ group, tol, tols, onPick, sort }: {
+  group: Group; tol: number; tols: Tols
+  onPick: (r: TankLedgerRow) => void; sort: Sort | null
 }) {
   const { tank, head, rows: srcRows } = group
   const rows = useMemo(() => sortRows(srcRows, sort), [srcRows, sort])
@@ -624,8 +675,8 @@ function GroupBlock({ group, tol, onPick, sort }: {
         </td>
       </tr>
       {rows.map((r) => {
-        const ariBad = Math.abs(r.arithmetic_gap) > ARI_TOL
-        const contBad = r.continuity_gap != null && Math.abs(r.continuity_gap) > CONT_TOL
+        const ariBad = Math.abs(r.arithmetic_gap) > tols.ari
+        const contBad = r.continuity_gap != null && Math.abs(r.continuity_gap) > tols.cont
         return (
           <tr
             key={`${r.shift_number}:${r.opened_at}`}

@@ -219,6 +219,24 @@ class AnalyticsService:
             stmt = stmt.where(FuelShift.station_id == f.station_id)
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def _load_shifts_by_open(self, f: PeriodFilter) -> list[FuelShift]:
+        """Смены периода по дате ОТКРЫТИЯ — граница остаточного контура.
+
+        Деньги признаются по закрытию смены (`_load_shifts`), а остаток в
+        резервуаре — по её открытию: на станции смену так и называют («смена от
+        02.01»), и по этой же границе работают книга резервуара, диагностика
+        расхождений и ведомость инвентаризации. Пока баланс считался по закрытию,
+        итоги четырёх экранов одного раздела не сходились на граничных сменах.
+        """
+        stmt = select(FuelShift).where(
+            FuelShift.company_id == f.company_id,
+            FuelShift.opened_at >= datetime.combine(f.date_from, datetime.min.time()),
+            FuelShift.opened_at <= datetime.combine(f.date_to, datetime.max.time()),
+        )
+        if f.station_id is not None:
+            stmt = stmt.where(FuelShift.station_id == f.station_id)
+        return list((await self.session.execute(stmt)).scalars().all())
+
     # ─── management: P&L ──────────────────────────────────────────────
 
     async def pnl(self, f: PeriodFilter, group_by: str = "station") -> dict[str, Any]:
@@ -408,7 +426,7 @@ class AnalyticsService:
         fuel_codes: list[int] | None = None,
     ) -> dict[str, Any]:
         """Периодный баланс: первый остаток + обороты − последний остаток."""
-        all_shifts = await self._load_shifts(f)
+        all_shifts = await self._load_shifts_by_open(f)
         station_ids = {shift.station_id for shift in all_shifts if shift.station_id}
         stations_map: dict[uuid.UUID, FuelStation] = {}
         if station_ids:

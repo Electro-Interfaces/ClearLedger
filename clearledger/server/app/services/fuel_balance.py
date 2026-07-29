@@ -3,9 +3,10 @@ from collections import defaultdict
 from typing import Any
 
 from app.models import FuelShift, FuelStation, FuelTank
-
-
-CONTINUITY_TOLERANCE_LITERS = 1.0
+# Допуск стыка — один на весь раздел: у книги резервуара и у периодного баланса он
+# обязан совпадать, иначе одна и та же смена даёт разное число «разрывов» на двух
+# вкладках одного экрана (было 1,0 л здесь против 0,5 л в книге резервуара).
+from app.services.tank_ledger import CONTINUITY_TOLERANCE_L as CONTINUITY_TOLERANCE_LITERS
 
 
 def build_fuel_balance(

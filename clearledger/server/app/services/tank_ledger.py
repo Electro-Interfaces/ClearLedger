@@ -41,7 +41,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FuelReceipt, FuelShift, FuelStation, FuelTank
+from app.models import FuelReceipt, FuelShift, FuelStation, FuelTank, FuelTankInventory
 
 # Порог, ниже которого расхождение считаем шумом измерения, а не событием.
 # Уровнемер даёт ±0,2–0,5% объёма; для типового резервуара 20–25 м³ это
@@ -249,6 +249,27 @@ async def build_tank_ledger(
         return out
 
     # Группировка в цепочки по физическому резервуару (станция + номер).
+    # Проведённые ведомости инвентаризации. Расхождение — величина НАКОПЛЕННАЯ:
+    # книга в источнике к факту не приводится, и списанное документом продолжает
+    # сидеть в цифре «книга − факт». Поэтому по каждому резервуару считаем ещё
+    # одну величину — сколько набежало ПОСЛЕ последней проведённой ведомости.
+    # Она и есть предмет следующей инвентаризации, в отличие от уже оформленного.
+    iq = (
+        select(FuelTankInventory, FuelStation.code)
+        .join(FuelStation, FuelStation.id == FuelTankInventory.station_id)
+        .where(FuelTankInventory.company_id == company_id,
+               FuelTankInventory.status == "confirmed",
+               FuelTankInventory.inventory_date <= date_to)
+        .order_by(FuelTankInventory.inventory_date)
+    )
+    if station_codes:
+        iq = iq.where(FuelStation.code.in_([int(c) for c in station_codes]))
+    # (станция, резервуар) → список (дата, корректировка) по возрастанию даты
+    inventories: dict[tuple[int, int], list[tuple[date, float]]] = defaultdict(list)
+    for inv, st_code in (await db.execute(iq)).all():
+        inventories[(int(st_code), int(inv.tank_number))].append(
+            (inv.inventory_date, _f(inv.adjustment_volume)))
+
     chains: dict[tuple[int, int], list[tuple[FuelTank, FuelShift, FuelStation]]] = defaultdict(list)
     for tank, shift, station in records:
         chains[(int(station.code), int(tank.tank_number))].append((tank, shift, station))
@@ -266,6 +287,11 @@ async def build_tank_ledger(
         sum_receipts = sum_sales = 0.0
         sum_mass_receipts = sum_mass_sales = 0.0
         arithmetic_breaks = continuity_breaks = fact_breaks = 0
+        # Ведомости этого резервуара и расхождение на момент последней из них.
+        tank_inventories = inventories.get((station_code, tank_no), [])
+        inv_dates = {d for d, _ in tank_inventories}
+        last_inv_date: date | None = None
+        gap_at_inventory: float | None = None
         # Разрывы этой цепочки — для пост-прохода по зеркальным возвратам.
         chain_breaks: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
         worst_fact = 0.0
@@ -409,6 +435,11 @@ async def build_tank_ledger(
                 "level_end": _n(tank.level_end),
                 "water_volume": _n(tank.water_volume),
                 "fuel_changed": fuel_changed,
+                # Смена, на дату которой проведена ведомость: с этой точки
+                # расхождение считается заново — предыдущее оформлено документом.
+                "inventory_on_date": (shift.opened_at.date().isoformat()
+                                      if shift.opened_at and shift.opened_at.date() in inv_dates
+                                      else None),
                 # Накладные, закреплённые за этой сменой и резервуаром (связь из
                 # секции `receipt` отчёта). Нужны в разборе строки: «приход 7 002 л»
                 # без номера ТТН нечем подтвердить перед поставщиком.
@@ -420,6 +451,12 @@ async def build_tank_ledger(
             })
             if issue_entry is not None and continuity_gap is not None:
                 chain_breaks.append((continuity_gap, issue_entry, rows[-1]))
+            # Запоминаем расхождение на смене, датой которой проведена ведомость:
+            # всё, что было до неё, списано документом.
+            if (shift.opened_at and shift.opened_at.date() in inv_dates
+                    and fact_gap is not None):
+                last_inv_date = shift.opened_at.date()
+                gap_at_inventory = fact_gap
             prev, prev_shift = tank, shift
 
         # Зеркальный возврат: разрыв, который в пределах трёх следующих разрывов
@@ -471,6 +508,17 @@ async def build_tank_ledger(
             "fact_gap_pct": (round(fact_gap_period / sum_sales * 100, 3)
                              if fact_gap_period is not None and sum_sales else None),
             "fact_gap_opening": round(first_fact_gap, 1) if first_fact_gap is not None else None,
+            # Инвентаризация: когда последняя ведомость, что она списала и сколько
+            # набежало после неё. `fact_gap_open` — предмет СЛЕДУЮЩЕЙ ведомости;
+            # без него уже оформленная недостача выглядит как непогашенная и
+            # менеджер списывает её второй раз.
+            "inventory_date": last_inv_date.isoformat() if last_inv_date else None,
+            "inventory_adjustment": (round(sum(a for d, a in tank_inventories
+                                               if date_from <= d <= date_to), 1)
+                                     or None),
+            "fact_gap_open": (round(fact_gap_period - gap_at_inventory, 1)
+                              if fact_gap_period is not None and gap_at_inventory is not None
+                              else fact_gap_period),
             "mass_receipts": round(sum_mass_receipts, 1),
             "mass_sales": round(sum_mass_sales, 1),
             "mass_end": _n(last.mass_end),
@@ -482,8 +530,9 @@ async def build_tank_ledger(
             "worst_fact_shift": worst_fact_shift,
         })
 
-    # Сортировка: сначала то, где расхождение больше — с этого начинают разбор.
-    tanks_summary.sort(key=lambda r: -abs(r["fact_gap"] or 0))
+    # Сортировка: сначала то, где НЕПОКРЫТОЕ расхождение больше — именно с него
+    # начинают разбор, а не с уже оформленного ведомостью.
+    tanks_summary.sort(key=lambda r: -abs(r["fact_gap_open"] or r["fact_gap"] or 0))
     issues.sort(key=lambda i: -abs(i["gap_liters"] or 0))
 
     totals = {
@@ -493,6 +542,12 @@ async def build_tank_ledger(
         "book_end": round(sum(t["book_end"] for t in tanks_summary), 1),
         "fact_end": round(sum(t["fact_end"] or 0 for t in tanks_summary), 1),
         "fact_gap": round(sum(t["fact_gap"] or 0 for t in tanks_summary), 1),
+        # Непокрытое ведомостями и то, что уже оформлено — раздельно: сумма
+        # «книга − факт» без вычета проведённого зовёт списать одно и то же дважды.
+        "fact_gap_open": round(sum(t["fact_gap_open"] or 0 for t in tanks_summary), 1),
+        "inventory_adjustment": round(sum(t["inventory_adjustment"] or 0
+                                          for t in tanks_summary), 1),
+        "tanks_with_inventory": sum(1 for t in tanks_summary if t["inventory_date"]),
         "mass_receipts": round(sum(t["mass_receipts"] for t in tanks_summary), 1),
         "mass_sales": round(sum(t["mass_sales"] for t in tanks_summary), 1),
         "tanks": len(tanks_summary),

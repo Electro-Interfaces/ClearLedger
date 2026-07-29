@@ -662,6 +662,12 @@ export interface TankLedgerTank {
   fact_gap_pct: number | null
   /** Расхождение книги и факта на ВХОДЕ в период — отделяет старую недостачу от новой. */
   fact_gap_opening: number | null
+  /** Дата последней проведённой ведомости инвентаризации по этому резервуару. */
+  inventory_date: string | null
+  /** Корректировка проведённых за период ведомостей (плюс — оприходовано). */
+  inventory_adjustment: number | null
+  /** Накопилось ПОСЛЕ последней ведомости — предмет следующей инвентаризации. */
+  fact_gap_open: number | null
   mass_receipts: number
   mass_sales: number
   mass_end: number | null
@@ -691,6 +697,8 @@ export interface TankLedgerResponse {
   totals: {
     book_start: number; receipts: number; sales: number; book_end: number
     fact_end: number; fact_gap: number; fact_gap_pct: number
+    /** Непокрытое ведомостями расхождение и то, что уже оформлено. */
+    fact_gap_open: number; inventory_adjustment: number; tanks_with_inventory: number
     mass_receipts: number; mass_sales: number
     tanks: number; shifts: number
     arithmetic_breaks: number; continuity_breaks: number; fact_breaks: number

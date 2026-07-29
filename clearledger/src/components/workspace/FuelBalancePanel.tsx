@@ -71,9 +71,14 @@ function varianceTone(value: number) {
   return value > 0 ? 'text-rose-400' : 'text-sky-400'
 }
 
+/** Имя невязки КНИГИ (приход-расход по документам), а не расхождения с замером.
+ *  Карточка звалась «Недостача»/«Излишек» — теми же словами, что расхождение книги с
+ *  уровнемером на соседней вкладке, хотя величина другая: здесь не сошлись документы
+ *  между собой, там документ не сошёлся с прибором. Менеджер читал арифметику
+ *  сменных отчётов как потерю топлива и шёл искать утечку. */
 function varianceName(value: number) {
-  if (Math.abs(value) <= 1) return 'Сходится'
-  return value > 0 ? 'Недостача' : 'Излишек'
+  if (Math.abs(value) <= 1) return 'Книга сходится'
+  return 'Невязка книги'
 }
 
 function SummaryTable({ rows, totals }: { rows: FuelBalanceLine[]; totals: FuelBalanceLine }) {
@@ -327,7 +332,7 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
               <Metric label="Поступления" value={fmtLiters(data.totals.receipts_liters)} hint="Сливы по сменам" tone="info" />
               <Metric label="Реализация" value={fmtLiters(data.totals.sales_liters)} hint={`${data.shifts_count} смен`} />
               <Metric label="Конечный остаток" value={fmtLiters(data.totals.balance_end_liters)} hint="Последняя смена периода" />
-              <Metric label={varianceName(variance)} value={fmtLiters(variance)} hint={`${fmtPct(data.totals.variance_pct)} от реализации`} tone={Math.abs(variance) <= 1 ? 'default' : variance > 0 ? 'danger' : 'surplus'} />
+              <Metric label={varianceName(variance)} value={fmtLiters(variance)} hint="приход − расход по документам, не замер" tone={Math.abs(variance) <= 1 ? 'default' : variance > 0 ? 'danger' : 'surplus'} />
               <Metric label="Резервуары" value={nf0.format(data.integrity.unique_tanks)} hint={`${nf0.format(data.integrity.records_count)} сменных записей`} />
               <Metric label="Контроль смен" value={nf0.format(data.integrity.continuity_checks)} hint={`${issues} замечаний`} />
             </CardContent>
