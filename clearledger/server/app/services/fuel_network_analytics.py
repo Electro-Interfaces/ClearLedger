@@ -115,6 +115,116 @@ def _xyz(cv: float | None) -> str:
     return "Z"
 
 
+# Меньше стольких бакетов жизни — стабильность не считаем. На трёх точках σ/μ
+# показывает случайность, а не спрос, и позиция уезжает в «рваные» ни за что.
+MIN_LIFE_BUCKETS = 6
+
+# Порог, с которого движение считается трендом, а не колебанием, — рост или
+# падение выручки за период относительно средней.
+TREND_PCT = 20.0
+
+# Окно, по которому меряется стабильность, в бакетах. Разброс — характеристика
+# ТЕКУЩЕГО режима работы, а не всей истории: у ГИГ станции запускались волнами,
+# и на горизонте в полгода ряд 208 · ДТ идёт от 0,1 до 5,5 млн ₽ в неделю. Даже
+# после снятия линейного тренда такой разгон даёт CV 0,74 — не потому, что спрос
+# рваный, а потому что рост нелинейный. По последним 12 неделям тот же ряд
+# укладывается в 0,2–0,3, и класс наконец отвечает на вопрос «предсказуем ли
+# спрос сейчас». Тренд за весь период при этом показывается отдельной колонкой.
+STAB_WINDOW = {"week": 12, "month": 6}
+
+
+def _bucket_keys(df: date, dt: date, bucket: str) -> list[str]:
+    """Ключи ВСЕХ полных бакетов периода — сетка, на которую ложится ряд позиции.
+
+    Нужна, чтобы отличить «неделю не продавали» (ноль внутри жизни, честная
+    рваность) от «позиции ещё не существовало» (ноль до первой продажи, который
+    раньше засчитывался как провал спроса).
+    """
+    b_from, b_to, n = _full_buckets(df, dt, bucket)
+    if not n:
+        return []
+    keys: list[str] = []
+    cur = date.fromisoformat(b_from)
+    last = date.fromisoformat(b_to)
+    while cur <= last:
+        keys.append(cur.isoformat())
+        if bucket == "month":
+            cur = date(cur.year + cur.month // 12, cur.month % 12 + 1, 1)
+        else:
+            cur = cur + timedelta(days=7)
+    return keys
+
+
+def _stability(by_bucket: dict[str, float], grid: list[str], bucket: str = "week") -> dict[str, Any]:
+    """Разброс позиции ОТДЕЛЬНО от её тренда + сам тренд как признак.
+
+    Первый прогон на данных ГИГ отправил 44 позиции из 47 в класс Z, а колонка X
+    осталась пустой — это был не рваный спрос, а три дефекта расчёта:
+
+    1. **CV мерил рост, а не нестабильность.** У АЗС 208 · ДТ недельная выручка
+       росла с 0,9 до 5,4 млн ₽ (корреляция со временем 0,80) — ряд не «рваный»,
+       он растущий. Классический XYZ применим к стационарному ряду, поэтому
+       разброс считаем по ОСТАТКАМ линейного тренда: 0,79 → 0,47.
+    2. **Нули до подключения станции.** АЗС 207 и 210 начали работать в марте:
+       20 бакетов из 29. Недостающие девять добивались нулями — как будто спрос
+       падал в ноль, — и CV раздувался до 1,33. Считаем от ПЕРВОЙ продажи;
+       нули внутри жизни остаются (не продавали неделю — это и есть рваность).
+    3. **Мало данных = Z.** Позиция, прожившая две недели, получала худший класс
+       автоматически. Теперь у неё честное «—» и пометка короткой истории.
+
+    Тренд при этом не выбрасывается, а становится собственной колонкой: «растёт
+    втрое» — это ответ, а не помеха классификации.
+    """
+    if not by_bucket or len(grid) < 3:
+        return {"cv": None, "life": len(by_bucket), "trend_pct": None,
+                "trend": "flat", "short": True}
+
+    # Жизнь позиции — от первой продажи до конца периода; нули внутри остаются.
+    first = min(by_bucket)
+    live = [b for b in grid if b >= first]
+    life_vals = [by_bucket.get(b, 0.0) for b in live]
+    if len(life_vals) < MIN_LIFE_BUCKETS or sum(life_vals) <= 0:
+        return {"cv": None, "life": len(life_vals), "trend_pct": None,
+                "trend": "flat", "short": True}
+
+    # Тренд — по всей жизни позиции (ответ «куда идём»), разброс — по свежему
+    # окну (ответ «насколько ровно идём сейчас»).
+    trend_pct = _slope_pct(life_vals)
+    trend = "up" if trend_pct > TREND_PCT else ("down" if trend_pct < -TREND_PCT else "flat")
+
+    win = STAB_WINDOW.get(bucket, 12)
+    vals = life_vals[-win:] if len(life_vals) > win else life_vals
+    mu = sum(vals) / len(vals) if vals else 0.0
+    if mu <= 0:
+        return {"cv": None, "life": len(life_vals), "trend_pct": trend_pct,
+                "trend": trend, "short": True}
+
+    n = len(vals)
+    xs = list(range(n))
+    mx = (n - 1) / 2
+    sxx = sum((x - mx) ** 2 for x in xs)
+    slope = (sum((x - mx) * (v - mu) for x, v in zip(xs, vals)) / sxx) if sxx else 0.0
+    resid = [v - (mu + slope * (x - mx)) for x, v in zip(xs, vals)]
+    cv = math.sqrt(sum(e * e for e in resid) / n) / mu
+    return {"cv": round(cv, 3), "life": len(life_vals), "window": n,
+            "trend_pct": trend_pct, "trend": trend, "short": False}
+
+
+def _slope_pct(vals: list[float]) -> float:
+    """Изменение ряда за период в процентах средней — наклон × число шагов."""
+    n = len(vals)
+    mu = sum(vals) / n if n else 0.0
+    if n < 2 or mu <= 0:
+        return 0.0
+    mx = (n - 1) / 2
+    sxx = sum((x - mx) ** 2 for x in range(n))
+    if not sxx:
+        return 0.0
+    slope = sum((x - mx) * (v - mu) for x, v in enumerate(vals)) / sxx
+    return round(slope * (n - 1) / mu * 100, 1)
+
+
+
 class FuelNetworkAnalytics:
     """Сетевые срезы по наливам. Кешируются версионным кешем компании."""
 
@@ -370,12 +480,25 @@ class FuelNetworkAnalytics:
             return st if dimension == "station" else f"{st} · {k[1]}"
 
         b_from, b_to, n_b = _full_buckets(date_from, date_to, bucket)
-        series: dict[tuple, list[float]] = {}
+        grid = _bucket_keys(date_from, date_to, bucket)
+        # ХВОСТ ПЕРИОДА БЕЗ ДАННЫХ. Период выбирает человек («с 1 января»), а
+        # данные приезжают из STS с задержкой: на 29 июля последняя операция была
+        # 11-го. Две пустые недели на конце попадали в расчёт как провал спроса —
+        # СРАЗУ У ВСЕХ позиций, и вся матрица уезжала в «рваные». Считаем по
+        # бакетам, в которых у СЕТИ есть хоть одна операция; чего ещё не было,
+        # того не было ни у кого.
+        live_grid = {str(r.b) for r in bkt_rows}
+        last_data = max(live_grid) if live_grid else None
+        if last_data:
+            grid = [b for b in grid if b <= last_data]
+        # Ряд позиции — упорядоченный по бакетам: без порядка нельзя ни отделить
+        # тренд от разброса, ни понять, с какого момента позиция вообще жила.
+        series: dict[tuple, dict[str, float]] = {}
         for r in bkt_rows:
             # В расчёт стабильности — только полные бакеты; в выручку и ABC —
             # весь период, как его выбрал пользователь.
             if n_b and b_from <= str(r.b) <= b_to:
-                series.setdefault(_key(r), []).append(float(r.v or 0))
+                series.setdefault(_key(r), {})[str(r.b)] = float(r.v or 0)
 
         items = []
         for r in rows:
@@ -383,18 +506,8 @@ class FuelNetworkAnalytics:
             amount = float(r.amount)
             liters = float(r.liters)
             m = amount if measure == "amount" else liters
-            vals = series.get(k, [])
-            # μ и σ — по числу ПОЛНЫХ бакетов, добивая нулями: позиция, что
-            # продавалась одну неделю из тринадцати, обязана быть Z, а не X.
-            # Меньше трёх бакетов — стабильность не считаем: две точки дают либо
-            # ноль разброса, либо сотню процентов, и то и другое ни о чём.
-            mu = sum(vals) / n_b if n_b else 0.0
-            if mu > 0 and n_b >= 3:
-                filled = vals + [0.0] * max(0, n_b - len(vals))
-                var = sum((v - mu) ** 2 for v in filled) / n_b
-                cv = math.sqrt(var) / mu
-            else:
-                cv = None
+            by_bucket = series.get(k, {})
+            stab = _stability(by_bucket, grid, bucket)
             items.append({
                 "key": "|".join(str(x) for x in k),
                 "label": _label(k),
@@ -404,9 +517,17 @@ class FuelNetworkAnalytics:
                 "measure": round(m, 2),
                 "amount": round(amount, 2), "liters": round(liters, 1),
                 "fills": int(r.fills), "cards": int(r.cards or 0),
-                "active_buckets": len(vals),
-                "cv": round(cv, 3) if cv is not None else None,
-                "xyz": _xyz(cv),
+                "active_buckets": len(by_bucket),
+                # Бакетов ЖИЗНИ позиции (от первой продажи), а не бакетов периода:
+                # по ним и считается стабильность.
+                "life_buckets": stab["life"],
+                "stab_window": stab.get("window"),
+                "cv": stab["cv"],
+                "xyz": _xyz(stab["cv"]),
+                # Тренд — отдельный признак, а не часть разброса (см. _stability).
+                "trend_pct": stab["trend_pct"],
+                "trend": stab["trend"],
+                "short_history": stab["short"],
             })
 
         items.sort(key=lambda x: -x["measure"])
@@ -449,7 +570,11 @@ class FuelNetworkAnalytics:
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
             "dimension": dimension, "bucket": bucket, "measure_kind": measure,
-            "buckets": n_b,
+            "buckets": len(grid),
+            # До какого бакета в сети реально есть операции: если период шире,
+            # экран обязан это сказать, иначе цифры выглядят провалом продаж.
+            "data_through": last_data,
+            "period_buckets": n_b,
             "items": items,
             "matrix": sorted(matrix.values(), key=lambda m: m["cell"]),
             "quintiles": quintiles,

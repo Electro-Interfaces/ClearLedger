@@ -113,6 +113,13 @@ export interface AbcItem {
   cards: number
   active_buckets: number
   cv: number | null
+  /** Бакетов жизни позиции (от первой продажи) и окно расчёта разброса. */
+  life_buckets: number
+  stab_window: number | null
+  /** Тренд за всю жизнь позиции — отдельный признак, а не часть разброса. */
+  trend_pct: number | null
+  trend: 'up' | 'down' | 'flat'
+  short_history: boolean
   abc: 'A' | 'B' | 'C'
   xyz: 'X' | 'Y' | 'Z' | '—'
   class: string
@@ -127,6 +134,9 @@ export interface AbcResponse {
   bucket: 'week' | 'month'
   measure_kind: AbcMeasure
   buckets: number
+  /** Полных бакетов в периоде и до какого из них есть данные в сети. */
+  period_buckets: number
+  data_through: string | null
   items: AbcItem[]
   matrix: { cell: string; count: number; measure: number; share_pct: number; hint: string }[]
   quintiles: { quintile: number; count: number; measure: number; share_pct: number }[]

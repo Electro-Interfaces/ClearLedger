@@ -9,7 +9,7 @@
  * таблиц и одна судьба — их правят вместе, разносить по файлам значит четыре
  * раза повторить один и тот же каркас.
  */
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CircleCheckBig, Gauge, Info, Loader2, TrendingUp } from 'lucide-react'
 import {
@@ -305,15 +305,55 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
 // 2. ABC-XYZ и концентрация
 // ═══════════════════════════════════════════════════════════════════════
 
-const ABC_TONE: Record<string, string> = {
-  A: 'text-emerald-400', B: 'text-blue-400', C: 'text-muted-foreground',
+/**
+ * Класс позиции читается ЦВЕТОМ ЗАЛИВКИ по доле выручки — это магнитуда, а
+ * магнитуда кодируется одной hue от светлого к тёмному, не радугой классов.
+ * Сам класс несут буквы и положение в сетке, поэтому цвет свободен под деньги:
+ * взгляд сразу находит клетку, где лежит оборот, а не ту, где больше позиций.
+ */
+function cellFill(sharePct: number, maxShare: number): { bg: string; ink: string } {
+  if (!sharePct) return { bg: 'transparent', ink: 'text-muted-foreground/60' }
+  const t = Math.min(1, sharePct / (maxShare || 1))
+  // Четыре ступени вместо непрерывной шкалы: глаз всё равно не различает
+  // больше, а ступени дают предсказуемый контраст текста.
+  const step = t > 0.66 ? 3 : t > 0.33 ? 2 : t > 0.1 ? 1 : 0
+  return {
+    bg: ['hsl(217 91% 60% / 0.08)', 'hsl(217 91% 60% / 0.18)',
+      'hsl(217 91% 60% / 0.30)', 'hsl(217 91% 60% / 0.45)'][step],
+    ink: step >= 2 ? 'text-foreground' : 'text-foreground/90',
+  }
 }
+
+const ABC_ROW = [
+  { k: 'A', title: 'A — лидеры', sub: 'до 80 % выручки' },
+  { k: 'B', title: 'B — середина', sub: '80–95 %' },
+  { k: 'C', title: 'C — хвост', sub: 'последние 5 %' },
+]
+const XYZ_COL = [
+  { k: 'X', title: 'X — ровный', sub: 'разброс ≤ 25 %' },
+  { k: 'Y', title: 'Y — переменный', sub: '25–50 %' },
+  { k: 'Z', title: 'Z — рваный', sub: '> 50 %' },
+]
+
+const TREND_VIEW: Record<string, { sign: string; cls: string; label: string }> = {
+  up: { sign: '↗', cls: 'text-emerald-400', label: 'растёт' },
+  down: { sign: '↘', cls: 'text-rose-400', label: 'падает' },
+  flat: { sign: '→', cls: 'text-muted-foreground', label: 'ровно' },
+}
+
+/** Деньги в таблице — компактно: «44,4 млн ₽» читается, «44 406 941,32» — нет. */
+const money = (v: number): string => (
+  v >= 1e6 ? `${nf1.format(v / 1e6)} млн` : v >= 1e3 ? `${nf0.format(v / 1e3)} тыс` : nf0.format(v)
+)
 
 export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
   const [dim, setDim] = useState<AbcDimension>('station_fuel')
   const [bucket, setBucket] = useState<'week' | 'month'>('week')
+  // Выбранная клетка матрицы фильтрует таблицу: классификация без связи со
+  // списком — картинка, по которой нельзя работать.
+  const [cell, setCell] = useState<string | null>(null)
   const scope = useFuelScope()
   const ref = useRef<HTMLDivElement>(null)
   const q = useQuery({
@@ -325,99 +365,229 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
   if (q.isLoading) return <Loading />
   const data = q.data
   if (!data) return <Empty />
-  const cells = ['A', 'B', 'C'].flatMap((a) => ['X', 'Y', 'Z'].map((x) => {
-    const m = data.matrix.find((c) => c.cell === a + x)
-    return { cell: a + x, count: m?.count ?? 0, share: m?.share_pct ?? 0, hint: m?.hint ?? '' }
-  }))
+
+  const byCell = new Map(data.matrix.map((m) => [m.cell, m]))
+  const maxShare = Math.max(...data.matrix.map((m) => m.share_pct), 0.01)
+  const rows = cell ? data.items.filter((i) => i.abc + i.xyz === cell) : data.items
+  const unclassified = data.items.filter((i) => i.xyz === '—')
+  const tail = data.items.filter((i) => i.abc === 'C')
+  const tailShare = tail.reduce((s, i) => s + i.share_pct, 0)
+  const leaders = data.items.filter((i) => i.abc === 'A')
+  const risky = data.items.filter((i) => i.abc === 'A' && i.xyz === 'Z')
+  const bucketWord = bucket === 'week' ? 'недель' : 'месяцев'
+  const cutShort = data.period_buckets && data.buckets < data.period_buckets
 
   return (
     <div ref={ref} className="space-y-4 p-4">
-      <Head title="ABC-XYZ и концентрация"
-        hint="ABC — вклад в выручку, XYZ — стабильность спроса по бакетам периода"
+      <Head title="Классы позиций: вклад × предсказуемость"
+        hint={`${data.totals.count} позиций · сетка по ${bucket === 'week' ? 'неделям' : 'месяцам'}`
+          + ` · в расчёте ${data.buckets} полных ${bucketWord}`
+          + (data.data_through ? ` · данные по ${data.data_through.slice(8, 10)}.${data.data_through.slice(5, 7)}` : '')}
         exportEl={() => ref.current}>
-        <Toggle value={dim} onChange={setDim} title="Единица классификации"
+        <Toggle value={dim} onChange={(v) => { setDim(v); setCell(null) }} title="Единица классификации"
           opts={[{ v: 'station_fuel', label: 'АЗС × топливо' }, { v: 'station', label: 'АЗС' }, { v: 'fuel', label: 'Топливо' }]} />
-        <Toggle value={bucket} onChange={setBucket} title="Шаг для расчёта стабильности"
+        <Toggle value={bucket} onChange={(v) => { setBucket(v); setCell(null) }} title="Шаг сетки для расчёта разброса"
           opts={[{ v: 'week', label: 'Недели' }, { v: 'month', label: 'Месяцы' }]} />
       </Head>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_1fr]">
+      {/* Период шире загруженных данных — сказать прямо. Раньше пустой хвост
+          молча превращал ровные позиции в «рваные»: это стоило целой матрицы. */}
+      {cutShort && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/35 bg-amber-500/5 px-3 py-2 text-xs">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+          <span>
+            Период шире загруженных данных: последние операции — {data.data_through}.
+            Пустые {bucketWord} на конце в расчёт разброса не берутся, иначе задержка
+            загрузки выглядела бы падением спроса.
+          </span>
+        </div>
+      )}
+
+      {/* Ответ раньше подробностей: три числа, ради которых экран открывают. */}
+      <Card className="gap-0 py-0">
+        <CardContent className="grid grid-cols-2 p-0 md:grid-cols-4">
+          <Metric label="Лидеры (A)" value={`${leaders.length} поз.`} tone="success"
+            hint={`дают ${pct(leaders.reduce((s, i) => s + i.share_pct, 0))} выручки`} />
+          <Metric label="Крупные и рваные" value={`${risky.length} поз.`}
+            tone={risky.length ? 'danger' : undefined}
+            hint={risky.length ? 'спрос скачет — разобрать причину' : 'таких нет'} />
+          <Metric label="Хвост (C)" value={`${tail.length} поз.`}
+            hint={`${pct(tailShare)} выручки — кандидаты на пересмотр`} />
+          <Metric label="Мало данных" value={`${unclassified.length} поз.`}
+            hint={unclassified.length ? `меньше 6 ${bucketWord} истории` : 'история достаточна у всех'} />
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,420px)_1fr]">
         <Card><CardContent className="pt-4">
-          <div className="mb-2 text-sm font-medium">Матрица 3 × 3</div>
-          <div className="grid grid-cols-3 gap-1.5">
-            {cells.map((c) => (
-              <div key={c.cell} title={c.hint}
-                className={cn('rounded-md border px-2 py-2 text-center',
-                  c.count ? 'bg-muted/40' : 'opacity-40')}>
-                <div className={cn('text-xs font-semibold', ABC_TONE[c.cell[0]])}>{c.cell}</div>
-                <div className="text-base font-semibold tabular-nums">{c.count}</div>
-                <div className="text-[10px] text-muted-foreground">{nf1.format(c.share)} %</div>
+          <div className="mb-3 flex items-baseline justify-between">
+            <span className="text-sm font-medium">Матрица классов</span>
+            {cell && (
+              <button onClick={() => setCell(null)}
+                className="text-xs text-primary hover:underline">Показать все</button>
+            )}
+          </div>
+
+          {/* Заголовки осей — на самих осях, а не в сноске под картинкой. */}
+          <div className="grid grid-cols-[auto_repeat(3,1fr)] gap-1.5 text-center">
+            <div />
+            {XYZ_COL.map((c) => (
+              <div key={c.k} className="pb-1">
+                <div className="text-xs font-semibold">{c.title}</div>
+                <div className="text-[10px] text-muted-foreground">{c.sub}</div>
               </div>
             ))}
+            {ABC_ROW.map((r) => (
+              <Fragment key={r.k}>
+                <div className="flex flex-col justify-center pr-2 text-right">
+                  <div className="text-xs font-semibold">{r.title}</div>
+                  <div className="text-[10px] text-muted-foreground">{r.sub}</div>
+                </div>
+                {XYZ_COL.map((c) => {
+                  const key = r.k + c.k
+                  const m = byCell.get(key)
+                  const count = m?.count ?? 0
+                  const fill = cellFill(m?.share_pct ?? 0, maxShare)
+                  const active = cell === key
+                  return (
+                    <button key={key} type="button" disabled={!count}
+                      onClick={() => setCell(active ? null : key)}
+                      title={m?.hint || 'Позиций этого класса нет'}
+                      aria-pressed={active}
+                      className={cn(
+                        'rounded-md border px-2 py-2.5 text-center transition-colors',
+                        count ? 'cursor-pointer hover:border-primary/60' : 'cursor-default',
+                        active ? 'border-primary ring-1 ring-primary/40' : 'border-border/60',
+                      )}
+                      style={{ background: fill.bg }}>
+                      <div className={cn('text-lg font-semibold tabular-nums', fill.ink)}>{count}</div>
+                      <div className="text-[10px] text-muted-foreground">{nf1.format(m?.share_pct ?? 0)} % ₽</div>
+                    </button>
+                  )
+                })}
+              </Fragment>
+            ))}
           </div>
-          <div className="mt-3 text-[11px] text-muted-foreground">
-            Строки — вклад (A → C), столбцы — стабильность (X → Z). Наведите на клетку,
-            чтобы прочитать, что с ней делать. Бакетов в расчёте: {data.buckets}.
+
+          {/* Совет принадлежит КЛАССУ, а не строке таблицы: в таблице он
+              повторялся восемнадцать раз подряд и съедал четверть ширины. */}
+          <div className="mt-3 min-h-[3rem] rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+            {cell
+              ? <><span className="font-medium text-foreground">{cell}:</span> {byCell.get(cell)?.hint}</>
+              : 'Заливка — доля выручки класса. Нажмите клетку, чтобы оставить в таблице только её позиции.'}
           </div>
+          {unclassified.length > 0 && (
+            <div className="mt-2 text-[11px] text-muted-foreground">
+              Ещё {unclassified.length} позиций без класса: история короче
+              6 {bucketWord} — разброс на таком отрезке показывает случайность, а не спрос.
+            </div>
+          )}
         </CardContent></Card>
 
         <Card><CardContent className="pt-4">
-          <div className="mb-2 text-sm font-medium">Концентрация: квинтили позиций</div>
+          <div className="mb-1 text-sm font-medium">Где лежат деньги</div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Позиции по убыванию выручки, разбитые на пять равных групп.
+          </p>
           <div className="space-y-1.5">
-            {data.quintiles.map((qq) => (
-              <div key={qq.quintile} className="flex items-center gap-2 text-xs">
-                <span className="w-16 shrink-0 text-muted-foreground">{qq.quintile}-я 20 %</span>
-                <div className="h-4 flex-1 overflow-hidden rounded bg-muted/40">
-                  <div className="h-full rounded bg-blue-500/70" style={{ width: `${Math.min(100, qq.share_pct)}%` }} />
+            {data.quintiles.map((qq, idx) => {
+              const label = ['Верхние 20 %', 'Следующие 20 %', 'Средние 20 %',
+                'Предпоследние 20 %', 'Нижние 20 %'][idx] ?? `${qq.quintile}-я группа`
+              return (
+                <div key={qq.quintile} className="flex items-center gap-2 text-xs">
+                  <span className="w-36 shrink-0 text-muted-foreground">{label}</span>
+                  <div className="h-5 flex-1 overflow-hidden rounded bg-muted/40">
+                    <div className="h-full rounded-r-[3px] bg-blue-500/70"
+                      style={{ width: `${Math.max(1.5, Math.min(100, qq.share_pct))}%` }} />
+                  </div>
+                  <span className="w-14 shrink-0 text-right font-medium tabular-nums">{nf1.format(qq.share_pct)} %</span>
+                  <span className="w-16 shrink-0 text-right text-muted-foreground">{qq.count} поз.</span>
                 </div>
-                <span className="w-16 shrink-0 text-right tabular-nums">{nf1.format(qq.share_pct)} %</span>
-                <span className="w-20 shrink-0 text-right text-muted-foreground">{qq.count} поз.</span>
-              </div>
-            ))}
+              )
+            })}
           </div>
-          <div className="mt-3 text-[11px] text-muted-foreground">
-            Средняя по сети смешивает полюса: решения принимаются по верхушке и по хвосту.
-          </div>
+          {data.quintiles.length >= 5 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Верхняя пятая часть даёт {nf1.format(data.quintiles[0].share_pct)} % выручки,
+              нижняя — {nf1.format(data.quintiles[4].share_pct)} %. Средняя по сети такие
+              полюса смешивает: решения принимаются по верхушке и по хвосту.
+            </p>
+          )}
         </CardContent></Card>
       </div>
 
       <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
+        <div className="flex items-center justify-between border-b px-4 py-2.5">
+          <span className="text-sm font-medium">
+            {cell ? `Класс ${cell}` : 'Все позиции'}
+            <span className="ml-2 text-xs font-normal text-muted-foreground">{rows.length}</span>
+          </span>
+          {cell && (
+            <button onClick={() => setCell(null)} className="text-xs text-primary hover:underline">
+              Снять фильтр
+            </button>
+          )}
+        </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-xs">
+          <table className="w-full min-w-[820px] text-xs">
             <thead>
               <tr className="border-b bg-muted/35 text-muted-foreground">
-                <Th>Позиция</Th><Th>Класс</Th><Th right>Выручка</Th><Th right>Доля</Th>
-                <Th right>Накопл.</Th><Th right>Литры</Th><Th right>Наливы</Th>
-                <Th right>Карт</Th><Th right>Разброс (CV)</Th><Th>Что делать</Th>
+                <Th>Позиция</Th><Th>Класс</Th><Th right>Выручка, ₽</Th>
+                <Th right>Доля</Th><Th right>Накопл.</Th><Th right>Литры</Th>
+                <Th right>Наливы</Th><Th right>Карт</Th>
+                <Th right>Разброс</Th><Th right>Тренд</Th>
               </tr>
             </thead>
             <tbody>
-              {data.items.map((i) => (
-                <tr key={i.key} className="border-b border-border/50 hover:bg-muted/25">
-                  <Td>{i.label}</Td>
-                  <Td><span className={cn('font-semibold', ABC_TONE[i.abc])}>{i.abc}</span>
-                    <span className="text-muted-foreground">{i.xyz}</span></Td>
-                  <Td right>{fmtMoney(i.amount)}</Td>
-                  <Td right>{pct(i.share_pct)}</Td>
-                  <Td right className="text-muted-foreground">{pct(i.cum_share_pct)}</Td>
-                  <Td right>{fmtLiters(i.liters)}</Td>
-                  <Td right>{nf0.format(i.fills)}</Td>
-                  <Td right>{nf0.format(i.cards)}</Td>
-                  <Td right className={cn(i.cv != null && i.cv > 0.5 && 'text-amber-400')}>
-                    {i.cv != null ? nf2.format(i.cv) : '—'}
-                  </Td>
-                  <Td className="max-w-[280px] truncate text-muted-foreground" >{i.hint}</Td>
-                </tr>
-              ))}
+              {rows.map((i) => {
+                const tr = TREND_VIEW[i.trend ?? 'flat'] ?? TREND_VIEW.flat
+                return (
+                  <tr key={i.key} className="border-b border-border/50 hover:bg-muted/25">
+                    <Td>{i.label}</Td>
+                    <Td>
+                      <span title={i.hint}
+                        className={cn('rounded px-1.5 py-0.5 font-semibold',
+                          i.xyz === '—' ? 'bg-muted/60 text-muted-foreground' : 'bg-primary/10 text-primary')}>
+                        {i.xyz === '—' ? `${i.abc}·—` : i.abc + i.xyz}
+                      </span>
+                    </Td>
+                    <Td right className="font-medium">{money(i.amount)}</Td>
+                    <Td right>
+                      {/* Бар внутри ячейки — доля читается взглядом, а не сравнением цифр. */}
+                      <div className="relative">
+                        <div className="absolute inset-y-0 right-0 rounded-sm bg-primary/15"
+                          style={{ width: `${Math.min(100, i.share_pct / (data.items[0]?.share_pct || 1) * 100)}%` }} />
+                        <span className="relative">{nf1.format(i.share_pct)} %</span>
+                      </div>
+                    </Td>
+                    <Td right className="text-muted-foreground">{nf1.format(i.cum_share_pct)} %</Td>
+                    <Td right>{fmtLiters(i.liters)}</Td>
+                    <Td right>{nf0.format(i.fills)}</Td>
+                    <Td right>{nf0.format(i.cards)}</Td>
+                    <Td right className={cn(i.cv != null && i.cv > 0.5 && 'text-amber-400')}>
+                      {i.cv != null ? `${nf0.format(i.cv * 100)} %` : '—'}
+                    </Td>
+                    <Td right>
+                      <span className={cn('tabular-nums', tr.cls)}
+                        title={`${tr.label}: ${i.trend_pct != null ? nf0.format(i.trend_pct) : '—'} % за период`}>
+                        {tr.sign} {i.trend_pct != null ? `${nf0.format(i.trend_pct)} %` : '—'}
+                      </span>
+                    </Td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       </CardContent></Card>
 
       <div className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
-        Стабильность считается только по полным бакетам периода: неполная неделя на краю
-        даёт половину обычной выручки и добавила бы разброс из ниоткуда. Нули внутри
-        периода учитываются честно — не продавали неделю, это и есть рваный спрос.
+        <span className="font-medium text-foreground/80">Как читается разброс.</span>{' '}
+        Это отклонение от собственного тренда позиции за последние
+        12 {bucket === 'week' ? 'недель' : 'месяцев'}, а не за весь период: сеть растёт,
+        и без поправки на рост любая позиция выглядела бы рваной. Куда идёт спрос,
+        показывает колонка «Тренд». Нули до подключения станции в расчёт не входят —
+        отсчёт ведётся от первой продажи позиции.
       </div>
     </div>
   )
