@@ -10,7 +10,7 @@
  * документам), минус — излишек. Подписи дублируют знак словом, потому что
  * «−444 л» без слова читается как «мало топлива», а это ровно наоборот.
  */
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Download, Loader2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -765,8 +765,24 @@ function GroupBlock({ group, tol, tols, onPick, sort }: {
         const ariBad = Math.abs(r.arithmetic_gap) > tols.ari
         const contBad = r.continuity_gap != null && Math.abs(r.continuity_gap) > tols.cont
         return (
+          <Fragment key={`${r.shift_number}:${r.opened_at}`}>
+          {/* Разделитель цепочки: после него нумерация смен и книга начинаются
+              заново, и сравнивать строки через эту черту нельзя. Без него лента
+              выглядела так, будто за сменой №7332 идёт смена №4 того же счёта. */}
+          {r.chain_break && (
+            <tr className="border-t-2 border-amber-500/40 bg-amber-500/10">
+              <td colSpan={15} className="px-2.5 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+                {r.opened_at ? new Date(r.opened_at).toLocaleDateString('ru-RU') : ''} — учёт по резервуару начат заново
+                {r.continuity_reason ? `: ${r.continuity_reason}` : ''}
+                {r.chain_jump != null && (
+                  <span className="ml-1 opacity-80">
+                    · скачок на стыке {nf1.format(Math.abs(r.chain_jump))} л — артефакт склейки, не движение топлива
+                  </span>
+                )}
+              </td>
+            </tr>
+          )}
           <tr
-            key={`${r.shift_number}:${r.opened_at}`}
             onClick={() => onPick(r)}
             title="Открыть разбор смены по резервуару"
             className={cn(
@@ -808,14 +824,24 @@ function GroupBlock({ group, tol, tols, onPick, sort }: {
               {r.receipts > 0 ? L1(r.receipts) : '—'}
             </Td>
             <Td right>{L1(r.sales)}</Td>
-            <Td right className="text-muted-foreground">{r.fact_start != null ? L1(r.fact_start) : '—'}</Td>
+            <Td right className="text-muted-foreground">
+              {r.chain_break ? (
+                <span title="Замер относится к прежней цепочке учёта — с книгой этой смены не сопоставим">
+                  — <span className="text-[10px]">прежний учёт</span>
+                </span>
+              ) : r.fact_start != null ? L1(r.fact_start) : '—'}
+            </Td>
             <Td right>{r.fact_end != null ? L1(r.fact_end) : '—'}</Td>
             {/* Расхождение на входе и на выходе — это СОСТОЯНИЕ (в нём сидит
                 накопленное ранее), а Δ — то, что произошло именно в эту смену.
                 Без разделения одна цифра «книга − факт» читается как результат
-                смены, хотя может годами тянуться с прошлого. */}
+                смены, хотя может годами тянуться с прошлого.
+                На разрыве цепочки «расхождение на входе» не существует: книга уже
+                новая, а замер ещё старый — раньше здесь стояло «19 155 л излишек». */}
             <Td right className={cn(gapTone(r.fact_gap_start, tol), 'text-[11px]')}>
-              {gapLabel(r.fact_gap_start)}
+              {r.chain_break
+                ? <span className="text-muted-foreground" title="учёт начат заново — сравнивать не с чем">—</span>
+                : gapLabel(r.fact_gap_start)}
             </Td>
             <Td right className={cn('font-medium', gapTone(r.fact_gap, tol))}>
               {gapLabel(r.fact_gap)}
@@ -835,6 +861,7 @@ function GroupBlock({ group, tol, tols, onPick, sort }: {
               {r.water_volume ? L1(r.water_volume) : '—'}
             </Td>
           </tr>
+          </Fragment>
         )
       })}
     </>
