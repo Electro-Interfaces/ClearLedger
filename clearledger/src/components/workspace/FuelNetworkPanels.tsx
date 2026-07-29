@@ -36,9 +36,16 @@ const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 const nf2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${nf1.format(v)} %`)
 
-/** Область работы экрана: точки и регионы «Области учёта» → коды станций STS. */
-function useFuelScope(): { stationCodes?: number[]; key: string } {
-  const { stationCode, locationIds, regionIds } = useFilters()
+/**
+ * Область работы экрана из общего фильтра: точки и регионы → коды станций STS,
+ * плюс выбранные виды нефтепродуктов.
+ *
+ * Вид топлива приходит отсюда, а не из локального селектора экрана: он выбран в
+ * шапке рабочей области и обязан действовать одинаково на загрузку ТРК, ABC-XYZ,
+ * когорты и приезды — иначе четыре экрана про одну сеть ответят по-разному.
+ */
+function useFuelScope(): { stationCodes?: number[]; fuelCodes?: number[]; key: string } {
+  const { stationCode, locationIds, regionIds, fuelCodes } = useFilters()
   const locations = useLocations()
   const scope = useMemo(
     () => scopeStationCodes(locations, locationIds, regionIds),
@@ -48,7 +55,12 @@ function useFuelScope(): { stationCodes?: number[]; key: string } {
   const codes = Number.isFinite(one)
     ? (scope.length === 0 || scope.includes(one) ? [one] : [-1])
     : (scope.length ? scope : undefined)
-  return { stationCodes: codes, key: `${stationCode ?? ''}|${scope.join(',')}` }
+  const fuels = fuelCodes.map(Number).filter(Number.isFinite)
+  return {
+    stationCodes: codes,
+    fuelCodes: fuels.length ? fuels : undefined,
+    key: `${stationCode ?? ''}|${scope.join(',')}|${fuels.join(',')}`,
+  }
 }
 
 function Loading() {
@@ -132,7 +144,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
   const ref = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['fuel-pumps', companyId, dateFrom, dateTo, level, scope.key],
-    queryFn: () => getFuelPumps({ companyId, dateFrom, dateTo, level, stationCodes: scope.stationCodes }),
+    queryFn: () => getFuelPumps({ companyId, dateFrom, dateTo, level, stationCodes: scope.stationCodes, fuelCodes: scope.fuelCodes }),
     placeholderData: keepPreviousData,
   })
   const silentQ = useQuery({
@@ -306,7 +318,7 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
   const ref = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['fuel-abcxyz', companyId, dateFrom, dateTo, dim, bucket, scope.key],
-    queryFn: () => getFuelAbcXyz({ companyId, dateFrom, dateTo, dimension: dim, bucket, stationCodes: scope.stationCodes }),
+    queryFn: () => getFuelAbcXyz({ companyId, dateFrom, dateTo, dimension: dim, bucket, stationCodes: scope.stationCodes, fuelCodes: scope.fuelCodes }),
     placeholderData: keepPreviousData,
   })
 
@@ -422,7 +434,7 @@ export function FuelClientsPanel({ companyId, dateFrom, dateTo }: {
   const ref = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['fuel-clients', companyId, dateFrom, dateTo, scope.key],
-    queryFn: () => getFuelClients({ companyId, dateFrom, dateTo, stationCodes: scope.stationCodes }),
+    queryFn: () => getFuelClients({ companyId, dateFrom, dateTo, stationCodes: scope.stationCodes, fuelCodes: scope.fuelCodes }),
     placeholderData: keepPreviousData,
   })
 
@@ -482,6 +494,30 @@ export function FuelClientsPanel({ companyId, dateFrom, dateTo }: {
         </CardContent></Card>
 
         <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
+          <div className="border-b px-4 py-2.5 text-sm font-medium">Что берут: виды топлива</div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/35 text-muted-foreground">
+                <Th>Топливо</Th><Th right>Карт</Th><Th right>Покупок</Th>
+                <Th right>Выручка</Th><Th right>Доля</Th><Th right>Ср. чек</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.by_fuel.map((f) => (
+                <tr key={f.fuel_name} className="border-b border-border/50 hover:bg-muted/25">
+                  <Td>{f.fuel_name}</Td>
+                  <Td right>{nf0.format(f.cards)}</Td>
+                  <Td right>{nf0.format(f.fills)}</Td>
+                  <Td right>{fmtMoney(f.amount)}</Td>
+                  <Td right className="font-medium">{pct(f.amount_pct)}</Td>
+                  <Td right>{fmtMoney(f.avg_check)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent></Card>
+
+        <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
           <div className="border-b px-4 py-2.5 text-sm font-medium">Топ карт по обороту</div>
           <div className="max-h-[420px] overflow-y-auto">
             <table className="w-full text-xs">
@@ -532,7 +568,7 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
   const ref = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['fuel-visits', companyId, dateFrom, dateTo, gap, scope.key],
-    queryFn: () => getFuelVisits({ companyId, dateFrom, dateTo, gapMin: Number(gap), stationCodes: scope.stationCodes }),
+    queryFn: () => getFuelVisits({ companyId, dateFrom, dateTo, gapMin: Number(gap), stationCodes: scope.stationCodes, fuelCodes: scope.fuelCodes }),
     placeholderData: keepPreviousData,
   })
 
@@ -563,8 +599,8 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
             hint="насколько занижен чек по наливам" />
           <Metric label="Объём приезда" value={`${nf1.format(t.avg_visit_liters)} л`}
             hint={fmtLiters(t.liters)} />
-          <Metric label="Выручка" value={`${fmtMoneyShort(t.amount)} ₽`}
-            hint={`порог склейки ${data.gap_min} мин`} />
+          <Metric label="Разных видов в приезде" value={nf0.format(t.multi_fuel_visits)}
+            hint={`${pct(t.multi_fuel_pct)} приездов · бак + канистра`} />
         </CardContent>
       </Card>
 
@@ -588,6 +624,33 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
               ))}
             </tbody>
           </table>
+        </CardContent></Card>
+
+        <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
+          <div className="border-b px-4 py-2.5 text-sm font-medium">Чек приезда по видам топлива</div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b bg-muted/35 text-muted-foreground">
+                <Th>Топливо</Th><Th right>Приездов</Th><Th right>Чек приезда</Th>
+                <Th right>Литров за приезд</Th><Th right>Выручка</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.by_fuel.map((f) => (
+                <tr key={f.fuel_name} className="border-b border-border/50 hover:bg-muted/25">
+                  <Td>{f.fuel_name}</Td>
+                  <Td right>{nf0.format(f.visits)}</Td>
+                  <Td right className="font-medium">{fmtMoney(f.avg_visit_check)}</Td>
+                  <Td right>{nf1.format(f.avg_visit_liters)} л</Td>
+                  <Td right>{fmtMoney(f.amount)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
+            Только приезды с одним видом топлива: смешанные ({pct(t.multi_fuel_pct)}) в разрез
+            не входят — их чек принадлежит сразу двум продуктам.
+          </div>
         </CardContent></Card>
 
         <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">

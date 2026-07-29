@@ -245,8 +245,11 @@ export interface FuelTariffGridResponse {
   cells: FuelTariffCell[]
 }
 
-export async function getFuelTariffGrid(p: { companyId: string; dateFrom: string; dateTo: string }): Promise<FuelTariffGridResponse> {
-  return get<FuelTariffGridResponse>('/api/fuel/tariffs/grid', { date_from: p.dateFrom, date_to: p.dateTo })
+export async function getFuelTariffGrid(p: { companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[] }): Promise<FuelTariffGridResponse> {
+  return get<FuelTariffGridResponse>('/api/fuel/tariffs/grid', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
 }
 
 export interface FuelPriceDeviationLine {
@@ -268,8 +271,11 @@ export interface FuelDeviationsResponse {
   discounts_by_channel: { channel: string; label: string; amount: number; discount: number }[]
 }
 
-export async function getFuelPriceDeviations(p: { companyId: string; dateFrom: string; dateTo: string }): Promise<FuelDeviationsResponse> {
-  return get<FuelDeviationsResponse>('/api/fuel/tariffs/deviations', { date_from: p.dateFrom, date_to: p.dateTo })
+export async function getFuelPriceDeviations(p: { companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[] }): Promise<FuelDeviationsResponse> {
+  return get<FuelDeviationsResponse>('/api/fuel/tariffs/deviations', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
 }
 
 export interface FuelPriceTimeseriesResponse {
@@ -318,8 +324,11 @@ export interface FuelCorporateOverviewResponse {
   monthly: { month: string; fills: number; liters: number; amount: number; cards: number }[]
 }
 
-export async function getFuelCorporateOverview(p: { companyId: string; dateFrom: string; dateTo: string }): Promise<FuelCorporateOverviewResponse> {
-  return get<FuelCorporateOverviewResponse>('/api/fuel/corporate/overview', { date_from: p.dateFrom, date_to: p.dateTo })
+export async function getFuelCorporateOverview(p: { companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[] }): Promise<FuelCorporateOverviewResponse> {
+  return get<FuelCorporateOverviewResponse>('/api/fuel/corporate/overview', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
 }
 
 export interface FuelCounterpartyRow {
@@ -343,8 +352,11 @@ export interface FuelCounterpartiesResponse {
   totals: { amount: number; fills: number; liters: number }
 }
 
-export async function getFuelCorporateCounterparties(p: { companyId: string; dateFrom: string; dateTo: string }): Promise<FuelCounterpartiesResponse> {
-  return get<FuelCounterpartiesResponse>('/api/fuel/corporate/counterparties', { date_from: p.dateFrom, date_to: p.dateTo })
+export async function getFuelCorporateCounterparties(p: { companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[] }): Promise<FuelCounterpartiesResponse> {
+  return get<FuelCounterpartiesResponse>('/api/fuel/corporate/counterparties', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
 }
 
 export interface FuelCardRow {
@@ -409,8 +421,11 @@ export interface FuelRetailOverviewResponse {
   weekly: { week: string; fills: number; amount: number; avg_check: number }[]
 }
 
-export async function getFuelRetailOverview(p: { companyId: string; dateFrom: string; dateTo: string }): Promise<FuelRetailOverviewResponse> {
-  return get<FuelRetailOverviewResponse>('/api/fuel/retail/overview', { date_from: p.dateFrom, date_to: p.dateTo })
+export async function getFuelRetailOverview(p: { companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[] }): Promise<FuelRetailOverviewResponse> {
+  return get<FuelRetailOverviewResponse>('/api/fuel/retail/overview', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
 }
 
 export interface FuelRetailLoyaltyResponse {
@@ -428,8 +443,11 @@ export interface FuelRetailLoyaltyResponse {
   top_cards: { card: string; fills: number; liters: number; amount: number }[]
 }
 
-export async function getFuelRetailLoyalty(p: { companyId: string; dateFrom: string; dateTo: string }): Promise<FuelRetailLoyaltyResponse> {
-  return get<FuelRetailLoyaltyResponse>('/api/fuel/retail/loyalty', { date_from: p.dateFrom, date_to: p.dateTo })
+export async function getFuelRetailLoyalty(p: { companyId: string; dateFrom: string; dateTo: string; fuelCodes?: number[] }): Promise<FuelRetailLoyaltyResponse> {
+  return get<FuelRetailLoyaltyResponse>('/api/fuel/retail/loyalty', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    ...(p.fuelCodes?.length ? { fuel_codes: p.fuelCodes.join(',') } : {}),
+  })
 }
 
 // ─── подписи и форматирование топливных метрик ──────────────────────

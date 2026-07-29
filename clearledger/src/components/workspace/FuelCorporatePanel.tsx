@@ -37,6 +37,7 @@ import {
   type FuelMetric, type FuelBucket, type FuelGroupBy, type FuelCardsSort,
   type FuelCounterpartyRow, type FuelTimeseriesResponse,
 } from '@/services/fuelSalesService'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -114,11 +115,12 @@ const fmtMonth = (m: string): string => (m.length >= 7 ? `${m.slice(5, 7)}.${m.s
 /* ────────────────────────── Обзор ────────────────────────── */
 
 function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
+  const fk = useFuelKindFilter()
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-corp-overview', companyId, period.from, period.to],
-    queryFn: () => getFuelCorporateOverview({ companyId, dateFrom: period.from, dateTo: period.to }),
+    queryKey: ['fuel-corp-overview', companyId, period.from, period.to, fk.key],
+    queryFn: () => getFuelCorporateOverview({ companyId, dateFrom: period.from, dateTo: period.to, fuelCodes: fk.fuelCodes }),
   })
   if (isLoading) return <Loading />
   if (!data || data.kpi.fills === 0) return <Empty />
@@ -237,11 +239,12 @@ type CpSortKey = keyof Pick<FuelCounterpartyRow,
   'name' | 'channel' | 'fills' | 'liters' | 'amount' | 'share_pct' | 'avg_fill' | 'avg_price' | 'stations' | 'cards'>
 
 function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
+  const fk = useFuelKindFilter()
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-corp-counterparties', companyId, period.from, period.to],
-    queryFn: () => getFuelCorporateCounterparties({ companyId, dateFrom: period.from, dateTo: period.to }),
+    queryKey: ['fuel-corp-counterparties', companyId, period.from, period.to, fk.key],
+    queryFn: () => getFuelCorporateCounterparties({ companyId, dateFrom: period.from, dateTo: period.to, fuelCodes: fk.fuelCodes }),
   })
   const [sort, setSort] = useState<{ key: CpSortKey; dir: 'asc' | 'desc' }>({ key: 'amount', dir: 'desc' })
   const rows = useMemo(() => {

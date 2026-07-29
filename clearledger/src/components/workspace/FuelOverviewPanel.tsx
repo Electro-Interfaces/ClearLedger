@@ -33,6 +33,7 @@ import {
   type ShiftDashboardData, type DashTrend, type DashStation, type DashOnboarding,
   type DashActivity, type DashCard,
 } from '@/services/fuel/fuelMappingService'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 
 // Цвет маркеров подключения станций (спокойный emerald, тема-независимый).
 const ONBOARD_COLOR = 'hsl(160 60% 45%)'
@@ -481,11 +482,12 @@ function ReceiptsBlock({ receipts }: { receipts: ShiftDashboardData['receipts'] 
 
 // ─── FIFO-маржа (mini) ───────────────────────────────────────────────
 function MarginMini({ companyId, from, to }: { companyId: string; from: string; to: string }) {
+  const fk = useFuelKindFilter()
   const { data } = useQuery({
     // companyId обязателен в ключе: запрос скоупится заголовком X-Company-Id,
     // без него при смене компании отдаётся кеш предыдущей.
-    queryKey: ['fuel-overview-margin', companyId, from, to],
-    queryFn: () => getCostingMargin(from, to, 'fuel'),
+    queryKey: ['fuel-overview-margin', companyId, from, to, fk.key],
+    queryFn: () => getCostingMargin(from, to, 'fuel', fk.fuelCodes),
   })
   if (!data) return null
   const t = data.totals
@@ -654,17 +656,21 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
     [locations, locationIds, regionIds],
   )
   const scopeKey = scopeCodes.join(',')
+  // Вид нефтепродукта из общего фильтра: обзор обязан считать по нему так же,
+  // как разрезы и цены, иначе шапка спорит с экранами под ней.
+  const fk = useFuelKindFilter()
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['fuel-overview', companyId, period.from, period.to, scopeKey],
+    queryKey: ['fuel-overview', companyId, period.from, period.to, scopeKey, fk.key],
     queryFn: () => getShiftDashboard(period.from, period.to, {
       compare: true,
       stations: scopeCodes.length ? scopeCodes.map(String) : undefined,
+      fuelCodes: fk.fuelCodes,
     }),
   })
   const margin = useQuery({
-    queryKey: ['fuel-overview-margin-kpi', companyId, period.from, period.to],
-    queryFn: () => getCostingMargin(period.from, period.to, 'fuel'),
+    queryKey: ['fuel-overview-margin-kpi', companyId, period.from, period.to, fk.key],
+    queryFn: () => getCostingMargin(period.from, period.to, 'fuel', fk.fuelCodes),
   })
   // Готовность к 1С — тот же контур, иначе алерты в шапке считались бы по всей
   // сети при выбранной одной АЗС.

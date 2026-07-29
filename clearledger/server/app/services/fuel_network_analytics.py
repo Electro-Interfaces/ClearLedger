@@ -263,22 +263,29 @@ class FuelNetworkAnalytics:
     # ─── Молчащие точки ─────────────────────────────────────────────────
 
     @cached_report("fuel:silent")
-    async def silent(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def silent(self, company_id, date_from: date, date_to: date,
+                     fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """Станции, ТРК и пистолеты без единого налива за период (но с историей).
 
         Отдельно от `pumps`, потому что вопрос другой: не «кто сколько отпустил»,
         а «что стоит». Ответ нужен коротким списком, а не строкой в таблице на 337 позиций.
+
+        С выбранным видом топлива вопрос сужается до «кто перестал отпускать ИМЕННО
+        этот продукт»: пистолет под ДТ может молчать при живой станции, и увидеть это
+        можно только так.
         """
         start = datetime(date_from.year, date_from.month, date_from.day)
         end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        fuel_cond = [T.fuel_code.in_(fuel_codes)] if fuel_codes else []
 
         async def _agg(keys: list) -> tuple[dict, dict]:
             hist = {tuple(r[:len(keys)]): r.last_at for r in (await self.db.execute(
                 select(*keys, func.max(T.dt).label("last_at"))
-                .where(T.company_id == company_id, T.dt < end).group_by(*keys)
+                .where(T.company_id == company_id, T.dt < end, *fuel_cond).group_by(*keys)
             )).all()}
             live = {tuple(r[:len(keys)]) for r in (await self.db.execute(
-                select(*keys).where(T.company_id == company_id, T.dt >= start, T.dt <= end)
+                select(*keys).where(T.company_id == company_id, T.dt >= start, T.dt <= end,
+                                    *fuel_cond)
                 .group_by(*keys)
             )).all()}
             return hist, live
@@ -551,6 +558,30 @@ class FuelNetworkAnalytics:
             "cards_top10": max(1, int(len(ordered) * 0.1)),
         }
 
+        # Что берут клиенты. Разные виды топлива — разные клиенты: ДТ возят
+        # перевозчики по ведомостям, АИ-95 льют физлица с банковских карт. Без
+        # этого разреза когорты не отвечают на вопрос «кого мы теряем».
+        # Выражение группировки — ОДИН объект на select и group_by: два одинаковых
+        # `coalesce(...)` дают разные bind-параметры, и Postgres не признаёт их
+        # тем же выражением («must appear in the GROUP BY clause»).
+        fuel_col = func.coalesce(T.fuel_name, "—")
+        by_fuel = (await self.db.execute(
+            select(fuel_col.label("fuel"),
+                   func.count(distinct(CARD)).label("cards"),
+                   func.count().label("fills"),
+                   func.coalesce(func.sum(T.amount), 0).label("amount"),
+                   func.coalesce(func.sum(T.liters), 0).label("liters"))
+            .where(*conds, valid).group_by(fuel_col)
+        )).all()
+        fuels = sorted([{
+            "fuel_name": str(r.fuel),
+            "cards": int(r.cards or 0), "fills": int(r.fills),
+            "amount": round(float(r.amount), 2), "liters": round(float(r.liters), 1),
+            "avg_check": round(float(r.amount) / int(r.fills), 2) if r.fills else 0.0,
+        } for r in by_fuel], key=lambda x: -x["amount"])
+        for f in fuels:
+            f["amount_pct"] = round(f["amount"] / total_amount * 100, 2) if total_amount else 0.0
+
         top = sorted(rows, key=lambda r: -float(r.amount))[:50]
         top_cards = [{
             "card": r.card,
@@ -566,6 +597,7 @@ class FuelNetworkAnalytics:
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
             "cohorts": cohorts,
+            "by_fuel": fuels,
             "concentration": concentration,
             "movement": movement,
             "top_cards": top_cards,
@@ -594,6 +626,7 @@ class FuelNetworkAnalytics:
             select(
                 CARD.label("card"), T.station_code.label("st"), T.dt.label("dt"),
                 T.amount.label("amount"), T.liters.label("liters"),
+                func.coalesce(T.fuel_name, "—").label("fuel"),
                 func.lag(T.dt).over(partition_by=[CARD, T.station_code],
                                     order_by=[T.dt, T.ext_id]).label("prev_dt"),
             ).where(*conds, valid)
@@ -605,7 +638,7 @@ class FuelNetworkAnalytics:
             else_=0,
         )
         grp = select(
-            base.c.card, base.c.st, base.c.dt, base.c.amount, base.c.liters,
+            base.c.card, base.c.st, base.c.dt, base.c.amount, base.c.liters, base.c.fuel,
             func.sum(is_new).over(partition_by=[base.c.card, base.c.st],
                                   order_by=[base.c.dt],
                                   rows=(None, 0)).label("vno"),
@@ -615,6 +648,10 @@ class FuelNetworkAnalytics:
             func.count().label("fills"),
             func.sum(grp.c.amount).label("amount"),
             func.sum(grp.c.liters).label("liters"),
+            # Сколько РАЗНЫХ видов топлива в одном приезде: два бака одной машины
+            # и заправка «себе + канистра ДТ» — принципиально разные сюжеты.
+            func.count(distinct(grp.c.fuel)).label("fuels"),
+            func.min(grp.c.fuel).label("fuel"),
         ).group_by(grp.c.card, grp.c.st, grp.c.vno).subquery("v")
 
         agg = (await self.db.execute(select(
@@ -623,6 +660,7 @@ class FuelNetworkAnalytics:
             func.coalesce(func.sum(vis.c.amount), 0).label("amount"),
             func.coalesce(func.sum(vis.c.liters), 0).label("liters"),
             func.count().filter(vis.c.fills > 1).label("multi"),
+            func.count().filter(vis.c.fuels > 1).label("multi_fuel"),
         ))).one()
         dist = (await self.db.execute(
             select(vis.c.fills.label("n"), func.count().label("visits"),
@@ -635,6 +673,13 @@ class FuelNetworkAnalytics:
                    func.coalesce(func.sum(vis.c.amount), 0).label("amount"),
                    func.sum(vis.c.fills).label("fills"))
             .group_by(vis.c.st)
+        )).all()
+
+        by_fuel = (await self.db.execute(
+            select(vis.c.fuel, func.count().label("visits"),
+                   func.coalesce(func.sum(vis.c.amount), 0).label("amount"),
+                   func.coalesce(func.sum(vis.c.liters), 0).label("liters"))
+            .where(vis.c.fuels == 1).group_by(vis.c.fuel)
         )).all()
 
         names = await self.sales._station_names(company_id)
@@ -651,6 +696,8 @@ class FuelNetworkAnalytics:
                 "amount": round(amount, 2),
                 "liters": round(liters, 1),
                 "multi_visits": int(agg.multi or 0),
+                "multi_fuel_visits": int(agg.multi_fuel or 0),
+                "multi_fuel_pct": round(int(agg.multi_fuel or 0) / visits_n * 100, 2) if visits_n else 0.0,
                 "multi_pct": round(int(agg.multi or 0) / visits_n * 100, 2) if visits_n else 0.0,
                 "fills_per_visit": round(fills_n / visits_n, 3) if visits_n else 0.0,
                 # Ради этой пары цифр всё и считается: чек визита выше чека налива
@@ -659,6 +706,14 @@ class FuelNetworkAnalytics:
                 "avg_fill_check": round(amount / fills_n, 2) if fills_n else 0.0,
                 "avg_visit_liters": round(liters / visits_n, 2) if visits_n else 0.0,
             },
+            # Однотопливные приезды в разрезе продукта: «чек приезда за ДТ» —
+            # то, что сравнивают с конкурентом, а не средняя по всем видам.
+            "by_fuel": sorted([{
+                "fuel_name": str(f.fuel), "visits": int(f.visits),
+                "amount": round(float(f.amount), 2), "liters": round(float(f.liters), 1),
+                "avg_visit_check": round(float(f.amount) / int(f.visits), 2) if f.visits else 0.0,
+                "avg_visit_liters": round(float(f.liters) / int(f.visits), 2) if f.visits else 0.0,
+            } for f in by_fuel], key=lambda x: -x["amount"]),
             "distribution": [{
                 "fills": int(d.n), "visits": int(d.visits),
                 "amount": round(float(d.amount), 2),
@@ -678,7 +733,8 @@ class FuelNetworkAnalytics:
     # ─── Инсайты для «Обзора» ───────────────────────────────────────────
 
     @cached_report("fuel:insights")
-    async def insights(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def insights(self, company_id, date_from: date, date_to: date,
+                       fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """Короткие выводы для шапки обзора: где не работает и где лежат деньги.
 
         Каждый вывод — уже посчитанная выше цифра, а не новый источник: экран не
@@ -686,7 +742,7 @@ class FuelNetworkAnalytics:
         """
         out: list[dict[str, Any]] = []
 
-        sil = await self.silent(company_id, date_from, date_to)
+        sil = await self.silent(company_id, date_from, date_to, fuel_codes)
         idle_nozzles = sil["counts"]["nozzles"]
         if idle_nozzles:
             worst = sil["nozzles"][0]
@@ -700,7 +756,8 @@ class FuelNetworkAnalytics:
                 "link": {"sub": "pumps"},
             })
 
-        pumps = await self.pumps(company_id, date_from, date_to, level="nozzle")
+        pumps = await self.pumps(company_id, date_from, date_to, level="nozzle",
+                                 fuel_codes=fuel_codes)
         med = pumps["totals"]["median_fills_per_day"]
         top = pumps["totals"]["top_fills_per_day"]
         if med and top and top > med * 2:
@@ -714,7 +771,8 @@ class FuelNetworkAnalytics:
                 "link": {"sub": "pumps"},
             })
 
-        abc = await self.abc_xyz(company_id, date_from, date_to, dimension="station_fuel")
+        abc = await self.abc_xyz(company_id, date_from, date_to, dimension="station_fuel",
+                                 fuel_codes=fuel_codes)
         q = abc["quintiles"]
         if len(q) >= 5:
             out.append({
@@ -737,7 +795,7 @@ class FuelNetworkAnalytics:
                 "link": {"sub": "abcxyz"},
             })
 
-        cl = await self.clients(company_id, date_from, date_to)
+        cl = await self.clients(company_id, date_from, date_to, fuel_codes=fuel_codes)
         conc = cl.get("concentration") or {}
         once = next((c for c in cl["cohorts"] if c["code"] == "once"), None)
         if conc.get("top10_pct"):
@@ -763,7 +821,7 @@ class FuelNetworkAnalytics:
                 "link": {"sub": "clients"},
             })
 
-        vis = await self.visits(company_id, date_from, date_to)
+        vis = await self.visits(company_id, date_from, date_to, fuel_codes=fuel_codes)
         t = vis["totals"]
         if t["multi_visits"]:
             out.append({

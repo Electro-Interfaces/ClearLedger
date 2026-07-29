@@ -18,6 +18,7 @@ import { useShifts } from '@/hooks/useFuel'
 import { getStsStationsFromLocations } from '@/services/locationService'
 import { WorkspaceFilterModal } from './WorkspaceFilterModal'
 import { WorkspaceScopeControl } from './WorkspaceScopePopover'
+import { FuelKindControl } from './FuelKindControl'
 import { ViewHistoryMenu } from './ViewHistoryMenu'
 import { ActiveFilterChips } from '@/components/common/ActiveFilterChips'
 import { AdvancedOnly } from '@/components/common/AdvancedOnly'
@@ -385,6 +386,9 @@ export function WorkspaceFilterBar() {
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
         <PeriodControl />
         <WorkspaceScopeControl />
+        {/* Вид нефтепродукта — третье измерение общего контура рядом с периодом и
+            областью: у топливного профиля он меняет ответ на любом экране. */}
+        {!isEnergy ? <FuelKindControl /> : null}
         {/* Технический источник загрузки смен: в простом режиме убран — как и
             одноимённая секция внутри модалки фильтра. Период и область учёта
             рядом остаются всегда: это ежедневный контур.

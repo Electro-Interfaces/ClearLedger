@@ -33,6 +33,17 @@ export interface FilterState {
   regionIds: string[]
   /** Коды ЭЗС-станций (energy) для сужения аналитики сессий. Пусто = «все». */
   stationCodes: string[]
+  /**
+   * Виды нефтепродуктов (коды STS) — сквозное измерение топливного профиля.
+   * Пусто = «все».
+   *
+   * Топливо на АЗС — не один товар: у АИ-92, АИ-95 и ДТ разная маржа, разный
+   * спрос и разные клиенты, и «выручка сети» без указания вида — среднее по
+   * больнице. Поэтому вид стоит рядом с периодом и областью учёта, а не внутри
+   * отдельных экранов: разрез, который меняет ответ везде, обязан жить в общем
+   * фильтре.
+   */
+  fuelCodes: string[]
 }
 
 /** Именованный предустановленный набор фильтра. */
@@ -51,6 +62,8 @@ interface FilterContextType extends FilterState {
   toggleRegion: (id: string) => void
   setStationCodes: (codes: string[]) => void
   toggleStationCode: (code: string) => void
+  setFuelCodes: (codes: string[]) => void
+  toggleFuelCode: (code: string) => void
   clearAll: () => void
   /** Целиком заменить состояние фильтра (для истории/пресетов). */
   applyState: (s: FilterState) => void
@@ -103,6 +116,7 @@ function coerceState(parsed: unknown): FilterState {
     locationIds: Array.isArray(o.locationIds) ? (o.locationIds as string[]) : [],
     regionIds: Array.isArray(o.regionIds) ? (o.regionIds as string[]) : [],
     stationCodes: Array.isArray(o.stationCodes) ? (o.stationCodes as string[]) : [],
+    fuelCodes: Array.isArray(o.fuelCodes) ? (o.fuelCodes as string[]) : [],
   }
 }
 
@@ -277,6 +291,19 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  const setFuelCodes = useCallback((codes: string[]) => {
+    setState((prev) => ({ ...prev, fuelCodes: codes }))
+  }, [])
+
+  const toggleFuelCode = useCallback((code: string) => {
+    setState((prev) => {
+      const set = new Set(prev.fuelCodes)
+      if (set.has(code)) set.delete(code)
+      else set.add(code)
+      return { ...prev, fuelCodes: [...set] }
+    })
+  }, [])
+
   const clearAll = useCallback(() => {
     setState(clearFilterSelections)
   }, [])
@@ -307,9 +334,11 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     toggleRegion,
     setStationCodes,
     toggleStationCode,
+    setFuelCodes,
+    toggleFuelCode,
     clearAll,
     filterByLocation,
-  }), [state, setPeriod, setStationCode, applyState, history, commitToHistory, presets, savePreset, deletePreset, setLocationIds, toggleLocation, setRegionIds, toggleRegion, setStationCodes, toggleStationCode, clearAll, filterByLocation])
+  }), [state, setPeriod, setStationCode, applyState, history, commitToHistory, presets, savePreset, deletePreset, setLocationIds, toggleLocation, setRegionIds, toggleRegion, setStationCodes, toggleStationCode, setFuelCodes, toggleFuelCode, clearAll, filterByLocation])
 
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>
 }

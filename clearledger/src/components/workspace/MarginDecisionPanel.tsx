@@ -43,6 +43,7 @@ import {
   type CostingMarginLine,
 } from '@/services/fuel/fuelMappingService'
 import { CostingWorkspace } from '@/components/fuel/CostingWorkspace'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 
 const money = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const number = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -198,9 +199,11 @@ export function MarginDecisionPanel({ companyId, dateFrom, dateTo }: {
   const activeTab = requestedTab && ['fuel', 'station', 'station-fuel', 'trend', 'costing'].includes(requestedTab)
     ? requestedTab
     : 'fuel'
+  // Вид нефтепродукта из общего фильтра: маржа АИ-95 и маржа ДТ — разные истории.
+  const fk = useFuelKindFilter()
   const query = useQuery({
-    queryKey: ['margin-decision-dashboard', companyId, dateFrom, dateTo],
-    queryFn: () => getMarginDecisionDashboard(companyId, dateFrom, dateTo),
+    queryKey: ['margin-decision-dashboard', companyId, dateFrom, dateTo, fk.key],
+    queryFn: () => getMarginDecisionDashboard(companyId, dateFrom, dateTo, fk.fuelCodes),
   })
 
   const setActiveTab = (value: string) => {

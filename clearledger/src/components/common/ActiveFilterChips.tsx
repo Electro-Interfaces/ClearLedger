@@ -14,6 +14,7 @@ import { X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useFilters } from '@/contexts/FilterContext'
 import { useLocations } from '@/hooks/useLocations'
+import { useFuelKinds } from '@/hooks/useFuelKinds'
 
 interface Chip {
   key: string
@@ -24,6 +25,7 @@ interface Chip {
 export function ActiveFilterChips({ className }: { className?: string }) {
   const f = useFilters()
   const locations = useLocations()
+  const kinds = useFuelKinds()
 
   const chips: Chip[] = []
   if (f.stationCode !== 'all') {
@@ -38,6 +40,12 @@ export function ActiveFilterChips({ className }: { className?: string }) {
   }
   for (const c of f.stationCodes) {
     chips.push({ key: `st:${c}`, label: `ЭЗС ${c}`, onRemove: () => f.toggleStationCode(c) })
+  }
+  // Вид нефтепродукта — такое же ограничение, как область: без чипа человек видит
+  // урезанные цифры и не понимает, почему выручка вдвое меньше вчерашней.
+  for (const c of f.fuelCodes) {
+    const name = kinds.find((k) => String(k.code) === c)?.name ?? `Код ${c}`
+    chips.push({ key: `fuel:${c}`, label: `Топливо: ${name}`, onRemove: () => f.toggleFuelCode(c) })
   }
   if (chips.length === 0) return null
 

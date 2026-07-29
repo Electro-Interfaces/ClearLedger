@@ -344,8 +344,11 @@ export interface CostingMargin {
   totals: CostingMarginTotals
 }
 /** group_by: fuel | payment | station | month | fuel_payment */
-export const getCostingMargin = (dateFrom: string, dateTo: string, groupBy = 'fuel') =>
-  get<CostingMargin>('/api/fuel/costing/margin', { date_from: dateFrom, date_to: dateTo, group_by: groupBy })
+export const getCostingMargin = (dateFrom: string, dateTo: string, groupBy = 'fuel', fuelCodes?: number[]) =>
+  get<CostingMargin>('/api/fuel/costing/margin', {
+    date_from: dateFrom, date_to: dateTo, group_by: groupBy,
+    ...(fuelCodes?.length ? { fuel_codes: fuelCodes.join(',') } : {}),
+  })
 
 export interface MarginDecisionDashboard {
   period: { from: string; to: string }
@@ -366,11 +369,13 @@ export interface MarginDecisionDashboard {
   }
 }
 
-export const getMarginDecisionDashboard = (companyId: string, dateFrom: string, dateTo: string) =>
+export const getMarginDecisionDashboard = (companyId: string, dateFrom: string, dateTo: string,
+  fuelCodes?: number[]) =>
   get<MarginDecisionDashboard>('/api/fuel/costing/decision-dashboard', {
     company_id: companyId,
     date_from: dateFrom,
     date_to: dateTo,
+    ...(fuelCodes?.length ? { fuel_codes: fuelCodes.join(',') } : {}),
   })
 
 export interface FuelOpeningBalance {
@@ -491,11 +496,13 @@ export interface ShiftDashboardData {
    *  вместе с trends: Δ% без явной базы читать нельзя. */
   prev_period?: { from: string; to: string }
 }
-export const getShiftDashboard = (dateFrom: string, dateTo: string, opts?: { stations?: string[]; compare?: boolean }) =>
+export const getShiftDashboard = (dateFrom: string, dateTo: string,
+  opts?: { stations?: string[]; compare?: boolean; fuelCodes?: number[] }) =>
   get<ShiftDashboardData>('/api/fuel/shift-dashboard', {
     date_from: dateFrom,
     date_to: dateTo,
     stations: opts?.stations?.length ? opts.stations.join(',') : undefined,
+    fuel_codes: opts?.fuelCodes?.length ? opts.fuelCodes.join(',') : undefined,
     compare: opts?.compare ? 'true' : undefined,
   })
 

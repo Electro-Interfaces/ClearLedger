@@ -24,6 +24,7 @@ import {
   getFuelTxRows, getFuelTxFilters, getFuelTxOverview, syncFuelTransactions, getFuelTxSyncStatus,
   type FuelTxRow,
 } from '@/services/fuel/fuelMappingService'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
@@ -141,7 +142,12 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
 }) {
   const qc = useQueryClient()
   const [station, setStation] = useState<string>(ALL)
-  const [fuelCodes, setFuelCodes] = useState<Set<number>>(new Set())
+  // Стартовый набор — из общего фильтра: реестр открывается уже суженным по виду
+  // топлива, как и все соседние экраны. Дальше пользователь правит его локально.
+  const fk = useFuelKindFilter()
+  const [fuelCodes, setFuelCodes] = useState<Set<number>>(() => new Set(fk.fuelCodes ?? []))
+  const fkKey = fk.key
+  useEffect(() => { setFuelCodes(new Set(fk.fuelCodes ?? [])) }, [fkKey])
   const [payTypes, setPayTypes] = useState<Set<string>>(new Set())
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')

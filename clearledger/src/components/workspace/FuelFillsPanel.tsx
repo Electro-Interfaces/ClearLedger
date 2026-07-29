@@ -89,7 +89,7 @@ function SegmentToggle({ value, onChange }: { value: SegmentSel; onChange: (v: S
  * регионов на «Реализации» не влиял вообще.
  */
 function useFuelNarrow(): FuelNarrow & { key: string } {
-  const { stationCode, locationIds, regionIds } = useFilters()
+  const { stationCode, locationIds, regionIds, fuelCodes } = useFilters()
   const locations = useLocations()
   const seg = useContext(FuelSegmentCtx)
   const segment = SEGMENT_VAL[seg]
@@ -106,7 +106,15 @@ function useFuelNarrow(): FuelNarrow & { key: string } {
     ? (scopeCodes.length === 0 || scopeCodes.includes(srcCode) ? [srcCode] : [])
     : (scopeCodes.length > 0 ? scopeCodes : undefined)
 
-  return { stationCodes, segment, key: `${stationCode ?? ''}|${scopeCodes.join(',')}|${seg}` }
+  // Вид топлива — измерение общего фильтра, а не экрана: сузили в шапке — сузилось
+  // всё, включая разрезы, динамику, сравнение периодов и когорты карт.
+  const fuels = fuelCodes.map(Number).filter(Number.isFinite)
+
+  return {
+    stationCodes, segment,
+    fuelCodes: fuels.length ? fuels : undefined,
+    key: `${stationCode ?? ''}|${scopeCodes.join(',')}|${seg}|${fuels.join(',')}`,
+  }
 }
 type Narrow = ReturnType<typeof useFuelNarrow>
 
@@ -214,7 +222,7 @@ function useFills(companyId: string, dateFrom: string, dateTo: string, groupBy: 
   const n = useFuelNarrow()
   return useQuery({
     queryKey: ['fuel-fills', groupBy, companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getFuelFills({ companyId, dateFrom, dateTo, groupBy, stationCodes: n.stationCodes, segment: n.segment }),
+    queryFn: () => getFuelFills({ companyId, dateFrom, dateTo, groupBy, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
   })
 }
 
@@ -234,7 +242,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
   const withSpark = SPARK_GROUPS.includes(p.group)
   const spark = useQuery({
     queryKey: ['fuel-slice-spark', companyId, period.from, period.to, p.group, n.key],
-    queryFn: () => getFuelSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', groupBy: p.group, metric: 'amount', topN: 1000, stationCodes: n.stationCodes, segment: n.segment }),
+    queryFn: () => getFuelSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: 'month', groupBy: p.group, metric: 'amount', topN: 1000, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
     enabled: withSpark,
   })
   const sparkMap = useMemo(() => {
@@ -294,7 +302,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
           <Button variant="outline" size="sm" className="h-7 px-2 text-xs"
             onClick={() => exportFuelPivot({
               companyId, dateFrom: period.from, dateTo: period.to, groupBy: p.group,
-              narrow: { stationCodes: n.stationCodes, segment: n.segment },
+              narrow: { stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment },
               title: `Реализация_${col}`,
             })}>
             Сводная × месяцы
@@ -305,7 +313,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
         <FuelDrillDialog open onClose={() => setDrill(null)}
           companyId={companyId} dateFrom={period.from} dateTo={period.to}
           dim={p.group} dimVal={drill.key} label={`${col}: ${drill.label}`}
-          narrow={{ stationCodes: n.stationCodes, segment: n.segment }} />
+          narrow={{ stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }} />
       )}
       <FillKpis t={t} />
       {data.truncated > 0 && (
@@ -381,7 +389,7 @@ function FuelHeatmap({ companyId, dateFrom, dateTo, metric }: {
   const n = useFuelNarrow()
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-heatmap', companyId, dateFrom, dateTo, metric, n.key],
-    queryFn: () => getFuelHeatmap({ companyId, dateFrom, dateTo, metric, stationCodes: n.stationCodes, segment: n.segment }),
+    queryFn: () => getFuelHeatmap({ companyId, dateFrom, dateTo, metric, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
   })
   if (isLoading) return <Loading />
   if (!data || data.cells.length === 0) return <Empty />
@@ -500,13 +508,13 @@ function Dynamics({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom
 
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-timeseries', companyId, period.from, period.to, p.bucket, p.metric, p.seriesSel, n.key],
-    queryFn: () => getFuelTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, seriesBy, stationCodes: n.stationCodes, segment: n.segment }),
+    queryFn: () => getFuelTimeseries({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, seriesBy, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
   })
   const yoyOn = p.yoy && p.seriesSel === '__net__'
   const prevFrom = shiftYearISO(period.from, -1), prevTo = shiftYearISO(period.to, -1)
   const prev = useQuery({
     queryKey: ['fuel-timeseries-yoy', companyId, prevFrom, prevTo, p.bucket, p.metric, n.key],
-    queryFn: () => getFuelTimeseries({ companyId, dateFrom: prevFrom, dateTo: prevTo, bucket: p.bucket, metric: p.metric, stationCodes: n.stationCodes, segment: n.segment }),
+    queryFn: () => getFuelTimeseries({ companyId, dateFrom: prevFrom, dateTo: prevTo, bucket: p.bucket, metric: p.metric, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
     enabled: yoyOn,
   })
   const hasData = data && data.data.length > 0
@@ -622,7 +630,7 @@ function SliceCompare({ companyId, dateFrom, dateTo }: { companyId: string; date
 
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-slice', companyId, period.from, period.to, p.bucket, p.metric, p.seriesSel, p.topN, n.key],
-    queryFn: () => getFuelSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, groupBy, topN: p.topN, stationCodes: n.stationCodes, segment: n.segment }),
+    queryFn: () => getFuelSlice({ companyId, dateFrom: period.from, dateTo: period.to, bucket: p.bucket, metric: p.metric, groupBy, topN: p.topN, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
   })
   const hasData = data && data.intervals.length > 0
   const format = fuelChartFormat(p.metric)
@@ -682,7 +690,7 @@ function ManualCompare({ companyId, dateFrom, dateTo }: { companyId: string; dat
   const ready = periods.length >= 2 && periods.every((x) => x.from && x.to)
   const { data, isLoading, error } = useQuery({
     queryKey: ['fuel-compare-multi', companyId, JSON.stringify(periods), p.metric, p.groupBy, n.key],
-    queryFn: () => getFuelCompareMulti({ companyId, periods, metric: p.metric, groupBy: p.groupBy, stationCodes: n.stationCodes, segment: n.segment }),
+    queryFn: () => getFuelCompareMulti({ companyId, periods, metric: p.metric, groupBy: p.groupBy, stationCodes: n.stationCodes, fuelCodes: n.fuelCodes, segment: n.segment }),
     enabled: ready,
   })
 

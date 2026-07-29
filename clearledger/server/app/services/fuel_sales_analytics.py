@@ -704,10 +704,11 @@ class FuelSalesAnalytics:
     # ─── Тарифы ─────────────────────────────────────────────────────────
 
     @cached_report("fuel:tariff_grid")
-    async def tariff_grid(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def tariff_grid(self, company_id, date_from: date, date_to: date,
+                          fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """Прайс-сетка станция × вид топлива: номинал стеллы (взвеш.), диапазон, факт."""
         _cls, dups = await self._classification(company_id)
-        conds = self._conds(company_id, date_from, date_to, dups)
+        conds = self._conds(company_id, date_from, date_to, dups, fuel_codes=fuel_codes)
         rows = (await self.db.execute(
             select(
                 T.station_code, T.fuel_code,
@@ -749,11 +750,12 @@ class FuelSalesAnalytics:
         }
 
     @cached_report("fuel:tariff_dev")
-    async def price_deviations(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def price_deviations(self, company_id, date_from: date, date_to: date,
+                               fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """Отклонение факт-цены станции от средней по сети (на вид топлива) +
         скидки по каналам из сменного sales-блока (fuel_shift_sales.discount)."""
         _cls, dups = await self._classification(company_id)
-        conds = self._conds(company_id, date_from, date_to, dups)
+        conds = self._conds(company_id, date_from, date_to, dups, fuel_codes=fuel_codes)
         rows = (await self.db.execute(
             select(
                 T.station_code, T.fuel_code,
@@ -846,11 +848,13 @@ class FuelSalesAnalytics:
     # ─── Корпоратив (сегмент corp = cards + ledger) ─────────────────────
 
     @cached_report("fuel:corp_overview")
-    async def corporate_overview(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def corporate_overview(self, company_id, date_from: date, date_to: date,
+                                 fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """KPI corp-сегмента + структура по топливу/станциям/каналам + помесячно."""
         cls, dups = await self._classification(company_id)
         corp_names = cls.segment_names("corp")
-        conds = self._conds(company_id, date_from, date_to, dups, pay_names=corp_names)
+        conds = self._conds(company_id, date_from, date_to, dups,
+                            fuel_codes=fuel_codes, pay_names=corp_names)
         valid_card = CARD.is_not(None) & func.trim(T.card).op("!~")("^0+$")
 
         kpi_row = (await self.db.execute(select(
@@ -862,7 +866,7 @@ class FuelSalesAnalytics:
 
         total_all = float((await self.db.execute(select(
             func.coalesce(func.sum(T.amount), 0)
-        ).where(*self._conds(company_id, date_from, date_to, dups)))).scalar_one())
+        ).where(*self._conds(company_id, date_from, date_to, dups, fuel_codes=fuel_codes)))).scalar_one())
 
         async def breakdown(gcol, label_fn):
             rows = (await self.db.execute(
@@ -912,12 +916,14 @@ class FuelSalesAnalytics:
         }
 
     @cached_report("fuel:corp_cparties")
-    async def corporate_counterparties(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def corporate_counterparties(self, company_id, date_from: date, date_to: date,
+                                       fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """Контрагенты-процессоры corp-сегмента (уровень вида оплаты): БАЛТОП,
         VIAcard, Инфорком и т.д. — готовые «клиенты» без НСИ."""
         cls, dups = await self._classification(company_id)
         corp_names = cls.segment_names("corp")
-        conds = self._conds(company_id, date_from, date_to, dups, pay_names=corp_names)
+        conds = self._conds(company_id, date_from, date_to, dups,
+                            fuel_codes=fuel_codes, pay_names=corp_names)
         valid_card = CARD.is_not(None) & func.trim(T.card).op("!~")("^0+$")
         rows = (await self.db.execute(
             select(T.pay_type_name.label("name"),
@@ -1062,11 +1068,13 @@ class FuelSalesAnalytics:
     # ─── Частные лица (retail = retail_cash + retail_card + retail) ─────
 
     @cached_report("fuel:retail_overview")
-    async def retail_overview(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def retail_overview(self, company_id, date_from: date, date_to: date,
+                              fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """KPI розницы + нал/безнал + структура + гистограмма чеков + понедельно."""
         cls, dups = await self._classification(company_id)
         retail_names = cls.segment_names("retail")
-        conds = self._conds(company_id, date_from, date_to, dups, pay_names=retail_names)
+        conds = self._conds(company_id, date_from, date_to, dups,
+                            fuel_codes=fuel_codes, pay_names=retail_names)
 
         kpi_row = (await self.db.execute(select(
             func.count(), func.coalesce(func.sum(T.liters), 0), func.coalesce(func.sum(T.amount), 0),
@@ -1075,7 +1083,7 @@ class FuelSalesAnalytics:
 
         total_all = float((await self.db.execute(select(
             func.coalesce(func.sum(T.amount), 0)
-        ).where(*self._conds(company_id, date_from, date_to, dups)))).scalar_one())
+        ).where(*self._conds(company_id, date_from, date_to, dups, fuel_codes=fuel_codes)))).scalar_one())
 
         ch_case = cls.channel_case()
         by_pay_rows = (await self.db.execute(
@@ -1163,7 +1171,8 @@ class FuelSalesAnalytics:
         }
 
     @cached_report("fuel:retail_loyalty")
-    async def retail_loyalty(self, company_id, date_from: date, date_to: date) -> dict[str, Any]:
+    async def retail_loyalty(self, company_id, date_from: date, date_to: date,
+                             fuel_codes: tuple[int, ...] = ()) -> dict[str, Any]:
         """Лояльность розницы по картам (токены банковских карт «Карта МПС»):
         постоянные vs разовые, частота визитов, топ-карты, выручка повторных."""
         cls, dups = await self._classification(company_id)
@@ -1183,7 +1192,8 @@ class FuelSalesAnalytics:
         # покрытие картами внутри розницы (наличные карт не несут)
         seg_tot = (await self.db.execute(select(
             func.count(), func.coalesce(func.sum(T.amount), 0),
-        ).where(*self._conds(company_id, date_from, date_to, dups, pay_names=retail_names)))).one()
+        ).where(*self._conds(company_id, date_from, date_to, dups,
+                             fuel_codes=fuel_codes, pay_names=retail_names)))).one()
         seg_fills, seg_amount = int(seg_tot[0]), float(seg_tot[1])
 
         bins = [("1 визит", 1, 1), ("2 визита", 2, 2), ("3–5", 3, 5),

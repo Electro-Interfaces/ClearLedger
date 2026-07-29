@@ -13,6 +13,7 @@ import { ReceiptAnalysisPanel } from '@/components/workspace/ReceiptAnalysisPane
 import { VarianceCausesPanel } from '@/components/workspace/VarianceCausesPanel'
 import { InventoryPanel } from '@/components/workspace/InventoryPanel'
 import { useFilters } from '@/contexts/FilterContext'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 import { useLocations } from '@/hooks/useLocations'
 import { cn } from '@/lib/utils'
 import {
@@ -173,6 +174,7 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
   view?: FuelBalanceView
 }) {
   const { stationCode, locationIds } = useFilters()
+  const fk = useFuelKindFilter()
   const locations = useLocations()
   const [stations, setStations] = useState<string[]>([])
   const [fuels, setFuels] = useState<string[]>([])
@@ -193,15 +195,19 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
   useEffect(() => setFuels([]), [dateFrom, dateTo])
 
   const effectiveStations = stations.length > 0 ? stations.map(Number) : workspaceStations
+  // Вид топлива: фильтр экрана сужает ВНУТРИ выбора из шапки рабочей области.
+  const effectiveFuels = fuels.length > 0
+    ? fuels.map(Number).filter(Number.isFinite)
+    : (fk.fuelCodes ?? [])
   const query = useQuery({
-    queryKey: ['analytics-fuelbalance-v2', companyId, dateFrom, dateTo, effectiveStations, fuels],
+    queryKey: ['analytics-fuelbalance-v2', companyId, dateFrom, dateTo, effectiveStations, effectiveFuels],
     queryFn: () => getFuelBalance({
       companyId,
       dateFrom,
       dateTo,
       groupBy: 'station_fuel',
       stationCodes: effectiveStations.length ? effectiveStations : undefined,
-      fuelCodes: fuels.length ? fuels.map(Number) : undefined,
+      fuelCodes: effectiveFuels.length ? effectiveFuels : undefined,
     }),
     placeholderData: keepPreviousData,
   })
@@ -364,42 +370,42 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
               <TankLedgerTabs view="journal"
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
-                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+                fuelCodes={effectiveFuels}
               />
             </TabsContent>
             <TabsContent value="book_tanks" className="mt-3">
               <TankLedgerTabs view="tanks"
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
-                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+                fuelCodes={effectiveFuels}
               />
             </TabsContent>
             <TabsContent value="book_issues" className="mt-3">
               <TankLedgerTabs view="issues"
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
-                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+                fuelCodes={effectiveFuels}
               />
             </TabsContent>
             <TabsContent value="receipts" className="mt-3">
               <ReceiptAnalysisPanel
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
-                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+                fuelCodes={effectiveFuels}
               />
             </TabsContent>
             <TabsContent value="causes" className="mt-3">
               <VarianceCausesPanel
                 companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
                 stationCodes={effectiveStations}
-                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+                fuelCodes={effectiveFuels}
               />
             </TabsContent>
             <TabsContent value="inventory" className="mt-3">
               <InventoryPanel
                 companyId={companyId} dateTo={dateTo}
                 stationCodes={effectiveStations}
-                fuelCodes={fuels.map(Number).filter(Number.isFinite)}
+                fuelCodes={effectiveFuels}
               />
             </TabsContent>
             <TabsContent value="summary" className="mt-3"><Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0"><SummaryTable rows={data.lines} totals={data.totals} /></CardContent></Card></TabsContent>

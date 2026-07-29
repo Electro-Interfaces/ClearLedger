@@ -164,6 +164,11 @@ export interface ClientCohort {
 export interface ClientsResponse {
   period: { from: string; to: string }
   cohorts: ClientCohort[]
+  /** Что берут клиенты: у ДТ и АИ-95 разные люди и разный чек. */
+  by_fuel: {
+    fuel_name: string; cards: number; fills: number
+    amount: number; liters: number; avg_check: number; amount_pct: number
+  }[]
   concentration: {
     top1_pct: number; top5_pct: number; top10_pct: number; top20_pct: number
     cards_top10: number
@@ -195,9 +200,15 @@ export interface VisitsResponse {
   totals: {
     visits: number; fills: number; amount: number; liters: number
     multi_visits: number; multi_pct: number; fills_per_visit: number
+    multi_fuel_visits: number; multi_fuel_pct: number
     avg_visit_check: number; avg_fill_check: number; avg_visit_liters: number
   }
   distribution: { fills: number; visits: number; amount: number; share_pct: number }[]
+  /** Однотопливные приезды в разрезе продукта — чек приезда «за ДТ», а не средний. */
+  by_fuel: {
+    fuel_name: string; visits: number; amount: number; liters: number
+    avg_visit_check: number; avg_visit_liters: number
+  }[]
   by_station: {
     station_code: number; station: string; visits: number; fills: number
     multi: number; multi_pct: number; amount: number; avg_visit_check: number

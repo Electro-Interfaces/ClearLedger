@@ -27,6 +27,7 @@ import {
   fmtFuelMetricCompact, fuelChartFormat,
   type FuelGroupBy, type FuelTariffCell, type FuelFillsLine, type FuelPriceDeviationLine,
 } from '@/services/fuelSalesService'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -109,11 +110,12 @@ function SortTable<T>({ rows, cols, initial, rowKey, exp }: {
 /* ────────────────────── Таб: Прайс-лист (сетка) ────────────────────── */
 
 function PriceGridTab({ companyId, dateFrom, dateTo }: TabProps) {
+  const fk = useFuelKindFilter()
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-tariff-grid', companyId, period.from, period.to],
-    queryFn: () => getFuelTariffGrid({ companyId, dateFrom: period.from, dateTo: period.to }),
+    queryKey: ['fuel-tariff-grid', companyId, period.from, period.to, fk.key],
+    queryFn: () => getFuelTariffGrid({ companyId, dateFrom: period.from, dateTo: period.to, fuelCodes: fk.fuelCodes }),
   })
   const cellMap = useMemo(() => {
     const m = new Map<string, FuelTariffCell>()
@@ -253,12 +255,13 @@ function AvgPricesTab({ companyId, dateFrom, dateTo }: TabProps) {
 /* ────────────────────── Таб: Отклонения цен ────────────────────── */
 
 function DeviationsTab({ companyId, dateFrom, dateTo }: TabProps) {
+  const fk = useFuelKindFilter()
   const [p, patch] = useTabParams('fuel_tariffs/dev', { fuel: 'all' })
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-tariff-dev', companyId, period.from, period.to],
-    queryFn: () => getFuelPriceDeviations({ companyId, dateFrom: period.from, dateTo: period.to }),
+    queryKey: ['fuel-tariff-dev', companyId, period.from, period.to, fk.key],
+    queryFn: () => getFuelPriceDeviations({ companyId, dateFrom: period.from, dateTo: period.to, fuelCodes: fk.fuelCodes }),
   })
   const fuels = useMemo(() => Array.from(new Set((data?.lines ?? []).map((l) => l.fuel))), [data])
   const lines = useMemo(

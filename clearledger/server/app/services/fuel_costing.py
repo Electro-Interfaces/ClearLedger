@@ -371,7 +371,11 @@ class FuelCostingService:
             ), 2),
         }
 
-    async def compute(self, date_from: date, date_to: date, group_by: str = "fuel") -> dict:
+    async def compute(self, date_from: date, date_to: date, group_by: str = "fuel",
+                      fuel_codes: tuple[int, ...] = ()) -> dict:
+        # Вид топлива приходит из общего фильтра рабочей области: маржа АИ-95 и
+        # маржа ДТ живут по разным законам, и «маржа сети» без вида — среднее,
+        # по которому цену не поставишь.
         queues = await self._build_queues()
         sale_rows = await self._sales_ordered()
 
@@ -387,6 +391,8 @@ class FuelCostingService:
         # Для выручки партии считаем цену продажи списанных литров пропорцией.
 
         for opened_at, station_id, fuel_code, sales in self._sale_groups(sale_rows):
+            if fuel_codes and fuel_code not in fuel_codes:
+                continue
             q = queues.get((station_id, fuel_code))
             allocations = self._allocate_group(q, opened_at, sales)
             in_period = date_from <= (opened_at.date() if opened_at else date_from) <= date_to
@@ -478,7 +484,8 @@ class FuelCostingService:
             },
         }
 
-    async def decision_dashboard(self, date_from: date, date_to: date) -> dict:
+    async def decision_dashboard(self, date_from: date, date_to: date,
+                                 fuel_codes: tuple[int, ...] = ()) -> dict:
         """Один FIFO-прогон для управленческого экрана: текущий и прошлый периоды,
         разрезы топлива, АЗС, АЗС × топливо и месячная динамика."""
         queues = await self._build_queues()
@@ -507,6 +514,8 @@ class FuelCostingService:
             row.cogs += cogs
 
         for opened_at, station_id, fuel_code, sales in self._sale_groups(sale_rows):
+            if fuel_codes and fuel_code not in fuel_codes:
+                continue
             q = queues.get((station_id, fuel_code))
             allocations = self._allocate_group(q, opened_at, sales)
 

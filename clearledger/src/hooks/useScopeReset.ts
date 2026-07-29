@@ -59,7 +59,7 @@ export function useScopeKey(): string {
  * `Период: 2026-06-30 — 2026-07-18 · Регион: Москва · Типов данных: 2`
  */
 export function useScopeSubtitle(opts?: { scopeApplied?: boolean }): string {
-  const { period, stationCode, locationIds, regionIds, stationCodes } = useFilters()
+  const { period, stationCode, locationIds, regionIds, stationCodes, fuelCodes } = useFilters()
 
   const parts = [`Период: ${period.from} — ${period.to}`]
 
@@ -78,6 +78,14 @@ export function useScopeSubtitle(opts?: { scopeApplied?: boolean }): string {
   else parts.push('Вся сеть')
 
   if (stationCode !== 'all') parts.push(`Источник STS: ${stationCode}`)
+
+  // Вид нефтепродукта — часть контура выгрузки: файл по одному ДТ и файл по всей
+  // номенклатуре внешне неразличимы, если не сказать этого в шапке.
+  if (fuelCodes.length > 0) {
+    parts.push(fuelCodes.length === 1
+      ? `Топливо: код ${fuelCodes[0]}`
+      : `Видов топлива: ${fuelCodes.length}`)
+  }
 
   return parts.join(' · ')
 }

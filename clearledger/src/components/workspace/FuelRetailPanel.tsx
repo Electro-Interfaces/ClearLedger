@@ -32,6 +32,7 @@ import {
   FUEL_METRIC_LABELS, fmtFuelMetric, fmtFuelMetricCompact, fmtFuelMetricShort, fuelChartFormat, fmtRub0,
   type FuelMetric, type FuelBucket, type FuelBreakdownRow, type FuelTimeseriesResponse,
 } from '@/services/fuelSalesService'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -59,9 +60,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 interface TabProps { companyId: string; dateFrom: string; dateTo: string }
 
 function useRetailOverview(companyId: string, dateFrom: string, dateTo: string) {
+  const fk = useFuelKindFilter()
   return useQuery({
-    queryKey: ['fuel-retail-overview', companyId, dateFrom, dateTo],
-    queryFn: () => getFuelRetailOverview({ companyId, dateFrom, dateTo }),
+    queryKey: ['fuel-retail-overview', companyId, dateFrom, dateTo, fk.key],
+    queryFn: () => getFuelRetailOverview({ companyId, dateFrom, dateTo, fuelCodes: fk.fuelCodes }),
   })
 }
 
@@ -259,12 +261,13 @@ function FreqTooltip({ active, payload }: { active?: boolean; payload?: readonly
 }
 
 function Loyalty({ companyId, dateFrom, dateTo }: TabProps) {
+  const fk = useFuelKindFilter()
   const [p, patch] = useTabParams('fuel_retail/loyalty', { fm: 'cards' as FreqMetric })
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
   const { data, isLoading } = useQuery({
-    queryKey: ['fuel-retail-loyalty', companyId, period.from, period.to],
-    queryFn: () => getFuelRetailLoyalty({ companyId, dateFrom: period.from, dateTo: period.to }),
+    queryKey: ['fuel-retail-loyalty', companyId, period.from, period.to, fk.key],
+    queryFn: () => getFuelRetailLoyalty({ companyId, dateFrom: period.from, dateTo: period.to, fuelCodes: fk.fuelCodes }),
   })
   if (isLoading) return <Loading />
   if (!data || data.kpi.cards === 0) return <Empty text="Нет карточных реализаций за период" />

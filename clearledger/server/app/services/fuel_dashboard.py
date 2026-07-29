@@ -35,7 +35,8 @@ class FuelDashboardService:
         self.session = session
         self.company_id = company_id
 
-    async def _load(self, date_from: date, date_to: date, station_ids: list[uuid.UUID] | None):
+    async def _load(self, date_from: date, date_to: date, station_ids: list[uuid.UUID] | None,
+                    fuel_codes: tuple[int, ...] = ()):
         dt_from = datetime(date_from.year, date_from.month, date_from.day)
         dt_to = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
         q = select(FuelShift).where(
@@ -47,8 +48,12 @@ class FuelDashboardService:
             q = q.where(FuelShift.station_id.in_(station_ids))
         shifts = (await self.session.execute(q)).scalars().all()
         shift_ids = [s.id for s in shifts]
-        sales = (await self.session.execute(select(FuelShiftSale).where(
-            FuelShiftSale.shift_id.in_(shift_ids)))).scalars().all() if shift_ids else []
+        sq = select(FuelShiftSale).where(FuelShiftSale.shift_id.in_(shift_ids))
+        # Смены и касса остаются целиком: смена не принадлежит одному виду топлива,
+        # а инкассация тем более. Сужаем то, у чего вид есть, — продажи и приёмку.
+        if fuel_codes:
+            sq = sq.where(FuelShiftSale.fuel_code.in_(fuel_codes))
+        sales = (await self.session.execute(sq)).scalars().all() if shift_ids else []
         cash = (await self.session.execute(select(FuelCashMovement).where(
             FuelCashMovement.shift_id.in_(shift_ids)))).scalars().all() if shift_ids else []
         rq = select(FuelReceipt).where(
@@ -58,18 +63,21 @@ class FuelDashboardService:
         )
         if station_ids:
             rq = rq.where(FuelReceipt.station_id.in_(station_ids))
+        if fuel_codes:
+            rq = rq.where(FuelReceipt.fuel_code.in_(fuel_codes))
         receipts = (await self.session.execute(rq)).scalars().all()
         return shifts, sales, cash, receipts
 
     async def compute(self, date_from: date, date_to: date,
-                      station_ids: list[uuid.UUID] | None = None, compare: bool = False) -> dict:
+                      station_ids: list[uuid.UUID] | None = None, compare: bool = False,
+                      fuel_codes: tuple[int, ...] = ()) -> dict:
         ctx = await load_mapping_context(self.session, self.company_id)
 
         def fuel_name(code: int) -> str:
             fm = ctx.fuel(code) if code is not None else None
             return (fm.fuel_name if fm else None) or f"код {code}"
 
-        shifts, sales, cash, receipts = await self._load(date_from, date_to, station_ids)
+        shifts, sales, cash, receipts = await self._load(date_from, date_to, station_ids, fuel_codes)
         kpis = self._kpis(shifts, sales, cash, receipts, fuel_name)
         charts = self._charts(shifts, sales, date_from, date_to, fuel_name)
         by_station = await self._by_station(shifts, sales)
@@ -77,7 +85,7 @@ class FuelDashboardService:
         # Разрез оплат/топлива со счётчиком НАЛИВОВ — из пооперационных транзакций
         # (fuel_transactions, грейн=налив). Фолбэк на сырые отчёты смен (без count),
         # если транзакции за период ещё не загружены.
-        payment_methods, fuel_types_raw = await self._tx_breakdowns(date_from, date_to, station_ids)
+        payment_methods, fuel_types_raw = await self._tx_breakdowns(date_from, date_to, station_ids, fuel_codes)
         if not payment_methods:
             payment_methods, fuel_types_raw = await self._raw_breakdowns(date_from, date_to, station_ids)
         activity = await self._activity(date_from, date_to, station_ids)
@@ -120,7 +128,7 @@ class FuelDashboardService:
             days = (date_to - date_from).days + 1
             cmp_to = date_from - timedelta(days=1)
             cmp_from = cmp_to - timedelta(days=days - 1)
-            c_shifts, c_sales, c_cash, c_receipts = await self._load(cmp_from, cmp_to, station_ids)
+            c_shifts, c_sales, c_cash, c_receipts = await self._load(cmp_from, cmp_to, station_ids, fuel_codes)
             c_kpis = self._kpis(c_shifts, c_sales, c_cash, c_receipts, fuel_name)
             result["trends"] = self._trends(kpis, c_kpis)
             # Границы базы сравнения отдаём наружу: Δ% без явной базы — скрытое
@@ -394,7 +402,8 @@ class FuelDashboardService:
         } for r in rows]
 
     async def _tx_breakdowns(self, date_from: date, date_to: date,
-                             station_ids: list | None) -> tuple[list[dict], list[dict]]:
+                             station_ids: list | None,
+                             fuel_codes: tuple[int, ...] = ()) -> tuple[list[dict], list[dict]]:
         """Разрез по видам оплаты и топлива из пооперационных транзакций (наливов).
         Даёт три колонки как в эталоне: наливы(count) · выручка · объём."""
         dt_from = datetime(date_from.year, date_from.month, date_from.day)
@@ -403,6 +412,8 @@ class FuelDashboardService:
         conds = [T.company_id == self.company_id, T.dt >= dt_from, T.dt <= dt_to]
         if station_ids:
             conds.append(T.station_id.in_(station_ids))
+        if fuel_codes:
+            conds.append(T.fuel_code.in_(fuel_codes))
         pay = (await self.session.execute(
             select(T.pay_type_name, func.count().label("n"),
                    func.coalesce(func.sum(T.liters), 0).label("vol"),

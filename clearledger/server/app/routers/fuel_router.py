@@ -1831,6 +1831,7 @@ async def costing_margin(
     date_from: str = Query(...),
     date_to: str = Query(...),
     group_by: str = Query("fuel"),   # fuel | payment | station | month | fuel_payment
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1838,7 +1839,8 @@ async def costing_margin(
     Независимо от проводок 1С: продажи − себестоимость партий (ТТН), списанная по ФИФО."""
     cid = await _company_id(user, db)
     svc = FuelCostingService(db, cid)
-    return await svc.compute(date.fromisoformat(date_from), date.fromisoformat(date_to), group_by)
+    return await svc.compute(date.fromisoformat(date_from), date.fromisoformat(date_to), group_by,
+                             fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/costing/decision-dashboard")
@@ -1846,6 +1848,7 @@ async def costing_decision_dashboard(
     company_id: str = Query(...),
     date_from: str = Query(...),
     date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1856,7 +1859,8 @@ async def costing_decision_dashboard(
     if period_from > period_to:
         raise HTTPException(422, "Начало периода позже окончания")
     svc = FuelCostingService(db, cid)
-    return await svc.decision_dashboard(period_from, period_to)
+    return await svc.decision_dashboard(period_from, period_to,
+                                        fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/costing/opening-balances")
@@ -2161,6 +2165,7 @@ async def shift_dashboard(
     date_from: str = Query(...),
     date_to: str = Query(...),
     stations: str | None = Query(None),   # CSV station_ids (UUID); пусто = все АЗС компании
+    fuel_codes: str | None = Query(None),
     compare: bool = Query(False),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -2171,7 +2176,8 @@ async def shift_dashboard(
     station_ids = await _resolve_station_filter(db, cid, stations)
     svc = FuelDashboardService(db, cid)
     return await svc.compute(
-        date.fromisoformat(date_from), date.fromisoformat(date_to), station_ids, compare)
+        date.fromisoformat(date_from), date.fromisoformat(date_to), station_ids, compare,
+        fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/cash-collections")
@@ -2935,12 +2941,13 @@ async def analytics_pumps(
 @router.get("/analytics/silent")
 async def analytics_silent(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Станции, ТРК и пистолеты без единого налива за период (с историей до него)."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelNetworkAnalytics(db).silent(cid, df, dt)
+    return await FuelNetworkAnalytics(db).silent(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/analytics/abc-xyz")
@@ -3000,34 +3007,37 @@ async def analytics_visits(
 @router.get("/analytics/insights")
 async def analytics_insights(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Короткие выводы для шапки «Обзора» — из тех же агрегатов, что и экраны."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelNetworkAnalytics(db).insights(cid, df, dt)
+    return await FuelNetworkAnalytics(db).insights(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/tariffs/grid")
 async def tariffs_grid(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Прайс-сетка станция × вид топлива (номинал стеллы, диапазон, факт)."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelSalesAnalytics(db).tariff_grid(cid, df, dt)
+    return await FuelSalesAnalytics(db).tariff_grid(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/tariffs/deviations")
 async def tariffs_deviations(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Отклонения факт-цены станций от сети + скидки по каналам (сменный блок)."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelSalesAnalytics(db).price_deviations(cid, df, dt)
+    return await FuelSalesAnalytics(db).price_deviations(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/tariffs/timeseries")
@@ -3047,23 +3057,25 @@ async def tariffs_timeseries(
 @router.get("/corporate/overview")
 async def corporate_overview(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """KPI корпоративного сегмента (топливные карты + ведомости)."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelSalesAnalytics(db).corporate_overview(cid, df, dt)
+    return await FuelSalesAnalytics(db).corporate_overview(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/corporate/counterparties")
 async def corporate_counterparties(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Контрагенты-процессоры corp-сегмента (уровень вида оплаты)."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelSalesAnalytics(db).corporate_counterparties(cid, df, dt)
+    return await FuelSalesAnalytics(db).corporate_counterparties(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/corporate/cards")
@@ -3087,23 +3099,25 @@ async def corporate_cards(
 @router.get("/retail/overview")
 async def retail_overview(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """KPI розницы: нал/безнал, структура, гистограмма чеков, понедельно."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelSalesAnalytics(db).retail_overview(cid, df, dt)
+    return await FuelSalesAnalytics(db).retail_overview(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.get("/retail/loyalty")
 async def retail_loyalty(
     date_from: str = Query(...), date_to: str = Query(...),
+    fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Лояльность розницы по токенам банковских карт."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
-    return await FuelSalesAnalytics(db).retail_loyalty(cid, df, dt)
+    return await FuelSalesAnalytics(db).retail_loyalty(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
 @router.post("/stations/sync-geo")

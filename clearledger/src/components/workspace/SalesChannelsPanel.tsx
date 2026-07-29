@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MultiSelectFilter } from '@/components/locations/fleet/MultiSelectFilter'
 import { useFilters } from '@/contexts/FilterContext'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 import { useLocations } from '@/hooks/useLocations'
 import { cn } from '@/lib/utils'
 import { fmtLiters, fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
@@ -228,6 +229,7 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
   dateTo: string
 }) {
   const { stationCode, locationIds } = useFilters()
+  const fk = useFuelKindFilter()
   const locations = useLocations()
   const [stations, setStations] = useState<string[]>([])
   const [fuels, setFuels] = useState<string[]>([])
@@ -263,13 +265,18 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
     if (stations.length > 0) return stations.map(Number)
     return workspaceStations
   }, [stations, workspaceStations])
+  // Вид топлива: локальный селектор экрана сужает ВНУТРИ выбора из шапки —
+  // выбрали в общем фильтре ДТ, экран не может показать бензин.
+  const effectiveFuels = useMemo(() => (
+    fuels.length ? fuels.map(Number) : (fk.fuelCodes ?? [])
+  ), [fuels, fk.fuelCodes])
   const params = useMemo(() => ({
     dateFrom,
     dateTo,
     stationCodes: effectiveStations.length ? effectiveStations : undefined,
-    fuelCodes: fuels.length ? fuels.map(Number) : undefined,
+    fuelCodes: effectiveFuels.length ? effectiveFuels : undefined,
     payTypes: payments.length ? payments : undefined,
-  }), [dateFrom, dateTo, effectiveStations, fuels, payments])
+  }), [dateFrom, dateTo, effectiveStations, effectiveFuels, payments])
   const analyticsQuery = useQuery({
     queryKey: ['fuel-sales-channels', companyId, params],
     queryFn: () => getSalesChannelsAnalytics(params),
