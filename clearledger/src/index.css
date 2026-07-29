@@ -579,6 +579,39 @@
   background: transparent;
 }
 
+/* ── Тултипы карты АЗС ──
+   Дефолтный тултип Leaflet — белая плашка с чёрной рамкой: на тёмной карте она
+   светится ярче самих станций и перетягивает внимание с данных на подсказку.
+   Карточка наведения одета в токены темы; подпись станции идёт без подложки —
+   это ярлык рядом с точкой, а не вторая карточка поверх карты. */
+.cl-map-tip.leaflet-tooltip {
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 10px;
+  box-shadow: var(--shadow-large);
+  padding: 8px 10px;
+  font: inherit;
+  white-space: normal;
+}
+.cl-map-tip.leaflet-tooltip::before { border-top-color: hsl(var(--border)); }
+
+.cl-map-label.leaflet-tooltip {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0;
+  /* Обводка тенью вместо подложки: подпись читается и на светлой воде, и на
+     тёмной суше, но не закрывает карту прямоугольником. */
+  text-shadow:
+    0 0 3px hsl(var(--background)), 0 0 3px hsl(var(--background)),
+    0 0 5px hsl(var(--background));
+}
+.cl-map-label.leaflet-tooltip::before { display: none; }
+
 /* ── Печать и сохранение в PDF ─────────────────────────────────────────────
    Отчёт руководителю печатают из браузера: диалог печати умеет «Сохранить как
    PDF», и кириллица в нём правильная без шрифтовых пакетов на сервере.
