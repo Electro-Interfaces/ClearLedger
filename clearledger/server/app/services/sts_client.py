@@ -101,6 +101,36 @@ async def sts_get_shifts(
     return await _auth_get(base_url, login, password, f"/v1/shifts?{params}")
 
 
+async def sts_get_coupons(
+    base_url: str, login: str, password: str,
+    system: int, station: int | None = None,
+    dt_beg: str | None = None, dt_end: str | None = None,
+) -> list[dict]:
+    """Купоны станции за период — STS /v1/coupons (dt_beg/dt_end как 'YYYY-MM-DD HH:MM:SS').
+
+    Купоны живут только в STS: в наливе остаётся номер купона, а дату его выдачи
+    знает лишь этот справочник. Ответ — блоки по системам/станциям с массивом
+    `coupons`; возвращаем плоский список {number, dt, …}.
+    """
+    from urllib.parse import urlencode
+    q: dict[str, Any] = {"system": system}
+    if station is not None:
+        q["station"] = station
+    if dt_beg:
+        q["dt_beg"] = dt_beg
+    if dt_end:
+        q["dt_end"] = dt_end
+    data = await _auth_get(base_url, login, password, f"/v1/coupons?{urlencode(q)}")
+    flat: list[dict] = []
+    if isinstance(data, list):
+        for block in data:
+            if isinstance(block, dict):
+                flat.extend(c for c in (block.get("coupons") or []) if isinstance(c, dict))
+    elif isinstance(data, dict):
+        flat.extend(c for c in (data.get("coupons") or []) if isinstance(c, dict))
+    return flat
+
+
 async def sts_get_points(
     base_url: str, login: str, password: str, system: int,
 ) -> list[dict]:

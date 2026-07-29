@@ -509,20 +509,30 @@ export const getShiftDashboard = (dateFrom: string, dateTo: string,
 // ─── Реестр пооперационных транзакций (наливов) ───
 export interface FuelTxRow {
   id: string
+  ext_id: number
   dt: string | null
   station_code: number
   station_name: string
   shift_number: number | null
+  receipt: number | null
   pos: number | null
   nozzle: number | null
   tank: number | null
   fuel_code: number | null
   fuel_name: string | null
   pay_type_name: string | null
+  /** Нормализованный вид оплаты — по нему сгруппированы карточки и фильтры. */
+  payment_method: string | null
   card: string | null
   liters: number
   price: number | null
   amount: number
+  mass: number | null
+  density: number | null
+  /** Заказ клиента до налива («залей на 1000 ₽»), если был. */
+  order_qty: number | null
+  order_cost: number | null
+  status: string
 }
 export interface FuelTxRowsResp {
   total: number
@@ -540,7 +550,14 @@ export interface FuelTxRowsParams {
   stationCode?: number
   fuelCodes?: number[]
   payTypes?: string[]
+  /** Свободный остаток строки поиска (карта, топливо, число). */
   search?: string
+  // Точные поля умного поиска — «смена 9 азс 6 чек 42 карта 1234».
+  shift?: number
+  receipt?: number
+  pos?: number
+  card?: string
+  status?: string
   sort?: string
   order?: 'asc' | 'desc'
   limit?: number
@@ -552,20 +569,35 @@ export const getFuelTxRows = (p: FuelTxRowsParams) =>
     station_code: p.stationCode,
     fuel_codes: p.fuelCodes?.length ? p.fuelCodes.join(',') : undefined,
     pay_types: p.payTypes?.length ? p.payTypes.join(',') : undefined,
-    search: p.search,
+    search: p.search, shift: p.shift, receipt: p.receipt, pos: p.pos, card: p.card,
+    status: p.status,
     sort: p.sort, order: p.order, limit: p.limit, offset: p.offset,
   })
 export const getFuelTxFilters = (dateFrom: string, dateTo: string) =>
   get<FuelTxFilters>('/api/fuel/transactions/filters', { date_from: dateFrom, date_to: dateTo })
 
-// KPI-агрегаты периода для «Операций» (итого + по топливу + по оплате)
+/** Дата выдачи купона, которым оплачен налив (живёт только в STS). */
+export const getFuelTxCoupon = (stationCode: number, dt: string, number: string) =>
+  get<{ issued_at: string | null }>('/api/fuel/transactions/coupon', {
+    station_code: stationCode, dt, number,
+  })
+
+// KPI-агрегаты периода для «Операций» (итого + по топливу + по оплате + кросс)
 export interface FuelTxOverview {
   kpi: { count: number; liters: number; amount: number }
   by_fuel: { fuel_code: number | null; fuel_name: string; count: number; liters: number; amount: number }[]
   by_payment: { name: string; count: number; liters: number; amount: number }[]
+  /** Топливо × оплата — для перекрёстного пересчёта карточек без похода в сеть. */
+  by_fuel_payment: {
+    fuel_code: number | null; fuel_name: string; name: string
+    count: number; liters: number; amount: number
+  }[]
 }
-export const getFuelTxOverview = (dateFrom: string, dateTo: string, stationCode?: number) =>
-  get<FuelTxOverview>('/api/fuel/transactions/overview', { date_from: dateFrom, date_to: dateTo, station_code: stationCode })
+export const getFuelTxOverview = (dateFrom: string, dateTo: string, stationCode?: number, fuelCodes?: number[]) =>
+  get<FuelTxOverview>('/api/fuel/transactions/overview', {
+    date_from: dateFrom, date_to: dateTo, station_code: stationCode,
+    fuel_codes: fuelCodes?.length ? fuelCodes.join(',') : undefined,
+  })
 export const getFuelTxCount = () => get<{ transactions: number }>('/api/fuel/transactions/count')
 
 export interface SalesChannelMetrics {

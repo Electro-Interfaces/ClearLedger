@@ -10,12 +10,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import FuelStation, FuelTransaction, Source, SourceCredentials
 from app.services.onec.crypto import decrypt_password
+from app.services.payment_normalize import normalize_payment_method
 from app.services.sts_client import sts_get_points, sts_get_transactions
 
 
@@ -94,21 +95,35 @@ async def ingest_station_window(db: AsyncSession, company_id, station: dict, con
         mapped.append({
             "company_id": company_id, "station_id": station.get("station_id"),
             "station_code": _int(tx.get("station")) or station["code"], "ext_id": ext,
-            "dt": dtv, "shift_number": _int(tx.get("shift")),
+            "dt": dtv, "shift_number": _int(tx.get("shift")), "receipt": _int(tx.get("number")),
             "pos": _int(tx.get("pos")), "nozzle": _int(tx.get("nozzle")), "tank": _int(tx.get("tank")),
             "fuel_code": _int(tx.get("fuel")), "fuel_name": tx.get("fuel_name"),
             "pay_type_id": _int(pt.get("id")), "pay_type_name": pt.get("name"),
+            "payment_method": normalize_payment_method(pt.get("name")),
             "card": str(card)[:64] if card else None,
             "liters": _flt(tx.get("quantity")), "price": (_flt(tx.get("price")) or None),
-            "amount": _flt(tx.get("cost")), "density": (_flt(tx.get("density")) or None),
+            "amount": _flt(tx.get("cost")), "mass": (_flt(tx.get("amount")) or None),
+            "density": (_flt(tx.get("density")) or None),
+            "order_qty": (_flt(tx.get("order")) or None),
+            "order_cost": (_flt(tx.get("order_cost")) or None),
         })
     created = 0
     for i in range(0, len(mapped), 1000):
         chunk = mapped[i:i + 1000]
-        stmt = pg_insert(FuelTransaction).values(chunk).on_conflict_do_nothing(
-            index_elements=["company_id", "station_code", "ext_id"]).returning(FuelTransaction.id)
+        # DO UPDATE, а не DO NOTHING: повторная загрузка периода — единственный способ
+        # дозаполнить поля, появившиеся позже ингеста (чек, заказ, масса, нормализованная
+        # оплата), и подхватить правки STS задним числом. Ключ дедупа прежний.
+        stmt = pg_insert(FuelTransaction).values(chunk)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["company_id", "station_code", "ext_id"],
+            set_={c: stmt.excluded[c] for c in (
+                "dt", "shift_number", "receipt", "pos", "nozzle", "tank",
+                "fuel_code", "fuel_name", "pay_type_id", "pay_type_name", "payment_method",
+                "card", "liters", "price", "amount", "mass", "density", "order_qty", "order_cost",
+            )},
+        ).returning(text("xmax = 0 AS inserted"))  # xmax=0 у строки, вставленной, а не обновлённой
         res = await db.execute(stmt)
-        created += len(res.fetchall())
+        created += sum(1 for r in res.fetchall() if r[0])
     return {"created": created, "fetched": len(rows)}
 
 

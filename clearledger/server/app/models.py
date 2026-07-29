@@ -1517,6 +1517,7 @@ class FuelTransaction(Base):
 
     dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     shift_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    receipt: Mapped[int | None] = mapped_column(Integer, nullable=True)  # номер чека (STS `number`)
     pos: Mapped[int | None] = mapped_column(Integer, nullable=True)
     nozzle: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tank: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -1525,12 +1526,23 @@ class FuelTransaction(Base):
     fuel_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     pay_type_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pay_type_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Нормализованный вид оплаты («Банковские», «Наличные», «Купон»…) — по нему
+    # группируются KPI-карточки и фильтруется реестр: сырых имён у STS десятки
+    # вариантов на один смысл. Заполняется при ингесте (payment_normalize).
+    payment_method: Mapped[str | None] = mapped_column(String(120), nullable=True)
     card: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     liters: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False, default=0)   # quantity
     price: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)          # ₽/л
     amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)    # ₽ (STS cost)
+    mass: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)           # кг (STS amount)
     density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    # Заказ клиента до налива: «залей на 1000 ₽» — расхождение с фактом видно в карточке.
+    order_qty: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    order_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    # STS отдаёт только завершённые наливы; поле — под будущие отменённые/сбойные.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed",
+                                        server_default="completed")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

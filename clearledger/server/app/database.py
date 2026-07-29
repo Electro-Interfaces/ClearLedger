@@ -1096,6 +1096,41 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
+        # v2.31: реестр «Операций» ГИГ вровень с «Монитором» — поля налива, которые
+        # STS отдаёт с первого дня, а ингест не сохранял: номер чека (по нему ищут
+        # конкретную заправку), заказ клиента до налива («залей на 1000 ₽» —
+        # расхождение с фактом видно в карточке), масса, статус и нормализованный
+        # вид оплаты (по нему группируются KPI-карточки).
+        for stmt in (
+            "ALTER TABLE fuel_transactions ADD COLUMN IF NOT EXISTS receipt INTEGER",
+            "ALTER TABLE fuel_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(120)",
+            "ALTER TABLE fuel_transactions ADD COLUMN IF NOT EXISTS mass NUMERIC(14,3)",
+            "ALTER TABLE fuel_transactions ADD COLUMN IF NOT EXISTS order_qty NUMERIC(14,3)",
+            "ALTER TABLE fuel_transactions ADD COLUMN IF NOT EXISTS order_cost NUMERIC(16,2)",
+            "ALTER TABLE fuel_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'completed'",
+            "CREATE INDEX IF NOT EXISTS idx_ftx_company_payment_dt "
+            "ON fuel_transactions (company_id, payment_method, dt)",
+            "CREATE INDEX IF NOT EXISTS idx_ftx_company_receipt "
+            "ON fuel_transactions (company_id, receipt) WHERE receipt IS NOT NULL",
+        ):
+            await conn.execute(__import__("sqlalchemy").text(stmt))
+
+        # Бэкфилл payment_method по уже загруженным наливам: идём по РАЗЛИЧНЫМ сырым
+        # именам (их десятки на сотни тысяч строк) и через ту же функцию, что и
+        # ингест — SQL-двойник этой логики со временем разошёлся бы с ней.
+        # Чек, заказ и массу бэкфиллом не взять: они приезжают только повторной
+        # загрузкой периода из STS (кнопка «Загрузить реализации» в разделе).
+        from app.services.payment_normalize import normalize_payment_method
+        _sa = __import__("sqlalchemy")
+        for raw in (await conn.execute(_sa.text(
+            "SELECT DISTINCT pay_type_name FROM fuel_transactions WHERE payment_method IS NULL"
+        ))).scalars().all():
+            await conn.execute(
+                _sa.text("UPDATE fuel_transactions SET payment_method = :norm "
+                         "WHERE payment_method IS NULL AND pay_type_name IS NOT DISTINCT FROM :raw"),
+                {"norm": normalize_payment_method(raw), "raw": raw},
+            )
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

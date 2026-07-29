@@ -71,6 +71,7 @@ from app.services.fuel_dashboard import FuelDashboardService
 from app.services.fuel_mappings import MappingContext, build_sales_agg, load_mapping_context
 from app.services.fuel_network_analytics import FuelNetworkAnalytics
 from app.services.fuel_sales_analytics import FuelSalesAnalytics
+from app.services.payment_normalize import normalize_payment_method
 from app.services.sts_client import (
     sts_get_shifts, sts_get_shift_report, sts_get_receipts,
     sts_test_connection,
@@ -2614,7 +2615,9 @@ def _csv_strs(v: str | None) -> list[str]:
     return [x.strip() for x in v.split(",") if x.strip()] if v else []
 
 
-def _tx_conds(cid, df: str, dt: str, station_code, fuel_codes: list[int], pay_types: list[str], search):
+def _tx_conds(cid, df: str, dt: str, station_code, fuel_codes: list[int], pay_types: list[str], search,
+              shift: int | None = None, receipt: int | None = None, pos: int | None = None,
+              card: str | None = None, status: str | None = None):
     d0, d1 = date.fromisoformat(df), date.fromisoformat(dt)
     T = FuelTransaction
     conds = [T.company_id == cid,
@@ -2625,9 +2628,29 @@ def _tx_conds(cid, df: str, dt: str, station_code, fuel_codes: list[int], pay_ty
     if fuel_codes:
         conds.append(T.fuel_code.in_(fuel_codes))
     if pay_types:
-        conds.append(T.pay_type_name.in_(pay_types))
+        # Фильтр по НОРМАЛИЗОВАННОМУ виду оплаты (как в «Мониторе»): карточки KPI
+        # сгруппированы по нему же. Строки до бэкфилла (payment_method IS NULL)
+        # подхватываются по сырому имени — иначе выборка молча теряет их.
+        conds.append(or_(T.payment_method.in_(pay_types),
+                         and_(T.payment_method.is_(None), T.pay_type_name.in_(pay_types))))
+    if status:
+        conds.append(T.status == status)
+    # Точные поля умного поиска («смена 9 азс 6 чек 42 карта 1234»).
+    if shift is not None:
+        conds.append(T.shift_number == shift)
+    if receipt is not None:
+        conds.append(T.receipt == receipt)
+    if pos is not None:
+        conds.append(T.pos == pos)
+    if card:
+        conds.append(T.card.ilike(f"%{card.strip()}%"))
     if search:
-        conds.append(T.card.ilike(f"%{search.strip()}%"))
+        # Свободный остаток строки: номер карты, вид топлива или число (чек/сумма).
+        s = search.strip()
+        free = [T.card.ilike(f"%{s}%"), T.fuel_name.ilike(f"%{s}%"), T.pay_type_name.ilike(f"%{s}%")]
+        if s.isdigit():
+            free.append(T.receipt == int(s))
+        conds.append(or_(*free))
     return conds
 
 
@@ -2636,15 +2659,20 @@ async def transactions_rows(
     date_from: str = Query(...), date_to: str = Query(...),
     station_code: int | None = Query(None), fuel_codes: str | None = Query(None),
     pay_types: str | None = Query(None), search: str | None = Query(None),
+    shift: int | None = Query(None), receipt: int | None = Query(None),
+    pos: int | None = Query(None), card: str | None = Query(None),
+    status: str | None = Query(None),
     sort: str = Query("dt"), order: str = Query("desc"),
     limit: int = Query(100, le=1000), offset: int = Query(0),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Построчный реестр наливов (пооперационно) — серверная пагинация/фильтры/сортировка.
-    fuel_codes/pay_types — CSV (мультивыбор через KPI-карточки)."""
+    fuel_codes/pay_types — CSV (мультивыбор через KPI-карточки); shift/receipt/pos/card —
+    точные поля умного поиска, search — свободный остаток строки."""
     cid = await _company_id(user, db)
     T = FuelTransaction
-    conds = _tx_conds(cid, date_from, date_to, station_code, _csv_ints(fuel_codes), _csv_strs(pay_types), search)
+    conds = _tx_conds(cid, date_from, date_to, station_code, _csv_ints(fuel_codes),
+                      _csv_strs(pay_types), search, shift, receipt, pos, card, status)
     tot = (await db.execute(select(
         func.count(), func.coalesce(func.sum(T.liters), 0), func.coalesce(func.sum(T.amount), 0)
     ).where(*conds))).one()
@@ -2655,13 +2683,21 @@ async def transactions_rows(
     names = {int(s.code): s.name for s in (await db.execute(
         select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
     out = [{
-        "id": str(r.id), "dt": r.dt.isoformat() if r.dt else None,
+        "id": str(r.id), "ext_id": r.ext_id, "dt": r.dt.isoformat() if r.dt else None,
         "station_code": r.station_code, "station_name": names.get(r.station_code) or f"АЗС {r.station_code}",
-        "shift_number": r.shift_number, "pos": r.pos, "nozzle": r.nozzle, "tank": r.tank,
+        "shift_number": r.shift_number, "receipt": r.receipt,
+        "pos": r.pos, "nozzle": r.nozzle, "tank": r.tank,
         "fuel_code": r.fuel_code, "fuel_name": r.fuel_name,
-        "pay_type_name": r.pay_type_name, "card": r.card,
+        "pay_type_name": r.pay_type_name,
+        "payment_method": r.payment_method or normalize_payment_method(r.pay_type_name),
+        "card": r.card,
         "liters": float(r.liters or 0), "price": float(r.price) if r.price is not None else None,
         "amount": float(r.amount or 0),
+        "mass": float(r.mass) if r.mass is not None else None,
+        "density": float(r.density) if r.density is not None else None,
+        "order_qty": float(r.order_qty) if r.order_qty is not None else None,
+        "order_cost": float(r.order_cost) if r.order_cost is not None else None,
+        "status": r.status or "completed",
     } for r in rows]
     return {
         "total": int(tot[0]),
@@ -2670,12 +2706,49 @@ async def transactions_rows(
     }
 
 
+@router.get("/transactions/coupon")
+async def transactions_coupon(
+    station_code: int = Query(...), dt: str = Query(..., description="время налива, ISO"),
+    number: str = Query(..., description="номер купона из налива"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Дата выдачи купона, которым оплачен налив (STS /v1/coupons).
+
+    В наливе остаётся только номер; когда купон выдан, знает лишь справочник STS.
+    Ищем по станции налива за 30 дней до него (срок жизни купона по умолчанию 7
+    дней, запас на «долгие»), как это делает «Монитор».
+    """
+    from app.services.fuel_transactions import resolve_sts
+    from app.services.sts_client import sts_get_coupons
+    cid = await _company_id(user, db)
+    conn = await resolve_sts(db, cid)
+    if conn is None:
+        return {"issued_at": None, "reason": "нет STS-источника у компании"}
+    try:
+        op_dt = datetime.fromisoformat(dt)
+    except ValueError:
+        raise HTTPException(400, "Неверный формат времени налива")
+    beg = (op_dt - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    end = (op_dt + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    for sysid in conn["systems"]:
+        try:
+            coupons = await sts_get_coupons(conn["base_url"], conn["login"], conn["pwd"],
+                                            sysid, station_code, beg, end)
+        except Exception:  # noqa: BLE001 — нет доступа к STS: покажем только номер купона
+            continue
+        for c in coupons:
+            if str(c.get("number")) == str(number):
+                return {"issued_at": c.get("dt")}
+    return {"issued_at": None}
+
+
 @router.get("/transactions/filters")
 async def transactions_filters(
     date_from: str = Query(...), date_to: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Значения для фильтров реестра (станции/топливо/виды оплаты за период)."""
+    """Значения для фильтров реестра (станции/топливо/виды оплаты за период).
+    Виды оплаты — нормализованные: по ним же фильтруется реестр и считаются карточки."""
     cid = await _company_id(user, db)
     T = FuelTransaction
     conds = _tx_conds(cid, date_from, date_to, None, [], [], None)
@@ -2683,7 +2756,8 @@ async def transactions_filters(
         select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
     st = (await db.execute(select(T.station_code).where(*conds).distinct().order_by(T.station_code))).scalars().all()
     fu = (await db.execute(select(T.fuel_code, T.fuel_name).where(*conds).distinct())).all()
-    pt = (await db.execute(select(T.pay_type_name).where(*conds).distinct().order_by(T.pay_type_name))).scalars().all()
+    pay = func.coalesce(T.payment_method, T.pay_type_name)
+    pt = (await db.execute(select(pay).where(*conds).distinct().order_by(pay))).scalars().all()
     fuels = sorted({(r[0], r[1]) for r in fu if r[0] is not None}, key=lambda x: x[0])
     return {
         "stations": [{"code": c, "name": names.get(c) or f"АЗС {c}"} for c in st],
@@ -2695,14 +2769,25 @@ async def transactions_filters(
 @router.get("/transactions/overview")
 async def transactions_overview(
     date_from: str = Query(...), date_to: str = Query(...),
-    station_code: int | None = Query(None),
+    station_code: int | None = Query(None), fuel_codes: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Агрегаты периода для KPI-карточек «Операций»: итого + по видам топлива + по оплате.
-    Не зависит от кликов по KPI (fuel/pay) — они фильтруют только список."""
+    """Агрегаты периода для KPI-карточек «Операций»: итого + по видам топлива + по оплате
+    + кросс-разрез «топливо × оплата».
+
+    Не зависит от кликов по KPI (fuel/pay) — они фильтруют только список. Кросс нужен
+    для ПЕРЕКРЁСТНОГО пересчёта карточек без похода в сеть (как в «Мониторе»): выбрал
+    АИ-92 — карточки оплат показывают суммы только по нему, и наоборот. Разрез мелкий
+    (виды топлива × виды оплаты — десятки строк), считается тем же проходом.
+    Оплата группируется по НОРМАЛИЗОВАННОМУ имени; у строк до бэкфилла его нет —
+    падаем на сырое (coalesce), иначе они соберутся в общую корзину «—».
+    """
     cid = await _company_id(user, db)
     T = FuelTransaction
-    conds = _tx_conds(cid, date_from, date_to, station_code, [], [], None)
+    pay = func.coalesce(T.payment_method, T.pay_type_name)
+    # fuel_codes здесь — сквозной фильтр вида нефтепродукта из шапки рабочей области
+    # (не клик по карточке): разрезы обязаны считаться в тех же границах, что и реестр.
+    conds = _tx_conds(cid, date_from, date_to, station_code, _csv_ints(fuel_codes), [], None)
     kpi = (await db.execute(select(
         func.count(), func.coalesce(func.sum(T.liters), 0), func.coalesce(func.sum(T.amount), 0)
     ).where(*conds))).one()
@@ -2712,16 +2797,23 @@ async def transactions_overview(
     ).where(*conds).group_by(T.fuel_code, T.fuel_name)
         .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
     pm = (await db.execute(select(
-        T.pay_type_name, func.count().label("n"),
+        pay.label("m"), func.count().label("n"),
         func.coalesce(func.sum(T.liters), 0).label("l"), func.coalesce(func.sum(T.amount), 0).label("a"),
-    ).where(*conds).group_by(T.pay_type_name)
+    ).where(*conds).group_by(pay)
         .order_by(func.coalesce(func.sum(T.amount), 0).desc()))).all()
+    cross = (await db.execute(select(
+        T.fuel_code, T.fuel_name, pay.label("m"), func.count().label("n"),
+        func.coalesce(func.sum(T.liters), 0).label("l"), func.coalesce(func.sum(T.amount), 0).label("a"),
+    ).where(*conds).group_by(T.fuel_code, T.fuel_name, pay))).all()
     return {
         "kpi": {"count": int(kpi[0]), "liters": round(float(kpi[1]), 2), "amount": round(float(kpi[2]), 2)},
         "by_fuel": [{"fuel_code": r.fuel_code, "fuel_name": r.fuel_name or "—", "count": int(r.n),
                      "liters": round(float(r.l), 2), "amount": round(float(r.a), 2)} for r in fu],
-        "by_payment": [{"name": r.pay_type_name or "—", "count": int(r.n),
+        "by_payment": [{"name": r.m or "—", "count": int(r.n),
                         "liters": round(float(r.l), 2), "amount": round(float(r.a), 2)} for r in pm],
+        "by_fuel_payment": [{"fuel_code": r.fuel_code, "fuel_name": r.fuel_name or "—",
+                             "name": r.m or "—", "count": int(r.n),
+                             "liters": round(float(r.l), 2), "amount": round(float(r.a), 2)} for r in cross],
     }
 
 
