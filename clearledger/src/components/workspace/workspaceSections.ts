@@ -165,11 +165,12 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     icon: Megaphone, items: isEnergy ? MARKET_MENU : [], connected: isEnergy }
   const acc: WorkspaceSection   = { mode: 'accounting', label: 'Бухгалтерский',  icon: BookOpen,     items: accItems, connected: accOn }
   const exp: WorkspaceSection   = { mode: 'export',     label: 'Выгрузка',       icon: FileOutput,   items: [], connected: true }
-  // Разделы продукта «Данные» (energy): без них рабочее место открывалось панелью
-  // нормализации, но в меню её пункта не было, а право `data:normalize` указывало в
+  // Разделы продукта «Данные» — у ОБОИХ профилей: без них рабочее место открывается
+  // панелью нормализации, которой нет в меню, а право `data:normalize` указывает в
   // пустоту. Под-меню у обеих панелей своё (каналы/разрезы) — items здесь не нужны.
-  // У топливного профиля разреза нет: там те же панели живут страницами Учёта
-  // (`/normalization`, `/reconciliation`), и вторые пункты дали бы дубль.
+  // Раньше топливный профиль их не получал: считалось, что те же панели живут
+  // страницами Учёта (`/normalization`, `/reconciliation`). После разреза Учёта у
+  // розницы нет — страницы осиротели, а «Данные» открывались без единого раздела.
   const normalize: WorkspaceSection = { mode: 'normalize', label: 'Нормализация', icon: Sparkles, items: [], connected: true }
   const reconcile: WorkspaceSection = { mode: 'reconcile', label: 'Сверка', icon: GitCompare, items: [], connected: true }
 
@@ -179,7 +180,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
        storeSections[0], acc, exp, normalize, reconcile]
-    : [sales, salesSessions, salesCommerce, salesGoods, ...storeSections, ops, acc, exp]
+    : [sales, salesSessions, salesCommerce, salesGoods, ...storeSections, ops, acc, exp,
+       normalize, reconcile]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый
   // пункт ни в гармошке, ни в контенте. Гейт есть только у продуктов разреза: там код
