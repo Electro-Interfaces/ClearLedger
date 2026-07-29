@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { ExportButton } from './analytics/ExportButton'
+import { FuelInsightsBar } from './FuelNetworkPanels'
 import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
 import { fmtMoney, fmtMoneyShort, fmtLiters } from '@/services/analyticsService'
 import { formatPeriod } from '@/lib/formatDate'
@@ -748,6 +749,10 @@ export function FuelOverviewPanel({ companyId, dateFrom, dateTo }: {
         : data.operational.shifts_count === 0 ? <Empty />
         : (
           <div ref={ref} className="space-y-5">
+            {/* Полоса выводов: KPI ниже отвечают «сколько заработали», а это —
+                «что в данных требует решения». Клик уводит на экран, где цифра
+                разбирается подробно. */}
+            <FuelInsightsBar companyId={companyId} dateFrom={period.from} dateTo={period.to} />
             {alerts.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {alerts.map((a, i) => (

@@ -28,6 +28,7 @@ import { scopeStationCodes } from '@/services/locationService'
 import { PanelViewTabs } from './PanelViewTabs'
 import { ViewParamsBar } from './ViewParamsBar'
 import { HorizonControl } from './HorizonControl'
+import { FuelDrillDialog, exportFuelPivot } from './FuelDrillDialog'
 import {
   getFuelFills, getFuelTimeseries, getFuelSlice, getFuelCompareMulti, getFuelHeatmap,
   getFuelNewCards, getFuelNewCardsList,
@@ -242,6 +243,8 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
     return m
   }, [spark.data])
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'amount', dir: 'desc' })
+  // Строка разреза больше не тупик: клик раскрывает её встречными разрезами.
+  const [drill, setDrill] = useState<{ key: string; label: string } | null>(null)
   const lines = useMemo(() => {
     const src = data?.lines ?? []
     const dir = sort.dir === 'asc' ? 1 : -1
@@ -285,7 +288,25 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
             <SelectContent>{ROWS_OPTS.map((o) => <SelectItem key={o.value} value={String(o.value)} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
+        {/* Сводная — матрица «разрез × месяцы»: экспорт видимой таблицы отдаёт
+            только выбранный период, а управленцу нужна динамика по строкам. */}
+        <Field label="Выгрузка">
+          <Button variant="outline" size="sm" className="h-7 px-2 text-xs"
+            onClick={() => exportFuelPivot({
+              companyId, dateFrom: period.from, dateTo: period.to, groupBy: p.group,
+              narrow: { stationCodes: n.stationCodes, segment: n.segment },
+              title: `Реализация_${col}`,
+            })}>
+            Сводная × месяцы
+          </Button>
+        </Field>
       </ViewParamsBar>
+      {drill && (
+        <FuelDrillDialog open onClose={() => setDrill(null)}
+          companyId={companyId} dateFrom={period.from} dateTo={period.to}
+          dim={p.group} dimVal={drill.key} label={`${col}: ${drill.label}`}
+          narrow={{ stationCodes: n.stationCodes, segment: n.segment }} />
+      )}
       <FillKpis t={t} />
       {data.truncated > 0 && (
         <div className="text-[11px] text-muted-foreground">Показан топ по обороту; ещё {nf0.format(data.truncated)} строк не выведено (сузьте период или фильтры).</div>
@@ -309,7 +330,9 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
             </thead>
             <tbody>
               {lines.map((l) => (
-                <tr key={l.key} className="border-b border-border/30 hover:bg-muted/30">
+                <tr key={l.key} className="cursor-pointer border-b border-border/30 hover:bg-muted/30"
+                  onClick={() => setDrill({ key: l.key, label: l.label })}
+                  title="Открыть строку по другим разрезам">
                   <td className="p-2 font-medium truncate max-w-[240px]">{l.label}</td>
                   <td className="p-2 text-right font-mono">{nf0.format(l.fills)}</td>
                   <td className="p-2 text-right font-mono">{nf0.format(l.liters)}</td>

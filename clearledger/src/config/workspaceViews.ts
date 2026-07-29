@@ -61,6 +61,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     'by-month': 'По месяцам', channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы', margin: 'Маржа и цены',
     purchases: 'Поступления', intake: 'Приёмка и сливы', tanks: 'Контроль баланса',
     variances: 'Расхождения', inventory: 'Инвентаризация', balance: 'Баланс',
+    pumps: 'Загрузка ТРК', abcxyz: 'ABC-XYZ', visits: 'Приезды', clients: 'Клиенты и когорты',
     procurement: 'Энергозакупка', rent: 'Аренда',
     cs_dashboard: 'Обзор', cs_map: 'Карта', cs_trend: 'Динамика 2024+',
     cs_abcxyz: 'ABC-XYZ станций', cs_reliability: 'Надёжность',
@@ -69,13 +70,14 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     cs_breakdown: 'Разрезы', cs_time: 'Время и загрузка', cs_dynamics: 'Тренд и YoY',
     cs_compare: 'Сравнение периодов', cs_list: 'Реестр сессий',
     cs_sessions: 'Разрезы',  // старая ссылка ?sub=cs_sessions
-    fills: 'Реализация', transactions: 'Реестр операций',
+    fills: 'Реализация', visits: 'Приезды', transactions: 'Реестр операций',
     channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы',
   },
   sales_commerce: {
     cs_clients: 'Тарифы', cs_corporate: 'Корпоратив',
     cs_retail: 'Частные лица', cs_segments: 'Сегменты и когорты',
     'fuel-tariffs': 'Тарифы', 'fuel-corporate': 'Корпоратив', 'fuel-retail': 'Частные лица',
+    clients: 'Клиенты и когорты',
   },
   sales_goods: {
     margin: 'Маржа и цены', purchases: 'Поступления', intake: 'Приёмка и сливы',

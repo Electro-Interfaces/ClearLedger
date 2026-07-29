@@ -27,9 +27,14 @@ import type { CentralMenuItem } from '@/components/workspace/CentralPanelLayout'
 export const FUEL_NETWORK_MENU: CentralMenuItem[] = [
   { key: 'overview',       label: 'Обзор' },
   { key: 'map',            label: 'Карта' },
+  // Оборудование и актив — перенос приёмов сети ЭЗС (port-efficiency, ABC-XYZ):
+  // отвечают не «сколько продали», а «где сеть не работает и где лежат деньги».
+  { key: 'pumps',          label: 'Загрузка ТРК' },
+  { key: 'abcxyz',         label: 'ABC-XYZ' },
 ]
 export const FUEL_ANALYTICS_MENU: CentralMenuItem[] = [
   { key: 'fills',          label: 'Реализация' },
+  { key: 'visits',         label: 'Приезды' },
   { key: 'transactions',   label: 'Реестр операций' },
   { key: 'channels',       label: 'Каналы продаж' },
   { key: 'online-orders',  label: 'Онлайн-заказы' },
@@ -38,6 +43,7 @@ export const FUEL_COMMERCE_MENU: CentralMenuItem[] = [
   { key: 'fuel-tariffs',   label: 'Тарифы' },
   { key: 'fuel-corporate', label: 'Корпоратив' },
   { key: 'fuel-retail',    label: 'Частные лица' },
+  { key: 'clients',        label: 'Клиенты и когорты' },
 ]
 /**
  * Товародвижение. Три пункта подняты из табов «Контроля баланса»: приёмка

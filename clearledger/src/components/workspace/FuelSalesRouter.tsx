@@ -17,6 +17,9 @@ import { FuelCorporatePanel } from './FuelCorporatePanel'
 import { FuelRetailPanel } from './FuelRetailPanel'
 import { MarginDecisionPanel } from './MarginDecisionPanel'
 import { FuelBalancePanel } from './FuelBalancePanel'
+import {
+  FuelAbcXyzPanel, FuelClientsPanel, FuelPumpsPanel, FuelVisitsPanel,
+} from './FuelNetworkPanels'
 import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
 
 export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode }: {
@@ -27,8 +30,11 @@ export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode 
     // Сеть
     case 'overview':       return <FuelOverviewPanel {...p} />
     case 'map':            return <FuelMapPanel {...p} />
+    case 'pumps':          return <FuelPumpsPanel {...p} />
+    case 'abcxyz':         return <FuelAbcXyzPanel {...p} />
     // Аналитика
     case 'fills':          return <FuelFillsPanel {...p} />
+    case 'visits':         return <FuelVisitsPanel {...p} />
     case 'transactions':   return <FuelTransactionsPanel {...p} />
     case 'channels':       return <SalesChannelsPanel {...p} />
     case 'online-orders':  return <OnlineOrdersPanel {...p} stationCode={stationCode} />
@@ -36,6 +42,7 @@ export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode 
     case 'fuel-tariffs':   return <FuelTariffsPanel {...p} />
     case 'fuel-corporate': return <FuelCorporatePanel {...p} />
     case 'fuel-retail':    return <FuelRetailPanel {...p} />
+    case 'clients':        return <FuelClientsPanel {...p} />
     // Товародвижение. «Приёмка», «Расхождения» и «Инвентаризация» — те же экраны,
     // что раньше были табами «Контроля баланса»: панель одна (общий фильтр станций и
     // топлива, шапка баланса), различается набором видов (см. FuelBalancePanel).

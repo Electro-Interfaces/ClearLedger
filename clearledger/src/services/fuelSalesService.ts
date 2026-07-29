@@ -70,11 +70,16 @@ export interface FuelFillsResponse {
   totals: FuelFillsLine & { label: 'Итого' }
 }
 
-export async function getFuelFills(p: FuelPeriodParams & { groupBy?: FuelGroupBy; top?: number }): Promise<FuelFillsResponse> {
+export async function getFuelFills(p: FuelPeriodParams & {
+  groupBy?: FuelGroupBy; top?: number
+  /** Провал вглубь: сузить до одного значения ДРУГОГО разреза («АИ-95», «АЗС 208»). */
+  dim?: FuelGroupBy; dimVal?: string
+}): Promise<FuelFillsResponse> {
   return get<FuelFillsResponse>('/api/fuel/analytics/fills', {
     date_from: p.dateFrom, date_to: p.dateTo,
     group_by: p.groupBy ?? 'station',
     ...(p.top ? { top: p.top } : {}),
+    ...(p.dim && p.dimVal != null ? { dim: p.dim, dim_val: p.dimVal } : {}),
     ...narrowParams(p),
   })
 }

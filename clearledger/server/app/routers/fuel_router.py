@@ -69,6 +69,7 @@ from app.services.fuel_documents import build_shift_documents, build_ttn_documen
 from app.services.fuel_costing import FuelCostingService
 from app.services.fuel_dashboard import FuelDashboardService
 from app.services.fuel_mappings import MappingContext, build_sales_agg, load_mapping_context
+from app.services.fuel_network_analytics import FuelNetworkAnalytics
 from app.services.fuel_sales_analytics import FuelSalesAnalytics
 from app.services.sts_client import (
     sts_get_shifts, sts_get_shift_report, sts_get_receipts,
@@ -2762,16 +2763,22 @@ async def analytics_fills(
     station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
     segment: str | None = Query(None), channel: str | None = Query(None),
     card: str | None = Query(None), top: int = Query(500, le=2000),
+    dim: str | None = Query(None), dim_val: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Разрез наливов: выручка/литры/наливы/ср.чек/ср.налив/ср.цена по группе."""
+    """Разрез наливов: выручка/литры/наливы/ср.чек/ср.налив/ср.цена по группе.
+
+    `dim`/`dim_val` — сужение до одного значения ДРУГОГО разреза (провал вглубь).
+    """
     cid = await _company_id(user, db)
     _fa_check(group_by, _FA_GROUPS, "group_by")
+    _fa_check(dim, _FA_GROUPS, "dim")
     df, dt = _fa_dates(date_from, date_to)
     return await FuelSalesAnalytics(db).fills(
         cid, df, dt, group_by=group_by,
         station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
-        segment=segment or None, channel=channel or None, card=card or None, top=top)
+        segment=segment or None, channel=channel or None, card=card or None, top=top,
+        dim=dim or None, dim_val=dim_val)
 
 
 @router.get("/analytics/fills/timeseries")
@@ -2895,6 +2902,110 @@ async def analytics_fills_new_cards_list(
         cid, df, dt,
         station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
         segment=segment or None, channel=channel or None, limit=limit)
+
+
+# ─── Сеть: оборудование, актив, клиенты, визиты (fuel_network_analytics) ────
+# Отвечают не «сколько продали» (это разрезы выше), а «где сеть не работает и где
+# лежат деньги» — перенос приёмов ЭЗС-контура на топливный грейн.
+
+_FN_LEVELS = {"pos", "nozzle"}
+_FN_DIMS = {"station", "fuel", "station_fuel"}
+_FN_MEASURES = {"amount", "liters"}
+_FN_ABC_BUCKETS = {"week", "month"}
+
+
+@router.get("/analytics/pumps")
+async def analytics_pumps(
+    date_from: str = Query(...), date_to: str = Query(...),
+    level: str = Query("nozzle"),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Загрузка ТРК и пистолетов: наливов в сутки на единицу, простой, молчащие."""
+    cid = await _company_id(user, db)
+    _fa_check(level, _FN_LEVELS, "level")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).pumps(
+        cid, df, dt, level=level,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/silent")
+async def analytics_silent(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Станции, ТРК и пистолеты без единого налива за период (с историей до него)."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).silent(cid, df, dt)
+
+
+@router.get("/analytics/abc-xyz")
+async def analytics_abc_xyz(
+    date_from: str = Query(...), date_to: str = Query(...),
+    dimension: str = Query("station_fuel"), bucket: str = Query("week"),
+    measure: str = Query("amount"),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """ABC (вклад) × XYZ (стабильность спроса) + квинтили концентрации."""
+    cid = await _company_id(user, db)
+    _fa_check(dimension, _FN_DIMS, "dimension")
+    _fa_check(bucket, _FN_ABC_BUCKETS, "bucket")
+    _fa_check(measure, _FN_MEASURES, "measure")
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).abc_xyz(
+        cid, df, dt, dimension=dimension, bucket=bucket, measure=measure,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/clients")
+async def analytics_clients(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Когорты карт по частоте покупок + приток/отток базы к прошлому периоду."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).clients(
+        cid, df, dt,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/visits")
+async def analytics_visits(
+    date_from: str = Query(...), date_to: str = Query(...),
+    gap_min: int = Query(10, ge=1, le=120),
+    station_codes: str | None = Query(None), fuel_codes: str | None = Query(None),
+    segment: str | None = Query(None), channel: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Приезды вместо наливов: склейка соседних наливов карты на одной станции."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).visits(
+        cid, df, dt, gap_min=gap_min,
+        station_codes=tuple(_csv_ints(station_codes)), fuel_codes=tuple(_csv_ints(fuel_codes)),
+        segment=segment or None, channel=channel or None)
+
+
+@router.get("/analytics/insights")
+async def analytics_insights(
+    date_from: str = Query(...), date_to: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Короткие выводы для шапки «Обзора» — из тех же агрегатов, что и экраны."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).insights(cid, df, dt)
 
 
 @router.get("/tariffs/grid")

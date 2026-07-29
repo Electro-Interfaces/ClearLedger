@@ -156,6 +156,16 @@ class FuelSalesAnalytics:
     def _msk():
         return func.timezone("Europe/Moscow", T.dt)
 
+    @staticmethod
+    def _dim_value(dim: str, raw: str):
+        """Значение разреза из URL к типу колонки: час/смена/станция — числа."""
+        if dim in ("hour", "weekday", "shift", "station"):
+            try:
+                return int(float(raw))
+            except (TypeError, ValueError):
+                return raw
+        return raw
+
     def _group_col(self, group_by: str, cls: _Classification):
         msk = self._msk()
         if group_by == "fuel":
@@ -242,12 +252,21 @@ class FuelSalesAnalytics:
                     group_by: str = "station",
                     station_codes: tuple[int, ...] = (), fuel_codes: tuple[int, ...] = (),
                     segment: str | None = None, channel: str | None = None,
-                    card: str | None = None, top: int = 500) -> dict[str, Any]:
-        """Разрез наливов: выручка/литры/наливы/ср.чек/ср.налив/ср.цена по группе."""
+                    card: str | None = None, top: int = 500,
+                    dim: str | None = None, dim_val: str | None = None) -> dict[str, Any]:
+        """Разрез наливов: выручка/литры/наливы/ср.чек/ср.налив/ср.цена по группе.
+
+        `dim`/`dim_val` сужают выборку до ОДНОГО значения другого разреза — на этом
+        держится провал вглубь: строку «АИ-95» открываем по видам оплаты, часам и
+        станциям, не выходя с экрана. Фильтровать через `station_codes`/`fuel_codes`
+        для этого мало: у часа, смены и вида оплаты своих параметров нет.
+        """
         cls, dups = await self._classification(company_id)
         pay_names = self._pay_filter(cls, segment, channel)
         conds = self._conds(company_id, date_from, date_to, dups,
                             station_codes, fuel_codes, pay_names, card)
+        if dim and dim_val is not None:
+            conds.append(self._group_col(dim, cls) == self._dim_value(dim, dim_val))
         gcol = self._group_col(group_by, cls)
         valid_card = CARD.is_not(None) & func.trim(T.card).op("!~")("^0+$")
         if group_by == "card":
