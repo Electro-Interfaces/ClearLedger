@@ -324,7 +324,8 @@ export function OnlineOrdersPanel({ companyId, dateFrom, dateTo, stationCode }: 
                 <TableHead className="h-9 text-right">Заказано</TableHead>
                 <TableHead className="h-9 text-right">Отпущено</TableHead>
                 <TableHead className="h-9 text-right">Цена</TableHead>
-                <TableHead className="h-9 text-right">Сумма факта</TableHead>
+                <TableHead className="h-9 text-right">Сумма заказа</TableHead>
+                <TableHead className="h-9 text-right">Сумма отпуска</TableHead>
                 <TableHead className="h-9 text-center">ТРК</TableHead>
               </TableRow>
             </TableHeader>
@@ -333,13 +334,22 @@ export function OnlineOrdersPanel({ companyId, dateFrom, dateTo, stationCode }: 
                 const currentStatus = orderStatus(order.operation_result)
                 const selected = selectedId === order.id
                 const actualPrice = orderPrice(order)
+                const station = order.station_name ?? order.service_point_name ?? 'Не сопоставлена'
+                // Код показываем, только если он не повторяет имя: у ГИГ станции
+                // зовутся «АЗС №6», и вторая строка «АЗС №6» была чистым дублем.
+                const codeLine = order.station_code && !station.includes(String(order.station_code))
+                  ? `АЗС №${order.station_code}` : null
+                const mismatch = mismatchClass(order)
                 return (
                   <TableRow
                     key={order.id}
                     data-state={selected ? 'selected' : undefined}
                     tabIndex={0}
                     aria-haspopup="dialog"
-                    className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    className={cn(
+                      'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                      freshIds.has(order.id) && 'bg-primary/10',
+                    )}
                     onClick={() => setSelectedId(order.id)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' || event.key === ' ') {
@@ -350,16 +360,25 @@ export function OnlineOrdersPanel({ companyId, dateFrom, dateTo, stationCode }: 
                   >
                     <TableCell className="font-mono text-muted-foreground">{displayDate(order.order_date)}</TableCell>
                     <TableCell>
-                      <div className="max-w-52 truncate font-medium">{order.station_name ?? order.service_point_name ?? 'Не сопоставлена'}</div>
-                      {order.station_code && <div className="text-[10px] text-muted-foreground">АЗС №{order.station_code}</div>}
+                      <div className="max-w-52 truncate font-medium">{station}</div>
+                      {codeLine && <div className="text-[10px] text-muted-foreground">{codeLine}</div>}
                     </TableCell>
                     <TableCell>{order.aggregator ?? '—'}</TableCell>
-                    <TableCell>{order.fuel_name ?? '—'}</TableCell>
-                    <TableCell><Badge variant="outline" className={cn('text-[10px]', statusMeta[currentStatus].className)}>{statusMeta[currentStatus].label}</Badge></TableCell>
+                    {/* Бейдж, а не текст: вид топлива читается цветом одинаково во всех
+                        разделах «Топлива» (реестр операций, реализация, заказы). */}
+                    <TableCell>{order.fuel_name ? <FuelBadge fuel={order.fuel_name} /> : '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={cn('w-fit gap-1 text-[10px]', statusMeta[currentStatus].className)}>
+                        {statusMeta[currentStatus].icon}{statusMeta[currentStatus].label}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{volume.format(order.ordered_volume)} л</TableCell>
-                    <TableCell className={cn('text-right tabular-nums', Math.abs(order.actual_volume - order.ordered_volume) > 0.01 && 'text-amber-500')}>{order.actual_volume > 0 ? `${volume.format(order.actual_volume)} л` : '—'}</TableCell>
+                    <TableCell className={cn('text-right tabular-nums', mismatch)}>{order.actual_volume > 0 ? `${volume.format(order.actual_volume)} л` : '—'}</TableCell>
                     <TableCell className="text-right tabular-nums">{actualPrice > 0 ? `${number2.format(actualPrice)} ₽` : '—'}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">{order.actual_sum > 0 ? `${number2.format(order.actual_sum)} ₽` : '—'}</TableCell>
+                    {/* Сумма заказа — отдельной колонкой: у невыполненного заказа факта
+                        нет, и без неё половина таблицы была строками из прочерков. */}
+                    <TableCell className={cn('text-right tabular-nums', mismatch)}>{order.ordered_sum > 0 ? `${number2.format(order.ordered_sum)} ₽` : '—'}</TableCell>
+                    <TableCell className={cn('text-right font-medium tabular-nums', mismatch)}>{order.actual_sum > 0 ? `${number2.format(order.actual_sum)} ₽` : '—'}</TableCell>
                     <TableCell className="text-center tabular-nums">{order.post_number ?? '—'}</TableCell>
                   </TableRow>
                 )
