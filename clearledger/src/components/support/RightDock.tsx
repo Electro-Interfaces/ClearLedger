@@ -12,13 +12,15 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLocation } from 'react-router-dom'
 import { MessageCircle, LifeBuoy, HelpCircle, X, Maximize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
 import { ChatPanel } from '@/components/chat/ChatPanel'
-import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { useOptionalWorkspace } from '@/contexts/WorkspaceContext'
 import { productForMode } from '@/config/productAccess'
+import { productForPath } from '@/config/spaceProducts'
 import { TicketsPanel } from './InteractionPanels'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -178,8 +180,15 @@ function DockBody({ section }: { section: InteractionSection }) {
   // Док открыт ИЗ приложения — значит и чаты показываем его: код продукта выводится
   // из активного раздела рабочей области. Верхняя кнопка (модалка) продукт не
   // передаёт и показывает все чаты пространства — это тот же чат, другие предустановки.
-  const { coreMode } = useWorkspace()
-  const product = productForMode(coreMode)
+  // Вне рабочей области (приложение «Чаты», «Управление») контекста нет — и это
+  // нормально: тогда чат просто не сужается до продукта и показывает всё пространство.
+  // Продукт берём по МАРШРУТУ, и только потом по активному режиму: режим приходит из
+  // ?mode=, а на рабочем столе продукта его в адресе ещё нет — тогда `productForMode`
+  // отдавала null, фильтр пропадал, и в «Топливе» рельса показывала чаты «Магазина» и
+  // «Процессинга». Маршрут известен всегда.
+  const { pathname } = useLocation()
+  const ws = useOptionalWorkspace()
+  const product = productForPath(pathname)?.code ?? (ws ? productForMode(ws.coreMode) : null)
   return (
     <div className="min-h-0 flex-1 overflow-hidden">
       {section === 'chat' && <ChatPanel compact scopeProduct={product} />}

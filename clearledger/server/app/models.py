@@ -984,6 +984,16 @@ class StationEnergyPeriod(Base):
     intake_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Входящий тариф, руб/кВт·ч с НДС (помесячный, ведётся с июня 2026).
     tariff_rub_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Показания прибора учёта и коэффициент трансформации: объём = (curr − prev) × КТ.
+    # Именно так объём считает заказчик — в исходном файле лежат формулы `=46*30`
+    # и пометка `198 - ПУ | К/Т = 50`. Без этих полей «нет расчёта» неотличимо от
+    # «забыли внести», а цифра в intake_kwh невоспроизводима.
+    meter_prev: Mapped[float | None] = mapped_column(Float, nullable=True)
+    meter_curr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ktrans: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Узел учёта, когда один прибор стоит на несколько станций (38 таких случаев).
+    meter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ops_meters.id", ondelete="SET NULL"), nullable=True)
     source: Mapped[str | None] = mapped_column(String(60), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -4370,11 +4380,24 @@ class EzsSiteCost(Base):
 # Комнаты компании (Общий/Объявления) + личные + группы; company-scoped.
 # ===========================================================================
 class ChatRoom(Base):
-    """Комната чата: company (kind general/news), direct (личный), group."""
+    """Комната чата пространства: company | direct | group | channel.
+
+    Концепция (решение МАГа 30.07.2026), по образцу Telegram:
+      • `channel` — ОДНОСТОРОННИЙ: новости, рассылки, слово руководителя. Пишут только
+        владелец и админы канала; остальные читают. Создать канал может лишь
+        администратор пространства;
+      • `group`   — обычная группа: пишут все участники. Создаёт любой свой сотрудник;
+      • `direct`  — личный чат двоих;
+      • `company` — системные комнаты пространства (`kind` general/news).
+
+    В группе могут быть и сотрудники компании-владельца, и люди компаний-партнёров —
+    поэтому в списке участников каждый помечен как свой или как сотрудник партнёра
+    (см. `ParticipantOut` в роутере): без этого непонятно, при ком идёт разговор.
+    """
     __tablename__ = "chat_rooms"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # type: company | direct | group. kind (только для company): general | news.
+    # type: company | direct | group | channel. kind (только company): general | news.
     type: Mapped[str] = mapped_column(String(20), nullable=False, default="direct")
     kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
     name: Mapped[str | None] = mapped_column(String(300), nullable=True)  # NULL у direct → имя собеседника
@@ -4390,6 +4413,10 @@ class ChatRoom(Base):
     # Закреплённое сообщение (одно на комнату). Мягкая ссылка (без FK — избегаем
     # цикла chat_rooms↔chat_messages); валидность проверяет роут.
     pinned_message_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # Приложение, к которому привязана комната («fuel», «store», …). NULL — чат всего
+    # пространства. Правая рельса показывает чаты своего приложения плюс общие, верхняя
+    # кнопка — всё подряд: один и тот же чат, разные предустановки.
+    scope_product: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # updated_at = время последней активности (сортировка списка комнат)
     updated_at: Mapped[datetime] = mapped_column(
@@ -4416,7 +4443,9 @@ class ChatParticipant(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")  # member | admin
+    # owner — создатель (в канале и группе), admin — назначенный им, member — остальные.
+    # Право писать в канал и менять состав определяется этой ролью, а не ролью в компании.
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")
     last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -5051,4 +5080,328 @@ class MarketObservation(Base):
     __table_args__ = (
         Index("ix_market_obs_site_date", "site_id", "observed_on"),
         Index("ix_market_obs_company_kind", "company_id", "kind", "observed_on"),
+    )
+
+
+# ===========================================================================
+# «Эксплуатация» — денежный контур площадок: что мы должны собрать за месяц
+# ===========================================================================
+# Контрагенты обязаны сами выставлять закрывающие документы и делают это не
+# всегда: в рабочем файле заказчика 54 пометки «Нет расчёта», ежемесячно 3–6
+# станций закрываются без первички. Задача контура — ежемесячный реестр
+# «что ожидали ↔ что получили ↔ чем подтверждено ↔ где расхождение».
+#
+# Разделение мастерства с уже существующим реестром:
+#   StationContractSettlement — СНИМОК реестра контрагента, идемпотентно
+#     перезаписываемый ингестом (uq_station_settlement). Дисциплина ОПЛАТЫ.
+#   OpsContractTerm — НАШЕ знание об обязательстве: версионное, редактируемое.
+#   OpsPeriodCharge — помесячный факт учёта, неизменяемый после закрытия.
+# Условия рождаются из реестра разовым бэкфиллом (database.py) и дальше живут
+# сами: дописать их в settlements значило бы терять при каждой загрузке файла.
+# ===========================================================================
+
+
+class OpsCostItem(Base):
+    """Статья затрат эксплуатации — ORM-вид справочника из database.py.
+
+    Таблица создаётся и сидируется сырым DDL рядом с `contract_types`: это
+    закрытый список, который правится вместе с кодом, а не пользователем.
+    Здесь — только чтение и джойны.
+    """
+    __tablename__ = "ops_cost_items"
+
+    code: Mapped[str] = mapped_column(Text, primary_key=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    contract_type_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Мост к StationContractSettlement.role: energy | rent | service.
+    settlement_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    measure: Mapped[str | None] = mapped_column(Text, nullable=True)  # fixed|metered|pct_revenue
+    default_expected_docs: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)
+    default_estimate_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bp_account: Mapped[str | None] = mapped_column(Text, nullable=True)  # 20/26/44 — задел под 1С
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class OpsContractTerm(Base):
+    """Условие обязательства: из чего разворачивается ожидание месяца.
+
+    Отвечает на вопросы, которые сегодня живут словом в примечании файла:
+    как часто платим, сколько, до какого числа контрагент обязан дать документ,
+    чем считать, если документа нет.
+
+    ВЕРСИОННОСТЬ ВМЕСТО ПЕРЕСЧЁТА. Индексация ставки — новая строка с
+    `valid_from`, старой проставляется `valid_to`. Автоматическая формула
+    пересчитала бы задним числом месяцы, по которым документы уже приняты;
+    `index_kind`/`index_month` держат только «когда напомнить».
+    """
+    __tablename__ = "ops_contract_terms"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="CASCADE"), nullable=False, index=True)
+    cost_item: Mapped[str] = mapped_column(
+        Text, ForeignKey("ops_cost_items.code"), nullable=False)
+    # Свой охват, а не Contract.scope_type: один договор несёт и объектную статью
+    # (аренда площадки), и общую (обслуживание всей сети). location | company.
+    scope_type: Mapped[str] = mapped_column(String(20), nullable=False, default="location")
+    # NULL при scope_type='location' — разворот по всем ContractLocation договора.
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), nullable=True, index=True)
+    # monthly | quarterly | annual | one_time
+    periodicity: Mapped[str] = mapped_column(String(16), nullable=False, default="monthly")
+    amount_gross: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    amount_net: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    vat_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    # Переменная часть: metered_kwh (объём × тариф) | pct_revenue (% от выручки).
+    variable_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    tariff_rub: Mapped[float | None] = mapped_column(Numeric(14, 6), nullable=True)
+    pct_of_revenue: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
+    # Чем закрывается период: {act,invoice} / {upd,invoice,sf}. Переопределяет статью.
+    expected_docs: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)
+    # До какого числа СЛЕДУЮЩЕГО месяца ждём документ. По нему считается просрочка.
+    doc_due_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pay_due_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # contract | prev_period | average | none — переопределяет статью.
+    estimate_basis: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Памятка об индексации, НЕ автоформула: annual_pct | cpi | manual.
+    index_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    index_pct: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
+    index_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Горизонт версии, ISO-даты строкой — как contract_start/contract_end реестра.
+    valid_from: Mapped[str] = mapped_column(String(10), nullable=False)
+    valid_to: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    doc_channel: Mapped[str | None] = mapped_column(String(16), nullable=True)  # email|edo|paper
+    # Адрес для матчинга входящего письма и для напоминаний. Отдельно от
+    # Counterparty.email: у крупного поставщика бухгалтерия шлёт с другого ящика.
+    counterparty_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Кто ведёт это обязательство. Объектов и контрагентов много — без владельца
+    # на строке рабочий стол превращается в общую свалку.
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        # NULL в location_id означает «весь охват договора», и штатным Index такой
+        # ключ не выразить (NULL != NULL) — та же причина, что у StationDispensePeriod.
+        Index("uq_ops_term", "contract_id", "cost_item",
+              text("coalesce(location_id,'')"), "valid_from", unique=True),
+        Index("ix_ops_term_company", "company_id", "cost_item", "valid_from"),
+        Index("ix_ops_term_owner", "company_id", "owner_user_id"),
+    )
+
+
+class OpsCounterpartyDoc(Base):
+    """Входящая первичка контрагента: акт, УПД, счёт, расшифровка.
+
+    Одна таблица на все каналы — почту, ЭДО и ручную загрузку. ЭДО поэтому
+    подключается без единой правки модели: меняется только `channel`,
+    `external_key` и содержимое `channel_ref`.
+
+    `AccountingDoc` для этого не годится: там `external_id` (GUID 1С) обязателен,
+    и вся семантика — «пришло из 1С, сверяется с DataEntry». Здесь 1С нет.
+    """
+    __tablename__ = "ops_counterparty_docs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # act | upd | invoice | sf | torg12 | report | other
+    doc_type: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
+    number: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    doc_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    counterparty_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    # Отчётный месяц документа (первое число). Заполнен, когда документ за месяц.
+    period: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
+    # Плавающий период — из данных заказчика: «За период май – август 2025»,
+    # «С 11.02.26 - 10.03.26», квартальные акты. Разносится по месяцам по дням.
+    period_from: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    period_to: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    amount_gross: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    amount_net: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    vat_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    qty: Mapped[float | None] = mapped_column(Numeric(16, 3), nullable=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
+    # Message-ID письма | docId ЭДО | sha256 файла — ключ идемпотентности приёма.
+    external_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    channel_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="SET NULL"), nullable=True)
+    # Счёт и счёт-фактура прицепляются к акту-основанию: комплект закрывает период,
+    # а ожидание закрывает именно основание.
+    parent_doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ops_counterparty_docs.id", ondelete="SET NULL"), nullable=True)
+    parse_status: Mapped[str] = mapped_column(String(12), nullable=False, default="raw")
+    # Письмо/нагрузка ЭДО как есть — L1 RAW, принятый в Ядре приём.
+    raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # unmatched | auto | manual | rejected
+    match_status: Mapped[str] = mapped_column(String(12), nullable=False, default="unmatched")
+    matched_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    matched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        # Повторная доставка того же письма или выгрузка того же документа ЭДО
+        # дубля не создаёт. Ручные документы ключа не имеют — там дубль осознан.
+        Index("uq_ops_doc_external", "company_id", "channel", "external_key", unique=True,
+              postgresql_where=text("external_key IS NOT NULL")),
+        Index("ix_ops_doc_inbox", "company_id", "match_status", "created_at"),
+    )
+
+
+class OpsPeriodCharge(Base):
+    """Начисление: объект × период × статья × сумма. Ядро реестра.
+
+    Одна строка = одно ожидание одного месяца. Разворачивается из условия
+    автоматически; нет документа к закрытию — закрывается РАСЧЁТНОЙ суммой с
+    пометкой метода в `expected_basis`, и метка видна человеку рядом с цифрой.
+
+    Сумма расхождения не хранится — считается на чтении, как стоимость в
+    StationEnergyPeriod. Хранится только классификация, по которой фильтруют.
+    """
+    __tablename__ = "ops_period_charges"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Первое число месяца ISO — как в StationEnergyPeriod.
+    period: Mapped[str] = mapped_column(String(10), nullable=False)
+    cost_item: Mapped[str] = mapped_column(
+        Text, ForeignKey("ops_cost_items.code"), nullable=False)
+    # NULL = строка заведена руками, без условия.
+    term_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ops_contract_terms.id", ondelete="SET NULL"), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    counterparty_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # NULL = ОБЩАЯ затрата компании, не привязанная к объекту. Штатный разрез,
+    # а не пропуск: у части договоров охват — вся сеть.
+    location_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), nullable=True)
+    # 0 = начисление периода, >0 = корректировка за прошлый закрытый месяц.
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+
+    expected_gross: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    expected_net: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    expected_qty: Mapped[float | None] = mapped_column(Numeric(16, 3), nullable=True)
+    vat_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    # Откуда взялась сумма — показывается меткой рядом с цифрой:
+    # contract | prev_period | average | metered | manual | correction | none
+    expected_basis: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    doc_due_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    doc_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ops_counterparty_docs.id", ondelete="SET NULL"), nullable=True)
+    actual_gross: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    actual_net: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
+    actual_qty: Mapped[float | None] = mapped_column(Numeric(16, 3), nullable=True)
+
+    # expected | received | matched | disputed | accrued | corrected | waived
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="expected")
+    # Те же слова, что у AccountingDoc.discrepancy_status: расхождение в двух
+    # контурах обязано называться одинаково.
+    variance_class: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    corrects_charge_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ops_period_charges.id", ondelete="SET NULL"), nullable=True)
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_in_period: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Журнал напоминаний контрагенту: reminders[] — когда, кому, кем.
+    extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        # Разворот идемпотентен: повторный прогон не задваивает. Ручные строки
+        # (term_id IS NULL) не дедуплицируются — ручная строка всегда осознанна.
+        Index("uq_ops_charge_term", "company_id", "period", "term_id", "seq", unique=True,
+              postgresql_where=text("term_id IS NOT NULL")),
+        Index("ix_ops_charge_location", "company_id", "period", "location_id"),
+        Index("ix_ops_charge_cp", "company_id", "counterparty_id", "period"),
+        Index("ix_ops_charge_status", "company_id", "period", "status"),
+    )
+
+
+class OpsPeriodClose(Base):
+    """Закрытие месяца по затратам эксплуатации.
+
+    Свой, а не `Period`: тот реплицирует периоды из 1С (`closure_source`) и для
+    профиля `energy` вообще не показывается. Здесь период закрывает наш человек
+    кнопкой, и после закрытия суммы перестают плавать.
+
+    Квартал и год своего закрытия не получают: квартальных документов не бывает,
+    бывают квартальные договоры — они дают ожидание в месяце окончания квартала.
+    """
+    __tablename__ = "ops_period_close"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    period: Mapped[str] = mapped_column(String(10), nullable=False)
+    # open | collecting | review | closed | reopened
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    expected_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    received_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estimated_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_expected_gross: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    total_actual_gross: Mapped[float | None] = mapped_column(Numeric(18, 2), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reopen_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Снимок на момент закрытия: разрезы по статьям, объектам, методам оценки.
+    # Нужен, чтобы «как было при закрытии» пережило любые последующие правки.
+    summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_ops_period_close", "company_id", "period", unique=True),
+    )
+
+
+class OpsMeter(Base):
+    """Узел учёта электроэнергии — когда один прибор стоит на несколько станций.
+
+    Из данных заказчика: 38 пометок «Один счетчик на три станции», «Потребление
+    по двум станциям». Плюс коэффициент трансформации, без которого объём не
+    воспроизводится: в файле лежат формулы вида `=46*30` и комментарий
+    `198 - ПУ | К/Т = 50`, поэтому значения кратны 30/40/50/60.
+    """
+    __tablename__ = "ops_meters"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    number: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ktrans: Mapped[float | None] = mapped_column(Numeric(10, 3), nullable=True)
+    counterparty_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
+    # {location_id: доля_в_процентах}. Таблицей связи не делаем: 38 случаев на
+    # 760 станций джойна не требуют, разнос идёт в коде расчёта.
+    shares: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_ops_meter_company", "company_id", "number"),
     )

@@ -668,12 +668,12 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
-        # v2.12: аналитика продаж ГИГ по наливам (раздел «Продажи» → Аналитика/
+        # v2.12: аналитика продаж ГИГ по реализациям (раздел «Продажи» → Аналитика/
         # Коммерция). Индекс под когорты «новые карты» (MIN(dt) GROUP BY card по
         # всей истории) и реестр карт. Досев паттернов маппинга оплат: на
         # ТРАНЗАКЦИОННОМ грейне STS имена видов оплаты отличаются от сменного
-        # sales-блока («Карта МПС» = банковские карты 64% наливов, «КР» =
-        # локальные топливные карты, тех.отпуски) — без досева 2/3 наливов
+        # sales-блока («Карта МПС» = банковские карты 64% реализаций, «КР» =
+        # локальные топливные карты, тех.отпуски) — без досева 2/3 реализаций
         # оставались «не размечено». sort_order 106+ — ПОСЛЕ 'кредит'(103)/
         # 'кред.рубл'(104), иначе паттерн 'кр' перехватил бы «Кредит».
         for stmt in (
@@ -750,6 +750,11 @@ async def create_all() -> None:
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_url TEXT",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_name VARCHAR(500)",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_size INTEGER",
+            # v2.42: каналы и контекст чатов пространства. Тип «channel» и роль «owner»
+            # живут в существующих строковых полях — ALTER нужен только под привязку
+            # комнаты к приложению.
+            "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_product VARCHAR(40)",
+            "CREATE INDEX IF NOT EXISTS idx_chat_rooms_scope ON chat_rooms (company_id, scope_product)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
@@ -1096,9 +1101,9 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
-        # v2.31: реестр «Операций» ГИГ вровень с «Монитором» — поля налива, которые
+        # v2.31: реестр «Операций» ГИГ вровень с «Монитором» — поля реализации, которые
         # STS отдаёт с первого дня, а ингест не сохранял: номер чека (по нему ищут
-        # конкретную заправку), заказ клиента до налива («залей на 1000 ₽» —
+        # конкретную заправку), заказ клиента до отпуска («залей на 1000 ₽» —
         # расхождение с фактом видно в карточке), масса, статус и нормализованный
         # вид оплаты (по нему группируются KPI-карточки).
         for stmt in (
@@ -1115,7 +1120,7 @@ async def create_all() -> None:
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
-        # Бэкфилл payment_method по уже загруженным наливам: идём по РАЗЛИЧНЫМ сырым
+        # Бэкфилл payment_method по уже загруженным реализациям: идём по РАЗЛИЧНЫМ сырым
         # именам (их десятки на сотни тысяч строк) и через ту же функцию, что и
         # ингест — SQL-двойник этой логики со временем разошёлся бы с ней.
         # Чек, заказ и массу бэкфиллом не взять: они приезжают только повторной
@@ -1130,6 +1135,115 @@ async def create_all() -> None:
                          "WHERE payment_method IS NULL AND pay_type_name IS NOT DISTINCT FROM :raw"),
                 {"norm": normalize_payment_method(raw), "raw": raw},
             )
+
+        # -------------------------------------------------------------------
+        # v2.32: «Эксплуатация» — денежный контур площадок (волна 0).
+        # -------------------------------------------------------------------
+        # Таблицы ops_* создаёт metadata.create_all. Здесь — сид справочника
+        # статей (закрытый список, правится вместе с кодом, как contract_types),
+        # показания приборов учёта в готовую station_energy_periods и два
+        # разовых бэкфилла, которые поднимают контур на реальных данных.
+
+        # Статьи затрат. Активны те, под которые есть условия; включение новой
+        # статьи — строка здесь плюс условия в реестре, кода писать не нужно.
+        await conn.execute(_sa.text("""
+            INSERT INTO ops_cost_items
+              (code, label, contract_type_code, settlement_role, measure,
+               default_expected_docs, default_estimate_basis, bp_account, sort_order) VALUES
+              ('rent',            'Аренда площадки',       'rent',          'rent',    'fixed',
+               '{act,invoice}',        'contract',    '20',  10),
+              ('energy',          'Электроэнергия',        'energy_supply', 'energy',  'metered',
+               '{upd,invoice,report}', 'prev_period', '20',  20),
+              ('maintenance',     'Обслуживание и ТО',     'maintenance',   'service', 'fixed',
+               '{act,invoice}',        'contract',    '20',  30),
+              ('tech_connection', 'Технологическое присоединение', 'services', NULL,   'fixed',
+               '{act,invoice}',        'contract',    '08',  40),
+              ('comms',           'Связь и передача данных', 'services',    NULL,      'fixed',
+               '{act,invoice}',        'prev_period', '26',  50),
+              ('cleaning',        'Уборка и содержание',   'services',      NULL,      'fixed',
+               '{act,invoice}',        'contract',    '20',  60),
+              ('other',           'Прочие расходы',         NULL,           NULL,      'fixed',
+               '{act}',                'average',     '26',  90)
+            ON CONFLICT (code) DO UPDATE
+              SET label = EXCLUDED.label,
+                  contract_type_code = EXCLUDED.contract_type_code,
+                  settlement_role = EXCLUDED.settlement_role,
+                  measure = EXCLUDED.measure,
+                  default_expected_docs = EXCLUDED.default_expected_docs,
+                  default_estimate_basis = EXCLUDED.default_estimate_basis,
+                  bp_account = EXCLUDED.bp_account,
+                  sort_order = EXCLUDED.sort_order
+        """))
+
+        # Показания ПУ и коэффициент трансформации: объём = (curr − prev) × КТ.
+        # create_all колонки в готовую таблицу не добавляет.
+        for stmt in (
+            "ALTER TABLE station_energy_periods ADD COLUMN IF NOT EXISTS meter_prev DOUBLE PRECISION",
+            "ALTER TABLE station_energy_periods ADD COLUMN IF NOT EXISTS meter_curr DOUBLE PRECISION",
+            "ALTER TABLE station_energy_periods ADD COLUMN IF NOT EXISTS ktrans DOUBLE PRECISION",
+            "ALTER TABLE station_energy_periods ADD COLUMN IF NOT EXISTS meter_id UUID "
+            "REFERENCES ops_meters(id) ON DELETE SET NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # ── Бэкфилл 1: охват договоров по объектам ──
+        # У 876 договоров scope_type='locations', а contract_locations заполнена
+        # у 26: привязку ингест реестра проставил в station_contract_settlements,
+        # но в ось «договор ↔ точка» она не доехала. Без неё ожидание по договору
+        # не на что разворачивать.
+        #
+        # Разовый: маркер в note. Иначе привязка, снятая человеком вручную как
+        # ошибочная, возвращалась бы при каждом рестарте.
+        if not (await conn.execute(_sa.text(
+            "SELECT 1 FROM contract_locations WHERE note = 'backfill:settlements' LIMIT 1"
+        ))).first():
+            await conn.execute(_sa.text("""
+                INSERT INTO contract_locations (id, company_id, contract_id, location_id, note)
+                SELECT gen_random_uuid(), s.company_id, s.contract_id, s.location_id,
+                       'backfill:settlements'
+                  FROM station_contract_settlements s
+                  JOIN contracts c ON c.id = s.contract_id
+                 WHERE s.contract_id IS NOT NULL
+                   -- Фильтр обязателен: общекомпанийный договор с объектной
+                   -- привязкой посчитался бы дважды — и по объектам, и как общий.
+                   AND c.scope_type = 'locations'
+                ON CONFLICT DO NOTHING
+            """))
+
+        # ── Бэкфилл 2: условия обязательств из реестра контрагента ──
+        # 1229 строк реестра (аренда 421, энергия 398) уже несут сумму, НДС и
+        # горизонт договора — это готовые условия, из которых разворачивается
+        # ожидание месяца. Дальше условия живут своей жизнью: реестр отвечает за
+        # дисциплину ОПЛАТЫ, условия — за дисциплину ДОКУМЕНТОВ, и повторная
+        # загрузка файла их не трогает.
+        if not (await conn.execute(_sa.text(
+            "SELECT 1 FROM ops_contract_terms WHERE source = 'backfill:settlements' LIMIT 1"
+        ))).first():
+            await conn.execute(_sa.text("""
+                INSERT INTO ops_contract_terms
+                  (id, company_id, contract_id, cost_item, scope_type, location_id,
+                   periodicity, amount_gross, amount_net, vat_pct,
+                   variable_kind, tariff_rub, valid_from, valid_to, source, extra)
+                SELECT gen_random_uuid(), s.company_id, s.contract_id,
+                       CASE s.role WHEN 'rent' THEN 'rent' ELSE 'energy' END,
+                       'location', s.location_id,
+                       'monthly',
+                       s.amount_gross, s.amount_net, s.vat_pct,
+                       CASE WHEN s.role = 'energy' THEN 'metered_kwh' END,
+                       NULLIF(s.extra->>'avgTariff', '')::NUMERIC,
+                       -- Горизонт версии. Дата начала неизвестна у большинства
+                       -- строк — берём заведомо ранний якорь, чтобы условие
+                       -- действовало на всю доступную историю.
+                       COALESCE(NULLIF(LEFT(s.contract_start, 10), ''), '2019-01-01'),
+                       NULLIF(LEFT(s.contract_end, 10), ''),
+                       'backfill:settlements',
+                       jsonb_build_object('paymentStatus', s.payment_status,
+                                          'basis', s.basis, 'comment', s.comment)
+                  FROM station_contract_settlements s
+                 WHERE s.contract_id IS NOT NULL
+                   AND s.role IN ('rent', 'energy')
+                ON CONFLICT DO NOTHING
+            """))
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

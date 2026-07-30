@@ -181,6 +181,16 @@ export function WorkspaceProvider({ children, lockModes }: { children: ReactNode
   )
 }
 
+/**
+ * Рабочая область, если она есть. Панели Ядра (чат, заявки) висят в шапке ВСЕХ
+ * экранов — в том числе приложений, живущих вне `WorkspaceLayout` («Чаты»,
+ * «Управление»). Им нужен контекст, когда он есть, и работа без него, когда нет:
+ * обязательный `useWorkspace` в такой панели ронял всё приложение целиком.
+ */
+export function useOptionalWorkspace() {
+  return useContext(WorkspaceContext)
+}
+
 export function useWorkspace() {
   const ctx = useContext(WorkspaceContext)
   if (!ctx) throw new Error('useWorkspace must be used within WorkspaceProvider')

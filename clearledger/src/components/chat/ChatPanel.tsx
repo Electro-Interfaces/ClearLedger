@@ -17,6 +17,8 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
+import { SPACE_PRODUCTS } from '@/config/spaceProducts'
+import { PartyBadge } from '@/components/chat/PartyBadge'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
 import { Input } from '@/components/ui/input'
@@ -42,9 +44,15 @@ import type {
 // ── константы ────────────────────────────────────────────────────────────────
 const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '😮', '👏']
 const NEWS_WRITER_ROLES = new Set(['admin', 'partner', 'coordinator', 'company', 'tech'])
-type FolderKey = 'all' | 'group' | 'direct'
+/**
+ * Разделы списка — как в Telegram: канал, группа и личный чат это разные сущности,
+ * а не «чат с разными настройками». Канал односторонний (новости, рассылка, слово
+ * руководителя), в группе говорят все, личный — про двоих.
+ */
+type FolderKey = 'all' | 'channel' | 'group' | 'direct'
 const FOLDERS: { key: FolderKey; label: string; icon: typeof UserIcon }[] = [
   { key: 'all', label: 'Все', icon: MessageCircle },
+  { key: 'channel', label: 'Каналы', icon: Megaphone },
   { key: 'group', label: 'Группы', icon: Users },
   { key: 'direct', label: 'Личные', icon: UserIcon },
 ]
@@ -76,6 +84,7 @@ function fmtAge(iso: string | null): string {
 function roomIcon(r: { type: string; kind?: string | null }): typeof UserIcon {
   if (r.kind === 'news') return Megaphone
   if (r.kind === 'general' || r.type === 'company') return Building2
+  if (r.type === 'channel' || r.kind === 'news') return Megaphone
   if (r.type === 'group') return Users
   return UserIcon
 }
@@ -194,8 +203,76 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
   })
   const memberIds = new Set((participants || []).map((p) => p.userId))
   const addable = found.filter((u) => !memberIds.has(u.userId))
+  const owner = (participants || []).find((p) => p.role === 'owner')
+  const peer = room?.type === 'direct'
+    ? (participants || []).find((p) => p.userId !== userId) : undefined
+  const external = (participants || []).filter((p) => p.isExternal)
+  // Что это за чат и почему он здесь: вид, кто ведёт, к какому приложению привязан.
+  // Без этой карточки панель отвечала только «кто внутри», а вопрос «что это такое»
+  // оставался открытым — особенно у групп, которые пространство завело само.
+  const kindText = room?.kind === 'platform' ? 'Канал разработчика платформы'
+    : room?.kind === 'news' ? 'Канал компании — пишут владелец и администраторы'
+    : room?.kind === 'general' ? 'Общая группа пространства'
+    : room?.kind?.startsWith('app:') ? 'Группа приложения'
+    : room?.type === 'channel' ? 'Канал — односторонний: пишут владелец и админы'
+    : room?.type === 'group' ? 'Группа — пишут все участники'
+    : room?.type === 'direct' ? 'Личная переписка' : 'Чат пространства'
+  const scopeLabel = room?.scopeProduct
+    ? SPACE_PRODUCTS.find((s) => s.code === room.scopeProduct)?.label || room.scopeProduct
+    : null
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-3">
+      <div className="mb-3 rounded-lg border border-border/70 bg-muted/25 p-2.5">
+        <div className="text-[13px] font-medium">{room?.name || peer?.name || 'Чат'}</div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">{kindText}</div>
+        <dl className="mt-2 space-y-1 text-[11px]">
+          {peer ? (
+            <>
+              <div className="flex gap-2">
+                <dt className="w-24 shrink-0 text-muted-foreground">Собеседник</dt>
+                <dd className="min-w-0 truncate">{peer.name}</dd>
+              </div>
+              {peer.companyName && (
+                <div className="flex gap-2">
+                  <dt className="w-24 shrink-0 text-muted-foreground">Компания</dt>
+                  <dd className="min-w-0 truncate">{peer.companyName}</dd>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <dt className="w-24 shrink-0 text-muted-foreground">Сейчас</dt>
+                <dd>{presenceMap.get(peer.userId)?.online || peer.online ? 'в сети' : 'не в сети'}</dd>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                <dt className="w-24 shrink-0 text-muted-foreground">Ведёт</dt>
+                <dd className="min-w-0 truncate">{owner?.name || 'не назначен'}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-24 shrink-0 text-muted-foreground">Участников</dt>
+                <dd className="tabular-nums">
+                  {participants?.length ?? 0}
+                  {external.length > 0 && (
+                    <span className="ml-1 text-amber-600 dark:text-amber-400"
+                      title={external.map((p) => `${p.name}${p.companyName ? ` · ${p.companyName}` : ''}`).join(', ')}>
+                      +{external.length} от партнёров
+                    </span>
+                  )}
+                </dd>
+              </div>
+            </>
+          )}
+          <div className="flex gap-2">
+            <dt className="w-24 shrink-0 text-muted-foreground">Приложение</dt>
+            <dd className="min-w-0 truncate">{scopeLabel || 'всё пространство'}</dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="w-24 shrink-0 text-muted-foreground">Моя роль</dt>
+            <dd>{room?.myRole === 'owner' ? 'владелец' : room?.myRole === 'admin' ? 'админ' : 'участник'}</dd>
+          </div>
+        </dl>
+      </div>
       <div className="mb-3">
         <div className="mb-1 text-xs font-semibold text-muted-foreground">Участники · {participants?.length ?? 0}</div>
         <div className="space-y-0.5">
@@ -205,8 +282,21 @@ function RoomInfoPanel({ room, participants, userId, canManage, onAdd, onMessage
               <div key={p.userId} className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-accent">
                 <Avatar seed={p.userId} name={p.name} online={online} size={32} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm">{p.name}{p.userId === userId && ' (вы)'}</div>
-                  <div className="text-[11px] text-muted-foreground">{p.role === 'admin' ? 'админ' : 'участник'}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-[13px]">{p.name}{p.userId === userId && ' (вы)'}</span>
+                    {/* Чей это человек — первое, что нужно знать перед тем, как писать:
+                        в смешанной группе рядом сидят инженер платформы, свой сотрудник
+                        и человек партнёра. Один и тот же бейдж во всех разрезах. */}
+                    <PartyBadge party={{
+                      partyType: p.partyType ?? (p.isExternal ? 'partner' : 'internal'),
+                      role: p.role === 'owner' || p.role === 'admin' ? 'admin' : undefined,
+                      orgName: p.companyName,
+                    }} />
+                  </div>
+                  <div className="truncate text-[11px] text-muted-foreground">
+                    {p.role === 'owner' ? 'владелец' : p.role === 'admin' ? 'админ' : 'участник'}
+                    {p.isExternal && p.companyName ? ` · ${p.companyName}` : ''}
+                  </div>
                 </div>
                 {p.userId !== userId && room?.type !== 'direct' && (
                   <button onClick={() => onMessageUser(p.userId)} className="rounded p-1 text-muted-foreground hover:text-foreground" title="Написать лично">
@@ -374,31 +464,49 @@ function ChatBubble({
         )}>
           {/* Меню действий: hover на мыши, всегда видно на тач-устройствах */}
           <div className={cn(
-            'absolute -top-3 z-10 flex items-center gap-0.5 rounded-md border border-border bg-popover px-0.5 py-0.5 shadow-lg opacity-0 transition-opacity group-hover/bubble:opacity-100 [@media(pointer:coarse)]:opacity-100',
+            'absolute -top-5 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover px-1 py-1 shadow-lg opacity-0 transition-opacity group-hover/bubble:opacity-100 [@media(pointer:coarse)]:opacity-100',
             isOwn ? 'right-0' : 'left-0',
           )}>
+            {/* Цель клика — 28px, а не размер самого символа: реакции ставят мышью на
+                ходу, и в 14-пиксельный эмодзи попасть нельзя. Символ крупнее рамки
+                кнопки не делаем — иначе панель выше самого сообщения. */}
             {onReact && QUICK_REACTIONS.map((emoji) => (
-              <button key={emoji} onClick={() => onReact(emoji)} className="rounded px-0.5 text-[13px] leading-none hover:bg-accent" title={emoji}>{emoji}</button>
+              <button key={emoji} onClick={() => onReact(emoji)} title={emoji}
+                className="flex size-7 items-center justify-center rounded-md text-[18px] leading-none transition-transform hover:scale-110 hover:bg-accent active:scale-95">
+                {emoji}
+              </button>
             ))}
-            {onReact && <span className="mx-0.5 h-3 w-px bg-border" />}
-            <button onClick={onReply} className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground" title="Ответить"><Reply className="size-3" /></button>
-            {onPin && <button onClick={onPin} className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground" title="Закрепить"><Pin className="size-3" /></button>}
-            {isOwn && <button onClick={onEditStart} className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground" title="Редактировать"><Pencil className="size-3" /></button>}
-            {canDelete && <button onClick={onDelete} className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-red-500" title="Удалить"><Trash2 className="size-3" /></button>}
+            {onReact && <span className="mx-0.5 h-5 w-px bg-border" />}
+            <button onClick={onReply} title="Ответить"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Reply className="size-4" /></button>
+            {onPin && <button onClick={onPin} title="Закрепить"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pin className="size-4" /></button>}
+            {isOwn && <button onClick={onEditStart} title="Редактировать"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><Pencil className="size-4" /></button>}
+            {canDelete && <button onClick={onDelete} title="Удалить"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-500"><Trash2 className="size-4" /></button>}
           </div>
 
           {!isOwn && isFirstInGroup && (
-            <button type="button" onClick={onAuthorClick} disabled={!onAuthorClick}
-              title={onAuthorClick ? 'Написать лично' : undefined}
-              className={cn('mb-0.5 block text-left text-[10px] font-semibold', getUserColor(message.userId || ''), onAuthorClick && 'cursor-pointer hover:underline')}>
-              {message.userName || 'Пользователь'}
-            </button>
+            <div className="mb-0.5 flex items-center gap-1.5">
+              <button type="button" onClick={onAuthorClick} disabled={!onAuthorClick}
+                title={onAuthorClick ? 'Написать лично' : undefined}
+                className={cn('text-left text-[11px] font-semibold', getUserColor(message.userId || ''), onAuthorClick && 'cursor-pointer hover:underline')}>
+                {message.userName || 'Пользователь'}
+              </button>
+              {/* Кто говорит — у самого сообщения, а не только в составе комнаты:
+                  инженера поддержки платформы, своего сотрудника и человека партнёра
+                  надо различать в момент чтения, не сверяясь со списком участников. */}
+              {message.authorParty && message.authorParty !== 'internal' && (
+                <PartyBadge party={{ partyType: message.authorParty }} className="py-0" />
+              )}
+            </div>
           )}
 
           {message.replyTo && message.replyPreview && (
             <div className="mb-1 rounded-r border-l-2 border-blue-500 pl-1.5">
-              <div className="text-[9px] font-medium text-blue-400">{message.replyAuthor || 'Пользователь'}</div>
-              <div className="max-w-[200px] truncate text-[10px] opacity-70">{message.replyPreview}</div>
+              <div className="text-[11px] font-medium text-blue-400">{message.replyAuthor || 'Пользователь'}</div>
+              <div className="max-w-[220px] truncate text-[11px] opacity-70">{message.replyPreview}</div>
             </div>
           )}
 
@@ -409,7 +517,7 @@ function ChatBubble({
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEditSave() }
                   if (e.key === 'Escape') onEditCancel()
                 }}
-                className="min-h-[28px] w-full resize-none rounded border border-border bg-transparent p-1 text-xs outline-none focus:border-primary" rows={2} />
+                className="min-h-[28px] w-full resize-none rounded border border-border bg-transparent p-1 text-[13px] outline-none focus:border-primary" rows={2} />
               <div className="flex justify-end gap-1">
                 <button onClick={onEditCancel} className="rounded p-0.5 text-muted-foreground hover:bg-accent"><X className="size-3.5" /></button>
                 <button onClick={onEditSave} className="rounded p-0.5 text-emerald-500 hover:bg-accent"><Check className="size-3.5" /></button>
@@ -417,7 +525,7 @@ function ChatBubble({
             </div>
           ) : (
             message.content && (
-              <p className="whitespace-pre-wrap break-words text-xs">
+              <p className="whitespace-pre-wrap break-words text-[13px] leading-[1.45]">
                 {searchHighlight ? highlightText(message.content, searchHighlight) : linkifyText(message.content)}
                 <span className={cn('inline-block', isOwn ? 'w-16' : 'w-11')} />
               </p>
@@ -453,20 +561,23 @@ function ChatBubble({
           {message.reactions.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
               {message.reactions.map((r) => (
+                /* Подсказка перечисляет ИМЕНА: «1» без автора не отвечает на вопрос,
+                   кто это поставил, — а в группе это первое, что хотят знать. */
                 <button key={r.emoji} onClick={() => onReact?.(r.emoji)}
-                  className={cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[11px] leading-4 transition-colors',
+                  title={r.users?.length ? r.users.join(', ') : undefined}
+                  className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[13px] leading-4 transition-colors',
                     r.mine ? 'border-blue-500/60 bg-blue-500/20 text-blue-500 dark:text-blue-200' : 'border-border bg-background/60 text-muted-foreground hover:border-foreground/30')}>
-                  {r.emoji}<span className="text-[9px] tabular-nums">{r.count}</span>
+                  {r.emoji}<span className="text-[10px] tabular-nums">{r.count}</span>
                 </button>
               ))}
             </div>
           )}
 
           <span className={cn('absolute bottom-1 right-2 flex items-center gap-0.5 text-[10px]', isOwn ? 'text-primary-foreground/60' : 'text-muted-foreground/70')}>
-            {message.isEdited && <span className="text-[9px] opacity-70">ред.</span>}
+            {message.isEdited && <span className="text-[10px] opacity-70">ред.</span>}
             {formatTime(message.createdAt)}
             {isOwn && (
-              <span className={cn('text-[9px]', message.readCount > 0 && 'text-sky-300')}
+              <span className={cn('text-[10px]', message.readCount > 0 && 'text-sky-300')}
                 title={message.readCount > 0 ? `Прочитали: ${message.readCount}` : 'Отправлено'}>
                 {message.readCount > 0 ? '✓✓' : '✓'}
               </span>
@@ -501,7 +612,15 @@ function PendingThumb({ file, onRemove }: { file: File; onRemove: () => void }) 
 }
 
 // ── корневой компонент ────────────────────────────────────────────────────────
-export function ChatPanel({ compact }: { compact?: boolean } = {}) {
+export function ChatPanel({ compact, scopeProduct }: {
+  compact?: boolean
+  /**
+   * Приложение, из которого открыта панель. Правая рельса передаёт текущее приложение
+   * и получает его чаты плюс общие чаты пространства; верхняя кнопка не передаёт
+   * ничего и показывает всё. Один и тот же чат — разные предустановки.
+   */
+  scopeProduct?: string | null
+} = {}) {
   const { user } = useAuth()
   const { companyId } = useCompany()
   const isMobile = useIsMobile()
@@ -521,6 +640,29 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
   const [dragOver, setDragOver] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [showRoomInfo, setShowRoomInfo] = useState(false)
+  // Ширина колонки списка: тянется разделителем, помнится между сессиями.
+  const [listWidth, setListWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('cl-chat-list-width'))
+    return saved >= 200 && saved <= 560 ? saved : 288
+  })
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = listWidth
+    const move = (ev: PointerEvent) => {
+      const next = Math.min(560, Math.max(200, startW + ev.clientX - startX))
+      setListWidth(next)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.userSelect = ''
+      setListWidth((w) => { localStorage.setItem('cl-chat-list-width', String(w)); return w })
+    }
+    document.body.style.userSelect = 'none'
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   const [folder, setFolder] = useState<string>('all')
   const [lightbox, setLightbox] = useState<{ items: { path: string; name?: string }[]; index: number } | null>(null)
   const [folderDialogOpen, setFolderDialogOpen] = useState(false)
@@ -539,10 +681,19 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
 
+  // Область: открыв рельсу в «Топливе», человек ждёт чаты «Топлива», а не весь
+  // пространственный список — группы «Магазина» и «Процессинга» здесь только мешают.
+  // Поэтому контекст включён по умолчанию, а выйти к остальным можно одним щелчком.
+  const [scopeOn, setScopeOn] = useState(true)
+  const scope = scopeOn ? scopeProduct : null
+  const scopeName = scopeProduct
+    ? SPACE_PRODUCTS.find((p) => p.code === scopeProduct)?.label || scopeProduct
+    : null
+
   // ── данные ──
   const { data: rooms = [] } = useQuery({
-    queryKey: ['chat-rooms', companyId, showArchived],
-    queryFn: () => chat.getRooms(showArchived),
+    queryKey: ['chat-rooms', companyId, showArchived, scope ?? 'all'],
+    queryFn: () => chat.getRooms(showArchived, scope),
     refetchInterval: 60000,
   })
   const { data: messages = [] } = useQuery({
@@ -757,14 +908,29 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
   // ── производные ──
   const activeRoom = selectedRoom ? rooms.find((r) => r.id === selectedRoom) : undefined
   const isAdmin = user?.role === 'admin' || !!user?.is_superadmin
-  const canWrite = activeRoom?.kind !== 'news' || NEWS_WRITER_ROLES.has(user?.role || '')
+  // Канал односторонний: писать в него могут владелец и назначенные им админы —
+  // роль В КОМНАТЕ, а не должность в компании. «Объявления» пространства ведёт ещё и
+  // администратор компании: это канал самой организации, а канал платформы — наш,
+  // пространство его только читает.
+  const canWrite = (() => {
+    if (!activeRoom) return true
+    const roomRole = activeRoom.myRole || 'member'
+    if (activeRoom.kind === 'platform') return false
+    if (activeRoom.kind === 'news') {
+      return NEWS_WRITER_ROLES.has(user?.role || '') || roomRole === 'owner' || roomRole === 'admin'
+    }
+    if (activeRoom.type === 'channel') return roomRole === 'owner' || roomRole === 'admin'
+    return true
+  })()
   const peerPresence = activeRoom?.type === 'direct' && activeRoom.directPeerId ? presenceMap.get(activeRoom.directPeerId) : undefined
 
   const filteredRooms = useMemo(() => {
     const custom = folders.find((f) => f.id === folder)
     const s = listSearch.trim().toLowerCase()
     const visible = rooms.filter((r) => {
-      if (folder === 'group' && !(r.type === 'group' || r.type === 'company')) return false
+      // «Объявления» пространства — тоже канал по смыслу: писать может только админ.
+      if (folder === 'channel' && !(r.type === 'channel' || r.kind === 'news')) return false
+      if (folder === 'group' && !(r.type === 'group' || r.kind === 'general')) return false
       if (folder === 'direct' && r.type !== 'direct') return false
       if (custom && !custom.roomIds.includes(r.id)) return false
       return !s || (r.name || '').toLowerCase().includes(s) || (r.lastMessage || '').toLowerCase().includes(s)
@@ -774,12 +940,13 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
   }, [rooms, listSearch, folder, folders])
 
   const unreadByFolder = useMemo(() => {
-    const acc: Record<string, number> = { all: 0, group: 0, direct: 0 }
+    const acc: Record<string, number> = { all: 0, channel: 0, group: 0, direct: 0 }
     for (const f of folders) acc[f.id] = 0
     for (const r of rooms) {
       const n = r.unreadCount || 0
       acc.all += n
-      if (r.type === 'group' || r.type === 'company') acc.group += n
+      if (r.type === 'channel' || r.kind === 'news') acc.channel += n
+      else if (r.type === 'group' || r.kind === 'general') acc.group += n
       if (r.type === 'direct') acc.direct += n
       for (const f of folders) if (f.roomIds.includes(r.id)) acc[f.id] += n
     }
@@ -826,6 +993,23 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
           <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Поиск…" className="h-8 pl-8 text-xs" />
         </div>
+        {/* Область: сначала чаты этого приложения (плюс общие пространства и личные),
+            и один щелчок, чтобы выйти ко всем. Виден сам факт отбора — иначе непонятно,
+            почему список короче, чем в приложении «Чаты». */}
+        {scopeName && (
+          <div className="mt-2 inline-flex w-full rounded-md border border-border p-0.5">
+            {[{ on: true, l: scopeName }, { on: false, l: 'Всё пространство' }].map((o) => (
+              <button key={String(o.on)} type="button" onClick={() => setScopeOn(o.on)}
+                title={o.on ? `Чаты приложения «${scopeName}» и общие чаты пространства`
+                  : 'Все чаты, где вы участник'}
+                className={cn('flex-1 truncate rounded-[5px] px-2 py-1 text-[11px] transition-colors',
+                  scopeOn === o.on ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground')}>
+                {o.l}
+              </button>
+            ))}
+          </div>
+        )}
         {/* Чипы папок (одноколоночный режим: мобильный / узкий док) */}
         {singleColumn && (
           <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5">
@@ -856,6 +1040,7 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
         ) : filteredRooms.map((room) => {
           const Icon = roomIcon(room)
           const isSystem = room.kind === 'news' || room.kind === 'general'
+            || room.kind === 'platform' || !!room.kind?.startsWith('app:')
           const peerOnline = room.type === 'direct' && room.directPeerId ? presenceMap.get(room.directPeerId)?.online : false
           return (
             <div key={room.id} onClick={() => { setSelectedRoom(room.id); setShowRoomInfo(false) }}
@@ -1190,8 +1375,13 @@ export function ChatPanel({ compact }: { compact?: boolean } = {}) {
           <Plus className="size-4" />Папка
         </button>
       </div>
-      {/* Список */}
-      <div className="flex w-72 shrink-0 flex-col border-r border-border/50">{listView}</div>
+      {/* Список — тянется мышью: у кого-то длинные названия групп, у кого-то важнее
+          ширина переписки. Ширина помнится между заходами (localStorage). */}
+      <div className="flex shrink-0 flex-col border-r border-border/50" style={{ width: listWidth }}>{listView}</div>
+      {/* Разделитель: полоса 4px, подсвечивается под курсором. */}
+      <div role="separator" aria-orientation="vertical" title="Потяните, чтобы изменить ширину"
+        onPointerDown={startResize}
+        className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
       {/* Переписка */}
       <div className="flex min-w-0 flex-1 flex-col">
         {conversationView || (

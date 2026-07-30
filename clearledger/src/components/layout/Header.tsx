@@ -9,7 +9,7 @@ import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useCompany } from '@/contexts/CompanyContext'
-import { isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
+import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { AppLauncher } from '@/components/layout/AppLauncher'
 import { DeskButton } from '@/components/layout/DeskButton'
@@ -25,6 +25,9 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const { company } = useCompany()
   const { pathname } = useLocation()
   const product = isCarvedProfile(company.profileId) ? productForPath(pathname) : null
+  // Приложение Ядра («Чаты», «Управление») называет себя само: продукта у него нет, а
+  // надпись «Учёт» в чужом приложении сбивает с толку.
+  const coreTitle = product ? null : coreAppTitle(pathname)
   // Универсальный логотип «учёт»: приложение не привязано к топливу/энергии.
   const BrandIcon = BookText
 
@@ -49,10 +52,11 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
                 («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
             <div className="hidden sm:flex flex-col leading-none">
               <h1 className="font-semibold tracking-tight text-foreground text-lg">
-                {product ? productLabel(product, company.profileId) : `${ECOSYSTEM_BRAND} Учёт`}
+                {product ? productLabel(product, company.profileId)
+                  : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
               </h1>
               <p className="text-xs text-muted-foreground">
-                {product ? ECOSYSTEM_BRAND : `v${APP_VERSION}`}
+                {product || coreTitle ? ECOSYSTEM_BRAND : `v${APP_VERSION}`}
               </p>
             </div>
           </Link>

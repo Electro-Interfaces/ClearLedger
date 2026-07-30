@@ -4,14 +4,23 @@
  */
 import { get, post, patch, del, upload } from './apiClient'
 
-export interface ChatReaction { emoji: string; count: number; mine: boolean }
+export interface ChatReaction {
+  emoji: string
+  count: number
+  mine: boolean
+  /** Кто поставил: «Вы» первым, дальше имена участников. */
+  users?: string[]
+}
 
 export interface ChatPinned { id: string; content: string; userName: string | null }
 
 export interface ChatRoom {
   id: string
-  type: 'company' | 'direct' | 'group'
+  /** channel — односторонний (новости, рассылка): пишут владелец и админы канала. */
+  type: 'company' | 'direct' | 'group' | 'channel'
   kind: 'general' | 'news' | null
+  /** Приложение, к которому привязан чат; null — чат всего пространства. */
+  scopeProduct?: string | null
   name: string | null
   isArchived: boolean
   participantCount: number
@@ -21,13 +30,30 @@ export interface ChatRoom {
   lastMessageAt: string | null
   createdBy: string | null
   pinnedMessage: ChatPinned | null
+  /** Моя роль в этом чате: owner | admin | member. В канале пишут первые двое. */
+  myRole?: string | null
+  /** Приложение, к которому привязан чат; null — чат всего пространства. */
+  scopeProduct?: string | null
 }
+
+/** Кто это в пространстве: инженер разработчика платформы, свой сотрудник, партнёр. */
+export type PartyType = 'vendor' | 'internal' | 'partner'
+
+/** Кто это в пространстве: инженер разработчика платформы, свой сотрудник, партнёр. */
+export type PartyType = 'vendor' | 'internal' | 'partner'
 
 export interface ChatParticipant {
   userId: string
   name: string
+  /** Роль в комнате: owner — создатель, admin — назначенный им, member — остальные. */
   role: string
   online: boolean
+  /** true — человек компании-партнёра, а не наш сотрудник. */
+  isExternal?: boolean
+  /** Компания партнёра: в смешанной группе надо видеть, при ком идёт разговор. */
+  companyName?: string | null
+  /** vendor | internal | partner — та же категория, что в Центре управления. */
+  partyType?: PartyType
 }
 
 export interface ChatRoomDetail extends ChatRoom {
@@ -52,6 +78,8 @@ export interface ChatMessage {
   readCount: number
   reactions: ChatReaction[]
   createdAt: string
+  /** Кто написал: разработчик платформы, свой сотрудник или человек партнёра. */
+  authorParty?: PartyType | null
 }
 
 export interface ChatUser { userId: string; name: string; email: string; online: boolean }
@@ -69,14 +97,27 @@ export interface SendPayload {
 }
 
 // ── комнаты ────────────────────────────────────────────────────────────────
-export const getRooms = (archived = false) =>
-  get<ChatRoom[]>('/api/chat/rooms', { archived: String(archived) })
+/**
+ * Список чатов человека. `product` — код приложения: правая рельса просит чаты своего
+ * приложения (к ним всегда добавляются общие чаты пространства), верхняя кнопка
+ * параметр не передаёт и получает всё. Один и тот же чат, разные предустановки.
+ */
+export const getRooms = (archived = false, product?: string | null) =>
+  get<ChatRoom[]>('/api/chat/rooms', {
+    archived: String(archived),
+    ...(product ? { product } : {}),
+  })
 
 export const getRoom = (roomId: string) =>
   get<ChatRoomDetail>(`/api/chat/rooms/${roomId}`)
 
-export const createRoom = (type: 'direct' | 'group', participantIds: string[], name?: string) =>
-  post<ChatRoomDetail>('/api/chat/rooms', { type, participantIds, name })
+export const createRoom = (
+  type: 'direct' | 'group' | 'channel',
+  participantIds: string[],
+  name?: string,
+  scopeProduct?: string | null,
+) =>
+  post<ChatRoomDetail>('/api/chat/rooms', { type, participantIds, name, scopeProduct })
 
 export const archiveRoom = (roomId: string) =>
   post<{ ok: boolean; isArchived: boolean }>(`/api/chat/rooms/${roomId}/archive`, {})

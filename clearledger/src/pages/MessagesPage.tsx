@@ -1,433 +1,437 @@
 /**
- * Чат экосистемы (Matrix) — модель Ангара (группы=комнаты, папки, личка) + ТЕМЫ (треды).
- * Полностраничный мессенджер: слева комнаты+папки, в центре лента+композер, справа — панель темы.
- * Данные Matrix — через matrixClient (matrix-js-sdk); провижининг/списки — /api/mchat/*.
+ * Приложение «Чаты» — управление чатами пространства. Вход только администраторам.
+ *
+ * Зачем отдельный экран, если чат уже открывается доком и модалкой: те отвечают на
+ * вопрос «мои разговоры» — показывают комнаты, где ты сам участник. Здесь другой
+ * вопрос: что вообще происходит в пространстве. Кто владелец канала, сколько в группе
+ * людей партнёра и какого, к какому приложению привязан чат, где месяц не писали.
+ *
+ * Раньше по этому адресу жил полностраничный мессенджер на Matrix — второй, никем не
+ * использованный чат-контур (в пилоте ГИГ: ни одной комнаты, одна служебная учётка и
+ * «Не удалось подключиться к чату» на экране). Основным чатом решением МАГа остаётся
+ * свой контур `/api/chat`, поэтому адрес занят тем, чего действительно не хватало.
+ * Прежняя версия сохранена рядом как `MessagesPage.tsx.matrix-bak`.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+
+import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  Loader2, Send, MessagesSquare, Users, Hash, User as UserIcon, Plus, Reply,
-  MessageSquare, X, CornerDownRight, Search, Globe, LifeBuoy,
+  Archive, ArchiveRestore, Crown, Hash, Loader2, Megaphone, MessagesSquare,
+  Search, Shield, ShieldAlert, Trash2, User as UserIcon, Users,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { PartyBadge, type PartyInfo } from '@/components/chat/PartyBadge'
-import { PresenceDot, resolvePresence } from '@/components/chat/PresenceDot'
-import { isApiEnabled } from '@/services/apiClient'
-import * as mc from '@/services/matrix/matrixClient'
-import * as api from '@/services/matrix/mchatApi'
-import type { ChatMessage, ChatRoom, ChatThread } from '@/services/matrix/types'
+import { CreateRoomDialog } from '@/components/chat/CreateRoomDialog'
+import { PartyBadge } from '@/components/chat/PartyBadge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
+import * as chat from '@/services/chatService'
+import * as admin from '@/services/chatAdminService'
+import { SPACE_PRODUCTS } from '@/config/spaceProducts'
 
-const QUICK = ['👍', '❤️', '🔥', '😂', '😮', '👏']
-const FOLDER_ALL = 'all'
+const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+const dmy = (iso: string | null) =>
+  (iso ? new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—')
+/** Дни тишины — главный признак заброшенного чата. */
+const silentDays = (iso: string | null) =>
+  (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000) : null)
 
-export function MessagesPage() {
-  const [ready, setReady] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [rooms, setRooms] = useState<ChatRoom[]>([])
-  const [active, setActive] = useState<string | null>(null)
-  const [tick, setTick] = useState(0)   // форс-рефреш по realtime
-  const [folder, setFolder] = useState<string>(FOLDER_ALL)
-  const [dialog, setDialog] = useState<null | 'group' | 'dm' | 'public'>(null)
-  const [thread, setThread] = useState<string | null>(null)   // открытая тема (root event id)
-
-  const foldersQ = useQuery({ queryKey: ['mchat-folders'], queryFn: api.listFolders, enabled: ready })
-  const [supportBusy, setSupportBusy] = useState(false)
-
-  /** Открыть канал поддержки платформы: создаётся один раз, дальше просто открывается. */
-  async function openSupport() {
-    if (supportBusy) return
-    setSupportBusy(true)
-    try {
-      const r = await api.openSupportChannel()
-      setRooms(mc.getChatRooms())
-      setActive(r.roomId)
-      setThread(null)
-      if (r.vendors === 0) {
-        toast.warning('Канал создан, но инженеры поддержки не назначены', {
-          description: 'В Центре управления отметьте участников поддержки платформы',
-        })
-      }
-    } catch (e) {
-      const msg = (e as Error).message || ''
-      toast.error(/503|не настроен/i.test(msg) ? 'Чат не настроен' : 'Не удалось открыть канал поддержки')
-    } finally {
-      setSupportBusy(false)
-    }
-  }
-
-  // инициализация Matrix
-  useEffect(() => {
-    let off: (() => void) | undefined
-    if (!isApiEnabled()) { setErr('API выключен'); return }
-    mc.ensureClient()
-      .then(async () => {
-        setReady(true)
-        setRooms(mc.getChatRooms())
-        off = await mc.subscribeChat(() => setTick((t) => t + 1))
-      })
-      .catch((e) => setErr(/503|не настроен/i.test((e as Error).message) ? 'Чат не настроен' : 'Не удалось подключиться к чату'))
-    return () => { off?.() }
-  }, [])
-
-  // рефреш списка комнат по realtime
-  useEffect(() => { if (ready) setRooms(mc.getChatRooms()) }, [ready, tick])
-
-  const folders = foldersQ.data ?? []
-  const filtered = useMemo(() => {
-    if (folder === FOLDER_ALL) return rooms
-    if (folder === 'auto:unread') return rooms.filter((r) => r.unread_count > 0)
-    if (folder === 'auto:direct') return rooms.filter((r) => r.type === 'direct')
-    if (folder === 'auto:group') return rooms.filter((r) => r.type !== 'direct')
-    const f = folders.find((x) => x.id === folder)
-    return f ? rooms.filter((r) => f.roomIds.includes(r.id)) : rooms
-  }, [rooms, folder, folders])
-
-  if (err) {
-    return <div className="flex flex-col items-center justify-center h-[70vh] gap-2 text-muted-foreground">
-      <MessagesSquare className="h-8 w-8" /><p>{err}</p></div>
-  }
-  if (!ready) {
-    return <div className="flex items-center justify-center h-[70vh] gap-2 text-muted-foreground">
-      <Loader2 className="h-5 w-5 animate-spin" /> Подключение к чату…</div>
-  }
-
-  return (
-    <div className="flex h-[calc(100vh-var(--header-height)-2rem)] gap-3 min-h-0">
-      {/* ── список комнат + папки ── */}
-      <aside className="w-72 shrink-0 flex flex-col rounded-xl border bg-card min-h-0">
-        <div className="flex items-center gap-1.5 p-2 border-b">
-          <span className="text-sm font-semibold px-1 flex-1">Чаты</span>
-          <Button size="icon" variant="ghost" className="h-8 w-8" title="Публичные" onClick={() => setDialog('public')}><Globe className="h-4 w-4" /></Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8" title="Личный чат" onClick={() => setDialog('dm')}><UserIcon className="h-4 w-4" /></Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8" title="Группа" onClick={() => setDialog('group')}><Plus className="h-4 w-4" /></Button>
-          {/* Канал разработчика платформы: у заказчика должен быть штатный способ дойти
-              до тех, кто эту экосистему делает, — теми же средствами, не через почту. */}
-          <Button size="icon" variant="ghost" className="h-8 w-8 text-sky-600 dark:text-sky-400"
-            title="Поддержка платформы" disabled={supportBusy} onClick={openSupport}>
-            {supportBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <LifeBuoy className="h-4 w-4" />}
-          </Button>
-        </div>
-        {/* папки */}
-        <div className="flex gap-1 p-1.5 overflow-x-auto border-b text-xs">
-          {[[FOLDER_ALL, 'Все'], ['auto:unread', 'Непроч.'], ['auto:direct', 'Личные'], ['auto:group', 'Группы']].map(([k, l]) => (
-            <button key={k} onClick={() => setFolder(k)}
-              className={`px-2 py-1 rounded-md whitespace-nowrap ${folder === k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{l}</button>
-          ))}
-          {folders.map((f) => (
-            <button key={f.id} onClick={() => setFolder(f.id)}
-              className={`px-2 py-1 rounded-md whitespace-nowrap ${folder === f.id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>{f.name}</button>
-          ))}
-        </div>
-        <div className="flex-1 overflow-y-auto min-h-0">
-          {filtered.length === 0 && <div className="p-4 text-center text-xs text-muted-foreground">Нет чатов</div>}
-          {filtered.map((r) => (
-            <button key={r.id} onClick={() => { setActive(r.id); setThread(null) }}
-              className={`w-full text-left px-3 py-2 border-b hover:bg-muted/50 ${active === r.id ? 'bg-muted' : ''}`}>
-              <div className="flex items-center gap-2">
-                {r.type === 'direct' ? <UserIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                  : r.type === 'channel' ? <Hash className="h-4 w-4 text-muted-foreground shrink-0" />
-                  : <Users className="h-4 w-4 text-muted-foreground shrink-0" />}
-                <span className="text-sm font-medium truncate flex-1">{r.name || 'Личный чат'}</span>
-                {r.unread_count > 0 && <Badge className="h-5 min-w-5 px-1 text-[10px]">{r.unread_count}</Badge>}
-              </div>
-              {r.last_message && <div className="text-xs text-muted-foreground truncate mt-0.5 pl-6">{r.last_message}</div>}
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      {/* ── лента комнаты ── */}
-      <main className="flex-1 flex flex-col rounded-xl border bg-card min-h-0">
-        {active ? (
-          <RoomView key={active} roomId={active} tick={tick} onOpenThread={setThread} />
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground gap-2">
-            <MessagesSquare className="h-6 w-6" /> Выберите чат
-          </div>
-        )}
-      </main>
-
-      {/* ── панель темы (тред) ── */}
-      {active && thread && (
-        <ThreadPanel key={thread} roomId={active} rootId={thread} tick={tick} onClose={() => setThread(null)} />
-      )}
-
-      {dialog && <NewChatDialog kind={dialog} onClose={() => setDialog(null)}
-        onOpened={async (roomId) => { setDialog(null); await mc.waitForRoom(roomId); setRooms(mc.getChatRooms()); setActive(roomId); setThread(null) }} />}
-    </div>
-  )
-}
-
-// ── лента одной комнаты ──
-function RoomView({ roomId, tick, onOpenThread }: { roomId: string; tick: number; onOpenThread: (id: string) => void }) {
-  const directory = useChatDirectory()
-  usePresenceTick()
-  const [msgs, setMsgs] = useState<ChatMessage[]>([])
-  const [threads, setThreads] = useState<ChatThread[]>([])
-  const [text, setText] = useState('')
-  const [reply, setReply] = useState<ChatMessage | null>(null)
-  const [showThreads, setShowThreads] = useState(false)
-  const endRef = useRef<HTMLDivElement>(null)
-
-  const load = useCallback(() => {
-    mc.getChatMessages(roomId).then(setMsgs)
-    mc.getThreads(roomId).then(setThreads)
-    mc.markChatRead(roomId).catch(() => {})
-  }, [roomId])
-
-  useEffect(() => { load() }, [load, tick])
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs.length])
-
-  async function send() {
-    const t = text.trim()
-    if (!t) return
-    setText('')
-    try { await mc.sendChatMessage(roomId, t, { replyTo: reply?.id }); setReply(null) }
-    catch { toast.error('Не удалось отправить') }
-  }
-
-  return (
-    <>
-      <div className="flex items-center gap-2 px-3 py-2 border-b">
-        <MessagesSquare className="h-4 w-4 text-primary" />
-        <span className="text-sm font-semibold flex-1 truncate">{mc.getChatRooms().find((r) => r.id === roomId)?.name || 'Чат'}</span>
-        <Button size="sm" variant={showThreads ? 'default' : 'ghost'} className="gap-1.5 h-8" onClick={() => setShowThreads((v) => !v)}>
-          <MessageSquare className="h-4 w-4" /> Темы {threads.length > 0 && <Badge variant="secondary" className="h-4 px-1 text-[10px]">{threads.length}</Badge>}
-        </Button>
-      </div>
-
-      {showThreads && (
-        <div className="border-b bg-muted/30 max-h-40 overflow-y-auto">
-          {threads.length === 0 && <div className="p-3 text-xs text-muted-foreground">Тем пока нет. Ответьте в тему на любом сообщении, чтобы создать тему.</div>}
-          {threads.map((t) => (
-            <button key={t.root_id} onClick={() => onOpenThread(t.root_id)}
-              className="w-full text-left px-3 py-2 border-b hover:bg-muted/50 flex items-center gap-2">
-              <MessageSquare className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span className="text-sm truncate flex-1">{t.root_preview || 'Тема'}</span>
-              <Badge variant="secondary" className="h-4 px-1 text-[10px]">{t.reply_count}</Badge>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto min-h-0 p-3 space-y-2">
-        {msgs.map((m) => (
-          <Bubble key={m.id} m={m} roomId={roomId} party={directory.get(m.user_id)}
-            onReply={() => setReply(m)} onThread={() => onOpenThread(m.thread_root_id || m.id)} />
-        ))}
-        <div ref={endRef} />
-      </div>
-
-      {reply && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-t bg-muted/40 text-xs">
-          <Reply className="h-3.5 w-3.5 text-primary" />
-          <span className="flex-1 truncate text-muted-foreground">Ответ: {reply.content}</span>
-          <button onClick={() => setReply(null)}><X className="h-3.5 w-3.5" /></button>
-        </div>
-      )}
-      <div className="flex items-center gap-2 p-2 border-t">
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Сообщение…"
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
-        <Button size="icon" onClick={send} disabled={!text.trim()}><Send className="h-4 w-4" /></Button>
-      </div>
-    </>
-  )
-}
+const TYPES = {
+  channel: { label: 'Канал', icon: Megaphone, hint: 'односторонний: пишут владелец и админы' },
+  group: { label: 'Группа', icon: Users, hint: 'пишут все участники' },
+  direct: { label: 'Личный', icon: UserIcon, hint: 'разговор двоих' },
+  company: { label: 'Системный', icon: Hash, hint: 'комната пространства' },
+} as const
 
 /**
- * Справочник участников: mxid → «кто это». Matrix присылает автора как mxid, поэтому без
- * этой карты подписать сообщение «внешний · ООО Подрядчик» нечем. Кого в карте нет
- * (гость, бот) — остаётся без подписи, а не помечается своим.
+ * Вид чата по его роли в пространстве, а не по полю в базе: «Объявления» и «Обновления
+ * Элси+» — каналы, «Общий чат» и группы приложений — группы. Базовый набор заводится
+ * сам (`ensure_company_rooms`), и в таблице он должен читаться так же, как созданный
+ * руками, иначе администратор ищет в списке «системное» вместо канала.
  */
-/** Перерисовка при изменении присутствия: Matrix шлёт события, реакт про них не знает. */
-function usePresenceTick() {
-  const [, setTick] = useState(0)
-  useEffect(() => mc.subscribePresence(() => setTick((t) => t + 1)), [])
+function typeOf(r: admin.AdminRoom) {
+  if (r.kind === 'news' || r.kind === 'platform') return TYPES.channel
+  if (r.kind === 'general' || r.kind?.startsWith('app:')) return TYPES.group
+  return TYPES[r.type as keyof typeof TYPES] ?? TYPES.group
 }
 
-function useChatDirectory() {
-  const q = useQuery({
-    queryKey: ['mchat-directory'],
-    queryFn: api.chatDirectory,
-    staleTime: 60_000,
-    // Присутствие живёт минутами — иначе точки «в сети» устаревали бы на глазах.
-    refetchInterval: 60_000,
-    retry: false,
-  })
-  return useMemo(() => {
-    const map = new Map<string, PartyInfo>()
-    for (const p of q.data ?? []) {
-      map.set(p.mxid, {
-        partyType: p.partyType, role: p.role, orgName: p.orgName,
-        position: p.position, online: p.online, lastSeenAt: p.lastSeenAt,
-      })
-    }
-    return map
-  }, [q.data])
-}
-
-// ── сообщение ──
-function Bubble({ m, roomId, party, onReply, onThread }: {
-  m: ChatMessage; roomId: string; party?: PartyInfo; onReply: () => void; onThread: () => void
+function Stat({ label, value, sub, tone }: {
+  label: string; value: string; sub?: string; tone?: 'warn' | 'info'
 }) {
-  const mine = m.user_id === mc.getMyId()
   return (
-    <div className={`group flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-      <div className={`max-w-[75%] rounded-2xl px-3 py-1.5 ${mine ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
-        {/* Автора подписываем вместе с принадлежностью: в общей комнате важно видеть,
-            свой это сотрудник или внешний подрядчик. */}
-        {!mine && (
-          <div className="mb-0.5 flex items-center gap-1.5">
-            <PresenceDot className="size-1.5" lastSeenAt={party?.lastSeenAt}
-              state={resolvePresence(mc.getPresence(m.user_id), party?.online)} />
-            <span className="text-[11px] font-medium opacity-70">{m.user_name}</span>
-            <PartyBadge party={party} withIcon={false} />
-          </div>
-        )}
-        <div className="text-sm whitespace-pre-wrap break-words">{m.content}{m.is_edited && <span className="opacity-50 text-[10px]"> (изм.)</span>}</div>
-      </div>
-      <div className="flex items-center gap-1 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {QUICK.slice(0, 3).map((e) => (
-          <button key={e} className="text-xs hover:scale-125 transition-transform" onClick={() => mc.toggleReaction(roomId, m.id, e).catch(() => {})}>{e}</button>
-        ))}
-        <button className="text-muted-foreground hover:text-foreground" title="Ответить" onClick={onReply}><Reply className="h-3.5 w-3.5" /></button>
-        <button className="text-muted-foreground hover:text-foreground" title="Ответить в тему" onClick={onThread}><CornerDownRight className="h-3.5 w-3.5" /></button>
-        {mine && <button className="text-muted-foreground hover:text-destructive" title="Удалить" onClick={() => mc.deleteChatMessage(roomId, m.id).catch(() => {})}><X className="h-3.5 w-3.5" /></button>}
-      </div>
-      {m.reactions && m.reactions.length > 0 && (
-        <div className={`flex gap-1 mt-0.5 ${mine ? 'justify-end' : ''}`}>
-          {m.reactions.map((r) => (
-            <button key={r.key} onClick={() => mc.toggleReaction(roomId, m.id, r.key).catch(() => {})}
-              className={`text-[11px] px-1.5 rounded-full border ${r.mine ? 'bg-primary/15 border-primary/40' : 'bg-muted border-border'}`}>{r.key} {r.count}</button>
-          ))}
-        </div>
-      )}
+    <div className="min-w-0 border-r border-border/70 px-4 py-3 last:border-r-0">
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn('mt-1 truncate text-lg font-semibold tabular-nums',
+        tone === 'warn' && 'text-amber-600 dark:text-amber-400',
+        tone === 'info' && 'text-sky-600 dark:text-sky-400')}>{value}</div>
+      {sub && <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{sub}</div>}
     </div>
   )
 }
 
-// ── панель темы (тред) ──
-function ThreadPanel({ roomId, rootId, tick, onClose }: { roomId: string; rootId: string; tick: number; onClose: () => void }) {
-  const directory = useChatDirectory()
-  const [msgs, setMsgs] = useState<ChatMessage[]>([])
-  const [text, setText] = useState('')
-  const endRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => { mc.getThreadMessages(roomId, rootId).then(setMsgs) }, [roomId, rootId, tick])
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs.length])
-
-  async function send() {
-    const t = text.trim(); if (!t) return
-    setText('')
-    try { await mc.sendChatMessage(roomId, t, { threadRootId: rootId }) } catch { toast.error('Не удалось отправить') }
+/** Состав чата: роли, метки партнёров, действия администратора. */
+function RoomMembers({ roomId }: { roomId: string }) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['chat-room-detail', roomId],
+    queryFn: () => chat.getRoom(roomId),
+  })
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['chat-room-detail', roomId] })
+    qc.invalidateQueries({ queryKey: ['chat-admin-rooms'] })
   }
+  const setRole = useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      admin.setRole(roomId, userId, role),
+    onSuccess: () => { refresh(); toast.success('Роль изменена') },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось изменить роль'),
+  })
+  const remove = useMutation({
+    mutationFn: (userId: string) => admin.removeParticipant(roomId, userId),
+    onSuccess: () => { refresh(); toast.success('Участник выведен из чата') },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось вывести участника'),
+  })
+  // Добор состава: канал новостей набирают «всем пространством», группу — человеком.
+  const people = useQuery({
+    queryKey: ['chat-admin-people'], queryFn: admin.getPeople, staleTime: 5 * 60_000,
+  })
+  const addPeople = useMutation({
+    mutationFn: (body: { userIds?: string[]; everyone?: boolean }) => admin.addPeople(roomId, body),
+    onSuccess: () => { refresh(); toast.success('Состав пополнен') },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось добавить'),
+  })
 
+  if (isLoading) {
+    return <div className="flex justify-center py-6"><Loader2 className="size-4 animate-spin text-muted-foreground" /></div>
+  }
+  const parts = data?.participants ?? []
   return (
-    <aside className="w-80 shrink-0 flex flex-col rounded-xl border bg-card min-h-0">
-      <div className="flex items-center gap-2 px-3 py-2 border-b">
-        <MessageSquare className="h-4 w-4 text-primary" />
-        <span className="text-sm font-semibold flex-1">Тема</span>
-        <button onClick={onClose}><X className="h-4 w-4" /></button>
+    <div className="space-y-0.5 px-4 pb-3 pt-2">
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+        Состав · {nf0.format(parts.length)}
       </div>
-      <div className="flex-1 overflow-y-auto min-h-0 p-3 space-y-2">
-        {msgs.map((m) => (
-          <Bubble key={m.id} m={m} roomId={roomId} party={directory.get(m.user_id)}
-            onReply={() => {}} onThread={() => {}} />
-        ))}
-        <div ref={endRef} />
+      {parts.map((p) => (
+        <div key={p.userId} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted/40">
+          <span className="truncate font-medium">{p.name}</span>
+          <PartyBadge party={{
+            partyType: p.partyType ?? (p.isExternal ? 'partner' : 'internal'),
+            orgName: p.companyName,
+          }} />
+          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+            {p.role === 'owner' ? 'владелец' : p.role === 'admin' ? 'админ' : 'участник'}
+          </span>
+          {p.role !== 'owner' && (
+            <>
+              <button type="button" title="Сделать владельцем"
+                onClick={() => setRole.mutate({ userId: p.userId, role: 'owner' })}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground">
+                <Crown className="size-3.5" />
+              </button>
+              <button type="button" title={p.role === 'admin' ? 'Снять права админа' : 'Сделать админом'}
+                onClick={() => setRole.mutate({ userId: p.userId, role: p.role === 'admin' ? 'member' : 'admin' })}
+                className={cn('shrink-0 rounded p-1 hover:text-foreground',
+                  p.role === 'admin' ? 'text-sky-500' : 'text-muted-foreground')}>
+                <Shield className="size-3.5" />
+              </button>
+              <button type="button" title="Вывести из чата"
+                onClick={() => remove.mutate(p.userId)}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:text-rose-500">
+                <Trash2 className="size-3.5" />
+              </button>
+            </>
+          )}
+        </div>
+      ))}
+      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
+        <Select value="" onValueChange={(v) => addPeople.mutate({ userIds: [v] })}>
+          <SelectTrigger className="h-7 w-[220px] text-xs">
+            <SelectValue placeholder="Добавить человека…" />
+          </SelectTrigger>
+          <SelectContent>
+            {(people.data ?? [])
+              .filter((x) => !parts.some((p) => p.userId === x.userId))
+              .map((x) => (
+                <SelectItem key={x.userId} value={x.userId} className="text-xs">
+                  {x.name}{x.companyName ? ` · ${x.companyName}` : ''}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+        <Button size="sm" variant="outline" className="h-7 text-xs"
+          disabled={addPeople.isPending}
+          onClick={() => addPeople.mutate({ everyone: true })}>
+          {addPeople.isPending && <Loader2 className="mr-1.5 size-3 animate-spin" />}
+          Добавить всё пространство
+        </Button>
       </div>
-      <div className="flex items-center gap-2 p-2 border-t">
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ответить в тему…"
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
-        <Button size="icon" onClick={send} disabled={!text.trim()}><Send className="h-4 w-4" /></Button>
-      </div>
-    </aside>
+    </div>
   )
 }
 
-// ── новый чат: группа / личка / публичные ──
-function NewChatDialog({ kind, onClose, onOpened }: { kind: 'group' | 'dm' | 'public'; onClose: () => void; onOpened: (roomId: string) => void }) {
+export function MessagesPage() {
+  const qc = useQueryClient()
+  // Раздел живёт в АДРЕСЕ (?view=), а не в локальном состоянии: его задаёт левое меню
+  // приложения, и оно же подсвечивает активный пункт. Селектор вида и переключатель
+  // архива меняют тот же параметр — иначе меню и экран показывали бы разное.
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') || 'all'
+  const archived = view === 'archive'
+  const kind = view === 'channel' ? 'Канал' : view === 'group' ? 'Группа'
+    : view === 'direct' ? 'Личный' : 'all'
+  const setView = (v: string) => {
+    const next = new URLSearchParams(params)
+    if (v === 'all') next.delete('view')
+    else next.set('view', v)
+    setParams(next, { replace: true })
+  }
   const [q, setQ] = useState('')
-  const [title, setTitle] = useState('')
-  const [picked, setPicked] = useState<Record<string, string>>({})
-  const [busy, setBusy] = useState(false)
-  const peopleQ = useQuery({ queryKey: ['mchat-people', q], queryFn: () => api.searchPeople(q), enabled: kind !== 'public' })
-  const publicQ = useQuery({ queryKey: ['mchat-public'], queryFn: api.listPublic, enabled: kind === 'public' })
+  const [open, setOpen] = useState<string | null>(null)
+  const [create, setCreate] = useState<'channel' | 'group' | null>(null)
 
-  async function createGroup() {
-    setBusy(true)
-    try { const g = await api.createGroup(title || 'Группа', Object.keys(picked), false); onOpened(g.roomId) }
-    catch { toast.error('Не удалось создать группу'); setBusy(false) }
-  }
-  async function openDm(userId: string) {
-    setBusy(true)
-    try { const r = await api.openDm(userId); onOpened(r.roomId) }
-    catch { toast.error('Не удалось открыть чат'); setBusy(false) }
-  }
-  async function join(roomId: string) {
-    setBusy(true)
-    try { await api.joinRoom(roomId); onOpened(roomId) }
-    catch { toast.error('Не удалось вступить'); setBusy(false) }
-  }
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['chat-admin-rooms', archived],
+    queryFn: () => admin.getRooms(archived),
+  })
+
+  const patchRoom = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: admin.RoomPatch }) => admin.patchRoom(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['chat-admin-rooms'] })
+      toast.success('Чат обновлён')
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось обновить чат'),
+  })
+  const archiveRoom = useMutation({
+    mutationFn: ({ id, on }: { id: string; on: boolean }) =>
+      (on ? chat.archiveRoom(id) : chat.unarchiveRoom(id)),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['chat-admin-rooms'] }); toast.success('Готово') },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось изменить архив'),
+  })
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return (data ?? []).filter((r) => {
+      if (kind !== 'all' && typeOf(r).label !== kind) return false
+      if (!needle) return true
+      return (r.name ?? '').toLowerCase().includes(needle)
+        || (r.ownerName ?? '').toLowerCase().includes(needle)
+    })
+  }, [data, q, kind])
+
+  const totals = useMemo(() => (data ?? []).reduce((a, r) => ({
+    channels: a.channels + (typeOf(r).label === 'Канал' ? 1 : 0),
+    groups: a.groups + (typeOf(r).label === 'Группа' ? 1 : 0),
+    direct: a.direct + (r.type === 'direct' ? 1 : 0),
+    external: a.external + r.externalCount,
+    silent: a.silent + ((silentDays(r.lastMessageAt) ?? 9999) > 30 ? 1 : 0),
+  }), { channels: 0, groups: 0, direct: 0, external: 0, silent: 0 }), [data])
+
+  // 403 — не администратор: экран объясняет, почему закрыт, а не показывает пустоту.
+  const forbidden = error instanceof Error && /403|администратор/i.test(error.message)
 
   return (
-    <div className="fixed inset-0 z-[1200] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl border bg-card p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2">
-          <span className="font-semibold flex-1">{kind === 'group' ? 'Новая группа' : kind === 'dm' ? 'Личный чат' : 'Публичные чаты'}</span>
-          <button onClick={onClose}><X className="h-4 w-4" /></button>
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-base font-semibold">
+            <MessagesSquare className="size-4 text-blue-600 dark:text-blue-400" />Чаты пространства
+          </h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Каналы, группы и личные переписки компании: состав, владельцы, привязка к
+            приложению. Управление доступно администраторам пространства.
+          </p>
         </div>
-
-        {kind === 'group' && <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Название группы" />}
-
-        {kind !== 'public' ? (
-          <>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск сотрудника…" />
-            </div>
-            <div className="max-h-64 overflow-y-auto border rounded-lg divide-y">
-              {(peopleQ.data ?? []).map((p) => (
-                <button key={p.id} disabled={busy}
-                  onClick={() => kind === 'dm' ? openDm(p.id) : setPicked((s) => { const n = { ...s }; if (n[p.id]) delete n[p.id]; else n[p.id] = p.name; return n })}
-                  className={`w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center gap-2 ${picked[p.id] ? 'bg-primary/10' : ''}`}>
-                  <span className="relative shrink-0">
-                    <UserIcon className="h-4 w-4 text-muted-foreground" />
-                    {/* Видно, дойдёт ли сообщение до живого собеседника или ляжет до утра. */}
-                    <PresenceDot ring className="absolute -right-0.5 -bottom-0.5 size-2"
-                      state={resolvePresence(undefined, p.online)} lastSeenAt={p.lastSeenAt} />
-                  </span>
-                  <span className="text-sm flex-1 min-w-0">
-                    <span className="block truncate">{p.name} <span className="text-xs text-muted-foreground">{p.email}</span></span>
-                  </span>
-                  <PartyBadge party={p} />
-                  {kind === 'group' && picked[p.id] && <Badge variant="secondary" className="text-[10px]">выбран</Badge>}
-                </button>
-              ))}
-              {(peopleQ.data ?? []).length === 0 && <div className="p-3 text-center text-xs text-muted-foreground">Никого не найдено</div>}
-            </div>
-            {kind === 'group' && (
-              <Button className="w-full" disabled={busy || Object.keys(picked).length === 0} onClick={createGroup}>
-                {busy && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />} Создать группу ({Object.keys(picked).length})
-              </Button>
-            )}
-          </>
-        ) : (
-          <div className="max-h-72 overflow-y-auto border rounded-lg divide-y">
-            {(publicQ.data ?? []).map((r) => (
-              <div key={r.roomId} className="px-3 py-2 flex items-center gap-2">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm flex-1 truncate">{r.title}</span>
-                <Button size="sm" variant="outline" disabled={busy} onClick={() => join(r.roomId)}>Вступить</Button>
-              </div>
-            ))}
-            {(publicQ.data ?? []).length === 0 && <div className="p-3 text-center text-xs text-muted-foreground">Публичных чатов нет</div>}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs"
+          onClick={() => setCreate('channel')}>
+          <Megaphone className="size-3.5" />Канал
+        </Button>
+        <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs"
+          onClick={() => setCreate('group')}>
+          <Users className="size-3.5" />Группа
+        </Button>
+        <div className="inline-flex rounded-md border border-border p-0.5">
+          {[{ v: false, l: 'Активные' }, { v: true, l: 'Архив' }].map((o) => (
+            <button key={String(o.v)} type="button" onClick={() => setView(o.v ? 'archive' : 'all')}
+              className={cn('rounded-[5px] px-2.5 py-1 text-xs transition-colors',
+                archived === o.v ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground')}>
+              {o.l}
+            </button>
+          ))}
+        </div>
+        </div>
       </div>
+
+      {create && (
+        <CreateRoomDialog type={create} open onOpenChange={(v) => { if (!v) setCreate(null) }} />
+      )}
+
+      {forbidden ? (
+        <div className="rounded-lg border border-dashed p-8 text-center">
+          <ShieldAlert className="mx-auto size-6 text-amber-500" />
+          <div className="mt-2 text-sm font-medium">Управление чатами закрыто</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Экран доступен администраторам пространства. Свои чаты открываются кнопкой
+            «Чат» в шапке и панелью справа.
+          </div>
+        </div>
+      ) : isLoading ? (
+        <div className="flex justify-center py-16"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+      ) : error ? (
+        <div className="rounded-lg border border-dashed p-8 text-center text-sm">
+          <div className="text-red-400/90">Список чатов не загрузился</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {error instanceof Error ? error.message : 'неизвестная ошибка'}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 rounded-lg border md:grid-cols-5">
+            <Stat label="Каналы" value={nf0.format(totals.channels)} sub="односторонние" />
+            <Stat label="Группы" value={nf0.format(totals.groups)} sub="обсуждения" />
+            <Stat label="Личные" value={nf0.format(totals.direct)} sub="переписки двоих" />
+            <Stat label="Людей партнёров" value={nf0.format(totals.external)}
+              sub="участий в чатах" tone={totals.external ? 'info' : undefined} />
+            <Stat label="Молчат месяц" value={nf0.format(totals.silent)}
+              sub="ни одного сообщения" tone={totals.silent ? 'warn' : undefined} />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              Вид:
+              <Select value={archived ? 'archive' : view} onValueChange={setView}>
+                <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">Все виды</SelectItem>
+                  <SelectItem value="channel" className="text-xs">Каналы</SelectItem>
+                  <SelectItem value="group" className="text-xs">Группы</SelectItem>
+                  <SelectItem value="direct" className="text-xs">Личные</SelectItem>
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Search className="size-3.5" />
+              <Input value={q} onChange={(e) => setQ(e.target.value)}
+                placeholder="Название или владелец" className="h-7 w-[200px] text-xs" />
+            </label>
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+              {nf0.format(rows.length)} из {nf0.format(data?.length ?? 0)}
+            </span>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+              {data?.length ? 'Под фильтр не подошёл ни один чат' : 'В пространстве пока нет чатов'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full min-w-[900px] text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/35 text-muted-foreground">
+                    <th className="p-2 text-left font-medium">Чат</th>
+                    <th className="p-2 text-left font-medium">Вид</th>
+                    <th className="p-2 text-left font-medium">Владелец</th>
+                    <th className="p-2 text-right font-medium">Участников</th>
+                    <th className="p-2 text-right font-medium">Сообщений</th>
+                    <th className="p-2 text-right font-medium">Последнее</th>
+                    <th className="p-2 text-left font-medium">Приложение</th>
+                    <th className="p-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => {
+                    const meta = typeOf(r)
+                    const Ico = meta.icon
+                    const days = silentDays(r.lastMessageAt)
+                    const isOpen = open === r.id
+                    return [
+                      <tr key={r.id}
+                        className={cn('border-b border-border/40 hover:bg-muted/25', isOpen && 'bg-muted/30')}>
+                        <td className="p-2">
+                          <button type="button" onClick={() => setOpen(isOpen ? null : r.id)}
+                            className="text-left font-medium hover:underline" title="Показать состав">
+                            {r.name ?? 'Личный чат'}
+                          </button>
+                        </td>
+                        <td className="p-2 whitespace-nowrap text-muted-foreground" title={meta.hint}>
+                          <Ico className="mr-1 inline size-3.5 align-[-2px]" />{meta.label}
+                        </td>
+                        <td className="max-w-[180px] truncate p-2 text-muted-foreground">{r.ownerName ?? '—'}</td>
+                        <td className="p-2 text-right tabular-nums">
+                          {nf0.format(r.participantCount)}
+                          {r.externalCount > 0 && (
+                            <span className="ml-1 text-[10px] text-amber-600 dark:text-amber-400"
+                              title={`${r.externalCount} из компаний-партнёров`}>+{r.externalCount}</span>
+                          )}
+                        </td>
+                        <td className="p-2 text-right tabular-nums text-muted-foreground">
+                          {nf0.format(r.messageCount)}
+                        </td>
+                        <td className={cn('p-2 text-right whitespace-nowrap tabular-nums',
+                          days != null && days > 30 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+                          {r.lastMessageAt ? dmy(r.lastMessageAt) : 'нет сообщений'}
+                        </td>
+                        <td className="p-2">
+                          {/* Привязка к приложению: чат остаётся в контексте, из которого его
+                              завели, — правая рельса покажет его именно в этом приложении. */}
+                          <Select value={r.scopeProduct ?? 'none'}
+                            onValueChange={(v) => patchRoom.mutate({
+                              id: r.id, body: { scopeProduct: v === 'none' ? '' : v },
+                            })}>
+                            <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none" className="text-xs">Всё пространство</SelectItem>
+                              {SPACE_PRODUCTS.map((p) => (
+                                <SelectItem key={p.code} value={p.code} className="text-xs">{p.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="p-2 text-right">
+                          <button type="button" title={r.isArchived ? 'Вернуть из архива' : 'В архив'}
+                            onClick={() => archiveRoom.mutate({ id: r.id, on: !r.isArchived })}
+                            className="rounded p-1 text-muted-foreground hover:text-foreground">
+                            {r.isArchived ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
+                          </button>
+                        </td>
+                      </tr>,
+                      isOpen ? (
+                        <tr key={`${r.id}-members`} className="border-b border-border/40 bg-muted/15">
+                          <td colSpan={8} className="p-0"><RoomMembers roomId={r.id} /></td>
+                        </tr>
+                      ) : null,
+                    ]
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="space-y-2 rounded-lg border border-dashed px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+            <div>
+              <span className="font-medium text-foreground">Что есть в пространстве сразу.</span>{' '}
+              «Обновления Элси+» — канал разработчика платформы: что вышло в продуктах и
+              когда регламентные работы; пространство его читает. «Объявления» — канал
+              компании: слово руководства сотрудникам, владельца назначаете вы. «Общий
+              чат» — группа со всеми людьми пространства. И по группе на каждое
+              подключённое приложение («Топливо», «Поддержка»): вопросы по работе живут в
+              разрезе рабочего места, а не в общем чате, где они тонут.
+            </div>
+            <div>
+              <span className="font-medium text-foreground">Что заводите вы.</span>{' '}
+              Канал — когда нужно говорить, а не обсуждать (кадры, безопасность, рассылка):
+              пишут в нём владелец и назначенные им админы. Группа — под задачу, объект или
+              партнёра. Привязка к приложению делает чат контекстным: он сам открывается в
+              рельсе того рабочего места. Владелец в чате один — назначая нового, прежний
+              становится админом. Сотрудники компаний-партнёров чаты не создают, но
+              участвуют в них и помечены в составе.
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
