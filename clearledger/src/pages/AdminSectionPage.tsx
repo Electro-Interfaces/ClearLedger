@@ -12,10 +12,7 @@ import { Navigate, useParams } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/card'
 import { InvitationsCard, MembersCard, RolesAccessTab } from '@/components/admin/CompanyTeam'
 import { AuditLog } from '@/components/admin/AuditLog'
-import { Connections } from '@/components/admin/Connections'
 import { Counterparties } from '@/components/admin/Counterparties'
-import { Notifications } from '@/components/admin/Notifications'
-import { CompanyApps } from '@/components/admin/CompanyApps'
 import { CompanyProfileCard } from '@/components/admin/CompanyProfile'
 import { CoreOverview } from '@/components/admin/CoreOverview'
 import { CoreSettings } from '@/components/admin/CoreSettings'
@@ -61,17 +58,11 @@ function CompanyScreen({ code }: { code: string }) {
     // между разделами.
     case 'partners': return <MembersCard companyId={company.id} canManage={canManage} selfId={user!.id} party="external" />
     case 'roles': return <RolesAccessTab companyId={company.id} canManage={canManage} />
-    // Каталог платформы — второй секцией этого же раздела, владельцу контейнера.
-    case 'apps': return <CompanyApps companyId={company.id} canManage={canManage}
-      isSuperadmin={!!user?.is_superadmin} />
     case 'objects': return <SpaceObjects companyId={company.id} canManage={canManage} />
     // Контрагент — сторона договора, компания-партнёр — организация с доступом. Разные
     // сущности и разные разделы, хотя карточка юрлица у них одна.
     case 'counterparties': return <Counterparties companyId={company.id} canManage={canManage} />
     case 'refs': return <SpaceRefs companyId={company.id} canManage={canManage} />
-    case 'notify': return <Notifications companyId={company.id} canManage={canManage} />
-    // Витрина: состояние каналов платформы и подключений приложений; настройка — у владельца.
-    case 'connections': return <Connections />
     // Одна карта на оба охвата — переключатель внутри, как в журнале.
     case 'map': return <SpaceMap companyId={company.id} isSuperadmin={!!user?.is_superadmin} />
     case 'profile': return <CompanyProfileCard company={company} canEdit={canManage} />

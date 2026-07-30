@@ -138,7 +138,21 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // настройка подключения встраивается в коннектор.
     code: 'data', route: '/data', label: 'Данные',
     modes: ['normalize', 'reconcile'],
-    paths: ['/connectors', '/catalog'],
+    paths: [],
+    objectTabs: ['passport'],
+  },
+  {
+    // Подключения — чем пространство связано с внешним миром. Отделены от
+    // «Управления» решением МАГа 30.07.2026: там вопрос «кто из людей что может»,
+    // здесь «откуда приходят данные и живо ли подключение». Ходят сюда разные люди:
+    // админ по людям не настраивает ключи STS, инженер интеграций не раздаёт роли.
+    // Настройка коннекторов и каталог типов переехали из «Данных» — там осталась
+    // работа с самими данными (нормализация и сверка), а не с трубами.
+    code: 'connect', route: '/connect', label: 'Подключения',
+    modes: [],
+    // Режимов рабочей области нет: приложение целиком собрано из страниц, поэтому
+    // корневой `/connect` — редирект на первую (см. App.tsx).
+    paths: ['/connections', '/connectors', '/catalog', '/notifications', '/apps'],
     objectTabs: ['passport', 'integrations', 'diagnostics'],
   },
 ]
@@ -161,7 +175,10 @@ export type Readiness = 'ready' | 'partial' | 'draft'
 
 export const PRODUCT_READINESS: Record<string, Readiness> = {
   admin: 'ready', data: 'partial', info: 'partial',
-  chat: 'ready', plan: 'partial', conf: 'draft',
+  // conf — рабочий с 30.07.2026: пространство само подписывает организаторский токен
+  // (ключ ledger/1 на meet.dataworker.ru), плитка создаёт комнату и кладёт ссылку для
+  // участников в буфер. Ни паролей, ни ручного создания комнат больше не требуется.
+  chat: 'ready', plan: 'partial', conf: 'ready',
   projects: 'ready', ops: 'partial', sales: 'ready',
   corp: 'draft', shop: 'draft', marketing: 'partial',
   support: 'ready', finance: 'draft',

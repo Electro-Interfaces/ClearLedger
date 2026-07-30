@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
 import { ChatPanel } from '@/components/chat/ChatPanel'
+import { useWorkspace } from '@/contexts/WorkspaceContext'
+import { productForMode } from '@/config/productAccess'
 import { TicketsPanel } from './InteractionPanels'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -165,15 +167,22 @@ function DockHead({ tabs, section, badgeOf, isMobile, onTab, onPop, onClose }: {
 /** «Инфо» в доке: контекст берётся из адреса, компания — из активного пространства. */
 function InfoDockPanel() {
   const { companyId } = useCompany()
-  const { toggleInteraction } = useSupportContext()
+  // Закрытие — именно закрытие: `toggleInteraction` из дока перебросил бы панель в
+  // окно, то есть крестик открывал бы другое представление вместо того, чтобы уйти.
+  const { closeInteraction } = useSupportContext()
   if (!companyId) return null
-  return <InfoContextPanel companyId={companyId} embedded onClose={() => toggleInteraction('help')} />
+  return <InfoContextPanel companyId={companyId} embedded onClose={closeInteraction} />
 }
 
 function DockBody({ section }: { section: InteractionSection }) {
+  // Док открыт ИЗ приложения — значит и чаты показываем его: код продукта выводится
+  // из активного раздела рабочей области. Верхняя кнопка (модалка) продукт не
+  // передаёт и показывает все чаты пространства — это тот же чат, другие предустановки.
+  const { coreMode } = useWorkspace()
+  const product = productForMode(coreMode)
   return (
     <div className="min-h-0 flex-1 overflow-hidden">
-      {section === 'chat' && <ChatPanel compact />}
+      {section === 'chat' && <ChatPanel compact scopeProduct={product} />}
       {section === 'tickets' && <TicketsPanel />}
       {/* «Инфо» — знание пространства под открытую рабочую область, а не статичный
           текст про один продукт (docs/INFO.md). */}

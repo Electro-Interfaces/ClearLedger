@@ -7,25 +7,31 @@
  *
  * Один компонент на два входа: страница `/info` со стола (`variant='page'`) и
  * окно из шапки любого продукта (`variant='modal'`) — это одно приложение, а не
- * копия. Контекстная выдача под открытую рабочую область живёт в
+ * копия. Разница только в ведении: страница даёт заводить и править документы
+ * компании, окно — чтение, потому что из шапки человек приходит искать ответ, а не
+ * писать регламент. Контекстная выдача под открытую рабочую область живёт в
  * `InfoContextPanel` (правый док).
  *
- * Размер шрифта — не украшение: регламент на 12 тысяч знаков читают подолгу и с
- * разных экранов, поэтому шаг сохраняется между сессиями.
+ * Обе подачи — колонки на всю высоту со своей прокруткой: дерево из сотни статей и
+ * регламент на 12 тысяч знаков не должны ездить одной общей полосой. Размер шрифта —
+ * не украшение: такие тексты читают подолгу и с разных экранов, поэтому шаг
+ * сохраняется между сессиями.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Loader2, Search, ChevronRight, ChevronDown, BookOpen, Scale, FileText, HelpCircle,
-  ExternalLink, Workflow, Type,
+  ExternalLink, Workflow, Type, Plus, Pencil, Building2,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import {
   getInfoTree, getInfoArticle, searchInfo,
-  type InfoKind, type InfoArticleRow,
+  type InfoKind, type InfoArticleRow, type InfoTree,
 } from '@/services/infoService'
 import { Markdown } from './Markdown'
+import { InfoArticleEditor } from './InfoArticleEditor'
 
 const KIND_ICON: Record<InfoKind, typeof BookOpen> = {
   guide: BookOpen, norm: Scale, lnd: FileText, faq: HelpCircle,
@@ -48,6 +54,7 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set(['guide', 'lnd']))
   const [openCats, setOpenCats] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<string | null>(initialId ?? null)
+  const [editing, setEditing] = useState<'new' | 'current' | null>(null)
   const [fontStep, setFontStep] = useState(() => {
     const v = Number(localStorage.getItem(FONT_KEY))
     return Number.isFinite(v) && v >= 0 && v < FONT_STEPS.length ? v : 1
@@ -73,25 +80,30 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
   }
   const empty = useMemo(() => (tree.data?.total ?? 0) === 0, [tree.data])
   const modal = variant === 'modal'
+  // Разделы для формы документа — все видимые: свои и платформенные.
+  const categories = useMemo(
+    () => (tree.data?.groups ?? []).flatMap((g) => g.categories)
+      .filter((c, i, arr) => arr.findIndex((x) => x.id === c.id) === i),
+    [tree.data])
+  // Править можно только документ пространства: платформенные ведёт поставщик.
+  const canEditCurrent = article.data?.scope === 'company'
+
+  const editor = editing && (
+    <InfoArticleEditor
+      companyId={companyId}
+      article={editing === 'current' ? article.data ?? null : null}
+      categories={categories}
+      onClose={() => setEditing(null)}
+      onSaved={(id) => { setEditing(null); setSelected(id) }}
+    />
+  )
 
   if (tree.isLoading) {
     return <div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
   }
-  if (empty) {
-    return (
-      <div className="p-4">
-        <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Знание пространства пока пустое. Сюда заводят инструкции по продуктам, отраслевые
-          нормы и документы компании — регламенты, приказы, чек-листы.
-        </CardContent></Card>
-      </div>
-    )
-  }
 
   const aside = (
-    <div className={modal
-      ? 'flex w-[300px] shrink-0 flex-col border-r border-border/60'
-      : 'flex flex-col'}>
+    <div className="flex min-h-0 w-full flex-col md:w-[300px] md:shrink-0 md:border-r md:border-border/60">
       <div className="p-2">
         <div className="relative">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -99,7 +111,7 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
             placeholder="Поиск по знанию пространства" className="h-9 pl-7 text-xs" />
         </div>
       </div>
-      <div className={modal ? 'min-h-0 flex-1 overflow-y-auto px-2 pb-2' : 'px-2 pb-2'}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {q.trim().length >= 2 ? (
           <div className="space-y-1">
             <div className="px-1 py-1 text-[11px] text-muted-foreground">
@@ -112,6 +124,11 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
                 <div className="text-[11px] text-muted-foreground"><Snippet text={a.snippet} /></div>
               </button>
             ))}
+          </div>
+        ) : empty ? (
+          <div className="px-2 py-6 text-xs text-muted-foreground">
+            Знание пространства пока пустое. Сюда заводят инструкции, отраслевые нормы и
+            документы компании — регламенты, приказы, чек-листы.
           </div>
         ) : (
           <div className="space-y-1">
@@ -159,15 +176,30 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
           </div>
         )}
       </div>
+      {/* Ведение — только в полноэкранном рабочем месте: из окна в шапке человек
+          пришёл искать ответ, а не писать регламент. */}
+      {!modal && (
+        <div className="border-t border-border/60 p-2">
+          <Button size="sm" variant="outline" className="h-8 w-full text-xs"
+            onClick={() => setEditing('new')}>
+            <Plus className="mr-1 h-3.5 w-3.5" /> Добавить документ компании
+          </Button>
+        </div>
+      )}
     </div>
   )
 
   const reader = (
-    <div className={modal ? 'flex min-w-0 flex-1 flex-col' : ''}>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
         <span className="flex-1 truncate text-sm font-semibold">
           {article.data?.title ?? 'Инфо'}
         </span>
+        {!modal && canEditCurrent && (
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditing('current')}>
+            <Pencil className="mr-1 h-3.5 w-3.5" /> Править
+          </Button>
+        )}
         {/* Размер текста: регламенты читают подолгу и с разных экранов. */}
         <Type className="h-3.5 w-3.5 text-muted-foreground" />
         <button type="button" onClick={() => setFontStep((v) => Math.max(0, v - 1))}
@@ -175,16 +207,13 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
         <button type="button" onClick={() => setFontStep((v) => Math.min(FONT_STEPS.length - 1, v + 1))}
           className="rounded px-1.5 text-sm text-muted-foreground hover:text-foreground" title="Крупнее">A+</button>
       </div>
-      <div className={modal ? 'min-h-0 flex-1 overflow-y-auto px-5 py-4' : 'px-4 py-3'}
-        style={{ fontSize: FONT_STEPS[fontStep] }}>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4" style={{ fontSize: FONT_STEPS[fontStep] }}>
         {!selected ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">
-            Выберите статью слева или найдите поиском.
-          </div>
+          <Start tree={tree.data} onPick={setSelected} onAdd={modal ? undefined : () => setEditing('new')} />
         ) : article.isLoading || !article.data ? (
           <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
         ) : (
-          <>
+          <div className="mx-auto max-w-3xl">
             <h3 className="mb-1 text-lg font-semibold">{article.data.title}</h3>
             <div className="mb-3 flex flex-wrap items-center gap-2 border-b pb-2 text-[11px] text-muted-foreground">
               <span>{article.data.kindLabel}</span>
@@ -204,27 +233,93 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
               )}
             </div>
             <Markdown content={article.data.bodyMd} />
-          </>
+          </div>
         )}
       </div>
     </div>
   )
 
-  if (modal) return <div className="flex h-full min-h-0">{aside}{reader}</div>
-
+  // Одна раскладка на обе подачи: две колонки на всю высоту, каждая со своей
+  // прокруткой. Страница берёт высоту рабочей области, окно — высоту диалога.
   return (
-    <div className="p-4 space-y-3">
+    <>
+      <div className={cn('flex min-h-0 flex-col md:flex-row',
+        modal
+          ? 'h-full'
+          : 'h-[calc(100dvh-var(--header-height)-2.5rem)] overflow-hidden rounded-lg border border-border/60 bg-card')}>
+        {aside}
+        {reader}
+      </div>
+      {editor}
+    </>
+  )
+}
+
+/** Стартовый экран читалки: чем «Инфо» наполнено и с чего начать. */
+function Start({ tree, onPick, onAdd }: {
+  tree?: InfoTree; onPick: (id: string) => void; onAdd?: () => void
+}) {
+  const groups = tree?.groups ?? []
+  const first = groups.find((g) => g.key === 'guide') ?? groups[0]
+  const starters = (first?.categories[0]?.articles ?? first?.loose ?? []).slice(0, 5)
+  return (
+    <div className="mx-auto max-w-3xl space-y-5 py-2">
       <div>
-        <h2 className="text-base font-semibold">Инфо</h2>
-        <p className="text-xs text-muted-foreground">
-          Инструкции по продуктам, отраслевые нормы и документы компании. Открывается и
-          отсюда, и подсказкой в рабочей области — это одно и то же знание.
+        <h3 className="text-lg font-semibold">Знание пространства</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Инструкции по работе в системе, отраслевые нормы и документы самой компании.
+          Хранилище одно: то же знание всплывает подсказкой в правой рельсе — там оно
+          подобрано под открытый экран.
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[320px_1fr]">
-        <Card className="self-start"><CardContent className="p-0">{aside}</CardContent></Card>
-        <Card><CardContent className="p-0">{reader}</CardContent></Card>
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        {groups.map((g) => {
+          const Icon = KIND_ICON[g.key] ?? BookOpen
+          return (
+            <div key={g.key} className="rounded-lg border border-border/60 p-3">
+              <div className="flex items-center gap-2">
+                <Icon className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">{g.label}</span>
+                <span className="ml-auto font-mono text-xs text-muted-foreground">{g.count}</span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{g.hint}</p>
+            </div>
+          )
+        })}
       </div>
+
+      {starters.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            С чего начать
+          </p>
+          <div className="space-y-1">
+            {starters.map((a) => (
+              <button key={a.id} type="button" onClick={() => onPick(a.id)}
+                className="block w-full rounded-md border border-border/60 px-3 py-2 text-left hover:border-primary/50">
+                <div className="text-sm font-medium">{a.title}</div>
+                {a.summary && <div className="text-xs text-muted-foreground">{a.summary}</div>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {onAdd && (
+        <div className="rounded-lg border border-dashed border-border p-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Building2 className="h-4 w-4 text-muted-foreground" /> Документы компании
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Регламенты, приказы и инструкции организации ведутся здесь же. Если указать
+            продукт и раздел, документ появится подсказкой на нужном экране.
+          </p>
+          <Button size="sm" variant="outline" className="mt-2 h-7 text-xs" onClick={onAdd}>
+            <Plus className="mr-1 h-3.5 w-3.5" /> Добавить документ
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

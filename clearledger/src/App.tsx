@@ -26,6 +26,9 @@ const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ de
 const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
 const CatalogPage = lazy(() => import('@/pages/CatalogPage').then((m) => ({ default: m.CatalogPage })))
+const ConnectionsPage = lazy(() => import('@/pages/ConnectPages').then((m) => ({ default: m.ConnectionsPage })))
+const NotificationsPage = lazy(() => import('@/pages/ConnectPages').then((m) => ({ default: m.NotificationsPage })))
+const SpaceAppsPage = lazy(() => import('@/pages/ConnectPages').then((m) => ({ default: m.SpaceAppsPage })))
 const LocationsPage = lazy(() => import('@/pages/LocationsPage').then((m) => ({ default: m.LocationsPage })))
 const ContractorsPage = lazy(() => import('@/pages/ContractorsPage').then((m) => ({ default: m.ContractorsPage })))
 const MetrikaPage = lazy(() => import('@/pages/MetrikaPage').then((m) => ({ default: m.MetrikaPage })))
@@ -190,10 +193,13 @@ const router = createBrowserRouter([
           // Продукты пространства — разделы Учёта, ставшие самостоятельными рабочими
           // местами (`config/spaceProducts.ts`): своя плитка на столе, свой ключ доступа
           // в роли, своё левое меню. Маршруты строятся из той же карты, что и меню.
-          ...SPACE_PRODUCTS.map((p) => ({
+          ...SPACE_PRODUCTS.filter((p) => p.modes.length).map((p) => ({
             path: p.route,
             element: <RequireApp code={p.code}><WorkspaceLayout modes={p.modes} /></RequireApp>,
           })),
+          // «Подключения» собраны из страниц, рабочей области у них нет — корень ведёт
+          // на первую страницу приложения.
+          { path: '/connect', element: <Navigate to="/connections" replace /> },
           // Функции Ядра открыты из КАЖДОГО рабочего места — под его адресом
           // (`/finance/objects`): экран один, но видно, откуда смотрят, и от этого
           // зависят права (`finance:objects`) и состав карточки (`objectTabs`).
@@ -223,6 +229,13 @@ const router = createBrowserRouter([
           { path: '/channels/:id', element: <ChannelDetailRedirect /> },
           { path: '/sources', element: <LazyPage><SourcesPage /></LazyPage> },
           { path: '/catalog', element: <LazyPage><CatalogPage /></LazyPage> },
+          // Разделы, переехавшие из «Управления» в «Подключения» (30.07.2026).
+          { path: '/connections', element: <LazyPage><ConnectionsPage /></LazyPage> },
+          { path: '/notifications', element: <LazyPage><NotificationsPage /></LazyPage> },
+          { path: '/apps', element: <LazyPage><SpaceAppsPage /></LazyPage> },
+          { path: '/admin/company/connections', element: <Navigate to="/connections" replace /> },
+          { path: '/admin/company/notify', element: <Navigate to="/notifications" replace /> },
+          { path: '/admin/company/apps', element: <Navigate to="/apps" replace /> },
           { path: '/locations', element: <Navigate to="/objects" replace /> },
           { path: '/contractors', element: <LazyPage><ContractorsPage /></LazyPage> },
           { path: '/organization', element: <LazyPage><OrganizationPage /></LazyPage> },

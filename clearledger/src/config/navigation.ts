@@ -11,6 +11,7 @@ import {
   Plug, BookOpen, CalendarClock, Link2, Package,
   Landmark, ScrollText, Tag, Layers, GitCompare,
   Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw, LineChart,
+  Cable, Bell, Blocks,
 } from 'lucide-react'
 
 export interface NavItemDef {
@@ -35,12 +36,24 @@ export const mainNavItems: NavItemDef[] = [
   { to: '/intake', icon: Upload, label: 'Загрузка' },             // ручная drag-n-drop загрузка
 ]
 
-// Раздел «Данные»
+// Раздел «Данные» — работа с самими данными. Трубы (коннекторы, каталог типов)
+// переехали в приложение «Подключения»: настройка связи и её состояние должны
+// жить в одном месте, иначе про подключение говорят в трёх экранах сразу.
 export const dataItems: NavItemDef[] = [
   { to: '/organization', icon: Building, label: 'Организация' },
-  { to: '/connectors', icon: Plug, label: 'Коннекторы' },
   { to: '/metrika', icon: LineChart, label: 'Яндекс.Метрика' },
   { to: '/normalization', icon: Sparkles, label: 'Нормализация' },
+]
+
+// Приложение «Подключения» — внешний контур пространства. Пути односегментные не для
+// красоты: код права страницы = первый сегмент (`pageCode`), и `/connect/notify` дал бы
+// всем разделам один ключ `connect`.
+export const connectItems: NavItemDef[] = [
+  { to: '/connections', icon: Cable, label: 'Состояние' },
+  { to: '/connectors', icon: Plug, label: 'Источники и коннекторы' },
+  { to: '/catalog', icon: Library, label: 'Каталог типов' },
+  { to: '/notifications', icon: Bell, label: 'Оповещения' },
+  { to: '/apps', icon: Blocks, label: 'Приложения и модули' },
 ]
 
 // Раздел «1С» — только для fuel-профиля (ГИГ)
@@ -70,7 +83,7 @@ export const settingsItems: NavItemDef[] = [
  * собирают своё левое меню, не заводя вторых определений тех же страниц.
  */
 export const navByPath: Record<string, NavItemDef> = Object.fromEntries(
-  [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems].map((i) => [i.to, i]),
+  [...mainNavItems, ...dataItems, ...connectItems, ...oneCItems, ...settingsItems].map((i) => [i.to, i]),
 )
 
 // Администрирование вынесено из меню Ledger в отдельное приложение «Центр управления»

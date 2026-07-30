@@ -91,8 +91,9 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   data: [
     { code: 'normalize', label: 'Нормализация', group: 'Разделы' },
     { code: 'reconcile', label: 'Сверка', group: 'Разделы' },
-    ...pages(['/connectors', '/catalog']),
   ],
+  // «Подключения» — приложение из одних страниц: каждая и есть модуль права.
+  connect: pages(['/connections', '/connectors', '/catalog', '/notifications', '/apps']),
 }
 
 /**
