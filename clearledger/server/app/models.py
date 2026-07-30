@@ -18,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -1492,13 +1493,13 @@ class FuelStation(Base):
 
 
 # ---------------------------------------------------------------------------
-# FuelTransaction (пооперационный налив — STS /v2/transactions)
+# FuelTransaction (пооперационная реализация — STS /v2/transactions)
 # ---------------------------------------------------------------------------
 class FuelTransaction(Base):
-    """Пооперационная транзакция отпуска топлива (налив) из STS /v2/transactions.
+    """Пооперационная транзакция отпуска топлива из STS /v2/transactions.
 
     Грейн = одна операция на ТРК (в отличие от FuelShiftSale = агрегат смена×канал×
-    топливо). Даёт счётчик наливов (как в эталонной системе), реестр операций и
+    топливо). Даёт счётчик реализаций (как в эталонной системе), реестр операций и
     точные метрики (по часам/картам/ТРК). Дедуп по STS `id` в скоупе компания+станция.
     """
     __tablename__ = "fuel_transactions"
@@ -1537,10 +1538,10 @@ class FuelTransaction(Base):
     amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)    # ₽ (STS cost)
     mass: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)           # кг (STS amount)
     density: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
-    # Заказ клиента до налива: «залей на 1000 ₽» — расхождение с фактом видно в карточке.
+    # Заказ клиента до отпуска: «залей на 1000 ₽» — расхождение с фактом видно в карточке.
     order_qty: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
     order_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
-    # STS отдаёт только завершённые наливы; поле — под будущие отменённые/сбойные.
+    # STS отдаёт только завершённые реализации; поле — под будущие отменённые/сбойные.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed",
                                         server_default="completed")
 
@@ -3150,6 +3151,53 @@ class FuelShiftSaleOverride(Base):
 
 
 # ---------------------------------------------------------------------------
+# FuelTankSpec — ПАСПОРТ РЕЗЕРВУАРА: вместимость для отбраковки замеров.
+#
+# Нужен, чтобы отличать невозможное показание уровнемера от настоящего. Без
+# паспорта вместимость оценивается по книге (максимум остатка за историю), а книга
+# на части станций сама завышена — тогда невозможный замер проходит проверку.
+#
+# Источник вместимости — сам STS: `/v1/tanks` отдаёт `volume_max` по каждому
+# резервуару станции (это же значение «Ёмкость» показывает «Монитор»). Поэтому
+# паспорт синхронизируется, а не набивается руками; ручной ввод остаётся как
+# уточнение, когда прибор врёт и про свою ёмкость тоже.
+#
+# `source`: sts — из источника, manual — введено человеком (приоритетнее всего),
+# estimate — наша оценка по книге, отправная точка до синхронизации.
+# ---------------------------------------------------------------------------
+class FuelTankSpec(Base):
+    __tablename__ = "fuel_tank_specs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    station_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fuel_stations.id", ondelete="CASCADE"), nullable=False
+    )
+    tank_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    fuel_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Номинал по паспорту и рабочая ёмкость (по ней проверяется замер).
+    nominal_liters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    usable_liters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Мёртвый остаток — ниже него топливо не выдаётся, замер около него нормален.
+    dead_liters: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # sts | manual | estimate — откуда взялась вместимость (см. шапку модели).
+    source: Mapped[str] = mapped_column(String(10), nullable=False, default="estimate")
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("uq_fuel_tank_spec", "company_id", "station_id", "tank_number", unique=True),
+    )
+
+
+# ---------------------------------------------------------------------------
 # FuelTankInventory — ИНВЕНТАРИЗАЦИЯ РЕЗЕРВУАРА (корректировка книги на факт).
 # Замер уровнемера (факт) и документальный остаток (книга) расходятся, и это
 # расхождение само не списывается — копится, пока инвентаризация не оформит
@@ -4083,6 +4131,39 @@ class EzsProject(Base):
         Index("ix_ezs_project_company_stage", "company_id", "stage"),
         Index("ix_ezs_project_site", "site_id"),
         Index("ix_ezs_project_location", "location_id"),
+    )
+
+
+class EzsSiteParticipant(Base):
+    """Кто ведёт проект: человек в роли службы из регламента заказчика.
+
+    Роль назначается НА ПРОЕКТ, а не на человека вообще: один и тот же сотрудник
+    ведёт один объект как ОР и лишь наблюдает за соседним. Глобальная роль в
+    пространстве на этот вопрос не отвечает, поэтому состав живёт здесь.
+
+    Приёмщики (ОЭ — принимает станцию, ОЦО — принимает документы) заводятся тем
+    же списком: приёмка это такое же участие, только с кнопкой в конце маршрута.
+
+    Состав уезжает в кейс Координатора вместе со сводкой проекта — там он
+    становится третьим слоем полномочий на рёбрах маршрута.
+    """
+    __tablename__ = "ezs_site_participants"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Код службы из ezs_checklist.ROLES: ОР, ДР/ГД, ОКС, ОЭ, ЮБ, ФБ, ОЦО, Подрядчик
+    role_code: Mapped[str] = mapped_column(String(40), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("site_id", "user_id", "role_code", name="uq_ezs_site_participant"),
+        Index("ix_ezs_site_participant_site", "site_id", "role_code"),
     )
 
 

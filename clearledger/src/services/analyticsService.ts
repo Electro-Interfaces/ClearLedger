@@ -8,7 +8,7 @@
  * Все методы принимают периодные параметры в ISO (YYYY-MM-DD).
  */
 
-import { get, post } from './apiClient'
+import { get, post, put } from './apiClient'
 
 // ─── общие типы ─────────────────────────────────────────────────────
 
@@ -1419,3 +1419,44 @@ export function currentMonthBounds(): { from: string; to: string; year: number; 
     month: m,
   }
 }
+
+// ─── Паспорт резервуаров: вместимость для отбраковки замеров ─────────
+
+export interface TankSpecRow {
+  station_id: string
+  station_code: number
+  station_name: string
+  tank_number: number
+  fuel_name: string
+  nominal_liters: number | null
+  /** Рабочая вместимость — по ней проверяется показание уровнемера. */
+  usable_liters: number | null
+  dead_liters: number | null
+  note: string | null
+  /** sts — из источника, manual — введено человеком, estimate — оценка по книге. */
+  source: string | null
+  synced_at: string | null
+  /** Наибольший книжный остаток и наибольшее показание прибора за историю. */
+  book_max: number
+  fact_max: number
+  records: number
+  /** Сколько смен вообще дали показание и сколько раз прибор отдал свой предел. */
+  measured: number
+  at_limit: number
+  /** Действующая граница: выше неё показание считается невозможным. */
+  fact_limit: number
+}
+
+export const getTankSpecs = () =>
+  get<{ rows: TankSpecRow[]; sanity_ratio: number }>('/api/fuel/tank-specs')
+
+export const saveTankSpecs = (rows: Array<{
+  station_id: string; tank_number: number; fuel_name?: string | null
+  nominal_liters?: number | null; usable_liters?: number | null
+  dead_liters?: number | null; note?: string | null
+}>) => put<{ saved: number }>('/api/fuel/tank-specs', { rows })
+
+/** Забрать вместимость из STS (`/v1/tanks`, поле `volume_max`). */
+export const syncTankSpecsFromSts = () =>
+  post<{ updated: number; skipped: number; stations: number; warning: string | null }>(
+    '/api/fuel/tank-specs/sync-sts')

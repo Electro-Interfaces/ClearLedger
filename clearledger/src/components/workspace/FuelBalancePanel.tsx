@@ -22,7 +22,7 @@ import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 import { useLocations } from '@/hooks/useLocations'
 import { cn } from '@/lib/utils'
 import {
-  fmtLiters, fmtPct, getFuelBalance,
+  fmtLiters, fmtPct, getFuelBalance, getTankSpecs,
   type FuelBalanceLine,
 } from '@/services/analyticsService'
 
@@ -231,6 +231,13 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
       .map((station) => ({ value: String(station.code), label: station.name }))
   }, [data?.dimensions.stations, scopeMismatch, workspaceStations])
   const fuelOptions = (data?.dimensions.fuels ?? []).map((fuel) => ({ value: String(fuel.code), label: fuel.name }))
+  // Состояние приборов — для счётчика на шаге «Резервуары»: про сломанный уровнемер
+  // надо знать с любого экрана раздела, а не только зайдя в пункт.
+  const specsQuery = useQuery({
+    queryKey: ['tank-specs', companyId],
+    queryFn: () => getTankSpecs(),
+    staleTime: 5 * 60 * 1000,
+  })
   const hasFilters = stations.length > 0 || fuels.length > 0
   const reset = () => { setStations([]); setFuels([]) }
 
@@ -242,6 +249,9 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
 
   const variance = data.totals.variance_liters
   const issues = data.integrity.issues_total
+  // Резервуары со сбойным прибором: считаем по книге резервуаров, она уже в кеше.
+  const suspectFacts = specsQuery.data?.rows.filter(
+    (r) => r.at_limit > 0 || r.fact_max > r.fact_limit).length ?? 0
   // Шаг маршрута: у панели один вид на пункт, кроме `balance` — он и есть «Контроль».
   const step: GoodsStep = view === 'balance' ? 'tanks' : view
 
@@ -267,6 +277,8 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
       <GoodsRouteBar
         current={step}
         counters={{
+          'tank-specs': suspectFacts > 0
+            ? { value: suspectFacts, unit: 'сбой', alarm: true } : null,
           tanks: issues > 0 ? { value: issues, unit: 'замеч.', alarm: true } : null,
           variances: data.integrity.continuity_breaks > 0
             ? { value: data.integrity.continuity_breaks, unit: 'разр.', alarm: true } : null,

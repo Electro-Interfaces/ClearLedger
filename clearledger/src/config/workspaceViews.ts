@@ -45,6 +45,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   // называться одинаково, иначе человек не понимает, где он оказался.
   projects: {
     pr_project: 'Проекты', pr_projects: 'Проекты', sites_list: 'Площадки',
+    pr_plan: 'План работ',
     pr_tp: 'Присоединение', pr_equipment: 'Оборудование', sites_map: 'Карта',
   },
   projects_analytics: {
@@ -61,8 +62,9 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     'by-month': 'По месяцам', channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы',
     coupons: 'Купоны', margin: 'Маржа и цены',
     purchases: 'Поступления', intake: 'Приёмка и сливы', tanks: 'Контроль баланса',
+    'tank-specs': 'Резервуары',
     variances: 'Расхождения', inventory: 'Инвентаризация', balance: 'Баланс',
-    pumps: 'Загрузка ТРК', abcxyz: 'ABC-XYZ', visits: 'Приезды', clients: 'Клиенты и когорты',
+    pumps: 'Загрузка ТРК', abcxyz: 'ABC-XYZ', visits: 'Визиты', clients: 'Клиенты и когорты',
     procurement: 'Энергозакупка', rent: 'Аренда',
     cs_dashboard: 'Обзор', cs_map: 'Карта', cs_trend: 'Динамика 2024+',
     cs_abcxyz: 'ABC-XYZ станций', cs_reliability: 'Надёжность',
@@ -71,7 +73,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     cs_breakdown: 'Разрезы', cs_time: 'Время и загрузка', cs_dynamics: 'Тренд и YoY',
     cs_compare: 'Сравнение периодов', cs_list: 'Реестр сессий',
     cs_sessions: 'Разрезы',  // старая ссылка ?sub=cs_sessions
-    fills: 'Реализация', visits: 'Приезды', transactions: 'Реестр операций',
+    fills: 'Реализация', visits: 'Визиты', transactions: 'Реестр операций',
     channels: 'Каналы продаж', 'online-orders': 'Онлайн-заказы', coupons: 'Купоны',
   },
   sales_commerce: {
@@ -81,6 +83,9 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     clients: 'Клиенты и когорты',
   },
   sales_goods: {
+    // `shifts` совпадает с ключом «Бухгалтерского» намеренно: подпись берётся из
+    // карты СВОЕГО раздела, а переход между продуктами по одному ключу запрещён.
+    shifts: 'Сменные отчёты',
     margin: 'Маржа и цены', purchases: 'Поступления', intake: 'Приёмка и сливы',
     tanks: 'Контроль баланса', variances: 'Расхождения', inventory: 'Инвентаризация',
   },

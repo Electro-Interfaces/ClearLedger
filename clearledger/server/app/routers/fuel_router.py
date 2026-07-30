@@ -2489,6 +2489,202 @@ async def inventory_list(
     return await list_inventories(db, cid, station_codes=codes)
 
 
+# ─── Паспорт резервуаров: вместимость для отбраковки замеров ───
+
+class TankSpecRow(BaseModel):
+    station_id: str
+    tank_number: int
+    fuel_name: str | None = None
+    nominal_liters: float | None = None
+    usable_liters: float | None = None
+    dead_liters: float | None = None
+    note: str | None = None
+
+
+class TankSpecSaveRequest(BaseModel):
+    rows: list[TankSpecRow]
+
+
+@router.get("/tank-specs")
+async def tank_specs_list(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Паспорт резервуаров + оценка по книге и наибольшее показание прибора.
+
+    Список резервуаров берётся из сменных данных (что реально работает), а не из
+    паспорта: иначе новый резервуар не появился бы, пока его не заведут руками.
+    """
+    from app.models import FuelTankSpec
+    from app.services.tank_ledger import FACT_SANITY_RATIO
+    cid = await _company_id(user, db)
+
+    specs = {
+        (str(s.station_id), int(s.tank_number)): s
+        for s in (await db.execute(select(FuelTankSpec).where(
+            FuelTankSpec.company_id == cid))).scalars().all()
+    }
+    T, S = FuelTank, FuelShift
+    rows = (await db.execute(
+        select(S.station_id, FuelStation.code, FuelStation.name, T.tank_number,
+               func.max(func.greatest(T.volume_start, T.volume_end)).label("book_max"),
+               func.max(T.fact_volume).label("fact_max"),
+               func.count().label("records"),
+               func.count(T.fact_volume).label("measured"),
+               func.max(T.fuel_type).label("fuel_name"))
+        .join(S, S.id == T.shift_id)
+        .join(FuelStation, FuelStation.id == S.station_id)
+        .where(S.company_id == cid)
+        .group_by(S.station_id, FuelStation.code, FuelStation.name, T.tank_number)
+        .order_by(FuelStation.code, T.tank_number)
+    )).all()
+
+    # Показания, равные вместимости из паспорта: прибор отдал предел шкалы вместо
+    # измерения. Считаем отдельно — по этой цифре видно, какой прибор сбойный.
+    at_limit: dict[tuple[str, int], int] = {}
+    for station_id, tank_no, cnt in (await db.execute(
+        select(S.station_id, T.tank_number, func.count())
+        .join(S, S.id == T.shift_id)
+        .join(FuelTankSpec, and_(FuelTankSpec.station_id == S.station_id,
+                                 FuelTankSpec.tank_number == T.tank_number,
+                                 FuelTankSpec.company_id == cid))
+        .where(S.company_id == cid,
+               FuelTankSpec.usable_liters.is_not(None),
+               func.abs(T.fact_volume - FuelTankSpec.usable_liters) < 0.5)
+        .group_by(S.station_id, T.tank_number)
+    )).all():
+        at_limit[(str(station_id), int(tank_no))] = int(cnt)
+
+    out = []
+    for station_id, code, name, tank_no, book_max, fact_max, records, measured, fuel_name in rows:
+        sp = specs.get((str(station_id), int(tank_no)))
+        usable = float(sp.usable_liters) if sp and sp.usable_liters else None
+        limit = (usable or round(float(book_max or 0), 1)) * FACT_SANITY_RATIO
+        out.append({
+            "station_id": str(station_id), "station_code": int(code),
+            "station_name": name or f"АЗС {code}", "tank_number": int(tank_no),
+            "fuel_name": (sp.fuel_name if sp and sp.fuel_name else fuel_name) or "—",
+            "nominal_liters": float(sp.nominal_liters) if sp and sp.nominal_liters else None,
+            "usable_liters": usable,
+            "dead_liters": float(sp.dead_liters) if sp and sp.dead_liters else None,
+            "note": sp.note if sp else None,
+            "source": sp.source if sp else None,
+            "synced_at": sp.synced_at.isoformat() if sp and sp.synced_at else None,
+            "book_max": round(float(book_max or 0), 1),
+            "fact_max": round(float(fact_max or 0), 1),
+            "records": int(records),
+            "measured": int(measured),
+            # Сколько раз прибор отдал ровно свою вместимость вместо измерения.
+            "at_limit": at_limit.get((str(station_id), int(tank_no)), 0),
+            # Порог, по которому сейчас отбраковывается показание прибора.
+            "fact_limit": round(limit, 1),
+        })
+    return {"rows": out, "sanity_ratio": FACT_SANITY_RATIO}
+
+
+@router.put("/tank-specs")
+async def tank_specs_save(
+    body: TankSpecSaveRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сохранить паспорт вручную — это уточнение поверх синхронизации из STS."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.models import FuelTankSpec
+    cid = await _company_id(user, db)
+    saved = 0
+    for r in body.rows:
+        values = dict(
+            id=uuid.uuid4(), company_id=cid, station_id=uuid.UUID(r.station_id),
+            tank_number=int(r.tank_number), fuel_name=r.fuel_name,
+            nominal_liters=r.nominal_liters, usable_liters=r.usable_liters,
+            dead_liters=r.dead_liters, note=r.note, source="manual",
+        )
+        stmt = pg_insert(FuelTankSpec).values(**values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["company_id", "station_id", "tank_number"],
+            set_={k: values[k] for k in (
+                "fuel_name", "nominal_liters", "usable_liters", "dead_liters", "note", "source")},
+        )
+        await db.execute(stmt)
+        saved += 1
+    await bump_version(db, cid)
+    await db.commit()
+    return {"saved": saved}
+
+
+@router.post("/tank-specs/sync-sts")
+async def tank_specs_sync_sts(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Забрать вместимость резервуаров из STS (`/v1/tanks`, поле `volume_max`).
+
+    Ручной паспорт не перетирается: человек уточняет то, чего источник не знает.
+    Нулевую ёмкость игнорируем — так STS отвечает, когда уровнемера на резервуаре
+    нет вовсе, и «ёмкость 0» отбраковала бы вообще все замеры.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.models import FuelTankSpec
+    from app.services.fuel_transactions import resolve_sts
+    from app.services.sts_client import sts_get_tanks
+
+    cid = await _company_id(user, db)
+    conn = await resolve_sts(db, cid)
+    if conn is None:
+        raise HTTPException(400, "нет STS-источника у компании")
+
+    stations = (await db.execute(select(FuelStation).where(
+        FuelStation.company_id == cid))).scalars().all()
+    now = datetime.now(timezone.utc)
+    updated = skipped = 0
+    errors: list[str] = []
+    for st in stations:
+        got = False
+        for sysid in conn["systems"]:
+            if got:
+                break
+            try:
+                tanks = await sts_get_tanks(conn["base_url"], conn["login"], conn["pwd"],
+                                            sysid, int(st.code))
+            except Exception as e:  # noqa: BLE001 — станция недоступна, идём дальше
+                errors.append(f"АЗС {st.code}: {str(e)[:60]}")
+                continue
+            if not tanks:
+                continue
+            got = True
+            for t in tanks:
+                num = _int_or_none(t.get("number") or t.get("id"))
+                vmax = _num_or_none(t.get("volume_max"))
+                if num is None or not vmax or float(vmax) <= 0:
+                    skipped += 1
+                    continue
+                values = dict(
+                    id=uuid.uuid4(), company_id=cid, station_id=st.id, tank_number=int(num),
+                    fuel_name=t.get("fuel_name"), nominal_liters=float(vmax),
+                    usable_liters=float(vmax), dead_liters=None,
+                    note="вместимость из STS (/v1/tanks · volume_max)",
+                    source="sts", synced_at=now,
+                )
+                stmt = pg_insert(FuelTankSpec).values(**values)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["company_id", "station_id", "tank_number"],
+                    # Ручной паспорт сильнее источника: он появился именно потому,
+                    # что источнику по этому резервуару не поверили.
+                    set_={"fuel_name": values["fuel_name"],
+                          "nominal_liters": values["nominal_liters"],
+                          "usable_liters": values["usable_liters"],
+                          "note": values["note"], "source": "sts", "synced_at": now},
+                    where=FuelTankSpec.source != "manual",
+                )
+                await db.execute(stmt)
+                updated += 1
+    await bump_version(db, cid)
+    await db.commit()
+    return {"updated": updated, "skipped": skipped, "stations": len(stations),
+            "warning": "; ".join(errors[:3]) if errors else None}
+
+
 class InventoryCancelRequest(BaseModel):
     date: str
     station_codes: list[int] | None = None
@@ -3189,6 +3385,38 @@ async def analytics_silent(
     return await FuelNetworkAnalytics(db).silent(cid, df, dt, fuel_codes=tuple(_csv_ints(fuel_codes)))
 
 
+@router.get("/analytics/shift-coverage")
+async def analytics_shift_coverage(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_codes: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Полнота сменных отчётов: за каждый рабочий день станции ждём хотя бы одну смену.
+
+    Путь под `/analytics/`, а не `/shifts/coverage`: там уже живёт `/shifts/{shift_id}`,
+    и статический сегмент пришлось бы объявлять раньше динамического.
+    """
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).shift_coverage(
+        cid, df, dt, station_codes=tuple(_csv_ints(station_codes)))
+
+
+@router.get("/analytics/unit")
+async def analytics_unit(
+    date_from: str = Query(...), date_to: str = Query(...),
+    station_code: int = Query(...),
+    pos: int | None = Query(None), nozzle: int | None = Query(None),
+    fuel_code: int | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Расшифровка строки «Загрузки ТРК»: динамика по суткам, часы, простои, источник."""
+    cid = await _company_id(user, db)
+    df, dt = _fa_dates(date_from, date_to)
+    return await FuelNetworkAnalytics(db).unit_detail(
+        cid, df, dt, station_code=station_code, pos=pos, nozzle=nozzle, fuel_code=fuel_code)
+
+
 @router.get("/analytics/abc-xyz")
 async def analytics_abc_xyz(
     date_from: str = Query(...), date_to: str = Query(...),
@@ -3234,7 +3462,7 @@ async def analytics_visits(
     segment: str | None = Query(None), channel: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Приезды вместо реализаций: склейка соседних реализаций карты на одной станции."""
+    """Визиты вместо реализаций: склейка соседних реализаций карты на одной станции."""
     cid = await _company_id(user, db)
     df, dt = _fa_dates(date_from, date_to)
     return await FuelNetworkAnalytics(db).visits(

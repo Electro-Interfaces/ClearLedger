@@ -41,7 +41,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FuelReceipt, FuelShift, FuelStation, FuelTank, FuelTankInventory
+from app.models import (
+    FuelReceipt, FuelShift, FuelStation, FuelTank, FuelTankInventory, FuelTankSpec,
+)
 
 # Порог, ниже которого расхождение считаем шумом измерения, а не событием.
 # Уровнемер даёт ±0,2–0,5% объёма; для типового резервуара 20–25 м³ это
@@ -50,16 +52,25 @@ ARITHMETIC_TOLERANCE_L = 0.5   # книга обязана сходиться т
 CONTINUITY_TOLERANCE_L = 0.5   # стык смен тоже арифметика, а не измерение
 FACT_TOLERANCE_L = 50.0        # замер — измерение, у него есть погрешность
 
-# Замер, превышающий наибольший книжный остаток резервуара более чем в
-# FACT_SANITY_RATIO раз, физически невозможен: в резервуар столько не входит.
-# Такие показания в данных ГИГ есть и они характерны — АЗС 8 резервуар 2 отдаёт
-# 53 763,0 л при уровне 262 мм (при нормальных 18–25 тыс. л на уровне 1040–1291 мм),
-# причём ровно одно и то же значение в разных сменах: прибор «залип». Раньше такой
-# замер шёл в расчёт как настоящий и давал «35 695 л излишка» из ниоткуда, а
-# ведомость инвентаризации предложила бы оприходовать эти литры.
-# Вместимость оцениваем по КНИГЕ: она ведётся арифметикой и в порядке величин
-# надёжна, тогда как замер — это то, что мы как раз проверяем.
+# Замер, превышающий вместимость резервуара более чем в FACT_SANITY_RATIO раз,
+# физически невозможен: столько в резервуар не входит. Такие показания в данных ГИГ
+# характерны — АЗС 8 резервуар 2 отдаёт 53 763,0 л при уровне 262 мм (при нормальных
+# 18–25 тыс. л на уровне 1040–1291 мм), причём ровно одно и то же значение в разных
+# сменах: прибор «залип». Раньше такой замер шёл в расчёт как настоящий и давал
+# «35 695 л излишка» из ниоткуда, а ведомость предложила бы оприходовать эти литры.
+#
+# Вместимость берётся из ПАСПОРТА резервуара (`fuel_tank_specs`): STS отдаёт её в
+# `/v1/tanks` полем `volume_max`, и это же значение «Монитор» показывает как
+# «Ёмкость». Пока паспорта нет — оцениваем по книге, но на части станций книга сама
+# завышена, и её максимум пропускает невозможный замер: паспорт надёжнее.
 FACT_SANITY_RATIO = 1.15
+# Второй признак сбоя, найденный на данных ГИГ: замер РОВНО равен вместимости из
+# паспорта STS (44 показания по 8 резервуарам, до 21 на одном). Прибор в этот момент
+# отдаёт предел своей шкалы вместо измерения, а `volume_max` у него — то же самое
+# залипшее значение, поэтому проверка «больше вместимости» такой замер пропускает.
+# Точное совпадение до литра физически невероятно: резервуар не заполняют под
+# горловину — оставляют место на температурное расширение.
+FACT_AT_LIMIT_L = 0.5
 
 
 def _ru(v: float, digits: int = 1) -> str:
@@ -296,6 +307,21 @@ async def build_tank_ledger(
         inventories[(int(st_code), int(inv.tank_number))].append(
             (inv.inventory_date, _f(inv.adjustment_volume)))
 
+    # Паспортная вместимость резервуаров (из STS `/v1/tanks` или введённая руками).
+    # Ею отбраковываются невозможные показания уровнемера; пока паспорта нет,
+    # граница оценивается по книге — но книга на части станций сама завышена,
+    # и тогда невозможный замер проходит проверку.
+    specs: dict[tuple[int, int], float] = {}
+    sq = (
+        select(FuelStation.code, FuelTankSpec.tank_number, FuelTankSpec.usable_liters)
+        .join(FuelStation, FuelStation.id == FuelTankSpec.station_id)
+        .where(FuelTankSpec.company_id == company_id,
+               FuelTankSpec.usable_liters.is_not(None))
+    )
+    for code, tank_no, usable in (await db.execute(sq)).all():
+        if usable and float(usable) > 0:
+            specs[(int(code), int(tank_no))] = float(usable)
+
     chains: dict[tuple[int, int], list[tuple[FuelTank, FuelShift, FuelStation]]] = defaultdict(list)
     for tank, shift, station in records:
         chains[(int(station.code), int(tank.tank_number))].append((tank, shift, station))
@@ -325,23 +351,31 @@ async def build_tank_ledger(
         chain_breaks: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
         worst_fact = 0.0
         worst_fact_shift: int | None = None
-        # Вместимость резервуара по книге — ею отбраковываются невозможные замеры.
-        capacity = max((max(_f(t.volume_start), _f(t.volume_end)) for t, _s, _st in chain),
+        # Вместимость: паспорт (STS или руками) сильнее оценки по книге — книга на
+        # части станций завышена, и её максимум пропустил бы невозможный замер.
+        book_max = max((max(_f(t.volume_start), _f(t.volume_end)) for t, _s, _st in chain),
                        default=0.0)
+        spec_cap = specs.get((station_code, tank_no))
+        capacity = spec_cap or book_max
+        capacity_source = "паспорт" if spec_cap else "оценка по книге"
         fact_limit = capacity * FACT_SANITY_RATIO if capacity > 0 else None
         suspect_facts = 0
 
         def _sane_fact(v: Any) -> float | None:
             """Замер или None, если показание невозможно физически.
 
-            Ноль — «уровнемер не дал показание», а не пустой резервуар (иначе книга
-            − факт = вся ёмкость). Превышение вместимости — залипшее показание
-            прибора: в резервуар столько не входит.
+            Три случая, когда это не измерение:
+            * ноль — «уровнемер не дал показание», а не пустой резервуар (иначе
+              книга − факт = вся ёмкость и в недостачу попадает весь бак);
+            * больше вместимости с запасом — в резервуар столько не входит;
+            * ровно вместимость по паспорту — прибор отдал предел шкалы.
             """
             f = _n(v) or None
             if f is None:
                 return None
             if fact_limit is not None and f > fact_limit:
+                return None
+            if spec_cap and abs(f - spec_cap) < FACT_AT_LIMIT_L:
                 return None
             return f
 
@@ -475,8 +509,9 @@ async def build_tank_ledger(
                     "gap_liters": None,
                     "fact_raw": round(fact_raw or 0, 1),
                     "capacity_hint": round(capacity, 0) if capacity else None,
+            "capacity_source": capacity_source if capacity else None,
                     "detail": (f"уровнемер показал {_ru(fact_raw or 0, 0)} л — в резервуар "
-                               f"входит около {_ru(capacity, 0)} л"),
+                               f"входит {_ru(capacity, 0)} л ({capacity_source})"),
                 })
 
             # Разрыв ЦЕПОЧКИ учёта: станцию переустановили (нумерация смен началась
@@ -625,6 +660,7 @@ async def build_tank_ledger(
             # как недостача в десятки тысяч литров.
             "suspect_facts": suspect_facts,
             "capacity_hint": round(capacity, 0) if capacity else None,
+            "capacity_source": capacity_source if capacity else None,
             "chain_resets": chain_resets,
             "chain_jump": round(chain_jump_sum, 1) if chain_resets else None,
             "worst_fact_gap": round(worst_fact, 1) if worst_fact else 0.0,

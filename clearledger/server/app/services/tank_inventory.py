@@ -24,10 +24,10 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FuelShift, FuelStation, FuelTank, FuelTankInventory
+from app.models import FuelShift, FuelStation, FuelTank, FuelTankInventory, FuelTankSpec
 # Порог достоверности замера — общий с книгой резервуара: два разных порога дали
 # бы ведомость, расходящуюся с экраном, по которому её сверяют.
-from app.services.tank_ledger import FACT_SANITY_RATIO
+from app.services.tank_ledger import FACT_AT_LIMIT_L, FACT_SANITY_RATIO
 
 
 def _f(v: Any) -> float:
@@ -101,15 +101,25 @@ async def build_draft(
         ))).scalars().all()
     }
 
-    # Вместимость резервуара по книге — ею отбраковываем невозможные замеры.
-    # Уровнемер на АЗС 8 рез.2 отдаёт 53 763 л при уровне 262 мм (входит ~25 000 л):
-    # взяв это за факт, ведомость предложила бы оприходовать 28 тысяч литров,
-    # которых нет. Логика и порог — те же, что в книге резервуара (tank_ledger).
+    # Вместимость резервуаров: сначала паспорт (STS `/v1/tanks` или ручной ввод),
+    # затем оценка по книге. Уровнемер на АЗС 8 рез.2 отдаёт 53 763 л при паспортных
+    # ~10 000 л: взяв это за факт, ведомость предложила бы оприходовать 44 тысячи
+    # литров, которых нет. Логика и порог — те же, что в книге резервуара.
     capacity: dict[tuple[int, int], float] = {}
     for tank, shift, station in records:
         key = (int(station.code), int(tank.tank_number))
         capacity[key] = max(capacity.get(key, 0.0),
                             _f(tank.volume_start), _f(tank.volume_end))
+    spec_capacity: dict[tuple[int, int], float] = {}
+    for code, tank_no, usable in (await db.execute(
+        select(FuelStation.code, FuelTankSpec.tank_number, FuelTankSpec.usable_liters)
+        .join(FuelStation, FuelStation.id == FuelTankSpec.station_id)
+        .where(FuelTankSpec.company_id == company_id,
+               FuelTankSpec.usable_liters.is_not(None))
+    )).all():
+        if usable and float(usable) > 0:
+            capacity[(int(code), int(tank_no))] = float(usable)  # паспорт сильнее книги
+            spec_capacity[(int(code), int(tank_no))] = float(usable)
 
     rows: list[dict[str, Any]] = []
     sum_adj_vol = 0.0
@@ -118,7 +128,11 @@ async def build_draft(
         book_v = _f(tank.volume_end)
         fact_v = _f(tank.fact_volume)
         cap = capacity.get((st_code, int(tank_no)), 0.0)
-        if cap > 0 and fact_v > cap * FACT_SANITY_RATIO:
+        spec_cap = spec_capacity.get((st_code, int(tank_no)))
+        # Второе условие: замер ровно равен паспортной вместимости — прибор отдал
+        # предел шкалы, а не измерил остаток (см. tank_ledger.FACT_AT_LIMIT_L).
+        if (cap > 0 and fact_v > cap * FACT_SANITY_RATIO) or (
+                spec_cap and abs(fact_v - spec_cap) < FACT_AT_LIMIT_L):
             # Мерить нечем: показание прибора невозможно. В ведомость не берём и
             # говорим об этом прямо — иначе резервуар молча исчезнет из списка.
             skipped_suspect.append({

@@ -101,6 +101,21 @@ async def sts_get_shifts(
     return await _auth_get(base_url, login, password, f"/v1/shifts?{params}")
 
 
+async def sts_get_tanks(
+    base_url: str, login: str, password: str, system: int, station: int,
+) -> list[dict]:
+    """Резервуары станции — STS /v1/tanks. Отсюда берётся ПАСПОРТНАЯ ёмкость.
+
+    `volume_max` — вместимость резервуара (её же «Монитор» показывает как «Ёмкость»);
+    без неё границу достоверности замера приходится оценивать по книге, а книга на
+    части станций сама завышена. Плюс текущий уровень, температура, плотность и
+    подтоварная вода — то же, что в сменном отчёте, но на момент запроса.
+    """
+    params = f"system={system}&station={station}"
+    data = await _auth_get(base_url, login, password, f"/v1/tanks?{params}")
+    return data if isinstance(data, list) else []
+
+
 async def sts_get_coupons(
     base_url: str, login: str, password: str,
     system: int, station: int | None = None,
@@ -108,7 +123,7 @@ async def sts_get_coupons(
 ) -> list[dict]:
     """Купоны станции за период — STS /v1/coupons (dt_beg/dt_end как 'YYYY-MM-DD HH:MM:SS').
 
-    Купоны живут только в STS: в наливе остаётся номер купона, а дату его выдачи
+    Купоны живут только в STS: в реализации остаётся номер купона, а дату его выдачи
     и остаток знает лишь этот справочник. Ответ — блоки по станциям
     ({system, number, coupons[], total}); возвращаем плоский список, проставляя
     каждому купону номер станции из блока (без него сеть не разложить по АЗС).

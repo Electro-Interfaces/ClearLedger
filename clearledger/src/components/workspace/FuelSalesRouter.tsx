@@ -14,13 +14,16 @@ import { SalesChannelsPanel } from './SalesChannelsPanel'
 import { OnlineOrdersPanel } from './OnlineOrdersPanel'
 import { CouponsPanel } from './CouponsPanel'
 import { FuelTariffsPanel } from './FuelTariffsPanel'
+import { FuelPricingPanel } from './FuelPricingPanel'
 import { FuelCorporatePanel } from './FuelCorporatePanel'
 import { FuelRetailPanel } from './FuelRetailPanel'
 import { MarginDecisionPanel } from './MarginDecisionPanel'
 import { FuelBalancePanel } from './FuelBalancePanel'
+import { FuelShiftsPanel } from './FuelShiftsPanel'
 import {
   FuelAbcXyzPanel, FuelClientsPanel, FuelPumpsPanel, FuelVisitsPanel,
 } from './FuelNetworkPanels'
+import { TankSpecsPanel } from './TankSpecsPanel'
 import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
 
 export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode }: {
@@ -40,15 +43,19 @@ export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode 
     case 'channels':       return <SalesChannelsPanel {...p} />
     case 'online-orders':  return <OnlineOrdersPanel {...p} stationCode={stationCode} />
     case 'coupons':        return <CouponsPanel {...p} />
-    // Коммерция
+    // Коммерция. Ценообразование разложено на три пункта: «Цены» (что стоит),
+    // «Изменения цен» (как двигали) и «Маржа и цены» (сколько заработали).
     case 'fuel-tariffs':   return <FuelTariffsPanel {...p} />
+    case 'fuel-pricing':   return <FuelPricingPanel {...p} />
+    case 'margin':         return <MarginDecisionPanel {...p} />
     case 'fuel-corporate': return <FuelCorporatePanel {...p} />
     case 'fuel-retail':    return <FuelRetailPanel {...p} />
     case 'clients':        return <FuelClientsPanel {...p} />
     // Товародвижение. «Приёмка», «Расхождения» и «Инвентаризация» — те же экраны,
     // что раньше были табами «Контроля баланса»: панель одна (общий фильтр станций и
     // топлива, шапка баланса), различается набором видов (см. FuelBalancePanel).
-    case 'margin':         return <MarginDecisionPanel {...p} />
+    case 'shifts':         return <FuelShiftsPanel {...p} />
+    case 'tank-specs':     return <TankSpecsPanel companyId={companyId} stationCodes={[]} standalone />
     case 'purchases':      return <ReceiptsSection />
     case 'intake':         return <FuelBalancePanel {...p} view="intake" />
     case 'tanks':          return <FuelBalancePanel {...p} />

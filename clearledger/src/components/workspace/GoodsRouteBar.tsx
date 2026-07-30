@@ -16,9 +16,10 @@ import { cn } from '@/lib/utils'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
-export type GoodsStep = 'purchases' | 'intake' | 'tanks' | 'variances' | 'inventory'
+export type GoodsStep = 'tank-specs' | 'purchases' | 'intake' | 'tanks' | 'variances' | 'inventory'
 
 const STEPS: { key: GoodsStep; label: string; what: string }[] = [
+  { key: 'tank-specs', label: 'Резервуары', what: 'паспорт и состояние уровнемеров' },
   { key: 'purchases', label: 'Поступления', what: 'что и когда пришло по накладным' },
   { key: 'intake', label: 'Приёмка и сливы', what: 'сошёлся ли слив с ТТН по массе' },
   { key: 'tanks', label: 'Контроль баланса', what: 'книга против замера, смена за сменой' },
