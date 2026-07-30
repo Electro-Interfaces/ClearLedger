@@ -169,6 +169,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const total = q.data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE))
   const reset = () => setPage(1)
+  const ownerless = rows.filter((r) => !r.ownerName).length
 
   const mAssign = useMutation({
     mutationFn: () => bulkAssignOwner(companyId, [...picked],
@@ -242,7 +243,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }}
-            placeholder="Адрес, город, собственник" className="h-8 w-[220px] pl-7 pr-7 text-sm" />
+            placeholder="Название, номер, адрес" className="h-8 w-[220px] pl-7 pr-7 text-sm" />
           {search && <button type="button" onClick={() => { setSearch(''); reset() }}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
         </div>
@@ -291,6 +292,22 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         </div>
       )}
 
+      {/* Три колонки прочерков — не отчёт, а тишина: реестр молчит о том, что у
+          проектов нет ни ведущего, ни следующего шага. Говорим числом и даём
+          действие прямо здесь, вместо того чтобы менеджер листал строки. */}
+      {!q.isLoading && ownerless > 0 && picked.size === 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
+          <span>
+            Без ответственного {nf0.format(ownerless)} из {nf0.format(rows.length)} на странице —
+            колонки «Ответственный» и «Следующий шаг» у них пустые не по ошибке.
+          </span>
+          <button type="button" className="text-primary hover:underline"
+            onClick={() => setPicked(new Set(rows.filter((r) => !r.ownerName).map((r) => r.id)))}>
+            выбрать их и назначить
+          </button>
+        </div>
+      )}
+
       {view === 'board' && !q.isLoading && (
         <StageBoard rows={rows} onOpen={openProject} />
       )}
@@ -299,8 +316,17 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <CardContent className="p-0 overflow-x-auto">
           {q.isLoading ? (
             <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : q.isError ? (
+            /* Отказ сети и пустой реестр — разные вещи. «Проектов не найдено» на
+               обрыве связи заставляет искать пропавшие проекты, которых никто не терял. */
+            <div className="py-10 text-center text-sm space-y-2">
+              <div>Список не загрузился: {q.error instanceof Error ? q.error.message : 'нет связи с сервером'}</div>
+              <Button size="sm" variant="outline" onClick={() => q.refetch()}>Повторить</Button>
+            </div>
           ) : rows.length === 0 ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">Проектов не найдено</div>
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              Ничего не найдено по заданным условиям — измените поиск или снимите фильтры.
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -312,8 +338,8 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                   </th>
                   <th className="text-left p-2 font-medium">Проект</th>
                   <th className="text-left p-2 font-medium">Объект</th>
-                  <th className="text-left p-2 font-medium">Этап</th>
-                  <th className="text-left p-2 font-medium">Статус</th>
+                  <th className="text-left p-2 font-medium">Этап проекта</th>
+                  <th className="text-left p-2 font-medium">Стадия</th>
                   <th className="text-left p-2 font-medium">Ответственный</th>
                   <th className="text-left p-2 font-medium">Следующий шаг</th>
                   <th className="text-left p-2 font-medium">Срок</th>

@@ -1,5 +1,5 @@
 /**
- * Обзор пайплайна площадок (Банк ЗУ): воронка подбора с гейтами, регионы,
+ * Обзор пайплайна проектов (Банк ЗУ): воронка подбора с гейтами, регионы,
  * качество данных + импорт сводного Excel.
  *
  * Воронка идёт слева направо в порядке гейтов (лид → … → введена): раньше
@@ -33,7 +33,7 @@ const PHASE_TAB: Record<string, string> = {
 export function SitesOverviewPanel({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
   const [, setParams] = useSearchParams()
-  // Клик по стадии = открыть банк площадок с этим фильтром. Стадия едет в URL,
+  // Клик по стадии = открыть реестр проектов с этим фильтром. Стадия едет в URL,
   // чтобы ссылку можно было отправить коллеге, а не пересказывать словами.
   const goSub = (sub: string) => {
     setParams((prev) => {
@@ -149,16 +149,16 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
-Этап 1 «Подбор площадки» — стадии проекта по порядку гейтов
+Этап 1 «Подбор проекты» — стадии проекта по порядку гейтов
               </div>
               <div className="p-3 space-y-2">
                 {/* Строка стадии — вход в работу, а не картинка: клик ведёт в банк
-                    площадок с уже включённым фильтром. Раньше человек видел
+                    проектов с уже включённым фильтром. Раньше человек видел
                     «Переговоры 183» и не мог до них добраться. */}
                 {d!.funnel.map((s) => (
                   <button key={s.stage} type="button"
                     onClick={() => goStage(s.stage)}
-                    title={`Открыть банк площадок: ${s.label}`}
+                    title={`Открыть реестр проектов: ${s.label}`}
                     className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted/60">
                     <span className="inline-flex items-center gap-1.5 text-sm w-32 shrink-0">
                       <span className={`h-2 w-2 rounded-full ${STAGE_META[s.stage].dot}`} />{s.label}
@@ -186,13 +186,13 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
             <KpiCard label="План ЭЗС к установке" value={nf0.format(d!.plannedEzs)} hint="суммарно по заполненным" />
             <KpiCard label="План мощности, кВт" value={nf0.format(d!.plannedPowerKwt)} hint="суммарно по заполненным" />
             <KpiCard label="Затраты на подключение" value={`${nf0.format(d!.connectionCostSum)} ₽`}
-              hint={`по ${nf0.format(d!.withKnownCost)} из ${nf0.format(total)} площадок`} />
+              hint={`по ${nf0.format(d!.withKnownCost)} из ${nf0.format(total)} проектов`} />
           </div>
 
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
-                Управляемость активной части ({nf0.format(active)} площадок)
+                Управляемость активной части ({nf0.format(active)} проектов)
               </div>
               <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <Risk label="Без ответственного" n={d!.work.noOwner} total={active} />
@@ -206,7 +206,7 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
-                Чем заполнен банк
+                Чем заполнен реестр
               </div>
               <div className="p-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <Fill label="Координаты" n={d!.quality.withCoords} total={total} />
@@ -222,7 +222,7 @@ export function SitesOverviewPanel({ companyId }: { companyId: string }) {
           <Card>
             <CardContent className="p-0">
               <div className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40 flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5" />Топ-регионы по числу площадок
+                <MapPin className="h-3.5 w-3.5" />Топ-регионы по числу проектов
               </div>
               <div className="p-3 space-y-1.5">
                 {d!.byRegion.map((r) => (
@@ -249,7 +249,7 @@ function stage(d: { funnel: { stage: SiteStage; count: number }[] } | undefined,
 
 /**
  * Разрывы покрытия: где сеть работает без пайплайна (развитие остановилось),
- * где пайплайн без сети (заходим в новый регион) и где новая площадка встанет
+ * где пайплайн без сети (заходим в новый регион) и где новая проект встанет
  * вплотную к нашей же станции.
  */
 function GapsCard({ companyId }: { companyId: string }) {
@@ -267,7 +267,7 @@ function GapsCard({ companyId }: { companyId: string }) {
         <div className="p-3 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
-              Сеть есть — площадок нет ({d.networkNoPipeline.length})
+              Сеть есть — проектов нет ({d.networkNoPipeline.length})
             </div>
             {noPipe.length === 0 ? <div className="text-muted-foreground">—</div> : noPipe.map((r) => (
               <div key={r.region} className="flex justify-between border-b border-border/20 py-0.5">
@@ -278,7 +278,7 @@ function GapsCard({ companyId }: { companyId: string }) {
           </div>
           <div>
             <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">
-              Площадки есть — сети нет ({d.pipelineNoNetwork.length})
+              Проекты есть — сети нет ({d.pipelineNoNetwork.length})
             </div>
             {noNet.length === 0 ? <div className="text-muted-foreground">—</div> : noNet.map((r) => (
               <div key={r.region} className="flex justify-between border-b border-border/20 py-0.5">
@@ -302,7 +302,7 @@ function GapsCard({ companyId }: { companyId: string }) {
                   </div>
                 ))}
                 <div className="text-xs text-muted-foreground mt-1">
-                  Ближе {d.thresholds.cannibalKm * 1000} м — площадка скорее делит трафик, чем добавляет покрытие.
+                  Ближе {d.thresholds.cannibalKm * 1000} м — проект скорее делит трафик, чем добавляет покрытие.
                 </div>
               </>
             )}
@@ -358,7 +358,7 @@ function ImportReport({ report, pending, busy, onConfirm }: {
         {report.dryRun ? 'Предпросмотр импорта (данные пока не записаны)' : 'Импорт выполнен ✓'}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
-        <span>новых площадок: <b className="text-foreground">{nf0.format(report.created)}</b></span>
+        <span>новых проектов: <b className="text-foreground">{nf0.format(report.created)}</b></span>
         <span>дополнено: <b className="text-foreground">{nf0.format(report.updated)}</b></span>
         <span>без изменений: {nf0.format(report.unchanged)}</span>
         {report.stageMoved > 0 && <span>продвинулось по воронке: <b className="text-foreground">{report.stageMoved}</b></span>}
@@ -382,7 +382,7 @@ function ImportReport({ report, pending, busy, onConfirm }: {
           </button>
           <div className="text-xs text-muted-foreground">
             {report.fileDuplicates.length > 0 && <div>дублей в файле (две строки на одну площадку): {report.fileDuplicates.length}</div>}
-            {report.nearConflicts.length > 0 && <div>координаты в 50 м от другой площадки, но адрес иной: {report.nearConflicts.length}</div>}
+            {report.nearConflicts.length > 0 && <div>координаты в 50 м от другой проекты, но адрес иной: {report.nearConflicts.length}</div>}
             {report.skippedNoKey > 0 && <div>строк пропущено — нет ни адреса, ни координат, ни собственника: {report.skippedNoKey}</div>}
           </div>
           {details && (
@@ -416,7 +416,7 @@ function ImportReport({ report, pending, busy, onConfirm }: {
         <div className="pt-1 flex items-center gap-2">
           <Button size="sm" className="h-8 text-sm" disabled={busy} onClick={onConfirm}>Загрузить в банк</Button>
           <span className="text-xs text-muted-foreground">
-            Файл дополнит банк: известные площадки обновятся, ручные правки сохранятся.
+            Файл дополнит банк: известные проекты обновятся, ручные правки сохранятся.
           </span>
         </div>
       )}

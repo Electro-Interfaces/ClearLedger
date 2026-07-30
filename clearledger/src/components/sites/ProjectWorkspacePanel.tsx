@@ -66,9 +66,12 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
   const s = q.data
 
   const refresh = async () => {
+    // `site-roadmap` — вкладка «Схема»: без неё схема маршрута обновится, а
+    // прогресс и гейты рядом с ней останутся из кэша.
     for (const key of [['site-detail', companyId, id], ['sites-list', companyId],
                        ['sites-overview', companyId], ['site-events', companyId, id],
                        ['site-project', companyId, id], ['site-docs', companyId, id],
+                       ['site-roadmap', companyId, id],
                        ['pr-portfolio', companyId], ['pr-overview', companyId],
                        ['pr-projects', companyId], ['pr-tc', companyId], ['pr-equipment', companyId]]) {
       await qc.invalidateQueries({ queryKey: key })
@@ -144,7 +147,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
       <ProjectPhaseStrip current={s.phase ?? undefined} kind={s.kind}
         note={s.kind && s.kind !== 'new_build'
           ? 'Работа на действующем объекте: место известно, подбор площадки не нужен.'
-          : 'Подбор площадки — первый этап этого же проекта, дальше земля, реализация и ввод.'} />
+          : 'Подбор места — первый этап этого же проекта, дальше земля, реализация и ввод.'} />
 
       <NextStepBar site={s} onGoTab={onTab} />
 

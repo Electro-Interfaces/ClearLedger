@@ -47,9 +47,13 @@ EDITABLE_FIELDS = {
     "planned_power_kwt", "planned_ezs_count", "supplier", "contractor", "tu_status",
     "tech_conn_type", "dop_service", "comment", "archive_reason",
     "next_action", "next_action_due", "hold_until", "owner_user_id", "location_id",
-    # проект: имя, субсидия, ввод в эксплуатацию
+    # проект: имя, субсидия, условия площадки
+    # `commissioned_on` здесь намеренно НЕТ: дата ввода — основание перевода
+    # капвложений со счёта 08 на 01, и правка её руками из паспорта позволяла бы
+    # закрыть стройку в учёте, минуя обязательные пункты чек-листа. Ставит её
+    # только маршрут, дошедший до стадии ввода при закрытом чек-листе.
     "title", "subsidy_planned", "parking_spots", "access_24x7", "has_lighting",
-    "has_internet", "subsidy_amount", "commissioned_on",
+    "has_internet", "subsidy_amount",
     # графы чек-листа согласования (v2.26)
     "input_price_kwth", "smr_cost", "long_term_contract", "has_video", "has_mobile",
     "owner_contact", "source_company", "source_person",
@@ -251,7 +255,15 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
     resolver = RegionResolver(list(regions))
     now = datetime.now(timezone.utc)
 
-    site = EzsSite(company_id=company_id, stage=payload.get("stage") or "lead",
+    # Вид работы задаётся только при заведении: по нему маршрут на входе выбирает
+    # ветку. В EDITABLE_FIELDS его нет намеренно — смена вида на полпути увела бы
+    # уже идущий проект в чужую ветку.
+    from app.services.ezs_lifecycle import KIND_LABELS
+    kind = str(payload.get("kind") or "new_build")
+    if kind not in KIND_LABELS:
+        kind = "new_build"
+
+    site = EzsSite(company_id=company_id, stage=payload.get("stage") or "lead", kind=kind,
                    stage_since=date.today().isoformat(), project_no=await next_project_no(db, company_id),
                    first_seen_at=now, last_seen_at=now, updated_at=now, last_touch_at=now)
     fields = {f: payload.get(f) for f in EDITABLE_FIELDS if f in payload}

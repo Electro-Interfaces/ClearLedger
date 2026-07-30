@@ -44,6 +44,18 @@ export function Markdown({ content }: { content: string }) {
   let list: string[] = []
   let table: string[] = []
   let code: string[] | null = null
+  let para: string[] = []
+
+  // Абзац в markdown — это блок строк до пустой строки, а не каждая строка
+  // отдельно. Тексты справки набраны с переносом по ширине, и построчный рендер
+  // разрывал фразу в произвольном месте: «…от первого разговора о месте до» /
+  // «работающей ЭЗС». Читается как обрывки, хотя написан связный текст.
+  const flushPara = (key: string) => {
+    if (!para.length) return
+    const text = para.join(' ')
+    blocks.push(<p key={key} className="my-1.5 leading-relaxed">{inline(text, key)}</p>)
+    para = []
+  }
 
   const flushList = (key: string) => {
     if (!list.length) return
@@ -83,7 +95,7 @@ export function Markdown({ content }: { content: string }) {
   lines.forEach((raw, idx) => {
     const key = `b${idx}`
     if (raw.trim().startsWith('```')) {
-      if (code === null) { flushList(`${key}-l`); flushTable(`${key}-t`); code = [] }
+      if (code === null) { flushPara(`${key}-p`); flushList(`${key}-l`); flushTable(`${key}-t`); code = [] }
       else {
         blocks.push(
           <pre key={key} className="my-2 overflow-x-auto rounded-md bg-muted p-2 text-[11px]">
@@ -97,12 +109,13 @@ export function Markdown({ content }: { content: string }) {
     if (code !== null) { code.push(raw); return }
 
     const line = raw.trimEnd()
-    if (line.trim().startsWith('|')) { flushList(`${key}-l`); table.push(line.trim()); return }
+    if (line.trim().startsWith('|')) { flushPara(`${key}-p`); flushList(`${key}-l`); table.push(line.trim()); return }
     flushTable(`${key}-t`)
 
-    if (!line.trim()) { flushList(`${key}-l`); return }
+    if (!line.trim()) { flushPara(`${key}-p`); flushList(`${key}-l`); return }
     const h = /^(#{1,4})\s+(.*)$/.exec(line)
     if (h) {
+      flushPara(`${key}-p`)
       flushList(`${key}-l`)
       const level = h[1].length
       const cls = level === 1 ? 'text-base font-semibold mt-4 mb-1'
@@ -115,6 +128,7 @@ export function Markdown({ content }: { content: string }) {
     // инструкций, и он не должен превращаться в ссылку посреди абзаца.
     const img = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(line.trim())
     if (img) {
+      flushPara(`${key}-p`)
       flushList(`${key}-l`)
       blocks.push(
         <figure key={key} className="my-3">
@@ -125,8 +139,9 @@ export function Markdown({ content }: { content: string }) {
       )
       return
     }
-    if (/^\s*[-*]\s+/.test(line)) { list.push(line.replace(/^\s*[-*]\s+/, '')); return }
+    if (/^\s*[-*]\s+/.test(line)) { flushPara(`${key}-p`); list.push(line.replace(/^\s*[-*]\s+/, '')); return }
     if (/^>\s?/.test(line)) {
+      flushPara(`${key}-p`)
       flushList(`${key}-l`)
       blocks.push(
         <blockquote key={key} className="my-2 border-l-2 border-border pl-3 text-muted-foreground">
@@ -136,10 +151,15 @@ export function Markdown({ content }: { content: string }) {
       return
     }
     const num = /^\s*\d+[.)]\s+(.*)$/.exec(line)
-    if (num) { list.push(num[1]); return }
+    if (num) { flushPara(`${key}-p`); list.push(num[1]); return }
+    // Продолжение пункта списка: пункт набран в две строки, и вторая начинается
+    // без маркера. Своим абзацем она вываливается из списка и читается как обрыв.
+    if (list.length && !para.length) { list[list.length - 1] += ' ' + line.trim(); return }
     flushList(`${key}-l`)
-    blocks.push(<p key={key} className="my-1.5 leading-relaxed">{inline(line, key)}</p>)
+    // Обычная строка текста — копим в абзац, сбросим на пустой строке или блоке.
+    para.push(line.trim())
   })
+  flushPara('tail-p')
   flushList('tail-l')
   flushTable('tail-t')
 

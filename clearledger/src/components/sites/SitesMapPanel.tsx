@@ -1,8 +1,8 @@
 /**
- * «Карта площадок» — банк ЗУ поверх действующей сети.
+ * «Карта проектов» — банк ЗУ поверх действующей сети.
  *
- * Главный вопрос карты: новая площадка добавляет покрытие или делит трафик с
- * нашей же станцией? Поэтому станции сети показаны фоном, а вокруг площадок,
+ * Главный вопрос карты: новая проект добавляет покрытие или делит трафик с
+ * нашей же станцией? Поэтому станции сети показаны фоном, а вокруг проектов,
  * которые стоят к ним ближе порога, рисуется круг каннибализации.
  */
 import { Fragment, useMemo, useState } from 'react'
@@ -126,7 +126,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
                         eventHandlers={{ dblclick: () => setDetailId(p.id) }}>
                         <Popup>
                           <div className="text-sm space-y-1 min-w-[210px]">
-                            <div className="font-medium">{p.address ?? p.city ?? 'Площадка'}</div>
+                            <div className="font-medium">{p.address ?? p.city ?? 'Проект'}</div>
                             <div className="text-muted-foreground">{p.region ?? ''}{p.city ? ` · ${p.city}` : ''}</div>
                             <div>Стадия: <b>{p.stageLabel}</b></div>
                             <div>Решение: <b>{QUADRANT_META[p.quadrant].label}</b> (уверенность {p.confidence}%)</div>
@@ -165,7 +165,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-slate-500/60" />станция сети
         </span>
-        <span>Круг — радиус {cannibalKm * 1000} м вокруг площадки, которая стоит вплотную к нашей станции.</span>
+        <span>Круг — радиус {cannibalKm * 1000} м вокруг проекты, которая стоит вплотную к нашей станции.</span>
       </div>
 
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}

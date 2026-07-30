@@ -32,7 +32,7 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
   construction: { label: 'Реализация', hint: 'присоединение ‖ оборудование ‖ монтаж', cls: 'border-teal-400/50 text-teal-600 dark:text-teal-300/80', dot: 'bg-teal-500' },
   commissioning: { label: 'Пусконаладка', hint: 'пусконаладка и приёмка', cls: 'border-cyan-400/50 text-cyan-600 dark:text-cyan-300/80', dot: 'bg-cyan-500' },
   live: { label: 'В эксплуатации', hint: 'объект работает в сети', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
-  on_hold: { label: 'Заморожен', hint: 'пауза с датой пересмотра', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
+  on_hold: { label: 'Приостановлен', hint: 'пауза с датой пересмотра', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
   archive: { label: 'Архив', hint: 'отклонён, с причиной', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
 }
 
@@ -240,6 +240,30 @@ export async function importSitesXlsx(companyId: string, file: File, dryRun: boo
   return upload(`/api/sites/import?company_id=${companyId}&dry_run=${dryRun}`, fd)
 }
 
+/** Отчёт импорта рабочего реестра работ по парку (файл переносов/замен/демонтажей). */
+export interface ParkPlanImportReport {
+  dryRun: boolean
+  created: number
+  updated: number
+  /** Работа встала на существующий объект сети, а не завела вторую карточку места. */
+  linkedToObject: number
+  /** Новые стройки: их ведёт воронка проектов, а не план работ по парку. */
+  toFunnel: number
+  skipped: { sheet: string; row: number; address: string; reason: string }[]
+  /** Лист «Ремонты» — это заявки поддержки, проектами импорт их не заводит. */
+  tickets: { sheet: string; row: number; region: string; address: string; comment: string; due: string | null }[]
+  sheets: { sheet: string; rows: number; note?: string }[]
+  unknownSheets: string[]
+}
+
+export async function importParkPlanXlsx(
+  companyId: string, file: File, dryRun: boolean,
+): Promise<ParkPlanImportReport> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return upload(`/api/sites/import-park-plan?company_id=${companyId}&dry_run=${dryRun}`, fd)
+}
+
 // ── Ведение площадки (Волна 2) ─────────────────────────────────────────────
 
 /** Кого можно назначить ответственным (члены компании, без прав админа). */
@@ -263,6 +287,126 @@ export async function moveSiteStage(
   gate: GateState; site?: SiteDetail
 }> {
   return post(`/api/sites/${id}/stage?company_id=${companyId}`, { stage, reason, override })
+}
+
+/* ── Ход проекта по маршруту (кейс в Координаторе) ──────────────────────── */
+
+/** Действие маршрута: кнопка, которую нажимает человек на своей роли. */
+export type CaseAction = {
+  id: string
+  verb: string
+  to_code: string
+  to_name: string
+  is_positive: boolean | null
+  is_finish: boolean
+  is_discretionary: boolean
+  automated: boolean
+  // Конфигурация автодействия ребра: чем именно обернётся нажатие — уведомлением,
+  // веткой или заполненными полями. Нужна, чтобы обещать факт, а не «шаги системы».
+  action?: { kind: string; text?: string; title?: string; fields?: Record<string, unknown> } | null
+  requirements: { require?: string[]; optional?: string[] } | null
+  // Закрытые действия приходят вместе с открытыми и показываются погашенными:
+  // так видно, чьего шага ждёт карточка, а не пустое место.
+  allowed?: boolean
+  deny_reason?: string | null
+  party_roles?: string[] | null
+}
+
+/** Участник проекта в роли регламента (ОР, ОКС, ОЭ, ЮБ, ФБ, ОЦО, ДР/ГД, Подрядчик). */
+export type SiteParticipant = {
+  id: string
+  userId: string
+  roleCode: string
+  name: string
+  email: string
+  note: string | null
+}
+
+export type CaseState = {
+  ok?: boolean
+  exists?: boolean
+  error?: string
+  caseId?: string
+  number?: number
+  status?: string
+  daysInStage?: number | null
+  stage?: { code: string; name: string } | null
+  // visited_at — когда кейс ВПЕРВЫЕ вошёл в стадию (журнал переходов). Не позиция
+  // в списке: возвраты и ветки ломают линейность, и «слева = пройдено» врало бы.
+  stages?: { code: string; name: string; is_finish: boolean; visited_at?: string | null; sort_order?: number }[]
+  // Рёбра всего графа — для схемы маршрута. Список стадий отвечает «где были»,
+  // но развилку и петлю доработки без рёбер нарисовать нечем.
+  links?: {
+    from_code: string; to_code: string; verb: string
+    is_positive: boolean | null; is_auto?: boolean; is_discretionary?: boolean
+    action_kind?: string | null
+  }[]
+  // Пройденный путь по журналу переходов: какими именно рёбрами шёл проект.
+  path?: { from_code: string | null; to_code: string; at: string; actor_name: string | null; verb: string | null }[]
+  actions?: CaseAction[]
+  fields?: { code: string; label: string; field_type: string; options: string[] | null; hint: string | null }[]
+  values?: Record<string, unknown>
+  milestones?: { code: string; name: string; reached_at: string | null; actor_name: string | null }[]
+  participants?: { role_code: string; name: string; email: string }[]
+  // Параллельные ветки (ОР ∥ ОКС, работы подрядчика) — дочерние кейсы. Родитель их
+  // показывает: иначе погашенная кнопка «ждём ветку» указывает в пустоту.
+  branches?: {
+    id: string; number: number | null; title: string; status: string
+    stage_name: string | null; assignee_name: string | null
+    // Закрытость ветки берём у её процесса (финальная стадия), а не у статуса:
+    // статус ветки равен коду стадии и с 'closed' не совпадает никогда.
+    stage_code?: string | null; stage_is_finish?: boolean
+    // Кнопки ветки — здесь же: закрывать её человек должен там, где видит, а не
+    // уходя за ней в Координатор.
+    actions?: CaseAction[]
+  }[]
+  readonly?: boolean
+  readonlyReason?: string | null
+  funnel?: { moved: boolean; blocking: string[]; message?: string | null }
+}
+
+/** Где стоит проект по маршруту и что можно нажать. Кейса ещё нет — `exists: false`. */
+export async function getProjectCase(companyId: string, id: string): Promise<CaseState> {
+  return get(`/api/sites/${id}/case`, { company_id: companyId })
+}
+
+/** Начать вести проект по маршруту (повтор безопасен — обновляет сводку). */
+export async function openProjectCase(companyId: string, id: string): Promise<CaseState> {
+  return post(`/api/sites/${id}/case?company_id=${companyId}`, {})
+}
+
+/**
+ * Выполнить шаг маршрута. `payload` — поля, которые требует действие.
+ * `branchCaseId` адресует шаг в параллельную ветку проекта (ОР ∥ ОКС, подрядчик).
+ */
+export async function applyProjectStep(
+  companyId: string, id: string, linkId: string, payload?: Record<string, unknown>,
+  branchCaseId?: string,
+): Promise<CaseState> {
+  return post(`/api/sites/${id}/case/transition?company_id=${companyId}`,
+    { linkId, payload, branchCaseId })
+}
+
+/** Состав проекта и словарь ролей регламента для формы назначения. */
+export async function getSiteParticipants(companyId: string, id: string): Promise<{
+  roles: { code: string; label: string }[]
+  participants: SiteParticipant[]
+}> {
+  return get(`/api/sites/${id}/participants`, { company_id: companyId })
+}
+
+/** Назначить человека на роль в проекте — состав сразу уезжает в кейс маршрута. */
+export async function addSiteParticipant(
+  companyId: string, id: string, userId: string, roleCode: string,
+): Promise<{ ok: boolean }> {
+  return post(`/api/sites/${id}/participants?company_id=${companyId}`, { userId, roleCode })
+}
+
+/** Снять человека с роли в проекте. */
+export async function removeSiteParticipant(
+  companyId: string, id: string, participantId: string,
+): Promise<{ ok: boolean }> {
+  return del(`/api/sites/${id}/participants/${participantId}?company_id=${companyId}`)
 }
 
 /** Отметка пункта гейта, который проверяется глазами. */

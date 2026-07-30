@@ -794,30 +794,45 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         {"key": "eq_overdue", "label": "Просрочена поставка оборудования", "count": int(risks["eq_overdue"]),
          "hint": "плановая дата поставки прошла", "filter": "equipment"},
         {"key": "stage_overdue", "label": "Стадия идёт дольше норматива", "count": int(risks["stage_overdue"]),
-         "hint": "срок стадии по регламенту вышел, движения нет", "filter": ""},
+         # На свежезагруженном портфеле stage_since — это дата поступления из файла,
+         # а не дата входа в стадию внутри системы. Формально проект действительно
+         # стоит дольше норматива, но приписка «движения нет» звучала бы упрёком за
+         # то, что систему только начали вести.
+         "hint": "проект стоит на стадии дольше норматива регламента", "filter": ""},
         {"key": "no_touch_30", "label": "Без касаний больше 30 дней", "count": int(risks["no_touch_30"]),
-         "hint": "никто не разговаривал с собственником", "filter": ""},
+         "hint": "нет записи о звонке, встрече или письме за 30 дней", "filter": ""},
         {"key": "no_owner", "label": "Без ответственного", "count": int(risks["no_owner"]),
-         "hint": "непонятно, кто ведёт", "filter": ""},
+         "hint": "проект не закреплён ни за кем — назначьте в реестре", "filter": ""},
         {"key": "no_next", "label": "Без следующего шага", "count": int(risks["no_next"]),
-         "hint": "непонятно, что делать дальше", "filter": ""},
+         "hint": "не записано, что делать дальше и к какому сроку", "filter": ""},
     ]
 
     # ── 2. Где затык: воронка со сроком и проходимостью ────────────────────
     # Проходимость считаем по истории: сколько проектов, побывавших на стадии,
-    # ушли дальше. Это честнее, чем делить текущие остатки соседних стадий.
-    passed = {r["stage"]: r for r in (await db.execute(text("""
+    # ушли ВПЕРЁД. Именно вперёд: раньше засчитывалось любое более позднее
+    # событие, поэтому возврат с пусконаладки на СМР, пауза и отказ в архив
+    # читались как «стадия пройдена» — метрика показывала успех там, где проект
+    # развернули назад.
+    # Позиция стадии в воронке — выражение строим для нужной колонки явно, чтобы
+    # не полагаться на текстовую замену внутри готового SQL.
+    def _pos(col: str) -> str:
+        whens = " ".join(f"when '{st}' then {i}" for i, st in enumerate(STAGE_ORDER))
+        return f"(case {col} {whens} else -1 end)"
+    passed = {r["stage"]: r for r in (await db.execute(text(f"""
         with visited as (
             select distinct site_id, to_stage as stage from ezs_site_events
             where company_id = :cid and kind = 'stage' and to_stage is not null
         ),
         moved as (
             select v.stage, v.site_id,
-                   exists (select 1 from ezs_site_events e
-                           where e.site_id = v.site_id and e.kind = 'stage'
-                             and e.created_at > (select min(e2.created_at) from ezs_site_events e2
-                                                 where e2.site_id = v.site_id and e2.to_stage = v.stage)
-                          ) as went_further
+                   exists (
+                     select 1 from ezs_site_events e
+                      where e.site_id = v.site_id and e.kind = 'stage'
+                        and e.created_at > (select min(e2.created_at) from ezs_site_events e2
+                                             where e2.site_id = v.site_id and e2.to_stage = v.stage)
+                        -- дальше по воронке, а не куда угодно позже
+                        and {_pos("e.to_stage")} > {_pos("v.stage")}
+                   ) as went_further
             from visited v
         )
         select stage, count(*) as visited,
@@ -1187,15 +1202,18 @@ async def link_contract(db: AsyncSession, company_id, site: EzsSite, contract_id
 
 async def link_location(db: AsyncSession, company_id, site: EzsSite, location_id,
                         user: User | None) -> dict[str, Any]:
-    """Связать проект с объектом сети — цикл замкнут, площадка стала станцией."""
+    """Связать проект с объектом сети — цикл замкнут, проект стал станцией."""
     loc = (await db.execute(select(ServiceLocation).where(
         ServiceLocation.company_id == company_id,
         ServiceLocation.id == str(location_id)))).scalar_one_or_none()
     if loc is None:
         return {"ok": False, "message": "Объект не найден"}
     site.location_id = loc.id
-    if not site.commissioned_on:
-        site.commissioned_on = date.today().isoformat()
+    # Дату ввода здесь НЕ ставим. Привязка объекта — это регистрация станции в
+    # реестре сети; её делают и до ввода, и на проекте, который потом отклонят.
+    # Дата ввода — основание перевода капвложений со счёта 08 на 01, и ставит её
+    # ровно один путь: маршрут, дошедший до стадии ввода, через закрытый чек-лист
+    # (projects_process._reflect_commissioning).
     await log_event(db, site, "note", user=user, text=f"Связан объект сети: {loc.name}")
     from app.services.ezs_lifecycle import sync_from_site
     await sync_from_site(db, company_id, site)

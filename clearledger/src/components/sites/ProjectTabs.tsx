@@ -18,7 +18,7 @@
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -33,11 +33,14 @@ import {
   patchSite, moveSiteStage, markSiteGate, addSiteEvent, uploadSiteDoc, deleteSiteDoc,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
+  getProjectCase, openProjectCase, applyProjectStep,
+  getSiteParticipants, addSiteParticipant, removeSiteParticipant,
   STAGE_META, FUNNEL_STAGES, QUADRANT_META,
-  type SiteDetail, type SiteStage, type ProjectContext,
+  type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
 } from '@/services/sitesService'
 import { getContracts, getCounterparties } from '@/services/referenceService'
 import { loadLocations } from '@/services/locationService'
+import { getObjectTickets, createObjectTicket } from '@/services/spaceObjectsService'
 
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
@@ -74,9 +77,495 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
   return <HistoryTab site={site} companyId={companyId} />
 }
 
+/* ── Ход по маршруту ────────────────────────────────────────────────────── */
+
+/**
+ * Причина недоступности — на языке проекта, а не графа.
+ *
+ * Координатор называет условие кодом вида проекта («new_build»), потому что
+ * сравнивает с ним рёбра. В карточке это слово ничего не значит: тот же проект
+ * подписан «Новый монтаж» во всех остальных местах экрана.
+ */
+const PROJECT_KIND_WORDS: Record<string, string> = {
+  new_build: 'Новое строительство', relocation: 'Перенос',
+  retrofit: 'Модернизация', decommission: 'Демонтаж',
+}
+function humanReason(reason: string | null | undefined): string {
+  let out = reason ?? 'недоступно'
+  for (const [code, word] of Object.entries(PROJECT_KIND_WORDS)) {
+    out = out.replaceAll(`«${code}»`, `«${word}»`)
+  }
+  return out
+}
+
+/**
+ * Где проект стоит по регламенту и что делать дальше.
+ *
+ * Гейт отвечает на «что заполнено», маршрут — на «чей ход и какая кнопка».
+ * Ход ведёт Координатор: там же живут роли, уведомления и просрочки этапов.
+ */
+/**
+ * Что сделает система после нажатия — словами, а не обещанием.
+ *
+ * «Система выполнит свои шаги сама» человек проверить не может: он подписывается
+ * под невидимым эффектом. Уведомление, ветка и заполняемые поля описаны в самой
+ * конфигурации ребра — её и пересказываем, поэтому правка маршрута правит и текст.
+ */
+function effectText(a: CaseAction, defs: Record<string, { label?: string }>): string | null {
+  const act = a.action
+  if (!act) return null
+  if (act.kind === 'notify' && act.text) return `Система разошлёт уведомление: «${act.text}»`
+  if (act.kind === 'create_case' && act.title) return `Откроется ветка «${act.title}» — её ведёт своя служба.`
+  if (act.kind === 'set_fields') {
+    const parts = Object.entries(act.fields ?? {}).map(([code, v]) =>
+      `${defs[code]?.label ?? code}: ${v === true ? 'да' : v === false ? 'нет' : String(v)}`)
+    if (parts.length) return `Система заполнит — ${parts.join(', ')}.`
+  }
+  // Эффект есть, но описать его нечем (действие нового типа, пустая конфигурация).
+  // Молчание честнее обещания «система выполнит свои шаги сама»: под непроверяемый
+  // эффект человек подписываться не должен.
+  return null
+}
+
+function RoutePanel({ site, companyId, onDone }: {
+  site: SiteDetail; companyId: string; onDone: () => Promise<void>
+}) {
+  const [picked, setPicked] = useState<CaseAction | null>(null)
+  const [form, setForm] = useState<Record<string, string>>({})
+
+  const q = useQuery({
+    queryKey: ['site-case', companyId, site.id],
+    queryFn: () => getProjectCase(companyId, site.id),
+  })
+  const state = q.data
+
+  const mOpen = useMutation({
+    mutationFn: () => openProjectCase(companyId, site.id),
+    onSuccess: async () => { toast.success('Проект встал на маршрут'); await q.refetch() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть маршрут'),
+  })
+  const mStep = useMutation({
+    mutationFn: (a: CaseAction & { branchCaseId?: string }) =>
+      applyProjectStep(companyId, site.id, a.id, a.branchCaseId ? {} : form, a.branchCaseId),
+    onSuccess: async (r) => {
+      setPicked(null); setForm({})
+      if (r.funnel && !r.funnel.moved && r.funnel.blocking.length) {
+        // Маршрут ушёл вперёд, а воронка держится гейтом — молчать об этом нельзя.
+        // Но всплывашка на 15 пунктов не читается: называем три и число остальных,
+        // полный список и так лежит в чек-листе гейта на этой же вкладке.
+        const b = r.funnel.blocking
+        const head = b.slice(0, 3).join('; ')
+        toast.warning(
+          `Ход выполнен. Воронку держит гейт: ${head}${b.length > 3 ? ` и ещё ${b.length - 3}` : ''}`,
+          { description: b.length > 3 ? 'Полный список — в чек-листе согласования ниже.' : undefined })
+      } else {
+        toast.success('Шаг выполнен')
+      }
+      await q.refetch(); await onDone()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Шаг не выполнен'),
+  })
+
+  const defs = useMemo(
+    () => Object.fromEntries((state?.fields ?? []).map((f) => [f.code, f])),
+    [state?.fields])
+
+  if (q.isLoading) {
+    return <div className="rounded-lg border border-border px-3 py-3 text-sm text-muted-foreground">
+      <Loader2 className="inline h-4 w-4 animate-spin mr-2" />Ход проекта…
+    </div>
+  }
+  // Мост не настроен — карточка обязана работать дальше, панель просто молчит о причине.
+  if (state?.error) {
+    return <div className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
+      Ход по маршруту недоступен: {state.error}
+    </div>
+  }
+  // Запрос не дошёл — это НЕ «проект не ведётся». Утверждать факт о проекте,
+  // которого мы не прочитали, и предлагать завести его заново — прямой путь ко
+  // второму кейсу на том же проекте.
+  if (q.isError) {
+    return (
+      <div className="rounded-lg border border-border px-3 py-3 text-sm space-y-2">
+        <div>Ход по маршруту не загрузился: {q.error instanceof Error ? q.error.message : 'нет связи с сервером'}</div>
+        <Button size="sm" variant="outline" onClick={() => q.refetch()}>Повторить</Button>
+      </div>
+    )
+  }
+  if (!state?.exists) {
+    return (
+      <section className="rounded-lg border border-dashed border-border px-3 py-3 flex items-center justify-between gap-3">
+        <div className="text-sm text-muted-foreground">
+          Проект ещё не ведётся по маршруту регламента: нет ни ответственного за шаг, ни сроков этапов.
+        </div>
+        <Button size="sm" onClick={() => mOpen.mutate()} disabled={mOpen.isPending}>
+          {mOpen.isPending && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Вести по маршруту
+        </Button>
+      </section>
+    )
+  }
+
+  // Чужое и ещё не открытое действие показываем погашенным с причиной: пустое место
+  // не объясняет менеджеру, чего он ждёт и от кого.
+  const open = (state.actions ?? []).filter((a) => a.allowed !== false)
+  // Развилка по виду проекта — это два ребра с ОДНОЙ надписью («Взять в работу»
+  // в подбор локации и оно же сразу в планирование), из которых условие включает
+  // ровно одно. Показать проигравший близнец погашенным значит написать «Взять в
+  // работу — не выполнено условие» рядом с работающей кнопкой «Взять в работу».
+  // Прячем только такие: кнопка с тем же словом никуда не делась, она под рукой.
+  const openVerbs = new Set(open.map((a) => a.verb))
+  const blockedActions = (state.actions ?? [])
+    .filter((a) => a.allowed === false && !openVerbs.has(a.verb))
+  const normal = open.filter((a) => !a.is_discretionary)
+  const extra = open.filter((a) => a.is_discretionary)
+  // Ведущий шаг стадии — единственный ход вперёд. Их два и больше (развилка формы
+  // права) — заливки не получает никто: выбор за человеком, а не за экраном.
+  const forward = normal.filter((a) => a.is_positive === true)
+  const leadId = forward.length === 1 ? forward[0].id : null
+  const need = picked ? [
+    ...(picked.requirements?.require ?? []),
+    ...(picked.requirements?.optional ?? []),
+  ] : []
+  const missing = (picked?.requirements?.require ?? []).filter((c) => !(form[c] ?? '').trim())
+  // Ветка «выполнена» — это финальная стадия её процесса. Статус ветки равен коду
+  // стадии, поэтому сравнение с 'closed' не сработало бы ни разу.
+  const openBranches = (state.branches ?? []).filter((b) => !b.stage_is_finish)
+
+  return (
+    <section className="rounded-lg border border-border">
+      <div data-zone="Ход проекта по маршруту регламента" className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between gap-2">
+        <span>Ход по маршруту · {state.stage?.name ?? '—'}</span>
+        {/* «Кейс» — слово Координатора. Человек ведёт проект и номер кейса не
+            встретит больше нигде; ему важно, сколько проект стоит на этапе. */}
+        <span className="text-xs font-normal text-muted-foreground">
+          {state.daysInStage != null && `на этапе ${state.daysInStage} дн.`}
+        </span>
+      </div>
+
+      {/* Полоса стадий: где были, где стоим, что впереди. Пройденное — по журналу
+          переходов, а не по месту в списке: возврат на доработку и ветки ломают
+          линейность, и «слева значит пройдено» врало бы ровно на срыве. */}
+      <div className="px-3 py-2 border-b">
+        <div className="flex flex-wrap gap-1">
+          {(state.stages ?? []).map((s) => {
+            const here = s.code === state.stage?.code
+            const seen = !!s.visited_at
+            return (
+              <span key={s.code}
+                title={s.visited_at ? `Пройдена ${new Date(s.visited_at).toLocaleDateString('ru-RU')}` : 'Ещё не проходили'}
+                className={`text-[11px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
+                  here ? 'bg-primary text-primary-foreground'
+                    : seen ? 'bg-muted text-foreground'
+                    : 'border border-dashed border-border text-muted-foreground'}`}>
+                {seen && !here && <Check className="h-2.5 w-2.5" />}
+                {s.name}
+              </span>
+            )
+          })}
+        </div>
+        {/* Признак не только цветом: сплошное — были, пунктир — впереди. */}
+        <div className="mt-1 text-[10px] text-muted-foreground">
+          Заливка — стадия пройдена, пунктир — впереди, синим — где стоим сейчас.
+        </div>
+      </div>
+
+      {/* Маршрут дошёл до ввода, а воронка стоит. Всплывашка в момент нажатия
+          гаснет за пять секунд, и назавтра проект выглядит как «Лид», прошедший
+          весь регламент, — без единого следа причины. Пока держит, говорим прямо. */}
+      {state.funnel && !state.funnel.moved && (state.funnel.blocking?.length ?? 0) > 0 && (
+        <div className="px-3 py-2 border-b text-xs text-amber-700 dark:text-amber-400">
+          Маршрут дошёл до ввода в эксплуатацию, но проект остаётся на прежней стадии
+          воронки: не закрыто обязательных пунктов — {state.funnel.blocking.length}.
+          Первые: {state.funnel.blocking.slice(0, 2).join('; ')}. Полный список — в чек-листе ниже.
+        </div>
+      )}
+
+      {/* Вехи: факт, который возврат на доработку не снимает */}
+      {(state.milestones ?? []).some((m) => m.reached_at) && (
+        <div className="px-3 py-2 flex flex-wrap items-center gap-2 border-b text-xs">
+          {/* Подпись слева: без неё зелёная строка читается как ещё один ряд кнопок.
+              Веха — зафиксированный факт, и он не снимается возвратом на доработку. */}
+          <span className="text-muted-foreground">Зафиксировано:</span>
+          {(state.milestones ?? []).filter((m) => m.reached_at).map((m) => (
+            <span key={m.code} className="text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"
+              title={`Отмечено ${new Date(m.reached_at!).toLocaleDateString('ru-RU')}`
+                + (m.actor_name ? `, ${m.actor_name}` : '')}>
+              <Check className="h-3 w-3" />{m.name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="px-3 py-3 space-y-2">
+        {/* Причин у «действий нет» четыре: финальная стадия, нет графа, нет стадии
+            под статус, ход ведётся во внешней системе. Первую пересказываем своими
+            словами, остальные — поломки настройки, о них надо сказать как есть. Но
+            слово «заявка» из Координатора здесь занято заявкой поддержки и заявкой
+            на техприсоединение, поэтому переводим его на язык карточки. */}
+        {state.readonly && (
+          <div className="text-sm text-muted-foreground">
+            {state.stage?.name && /финальн/i.test(state.readonlyReason ?? '')
+              ? `Маршрут пройден: проект стоит на финальной стадии «${state.stage.name}» — действий больше нет.`
+              : (state.readonlyReason ?? '')
+                  .replace(/Для заявки/g, 'Для проекта').replace(/Заявка/g, 'Проект')
+                  .replace(/заявки/g, 'проекта').replace(/заявка/g, 'проект')}
+          </div>
+        )}
+        {/* Дискреционные действия (отложить, отклонить) стоят отдельной строкой ниже:
+            без учёта их фраза «действий нет» печаталась прямо над живыми кнопками. */}
+        {!state.readonly && normal.length === 0 && extra.length === 0 && blockedActions.length === 0 && (
+          <div className="text-sm text-muted-foreground">
+            Сейчас ход за другой службой — доступных вам действий на этой стадии нет.
+          </div>
+        )}
+        <div data-zone="Действия маршрута: чей сейчас шаг" className="flex flex-wrap gap-2">
+          {/* Залит ровно один шаг — тот, которым маршрут идёт вперёд. Когда «ТП
+              выполнено» и «Отложить» одинаково синие, экран перестаёт отличать
+              обычный ход от исключения. На развилке (ДА / ДоРНО / РНР — все ходы
+              вперёд) главного нет, и заливать один из них значило бы советовать. */}
+          {normal.map((a) => (
+            <Button key={a.id} size="sm" variant={a.id === leadId ? 'default' : 'outline'}
+              onClick={() => { setPicked(picked?.id === a.id ? null : a); setForm({}) }}>
+              {a.verb}
+            </Button>
+          ))}
+          {extra.map((a) => (
+            <Button key={a.id} size="sm" variant="ghost"
+              onClick={() => { setPicked(picked?.id === a.id ? null : a); setForm({}) }}>
+              {a.verb}
+            </Button>
+          ))}
+        </div>
+
+        {blockedActions.length > 0 && (
+          <div className="flex flex-wrap gap-2 pt-1">
+            {blockedActions.map((a) => (
+              <span key={a.id} title={`${humanReason(a.deny_reason)}${openBranches.length ? `. Открыты ветки: ${openBranches.map((b) => b.title).join(', ')}` : ''}`}
+                className="text-xs px-2 py-1 rounded border border-dashed border-border text-muted-foreground">
+                {a.verb}
+                <span className="ml-1 opacity-70">· {humanReason(a.deny_reason)}</span>
+                {/* Условие ребра чаще всего держит именно ветка — называем её,
+                    иначе «не выполнено условие перехода» указывает в пустоту. */}
+                {openBranches.length > 0 && (
+                  <span className="ml-1 opacity-70">
+                    (открыты ветки: {openBranches.map((b) => b.title).join(', ')})
+                  </span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Параллельные ветки: ОР ∥ ОКС на этапе 3, работы подрядчика. Пока ветка
+            открыта, родитель ждёт — значит она обязана быть видна вместе с кнопками. */}
+        {(state.branches ?? []).length > 0 && (
+          <div data-zone="Параллельные ветки проекта" className="pt-1 space-y-1">
+            <div className="text-xs font-medium">Ветки работ</div>
+            {(state.branches ?? []).map((b) => {
+              const done = !!b.stage_is_finish
+              return (
+                <div key={b.id} className="flex items-center gap-2 text-xs">
+                  {done
+                    ? <Check className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    : <span className="h-3 w-3 shrink-0 rounded-full border border-amber-500" />}
+                  <span className="truncate">{b.title}</span>
+                  <span className="text-muted-foreground shrink-0">
+                    {b.stage_name ?? '—'}{b.assignee_name ? ` · ${b.assignee_name}` : ''}
+                  </span>
+                  {/* Кнопки ветки — здесь же. Ветка держит проект, и отправлять за
+                      ней человека в другой продукт значит показать ему тупик. */}
+                  {(b.actions ?? []).map((a) => (
+                    <Button key={a.id} size="sm" variant="outline"
+                      className="h-6 px-2 text-[11px] shrink-0" disabled={mStep.isPending}
+                      onClick={() => mStep.mutate({ ...a, branchCaseId: b.id })}>
+                      {a.verb}
+                    </Button>
+                  ))}
+                </div>
+              )
+            })}
+            {openBranches.length > 0 && (
+              <div className="text-[11px] text-muted-foreground">
+                Пока ветка открыта, проект ждёт её закрытия. Ветку ведёт своя служба —
+                кнопка рядом с ней закрывает ветку, а не проект.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Состав: кто ведёт проект в ролях регламента. Пусто — слой ролей выключен,
+            и об этом надо сказать прямо, иначе «кнопка есть у всех» выглядит багом. */}
+        <div data-zone="Состав участников проекта" className="pt-1 text-xs text-muted-foreground">
+          {(state.participants ?? []).length === 0
+            ? 'Роли регламента на проект не назначены — действия открыты всем участникам пространства.'
+            : <>Ведут проект: {(state.participants ?? [])
+                .map((p) => `${p.role_code} — ${p.name}`).join(' · ')}</>}
+        </div>
+
+        {picked && (
+          <div className="rounded border border-border p-2 space-y-2 bg-muted/30">
+            <div className="text-xs text-muted-foreground">
+              «{picked.verb}» → стадия «{picked.to_name}»
+              {effectText(picked, defs) && <>. {effectText(picked, defs)}</>}
+            </div>
+            {need.map((code) => {
+              const d = defs[code]
+              const req = (picked.requirements?.require ?? []).includes(code)
+              return (
+                <div key={code} className="space-y-1">
+                  <label className="text-xs font-medium">
+                    {d?.label ?? code}{req && <span className="text-destructive"> *</span>}
+                  </label>
+                  {/* Поле вводится тем способом, каким оно объявлено в процессе.
+                      Способ закупки или вид работ — закрытый список: набранное
+                      руками «перемещение» сервер отобьёт по справочнику, и человек
+                      узнает об этом только после нажатия. Деньги — числом, иначе
+                      на телефоне открывается буквенная клавиатура. */}
+                  {d?.field_type === 'textarea' ? (
+                    <Textarea rows={2} value={form[code] ?? ''}
+                      onChange={(e) => setForm({ ...form, [code]: e.target.value })} />
+                  ) : d?.field_type === 'select' && d.options?.length ? (
+                    <Select value={form[code] || '__none__'}
+                      onValueChange={(v) => setForm({ ...form, [code]: v === '__none__' ? '' : v })}>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__" className="text-sm">—</SelectItem>
+                        {d.options.map((o) => (
+                          /* Вид проекта хранится кодом (от него зависят рёбра маршрута),
+                             а человеку показываем то же слово, что и везде на экране. */
+                          <SelectItem key={o} value={o} className="text-sm">
+                            {PROJECT_KIND_WORDS[o] ?? o}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      // Деньги вводим текстом с числовой клавиатурой, а не input[type=number]:
+                      // на русской раскладке сумму набирают через запятую, а такое значение
+                      // браузер считает невалидным и отдаёт пустую строку — введённое
+                      // исчезало, и кнопка гасла без объяснения. Сервер запятую понимает.
+                      type={d?.field_type === 'date' ? 'date' : 'text'}
+                      inputMode={d?.field_type === 'money' || d?.field_type === 'number' ? 'decimal' : undefined}
+                      value={form[code] ?? ''}
+                      onChange={(e) => setForm({ ...form, [code]: e.target.value })} />
+                  )}
+                  {d?.hint && <div className="text-[11px] text-muted-foreground">{d.hint}</div>}
+                </div>
+              )
+            })}
+            <div className="flex items-center gap-2">
+              <Button size="sm" disabled={missing.length > 0 || mStep.isPending}
+                onClick={() => mStep.mutate(picked)}>
+                {mStep.isPending && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Выполнить
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setPicked(null); setForm({}) }}>Отмена</Button>
+              {missing.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Заполните: {missing.map((c) => defs[c]?.label ?? c).join(', ')}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Состав проекта: кто в какой роли регламента.
+ *
+ * Роль назначается на проект, а не на человека вообще: сотрудник ведёт один объект
+ * как ОР и лишь наблюдает за соседним. Приёмщики (ОЭ, ОЦО) — тот же список: приёмка
+ * это участие с кнопкой в конце маршрута. Состав уезжает в кейс сразу при назначении,
+ * иначе назначенный не увидит своей кнопки до следующего шага.
+ */
+function PartiesPanel({ site, companyId, onChanged }: {
+  site: SiteDetail; companyId: string; onChanged: () => Promise<unknown>
+}) {
+  const [person, setPerson] = useState('')
+  const [role, setRole] = useState('')
+
+  const q = useQuery({
+    queryKey: ['site-parties', companyId, site.id],
+    queryFn: () => getSiteParticipants(companyId, site.id),
+  })
+  const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
+
+  const mAdd = useMutation({
+    mutationFn: () => addSiteParticipant(companyId, site.id, person, role),
+    onSuccess: async () => {
+      setPerson(''); setRole('')
+      toast.success('Роль назначена')
+      await q.refetch(); await onChanged()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось назначить'),
+  })
+  const mDrop = useMutation({
+    mutationFn: (id: string) => removeSiteParticipant(companyId, site.id, id),
+    onSuccess: async () => { await q.refetch(); await onChanged() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось снять'),
+  })
+
+  const rows = q.data?.participants ?? []
+
+  return (
+    <section className="rounded-lg border border-border">
+      <div data-zone="Состав проекта: роли регламента" className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <span>Кто ведёт проект</span>
+        <span className="text-xs font-normal text-muted-foreground">{rows.length} чел.</span>
+      </div>
+      <div className="p-2 space-y-2">
+        {rows.length === 0 && (
+          <div className="text-xs text-muted-foreground px-1">
+            Роли не назначены. Пока состав пуст, кнопки маршрута открыты всем участникам
+            пространства — назначьте хотя бы ОР и ОКС, и каждый увидит свои.
+          </div>
+        )}
+        {rows.map((p) => (
+          <div key={p.id} className="flex items-center gap-2 text-sm px-1">
+            <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-muted">{p.roleCode}</span>
+            <span className="flex-1 truncate">{p.name}</span>
+            <Button size="icon" variant="ghost" className="h-6 w-6"
+              onClick={() => mDrop.mutate(p.id)} disabled={mDrop.isPending} title="Снять с роли">
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ))}
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Select value={person} onValueChange={setPerson}>
+            <SelectTrigger className="h-8 w-56 text-xs"><SelectValue placeholder="Человек" /></SelectTrigger>
+            <SelectContent>
+              {(members.data ?? []).map((m) => (
+                <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={role} onValueChange={setRole}>
+            <SelectTrigger className="h-8 w-64 text-xs"><SelectValue placeholder="Роль по регламенту" /></SelectTrigger>
+            <SelectContent>
+              {(q.data?.roles ?? []).map((r) => (
+                <SelectItem key={r.code} value={r.code}>{r.code} — {r.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" disabled={!person || !role || mAdd.isPending}
+            onClick={() => mAdd.mutate()}>
+            {mAdd.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Назначить
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 /* ── Вкладка «Работа» ───────────────────────────────────────────────────── */
 
 export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
+  const qc = useQueryClient()
   const [stage, setStage] = useState<SiteStage>(site.stage)
   const [reason, setReason] = useState('')
   const [owner, setOwner] = useState(site.ownerUserId ?? '')
@@ -129,7 +618,13 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
   })
   const mGate = useMutation({
     mutationFn: (p: { key: string; done: boolean }) => markSiteGate(companyId, site.id, p.key, p.done),
-    onSuccess: async () => { await onDone() },
+    onSuccess: async (r) => {
+      // Сервер может отказать (пункт не с этой стадии) — тогда галочка не появится,
+      // и без сообщения это выглядит как поломка интерфейса.
+      if (r && r.ok === false) { toast.warning(r.message ?? 'Пункт не отмечен'); return }
+      await onDone()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось отметить пункт'),
   })
   const mTouch = useMutation({
     mutationFn: () => addSiteEvent(companyId, site.id, touch, 'touch'),
@@ -140,6 +635,11 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
   return (
     <div className="space-y-4">
+      <RoutePanel site={site} companyId={companyId} onDone={onDone} />
+
+      <PartiesPanel site={site} companyId={companyId}
+        onChanged={() => qc.invalidateQueries({ queryKey: ['site-case', companyId, site.id] })} />
+
       {/* Гейт текущей стадии */}
       <section className="rounded-lg border border-border">
         <div data-zone="Чек-лист стадии по регламенту" className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
@@ -156,9 +656,15 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             // Автоматический не кликается вовсе — и должен сам сказать, чем закроется,
             // иначе человек жмёт по нему и считает, что система не работает.
             const Row = it.manual ? 'button' : 'div'
+            const FIELD_LABELS: Record<string, string> = Object.fromEntries(
+              PASSPORT_GROUPS.flatMap((g) => g.fields.map((f) => [
+                String(f.k).replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()), f.label])))
+            const byFields = (it.fields ?? []).map((f) => FIELD_LABELS[f]).filter(Boolean)
             const source = it.doc ? 'вкладка «Документы»'
               : it.equipment ? 'вкладка «Оборудование»'
-              : !it.manual ? 'заполняется в паспорте' : null
+              : it.manual ? null
+              : byFields.length ? `графа${byFields.length > 1 ? 'ми' : 'й'} «${byFields.join('», «')}» в паспорте`
+              : 'заполняется в паспорте'
             return (
               <Row key={it.key} type={it.manual ? 'button' : undefined}
                 disabled={it.manual ? mGate.isPending : undefined}
@@ -176,7 +682,8 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                   title={it.phaseLabel ? `Этап ${it.phase}. ${it.phaseLabel}` : undefined}>{it.key}</span>
                 <span className={it.done ? '' : 'text-muted-foreground'}>{it.label}</span>
                 {it.role && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">· {it.role}</span>}
-                {it.required && <span className="text-xs text-red-500/80 shrink-0 mt-0.5" title="Обязательно для перехода">обязательно</span>}
+                {it.required && <span className="text-xs text-red-500/80 shrink-0 mt-0.5"
+                  title="Пока не закрыт, проект дальше не пойдёт">держит переход</span>}
                 {source && <span className="text-xs text-muted-foreground shrink-0 mt-0.5">— {source}</span>}
               </Row>
             )
@@ -226,11 +733,19 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                 <SelectItem value="archive" className="text-sm">{STAGE_META.archive.label}</SelectItem>
               </SelectContent>
             </Select>
+            {/* «Обязательна по смыслу» — обещание, которого система не выполняла:
+                пустую причину принимала, и проект уходил в архив без объяснения.
+                Раз обязательна — значит обязательна, кнопка ждёт текста. */}
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
-              placeholder={stage === 'archive' ? 'Причина отклонения (обязательна по смыслу)' : 'Комментарий к переходу'}
+              placeholder={override ? 'Обоснование обхода — обязательно'
+                : stage === 'archive' ? 'Причина отклонения — обязательна'
+                : stage === 'on_hold' ? 'Что должно случиться, чтобы вернуть проект в работу'
+                : 'Комментарий к переходу'}
               className="h-8 text-sm flex-1 min-w-[220px]" />
             <Button size="sm" variant={stage === 'archive' ? 'destructive' : 'default'}
-              className="h-8 text-sm" disabled={stage === site.stage || mMove.isPending}
+              className="h-8 text-sm"
+              disabled={stage === site.stage || mMove.isPending
+                || (stage === 'archive' && !reason.trim()) || (override && !reason.trim())}
               onClick={() => mMove.mutate(undefined)}>
               {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Перевести
             </Button>
@@ -261,14 +776,15 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
           <label className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
             <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-0.5" />
             <span>
-              Провести в обход гейта под мою ответственность. Нужно обоснование — оно попадёт в
-              историю проекта отдельной записью.
+              Провести в обход обязательных пунктов. Обоснование обязательно — впишите его в
+              поле рядом с кнопкой «Перевести»; оно попадёт в историю проекта отдельной записью.
             </span>
           </label>
         )}
         {blocked && !mayOverride && (
           <div className="text-xs text-muted-foreground">
-            Обход обязательных пунктов доступен администратору компании.
+            Обход обязательных пунктов делает администратор компании — попросите его
+            или закройте оставшиеся пункты.
           </div>
         )}
         <div className="text-xs text-muted-foreground">
@@ -987,7 +1503,11 @@ function LinkPicker({ label, options, onPick, pending }: {
       <Input autoFocus className="h-8 text-sm" placeholder="Поиск…"
         value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="max-h-48 overflow-y-auto">
-        {found.length === 0 && <div data-zone="Работы на объекте: модернизации" className="text-xs text-muted-foreground px-1 py-2">Ничего не найдено.</div>}
+        {found.length === 0 && (
+          <div className="text-xs text-muted-foreground px-1 py-2">
+            Ничего не найдено. Договоры заводят в разделе «Договоры», объекты сети — в Центре управления.
+          </div>
+        )}
         {found.map((o) => (
           <button key={o.id} type="button" disabled={pending}
             onClick={() => { onPick(o.id); setOpen(false) }}
@@ -1122,6 +1642,110 @@ function ObjectWorksSection({ site, companyId, onDone }: {
   )
 }
 
+const TICKET_STATUS: Record<string, string> = {
+  new: 'новая', open: 'в работе', in_progress: 'в работе', pending: 'ждёт ответа',
+  on_hold: 'приостановлена', resolved: 'решена', closed: 'закрыта', cancelled: 'отменена',
+}
+
+/**
+ * Заявки поддержки по объекту и кнопка завести новую.
+ *
+ * Граница проходит здесь и нигде больше: работа меняет состав или положение станции —
+ * это проект (блок выше); работа восстанавливает работоспособность — это заявка. Держим
+ * оба списка рядом, чтобы замену автомата в щите не заводили проектом-ремонтом: иначе
+ * реестр проектов перестанет быть реестром капвложений.
+ */
+function ObjectTicketsSection({ site, companyId }: { site: SiteDetail; companyId: string }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [priority, setPriority] = useState('medium')
+  const tickets = useQuery({
+    queryKey: ['object-tickets', companyId, site.locationId],
+    queryFn: () => getObjectTickets(companyId, site.locationId as string),
+    enabled: !!site.locationId,
+    retry: false,
+  })
+  const mCreate = useMutation({
+    mutationFn: () => createObjectTicket(companyId, site.locationId as string,
+      { description: text.trim(), priority }),
+    onSuccess: async (r) => {
+      toast.success(`Заявка ${r.display_number ?? r.number} принята поддержкой`)
+      setText(''); setOpen(false); await tickets.refetch()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось завести заявку'),
+  })
+
+  if (!site.locationId) return null
+
+  const rows = tickets.data?.tickets ?? []
+  return (
+    <section className="rounded-lg border border-border">
+      <div data-zone="Заявки поддержки по объекту"
+        className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
+        <span>Заявки поддержки по объекту</span>
+        <span className="font-mono text-muted-foreground">
+          {tickets.data ? `${tickets.data.open} откр. / ${tickets.data.total}` : '—'}
+        </span>
+      </div>
+      <div className="p-3 space-y-2">
+        {tickets.isError && (
+          <div className="text-sm text-muted-foreground">
+            Поддержка сейчас недоступна — список заявок не получен.
+          </div>
+        )}
+        {!tickets.isError && rows.length === 0 && !tickets.isLoading && (
+          <div className="text-sm text-muted-foreground">Заявок по этому объекту нет.</div>
+        )}
+        {rows.map((t) => (
+          <div key={t.id} className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-mono text-muted-foreground">{t.number}</span>
+            <span>{t.title}</span>
+            <span className="text-xs rounded border px-1.5 py-0.5">
+              {TICKET_STATUS[t.status] ?? t.status}
+            </span>
+            <span className="text-xs text-muted-foreground">{t.created_at?.slice(0, 10)}</span>
+          </div>
+        ))}
+
+        {!open ? (
+          <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => setOpen(true)}>
+            <MessageSquarePlus className="h-3.5 w-3.5 mr-1" />Заявка в поддержку
+          </Button>
+        ) : (
+          <div className="rounded-md border border-border p-2 space-y-2">
+            <Textarea className="text-sm" rows={3} value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Что случилось и что нужно сделать — не меньше 10 символов" />
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={priority} onValueChange={setPriority}>
+                <SelectTrigger className="h-8 w-[160px] text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low" className="text-sm">низкий</SelectItem>
+                  <SelectItem value="medium" className="text-sm">обычный</SelectItem>
+                  <SelectItem value="high" className="text-sm">высокий</SelectItem>
+                  <SelectItem value="critical" className="text-sm">критичный</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="sm" className="h-8 text-sm"
+                disabled={mCreate.isPending || text.trim().length < 10}
+                onClick={() => mCreate.mutate()}>
+                {mCreate.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Завести заявку
+              </Button>
+              <button type="button" className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setOpen(false)}>отмена</button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Заявка уходит в поддержку со сроком по регламенту. Проектом заводят работу,
+              которая меняет состав или положение станции; восстановление работоспособности —
+              заявка.
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export function AccountingTab({ site, companyId, onDone }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
@@ -1210,6 +1834,8 @@ export function AccountingTab({ site, companyId, onDone }: {
       </section>
 
       <ObjectWorksSection site={site} companyId={companyId} onDone={onDone} />
+
+      <ObjectTicketsSection site={site} companyId={companyId} />
 
       {/* субсидия */}
       <section className="rounded-lg border border-border">

@@ -26,9 +26,13 @@ export function SiteCardDialog({ companyId, id, onClose }: {
   const s = q.data
 
   const refresh = async () => {
+    // `site-roadmap` — вкладка «Схема». Без неё блок-схема свежая, а прогресс,
+    // гейты и этапы над ней — из кэша до пяти минут: два несогласованных ответа
+    // об одном проекте на одном экране.
     for (const key of [['site-detail', companyId, id], ['sites-list', companyId],
                        ['sites-overview', companyId], ['site-events', companyId, id],
                        ['site-project', companyId, id], ['site-docs', companyId, id],
+                       ['site-roadmap', companyId, id],
                        ['pr-portfolio', companyId], ['pr-overview', companyId],
                        ['pr-tc', companyId], ['pr-equipment', companyId]]) {
       await qc.invalidateQueries({ queryKey: key })

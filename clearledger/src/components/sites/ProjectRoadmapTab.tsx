@@ -15,7 +15,9 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Check, Circle, Play, AlertTriangle, XCircle, Minus, PauseCircle } from 'lucide-react'
-import { getProjectRoadmap, type SiteDetail } from '@/services/sitesService'
+import { getProjectRoadmap, getProjectCase, type SiteDetail } from '@/services/sitesService'
+import { Button } from '@/components/ui/button'
+import { ProjectFlowChart } from './ProjectFlowChart'
 
 const STATE_META: Record<string, { icon: typeof Check; cls: string }> = {
   done: { icon: Check, cls: 'text-emerald-600 dark:text-emerald-400' },
@@ -30,7 +32,7 @@ const STATE_META: Record<string, { icon: typeof Check; cls: string }> = {
 
 // Порядок и подписи этапов — по ним группируется вся схема.
 const PHASE_BLOCKS = [
-  { key: 'select', n: 1, label: 'Подбор площадки' },
+  { key: 'select', n: 1, label: 'Подбор места' },
   { key: 'land', n: 2, label: 'Оформление земли' },
   { key: 'build', n: 3, label: 'Реализация' },
   { key: 'operate', n: 4, label: 'Эксплуатация' },
@@ -41,8 +43,26 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
     queryKey: ['site-roadmap', companyId, site.id],
     queryFn: () => getProjectRoadmap(companyId, site.id),
   })
-  if (q.isLoading || !q.data) {
+  // Ход по маршруту — та же выборка, что кормит кнопки на вкладке «Работа».
+  // Схема обязана рисоваться по тем же данным, иначе она станет вторым мнением
+  // о проекте, и однажды оно разойдётся с кнопками.
+  const qCase = useQuery({
+    queryKey: ['site-case', companyId, site.id],
+    queryFn: () => getProjectCase(companyId, site.id),
+  })
+  if (q.isLoading) {
     return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  }
+  // Ошибку показываем ошибкой. Раньше любой отказ (сеть, 401, 500) оставлял здесь
+  // вечный спиннер: `isLoading` уже false, данных нет — и вкладка, открытая первой,
+  // встречала человека крутящимся колесом без объяснения.
+  if (q.isError || !q.data) {
+    return (
+      <div className="rounded-lg border border-border px-3 py-3 text-sm space-y-2">
+        <div>Путь проекта не загрузился: {q.error instanceof Error ? q.error.message : 'нет связи с сервером'}</div>
+        <Button size="sm" variant="outline" onClick={() => q.refetch()}>Повторить</Button>
+      </div>
+    )
   }
   const d = q.data
   // Этап, на котором проект стоит сейчас (или на котором остановлен).
@@ -55,8 +75,11 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
         <div className="flex-1 min-w-[200px]">
           <div className="flex items-baseline justify-between text-sm">
             <span className="font-semibold">Путь проекта</span>
+            {/* «По стадиям воронки» — не придирка к слову: рядом стоит схема маршрута,
+                где проект может быть уже в приёмке, а воронку держит незакрытый гейт.
+                Без уточнения два числа на одном экране выглядят как ошибка. */}
             <span className="text-muted-foreground">
-              {d.progress == null ? 'путь не прослеживается' : `пройдено ${d.progress}%`}
+              {d.progress == null ? 'путь не прослеживается' : `пройдено ${d.progress}% по стадиям воронки`}
             </span>
           </div>
           <div className="mt-1 h-2 rounded-full bg-muted overflow-hidden">
@@ -71,6 +94,21 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
           </span>
         )}
       </div>
+
+      {/* Схема маршрута: стадии, стрелки и фактический путь проекта. Стоит первой —
+          это ответ на «покажи всю картину целиком», ради которого сюда заходят. */}
+      {qCase.data?.exists && (
+        <section className="rounded-lg border border-border">
+          <div className="px-3 py-2 border-b bg-muted/40">
+            <span className="text-sm font-semibold">Схема маршрута проекта</span>
+            <div className="text-xs text-muted-foreground">
+              Тот же граф, по которому работают кнопки на вкладке «Работа». Раскрашено по журналу
+              переходов: пройденное — фактом, а не порядком в списке.
+            </div>
+          </div>
+          <div className="p-3"><ProjectFlowChart state={qCase.data} /></div>
+        </section>
+      )}
 
       {/* Этапы проекта: стадии + свои параллельные треки под общим заголовком */}
       {PHASE_BLOCKS.map((ph) => {

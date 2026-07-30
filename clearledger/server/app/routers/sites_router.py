@@ -14,10 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import EzsSite, User
+from app.models import EzsSite, EzsSiteParticipant, User
 from app.services import (
-    ezs_checklist, ezs_lifecycle, ezs_project, ezs_site_analysis, ezs_site_work, ezs_sites,
+    ezs_checklist, ezs_lifecycle, ezs_park_plan, ezs_project, ezs_site_analysis,
+    ezs_site_work, ezs_sites, projects_process,
 )
+from app.services.space_projection import ProjectionError
 
 router = APIRouter(prefix="/sites", tags=["Площадки ЭЗС (Банк ЗУ)"])
 
@@ -34,6 +36,25 @@ async def import_sites(
     if not content:
         raise HTTPException(400, "Пустой файл")
     return await ezs_sites.import_sites_xlsx(db, cid, content, dry_run)
+
+
+@router.post("/import-park-plan")
+async def import_park_plan(
+    company_id: str = Query(...), dry_run: bool = Query(False),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Импорт рабочего реестра работ по парку (переносы, замены, демонтажи).
+
+    Отдельная ручка, а не режим импорта банка ЗУ: тот файл описывает МЕСТА под
+    новую стройку, этот — РАБОТЫ на действующих станциях. Общего в них только
+    расширение файла.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Пустой файл")
+    return await ezs_park_plan.import_park_plan_xlsx(db, cid, content, dry_run)
 
 
 @router.get("/overview")
@@ -739,6 +760,155 @@ async def delete_site(
     await db.delete(site)
     await db.commit()
     return {"deleted": str(site_id)}
+
+
+@router.get("/{site_id}/case")
+async def project_case(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Ход проекта: стадия маршрута, доступные действия, вехи, сколько стоим.
+
+    Гейты отвечают на «что заполнено», ход — на «что делать дальше и чья очередь».
+    """
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    try:
+        return await projects_process.case_state(db, cid, site, user)
+    except ProjectionError as e:
+        # Мост не настроен или Координатор недоступен — карточка должна открыться
+        # и показать причину, а не упасть целиком из-за необязательной панели.
+        return {"ok": False, "exists": False, "error": str(e)}
+
+
+@router.post("/{site_id}/case")
+async def open_project_case(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Начать вести проект по маршруту (или обновить сводку у заведённого кейса)."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    try:
+        return await projects_process.sync_case(db, cid, site, user)
+    except ProjectionError as e:
+        raise HTTPException(502, str(e)) from e
+
+
+@router.post("/{site_id}/case/transition")
+async def apply_project_step(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Выполнить шаг маршрута: тело — { linkId, payload, branchCaseId? }."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    link_id = str(payload.get("linkId") or "")
+    if not link_id:
+        raise HTTPException(400, "Не указано действие (linkId)")
+    branch = payload.get("branchCaseId")
+    try:
+        res = await projects_process.apply_step(
+            db, cid, site, link_id, payload.get("payload") or {}, user,
+            branch_case_id=str(branch) if branch else None)
+    except ProjectionError as e:
+        raise HTTPException(400, str(e)) from e
+    await db.commit()
+    return res
+
+
+@router.get("/{site_id}/participants")
+async def project_participants(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Кто ведёт проект и в какой роли регламента. Заодно — словарь ролей для формы."""
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    rows = (await db.execute(
+        select(EzsSiteParticipant, User)
+        .join(User, User.id == EzsSiteParticipant.user_id)
+        .where(EzsSiteParticipant.site_id == site_id)
+        .order_by(EzsSiteParticipant.role_code, User.name)
+    )).all()
+    return {
+        "roles": [{"code": c, "label": l} for c, l in ezs_checklist.ROLES.items()],
+        "participants": [
+            {"id": str(p.id), "userId": str(p.user_id), "roleCode": p.role_code,
+             "name": u.name or u.email, "email": u.email, "note": p.note}
+            for p, u in rows
+        ],
+    }
+
+
+@router.post("/{site_id}/participants")
+async def add_project_participant(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Назначить человека на роль в проекте. Тело: { userId, roleCode, note }."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    user_id = payload.get("userId")
+    role_code = (payload.get("roleCode") or "").strip()
+    if not user_id or not role_code:
+        raise HTTPException(400, "Нужны человек и роль")
+    if role_code not in ezs_checklist.ROLES:
+        raise HTTPException(400, f"Неизвестная роль регламента: {role_code}")
+    # Человек должен быть в этой же компании: состав проекта не место для чужих.
+    # Проверка именно членства, а не просто существования: id людей отдают разные
+    # ручки, и без join сотрудник соседнего пространства получал бы роль в чужом
+    # проекте — вместе с правом нажимать её кнопки и видимостью почты в составе.
+    from app.models import UserCompany
+    try:
+        target_id = uuid.UUID(str(user_id))
+    except ValueError:
+        raise HTTPException(400, "Неизвестный человек")
+    target = (await db.execute(
+        select(User).join(UserCompany, UserCompany.user_id == User.id)
+        .where(User.id == target_id, UserCompany.company_id == cid))).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(404, "Человек не найден в этой компании")
+
+    exists = (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.site_id == site_id,
+        EzsSiteParticipant.user_id == target.id,
+        EzsSiteParticipant.role_code == role_code))).scalar_one_or_none()
+    if exists is None:
+        db.add(EzsSiteParticipant(company_id=cid, site_id=site_id, user_id=target.id,
+                                  role_code=role_code, note=payload.get("note")))
+        await db.commit()
+
+    # Состав — часть полномочий маршрута, поэтому уезжает в кейс сразу, а не при
+    # следующем шаге: иначе назначенный человек не увидит своей кнопки.
+    await _push_participants(db, cid, site, user)
+    return {"ok": True}
+
+
+@router.delete("/{site_id}/participants/{participant_id}")
+async def drop_project_participant(
+    site_id: uuid.UUID, participant_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Снять человека с роли в проекте."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    row = (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.id == participant_id,
+        EzsSiteParticipant.site_id == site_id))).scalar_one_or_none()
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+    await _push_participants(db, cid, site, user)
+    return {"ok": True}
+
+
+async def _push_participants(db: AsyncSession, cid, site: EzsSite, user: User) -> None:
+    """Отправить состав в кейс. Кейса ещё нет — это норма, состав уедет при заведении."""
+    try:
+        await projects_process.sync_case(db, cid, site, user)
+    except ProjectionError:
+        pass
 
 
 async def _owned(db: AsyncSession, cid, site_id: uuid.UUID) -> EzsSite:
