@@ -7,7 +7,9 @@ import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { PackageOpen, Check, X, TrendingUp, TrendingDown, Minus, Pencil } from 'lucide-react'
+import {
+  ArrowDown, ArrowUp, ArrowUpDown, PackageOpen, Check, X, TrendingUp, TrendingDown, Minus, Pencil,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -29,6 +31,12 @@ import {
 } from '@/services/fuel/fuelMappingService'
 import { ReceiptDetailsModal } from './ReceiptDetailsModal'
 
+/** Ниже этого отклонение по массе считаем нулевым: округление документа. */
+const DIFF_EPS = 0.005
+
+type DiffFilter = 'all' | 'short' | 'over' | 'any' | 'ok'
+type SortKey = 'date' | 'station' | 'shift' | 'ttn' | 'fuel' | 'volume' | 'mass' | 'diff' | 'status'
+
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   confirmed: { label: 'Принято', cls: 'border-emerald-400/50 text-emerald-300/80' },
   corrected: { label: 'Скорректировано', cls: 'border-sky-400/50 text-sky-300/80' },
@@ -40,6 +48,32 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 const todayStr = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Заголовок-кнопка сортировки. Стрелка показывает и колонку, и направление. */
+function SortHead({ label, k, sort, onSort, right }: {
+  label: string
+  k: SortKey
+  sort: { key: SortKey; dir: 'asc' | 'desc' }
+  onSort: (k: SortKey) => void
+  right?: boolean
+}) {
+  const active = sort.key === k
+  const Icon = !active ? ArrowUpDown : sort.dir === 'asc' ? ArrowUp : ArrowDown
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(k)}
+      title={`Сортировать по «${label}»`}
+      className={cn('group inline-flex items-center gap-1 uppercase tracking-wide',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded',
+        right && 'flex-row-reverse justify-start text-right',
+        active ? 'text-primary' : 'hover:text-foreground')}
+    >
+      <Icon className={cn('h-3 w-3', active ? 'text-primary' : 'opacity-30 group-hover:opacity-70')} />
+      {label}
+    </button>
+  )
 }
 
 export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
@@ -60,6 +94,10 @@ export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
   const [base, setBase] = useState('all')
   const [shift, setShift] = useState('')
   const [openReceipt, setOpenReceipt] = useState<LoadedReceipt | null>(null)
+  const [diffFilter, setDiffFilter] = useState<DiffFilter>('all')
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'date', dir: 'desc' })
+  const toggleSort = (key: SortKey) => setSort((s) =>
+    s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' })
 
   const bases = useMemo(() => {
     const s = new Set<string>()
@@ -116,11 +154,61 @@ export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
     return [...map.values()].sort((a, b) => b.doc - a.doc)
   }, [filtered, fuelName])
 
+  /** Отклонение по массе — то, ради чего журнал и открывают: недолив это претензия
+   *  поставщику, перелив — вопрос к замеру или к чужому остатку в резервуаре. */
+  const massDiffOf = (r: LoadedReceipt) =>
+    r.diff_mass ?? ((r.fact_mass_kg || 0) - (r.doc_mass_kg || 0))
+
   const shown = useMemo(() => {
     let list = fuelFilter == null ? filtered : filtered.filter((r) => (r.fuel_code ?? -1) === fuelFilter)
     if (onlyCorrected) list = list.filter((r) => r.has_corrections)
-    return list
-  }, [filtered, fuelFilter, onlyCorrected])
+    if (diffFilter !== 'all') {
+      list = list.filter((r) => {
+        const d = massDiffOf(r)
+        if (diffFilter === 'short') return d < -DIFF_EPS
+        if (diffFilter === 'over') return d > DIFF_EPS
+        if (diffFilter === 'any') return Math.abs(d) > DIFF_EPS
+        return Math.abs(d) <= DIFF_EPS   // 'ok'
+      })
+    }
+    // Сортировка своя: по умолчанию свежие сверху, но разбирают журнал по отклонению,
+    // и без сортировки крупнейший недолив приходится искать глазами.
+    const dir = sort.dir === 'asc' ? 1 : -1
+    const val = (r: LoadedReceipt): number | string => {
+      switch (sort.key) {
+        case 'date': return new Date(rdt(r)).getTime()
+        case 'station': return r.station_code ?? 0
+        case 'shift': return r.shift_number ?? 0
+        case 'ttn': return r.ttn ?? ''
+        case 'fuel': return fuelName(r.fuel_code, r.fuel_name)
+        case 'volume': return r.doc_volume_liters || 0
+        case 'mass': return r.doc_mass_kg || 0
+        case 'diff': return massDiffOf(r)
+        case 'status': return r.status ?? ''
+        default: return 0
+      }
+    }
+    return [...list].sort((a, b) => {
+      const x = val(a), y = val(b)
+      if (typeof x === 'string' || typeof y === 'string') {
+        return String(x).localeCompare(String(y), 'ru') * dir
+      }
+      return (x - y) * dir
+    })
+  }, [filtered, fuelFilter, onlyCorrected, diffFilter, sort, fuelName])
+
+  /** Сколько строк в каждой категории отклонения — цифра на чипе отбора. */
+  const diffCounts = useMemo(() => {
+    const base = fuelFilter == null ? filtered : filtered.filter((r) => (r.fuel_code ?? -1) === fuelFilter)
+    let short = 0, over = 0, ok = 0
+    for (const r of base) {
+      const d = massDiffOf(r)
+      if (d < -DIFF_EPS) short += 1
+      else if (d > DIFF_EPS) over += 1
+      else ok += 1
+    }
+    return { all: base.length, short, over, ok, any: short + over }
+  }, [filtered, fuelFilter])
 
   const toggleSel = (id: string) => setSelected((s) => {
     const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n
@@ -227,15 +315,51 @@ export function ReceiptsJournal({ stationFilter = null, onClearStation }: {
             </button>
             <button onClick={clear} className="text-xs text-muted-foreground hover:text-foreground">Сбросить фильтры</button>
           </CardTitle>
+          {/* Отбор по отклонению: недолив — претензия поставщику, перелив — вопрос к
+              замеру или к чужому остатку в резервуаре. Разные адресаты, разные дела. */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-2">
+            {([
+              ['all', 'Все', diffCounts.all, ''],
+              ['short', 'Недолив', diffCounts.short, 'text-red-500'],
+              ['over', 'Перелив', diffCounts.over, 'text-emerald-500'],
+              ['any', 'С отклонением', diffCounts.any, 'text-amber-500'],
+              ['ok', 'Без отклонения', diffCounts.ok, ''],
+            ] as [DiffFilter, string, number, string][]).map(([k, label, count, tone]) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={diffFilter === k}
+                onClick={() => setDiffFilter(k)}
+                className={cn('rounded-lg border px-2.5 py-1 text-xs transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  diffFilter === k
+                    ? 'border-primary/60 bg-primary/10 font-medium text-primary'
+                    : 'border-border bg-card/50 text-muted-foreground hover:bg-muted/40 hover:text-foreground')}
+              >
+                {label}
+                <span className={cn('ml-1.5 tabular-nums', diffFilter === k ? '' : tone)}>{count}</span>
+              </button>
+            ))}
+          </div>
         </CardHeader>
         <CardContent className="pt-0 pb-3">
           {/* Фикс. колонки журнала на мобиле распирали раздел — скролл внутри
               карточки; w-0+min-w-full гасит проброс min-content вверх */}
           <div className="overflow-x-auto w-0 min-w-full">
           <div className="min-w-[880px]">
+          {/* Шапка сортирует: журнал разбирают по отклонению, и без сортировки
+              крупнейший недолив приходится искать глазами по полутора тысячам строк. */}
           <div className="grid grid-cols-[28px_130px_50px_56px_88px_1fr_92px_92px_100px_120px] gap-2 px-3 pb-2 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wide">
-            <span></span><span>Дата</span><span>ТТ</span><span>Смена</span><span>ТТН</span><span>Топливо</span>
-            <span className="text-right">Объём л</span><span className="text-right">Масса кг</span><span className="text-right">Откл. кг</span><span>Приёмка</span>
+            <span />
+            <SortHead label="Дата" k="date" sort={sort} onSort={toggleSort} />
+            <SortHead label="ТТ" k="station" sort={sort} onSort={toggleSort} />
+            <SortHead label="Смена" k="shift" sort={sort} onSort={toggleSort} />
+            <SortHead label="ТТН" k="ttn" sort={sort} onSort={toggleSort} />
+            <SortHead label="Топливо" k="fuel" sort={sort} onSort={toggleSort} />
+            <SortHead label="Объём л" k="volume" sort={sort} onSort={toggleSort} right />
+            <SortHead label="Масса кг" k="mass" sort={sort} onSort={toggleSort} right />
+            <SortHead label="Откл. кг" k="diff" sort={sort} onSort={toggleSort} right />
+            <SortHead label="Приёмка" k="status" sort={sort} onSort={toggleSort} />
           </div>
           <div className="max-h-[460px] overflow-y-auto space-y-1 pr-1">
             {shown.length === 0 ? (
