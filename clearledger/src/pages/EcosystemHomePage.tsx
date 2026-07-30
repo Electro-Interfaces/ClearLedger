@@ -11,10 +11,8 @@
  *
  * Классификация слоя приходит с бэкенда (`layer` в /api/sso/apps), не хардкодится по коду.
  */
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import {
   LayoutGrid, ExternalLink, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
@@ -26,7 +24,8 @@ import { CompanySelector } from '@/components/company/CompanySelector'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
-import { listSsoApps, authorizeApp, hasSideButton, type SsoApp } from '@/services/ssoService'
+import { listSsoApps, hasSideButton, type SsoApp } from '@/services/ssoService'
+import { useOpenApp } from '@/hooks/useOpenApp'
 import { READINESS_LABEL, productReadiness, type Readiness } from '@/config/spaceProducts'
 import { getDeskSummary, type DeskMetric } from '@/services/spaceDeskService'
 
@@ -136,18 +135,18 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, metrics, on
         <span className="flex items-end gap-3 border-t border-border/60 pt-1.5">
           {shown.map((m) => (
             <span key={m.label} className="min-w-0 flex-1">
-              <span className={`block truncate text-[13px] font-semibold leading-tight tabular-nums
+              <span className={`block truncate text-[15px] sm:text-[13px] font-semibold leading-tight tabular-nums
                                 ${m.tone ? TONE_CLASS[m.tone] ?? '' : ''}`}>
                 {m.value}
               </span>
-              <span className="block truncate text-[10px] leading-tight text-muted-foreground/70">
+              <span className="block truncate text-[12px] sm:text-[10px] leading-tight text-muted-foreground/70">
                 {m.label}
               </span>
             </span>
           ))}
         </span>
       ) : (
-        <span className="block border-t border-border/60 pt-1.5 text-[10px] leading-tight text-muted-foreground/60">
+        <span className="block border-t border-border/60 pt-1.5 text-[12px] sm:text-[10px] leading-tight text-muted-foreground/60">
           {subtitle}
         </span>
       )}
@@ -186,7 +185,9 @@ export function EcosystemHomePage() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const { company, companyId, companies } = useCompany()
-  const [busy, setBusy] = useState<string | null>(null)
+  // Открытие продуктов — общей логикой с лаунчером: там же живёт особый случай
+  // «Конференций», где вместо перехода на чужую главную создаётся комната.
+  const { open: openViaHook, busy } = useOpenApp()
 
   const q = useQuery({
     queryKey: ['sso-apps', companyId],
@@ -229,26 +230,19 @@ export function EcosystemHomePage() {
     await openExternal(app)
   }
 
-  /** Открыть внешнее приложение: SSO — по handoff-токену, мост — просто ссылкой. */
+  /** Открыть внешнее приложение: SSO — по handoff-токену, мост — ссылкой. */
   async function openExternal(app: SsoApp) {
-    if (busy) return
-    setBusy(app.code)
-    try {
-      const url = await authorizeApp(app.code, companyId)
-      window.open(url, '_blank', 'noopener,noreferrer')
-    } catch (e) {
-      const msg = (e as Error).message || ''
-      toast.error(/503|не настроен/i.test(msg) ? 'Единый вход не настроен' : 'Не удалось открыть приложение')
-    } finally {
-      setBusy(null)
-    }
+    await openViaHook(app.code, true)
   }
 
-  /** Плитка любого продукта пространства: подпись объясняет, как он откроется. */
+  /** Плитка любого продукта пространства: подпись говорит, ЧТО за ним стоит, а не как он
+   *  откроется. Способ входа виден значком «вход отдельный» в углу, а пока подпись занимала
+   *  «Открывается по ссылке», описание из реестра не доходило до человека вовсе — и
+   *  «Конференции» молчали о том, что вход без регистрации, прямо в браузере. */
   function ProductTile({ a }: { a: SsoApp }) {
-    const subtitle = a.mode === 'internal'
-      ? (a.description || 'Продукт пространства')
-      : a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход'
+    const subtitle = a.description
+      || (a.mode === 'internal' ? 'Продукт пространства'
+        : a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход')
     return (
       <Tile
         title={a.name}

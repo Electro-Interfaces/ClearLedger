@@ -152,18 +152,25 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
       <NextStepBar site={s} onGoTab={onTab} />
 
       {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
-          девять одинаковых кнопок не подсказывают, с какой начинать. */}
-      <div data-zone="Разделы проекта: точка = есть незакрытое" className="inline-flex rounded-md border border-border p-0.5 gap-0.5 flex-wrap">
-        {PROJECT_TABS.map((t) => (
-          <button key={t.k} type="button" onClick={() => onTab(t.k)}
-            title={pending.has(t.k) ? 'Здесь есть незакрытые пункты текущей стадии' : undefined}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-            {t.label}
-            {pending.has(t.k) && (
-              <span className={`h-1.5 w-1.5 rounded-full ${tab === t.k ? 'bg-primary-foreground/80' : 'bg-amber-500'}`} />
-            )}
-          </button>
-        ))}
+          девять одинаковых кнопок не подсказывают, с какой начинать.
+
+          На телефоне они переносились в три строки и съедали треть первого экрана —
+          до содержимого приходилось листать. Поэтому узкий экран прокручивает их в
+          одну строку вбок, а широкий по-прежнему показывает все сразу. */}
+      <div data-zone="Разделы проекта: точка = есть незакрытое"
+        className="-mx-4 px-4 overflow-x-auto sm:mx-0 sm:px-0 sm:overflow-visible">
+        <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 sm:flex-wrap">
+          {PROJECT_TABS.map((t) => (
+            <button key={t.k} type="button" onClick={() => onTab(t.k)}
+              title={pending.has(t.k) ? 'Здесь есть незакрытые пункты текущей стадии' : undefined}
+              className={`inline-flex shrink-0 items-center gap-1.5 px-3 py-2 sm:py-1.5 text-sm rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+              {t.label}
+              {pending.has(t.k) && (
+                <span className={`h-1.5 w-1.5 rounded-full ${tab === t.k ? 'bg-primary-foreground/80' : 'bg-amber-500'}`} />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       <Card>

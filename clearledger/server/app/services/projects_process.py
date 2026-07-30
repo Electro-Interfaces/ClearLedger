@@ -139,7 +139,10 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
     Проверка при чтении карточки чинит расхождение сама.
     """
     state = await _call(db, company_id, "GET", f"/api/v1/eco/projects/{site.id}/case",
-                        params={"actorEmail": getattr(user, "email", None) or ""})
+                        params={"actorEmail": getattr(user, "email", None) or "",
+                                # Вид проекта нужен, когда кейса ещё нет: Координатор
+                                # вернёт маршрут, чтобы путь было видно заранее.
+                                "kind": site.kind or "new_build"})
     # Поля шага тоже досверяем. Их пишет `apply_step` уже после ответа Координатора,
     # и обрыв связи между этими точками оставлял подрядчика и форму права только в
     # кейсе: человек их ввёл, а чек-лист проекта об этом не знал. Значения кейса —

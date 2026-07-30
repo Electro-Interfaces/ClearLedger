@@ -194,11 +194,12 @@ function RoutePanel({ site, companyId, onDone }: {
   }
   if (!state?.exists) {
     return (
-      <section className="rounded-lg border border-dashed border-border px-3 py-3 flex items-center justify-between gap-3">
+      <section className="rounded-lg border border-dashed border-border px-3 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="text-sm text-muted-foreground">
           Проект ещё не ведётся по маршруту регламента: нет ни ответственного за шаг, ни сроков этапов.
         </div>
-        <Button size="sm" onClick={() => mOpen.mutate()} disabled={mOpen.isPending}>
+        <Button size="sm" className="h-10 sm:h-9 w-full sm:w-auto shrink-0"
+          onClick={() => mOpen.mutate()} disabled={mOpen.isPending}>
           {mOpen.isPending && <Loader2 className="h-4 w-4 animate-spin mr-1" />}Вести по маршруту
         </Button>
       </section>
@@ -325,6 +326,7 @@ function RoutePanel({ site, companyId, onDone }: {
               вперёд) главного нет, и заливать один из них значило бы советовать. */}
           {normal.map((a) => (
             <Button key={a.id} size="sm" variant={a.id === leadId ? 'default' : 'outline'}
+              className="h-10 sm:h-9"
               onClick={() => { setPicked(picked?.id === a.id ? null : a); setForm({}) }}>
               {a.verb}
             </Button>
@@ -427,7 +429,7 @@ function RoutePanel({ site, companyId, onDone }: {
                   ) : d?.field_type === 'select' && d.options?.length ? (
                     <Select value={form[code] || '__none__'}
                       onValueChange={(v) => setForm({ ...form, [code]: v === '__none__' ? '' : v })}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger className="h-10 sm:h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__" className="text-sm">—</SelectItem>
                         {d.options.map((o) => (
@@ -447,6 +449,7 @@ function RoutePanel({ site, companyId, onDone }: {
                       // исчезало, и кнопка гасла без объяснения. Сервер запятую понимает.
                       type={d?.field_type === 'date' ? 'date' : 'text'}
                       inputMode={d?.field_type === 'money' || d?.field_type === 'number' ? 'decimal' : undefined}
+                      className="h-10 sm:h-9"
                       value={form[code] ?? ''}
                       onChange={(e) => setForm({ ...form, [code]: e.target.value })} />
                   )}
@@ -994,7 +997,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <p className="text-xs text-muted-foreground">
           Изменённые поля перестают обновляться из файла — в них истина ваша, а не выгрузки.
           {wantedCount > 0 && (
@@ -1120,7 +1123,7 @@ export function TechConnectionTab({ site, companyId, onDone }: {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <p className="text-xs text-muted-foreground">
           Срок проекта задаёт присоединение: от заявки до исполнения — от двух месяцев
           до полутора лет при реконструкции сети.
@@ -1279,7 +1282,7 @@ export function EquipmentTab({ site, companyId, onDone }: {
   const eq = ctx.data.equipment
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <p className="text-xs text-muted-foreground">
           Потребность проекта, а не склад. Пункт гейта «Оборудование поставлено» закрывается,
           когда все позиции получили статус «Поставлено» или «Смонтировано».

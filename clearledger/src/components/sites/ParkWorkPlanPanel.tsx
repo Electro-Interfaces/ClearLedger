@@ -116,8 +116,8 @@ export function ParkWorkPlanPanel({ companyId }: { companyId: string }) {
             {overdue > 0 && <>, из них просрочено <span className="text-red-600 dark:text-red-400">{nf0.format(overdue)}</span></>}.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Input className="h-8 w-[240px] text-sm" value={search}
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <Input className="h-10 sm:h-8 w-full sm:w-[240px] text-sm" value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Регион, объект, номер, ответственный" />
           <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -126,7 +126,7 @@ export function ParkWorkPlanPanel({ companyId }: { companyId: string }) {
           </label>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" hidden
             onChange={(e) => { const f = e.target.files?.[0]; if (f) runImport(f, true) }} />
-          <Button variant="outline" size="sm" className="h-8 text-sm" disabled={busy}
+          <Button variant="outline" size="sm" className="h-10 sm:h-8 text-sm" disabled={busy}
             onClick={() => fileRef.current?.click()}>
             {busy ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
             Импорт реестра работ (xlsx)
@@ -170,7 +170,31 @@ export function ParkWorkPlanPanel({ companyId }: { companyId: string }) {
               )}
               <span className="font-mono text-sm text-muted-foreground ml-auto">{nf0.format(g.items.length)}</span>
             </div>
-            <table className="w-full text-sm">
+            {/* Телефон: та же строка без прокрутки вбок. */}
+            <ul className="sm:hidden divide-y divide-border/40">
+              {g.items.map((p) => {
+                const late = !!p.nextActionDue && p.nextActionDue < today
+                return (
+                  <li key={p.id}>
+                    <button type="button" onClick={() => openProject(p.siteId)}
+                      className="w-full text-left px-3 py-3 active:bg-muted/40">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{p.projectNo ?? '—'}</span>
+                        <span className="text-[11px] rounded border px-1.5 py-0.5">{p.kindLabel}</span>
+                      </div>
+                      <div className="mt-1 text-sm">{placeOf(p)}</div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                        <span>{p.ownerName ?? 'не назначен'}</span>
+                        {p.nextActionDue && (
+                          <span className={late ? 'text-red-600 dark:text-red-400' : ''}>до {p.nextActionDue}</span>
+                        )}
+                      </div>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            <table className="hidden sm:table w-full text-sm">
               {/* Семь колонок без шапки читаются как набор обрывков: «Лид» — это
                   стадия объекта или ход работы? Называем каждую, иначе строку
                   нельзя ни понять, ни оспорить. */}

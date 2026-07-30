@@ -182,9 +182,31 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось назначить'),
   })
 
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  // Сколько фильтров сейчас сужают выдачу — чтобы свёрнутая панель не скрывала
+  // того, что список показан не целиком.
+  const activeFilters = [phase, region, ownerId, overdue ? '1' : '', closed ? '1' : '',
+    risk, stageFromUrl].filter(Boolean).length
+
   return (
     <div className="p-4 space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Телефон: сначала данные, настройки по требованию. На широком экране
+          панель всегда развёрнута — там она ничего не заслоняет. */}
+      <div className="sm:hidden flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }}
+            placeholder="Номер, адрес" className="h-10 w-full pl-7 pr-7 text-sm" />
+          {search && <button type="button" onClick={() => { setSearch(''); reset() }}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground"><X className="h-4 w-4" /></button>}
+        </div>
+        <Button size="sm" variant={filtersOpen ? 'default' : 'outline'} className="h-10 shrink-0"
+          onClick={() => setFiltersOpen((v) => !v)}>
+          Фильтры{activeFilters > 0 ? ` · ${activeFilters}` : ''}
+        </Button>
+      </div>
+
+      <div className={`${filtersOpen ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-2`}>
         <Select value={phase || '__all__'} onValueChange={(v) => { setPhase(v === '__all__' ? '' : v); reset() }}>
           <SelectTrigger className="h-8 w-[210px] text-sm"><SelectValue placeholder="Все этапы" /></SelectTrigger>
           <SelectContent>
@@ -240,7 +262,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           ))}
         </div>
 
-        <div className="relative">
+        <div className="relative hidden sm:block">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }}
             placeholder="Название, номер, адрес" className="h-8 w-[220px] pl-7 pr-7 text-sm" />
@@ -328,7 +350,39 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
               Ничего не найдено по заданным условиям — измените поиск или снимите фильтры.
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <>
+            {/* Телефон: строка-карточка. Всё, что нужно для выбора проекта, видно
+                сразу — номер, место, стадия, ответственный и срок, без прокрутки вбок. */}
+            <ul className="sm:hidden divide-y divide-border/40">
+              {rows.map((s) => {
+                const late = !!s.nextActionDue && s.nextActionDue < today()
+                return (
+                  <li key={s.id}>
+                    <button type="button" onClick={() => openProject(s.id)}
+                      className="w-full text-left px-3 py-3 active:bg-muted/40">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-mono text-xs text-muted-foreground shrink-0">{s.projectNo ?? '—'}</span>
+                        <span className={`text-[11px] rounded border px-1.5 py-0.5 shrink-0 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
+                          {s.stageLabel}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-sm">
+                        {s.title || s.address || s.installPlace || s.fullAddress || '—'}
+                        <span className="text-muted-foreground"> · {s.city ?? s.region ?? ''}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                        <span>{s.ownerName ?? 'ответственный не назначен'}</span>
+                        {s.nextAction && <span className="truncate max-w-[60%]">{s.nextAction}</span>}
+                        {s.nextActionDue && (
+                          <span className={late ? 'text-red-600 dark:text-red-400' : ''}>до {s.nextActionDue}</span>
+                        )}
+                      </div>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            <table className="hidden sm:table w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/20 text-muted-foreground">
                   <th className="w-8 p-2">
@@ -388,6 +442,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                 })}
               </tbody>
             </table>
+            </>
           )}
         </CardContent>
       </Card>

@@ -325,6 +325,8 @@ export type SiteParticipant = {
 export type CaseState = {
   ok?: boolean
   exists?: boolean
+  /** Кейса ещё нет: пришёл сам маршрут, чтобы путь был виден заранее. */
+  preview?: boolean
   error?: string
   caseId?: string
   number?: number

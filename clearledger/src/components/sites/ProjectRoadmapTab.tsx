@@ -97,13 +97,16 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
 
       {/* Схема маршрута: стадии, стрелки и фактический путь проекта. Стоит первой —
           это ответ на «покажи всю картину целиком», ради которого сюда заходят. */}
-      {qCase.data?.exists && (
+      {(qCase.data?.exists || qCase.data?.preview) && (
         <section className="rounded-lg border border-border">
           <div className="px-3 py-2 border-b bg-muted/40">
-            <span className="text-sm font-semibold">Схема маршрута проекта</span>
+            <span className="text-sm font-semibold">
+              Схема маршрута{qCase.data?.exists ? ' проекта' : ' по регламенту'}
+            </span>
             <div className="text-xs text-muted-foreground">
-              Тот же граф, по которому работают кнопки на вкладке «Работа». Раскрашено по журналу
-              переходов: пройденное — фактом, а не порядком в списке.
+              {qCase.data?.exists
+                ? 'Тот же граф, по которому работают кнопки на вкладке «Работа». Раскрашено по журналу переходов: пройденное — фактом, а не порядком в списке.'
+                : 'Проект ещё не ведётся по маршруту, поэтому пройденного нет: это весь путь целиком — какие стадии впереди и какими кнопками они проходятся. Начните вести проект на вкладке «Работа», и схема начнёт раскрашиваться.'}
             </div>
           </div>
           <div className="p-3"><ProjectFlowChart state={qCase.data} /></div>
