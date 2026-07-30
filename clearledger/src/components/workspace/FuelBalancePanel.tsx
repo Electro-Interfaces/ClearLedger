@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
-  Activity, BookOpen, CircleCheckBig, Database, Download, Fuel, Loader2, MapPin, RefreshCw,
-  TriangleAlert, Warehouse, X,
+  Activity, BookOpen, CircleCheckBig, Database, Download, FileSpreadsheet, FileText, Fuel,
+  Loader2, MapPin, RefreshCw, TriangleAlert, Warehouse, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,6 +13,10 @@ import { ReceiptAnalysisPanel } from '@/components/workspace/ReceiptAnalysisPane
 import { VarianceCausesPanel } from '@/components/workspace/VarianceCausesPanel'
 import { InventoryPanel } from '@/components/workspace/InventoryPanel'
 import { GoodsRouteBar, type GoodsStep } from '@/components/workspace/GoodsRouteBar'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { exportGoodsPdf, exportGoodsXlsx, type GoodsView } from '@/services/fuel/goodsExport'
 import { useFilters } from '@/contexts/FilterContext'
 import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 import { useLocations } from '@/hooks/useLocations'
@@ -230,52 +234,6 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
   const hasFilters = stations.length > 0 || fuels.length > 0
   const reset = () => { setStations([]); setFuels([]) }
 
-  async function exportXlsx() {
-    if (!data) return
-    setExporting(true)
-    try {
-      const XLSX = await import('xlsx')
-      const workbook = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.lines.map((row) => ({
-        'АЗС · топливо': row.label,
-        'Начальный остаток, л': row.balance_start_liters,
-        'Поступления, л': row.receipts_liters,
-        'Реализация, л': row.sales_liters,
-        'Конечный остаток, л': row.balance_end_liters,
-        'Отклонение, л': row.variance_liters,
-        'Отклонение, %': row.variance_pct,
-        'Резервуары': row.tanks_count,
-      }))), 'Свод')
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.tanks.map((row) => ({
-        'АЗС': row.station_name,
-        'Резервуар': row.tank_number,
-        'Топливо': row.fuel_name,
-        'Первая смена': row.first_shift,
-        'Последняя смена': row.last_shift,
-        'Начальный остаток, л': row.balance_start_liters,
-        'Поступления, л': row.receipts_liters,
-        'Реализация, л': row.sales_liters,
-        'Конечный остаток, л': row.balance_end_liters,
-        'Отклонение, л': row.variance_liters,
-        'Разрывы': row.continuity_breaks,
-      }))), 'Резервуары')
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data.issues.map((row) => ({
-        'Тип': row.type === 'fuel_change' ? 'Смена топлива' : 'Разрыв остатков',
-        'АЗС': row.station_name,
-        'Резервуар': row.tank_number,
-        'Топливо': row.fuel_name,
-        'Предыдущая смена': row.previous_shift,
-        'Текущая смена': row.current_shift,
-        'Предыдущий конец, л': row.previous_end_liters,
-        'Текущее начало, л': row.current_start_liters,
-        'Разрыв, л': row.gap_liters,
-      }))), 'Контроль разрывов')
-      XLSX.writeFile(workbook, `toplivnyj_balans_${dateFrom}_${dateTo}.xlsx`)
-    } finally {
-      setExporting(false)
-    }
-  }
-
   if (query.isLoading) {
     return <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Расчёт топливного баланса…</div>
   }
@@ -286,6 +244,23 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
   const issues = data.integrity.issues_total
   // Шаг маршрута: у панели один вид на пункт, кроме `balance` — он и есть «Контроль».
   const step: GoodsStep = view === 'balance' ? 'tanks' : view
+
+  async function runExport(kind: 'xlsx' | 'pdf') {
+    setExporting(true)
+    try {
+      const p = {
+        companyId, dateFrom, dateTo,
+        stationCodes: effectiveStations, fuelCodes: effectiveFuels,
+        scopeLabel: effectiveStations.length ? `${effectiveStations.length} АЗС` : 'вся сеть',
+      }
+      if (kind === 'xlsx') await exportGoodsXlsx(view as GoodsView, p)
+      else await exportGoodsPdf(view as GoodsView, p)
+    } catch (e) {
+      console.error('Выгрузка товародвижения:', e)
+    } finally {
+      setExporting(false)
+    }
+  }
   return (
     <div className="space-y-4 p-4">
       {/* Порядок работы разделa: пять пунктов — это один сценарий, а не пять экранов. */}
@@ -311,13 +286,27 @@ export function FuelBalancePanel({ companyId, dateFrom, dateTo, view = 'balance'
           <Button variant="outline" size="sm" className="h-8" onClick={() => query.refetch()} disabled={query.isFetching}>
             <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', query.isFetching && 'animate-spin')} />Обновить
           </Button>
-          {/* Выгрузка — книга остатков (свод · резервуары · разрывы): она про баланс,
-              на «Приёмке» и «Инвентаризации» отдала бы не то, что человек видит. */}
-          {view === 'balance' && (
-            <Button variant="outline" size="sm" className="h-8" onClick={exportXlsx} disabled={exporting || data.tanks.length === 0}>
-              {exporting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}Экспорт
-            </Button>
-          )}
+          {/* Выгрузка на всех пунктах раздела и в двух форматах: состав файла
+              определяется видом, а данные берутся теми же запросами, что рисуют
+              экран, — иначе файл разойдётся с тем, что человек видел. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8" disabled={exporting}>
+                {exporting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
+                Выгрузить
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem className="cursor-pointer gap-2 py-2.5" onClick={() => runExport('xlsx')}>
+                <FileSpreadsheet className="h-4 w-4 text-green-600 dark:text-green-400" />
+                <span className="text-sm font-medium">Excel — данные</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="cursor-pointer gap-2 py-2.5" onClick={() => runExport('pdf')}>
+                <FileText className="h-4 w-4 text-red-600 dark:text-red-400" />
+                <span className="text-sm font-medium">PDF — печатный отчёт</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
