@@ -97,7 +97,16 @@ async def _party_types(db: AsyncSession, cid: uuid.UUID,
     rows = (await db.execute(select(UserCompany.user_id, UserCompany.party_type).where(
         UserCompany.company_id == cid, UserCompany.user_id.in_(user_ids)))).all()
     by_user = {uid: (pt or "internal") for uid, pt in rows}
-    return {uid: by_user.get(uid, "internal") for uid in user_ids}
+    # Суперадмин платформы — это МЫ: учётку с правами на весь контейнер заказчику не
+    # выдают, ею работает инженер разработчика. В членстве у него стоит дефолтный
+    # `internal` (никто не проставлял принадлежность руками), и без этой поправки
+    # поддержка платформы в переписке ничем не отличалась от сотрудника компании.
+    # Явно заданные `partner`/`vendor` уважаем — их ставили осознанно.
+    supers = set((await db.execute(select(User.id).where(
+        User.id.in_(user_ids), User.is_superadmin.is_(True)))).scalars().all())
+    return {uid: (by_user.get(uid) if by_user.get(uid) in ("partner", "vendor")
+                  else ("vendor" if uid in supers else by_user.get(uid, "internal")))
+            for uid in user_ids}
 
 
 async def _company_titles(db: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:

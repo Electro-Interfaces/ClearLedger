@@ -1144,6 +1144,12 @@ async def create_all() -> None:
         # показания приборов учёта в готовую station_energy_periods и два
         # разовых бэкфилла, которые поднимают контур на реальных данных.
 
+        # Дефолт под сырой INSERT ниже: колонка объявлена NOT NULL с python-default,
+        # а сеялка идёт SQL-ом и значения не передаёт — на базе, где таблица создана
+        # без server_default, старт падал на NotNullViolationError.
+        await conn.execute(_sa.text(
+            "ALTER TABLE ops_cost_items ALTER COLUMN is_active SET DEFAULT true"))
+
         # Статьи затрат. Активны те, под которые есть условия; включение новой
         # статьи — строка здесь плюс условия в реестре, кода писать не нужно.
         await conn.execute(_sa.text("""
