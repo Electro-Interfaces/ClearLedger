@@ -39,6 +39,16 @@ from app.services.ezs_sites import (
 _NORM_CASE = "(case stage " + " ".join(
     f"when '{s}' then {norm_days(s)}" for s in STAGE_ORDER) + " else 90 end)"
 
+
+def _stage_position_sql(column: str) -> str:
+    allowed = {"e.from_stage", "e.to_stage"}
+    if column not in allowed:
+        raise ValueError(f"Недопустимая колонка стадии: {column}")
+    whens = " ".join(f"when '{stage}' then {index}"
+                     for index, stage in enumerate(STAGE_ORDER))
+    return f"(case {column} {whens} else -1 end)"
+
+
 # ── Документы ──────────────────────────────────────────────────────────────
 DOC_KINDS = [
     {"key": "egrn", "label": "Выписка ЕГРН"},
@@ -758,53 +768,119 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     d90 = (date.today() - timedelta(days=90)).isoformat()
 
     # ── 1. Что горит ───────────────────────────────────────────────────────
-    risks = (await db.execute(text("""
+    risks = (await db.execute(text(f"""
         with active as (
             select s.* from ezs_sites s
             where s.company_id = :cid and s.stage = any(:active)
+        ),
+        stage_events as (
+            select e.site_id, e.from_stage, e.to_stage
+            from ezs_site_events e join active a on a.id = e.site_id
+            where e.company_id = :cid and e.kind = 'stage'
+        ),
+        event_stats as (
+            select site_id, count(*) as stage_events,
+                   bool_or({_stage_position_sql("e.to_stage")} >= 0
+                       and {_stage_position_sql("e.from_stage")} >= 0
+                       and {_stage_position_sql("e.to_stage")}
+                           < {_stage_position_sql("e.from_stage")}) as has_rework
+            from stage_events e group by site_id
+        ),
+        repeat_stats as (
+            select site_id, sum(entries - 1) as repeat_entries
+            from (
+                select site_id, to_stage, count(*) as entries
+                from stage_events where to_stage is not null
+                group by site_id, to_stage having count(*) > 1
+            ) x group by site_id
+        ),
+        flags as (
+            select a.*,
+                   coalesce(es.stage_events, 0) as stage_events,
+                   coalesce(es.has_rework, false) as has_rework,
+                   coalesce(rs.repeat_entries, 0) as repeat_entries,
+                   not exists (
+                       select 1 from ezs_site_participants p where p.site_id = a.id
+                   ) as no_participants,
+                   (
+                       (coalesce(a.commissioned_on, '') <> '' and a.stage <> 'live')
+                       or (a.stage = 'live' and coalesce(a.commissioned_on, '') = '')
+                       or (a.kind = 'decommission' and coalesce(a.commissioned_on, '') <> '')
+                   ) as commissioning_mismatch,
+                   (a.next_action_due is not null and a.next_action_due < :today) as step_overdue,
+                   exists (
+                       select 1 from ezs_tech_connections t where t.site_id = a.id
+                         and t.due_date is not null and t.done_date is null
+                         and t.due_date < :today and t.status not in ('done','rejected')
+                   ) as tp_overdue,
+                   exists (
+                       select 1 from ezs_site_equipment eq where eq.site_id = a.id
+                         and eq.due_date is not null and eq.supplied_date is null
+                         and eq.status in ('planned','ordered') and eq.due_date < :today
+                   ) as eq_overdue
+            from active a
+            left join event_stats es on es.site_id = a.id
+            left join repeat_stats rs on rs.site_id = a.id
         )
         select
-          (select count(*) from active where next_action_due is not null
-             and next_action_due < :today)                                as step_overdue,
-          (select count(*) from active a join ezs_tech_connections t on t.site_id = a.id
-             where t.due_date is not null and t.done_date is null
-               and t.due_date < :today and t.status not in ('done','rejected'))  as tp_overdue,
-          (select count(*) from active a join ezs_site_equipment e on e.site_id = a.id
-             where e.due_date is not null and e.supplied_date is null
-               and e.status in ('planned','ordered') and e.due_date < :today)    as eq_overdue,
-          (select count(*) from active where owner_user_id is null)         as no_owner,
-          (select count(*) from active where next_action is null)           as no_next,
-          -- Просрочка стадии считается по НОРМАТИВУ СВОЕЙ стадии (регламент
-          -- согласования ЗУ), а не по общему порогу: «1–4 недели» на переговоры
-          -- и «до 6 месяцев» на присоединение — разные вещи, и общие 90 дней
-          -- врали в обе стороны.
-          (select count(*) from active
-             where stage_since is not null
-               and (current_date - stage_since::date) > """ + _NORM_CASE + """) as stage_overdue,
-          (select count(*) from active
-             where coalesce(to_char(last_touch_at, 'YYYY-MM-DD'), '1970-01-01') < :d30) as no_touch_30
+          count(*) filter (where step_overdue) as step_overdue,
+          count(*) filter (where tp_overdue) as tp_overdue,
+          count(*) filter (where eq_overdue) as eq_overdue,
+          count(*) filter (where owner_user_id is null) as no_owner,
+          count(*) filter (where next_action is null) as no_next,
+          count(*) filter (where stage_since is not null
+             and (current_date - stage_since::date) > {_NORM_CASE}) as stage_overdue,
+          count(*) filter (where coalesce(to_char(last_touch_at, 'YYYY-MM-DD'),
+             '1970-01-01') < :d30) as no_touch_30,
+          count(*) filter (where no_participants) as no_participants,
+          count(*) filter (where has_rework) as rework,
+          count(*) filter (where commissioning_mismatch) as commissioning_mismatch,
+          count(*) filter (where step_overdue or tp_overdue or eq_overdue) as at_risk,
+          count(*) filter (where step_overdue or tp_overdue or eq_overdue
+             or owner_user_id is null or next_action is null
+             or (stage_since is not null
+                 and (current_date - stage_since::date) > {_NORM_CASE})
+             or coalesce(to_char(last_touch_at, 'YYYY-MM-DD'), '1970-01-01') < :d30
+             or no_participants or has_rework or commissioning_mismatch) as attention_total,
+          count(*) as active_total,
+          count(*) filter (where stage_events > 0) as with_history,
+          count(*) filter (where stage_events = 0) as without_history,
+          coalesce(sum(stage_events), 0) as stage_events,
+          coalesce(sum(repeat_entries), 0) as repeat_entries,
+          count(*) filter (where has_rework) as rework_projects
+        from flags
     """), {"cid": company_id, "active": STAGE_ORDER, "today": today,
            "d30": d30})).mappings().one()
 
     attention = [
         {"key": "step_overdue", "label": "Просрочен следующий шаг", "count": int(risks["step_overdue"]),
-         "hint": "срок в карточке прошёл, шаг не сделан", "filter": "overdue"},
+         "hint": "срок в карточке прошёл, шаг не сделан", "filter": "overdue", "tone": "critical"},
         {"key": "tp_overdue", "label": "Просрочено техприсоединение", "count": int(risks["tp_overdue"]),
-         "hint": "срок мероприятий сетевой прошёл", "filter": "tp"},
+         "hint": "срок мероприятий сетевой прошёл", "filter": "tp", "tone": "critical"},
         {"key": "eq_overdue", "label": "Просрочена поставка оборудования", "count": int(risks["eq_overdue"]),
-         "hint": "плановая дата поставки прошла", "filter": "equipment"},
+         "hint": "плановая дата поставки прошла", "filter": "equipment", "tone": "critical"},
+        {"key": "commissioning_mismatch", "label": "Дата ввода расходится со стадией",
+         "count": int(risks["commissioning_mismatch"]),
+         "hint": "проверьте основание перевода капвложений в основные средства",
+         "filter": "", "tone": "critical"},
         {"key": "stage_overdue", "label": "Стадия идёт дольше норматива", "count": int(risks["stage_overdue"]),
          # На свежезагруженном портфеле stage_since — это дата поступления из файла,
          # а не дата входа в стадию внутри системы. Формально проект действительно
          # стоит дольше норматива, но приписка «движения нет» звучала бы упрёком за
          # то, что систему только начали вести.
-         "hint": "проект стоит на стадии дольше норматива регламента", "filter": ""},
+         "hint": "проект стоит на стадии дольше норматива регламента", "filter": "", "tone": "warning"},
         {"key": "no_touch_30", "label": "Без касаний больше 30 дней", "count": int(risks["no_touch_30"]),
-         "hint": "нет записи о звонке, встрече или письме за 30 дней", "filter": ""},
+         "hint": "нет записи о звонке, встрече или письме за 30 дней", "filter": "", "tone": "warning"},
+        {"key": "rework", "label": "Возвращались на более раннюю стадию",
+         "count": int(risks["rework"]),
+         "hint": "есть обратный переход — проверьте причину переделки", "filter": "", "tone": "warning"},
         {"key": "no_owner", "label": "Без ответственного", "count": int(risks["no_owner"]),
-         "hint": "проект не закреплён ни за кем — назначьте в реестре", "filter": ""},
+         "hint": "проект не закреплён ни за кем — назначьте в реестре", "filter": "", "tone": "warning"},
         {"key": "no_next", "label": "Без следующего шага", "count": int(risks["no_next"]),
-         "hint": "не записано, что делать дальше и к какому сроку", "filter": ""},
+         "hint": "не записано, что делать дальше и к какому сроку", "filter": "", "tone": "warning"},
+        {"key": "no_participants", "label": "Не назначен состав проекта",
+         "count": int(risks["no_participants"]),
+         "hint": "нет ни одного участника с ролью по регламенту", "filter": "", "tone": "warning"},
     ]
 
     # ── 2. Где затык: воронка со сроком и проходимостью ────────────────────
@@ -813,31 +889,59 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     # событие, поэтому возврат с пусконаладки на СМР, пауза и отказ в архив
     # читались как «стадия пройдена» — метрика показывала успех там, где проект
     # развернули назад.
-    # Позиция стадии в воронке — выражение строим для нужной колонки явно, чтобы
-    # не полагаться на текстовую замену внутри готового SQL.
-    def _pos(col: str) -> str:
-        whens = " ".join(f"when '{st}' then {i}" for i, st in enumerate(STAGE_ORDER))
-        return f"(case {col} {whens} else -1 end)"
     passed = {r["stage"]: r for r in (await db.execute(text(f"""
-        with visited as (
-            select distinct site_id, to_stage as stage from ezs_site_events
-            where company_id = :cid and kind = 'stage' and to_stage is not null
+        with stage_events as (
+            select id, site_id, from_stage, to_stage, created_at
+            from ezs_site_events
+            where company_id = :cid and kind = 'stage'
         ),
-        moved as (
-            select v.stage, v.site_id,
-                   exists (
-                     select 1 from ezs_site_events e
-                      where e.site_id = v.site_id and e.kind = 'stage'
-                        and e.created_at > (select min(e2.created_at) from ezs_site_events e2
-                                             where e2.site_id = v.site_id and e2.to_stage = v.stage)
-                        -- дальше по воронке, а не куда угодно позже
-                        and {_pos("e.to_stage")} > {_pos("v.stage")}
-                   ) as went_further
-            from visited v
+        explicit_entries as (
+            select site_id, to_stage as stage, count(*) as entries
+            from stage_events where to_stage is not null
+            group by site_id, to_stage
+        ),
+        implicit_entries as (
+            select distinct e.site_id, e.from_stage as stage, 1 as entries
+            from stage_events e
+            where e.from_stage is not null and not exists (
+                select 1 from stage_events prior
+                where prior.site_id = e.site_id and prior.to_stage = e.from_stage
+                  and (prior.created_at, prior.id) < (e.created_at, e.id)
+            )
+        ),
+        visits as (
+            select site_id, stage, sum(entries) as entries
+            from (
+                select * from explicit_entries
+                union all
+                select * from implicit_entries
+            ) entered
+            group by site_id, stage
+        ),
+        outcomes as (
+            select site_id, from_stage as stage,
+                   bool_or({_stage_position_sql("e.to_stage")}
+                       > {_stage_position_sql("e.from_stage")}) as advanced,
+                   bool_or({_stage_position_sql("e.to_stage")} >= 0
+                       and {_stage_position_sql("e.from_stage")} >= 0
+                       and {_stage_position_sql("e.to_stage")}
+                           < {_stage_position_sql("e.from_stage")}) as returned,
+                   bool_or(to_stage = 'on_hold') as paused,
+                   bool_or(to_stage = 'archive') as archived
+            from stage_events e where from_stage is not null
+            group by site_id, from_stage
         )
-        select stage, count(*) as visited,
-               count(*) filter (where went_further) as advanced
-        from moved group by stage
+        select v.stage, count(*) as visited,
+               count(*) filter (where coalesce(o.advanced, false)) as advanced,
+               count(*) filter (where coalesce(o.advanced, false)
+                   and v.entries = 1) as first_pass,
+               coalesce(sum(greatest(v.entries - 1, 0)), 0) as reentries,
+               count(*) filter (where coalesce(o.returned, false)) as returned,
+               count(*) filter (where coalesce(o.paused, false)) as paused,
+               count(*) filter (where coalesce(o.archived, false)) as archived
+        from visits v
+        left join outcomes o on o.site_id = v.site_id and o.stage = v.stage
+        group by v.stage
     """), {"cid": company_id})).mappings().all()}
 
     durations = (await phase_durations(db, company_id))["stages"]
@@ -860,12 +964,22 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         v = passed.get(st, {})
         visited = int(v.get("visited") or 0)
         advanced = int(v.get("advanced") or 0)
+        first_pass = int(v.get("first_pass") or 0)
         funnel.append({
             "stage": st, "label": STAGE_LABELS[st],
             "phase": STAGE_PHASE.get(st), "count": counts.get(st, 0),
             "medianDays": dur_by_stage.get(st, {}).get("medianDays", 0),
+            "p85Days": dur_by_stage.get(st, {}).get("p85Days", 0),
+            "open": dur_by_stage.get(st, {}).get("open", 0),
+            "openMedianDays": dur_by_stage.get(st, {}).get("openMedianDays", 0),
             "visited": visited, "advanced": advanced,
             "conversion": round(advanced / visited * 100) if visited else None,
+            "firstPass": first_pass,
+            "firstPassRate": round(first_pass / advanced * 100) if advanced else None,
+            "reentries": int(v.get("reentries") or 0),
+            "returned": int(v.get("returned") or 0),
+            "paused": int(v.get("paused") or 0),
+            "archivedFromStage": int(v.get("archived") or 0),
             "stuck": stuck_by_stage.get(st, 0),
             "normDays": norm_days(st),
         })
@@ -953,6 +1067,14 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     """), {"cid": company_id, "active": STAGE_ORDER})).scalar()
 
     active_total = sum(counts.get(s, 0) for s in STAGE_ORDER)
+    measurement_total = int(risks["active_total"] or 0)
+    with_history = int(risks["with_history"] or 0)
+    kind_rows = (await db.execute(text("""
+        select coalesce(kind, 'new_build') as kind, count(*) as n
+        from ezs_sites
+        where company_id = :cid and stage = any(:active)
+        group by 1 order by 2 desc
+    """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()
     return {
         "active": active_total,
         "total": sum(counts.values()),
@@ -961,7 +1083,17 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         "onHold": counts.get("on_hold", 0),
         "attention": [a for a in attention if a["count"] > 0],
         "attentionAll": attention,
-        "atRisk": int(risks["step_overdue"]) + int(risks["tp_overdue"]) + int(risks["eq_overdue"]),
+        "atRisk": int(risks["at_risk"] or 0),
+        "attentionTotal": int(risks["attention_total"] or 0),
+        "measurement": {
+            "withHistory": with_history,
+            "withoutHistory": int(risks["without_history"] or 0),
+            "coverage": round(with_history / measurement_total * 100) if measurement_total else 0,
+            "stageEvents": int(risks["stage_events"] or 0),
+            "repeatEntries": int(risks["repeat_entries"] or 0),
+            "reworkProjects": int(risks["rework_projects"] or 0),
+            "kinds": [{"kind": r["kind"], "count": int(r["n"])} for r in kind_rows],
+        },
         "funnel": funnel,
         "bottleneck": bottleneck,
         "forecast": [{"bucket": r["bucket"], "count": int(r["n"])} for r in forecast],
@@ -991,20 +1123,33 @@ async def phase_durations(db: AsyncSession, company_id) -> dict[str, Any]:
             from ezs_site_events e
             where e.company_id = :cid and e.kind = 'stage' and e.to_stage is not null
         )
-        select stage,
-               count(*) as n,
+        select stage, count(*) as n,
+               count(*) filter (where next_at is not null) as completed,
                percentile_cont(0.5) within group (
-                   order by extract(epoch from (coalesce(next_at, now()) - created_at)) / 86400) as median_days,
-               count(*) filter (where next_at is null) as still_open
+                   order by extract(epoch from (next_at - created_at)) / 86400
+               ) filter (where next_at is not null) as median_days,
+               percentile_cont(0.85) within group (
+                   order by extract(epoch from (next_at - created_at)) / 86400
+               ) filter (where next_at is not null) as p85_days,
+               count(*) filter (where next_at is null) as still_open,
+               percentile_cont(0.5) within group (
+                   order by extract(epoch from (now() - created_at)) / 86400
+               ) filter (where next_at is null) as open_median_days
         from moves group by stage
     """), {"cid": company_id})).mappings().all()
     by_stage = {r["stage"]: {"count": int(r["n"]),
+                             "completed": int(r["completed"]),
                              "medianDays": round(float(r["median_days"] or 0), 1),
-                             "open": int(r["still_open"])} for r in rows}
+                             "p85Days": round(float(r["p85_days"] or 0), 1),
+                             "open": int(r["still_open"]),
+                             "openMedianDays": round(float(r["open_median_days"] or 0), 1)}
+                for r in rows}
     return {
-        "stages": [{"stage": s, "label": STAGE_LABELS[s], **by_stage.get(s, {"count": 0, "medianDays": 0, "open": 0})}
+        "stages": [{"stage": s, "label": STAGE_LABELS[s],
+                    **by_stage.get(s, {"count": 0, "completed": 0, "medianDays": 0,
+                                       "p85Days": 0, "open": 0, "openMedianDays": 0})}
                    for s in STAGE_ORDER],
-        "note": "медиана по фактическим переходам в истории; текущие стадии считаются до сегодня",
+        "note": "медиана и P85 — только по завершённым визитам; открытые стадии показаны отдельно",
     }
 
 

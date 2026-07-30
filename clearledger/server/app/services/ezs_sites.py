@@ -974,9 +974,11 @@ def _risk_conditions(risk: str) -> list[Any]:
     Считаются ровно так же, как в `portfolio_overview`: иначе список не сойдётся
     с цифрой, и доверия к экрану не будет.
     """
-    from sqlalchemy import exists, select as _select
+    from sqlalchemy import case, exists, literal, select as _select
 
-    from app.models import EzsSiteEquipment, EzsTechConnection
+    from app.models import (
+        EzsSiteEquipment, EzsSiteEvent, EzsSiteParticipant, EzsTechConnection,
+    )
 
     S = EzsSite
     today = date.today().isoformat()
@@ -1016,6 +1018,31 @@ def _risk_conditions(risk: str) -> list[Any]:
             EzsSiteEquipment.supplied_date.is_(None),
             EzsSiteEquipment.due_date < today,
             EzsSiteEquipment.status.in_(["planned", "ordered"])))]
+    if risk == "no_history":
+        return [*active, ~exists(_select(EzsSiteEvent.id).where(
+            EzsSiteEvent.site_id == S.id,
+            EzsSiteEvent.kind == "stage"))]
+    if risk == "no_participants":
+        return [*active, ~exists(_select(EzsSiteParticipant.id).where(
+            EzsSiteParticipant.site_id == S.id))]
+    if risk == "rework":
+        from_pos = case(*[(EzsSiteEvent.from_stage == st, literal(i))
+                          for i, st in enumerate(STAGE_ORDER)], else_=literal(-1))
+        to_pos = case(*[(EzsSiteEvent.to_stage == st, literal(i))
+                        for i, st in enumerate(STAGE_ORDER)], else_=literal(-1))
+        return [*active, exists(_select(EzsSiteEvent.id).where(
+            EzsSiteEvent.site_id == S.id,
+            EzsSiteEvent.kind == "stage",
+            from_pos >= 0,
+            to_pos >= 0,
+            to_pos < from_pos))]
+    if risk == "commissioning_mismatch":
+        has_date = func.coalesce(S.commissioned_on, "") != ""
+        return [*active, (
+            (has_date & (S.stage != "live"))
+            | ((S.stage == "live") & ~has_date)
+            | ((S.kind == "decommission") & has_date)
+        )]
     return []
 
 

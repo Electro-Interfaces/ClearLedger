@@ -632,12 +632,28 @@ export interface PortfolioOverview {
   onHold: number
   /** Проекты со сорванным сроком (шаг, ТП, поставка). */
   atRisk: number
-  attention: { key: string; label: string; count: number; hint: string; filter: string }[]
+  attentionTotal: number
+  attention: {
+    key: string; label: string; count: number; hint: string; filter: string
+    tone: 'critical' | 'warning'
+  }[]
   attentionAll: PortfolioOverview['attention']
+  measurement: {
+    withHistory: number
+    withoutHistory: number
+    coverage: number
+    stageEvents: number
+    repeatEntries: number
+    reworkProjects: number
+    kinds: { kind: string; count: number }[]
+  }
   funnel: {
     stage: SiteStage; label: string; phase: string | null; count: number
-    medianDays: number; visited: number; advanced: number
+    medianDays: number; p85Days: number; open: number; openMedianDays: number
+    visited: number; advanced: number
     conversion: number | null; stuck: number
+    firstPass: number; firstPassRate: number | null
+    reentries: number; returned: number; paused: number; archivedFromStage: number
     /** Норматив стадии из регламента согласования, дней. */
     normDays?: number
   }[]
@@ -669,7 +685,10 @@ export async function getTechConnections(companyId: string): Promise<{
 }
 
 export interface PhaseDurations {
-  stages: { stage: SiteStage; label: string; count: number; medianDays: number; open: number }[]
+  stages: {
+    stage: SiteStage; label: string; count: number; completed: number
+    medianDays: number; p85Days: number; open: number; openMedianDays: number
+  }[]
   note: string
 }
 

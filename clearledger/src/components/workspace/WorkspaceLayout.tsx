@@ -208,6 +208,7 @@ function MobileWorkspace() {
         {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
         {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
+        {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
         {STORE_MODES.includes(coreMode) && <StorePanel />}
         {coreMode === 'store_help' && <StoreHelpPanel />}
         {coreMode === 'corporate' && <ProductStub code="corp" />}

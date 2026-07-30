@@ -16,7 +16,10 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Loader2, Download, AlertTriangle, ChevronRight, ChevronDown, TrendingUp, ExternalLink } from 'lucide-react'
+import {
+  Loader2, Download, AlertTriangle, ChevronRight, ChevronDown, TrendingUp,
+  ExternalLink, Database, RefreshCw,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import {
   getPortfolioOverview, getSites, exportPortfolioXlsx, PHASE_META, STAGE_META,
@@ -27,31 +30,47 @@ import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const money = (v: number) => `${nf0.format(Math.round(v))} ₽`
+const KIND_LABELS: Record<string, string> = {
+  new_build: 'Новое строительство',
+  retrofit: 'Модернизация',
+  relocation: 'Перенос',
+  decommission: 'Демонтаж',
+}
 // Куда ведёт строка «Требует внимания». Ключ вкладки — ИЗ МЕНЮ (`SITES_MENU`):
 // пункт называется `pr_project`, и опечатка `pr_projects` молча возвращала
 // пользователя на сам обзор (несуществующий ключ схлопывается в первый пункт).
 // `risk` — фильтр, который реестр обязан применить, иначе откроется не тот список.
 const RISK_TARGET: Record<string, { tab: string; hint: string }> = {
   step_overdue: { tab: 'pr_project', hint: 'реестр проектов, фильтр просрочки' },
-  tp_overdue: { tab: 'pr_tp', hint: 'реестр присоединений' },
-  eq_overdue: { tab: 'pr_equipment', hint: 'реестр оборудования' },
+  tp_overdue: { tab: 'pr_project', hint: 'реестр проектов' },
+  eq_overdue: { tab: 'pr_project', hint: 'реестр проектов' },
   stuck_90: { tab: 'pr_project', hint: 'реестр проектов' },
   no_touch_30: { tab: 'pr_project', hint: 'реестр проектов' },
   no_owner: { tab: 'pr_project', hint: 'реестр проектов' },
   no_next: { tab: 'pr_project', hint: 'реестр проектов' },
+  stage_overdue: { tab: 'pr_project', hint: 'реестр проектов' },
+  commissioning_mismatch: { tab: 'pr_project', hint: 'реестр проектов' },
+  rework: { tab: 'pr_project', hint: 'реестр проектов' },
+  no_participants: { tab: 'pr_project', hint: 'реестр проектов' },
+  no_history: { tab: 'pr_project', hint: 'реестр проектов' },
 }
 
 export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
   const [, setParams] = useSearchParams()
-  /** Уйти в другой реестр с фильтром: `mode`, `sub` и `risk` — одной правкой URL.
+  /** Уйти в другой реестр с фильтром: `mode`, `sub`, `risk`/`stage` — одной правкой URL.
    *  Раздел (`mode`) обязателен: обзор живёт в «Аналитике», а ведут работу в
    *  «Работе», и без смены раздела пункт оказался бы чужим. */
-  const goTo = useCallback((tab: string, risk?: string) => {
+  const goTo = useCallback((tab: string, risk?: string, stage?: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('mode', sitesModeForKey(tab))
       next.set('sub', tab)
-      if (risk) next.set('risk', risk); else next.delete('risk')
+      next.delete('risk')
+      next.delete('stage')
+      next.delete('project')
+      next.delete('ptab')
+      if (risk) next.set('risk', risk)
+      if (stage) next.set('stage', stage)
       return next
     }, { replace: true })
   }, [setParams])
@@ -65,8 +84,27 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
   })
   const d = q.data
 
-  if (q.isLoading || !d) {
+  if (q.isLoading) {
     return <div className="flex justify-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  }
+  if (q.isError || !d) {
+    return (
+      <div className="p-4">
+        <Card className="border-red-400/40">
+          <CardContent className="p-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">Не удалось загрузить обзор портфеля</div>
+              <div className="text-xs text-muted-foreground">
+                {q.error instanceof Error ? q.error.message : 'Сервис аналитики не ответил'}
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />Повторить
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (
@@ -86,27 +124,82 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
         </Button>
       </div>
 
+      <Card>
+        <CardContent className="p-0">
+          <div className="px-3 py-2 border-b bg-muted/40 flex items-center gap-2">
+            <Database className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-sm font-semibold">Основание измерения</span>
+            <span className="text-xs text-muted-foreground ml-auto">
+              история есть у {nf0.format(d.measurement.withHistory)} из {nf0.format(d.active)} активных проектов
+            </span>
+          </div>
+          <div className="p-3 grid grid-cols-1 lg:grid-cols-[minmax(240px,1.4fr)_repeat(3,minmax(110px,0.6fr))] gap-4 items-end">
+            <div>
+              <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                <span className="text-sm">Покрытие историей стадий</span>
+                <span className="font-mono text-sm">{d.measurement.coverage}%</span>
+              </div>
+              <div className="h-2 bg-muted overflow-hidden" aria-label={`Покрытие историей ${d.measurement.coverage}%`}>
+                <div className="h-full bg-blue-600 dark:bg-blue-500"
+                  style={{ width: `${Math.min(100, d.measurement.coverage)}%` }} />
+              </div>
+              <div className="text-xs text-muted-foreground mt-1.5">
+                Проекты без переходов не участвуют в оценке проходимости и длительности.
+              </div>
+            </div>
+            <Metric label="Событий стадий" value={d.measurement.stageEvents} />
+            <Metric label="Повторных заходов" value={d.measurement.repeatEntries} />
+            <Metric label="Проектов с возвратом" value={d.measurement.reworkProjects} />
+          </div>
+          <div className="px-3 pb-3 flex flex-wrap items-center gap-2">
+            {d.measurement.kinds.map((item) => (
+              <span key={item.kind} className="text-xs border px-1.5 py-0.5 text-muted-foreground">
+                {KIND_LABELS[item.kind] ?? item.kind}: {nf0.format(item.count)}
+              </span>
+            ))}
+            {d.measurement.withoutHistory > 0 && (
+              <button type="button" onClick={() => toggle('risk:no_history')}
+                aria-expanded={open === 'risk:no_history'}
+                className="ml-auto text-xs text-amber-700 dark:text-amber-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {nf0.format(d.measurement.withoutHistory)} без истории — показать
+              </button>
+            )}
+          </div>
+          {open === 'risk:no_history' && (
+            <Drill companyId={companyId} risk="no_history" count={d.measurement.withoutHistory}
+              onAll={() => goTo('pr_project', 'no_history')} />
+          )}
+        </CardContent>
+      </Card>
+
       {/* ЧТО ГОРИТ */}
-      <Card className={d.atRisk > 0 ? 'border-amber-400/50' : undefined}>
+      <Card className={d.attentionTotal > 0 ? 'border-amber-400/50' : undefined}>
         <CardContent className="p-0">
           <div className="px-3 py-2 border-b bg-muted/40 flex items-center gap-2">
             <AlertTriangle className={`h-3.5 w-3.5 ${d.atRisk > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`} />
             <span className="text-sm font-semibold">Требует внимания</span>
             <span className="text-xs text-muted-foreground ml-auto">
-              {d.atRisk > 0 ? `${nf0.format(d.atRisk)} проектов со сорванным сроком` : 'сорванных сроков нет'}
+              {d.attentionTotal > 0
+                ? `${nf0.format(d.attentionTotal)} требуют проверки · ${nf0.format(d.atRisk)} со сроком`
+                : 'проверок нет'}
             </span>
           </div>
           {d.attention.length === 0 ? (
             <div className="py-6 text-center text-sm text-muted-foreground">
-              Всё в порядке: сроки соблюдаются, у каждого проекта есть ответственный и следующий шаг.
+              Сроки соблюдаются, дата ввода согласована со стадией, ведение проектов заполнено.
             </div>
           ) : (
             <div className="divide-y divide-border/40">
               {d.attention.map((a) => (
                 <div key={a.key}>
                   <button type="button" onClick={() => toggle(`risk:${a.key}`)}
-                    className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-muted/40 transition-colors">
-                    <span className="font-mono text-sm w-14 shrink-0 text-right">{nf0.format(a.count)}</span>
+                    aria-expanded={open === `risk:${a.key}`}
+                    className={`w-full flex items-center gap-3 px-3 py-2 text-left border-l-2 hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+                      a.tone === 'critical' ? 'border-l-red-500' : 'border-l-amber-500'
+                    }`}>
+                    <span className={`font-mono text-sm w-14 shrink-0 text-right ${
+                      a.tone === 'critical' ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'
+                    }`}>{nf0.format(a.count)}</span>
                     <span className="text-sm flex-1 min-w-0">
                       {a.label}
                       <span className="text-muted-foreground"> — {a.hint}</span>
@@ -133,83 +226,103 @@ export function ProjectsPortfolioPanel({ companyId }: { companyId: string }) {
             <span className="text-sm font-semibold">Воронка: где стоим и куда не проходим</span>
             {d.bottleneck && d.bottleneck.stuck > 0 && (
               <span className="text-xs text-amber-700 dark:text-amber-400 ml-auto">
-                узкое место — «{d.bottleneck.label}»: {nf0.format(d.bottleneck.stuck)} стоят больше 90 дней
+                узкое место — «{d.bottleneck.label}»: {nf0.format(d.bottleneck.stuck)} дольше норматива
               </span>
             )}
           </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-muted-foreground border-b">
-                <th className="text-left px-3 py-1.5 font-medium">Стадия</th>
-                <th className="text-right px-3 py-1.5 font-medium">Сейчас</th>
-                <th className="text-right px-3 py-1.5 font-medium">Медиана / норма, дн</th>
-                <th className="text-right px-3 py-1.5 font-medium">Проходят дальше</th>
-                <th className="text-right px-3 py-1.5 font-medium" title="Дольше норматива стадии по регламенту">Дольше нормы</th>
-                <th className="px-3 py-1.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {d.funnel.map((f) => {
-                const hot = d.bottleneck?.stage === f.stage && f.stuck > 0
-                return (
-                  <tr key={f.stage} className={`border-b border-border/30 ${hot ? 'bg-amber-500/[0.06]' : ''}`}>
-                    <td className="px-3 py-1.5">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className={`h-2 w-2 rounded-full ${STAGE_META[f.stage]?.dot ?? 'bg-zinc-400'}`} />
-                        {f.label}
-                        <span className={`text-xs rounded border px-1 ${PHASE_META[f.phase ?? '']?.cls ?? 'text-muted-foreground'}`}>
-                          {PHASE_META[f.phase ?? '']?.label ?? ''}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead>
+                <tr className="text-muted-foreground border-b">
+                  <th className="text-left px-3 py-1.5 font-medium">Стадия</th>
+                  <th className="text-right px-3 py-1.5 font-medium">Сейчас</th>
+                  <th className="text-right px-3 py-1.5 font-medium" title="Завершённые визиты: медиана, P85 и норматив">
+                    Медиана / P85 / норма
+                  </th>
+                  <th className="text-right px-3 py-1.5 font-medium">Ушли вперёд</th>
+                  <th className="text-right px-3 py-1.5 font-medium">С первого раза</th>
+                  <th className="text-right px-3 py-1.5 font-medium" title="Повторные входы / проекты с обратным переходом">
+                    Повторы / возвраты
+                  </th>
+                  <th className="text-right px-3 py-1.5 font-medium" title="Дольше норматива стадии по регламенту">
+                    Дольше нормы
+                  </th>
+                  <th className="px-3 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {d.funnel.map((f) => {
+                  const hot = d.bottleneck?.stage === f.stage && f.stuck > 0
+                  return (
+                    <tr key={f.stage} className={`border-b border-border/30 ${hot ? 'bg-amber-500/[0.06]' : ''}`}>
+                      <td className="px-3 py-1.5">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className={`h-2 w-2 rounded-full ${STAGE_META[f.stage]?.dot ?? 'bg-zinc-400'}`} />
+                          {f.label}
+                          <span className={`text-xs rounded border px-1 ${PHASE_META[f.phase ?? '']?.cls ?? 'text-muted-foreground'}`}>
+                            {PHASE_META[f.phase ?? '']?.label ?? ''}
+                          </span>
                         </span>
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono">{nf0.format(f.count)}</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
-                      {f.medianDays ? f.medianDays : '—'}
-                      {f.normDays != null && <span className="text-xs"> / {f.normDays}</span>}
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
-                      {f.conversion != null ? `${f.conversion}%` : '—'}
-                      {f.visited > 0 && <span className="text-xs"> ({f.advanced}/{f.visited})</span>}
-                    </td>
-                    <td className={`px-3 py-1.5 text-right font-mono ${f.stuck ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
-                      {f.stuck || '—'}
-                    </td>
-                    <td className="px-3 py-1.5 text-right">
-                      {f.count > 0 && (
-                        <button type="button" onClick={() => toggle(`stage:${f.stage}`)}
-                          className="text-muted-foreground hover:text-foreground">
-                          {open === `stage:${f.stage}`
-                            ? <ChevronDown className="h-3.5 w-3.5" />
-                            : <ChevronRight className="h-3.5 w-3.5" />}
-                        </button>
-                      )}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono">{nf0.format(f.count)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                        {f.medianDays || '—'}
+                        <span className="text-xs"> / {f.p85Days || '—'} / {f.normDays ?? '—'}</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                        {f.conversion != null ? `${f.conversion}%` : '—'}
+                        {f.visited > 0 && <span className="text-xs"> ({f.advanced}/{f.visited})</span>}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                        {f.firstPassRate != null ? `${f.firstPassRate}%` : '—'}
+                        {f.advanced > 0 && <span className="text-xs"> ({f.firstPass}/{f.advanced})</span>}
+                      </td>
+                      <td className={`px-3 py-1.5 text-right font-mono ${
+                        f.returned ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'
+                      }`}>
+                        {f.reentries || '—'} / {f.returned || '—'}
+                      </td>
+                      <td className={`px-3 py-1.5 text-right font-mono ${f.stuck ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                        {f.stuck || '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right">
+                        {f.count > 0 && (
+                          <button type="button" onClick={() => toggle(`stage:${f.stage}`)}
+                            aria-label={`${open === `stage:${f.stage}` ? 'Скрыть' : 'Показать'} проекты стадии «${f.label}»`}
+                            aria-expanded={open === `stage:${f.stage}`}
+                            className="text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                            {open === `stage:${f.stage}`
+                              ? <ChevronDown className="h-3.5 w-3.5" />
+                              : <ChevronRight className="h-3.5 w-3.5" />}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+                {d.funnel.filter((f) => open === `stage:${f.stage}`).map((f) => (
+                  <tr key={`d-${f.stage}`}>
+                    <td colSpan={8} className="p-0">
+                      <Drill companyId={companyId} stage={f.stage} count={f.count}
+                        onAll={() => goTo('pr_project', undefined, f.stage)} />
                     </td>
                   </tr>
-                )
-              })}
-              {d.funnel.filter((f) => open === `stage:${f.stage}`).map((f) => (
-                <tr key={`d-${f.stage}`}>
-                  <td colSpan={6} className="p-0">
-                    <Drill companyId={companyId} stage={f.stage} count={f.count}
-                      onAll={() => goTo('pr_project')} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div className="px-3 py-2 text-xs text-muted-foreground border-t space-y-1">
             <div>
-              «Проходят дальше» — доля проектов, побывавших на стадии и ушедших вперёд (по истории
-              переходов). «Медиана» — сколько стадия занимает по факту, а не сколько числится сейчас.
+              «Ушли вперёд» — прямой переход на более позднюю стадию. «С первого раза» — без повторного
+              входа. Медиана и P85 считаются только по завершённым визитам, открытые не искажают срок.
             </div>
             {/* Прочерк вместо числа — не поломка расчёта, а отсутствие материала: обе
                 метрики считаются по переходам, а у проектов, загруженных файлом, их
                 ещё нет. Без этой оговорки таблица выглядит сломанной. */}
             {d.funnel.every((f) => f.visited === 0) && (
               <div>
-                Прочерки в обеих колонках означают, что проекты пока не двигались по стадиям
-                внутри системы: портфель загружен файлом, история переходов начнёт копиться
-                с первого перевода стадии.
+                Прочерки означают, что проекты пока не двигались по стадиям внутри системы:
+                история переходов начнёт копиться с первого перевода стадии.
               </div>
             )}
           </div>
@@ -321,12 +434,22 @@ function Drill({ companyId, risk, stage, count, onAll }: {
   if (q.isLoading) {
     return <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
   }
+  if (q.isError) {
+    return (
+      <div className="bg-muted/20 border-t border-border/40 px-3 py-3 flex items-center justify-between gap-3">
+        <span className="text-xs text-red-700 dark:text-red-400">Список проектов не загрузился</span>
+        <Button variant="ghost" size="sm" className="h-7" onClick={() => void q.refetch()}>
+          <RefreshCw className="h-3 w-3 mr-1" />Повторить
+        </Button>
+      </div>
+    )
+  }
   const rows = q.data?.items ?? []
   return (
     <div className="bg-muted/20 border-t border-border/40">
       {rows.map((s) => (
         <button key={s.id} type="button" onClick={() => openProject(s.id)}
-          className="w-full flex items-center gap-3 px-3 py-1.5 text-left text-sm hover:bg-muted/50 border-b border-border/20">
+          className="w-full flex items-center gap-3 px-3 py-1.5 text-left text-sm hover:bg-muted/50 border-b border-border/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
           <span className="font-mono w-32 shrink-0 text-muted-foreground">{s.projectNo ?? '—'}</span>
           <span className="flex-1 min-w-0 truncate">
             {s.title || s.address || s.installPlace || s.fullAddress || '—'}
@@ -339,7 +462,7 @@ function Drill({ companyId, risk, stage, count, onAll }: {
         </button>
       ))}
       <button type="button" onClick={onAll}
-        className="w-full px-3 py-1.5 text-left text-xs text-primary hover:underline inline-flex items-center gap-1">
+        className="w-full px-3 py-1.5 text-left text-xs text-primary hover:underline inline-flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
         <ExternalLink className="h-3 w-3" />
         {count > rows.length ? `Показаны ${rows.length} из ${nf0.format(count)} — открыть весь список` : 'Открыть в реестре'}
       </button>
