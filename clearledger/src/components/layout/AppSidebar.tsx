@@ -14,6 +14,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
+  Archive, Megaphone, MessagesSquare, UserRound, Users2,
+  BookOpen, Compass, Scale, FileSignature, HelpCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -70,6 +72,35 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
  *    и шторка получалась пустой.
  * `onNavigate` — колбэк на клик по пункту (мобила закрывает шторку).
  */
+/**
+ * Разделы приложения «Чаты». Те же виды, которыми живёт сам чат: канал односторонний,
+ * в группе говорят все, личный — про двоих. Архив отдельным пунктом, потому что это
+ * другой вопрос: не «что происходит», а «что было».
+ */
+/**
+ * Пласты знания - меню приложения «Инфо».
+ *
+ * Раньше на `/info` рисовалось меню Учёта целиком, и первым пунктом стоял «Рабочий
+ * стол», уводивший из приложения совсем (решение МАГа 30.07.2026: пункт должен
+ * оставлять человека там, где он есть). «Инфо» - самостоятельное приложение, его
+ * верхний уровень навигации - пласты знания, а не чужие разделы.
+ */
+const INFO_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] = [
+  { key: 'all', label: 'Всё знание', icon: BookOpen },
+  { key: 'guide', label: 'Работа в системе', icon: Compass },
+  { key: 'norm', label: 'Нормы и требования', icon: Scale },
+  { key: 'lnd', label: 'Документы компании', icon: FileSignature },
+  { key: 'faq', label: 'Частые вопросы', icon: HelpCircle },
+]
+
+const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] = [
+  { key: 'all', label: 'Все чаты', icon: MessagesSquare },
+  { key: 'channel', label: 'Каналы', icon: Megaphone },
+  { key: 'group', label: 'Группы', icon: Users2 },
+  { key: 'direct', label: 'Личные', icon: UserRound },
+  { key: 'archive', label: 'Архив', icon: Archive },
+]
+
 export function SidebarNavContent({ collapsed = false, onNavigate }: {
   collapsed?: boolean; onNavigate?: () => void
 }) {
@@ -85,6 +116,40 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
   // страницы: рабочее место не должно показывать чужие. Модулями Учёта пункты внутри не
   // фильтруются (у роли с ключом `finance` их нет, и «Документы» исчезли бы из
   // собственного продукта) — правами продукта фильтруются: `finance:files`.
+  // Приложение «Чаты» — не продукт разреза, но полноценное рабочее место со своими
+  // разделами: у управления перепиской те же виды, что и в самом чате (канал, группа,
+  // личный) плюс архив. Без этой ветки экран открывался без левого меню — как страница,
+  // а не как приложение.
+  if (pathname === '/messages' || pathname.startsWith('/messages/')) {
+    const view = new URLSearchParams(search).get('view') || 'all'
+    return (
+      <SidebarGroup className="py-0">
+        <SidebarMenu>
+          {CHAT_VIEWS.map((v) => (
+            <NavItem key={v.key} to={`/messages${v.key === 'all' ? '' : `?view=${v.key}`}`}
+              icon={v.icon} label={v.label} active={view === v.key} onNavigate={onNavigate} />
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+    )
+  }
+
+  // «Инфо» - приложение Ядра со своим меню: пласты знания. Пункт ведёт на тот же
+  // экран с фильтром, а не наружу: человек, открывший знание, остаётся в нём.
+  if (pathname === '/info' || pathname.startsWith('/info/')) {
+    const kind = new URLSearchParams(search).get('kind') || 'all'
+    return (
+      <SidebarGroup className="py-0">
+        <SidebarMenu>
+          {INFO_VIEWS.map((v) => (
+            <NavItem key={v.key} to={`/info${v.key === 'all' ? '' : `?kind=${v.key}`}`}
+              icon={v.icon} label={v.label} active={kind === v.key} onNavigate={onNavigate} />
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+    )
+  }
+
   const product = isCarvedProfile(company.profileId) ? productForPath(pathname) : null
   if (product) {
     // Разделы берём фактические (useWorkspaceSections), а не объявленные в карте:

@@ -18,6 +18,7 @@
  * сохраняется между сессиями.
  */
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -61,6 +62,11 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
   })
   useEffect(() => { localStorage.setItem(FONT_KEY, String(fontStep)) }, [fontStep])
 
+  // Пласт из адреса: пункт левого меню приложения ведёт сюда же с `?kind=`, а не
+  // наружу. В окне из шапки меню нет, поэтому там всегда всё знание.
+  const [params] = useSearchParams()
+  const kind = variant === 'modal' ? null : params.get('kind')
+
   const tree = useQuery({ queryKey: ['info-tree', companyId], queryFn: () => getInfoTree(companyId) })
   const found = useQuery({
     queryKey: ['info-search', companyId, q],
@@ -78,7 +84,12 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
     if (next.has(k)) next.delete(k); else next.add(k)
     fn(next)
   }
-  const empty = useMemo(() => (tree.data?.total ?? 0) === 0, [tree.data])
+  const groups = useMemo(
+    () => (tree.data?.groups ?? []).filter((g) => !kind || g.key === kind),
+    [tree.data, kind])
+  const empty = useMemo(
+    () => (kind ? groups.length === 0 : (tree.data?.total ?? 0) === 0),
+    [kind, groups, tree.data])
   const modal = variant === 'modal'
   // Разделы для формы документа — все видимые: свои и платформенные.
   const categories = useMemo(
@@ -127,12 +138,15 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
           </div>
         ) : empty ? (
           <div className="px-2 py-6 text-xs text-muted-foreground">
-            Знание пространства пока пустое. Сюда заводят инструкции, отраслевые нормы и
-            документы компании: регламенты, приказы, чек-листы.
+            {kind === 'lnd'
+              ? 'Документов компании пока нет. Их заводят кнопкой ниже: регламенты, приказы, инструкции организации.'
+              : kind
+                ? 'В этом пласте пока пусто.'
+                : 'Знание пространства пока пустое. Сюда заводят инструкции, отраслевые нормы и документы компании: регламенты, приказы, чек-листы.'}
           </div>
         ) : (
           <div className="space-y-1">
-            {(tree.data?.groups ?? []).map((g) => {
+            {groups.map((g) => {
               const Icon = KIND_ICON[g.key] ?? BookOpen
               const open = openGroups.has(g.key)
               return (
@@ -209,7 +223,8 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4" style={{ fontSize: FONT_STEPS[fontStep] }}>
         {!selected ? (
-          <Start tree={tree.data} onPick={setSelected} onAdd={modal ? undefined : () => setEditing('new')} />
+          <Start tree={tree.data} groups={groups} onPick={setSelected}
+            onAdd={modal ? undefined : () => setEditing('new')} />
         ) : article.isLoading || !article.data ? (
           <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
         ) : (
@@ -256,10 +271,9 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
 }
 
 /** Стартовый экран читалки: чем «Инфо» наполнено и с чего начать. */
-function Start({ tree, onPick, onAdd }: {
-  tree?: InfoTree; onPick: (id: string) => void; onAdd?: () => void
+function Start({ tree, groups, onPick, onAdd }: {
+  tree?: InfoTree; groups: InfoTree['groups']; onPick: (id: string) => void; onAdd?: () => void
 }) {
-  const groups = tree?.groups ?? []
   const first = groups.find((g) => g.key === 'guide') ?? groups[0]
   const starters = (first?.categories[0]?.articles ?? first?.loose ?? []).slice(0, 5)
   return (
