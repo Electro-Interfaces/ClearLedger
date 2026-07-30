@@ -141,6 +141,12 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
 #   Общий чат         — группа со всеми людьми пространства, включая партнёров:
 #                       место, где просто спросить.
 #
+# Групп под рабочие места пространство НЕ заводит (решение МАГа 30.07.2026): группа
+# нужна тогда, когда людям есть о чём говорить, и создают её они сами — привязку к
+# приложению задают в диалоге создания. Автоматика плодила чаты, в которые никто не
+# написал: витрина считает приложение включённым и по дефолту профиля, поэтому у
+# пилота их набегало по десятку.
+#
 # Тип комнаты — по смыслу, а не «системная»: канал односторонний (`_can_write`),
 # группа говорит вся. Раньше все три были `company`, и «Объявления» вели себя как
 # группа — писать мог любой участник.
@@ -149,12 +155,6 @@ SYSTEM_ROOMS = [
     ("news", "Объявления", "channel"),
     ("platform", "Обновления Элси+", "channel"),
 ]
-
-# Приложения, которым своя группа не нужна: служебная кухня пространства и сервисы,
-# у которых обсуждать нечего (сам чат, заявки, конференции). Группа появляется у
-# ПРИКЛАДНОГО рабочего места — там, где идёт работа и возникают вопросы по ней.
-_NO_GROUP_APPS = {"admin", "data", "info", "connect", "chat", "plan", "conf"}
-
 
 async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> None:
     """Базовый набор чатов пространства + членство ВСЕХ его людей.
@@ -207,66 +207,6 @@ async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> 
             if missing:
                 await db.flush()
 
-
-async def _ensure_app_room(user: User, cid: uuid.UUID, code: str,
-                           db: AsyncSession) -> None:
-    """Группа приложения — по первому входу В ЭТО приложение, а не на весь каталог.
-
-    Раньше комнаты заводились сразу для всех приложений витрины. Но витрина считает
-    приложение включённым и по дефолту профиля: у пилота РусГидро так «подключены»
-    шестнадцать, включая «Интернет-магазин» и «Диагностику», — и в чате появлялось
-    десять групп, в которые никто никогда не напишет. Пустой список чатов честнее
-    списка из пустых групп.
-
-    Теперь группу создаёт сам факт работы: человек открыл рабочее место, рельса
-    попросила чаты этого приложения — группа появилась и заселилась. Вопросы по работе
-    живут в разрезе своего рабочего места, а не в общем чате, где тонут.
-
-    Состав — все люди пространства: доступ к переписке о работе ≠ доступ к её данным,
-    и пересчитывать эффективные права каждого на каждом заходе в чат слишком дорого.
-    Лишних администратор выводит вручную (`/admin/rooms/{id}/participants`).
-    """
-    if not code or code in _NO_GROUP_APPS:
-        return
-    kind = f"app:{code}"
-    room = (await db.execute(select(ChatRoom).where(
-        ChatRoom.company_id == cid, ChatRoom.kind == kind,
-        ChatRoom.is_active.is_(True)))).scalar_one_or_none()
-    if room is None:
-        # Имя — как у приложения в витрине этого профиля («Продажи» у энергетика,
-        # «Топливо» у топливной сети): один и тот же продукт зовётся по-разному, и чат
-        # должен называться так, как рабочее место в меню.
-        name = code
-        try:
-            from app.services import app_registry
-            apps = await app_registry.company_apps(db, cid)
-            rec = next((a for a in apps if a["code"] == code), None)
-            if rec is None or not rec.get("enabled"):
-                return                      # приложение пространству не подключено
-            name = rec["name"]
-        except Exception:                   # noqa: BLE001 — реестр не поднят
-            return
-        room = ChatRoom(type="group", kind=kind, name=name, company_id=cid,
-                        created_by=user.id, scope_product=code)
-        db.add(room)
-        try:
-            await db.flush()
-        except Exception:                   # noqa: BLE001 — гонка двух заходов
-            await db.rollback()
-            return
-
-    member_ids = set((await db.execute(select(ChatParticipant.user_id).where(
-        ChatParticipant.room_id == room.id))).scalars().all())
-    space_ids = set((await db.execute(select(User.id).where(or_(
-        User.company_id == cid,
-        User.id.in_(select(UserCompany.user_id).where(UserCompany.company_id == cid)),
-    )))).scalars().all())
-    space_ids.add(user.id)
-    missing = space_ids - member_ids
-    for uid in missing:
-        db.add(ChatParticipant(room_id=room.id, user_id=uid, role="member"))
-    if missing:
-        await db.flush()
 
 
 def _can_write(room: ChatRoom, user: User, room_role: str | None = None) -> bool:
@@ -426,11 +366,6 @@ async def list_rooms(
 ):
     cid = await _company_of(current_user, db)
     await ensure_company_rooms(current_user, cid, db)
-    # Пришли из приложения (правая рельса передаёт его код) — значит в нём работают:
-    # заводим его группу, если ещё нет. Верхняя кнопка код не передаёт и ничего не
-    # создаёт: она про «все мои чаты», а не про конкретное рабочее место.
-    if product:
-        await _ensure_app_room(current_user, cid, product, db)
 
     # Только комнаты ВЫБРАННОЙ организации — иначе мультикомпанийный юзер увидел
     # бы чаты двух орг вперемешку. Строгая изоляция пространств.
