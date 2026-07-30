@@ -2966,6 +2966,77 @@ async def transactions_rows(
     }
 
 
+@router.get("/transactions/pivot")
+async def transactions_pivot(
+    date_from: str = Query(...), date_to: str = Query(...),
+    dims: str = Query(..., description="ключи измерений через запятую, например station,fuel"),
+    station_code: int | None = Query(None), fuel_codes: str | None = Query(None),
+    pay_types: str | None = Query(None), search: str | None = Query(None),
+    shift: int | None = Query(None), receipt: int | None = Query(None),
+    pos: int | None = Query(None), card: str | None = Query(None),
+    status: str | None = Query(None),
+    limit: int = Query(20000, le=50000),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Листья сводной: агрегаты по НАБОРУ измерений, без иерархии и подытогов.
+
+    Дерево, подытоги и доли собирает браузер. Отсюда два следствия: SQL остаётся
+    обычным GROUP BY без ROLLUP, а смена ПОРЯДКА уровней не идёт в сеть - это те же
+    листья, просто иначе собранные.
+
+    Фильтры берутся тем же билдером, что и построчный реестр (`_tx_conds`). Копия
+    здесь была бы гарантией расхождения: правку внесли бы в одном месте, а сводная
+    показывала бы не то, что список.
+    """
+    from app.services.pivot_dims import dim_select, dim_label, parse_dims
+
+    cid = await _company_id(user, db)
+    try:
+        keys = parse_dims(dims)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    T = FuelTransaction
+    conds = _tx_conds(cid, date_from, date_to, station_code, _csv_ints(fuel_codes),
+                      _csv_strs(pay_types), search, shift, receipt, pos, card, status)
+    cols = [dim_select(k).label(f"d{i}") for i, k in enumerate(keys)]
+    q = (select(*cols,
+                func.count().label("ops"),
+                func.coalesce(func.sum(T.liters), 0).label("liters"),
+                func.coalesce(func.sum(T.amount), 0).label("amount"))
+         .where(*conds).group_by(*cols).limit(limit + 1))
+    res = (await db.execute(q)).all()
+    truncated = len(res) > limit
+    rows = res[:limit]
+
+    # Подписи станций: код в ключе, имя на экране. Остальные измерения говорят сами
+    # за себя, а «АЗС 210» без названия читается плохо.
+    names: dict[str, str] = {}
+    if "station" in keys:
+        names = {str(int(st.code)): st.name for st in (await db.execute(
+            select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
+
+    return {
+        "dims": keys,
+        "labels": [dim_label(k) for k in keys],
+        "stationNames": names,
+        "rows": [{
+            "keys": [r[i] for i in range(len(keys))],
+            "ops": int(r.ops),
+            "liters": round(float(r.liters), 3),
+            "amount": round(float(r.amount), 2),
+        } for r in rows],
+        "truncated": truncated,
+    }
+
+
+@router.get("/transactions/pivot/dims")
+async def transactions_pivot_dims(user: User = Depends(get_current_user)):
+    """Справочник измерений для конструктора сводной (тот же, что режет SQL)."""
+    from app.services.pivot_dims import dims_catalog
+    return {"dims": dims_catalog()}
+
+
 @router.get("/transactions/coupon")
 async def transactions_coupon(
     station_code: int = Query(...), dt: str = Query(..., description="время реализации, ISO"),

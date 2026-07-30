@@ -573,6 +573,38 @@ export const getFuelTxRows = (p: FuelTxRowsParams) =>
     status: p.status,
     sort: p.sort, order: p.order, limit: p.limit, offset: p.offset,
   })
+/** Лист сводной: агрегат по набору измерений. Иерархию собирает браузер. */
+export interface FuelPivotResp {
+  dims: string[]
+  labels: string[]
+  /** Код станции → имя: в ключах код, на экране название. */
+  stationNames: Record<string, string>
+  rows: { keys: (string | null)[]; ops: number; liters: number; amount: number }[]
+  /** Упёрлись в потолок строк: показать плашку, а не молча обрезать. */
+  truncated: boolean
+}
+
+/**
+ * Листья сводной по тем же фильтрам, что и реестр.
+ *
+ * `dims` — НАБОР измерений; порядок уровней на экране к серверу отношения не имеет,
+ * поэтому ключ кэша строится по отсортированному набору (см. `FuelTxPivot`).
+ */
+export const getFuelTxPivot = (p: FuelTxRowsParams & { dims: string[] }) =>
+  get<FuelPivotResp>('/api/fuel/transactions/pivot', {
+    date_from: p.dateFrom, date_to: p.dateTo,
+    dims: p.dims.join(','),
+    station_code: p.stationCode,
+    fuel_codes: p.fuelCodes?.length ? p.fuelCodes.join(',') : undefined,
+    pay_types: p.payTypes?.length ? p.payTypes.join(',') : undefined,
+    search: p.search, shift: p.shift, receipt: p.receipt, pos: p.pos, card: p.card,
+    status: p.status,
+  })
+
+/** Справочник измерений для конструктора (тот же, что режет SQL на сервере). */
+export const getFuelPivotDims = () =>
+  get<{ dims: { key: string; label: string }[] }>('/api/fuel/transactions/pivot/dims')
+
 export const getFuelTxFilters = (dateFrom: string, dateTo: string) =>
   get<FuelTxFilters>('/api/fuel/transactions/filters', { date_from: dateFrom, date_to: dateTo })
 

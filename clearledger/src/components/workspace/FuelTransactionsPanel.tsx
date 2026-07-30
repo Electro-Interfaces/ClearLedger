@@ -38,6 +38,7 @@ import {
 import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 import { parseOperationsSearch, parsedInt } from '@/utils/operationsSearchParser'
 import { KpiFuelCard, KpiPaymentCard, KpiPaymentChip } from './operations/OperationsKpiCards'
+import { FuelTxPivot } from './FuelTxPivot'
 import { exportOperationsToExcel, exportOperationsToPdf } from '@/services/fuel/operationsExport'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -94,6 +95,8 @@ function SortHead({ label, k, sort, order, onSort, right, center }: {
 type Agg = { count: number; liters: number; amount: number }
 const ZERO: Agg = { count: 0, liters: 0, amount: 0 }
 
+const VIEW_KEY = 'fuel-tx-view'
+
 export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
@@ -115,6 +118,12 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
   const [exporting, setExporting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [detail, setDetail] = useState<FuelTxRow | null>(null)
+  // Режим страницы: тот же период, те же фильтры и те же KPI, другой способ смотреть.
+  // Запоминается, потому что человек обычно живёт в одном из двух.
+  const [view, setView] = useState<'list' | 'pivot'>(() => {
+    try { return localStorage.getItem(VIEW_KEY) === 'pivot' ? 'pivot' : 'list' } catch { return 'list' }
+  })
+  useEffect(() => { try { localStorage.setItem(VIEW_KEY, view) } catch { /* ignore */ } }, [view])
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 300)
@@ -290,6 +299,16 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Список и сводная — один и тот же отбор, разный способ смотреть. */}
+          <div className="inline-flex rounded-lg border border-border p-0.5">
+            {(['list', 'pivot'] as const).map((v) => (
+              <button key={v} type="button" onClick={() => setView(v)}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                {v === 'list' ? 'Список' : 'Сводная'}
+              </button>
+            ))}
+          </div>
           <Button variant="outline" size="sm" className="h-9" onClick={loadTx} disabled={syncing} title="Загрузить реализации из STS за период раздела">
             {syncing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Загрузить реализации
           </Button>
@@ -403,6 +422,19 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
         </div>
       )}
 
+      {view === 'pivot' ? (
+        <section aria-labelledby="operation-pivot-heading" className="min-w-0">
+          <div className="mb-2">
+            <h3 id="operation-pivot-heading" className="text-sm font-semibold text-foreground">Сводная</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Соберите разрез: перетащите уровни мышью или добавьте кликом. Итог сводной
+              совпадает с карточками выше — фильтры общие.
+            </p>
+          </div>
+          <FuelTxPivot params={params} dateFrom={dateFrom} dateTo={dateTo}
+            stationName={station === ALL ? 'все' : (filtersQ.data?.stations.find((s) => String(s.code) === station)?.name ?? station)} />
+        </section>
+      ) : (
       <section aria-labelledby="operation-list-heading">
         <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -466,9 +498,10 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
         </CardContent>
         </Card>
       </section>
+      )}
 
-      {/* пагинация */}
-      {total > 0 && (
+      {/* пагинация — только у списка: у сводной страниц нет */}
+      {view === 'list' && total > 0 && (
         <div className="flex items-center justify-between text-xs text-muted-foreground">
           <span>{nf0.format(from)}–{nf0.format(to)} из {nf0.format(total)}{isPlaceholderData ? ' · обновляем' : ''}</span>
           <div className="flex items-center gap-1">
