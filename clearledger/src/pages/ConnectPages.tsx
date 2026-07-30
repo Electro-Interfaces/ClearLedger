@@ -58,7 +58,7 @@ function NoCompany() {
 export function ConnectionsPage() {
   return (
     <Page icon={Cable} title="Состояние"
-      hint="Каналы связи пространства и источники данных приложений — что живо и когда приносили данные">
+      hint="Каналы связи пространства и источники данных приложений: что живо и когда приносили данные">
       <Connections />
     </Page>
   )
@@ -67,7 +67,7 @@ export function ConnectionsPage() {
 export function NotificationsPage() {
   const { companyId, canManage } = useCanManage()
   return (
-    <Page icon={Bell} title="Оповещения" hint="О чём сообщать и куда — в чат организации или на почту">
+    <Page icon={Bell} title="Оповещения" hint="О чём сообщать и куда: в чат организации или на почту">
       {companyId ? <Notifications companyId={companyId} canManage={canManage} /> : <NoCompany />}
     </Page>
   )

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import InfoArticle, InfoBinding, InfoCategory
@@ -519,12 +519,24 @@ async def _seed_pack(db: AsyncSession, profile: str | None,
     # воркерами, и сид выполняется дважды одновременно. Гонка успевает завести две
     # одноимённые записи, после чего строгая выборка роняла весь сид целиком
     # («Multiple rows were found»), а вместе с ним и обновление всех текстов.
+    def _norm(col: Any):
+        """Заголовок без разницы «тире или дефис»."""
+        return func.replace(func.replace(col, "—", "-"), "–", "-")
+
     async def _find(model: Any, title: str) -> tuple[Any, list[Any]]:
         rows = (await db.execute(select(model).where(
             model.company_id.is_(None), _own(model), model.title == title))).scalars().all()
+        # Заголовок мог смениться только знаком (правка по навыку «хуманизатор»:
+        # длинное тире ушло на дефис). Точное сравнение завело бы вторую статью, а
+        # первая осталась бы висеть рядом с тем же текстом.
+        if not rows:
+            norm = title.replace("—", "-").replace("–", "-")
+            rows = (await db.execute(select(model).where(
+                model.company_id.is_(None), _own(model), _norm(model.title) == norm))).scalars().all()
         if not rows and profile is None:
             rows = (await db.execute(select(model).where(
-                model.company_id.is_(None), model.title == title))).scalars().all()
+                model.company_id.is_(None), _norm(model.title) == title.replace(
+                    "—", "-").replace("–", "-")))).scalars().all()
         return (rows[0] if rows else None), list(rows[1:])
 
     cats: dict[str, InfoCategory] = {}

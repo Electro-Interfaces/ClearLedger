@@ -161,7 +161,7 @@ export function InfoArticleEditor({ companyId, article, categories, onClose, onS
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">О чём документ — одной строкой</Label>
+            <Label className="text-xs">О чём документ, одной строкой</Label>
             <Input value={summary} onChange={(e) => setSummary(e.target.value)}
               placeholder="Порядок приёма бензовоза и сверки с ТТН" className="h-9" />
           </div>
