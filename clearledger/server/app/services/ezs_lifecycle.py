@@ -288,7 +288,8 @@ async def start_project(db: AsyncSession, company_id, *, site: EzsSite, kind: st
     await db.flush()
     await log_event(db, site, "note", user=user,
                     text=f"Заведён проект {p.project_no} — {KIND_LABELS[kind]}"
-                         + (f" ({reason})" if reason else ""))
+                         + (f" ({reason})" if reason else ""),
+                    project_id=p.id)
     return {"ok": True, "project": _out(p, site=site, location=loc)}
 
 
@@ -317,7 +318,8 @@ async def close_project(db: AsyncSession, company_id, project: EzsProject, *, mo
     tail = ("капвложения остаются на счёте 08"
             if mode == "on_hold" else "капвложения подлежат списанию")
     await log_event(db, site, "stage", user=user, from_stage=project.prev_stage, to_stage=mode,
-                    text=f"Проект {project.project_no} {word}: {reason.strip()} — {tail}")
+                    text=f"Проект {project.project_no} {word}: {reason.strip()} — {tail}",
+                    project_id=project.id)
     return {"ok": True, "project": _out(project, site=site)}
 
 

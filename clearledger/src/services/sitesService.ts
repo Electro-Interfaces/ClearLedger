@@ -673,6 +673,56 @@ export async function getPortfolioOverview(companyId: string): Promise<Portfolio
   return get('/api/sites/portfolio/overview', { company_id: companyId })
 }
 
+export interface ProjectChange {
+  field: string
+  label: string
+  category: string
+  old: unknown
+  new: unknown
+  oldDisplay: string
+  newDisplay: string
+}
+
+export interface ProjectChangesOverview {
+  period: { days: number; from: string }
+  summary: { events: number; projects: number; fields: number; decisions: number }
+  tracking: { startedAt: string | null; legacyEvents: number }
+  byCategory: { category: string; label: string; count: number }[]
+  byField: { field: string; label: string; category: string; count: number }[]
+  items: {
+    id: string
+    siteId: string
+    projectId: string | null
+    projectNo: string | null
+    title: string
+    kind: string
+    source: 'user' | 'import' | 'system'
+    text: string | null
+    author: string
+    createdAt: string | null
+    changes: ProjectChange[]
+  }[]
+  nextCursor: string | null
+}
+
+export async function getProjectChanges(params: {
+  companyId: string
+  days: number
+  category?: string
+  source?: string
+  cursor?: string
+  limit?: number
+}): Promise<ProjectChangesOverview> {
+  return get('/api/sites/changes/overview', {
+    company_id: params.companyId,
+    days: params.days,
+    category: params.category,
+    source: params.source,
+    cursor: params.cursor,
+    limit: params.limit,
+  })
+}
+
 export async function getPortfolio(companyId: string): Promise<Portfolio> {
   return get('/api/sites/portfolio', { company_id: companyId })
 }

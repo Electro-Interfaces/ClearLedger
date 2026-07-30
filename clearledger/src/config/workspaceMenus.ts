@@ -203,6 +203,7 @@ export const SITES_WORK_MENU: CentralMenuItem[] = [
 ]
 export const SITES_ANALYTICS_MENU: CentralMenuItem[] = [
   { key: 'pr_portfolio',   label: 'Обзор' },
+  { key: 'pr_changes',     label: 'Изменения' },
   { key: 'sites_overview', label: 'Воронка' },
   { key: 'sites_priority', label: 'Приоритеты' },
   { key: 'pr_budget',      label: 'Бюджет' },

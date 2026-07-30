@@ -27,6 +27,7 @@ from app.models import (
     Contract, EzsSite, EzsSiteCost, EzsSiteDoc, EzsSiteEquipment, EzsTechConnection,
     ServiceLocation, User,
 )
+from app.services.ezs_changes import make_change
 from app.services.ezs_site_work import log_event
 from app.services.ezs_checklist import norm_days
 from app.services.ezs_sites import (
@@ -98,7 +99,12 @@ async def add_doc(db: AsyncSession, company_id, site: EzsSite, *, file_id, kind:
     await db.flush()
     await log_event(db, site, "doc", user=user,
                     text=f"Приложен документ: {DOC_LABELS.get(doc.kind, doc.kind)}"
-                         + (f" — {title}" if title else ""))
+                         + (f" — {title}" if title else ""),
+                    changes=[make_change(
+                        f"document:{doc.kind}", None, str(doc.id),
+                        label=f"Документ: {DOC_LABELS.get(doc.kind, doc.kind)}",
+                        category="decision", new_display=title or "добавлен",
+                    )])
     return {"id": str(doc.id)}
 
 
@@ -109,7 +115,13 @@ async def delete_doc(db: AsyncSession, company_id, site: EzsSite, doc_id, user: 
     if doc is None:
         return False
     await log_event(db, site, "doc", user=user,
-                    text=f"Удалён документ: {DOC_LABELS.get(doc.kind, doc.kind)}")
+                    text=f"Удалён документ: {DOC_LABELS.get(doc.kind, doc.kind)}",
+                    changes=[make_change(
+                        f"document:{doc.kind}", str(doc.id), None,
+                        label=f"Документ: {DOC_LABELS.get(doc.kind, doc.kind)}",
+                        category="decision", old_display=doc.title or "был приложен",
+                        new_display="удалён",
+                    )])
     await db.delete(doc)
     return True
 
@@ -177,10 +189,11 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
     if tc is None:
         tc = EzsTechConnection(company_id=company_id, site_id=site.id)
         db.add(tc)
-    prev_status = tc.status
+    changes: list[dict[str, Any]] = []
     for f, v in patch.items():
         if f not in TC_FIELDS:
             continue
+        old = getattr(tc, f, None)
         if v in ("", None):
             setattr(tc, f, None)
         elif f in _TC_NUM:
@@ -192,6 +205,13 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
             setattr(tc, f, bool(v))
         else:
             setattr(tc, f, str(v))
+        new = getattr(tc, f, None)
+        if old != new:
+            changes.append(make_change(
+                f"tc.{f}", old, new,
+                old_display=TC_LABELS.get(old, old) if f == "status" and old else None,
+                new_display=TC_LABELS.get(new, new) if f == "status" and new else None,
+            ))
     tc.updated_at = datetime.now(timezone.utc)
     # Пункт 5.6 гейта («фиксация сроков мероприятий ТУ») смотрит в графу площадки,
     # а срок задают здесь — месяцами заявителя или датой мероприятий. Без зеркала
@@ -205,14 +225,17 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
             except ValueError:
                 months = None
         if months:
+            changes.append(make_change("tp_term_months", site.tp_term_months, months))
             site.tp_term_months = months
     await db.flush()
-    if created:
+    if changes:
+        await log_event(
+            db, site, "edit", user=user, changes=changes,
+            text=("Заведено техприсоединение: " if created else "Техприсоединение: ")
+                 + ", ".join(item["label"] for item in changes),
+        )
+    elif created:
         await log_event(db, site, "note", text="Заведено техприсоединение", user=user)
-    elif prev_status != tc.status:
-        await log_event(db, site, "note", user=user,
-                        text=f"Техприсоединение: {TC_LABELS.get(prev_status, prev_status)} → "
-                             f"{TC_LABELS.get(tc.status, tc.status)}")
     return _tc_out(tc)
 
 
@@ -402,10 +425,11 @@ async def upsert_equipment(db: AsyncSession, company_id, site: EzsSite, payload:
     if row is None:
         row = EzsSiteEquipment(company_id=company_id, site_id=site.id)
         db.add(row)
-    prev_status = row.status
+    changes: list[dict[str, Any]] = []
     for f, v in payload.items():
         if f not in EQ_FIELDS:
             continue
+        old = getattr(row, f, None)
         if v in ("", None):
             setattr(row, f, None)
         elif f in _EQ_NUM:
@@ -420,24 +444,48 @@ async def upsert_equipment(db: AsyncSession, company_id, site: EzsSite, payload:
                 pass
         else:
             setattr(row, f, str(v))
+        new = getattr(row, f, None)
+        if old != new:
+            changes.append(make_change(
+                f"equipment.{f}", old, new,
+                old_display=EQ_LABELS.get(old, old) if f == "status" and old else None,
+                new_display=EQ_LABELS.get(new, new) if f == "status" and new else None,
+            ))
     row.updated_at = datetime.now(timezone.utc)
     await db.flush()
-    if created:
+    if changes:
+        await log_event(
+            db, site, "edit", user=user, changes=changes,
+            text=(f"Оборудование в план: {row.title or '—'}"
+                  if created else f"Оборудование «{row.title or '—'}»: ")
+                 + ", ".join(item["label"] for item in changes),
+        )
+    elif created:
         await log_event(db, site, "note", user=user,
                         text=f"Оборудование в план: {row.title or '—'} × {row.qty}")
-    elif prev_status != row.status:
-        await log_event(db, site, "note", user=user,
-                        text=f"Оборудование «{row.title or '—'}»: "
-                             f"{EQ_LABELS.get(prev_status, prev_status)} → {EQ_LABELS.get(row.status, row.status)}")
     return _eq_out(row)
 
 
-async def delete_equipment(db: AsyncSession, company_id, site_id, eq_id) -> bool:
+async def delete_equipment(
+    db: AsyncSession, company_id, site_id, eq_id,
+    *, site: EzsSite | None = None, user: User | None = None,
+) -> bool:
     row = (await db.execute(select(EzsSiteEquipment).where(
         EzsSiteEquipment.company_id == company_id, EzsSiteEquipment.site_id == site_id,
         EzsSiteEquipment.id == eq_id))).scalar_one_or_none()
     if row is None:
         return False
+    if site is not None:
+        label = row.title or "Позиция оборудования"
+        await log_event(
+            db, site, "edit", user=user, text=f"Удалено оборудование: {label}",
+            changes=[make_change(
+                "equipment.status", row.status, None,
+                label=f"Оборудование: {label}", category="technical",
+                old_display=EQ_LABELS.get(row.status, row.status),
+                new_display="удалено",
+            )],
+        )
     await db.delete(row)
     return True
 
@@ -594,6 +642,8 @@ async def upsert_cost(db: AsyncSession, company_id, site: EzsSite, payload: dict
     if row is None:
         row = EzsSiteCost(company_id=company_id, site_id=site.id)
         db.add(row)
+    old_kind = row.kind
+    old_details = (row.title, row.doc_ref, row.note)
     was = (row.plan_amount, row.fact_amount)
     row.kind = str(payload.get("kind") or "other")
     row.title = payload.get("title") or None
@@ -611,14 +661,31 @@ async def upsert_cost(db: AsyncSession, company_id, site: EzsSite, payload: dict
     # Бюджет — единственное, что правилось молча: кто и на сколько поменял сумму,
     # восстановить было нельзя. Пишем суммы «было → стало» прямо в текст события.
     label = COST_LABELS.get(row.kind, row.kind)
-    if created:
-        await log_event(db, site, "note", user=user,
-                        text=f"Бюджет: добавлена статья «{label}» — "
-                             f"план {_money(row.plan_amount)}, факт {_money(row.fact_amount)}")
-    elif was != (row.plan_amount, row.fact_amount):
-        await log_event(db, site, "note", user=user,
-                        text=f"Бюджет «{label}»: план {_money(was[0])} → {_money(row.plan_amount)}, "
-                             f"факт {_money(was[1])} → {_money(row.fact_amount)}")
+    changes = []
+    if old_kind != row.kind:
+        changes.append(make_change(
+            "budget.kind", old_kind, row.kind,
+            old_display=COST_LABELS.get(old_kind, old_kind) if old_kind else None,
+            new_display=label,
+        ))
+    for field, old, new in (
+        ("budget.title", old_details[0], row.title),
+        ("budget.doc_ref", old_details[1], row.doc_ref),
+        ("budget.note", old_details[2], row.note),
+    ):
+        if old != new:
+            changes.append(make_change(field, old, new))
+    if was[0] != row.plan_amount:
+        changes.append(make_change("budget.plan", was[0], row.plan_amount))
+    if was[1] != row.fact_amount:
+        changes.append(make_change("budget.fact", was[1], row.fact_amount))
+    if changes:
+        await log_event(
+            db, site, "edit", user=user, changes=changes,
+            text=(f"Бюджет: добавлена статья «{label}» — "
+                  if created else f"Бюджет «{label}»: ")
+                 + ", ".join(item["label"] for item in changes),
+        )
     await db.flush()
     return {"id": str(row.id)}
 
@@ -635,9 +702,19 @@ async def delete_cost(db: AsyncSession, company_id, site_id, cost_id,
     if row is None:
         return False
     if site is not None:
+        label = COST_LABELS.get(row.kind, row.kind)
+        changes = [make_change(
+            "budget.kind", row.kind, None,
+            old_display=label, new_display="статья удалена",
+        )]
+        if row.plan_amount is not None:
+            changes.append(make_change("budget.plan", row.plan_amount, None))
+        if row.fact_amount is not None:
+            changes.append(make_change("budget.fact", row.fact_amount, None))
         await log_event(db, site, "note", user=user,
-                        text=f"Бюджет: удалена статья «{COST_LABELS.get(row.kind, row.kind)}» "
-                             f"(план {_money(row.plan_amount)}, факт {_money(row.fact_amount)})")
+                        text=f"Бюджет: удалена статья «{label}» "
+                             f"(план {_money(row.plan_amount)}, факт {_money(row.fact_amount)})",
+                        changes=changes)
     await db.delete(row)
     return True
 
@@ -1335,10 +1412,22 @@ async def link_contract(db: AsyncSession, company_id, site: EzsSite, contract_id
         Contract.id == _uuid.UUID(str(contract_id))))).scalar_one_or_none()
     if c is None:
         return {"ok": False, "message": "Договор не найден"}
+    old_contract_id = site.contract_id
+    old_contract = None
+    if old_contract_id and old_contract_id != c.id:
+        old_contract = (await db.execute(select(Contract).where(
+            Contract.company_id == company_id,
+            Contract.id == old_contract_id))).scalar_one_or_none()
     site.contract_id = c.id
-    await log_event(db, site, "note", user=user,
+    await log_event(db, site, "edit", user=user,
                     text=f"Привязан договор № {c.number} от {c.date}"
-                         + (f" ({c.basis})" if c.basis else ""))
+                         + (f" ({c.basis})" if c.basis else ""),
+                    changes=[make_change(
+                        "contract_id", old_contract_id, c.id,
+                        old_display=(f"№ {old_contract.number} от {old_contract.date}"
+                                     if old_contract else None),
+                        new_display=f"№ {c.number} от {c.date}",
+                    )] if old_contract_id != c.id else None)
     from app.services.ezs_lifecycle import sync_from_site
     await sync_from_site(db, company_id, site)
     return {"ok": True, "contract": {"id": str(c.id), "number": c.number, "date": c.date,
@@ -1353,13 +1442,26 @@ async def link_location(db: AsyncSession, company_id, site: EzsSite, location_id
         ServiceLocation.id == str(location_id)))).scalar_one_or_none()
     if loc is None:
         return {"ok": False, "message": "Объект не найден"}
+    old_location_id = site.location_id
+    old_location = None
+    if old_location_id and old_location_id != loc.id:
+        old_location = (await db.execute(select(ServiceLocation).where(
+            ServiceLocation.company_id == company_id,
+            ServiceLocation.id == old_location_id))).scalar_one_or_none()
     site.location_id = loc.id
     # Дату ввода здесь НЕ ставим. Привязка объекта — это регистрация станции в
     # реестре сети; её делают и до ввода, и на проекте, который потом отклонят.
     # Дата ввода — основание перевода капвложений со счёта 08 на 01, и ставит её
     # ровно один путь: маршрут, дошедший до стадии ввода, через закрытый чек-лист
     # (projects_process._reflect_commissioning).
-    await log_event(db, site, "note", user=user, text=f"Связан объект сети: {loc.name}")
+    await log_event(
+        db, site, "edit", user=user, text=f"Связан объект сети: {loc.name}",
+        changes=[make_change(
+            "location_id", old_location_id, loc.id,
+            old_display=old_location.name if old_location else None,
+            new_display=loc.name,
+        )] if old_location_id != loc.id else None,
+    )
     from app.services.ezs_lifecycle import sync_from_site
     await sync_from_site(db, company_id, site)
     return {"ok": True, "location": {"id": str(loc.id), "name": loc.name, "code": loc.code}}

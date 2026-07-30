@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsSite, EzsSiteParticipant, User
+from app.services.ezs_changes import make_change
 from app.services.space_projection import (
     DEFAULT_TIMEOUT,
     ProjectionError,
@@ -147,9 +148,16 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
     # и обрыв связи между этими точками оставлял подрядчика и форму права только в
     # кейсе: человек их ввёл, а чек-лист проекта об этом не знал. Значения кейса —
     # канонические, поэтому сверка идемпотентна и повтор ей не вредит.
+    before = {column: getattr(site, column, None) for column in STEP_FIELDS_TO_SITE.values()}
     written = _reflect_step_fields(site, state.get("values") or {})
     if written:
         state["siteFieldsWritten"] = written
+        from app.services.ezs_site_work import log_event
+        await log_event(
+            db, site, "edit", user=None, source="system",
+            text="Поля проекта досверены с маршрутом",
+            changes=[make_change(field, before[field], getattr(site, field)) for field in written],
+        )
     funnel = await _reflect_commissioning(db, site, state, user=user)
     if funnel:
         state["funnel"] = funnel
@@ -183,12 +191,18 @@ async def _reflect_commissioning(db: AsyncSession, site: EzsSite, state: dict[st
 
     moved = await ezs_site_work.set_stage(
         db, site, "live",
-        reason="Ввод в эксплуатацию по маршруту проекта (Координатор)", user=user)
+        reason="Ввод в эксплуатацию по маршруту проекта (Координатор)",
+        user=None, source="system")
     # Дату ввода ставим, только если воронка проект ПРИНЯЛА. Это основание
     # перевода капвложений со счёта 08 на 01: на проекте с незакрытыми гейтами
     # она была бы ложной записью в учёте, которую потом никто не оспорит.
     if moved.get("moved") and not site.commissioned_on:
         site.commissioned_on = date.today().isoformat()
+        await ezs_site_work.log_event(
+            db, site, "edit", user=None, text="Зафиксирована дата ввода",
+            changes=[make_change("commissioned_on", None, site.commissioned_on)],
+            source="system",
+        )
     return {
         "moved": moved.get("moved", False),
         "blocking": moved.get("blocking") or [],
@@ -252,9 +266,15 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
     # ни подрядчика, ни формы права, и человек будет искать, почему пункт красный.
     # Только для шага самого проекта: ветка ведёт свою часть и карточку не правит.
     if not branch_case_id:
+        before = {column: getattr(site, column, None) for column in STEP_FIELDS_TO_SITE.values()}
         written = _reflect_step_fields(site, payload)
         if written:
             state["siteFieldsWritten"] = written
+            from app.services.ezs_site_work import log_event
+            await log_event(
+                db, site, "edit", user=user, text="Поля перенесены из шага маршрута",
+                changes=[make_change(field, before[field], getattr(site, field)) for field in written],
+            )
 
     funnel = await _reflect_commissioning(db, site, state, user=user)
     if funnel:

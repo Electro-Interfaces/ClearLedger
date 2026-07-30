@@ -30,6 +30,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsSite, Region
+from app.services.ezs_changes import make_change
 
 # ── Воронка ────────────────────────────────────────────────────────────────
 # Порядок = порядок гейтов. Импорт может двигать площадку только ВПЕРЁД по
@@ -631,7 +632,7 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
     touched: set[int] = set()           # площадки, уже обработанные этой загрузкой
     # События истории пишем после commit площадок: у новых записей id появляется
     # только после flush, а ссылаться на несуществующую строку нельзя.
-    events: list[tuple[Any, str, str, str | None, str | None]] = []
+    events: list[tuple[Any, ...]] = []
 
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     for sn in wb.sheetnames:
@@ -791,7 +792,8 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                 report["created"] += 1
             else:
                 prev_stage = found.stage
-                changed = _apply_update(found, fields, raw, sn, ri, key, now, not dry_run)
+                changed, field_changes = _apply_update(
+                    found, fields, raw, sn, ri, key, now, not dry_run)
                 moved = _advance_stage(found, stage, today, not dry_run)
                 if moved == "forward":
                     report["stageMoved"] += 1
@@ -802,7 +804,14 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                 if moved and not dry_run:
                     events.append((found, "stage",
                                    f"Импорт: {STAGE_LABELS.get(prev_stage, prev_stage)} → "
-                                   f"{STAGE_LABELS.get(stage, stage)}", prev_stage, stage))
+                                   f"{STAGE_LABELS.get(stage, stage)}", prev_stage, stage,
+                                   [make_change("stage", prev_stage, stage)], "import"))
+                if field_changes and not dry_run:
+                    events.append((
+                        found, "edit",
+                        "Импорт: " + ", ".join(item["label"] for item in field_changes),
+                        None, None, field_changes, "import",
+                    ))
                 if changed or moved:
                     report["updated"] += 1
                 else:
@@ -826,17 +835,42 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
                                   sorted(resolver.unmatched.items(), key=lambda x: -x[1])[:20]]
     if not dry_run:
         await db.flush()          # id новых площадок — до записи событий
-        from app.models import EzsSiteEvent
-        for site, kind, text_, frm, to in events:
-            db.add(EzsSiteEvent(company_id=company_id, site_id=site.id, kind=kind,
-                                text=text_, from_stage=frm, to_stage=to))
-        await _sync_tech_connections(db, company_id, tc_pending, now, report)
-        # Проект на каждую новую площадку: без него запись не попадёт ни в
-        # реестр проектов, ни в историю объекта.
+        # Сначала создаём проект для новых площадок: событие должно ссылаться на
+        # конкретную работу, а не только на место, где работ может быть несколько.
         from app.services.ezs_lifecycle import sync_from_site
-        for site, kind, _t, _f, _to in events:
+        for event in events:
+            site, kind = event[0], event[1]
             if kind == "import":
                 await sync_from_site(db, company_id, site)
+        await db.flush()
+        await _sync_tech_connections(
+            db, company_id, tc_pending, now, report, events)
+        await db.flush()
+
+        from app.models import EzsProject, EzsSiteEvent
+        event_site_ids = {event[0].id for event in events}
+        project_rows = (await db.execute(
+            select(EzsProject.site_id, EzsProject.id)
+            .where(
+                EzsProject.company_id == company_id,
+                EzsProject.site_id.in_(event_site_ids),
+            )
+            .order_by(EzsProject.created_at.desc())
+        )).all() if event_site_ids else []
+        project_by_site = {}
+        for site_id, project_id in project_rows:
+            project_by_site.setdefault(site_id, project_id)
+
+        for event in events:
+            site, kind, text_, frm, to, *extra = event
+            changes = extra[0] if extra else None
+            source = extra[1] if len(extra) > 1 else "import"
+            db.add(EzsSiteEvent(
+                company_id=company_id, site_id=site.id,
+                project_id=project_by_site.get(site.id), kind=kind,
+                text=text_, from_stage=frm, to_stage=to,
+                changes=changes, source=source,
+            ))
         await db.commit()
     else:
         # В предпросмотре считаем, сколько карточек присоединения появилось бы.
@@ -844,8 +878,14 @@ async def import_sites_xlsx(db: AsyncSession, company_id, content: bytes, dry_ru
     return report
 
 
-async def _sync_tech_connections(db: AsyncSession, company_id, pending: list[tuple[Any, dict[str, Any]]],
-                                 now: datetime, report: dict[str, Any]) -> None:
+async def _sync_tech_connections(
+    db: AsyncSession,
+    company_id,
+    pending: list[tuple[Any, dict[str, Any]]],
+    now: datetime,
+    report: dict[str, Any],
+    events: list[tuple[Any, ...]],
+) -> None:
     """Заводит карточку присоединения по данным файла и дополняет пустые поля.
 
     Заполненное НЕ перетираем: карточку ведут руками (переписка с сетевой
@@ -869,15 +909,28 @@ async def _sync_tech_connections(db: AsyncSession, company_id, pending: list[tup
             db.add(tc)
             existing[site.id] = tc
             report["techConnections"]["created"] += 1
+            changes = [make_change(f"tc.{field}", None, value)
+                       for field, value in vals.items()]
+            if changes:
+                events.append((
+                    site, "edit",
+                    "Импорт: " + ", ".join(item["label"] for item in changes),
+                    None, None, changes, "import",
+                ))
             continue
-        changed = False
+        changes = []
         for f, v in vals.items():
             if getattr(tc, f, None) is None:
+                changes.append(make_change(f"tc.{f}", None, v))
                 setattr(tc, f, v)
-                changed = True
-        if changed:
+        if changes:
             tc.updated_at = now
             report["techConnections"]["updated"] += 1
+            events.append((
+                site, "edit",
+                "Импорт: " + ", ".join(item["label"] for item in changes),
+                None, None, changes, "import",
+            ))
 
 
 def _place_kind(v: Any) -> str | None:
@@ -906,7 +959,7 @@ def _archive_reason(stage: str, vals: dict[str, Any], raw: dict[str, str]) -> st
 
 def _apply_update(site: EzsSite, fields: dict[str, Any], raw: dict[str, str],
                   sheet: str, row_no: int, key: str | None, now: datetime,
-                  apply: bool) -> bool:
+                  apply: bool) -> tuple[bool, list[dict[str, Any]]]:
     """Дополняет пустые поля значениями из файла. Известное НЕ затирает.
 
     Файл — не единственный источник: часть данных ведут руками в карточке, и
@@ -914,6 +967,7 @@ def _apply_update(site: EzsSite, fields: dict[str, Any], raw: dict[str, str],
     apply=False — предпросмотр: только считаем, объекты сессии не трогаем.
     """
     changed = False
+    field_changes: list[dict[str, Any]] = []
     manual = set(site.manual_fields or [])   # поля, введённые руками, — не наше дело
     for f in _FILL_FIELDS:
         if f in manual:
@@ -922,6 +976,7 @@ def _apply_update(site: EzsSite, fields: dict[str, Any], raw: dict[str, str],
         if new is None or new == "":
             continue
         if getattr(site, f, None) in (None, ""):
+            field_changes.append(make_change(f, getattr(site, f, None), new))
             if apply:
                 setattr(site, f, new)
             changed = True
@@ -939,7 +994,7 @@ def _apply_update(site: EzsSite, fields: dict[str, Any], raw: dict[str, str],
             site.dedup_key = key
         if changed:
             site.updated_at = now
-    return changed
+    return changed, field_changes
 
 
 def _advance_stage(site: EzsSite, stage: str, today: str, apply: bool) -> str | None:

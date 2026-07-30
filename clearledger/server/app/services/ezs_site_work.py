@@ -19,12 +19,13 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import EzsSite, EzsSiteEvent, User
+from app.models import EzsProject, EzsSite, EzsSiteEvent, User
 from app.services.ezs_checklist import PHASE_LABELS_DOC, gates_by_stage
 from app.services.ezs_sites import (
     STAGE_LABELS, STAGE_ORDER, _site_out, format_project_no, parse_project_seq,
     project_no_prefix,
 )
+from app.services.ezs_changes import make_change
 
 # ── Гейты: что должно быть готово, чтобы уйти с этой стадии дальше ──────────
 # Собираются из чек-листа согласования ЗУ (регламент РусГидро, `ezs_checklist`):
@@ -150,10 +151,25 @@ async def site_equipment_supplied(db: AsyncSession, site_id) -> bool:
 
 async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | None = None,
                     from_stage: str | None = None, to_stage: str | None = None,
-                    user: User | None = None) -> EzsSiteEvent:
+                    user: User | None = None, changes: list[dict[str, Any]] | None = None,
+                    source: str = "user", project_id: Any | None = None) -> EzsSiteEvent:
+    if changes is None and kind == "stage" and from_stage != to_stage:
+        changes = [make_change("stage", from_stage, to_stage)]
+    if project_id is None:
+        project_id = (await db.execute(
+            select(EzsProject.id)
+            .where(
+                EzsProject.company_id == site.company_id,
+                EzsProject.site_id == site.id,
+            )
+            .order_by(EzsProject.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
     ev = EzsSiteEvent(
-        company_id=site.company_id, site_id=site.id, kind=kind, text=text,
+        company_id=site.company_id, site_id=site.id, project_id=project_id,
+        kind=kind, text=text,
         from_stage=from_stage, to_stage=to_stage,
+        changes=changes, source=source,
         author_user_id=user.id if user is not None else None,
     )
     db.add(ev)
@@ -188,21 +204,40 @@ async def update_site(db: AsyncSession, site: EzsSite, patch: dict[str, Any],
                       user: User | None) -> dict[str, Any]:
     """Правка карточки. Изменённые поля запоминаются как ручные — импорт их не тронет."""
     changed: list[str] = []
+    changes: list[dict[str, Any]] = []
+    owner_values: tuple[Any, Any] | None = None
     manual = set(site.manual_fields or [])
     for f, v in patch.items():
         if f not in EDITABLE_FIELDS:
             continue
         new = _coerce(f, v)
-        if getattr(site, f, None) == new:
+        old = getattr(site, f, None)
+        if old == new:
             continue
         setattr(site, f, new)
         changed.append(f)
+        changes.append(make_change(f, old, new))
+        if f == "owner_user_id":
+            owner_values = (old, new)
         manual.add(f)
     if changed:
+        if owner_values is not None:
+            owner_ids = {value for value in owner_values if value is not None}
+            names = dict((await db.execute(
+                select(User.id, func.coalesce(User.name, User.email)).where(
+                    User.id.in_(owner_ids))
+            )).all()) if owner_ids else {}
+            owner_change = next(
+                item for item in changes if item["field"] == "owner_user_id")
+            owner_change["oldDisplay"] = names.get(owner_values[0]) or "не назначен"
+            owner_change["newDisplay"] = names.get(owner_values[1]) or "не назначен"
         site.manual_fields = sorted(manual)
         site.updated_at = datetime.now(timezone.utc)
         site.last_touch_at = datetime.now(timezone.utc)
-        await log_event(db, site, "edit", text=", ".join(changed), user=user)
+        await log_event(
+            db, site, "edit", text=", ".join(item["label"] for item in changes),
+            changes=changes, user=user,
+        )
         from app.services.ezs_lifecycle import sync_from_site
         await sync_from_site(db, site.company_id, site)
     return {"changed": changed}
@@ -228,20 +263,47 @@ async def bulk_assign(db: AsyncSession, company_id, site_ids: list[Any],
             return {"assigned": 0, "error": "Пользователь не найден"}
     rows = (await db.execute(select(EzsSite).where(
         EzsSite.company_id == company_id, EzsSite.id.in_(site_ids)))).scalars().all()
+    project_rows = (await db.execute(
+        select(EzsProject.site_id, EzsProject.id)
+        .where(
+            EzsProject.company_id == company_id,
+            EzsProject.site_id.in_([site.id for site in rows]),
+        )
+        .order_by(EzsProject.created_at.desc())
+    )).all()
+    project_by_site = {}
+    for site_id, project_id in project_rows:
+        project_by_site.setdefault(site_id, project_id)
     now = datetime.now(timezone.utc)
     name = None
     if owner is not None:
         name = (await db.execute(
             select(func.coalesce(User.name, User.email)).where(User.id == owner))).scalar()
+    old_owner_ids = {s.owner_user_id for s in rows if s.owner_user_id is not None}
+    old_owner_names = {}
+    if old_owner_ids:
+        old_owner_names = dict((await db.execute(
+            select(User.id, func.coalesce(User.name, User.email)).where(
+                User.id.in_(old_owner_ids))
+        )).all())
+    assigned = 0
     for s in rows:
         if s.owner_user_id == owner:
             continue
+        old_owner = s.owner_user_id
         s.owner_user_id = owner
         s.manual_fields = sorted(set(s.manual_fields or []) | {"owner_user_id"})
         s.updated_at = now
         await log_event(db, s, "edit", user=user,
-                        text=f"Ответственный: {name}" if name else "Ответственный снят")
-    return {"assigned": len(rows)}
+                        text=f"Ответственный: {name}" if name else "Ответственный снят",
+                        project_id=project_by_site.get(s.id),
+                        changes=[make_change(
+                            "owner_user_id", old_owner, owner,
+                            old_display=old_owner_names.get(old_owner, "не назначен"),
+                            new_display=name or "не назначен",
+                        )])
+        assigned += 1
+    return {"assigned": assigned}
 
 
 async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
@@ -279,17 +341,21 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
     )
     db.add(site)
     await db.flush()
-    await log_event(db, site, "note", text="Площадка заведена вручную", user=user)
     # У места сразу появляется первый проект: без него площадка не попадёт ни в
     # историю объекта, ни в реестр проектов.
     from app.services.ezs_lifecycle import sync_from_site
-    await sync_from_site(db, site.company_id, site)
+    project = await sync_from_site(db, site.company_id, site)
+    await db.flush()
+    await log_event(
+        db, site, "note", text="Площадка заведена вручную", user=user,
+        project_id=project.id,
+    )
     return site
 
 
 async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str | None,
                     user: User | None, may_override: bool = False,
-                    override: bool = False) -> dict[str, Any]:
+                    override: bool = False, source: str = "user") -> dict[str, Any]:
     """Перевод стадии.
 
     Обязательные пункты гейта **блокируют** движение вперёд. Обход возможен
@@ -336,9 +402,12 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     site.last_touch_at = datetime.now(timezone.utc)
     site.updated_at = datetime.now(timezone.utc)
     if stage == "archive" and reason:
+        old_archive_reason = site.archive_reason
         site.archive_reason = reason[:200]
         manual = set(site.manual_fields or []); manual.add("archive_reason")
         site.manual_fields = sorted(manual)
+    else:
+        old_archive_reason = site.archive_reason
 
     note = f"{STAGE_LABELS.get(prev, prev)} → {STAGE_LABELS.get(stage, stage)}"
     if reason:
@@ -350,8 +419,16 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     if forward and gate["blocking"] and override:
         note = "ОБХОД ГЕЙТА. " + note
         await log_event(db, site, "gate", user=user,
+                        source=source,
                         text=f"Обход обязательных пунктов ({'; '.join(gate['blocking'])}): {reason}")
-    await log_event(db, site, "stage", text=note, from_stage=prev, to_stage=stage, user=user)
+    changes = [make_change("stage", prev, stage)]
+    if old_archive_reason != site.archive_reason:
+        changes.append(make_change(
+            "archive_reason", old_archive_reason, site.archive_reason))
+    await log_event(
+        db, site, "stage", text=note, from_stage=prev, to_stage=stage,
+        changes=changes, user=user, source=source,
+    )
     from app.services.ezs_lifecycle import sync_from_site
     await sync_from_site(db, site.company_id, site)
     return {"moved": True, "missing": missing, "overridden": bool(forward and gate["blocking"] and override),
@@ -370,6 +447,7 @@ async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
         return {"ok": False, "message": "пункт не относится к текущей стадии"}
     gates = dict(site.gates or {})
     stage_marks = dict(gates.get(site.stage) or {})
+    old_done = bool(stage_marks.get(key, {}).get("done"))
     stage_marks[key] = {
         "done": bool(done),
         "at": datetime.now(timezone.utc).isoformat(),
@@ -379,7 +457,13 @@ async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
     site.gates = gates
     site.last_touch_at = datetime.now(timezone.utc)
     await log_event(db, site, "gate", user=user,
-                    text=f"{'✓' if done else '✗'} {items[key]['label']}")
+                    text=f"{'✓' if done else '✗'} {items[key]['label']}",
+                    changes=[make_change(
+                        f"gate:{key}", old_done, bool(done),
+                        label=items[key]["label"], category="decision",
+                        old_display="выполнено" if old_done else "не выполнено",
+                        new_display="выполнено" if done else "не выполнено",
+                    )] if old_done != bool(done) else None)
     return {"ok": True, "gate": gate_state(
         site, doc_kinds=await site_doc_kinds(db, site.id),
         equipment_supplied=await site_equipment_supplied(db, site.id))}

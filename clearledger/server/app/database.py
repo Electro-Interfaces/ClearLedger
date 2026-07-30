@@ -1251,6 +1251,27 @@ async def create_all() -> None:
                 ON CONFLICT DO NOTHING
             """))
 
+        # v2.33: отдельная аналитика изменений проектов.
+        # Старый `text='owner_user_id, stage'` не содержит прежних значений и не
+        # позволяет честно показать «было → стало». Новые события хранят снимок
+        # изменённых полей; старые остаются как неполная история.
+        for stmt in (
+            "ALTER TABLE ezs_site_events ADD COLUMN IF NOT EXISTS changes JSONB",
+            "ALTER TABLE ezs_site_events ADD COLUMN IF NOT EXISTS source "
+            "VARCHAR(16) NOT NULL DEFAULT 'user'",
+            """
+            UPDATE ezs_site_events
+               SET source = 'import'
+             WHERE source = 'user'
+               AND (kind = 'import' OR text LIKE 'Импорт:%')
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_ezs_site_event_company_created "
+            "ON ezs_site_events (company_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_site_event_changes_gin "
+            "ON ezs_site_events USING GIN (changes) WHERE changes IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

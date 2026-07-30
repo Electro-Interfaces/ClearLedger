@@ -16,8 +16,8 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import EzsSite, EzsSiteParticipant, User
 from app.services import (
-    ezs_checklist, ezs_lifecycle, ezs_park_plan, ezs_project, ezs_site_analysis,
-    ezs_site_work, ezs_sites, projects_process,
+    ezs_changes, ezs_checklist, ezs_lifecycle, ezs_park_plan, ezs_project,
+    ezs_site_analysis, ezs_site_work, ezs_sites, projects_process,
 )
 from app.services.space_projection import ProjectionError
 
@@ -275,6 +275,24 @@ async def portfolio_overview(
     """Рабочий обзор портфеля: что горит, где затык, когда ждать станции, что изменилось."""
     cid = await assert_company_member(company_id, user, db)
     return await ezs_project.portfolio_overview(db, cid)
+
+
+@router.get("/changes/overview")
+async def changes_overview(
+    company_id: str = Query(...),
+    days: int = Query(30),
+    category: str | None = Query(None),
+    source: str | None = Query(None),
+    cursor: uuid.UUID | None = Query(None),
+    limit: int = Query(60),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Проверяемая история изменений проекта: прежнее и новое значение рядом."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_changes.changes_overview(
+        db, cid, days=days, category=category, source=source,
+        cursor=cursor, limit=limit,
+    )
 
 
 @router.get("/tech-connections")
@@ -641,8 +659,9 @@ async def del_equipment(
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     cid = await assert_company_member(company_id, user, db)
-    await _owned(db, cid, site_id)
-    ok = await ezs_project.delete_equipment(db, cid, site_id, eq_id)
+    site = await _owned(db, cid, site_id)
+    ok = await ezs_project.delete_equipment(
+        db, cid, site_id, eq_id, site=site, user=user)
     if not ok:
         raise HTTPException(404, "Позиция не найдена")
     await db.commit()

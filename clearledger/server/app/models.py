@@ -4200,12 +4200,18 @@ class EzsSiteEvent(Base):
     from_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
     to_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Структурированное «было → стало». Текст события остаётся пояснением,
+    # но аналитика изменений строится только по этим проверяемым значениям.
+    changes: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="user", server_default="user")
     author_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("ix_ezs_site_event_site", "site_id", "created_at"),
+        Index("ix_ezs_site_event_company_created", "company_id", "created_at"),
     )
 
 
