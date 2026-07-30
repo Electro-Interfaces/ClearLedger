@@ -28,6 +28,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { GoodsRouteBar } from './GoodsRouteBar'
+import { TankEquipmentPane } from './TankEquipmentPane'
+import { TankCardDialog, type TankRef } from './TankCardDialog'
 import {
   getTankSpecs, saveTankSpecs, syncTankSpecsFromSts, type TankSpecRow,
 } from '@/services/analyticsService'
@@ -40,13 +42,20 @@ const SOURCE_META: Record<string, { label: string; cls: string }> = {
   estimate: { label: 'оценка по книге', cls: 'border-amber-500/40 text-amber-500' },
 }
 
-export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
+export function TankSpecsPanel({ companyId, stationCodes, standalone, dateFrom, dateTo }: {
   companyId: string
   stationCodes: number[]
   /** Отдельным пунктом — рисуем маршрут раздела и заголовок сами. */
   standalone?: boolean
+  /** Период рабочей области — для истории резервуара в карточке. */
+  dateFrom?: string
+  dateTo?: string
 }) {
   const qc = useQueryClient()
+  // Карточка оборудования и разбор расхождения — по строке, немодально: резервуары
+  // просматривают подряд, список под панелью должен оставаться живым.
+  const [picked, setPicked] = useState<TankSpecRow | null>(null)
+  const [variance, setVariance] = useState<TankRef | null>(null)
   /** Правки до сохранения: ключ «код АЗС:резервуар» → введённая вместимость. */
   const [edits, setEdits] = useState<Record<string, string>>({})
 
@@ -105,6 +114,9 @@ export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
     }
     saveMut.mutate(payload)
   }
+
+  const histFrom = useMemo(halfYearAgo, [])
+  const histTo = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
   const noSpec = rows.filter((r) => !r.usable_liters || r.source === 'estimate').length
   /** Прибор врёт: отдавал больше вместимости или свой предел вместо измерения. */
@@ -191,7 +203,14 @@ export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
               </thead>
               <tbody>
                 {broken.map((r) => (
-                  <tr key={`b-${key(r)}`} className="border-t border-red-500/15">
+                  <tr
+                    key={`b-${key(r)}`}
+                    tabIndex={0}
+                    aria-haspopup="dialog"
+                    onClick={() => setPicked(r)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPicked(r) } }}
+                    className="cursor-pointer border-t border-red-500/15 transition-colors hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  >
                     <td className="px-3 py-1.5 font-medium">{r.station_name}</td>
                     <td className="px-3 py-1.5">№{r.tank_number}</td>
                     <td className="px-3 py-1.5">{r.fuel_name}</td>
@@ -267,11 +286,20 @@ export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
                   const bad = isBroken(r)
                   const src = r.source ? SOURCE_META[r.source] : null
                   return (
-                    <tr key={k} className={cn('border-t', bad && 'bg-red-500/5')}>
+                    <tr
+                      key={k}
+                      tabIndex={0}
+                      aria-haspopup="dialog"
+                      onClick={() => setPicked(r)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPicked(r) } }}
+                      className={cn('cursor-pointer border-t transition-colors hover:bg-muted/40',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                        bad && 'bg-red-500/5')}
+                    >
                       <td className="px-3 py-1.5">{r.station_name}</td>
                       <td className="px-3 py-1.5">№{r.tank_number}</td>
                       <td className="px-3 py-1.5">{r.fuel_name}</td>
-                      <td className="px-3 py-1.5 text-right">
+                      <td className="px-3 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                         <Input
                           value={edits[k] ?? (r.usable_liters ? nf0.format(r.usable_liters) : '')}
                           onChange={(e) => setEdits((p) => ({ ...p, [k]: e.target.value }))}
@@ -353,9 +381,42 @@ export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
             на погрешность и заполнение до горловины. Показание выше неё в расчёт расхождения
             не берётся и в ведомость инвентаризации не попадает: это поломка прибора, а не топливо.
             {broken.length > 0 && ` Сейчас приборов с явным сбоем: ${broken.length}.`}
+            {' '}Строка открывает карточку резервуара: паспорт, состояние, история наполнения
+            и исправность прибора.
           </p>
         </>
       )}
+
+      <TankEquipmentPane
+        row={picked}
+        companyId={companyId}
+        dateFrom={dateFrom ?? histFrom}
+        dateTo={dateTo ?? histTo}
+        onClose={() => setPicked(null)}
+        onOpenVariance={(r) => {
+          setVariance({
+            station_code: r.station_code, tank_number: r.tank_number,
+            station_name: r.station_name, fuel_name: r.fuel_name,
+          })
+          setPicked(null)
+        }}
+      />
+      <TankCardDialog
+        target={variance}
+        tol={50}
+        companyId={companyId}
+        dateFrom={dateFrom ?? histFrom}
+        dateTo={dateTo ?? histTo}
+        onClose={() => setVariance(null)}
+      />
     </div>
   )
+}
+
+/** История для карточки, когда пункт открыт без периода рабочей области: полгода —
+ *  достаточно, чтобы увидеть ритм завозов и поведение прибора. */
+function halfYearAgo(): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - 6)
+  return d.toISOString().slice(0, 10)
 }

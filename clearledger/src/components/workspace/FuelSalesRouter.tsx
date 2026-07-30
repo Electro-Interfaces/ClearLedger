@@ -55,7 +55,8 @@ export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode 
     // что раньше были табами «Контроля баланса»: панель одна (общий фильтр станций и
     // топлива, шапка баланса), различается набором видов (см. FuelBalancePanel).
     case 'shifts':         return <FuelShiftsPanel {...p} />
-    case 'tank-specs':     return <TankSpecsPanel companyId={companyId} stationCodes={[]} standalone />
+    case 'tank-specs':     return <TankSpecsPanel companyId={companyId} stationCodes={[]} standalone
+                                    dateFrom={dateFrom} dateTo={dateTo} />
     case 'purchases':      return <ReceiptsSection />
     case 'intake':         return <FuelBalancePanel {...p} view="intake" />
     case 'tanks':          return <FuelBalancePanel {...p} />
