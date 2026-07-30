@@ -2978,7 +2978,7 @@ async def transactions_pivot(
     limit: int = Query(20000, le=50000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Листья сводной: агрегаты по НАБОРУ измерений, без иерархии и подытогов.
+    """Листья сводной по реализациям: агрегаты по НАБОРУ измерений, без иерархии.
 
     Дерево, подытоги и доли собирает браузер. Отсюда два следствия: SQL остаётся
     обычным GROUP BY без ROLLUP, а смена ПОРЯДКА уровней не идёт в сеть - это те же
@@ -2988,29 +2988,27 @@ async def transactions_pivot(
     здесь была бы гарантией расхождения: правку внесли бы в одном месте, а сводная
     показывала бы не то, что список.
     """
-    from app.services.pivot_dims import dim_select, dim_label, parse_dims
+    from app.services.pivot_dims import (
+        dim_label, dim_select, metric_selects, metrics_catalog, parse_dims,
+    )
 
     cid = await _company_id(user, db)
     try:
-        keys = parse_dims(dims)
+        keys = parse_dims(dims, "transactions")
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    T = FuelTransaction
     conds = _tx_conds(cid, date_from, date_to, station_code, _csv_ints(fuel_codes),
                       _csv_strs(pay_types), search, shift, receipt, pos, card, status)
-    cols = [dim_select(k).label(f"d{i}") for i, k in enumerate(keys)]
-    q = (select(*cols,
-                func.count().label("ops"),
-                func.coalesce(func.sum(T.liters), 0).label("liters"),
-                func.coalesce(func.sum(T.amount), 0).label("amount"))
-         .where(*conds).group_by(*cols).limit(limit + 1))
-    res = (await db.execute(q)).all()
+    cols = [dim_select(k, "transactions").label(f"d{i}") for i, k in enumerate(keys)]
+    metrics = metric_selects("transactions")
+    mcols = [expr.label(f"m{i}") for i, (_, expr, _) in enumerate(metrics)]
+    res = (await db.execute(select(*cols, *mcols).where(*conds)
+                            .group_by(*cols).limit(limit + 1))).all()
     truncated = len(res) > limit
     rows = res[:limit]
 
-    # Подписи станций: код в ключе, имя на экране. Остальные измерения говорят сами
-    # за себя, а «АЗС 210» без названия читается плохо.
+    # Подписи станций: код в ключе, имя на экране. «АЗС 210» без названия читается плохо.
     names: dict[str, str] = {}
     if "station" in keys:
         names = {str(int(st.code)): st.name for st in (await db.execute(
@@ -3018,23 +3016,94 @@ async def transactions_pivot(
 
     return {
         "dims": keys,
-        "labels": [dim_label(k) for k in keys],
+        "labels": [dim_label(k, "transactions") for k in keys],
+        "metrics": metrics_catalog("transactions"),
         "stationNames": names,
         "rows": [{
             "keys": [r[i] for i in range(len(keys))],
-            "ops": int(r.ops),
-            "liters": round(float(r.liters), 3),
-            "amount": round(float(r.amount), 2),
+            "m": {k: round(float(r[len(keys) + j]), d) for j, (k, _, d) in enumerate(metrics)},
         } for r in rows],
         "truncated": truncated,
     }
 
 
-@router.get("/transactions/pivot/dims")
-async def transactions_pivot_dims(user: User = Depends(get_current_user)):
-    """Справочник измерений для конструктора сводной (тот же, что режет SQL)."""
-    from app.services.pivot_dims import dims_catalog
-    return {"dims": dims_catalog()}
+@router.get("/receipts/pivot")
+async def receipts_pivot(
+    dims: str = Query(..., description="ключи измерений через запятую, например supplier,fuel"),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
+    station_code: int | None = Query(None),
+    limit: int = Query(20000, le=50000),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Листья сводной по приёмке ТТН.
+
+    Метрики здесь свои и это не косметика: приёмку сверяют по МАССЕ, объём зависит от
+    температуры. Отклонение факта от документа считается суммой по листу, а не
+    выводится из средних - иначе подытог перестанет сходиться с строками.
+
+    Отдельный источник от реализаций намеренно: смешивать приход и продажу в одной
+    сводной нельзя, итоги разойдутся с обоими экранами сразу.
+    """
+    from app.services.pivot_dims import (
+        dim_label, dim_select, metric_selects, metrics_catalog, parse_dims,
+    )
+
+    cid = await _company_id(user, db)
+    try:
+        keys = parse_dims(dims, "receipts")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    conds = [FuelReceipt.company_id == cid]
+    if date_from:
+        conds.append(FuelReceipt.received_at >= datetime.fromisoformat(date_from))
+    if date_to:
+        d1 = date.fromisoformat(date_to)
+        conds.append(FuelReceipt.received_at <= datetime(d1.year, d1.month, d1.day, 23, 59, 59))
+    if station_code is not None:
+        st = (await db.execute(select(FuelStation.id).where(
+            FuelStation.company_id == cid, FuelStation.code == station_code))).scalar()
+        conds.append(FuelReceipt.station_id == st)
+
+    cols = [dim_select(k, "receipts").label(f"d{i}") for i, k in enumerate(keys)]
+    metrics = metric_selects("receipts")
+    mcols = [expr.label(f"m{i}") for i, (_, expr, _) in enumerate(metrics)]
+    res = (await db.execute(select(*cols, *mcols).where(*conds)
+                            .group_by(*cols).limit(limit + 1))).all()
+    truncated = len(res) > limit
+    rows = res[:limit]
+
+    # У поступлений станция хранится идентификатором, а не кодом: подписи обязательны,
+    # иначе в разрезе будут UUID.
+    names: dict[str, str] = {}
+    if "station" in keys:
+        names = {str(st.id): st.name for st in (await db.execute(
+            select(FuelStation).where(FuelStation.company_id == cid))).scalars().all()}
+
+    return {
+        "dims": keys,
+        "labels": [dim_label(k, "receipts") for k in keys],
+        "metrics": metrics_catalog("receipts"),
+        "stationNames": names,
+        "rows": [{
+            "keys": [r[i] for i in range(len(keys))],
+            "m": {k: round(float(r[len(keys) + j]), d) for j, (k, _, d) in enumerate(metrics)},
+        } for r in rows],
+        "truncated": truncated,
+    }
+
+
+@router.get("/pivot/dims")
+async def pivot_dims_catalog(
+    source: str = Query("transactions", description="transactions | receipts"),
+    user: User = Depends(get_current_user),
+):
+    """Справочник измерений и метрик источника (тот же, что режет SQL)."""
+    from app.services.pivot_dims import dims_catalog, metrics_catalog
+    try:
+        return {"dims": dims_catalog(source), "metrics": metrics_catalog(source)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.get("/transactions/coupon")

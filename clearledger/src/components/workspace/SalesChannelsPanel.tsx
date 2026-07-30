@@ -17,9 +17,10 @@ import { useLocations } from '@/hooks/useLocations'
 import { cn } from '@/lib/utils'
 import { fmtLiters, fmtMoney, fmtMoneyShort } from '@/services/analyticsService'
 import {
-  getFuelTxFilters, getSalesChannelsAnalytics,
+  getFuelTxFilters, getFuelTxPivot, getSalesChannelsAnalytics,
   type SalesChannelMetrics, type SalesChannelsAnalytics,
 } from '@/services/fuel/fuelMappingService'
+import { PivotView } from './PivotView'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -246,6 +247,10 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
     return locationCodes.includes(sourceCode) ? [sourceCode] : [-1]
   }, [locationIds, locations, stationCode])
   const workspaceKey = workspaceStations.join(',')
+  // Сводная умеет одну станцию (как реестр). Несколько выбранных областью - берём
+  // всю сеть, иначе разрез молча покажет часть данных и разойдётся с карточками.
+  const pivotStation = workspaceStations.length === 1 && workspaceStations[0] > 0
+    ? workspaceStations[0] : undefined
   const scopeMismatch = workspaceStations.includes(-1)
 
   useEffect(() => {
@@ -446,6 +451,7 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
                 <TabsTrigger value="stations">По АЗС <span className="text-[10px] text-muted-foreground">{data.by_station.length}</span></TabsTrigger>
                 <TabsTrigger value="fuel">По топливу <span className="text-[10px] text-muted-foreground">{data.by_fuel.length}</span></TabsTrigger>
                 <TabsTrigger value="matrix">Оплата × АЗС <span className="text-[10px] text-muted-foreground">{data.station_payment.length}</span></TabsTrigger>
+                <TabsTrigger value="pivot">Сводная</TabsTrigger>
               </TabsList>
               <span className="text-[11px] text-muted-foreground">Строки в первых двух разрезах интерактивны</span>
             </div>
@@ -457,6 +463,22 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
             </TabsContent>
             <TabsContent value="matrix">
               <Card><CardContent className="p-0"><StationPaymentTable rows={data.station_payment} /></CardContent></Card>
+            </TabsContent>
+            {/* Готовые разрезы выше отвечают на частые вопросы, сводная - на остальные:
+                канал → топливо → час, оплата → смена и любые другие комбинации. */}
+            <TabsContent value="pivot">
+              <PivotView
+                source="transactions" storageKey="fuel-channels-pivot"
+                defaultDims={['payment', 'station', 'fuel']}
+                queryKey={{ dateFrom, dateTo, station: pivotStation, fuels: fk.fuelCodes }}
+                fetchLeaves={(dims) => getFuelTxPivot({
+                  dateFrom, dateTo, dims,
+                  stationCode: pivotStation,
+                  fuelCodes: fk.fuelCodes?.length ? fk.fuelCodes : undefined,
+                })}
+                dateFrom={dateFrom} dateTo={dateTo}
+                scopeLabel={pivotStation ? `АЗС ${pivotStation}` : 'все АЗС'}
+                hint="разрез по каналам оплаты: перетащите уровни или добавьте свои" />
             </TabsContent>
           </Tabs>
 

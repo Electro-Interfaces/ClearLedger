@@ -1,5 +1,5 @@
 /**
- * Сводная таблица реестра операций: пользователь сам собирает разрез.
+ * Сводная таблица: пользователь сам собирает разрез.
  *
  * Сервер отдаёт только листья (агрегаты по НАБОРУ измерений), дерево и подытоги
  * собирает браузер (`services/fuel/pivotTree.ts`). Отсюда главное свойство экрана:
@@ -10,39 +10,34 @@
  * палитра невыбранных (добавляются кликом). Оба способа обязательны: HTML5 drag&drop
  * на тач-устройствах не работает вовсе, и без клика телефон остался бы без сводной.
  *
- * Фильтры, период и KPI берутся с самой страницы операций - второй раз их не делаем.
- * Поэтому итог сводной обязан совпадать с карточками страницы до копейки.
+ * Фильтры, период и KPI берутся с самой страницы - второй раз их не делаем. Поэтому
+ * итог сводной обязан совпадать с карточками страницы до копейки.
+ *
+ * Компонент общий на все экраны со сводной: источник (реализации, приёмка ТТН), его
+ * измерения и метрики приходят пропсами. Метрики разные не для красоты - приёмку
+ * сверяют по массе, продажи считают в литрах и рублях, и одна зашитая тройка колонок
+ * одному из экранов всегда врала бы.
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import {
-  ChevronDown, ChevronRight, Download, GripVertical, Loader2, Plus, X,
-} from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, GripVertical, Loader2, Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  getFuelPivotDims, getFuelTxPivot, type FuelTxRowsParams,
-} from '@/services/fuel/fuelMappingService'
-import {
-  allExpandablePaths, buildPivotTree, flattenVisible,
-  reorderDims, type PivotMetric, type PivotNode,
+  allExpandablePaths, buildPivotTree, flattenVisible, reorderDims, type PivotNode,
 } from '@/services/fuel/pivotTree'
 import { exportPivotToExcel } from '@/services/fuel/pivotExport'
+import { getPivotCatalog, type PivotMetricDef, type PivotResp } from '@/services/fuel/fuelMappingService'
 
-const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-const nf1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
-const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const nfInt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
-const DIMS_KEY = 'fuel-pivot-dims'
-const METRIC_KEY = 'fuel-pivot-metric'
-const DEFAULT_DIMS = ['station', 'fuel', 'payment']
-
-const METRICS: { key: PivotMetric; label: string }[] = [
-  { key: 'amount', label: 'Выручка' },
-  { key: 'liters', label: 'Литры' },
-  { key: 'ops', label: 'Операции' },
-]
+/** Формат по числу знаков из справочника метрик источника (кг и литры точнее рублей). */
+function fmt(v: number, digits: number): string {
+  if (digits === 0) return nfInt.format(v)
+  const d = Math.min(digits, 2)
+  return new Intl.NumberFormat('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }).format(v)
+}
 
 function readStored<T>(key: string, fallback: T): T {
   try {
@@ -53,23 +48,41 @@ function readStored<T>(key: string, fallback: T): T {
   }
 }
 
-export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
-  /** Те же параметры, что у списка: фильтры не должны разъезжаться. */
-  params: FuelTxRowsParams
-  stationName: string
+export function PivotView({
+  source, storageKey, defaultDims, fetchLeaves, queryKey,
+  dateFrom, dateTo, scopeLabel, hint,
+}: {
+  /** Источник в реестре сервера: `transactions` | `receipts`. */
+  source: string
+  /** Своя память разреза на каждый экран: у приёмки и продаж разрезы разные. */
+  storageKey: string
+  defaultDims: string[]
+  /** Загрузка листьев по набору измерений (фильтры экран подставляет сам). */
+  fetchLeaves: (dims: string[]) => Promise<PivotResp>
+  /** Часть ключа кэша, зависящая от фильтров экрана. */
+  queryKey: unknown
   dateFrom: string
   dateTo: string
+  /** Подпись отбора для шапки Excel (АЗС, сегмент). */
+  scopeLabel?: string
+  hint?: string
 }) {
-  const [dims, setDims] = useState<string[]>(() => readStored(DIMS_KEY, DEFAULT_DIMS))
-  const [metric, setMetric] = useState<PivotMetric>(() => readStored(METRIC_KEY, 'amount' as PivotMetric))
+  const [dims, setDims] = useState<string[]>(() => readStored(`${storageKey}:dims`, defaultDims))
+  const [metric, setMetric] = useState<string>(() => readStored(`${storageKey}:metric`, ''))
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [exporting, setExporting] = useState(false)
 
-  useEffect(() => { localStorage.setItem(DIMS_KEY, JSON.stringify(dims)) }, [dims])
-  useEffect(() => { localStorage.setItem(METRIC_KEY, JSON.stringify(metric)) }, [metric])
+  useEffect(() => { localStorage.setItem(`${storageKey}:dims`, JSON.stringify(dims)) }, [dims, storageKey])
+  useEffect(() => {
+    if (metric) localStorage.setItem(`${storageKey}:metric`, JSON.stringify(metric))
+  }, [metric, storageKey])
 
-  const catalog = useQuery({ queryKey: ['fuel-pivot-dims'], queryFn: getFuelPivotDims, staleTime: 60 * 60_000 })
+  const catalog = useQuery({
+    queryKey: ['pivot-catalog', source],
+    queryFn: () => getPivotCatalog(source),
+    staleTime: 60 * 60_000,
+  })
   const labelOf = useMemo(() => {
     const m = new Map((catalog.data?.dims ?? []).map((d) => [d.key, d.label]))
     return (k: string) => m.get(k) ?? k
@@ -78,12 +91,20 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
   // Ключ кэша — ОТСОРТИРОВАННЫЙ набор: порядок уровней меняет только сборку дерева.
   const sortedDims = useMemo(() => [...dims].sort(), [dims])
   const pivot = useQuery({
-    queryKey: ['fuel-tx-pivot', params, sortedDims],
-    queryFn: () => getFuelTxPivot({ ...params, dims: sortedDims }),
+    queryKey: ['pivot', source, queryKey, sortedDims],
+    queryFn: () => fetchLeaves(sortedDims),
     enabled: sortedDims.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 5 * 60_000,
   })
+
+  const metrics: PivotMetricDef[] = pivot.data?.metrics ?? catalog.data?.metrics ?? []
+  // Метрика сортировки: сохранённая, если она есть у источника, иначе вторая по счёту
+  // (первая обычно «сколько документов», а сортировать интереснее по объёму).
+  const activeMetric = metrics.some((m) => m.key === metric)
+    ? metric
+    : (metrics[1]?.key ?? metrics[0]?.key ?? '')
+  useEffect(() => { if (!metric && activeMetric) setMetric(activeMetric) }, [metric, activeMetric])
 
   const labeler = useMemo(() => {
     const names = pivot.data?.stationNames ?? {}
@@ -97,8 +118,8 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
   }, [pivot.data])
 
   const { nodes, totals } = useMemo(
-    () => buildPivotTree(pivot.data?.rows ?? [], pivot.data?.dims ?? [], dims, metric, labeler),
-    [pivot.data, dims, metric, labeler],
+    () => buildPivotTree(pivot.data?.rows ?? [], pivot.data?.dims ?? [], dims, activeMetric, labeler),
+    [pivot.data, dims, activeMetric, labeler],
   )
   const visible = useMemo(() => flattenVisible(nodes, expanded), [nodes, expanded])
   const available = (catalog.data?.dims ?? []).filter((d) => !dims.includes(d.key))
@@ -108,8 +129,6 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
     if (n.has(path)) n.delete(path); else n.add(path)
     return n
   })
-  const expandAll = () => setExpanded(new Set(allExpandablePaths(nodes)))
-  const collapseAll = () => setExpanded(new Set())
 
   const addDim = (key: string) => setDims((d) => (d.length >= 5 ? d : [...d, key]))
   const removeDim = (key: string) => setDims((d) => d.filter((x) => x !== key))
@@ -123,9 +142,10 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
     setExporting(true)
     try {
       await exportPivotToExcel({
-        nodes, totals, dims, dimLabels: dims.map(labelOf), metric,
+        nodes, totals, dims, dimLabels: dims.map(labelOf), metrics,
+        sortBy: activeMetric,
         leaves: pivot.data?.rows ?? [], serverDims: pivot.data?.dims ?? [],
-        labeler, dateFrom, dateTo, stationName,
+        labeler, dateFrom, dateTo, scopeLabel,
       })
       toast.success('Сводная выгружена')
     } catch (e) {
@@ -136,9 +156,6 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
       setExporting(false)
     }
   }
-
-  const metricValue = (n: { ops: number; liters: number; amount: number }) =>
-    metric === 'ops' ? n.ops : metric === 'liters' ? n.liters : n.amount
 
   return (
     <div className="min-w-0 space-y-3">
@@ -185,11 +202,12 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
             ))}
           </div>
 
-          <div className="ml-auto flex items-center gap-1.5">
-            {METRICS.map((m) => (
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {metrics.map((m) => (
               <button key={m.key} type="button" onClick={() => setMetric(m.key)}
+                title={`Сортировка и доли по «${m.label}»`}
                 className={cn('rounded-md px-2 py-1 text-xs',
-                  metric === m.key ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+                  activeMetric === m.key ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground')}>
                 {m.label}
               </button>
             ))}
@@ -202,11 +220,12 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          <button type="button" onClick={expandAll} className="hover:text-foreground">развернуть всё</button>
+          <button type="button" onClick={() => setExpanded(new Set(allExpandablePaths(nodes)))}
+            className="hover:text-foreground">развернуть всё</button>
           <span>·</span>
-          <button type="button" onClick={collapseAll} className="hover:text-foreground">свернуть</button>
+          <button type="button" onClick={() => setExpanded(new Set())} className="hover:text-foreground">свернуть</button>
           <span>·</span>
-          <span>сортировка по метрике, доля считается от родителя</span>
+          <span>{hint ?? 'сортировка по выбранной метрике, доля считается от родителя'}</span>
           {pivot.isFetching && <Loader2 className="h-3 w-3 animate-spin" />}
         </div>
       </div>
@@ -223,52 +242,49 @@ export function FuelTxPivot({ params, stationName, dateFrom, dateTo }: {
           <thead className="bg-muted/40 text-xs text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left font-medium">Разрез</th>
-              <th className="px-3 py-2 text-right font-medium">Операций</th>
-              <th className="px-3 py-2 text-right font-medium">Литры</th>
-              <th className="px-3 py-2 text-right font-medium">Выручка, ₽</th>
-              <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Ср. цена</th>
+              {metrics.map((m) => (
+                <th key={m.key} className="px-3 py-2 text-right font-medium">{m.label}</th>
+              ))}
               <th className="px-3 py-2 text-right font-medium">Доля</th>
             </tr>
           </thead>
           <tbody>
             {pivot.isLoading ? (
-              <tr><td colSpan={6} className="py-10 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></td></tr>
+              <tr><td colSpan={metrics.length + 2} className="py-10 text-center">
+                <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+              </td></tr>
             ) : !visible.length ? (
-              <tr><td colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
+              <tr><td colSpan={metrics.length + 2} className="py-10 text-center text-sm text-muted-foreground">
                 Нет данных по выбранным фильтрам.
               </td></tr>
             ) : visible.map((n) => (
-              <Row key={n.path} node={n} expanded={expanded.has(n.path)} onToggle={toggleNode} />
+              <Row key={n.path} node={n} metrics={metrics} expanded={expanded.has(n.path)} onToggle={toggleNode} />
             ))}
           </tbody>
           {visible.length > 0 && (
             <tfoot className="border-t-2 border-border bg-muted/30 font-semibold">
               <tr>
                 <td className="px-3 py-2">Итого</td>
-                <td className="px-3 py-2 text-right tabular-nums">{nf0.format(totals.ops)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{nf1.format(totals.liters)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{nf2.format(totals.amount)}</td>
-                <td className="hidden px-3 py-2 text-right tabular-nums sm:table-cell">
-                  {totals.liters > 0 ? nf2.format(totals.amount / totals.liters) : '—'}
-                </td>
+                {metrics.map((m) => (
+                  <td key={m.key} className="px-3 py-2 text-right tabular-nums">
+                    {fmt(totals[m.key] ?? 0, m.digits)}
+                  </td>
+                ))}
                 <td className="px-3 py-2 text-right">100 %</td>
               </tr>
             </tfoot>
           )}
         </table>
       </div>
-
-      <p className="text-[11px] text-muted-foreground">
-        Итог сводной считается по тем же фильтрам, что и карточки сверху: числа обязаны совпадать.
-        Метрика сортировки — {METRICS.find((m) => m.key === metric)?.label.toLowerCase()},
-        {' '}текущий итог {nf2.format(metricValue(totals))}.
-      </p>
     </div>
   )
 }
 
-function Row({ node, expanded, onToggle }: {
-  node: PivotNode; expanded: boolean; onToggle: (p: string) => void
+function Row({ node, metrics, expanded, onToggle }: {
+  node: PivotNode
+  metrics: PivotMetricDef[]
+  expanded: boolean
+  onToggle: (p: string) => void
 }) {
   const canOpen = node.children.length > 0
   return (
@@ -283,12 +299,11 @@ function Row({ node, expanded, onToggle }: {
           <span className={cn(node.level === 0 && 'font-medium')}>{node.label}</span>
         </button>
       </td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{nf0.format(node.ops)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums">{nf1.format(node.liters)}</td>
-      <td className="px-3 py-1.5 text-right tabular-nums">{nf2.format(node.amount)}</td>
-      <td className="hidden px-3 py-1.5 text-right tabular-nums text-muted-foreground sm:table-cell">
-        {node.liters > 0 ? nf2.format(node.amount / node.liters) : '—'}
-      </td>
+      {metrics.map((m) => (
+        <td key={m.key} className="px-3 py-1.5 text-right tabular-nums">
+          {fmt(node.m[m.key] ?? 0, m.digits)}
+        </td>
+      ))}
       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
         {(node.share * 100).toFixed(1)} %
       </td>

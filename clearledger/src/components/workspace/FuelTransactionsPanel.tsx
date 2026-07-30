@@ -31,14 +31,14 @@ import { cn } from '@/lib/utils'
 import { fmtMoney, fmtLiters } from '@/services/analyticsService'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import {
-  getFuelTxRows, getFuelTxFilters, getFuelTxOverview, getFuelTxCoupon,
+  getFuelTxRows, getFuelTxFilters, getFuelTxOverview, getFuelTxCoupon, getFuelTxPivot,
   syncFuelTransactions, getFuelTxSyncStatus,
   type FuelTxRow, type FuelTxRowsParams,
 } from '@/services/fuel/fuelMappingService'
 import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 import { parseOperationsSearch, parsedInt } from '@/utils/operationsSearchParser'
 import { KpiFuelCard, KpiPaymentCard, KpiPaymentChip } from './operations/OperationsKpiCards'
-import { FuelTxPivot } from './FuelTxPivot'
+import { PivotView } from './PivotView'
 import { exportOperationsToExcel, exportOperationsToPdf } from '@/services/fuel/operationsExport'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -431,8 +431,13 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
               совпадает с карточками выше — фильтры общие.
             </p>
           </div>
-          <FuelTxPivot params={params} dateFrom={dateFrom} dateTo={dateTo}
-            stationName={station === ALL ? 'все' : (filtersQ.data?.stations.find((s) => String(s.code) === station)?.name ?? station)} />
+          <PivotView
+            source="transactions" storageKey="fuel-tx-pivot"
+            defaultDims={['station', 'fuel', 'payment']}
+            queryKey={params}
+            fetchLeaves={(dims) => getFuelTxPivot({ ...params, dims })}
+            dateFrom={dateFrom} dateTo={dateTo}
+            scopeLabel={station === ALL ? 'все АЗС' : (filtersQ.data?.stations.find((s) => String(s.code) === station)?.name ?? station)} />
         </section>
       ) : (
       <section aria-labelledby="operation-list-heading">

@@ -573,25 +573,29 @@ export const getFuelTxRows = (p: FuelTxRowsParams) =>
     status: p.status,
     sort: p.sort, order: p.order, limit: p.limit, offset: p.offset,
   })
-/** Лист сводной: агрегат по набору измерений. Иерархию собирает браузер. */
-export interface FuelPivotResp {
+/** Метрика источника: что показывать колонкой и по чему сортировать. */
+export interface PivotMetricDef { key: string; label: string; digits: number }
+
+/** Ответ сводной: листья плюс словарь метрик источника. */
+export interface PivotResp {
   dims: string[]
   labels: string[]
-  /** Код станции → имя: в ключах код, на экране название. */
+  metrics: PivotMetricDef[]
+  /** Код (или id) станции → имя: в ключах код, на экране название. */
   stationNames: Record<string, string>
-  rows: { keys: (string | null)[]; ops: number; liters: number; amount: number }[]
+  rows: { keys: (string | null)[]; m: Record<string, number> }[]
   /** Упёрлись в потолок строк: показать плашку, а не молча обрезать. */
   truncated: boolean
 }
 
 /**
- * Листья сводной по тем же фильтрам, что и реестр.
+ * Листья сводной по реализациям - те же фильтры, что у реестра операций.
  *
- * `dims` — НАБОР измерений; порядок уровней на экране к серверу отношения не имеет,
- * поэтому ключ кэша строится по отсортированному набору (см. `FuelTxPivot`).
+ * `dims` это НАБОР измерений; порядок уровней на экране к серверу отношения не имеет,
+ * поэтому ключ кэша строится по отсортированному набору (см. `PivotView`).
  */
 export const getFuelTxPivot = (p: FuelTxRowsParams & { dims: string[] }) =>
-  get<FuelPivotResp>('/api/fuel/transactions/pivot', {
+  get<PivotResp>('/api/fuel/transactions/pivot', {
     date_from: p.dateFrom, date_to: p.dateTo,
     dims: p.dims.join(','),
     station_code: p.stationCode,
@@ -601,9 +605,19 @@ export const getFuelTxPivot = (p: FuelTxRowsParams & { dims: string[] }) =>
     status: p.status,
   })
 
-/** Справочник измерений для конструктора (тот же, что режет SQL на сервере). */
-export const getFuelPivotDims = () =>
-  get<{ dims: { key: string; label: string }[] }>('/api/fuel/transactions/pivot/dims')
+/** Листья сводной по приёмке ТТН: метрики свои (массы и отклонение, а не выручка). */
+export const getFuelReceiptsPivot = (p: {
+  dims: string[]; dateFrom?: string; dateTo?: string; stationCode?: number
+}) =>
+  get<PivotResp>('/api/fuel/receipts/pivot', {
+    dims: p.dims.join(','),
+    date_from: p.dateFrom, date_to: p.dateTo, station_code: p.stationCode,
+  })
+
+/** Справочник измерений и метрик источника (тот же, что режет SQL на сервере). */
+export const getPivotCatalog = (source: string) =>
+  get<{ dims: { key: string; label: string }[]; metrics: PivotMetricDef[] }>(
+    '/api/fuel/pivot/dims', { source })
 
 export const getFuelTxFilters = (dateFrom: string, dateTo: string) =>
   get<FuelTxFilters>('/api/fuel/transactions/filters', { date_from: dateFrom, date_to: dateTo })

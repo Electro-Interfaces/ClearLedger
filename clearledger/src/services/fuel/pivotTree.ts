@@ -2,20 +2,23 @@
  * Дерево сводной таблицы - чистые функции без React.
  *
  * Сервер отдаёт только листья: агрегаты по НАБОРУ измерений. Иерархию, подытоги и
- * доли собирает браузер. Поэтому смена порядка уровней не идёт в сеть: те же листья
- * пересобираются в другое дерево за миллисекунды.
+ * доли собирает браузер. Отсюда главное свойство: **перестановка уровней не идёт в
+ * сеть**, те же листья пересобираются в другое дерево за миллисекунды.
  *
  * Доля считается **от родителя**, а не от общего итога: внутри АЗС виды топлива дают
  * 100 %, внутри топлива - способы оплаты. Так читается структура продаж, а доля от
  * общего итога на третьем уровне превращается в набор долей процента.
+ *
+ * Метрики не зашиты: узел держит их словарём. У реализаций это операции, литры и
+ * выручка, у поступлений - массы по документу и факту с отклонением. Один и тот же
+ * экран сводной работает над обоими, потому что складывает по ключам, а не по
+ * заранее известным полям.
  */
 
-/** Лист от сервера: значения измерений в порядке `dims` плюс метрики. */
+/** Лист от сервера: значения измерений в порядке `dims` плюс метрики словарём. */
 export interface PivotLeaf {
   keys: (string | null)[]
-  ops: number
-  liters: number
-  amount: number
+  m: Record<string, number>
 }
 
 export interface PivotNode {
@@ -28,21 +31,14 @@ export interface PivotNode {
   /** Человеческая подпись. */
   label: string
   level: number
-  ops: number
-  liters: number
-  amount: number
+  /** Суммы метрик по поддереву. */
+  m: Record<string, number>
   /** Доля метрики сортировки от родителя, 0..1. */
   share: number
   children: PivotNode[]
 }
 
-export interface PivotTotals {
-  ops: number
-  liters: number
-  amount: number
-}
-
-export type PivotMetric = 'amount' | 'liters' | 'ops'
+export type PivotTotals = Record<string, number>
 
 const SEP = '¦'
 export const PIVOT_PATH_SEP = SEP
@@ -51,36 +47,36 @@ export const EMPTY_LABEL = '— не указано —'
 /** Подпись значения измерения: коды станций в имена, пустые в «не указано». */
 export type PivotLabeler = (dim: string, value: string | null) => string
 
-const metricOf = (n: { ops: number; liters: number; amount: number }, m: PivotMetric) =>
-  m === 'ops' ? n.ops : m === 'liters' ? n.liters : n.amount
-
 /**
  * Собрать дерево из листьев.
  *
  * `serverDims` - порядок значений в `keys` (как отдал сервер).
  * `displayDims` - порядок уровней на экране. Перестановка меняет только его.
+ * `sortBy` - ключ метрики, по которой сортируются узлы и считаются доли.
  */
 export function buildPivotTree(
   leaves: PivotLeaf[],
   serverDims: string[],
   displayDims: string[],
-  sortBy: PivotMetric,
+  sortBy: string,
   labeler: PivotLabeler,
 ): { nodes: PivotNode[]; totals: PivotTotals } {
-  // Измерение, которого нет в ответе сервера, просто пропускаем: дерево должно
-  // пережить рассинхрон конструктора и запроса, а не рухнуть.
+  // Измерение, которого нет в ответе сервера, пропускаем: дерево должно пережить
+  // рассинхрон конструктора и запроса, а не рухнуть.
   const order = displayDims
     .map((d) => ({ dim: d, idx: serverDims.indexOf(d) }))
     .filter((x) => x.idx >= 0)
 
-  const totals: PivotTotals = { ops: 0, liters: 0, amount: 0 }
+  const totals: PivotTotals = {}
   const roots: PivotNode[] = []
   const index = new Map<string, PivotNode>()
 
+  const addMetrics = (target: Record<string, number>, src: Record<string, number>) => {
+    for (const k of Object.keys(src)) target[k] = (target[k] ?? 0) + (src[k] ?? 0)
+  }
+
   for (const leaf of leaves) {
-    totals.ops += leaf.ops
-    totals.liters += leaf.liters
-    totals.amount += leaf.amount
+    addMetrics(totals, leaf.m)
 
     let parentPath = ''
     let siblings = roots
@@ -90,35 +86,30 @@ export function buildPivotTree(
       const path = parentPath ? `${parentPath}${SEP}${dim}=${value ?? ''}` : `${dim}=${value ?? ''}`
       let node = index.get(path)
       if (!node) {
-        node = {
-          path, dim, value, label: labeler(dim, value), level,
-          ops: 0, liters: 0, amount: 0, share: 0, children: [],
-        }
+        node = { path, dim, value, label: labeler(dim, value), level, m: {}, share: 0, children: [] }
         index.set(path, node)
         siblings.push(node)
       }
-      node.ops += leaf.ops
-      node.liters += leaf.liters
-      node.amount += leaf.amount
+      addMetrics(node.m, leaf.m)
       parentPath = path
       siblings = node.children
     }
   }
 
   sortTree(roots, sortBy)
-  shareFromParent(roots, metricOf(totals, sortBy), sortBy)
+  shareFromParent(roots, totals[sortBy] ?? 0, sortBy)
   return { nodes: roots, totals }
 }
 
-function sortTree(nodes: PivotNode[], sortBy: PivotMetric): void {
-  nodes.sort((a, b) => metricOf(b, sortBy) - metricOf(a, sortBy))
+function sortTree(nodes: PivotNode[], sortBy: string): void {
+  nodes.sort((a, b) => (b.m[sortBy] ?? 0) - (a.m[sortBy] ?? 0))
   for (const n of nodes) sortTree(n.children, sortBy)
 }
 
 /** Доля от родителя: сумма долей детей одного узла = 100 %. */
-function shareFromParent(nodes: PivotNode[], parentValue: number, sortBy: PivotMetric): void {
+function shareFromParent(nodes: PivotNode[], parentValue: number, sortBy: string): void {
   for (const n of nodes) {
-    const v = metricOf(n, sortBy)
+    const v = n.m[sortBy] ?? 0
     n.share = parentValue > 0 ? v / parentValue : 0
     shareFromParent(n.children, v, sortBy)
   }

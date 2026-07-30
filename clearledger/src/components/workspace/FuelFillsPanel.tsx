@@ -21,6 +21,9 @@ import { ChargeChart, ChartControls, useChartView } from './analytics/ChargeChar
 import { type Period, buildMoM, isoLocal } from './analytics/periodPresets'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
+import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
+import { getFuelTxPivot } from '@/services/fuel/fuelMappingService'
+import { PivotView } from './PivotView'
 import { ExportButton } from './analytics/ExportButton'
 import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { useLocations } from '@/hooks/useLocations'
@@ -969,6 +972,8 @@ const SUB_TABS: { k: string; label: string }[] = [
   { k: 'time', label: 'Время и загрузка' },
   { k: 'dynamics', label: 'Динамика (тренд)' },
   { k: 'compare', label: 'Сравнение периодов' },
+  // Готовые разрезы отвечают на частые вопросы, сводная - на все остальные.
+  { k: 'pivot', label: 'Сводная' },
 ]
 
 function subView(sub: string, p: { companyId: string; dateFrom: string; dateTo: string }): { title: string; node: ReactNode } {
@@ -977,8 +982,36 @@ function subView(sub: string, p: { companyId: string; dateFrom: string; dateTo: 
     case 'time': return { title: 'Время и загрузка', node: <TimeLoad companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
     case 'dynamics': return { title: 'Динамика', node: <Dynamics companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
     case 'compare': return { title: 'Сравнение периодов', node: <Compare companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
+    case 'pivot': return { title: 'Сводная', node: <FillsPivot dateFrom={dateFrom} dateTo={dateTo} /> }
     default: return { title: 'Разрезы', node: <FillsBreakdown companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} /> }
   }
+}
+
+/**
+ * Сводная «Реализации»: тот же источник, что у реестра операций, и те же фильтры
+ * рабочей области. Сегмент (розница/корпоратив) сюда НЕ прокидывается: сводная
+ * умеет разрез по способу оплаты, а два разных сужения одних данных в одном экране
+ * читаются как ошибка в цифрах.
+ */
+function FillsPivot({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+  const { stationCode } = useFilters()
+  const fk = useFuelKindFilter()
+  const station = stationCode !== 'all' && Number.isFinite(Number(stationCode))
+    ? Number(stationCode) : undefined
+  return (
+    <div className="px-4 pb-4">
+      <PivotView
+        source="transactions" storageKey="fuel-fills-pivot"
+        defaultDims={['fuel', 'station', 'payment']}
+        queryKey={{ dateFrom, dateTo, station, fuels: fk.fuelCodes }}
+        fetchLeaves={(dims) => getFuelTxPivot({
+          dateFrom, dateTo, dims, stationCode: station,
+          fuelCodes: fk.fuelCodes?.length ? fk.fuelCodes : undefined,
+        })}
+        dateFrom={dateFrom} dateTo={dateTo}
+        scopeLabel={station ? `АЗС ${station}` : 'все АЗС'} />
+    </div>
+  )
 }
 
 /** Пункт «Реализация» — контейнер с внутренними табами + общий тумблер сегмента. */

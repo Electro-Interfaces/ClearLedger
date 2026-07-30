@@ -36,6 +36,10 @@ import {
 import { OpsOverviewVitrine, OpsBalanceVitrine } from '@/components/balance/OpsCockpit'
 import { OpsCompletenessVitrine } from '@/components/balance/OpsCompleteness'
 import { ProcurementVitrine, RentVitrine } from '@/components/balance/EnergyManagementVitrines'
+import { OpsClosingPanel } from '@/components/balance/OpsClosingPanel'
+import { OpsChargesPanel } from '@/components/balance/OpsChargesPanel'
+import { OpsCounterpartiesPanel } from '@/components/balance/OpsCounterpartiesPanel'
+import { OpsDocsPanel } from '@/components/balance/OpsDocsPanel'
 import { FinancialVitrine } from '@/components/balance/EnergyFinancialVitrine'
 import { AccountingVitrine } from '@/components/balance/EnergyAccountingVitrine'
 import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
@@ -96,6 +100,11 @@ function SectionEmpty({ section, org }: { section: string; org: string }) {
 // receivables на DEMO_EZS) удалены.
 function EnergyMgmtVitrine({ tab }: { tab: string }) {
   switch (tab) {
+    // Денежный контур: реестр обязательств и закрытие месяца по затратам.
+    case 'ops_closing': return <OpsClosingPanel />
+    case 'ops_charges': return <OpsChargesPanel />
+    case 'ops_docs': return <OpsDocsPanel />
+    case 'ops_parties': return <OpsCounterpartiesPanel />
     case 'procurement': return <ProcurementVitrine />
     case 'rent': return <RentVitrine />
     default: return null
