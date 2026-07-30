@@ -17,14 +17,15 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import App, AppCompanyLink, Channel
+from app.models import App, AppCompanyLink, Channel, Source, SourceSync
 from app.services import sso
 from app.services.space_projection import _internal_base_url
 
@@ -137,6 +138,67 @@ async def _app_connectors(
     return out, None
 
 
+# Как называется подключение того или иного типа — человеческими словами. Код типа
+# («onec_operational», «acquiring_sber») администратору ничего не говорит.
+_SOURCE_KIND: dict[str, str] = {
+    "sts": "API кассового сервера",
+    "sts_transactions": "API кассового сервера",
+    "msto": "API агрегаторов",
+    "onec_accounting": "Обмен с 1С",
+    "onec_operational": "Обмен с 1С",
+    "acquiring_sber": "Эквайринг",
+    "ofd": "ОФД",
+    "chestny_znak": "Честный знак",
+}
+
+# Что подключение приносит в пространство — по типу источника.
+_SOURCE_BRINGS: dict[str, str] = {
+    "sts": "Смены, реализация, резервуары и накладные АЗС",
+    "sts_transactions": "Пооперационные наливы (реестр операций)",
+    "msto": "Онлайн-заказы агрегаторов",
+    "onec_accounting": "Документы и справочники 1С:Бухгалтерии",
+    "onec_operational": "Товародвижение сопутки и общепита из ЦБ",
+    "acquiring_sber": "Реестры эквайринга",
+    "ofd": "Фискальные чеки ОФД",
+    "chestny_znak": "Обороты маркированного товара",
+}
+
+# Состояние источника → состояние подключения в витрине.
+_SOURCE_STATUS: dict[str, str] = {
+    "connected": "active", "error": "error",
+    "disconnected": "disabled", "draft": "configured",
+}
+
+
+def _source_entry(src: Source, last_sync: datetime | None, records: int | None) -> dict[str, Any]:
+    """Живая интеграция как запись витрины.
+
+    Раньше витрина показывала только файловые каналы и платформенные сервисы, и
+    настроенные подключения к внешним системам (STS, MSTO, 1С, эквайринг, ОФД,
+    «Честный знак») в неё не попадали вовсе — у ГИГ это 7 источников из 11.
+    Администратор видел «6 подключений» там, где их одиннадцать.
+    """
+    kind = _SOURCE_KIND.get(src.source_type, "Внешняя система")
+    return {
+        "key": f"source:{src.id}",
+        "app": "core", "app_name": "Ядро",
+        "provider": src.source_type,
+        "kind": kind,
+        "label": src.name,
+        "brings": _brings(src.description) or _SOURCE_BRINGS.get(src.source_type, "Данные внешней системы"),
+        "direction": "in",
+        "status": _SOURCE_STATUS.get(src.status, "configured"),
+        "enabled": src.status == "connected",
+        "last_sync_at": last_sync.isoformat() if last_sync else (
+            src.last_test_at.isoformat() if src.last_test_at else None),
+        "last_error": src.error_message,
+        "records": records,
+        "files": 0,
+        # Настройка живёт в продукте «Данные» — там же, где заводят коннектор.
+        "settings_route": "/connectors",
+    }
+
+
 async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any]:
     """Все источники данных компании: файловые каналы, интеграции приложений, сервисы."""
     items: list[dict[str, Any]] = []
@@ -150,6 +212,28 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
         "chat", "Чат (Matrix)", "Переписка и темы пространства", settings.chat_enabled))
     items.append(_service_entry(
         "mail", "Почта (SMTP)", "Письма приглашений и уведомлений", bool(settings.smtp_host)))
+
+    # Настроенные подключения к внешним системам. Когда синхронизировались и сколько
+    # принесли — из журнала синков, иначе витрина показывает подключение «мёртвым».
+    sources = (await db.execute(
+        select(Source).where(Source.company_id == company_id).order_by(Source.name)
+    )).scalars().all()
+    # Журнал синков ведётся по ТИПУ синхронизации, а не по источнику, поэтому
+    # сопоставляем по типу: грубее, чем хотелось бы, но честнее, чем показывать
+    # живое подключение вообще без отметки о работе.
+    sync_by_type: dict[str, tuple[datetime | None, int | None]] = {}
+    if sources:
+        for stype, finished, processed in (await db.execute(
+            select(SourceSync.sync_type, func.max(SourceSync.finished_at),
+                   func.sum(SourceSync.items_processed))
+            .where(SourceSync.company_id == company_id)
+            .group_by(SourceSync.sync_type)
+        )).all():
+            sync_by_type[str(stype)] = (
+                finished, int(processed) if processed is not None else None)
+    for src in sources:
+        last_sync, records = sync_by_type.get(src.source_type, (None, None))
+        items.append(_source_entry(src, last_sync, records))
 
     # Приложения-разрезы: спрашиваем только те, что подключены компании и знают её.
     rows = (await db.execute(
