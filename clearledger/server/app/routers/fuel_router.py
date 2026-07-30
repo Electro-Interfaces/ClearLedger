@@ -316,10 +316,18 @@ async def list_shifts(
     # Отбор по периоду рабочей области. Без него срабатывал limit по номеру
     # смены: журнал отдавал последние 200 смен, и период месячной давности
     # показывал «нет смен», хотя они загружены.
-    if date_from:
-        q = q.where(func.date(FuelShift.opened_at) >= date_from)
-    if date_to:
-        q = q.where(func.date(FuelShift.opened_at) <= date_to)
+    #
+    # Границы приводятся к `date` В PYTHON, а не передаются строкой: asyncpg не
+    # приводит текст к дате сам, и сравнение `date >= character varying` роняло
+    # ручку в 500. Журнал смен из-за этого выглядел пустым — и здесь, и в
+    # «Бухгалтерском», который зовёт ту же ручку с периодом.
+    try:
+        if date_from:
+            q = q.where(func.date(FuelShift.opened_at) >= date.fromisoformat(date_from))
+        if date_to:
+            q = q.where(func.date(FuelShift.opened_at) <= date.fromisoformat(date_to))
+    except ValueError:
+        raise HTTPException(400, "Неверный формат дат (ожидается YYYY-MM-DD)")
     # Внутри периода — свежие сверху (по дате открытия, номер как tie-breaker).
     q = q.order_by(FuelShift.opened_at.desc(), FuelShift.shift_number.desc()).limit(limit)
     shifts = list((await db.execute(q)).scalars())
@@ -2539,6 +2547,32 @@ async def tank_specs_list(
         .order_by(FuelStation.code, T.tank_number)
     )).all()
 
+    # Последняя смена по каждому резервуару: остаток, уровень и условия замера. Это
+    # «состояние резервуара сейчас» — то же, что показывает «Монитор» карточками.
+    last_state: dict[tuple[str, int], dict[str, Any]] = {}
+    for row in (await db.execute(
+        select(S.station_id, T.tank_number, S.shift_number, S.opened_at,
+               T.volume_end, T.fact_volume, T.level_end, T.temp_end, T.density,
+               T.water_volume, T.fact_mass)
+        .join(S, S.id == T.shift_id)
+        .where(S.company_id == cid)
+        .order_by(S.station_id, T.tank_number, S.opened_at, S.shift_number)
+    )).all():
+        (station_id, tank_no, shift_no, opened_at, book_end, fact_vol,
+         level, temp, dens, water, mass) = row
+        # Список отсортирован по времени — последняя запись перетирает предыдущую.
+        last_state[(str(station_id), int(tank_no))] = {
+            "shift_number": int(shift_no) if shift_no is not None else None,
+            "shift_date": opened_at.date().isoformat() if opened_at else None,
+            "book_end": round(float(book_end or 0), 1),
+            "fact_volume": round(float(fact_vol), 1) if fact_vol is not None else None,
+            "level_mm": round(float(level), 1) if level is not None else None,
+            "temp_c": round(float(temp), 1) if temp is not None else None,
+            "density": float(dens) if dens is not None else None,
+            "water_liters": round(float(water), 1) if water is not None else None,
+            "mass_kg": round(float(mass), 1) if mass is not None else None,
+        }
+
     # Показания, равные вместимости из паспорта: прибор отдал предел шкалы вместо
     # измерения. Считаем отдельно — по этой цифре видно, какой прибор сбойный.
     at_limit: dict[tuple[str, int], int] = {}
@@ -2578,6 +2612,8 @@ async def tank_specs_list(
             "at_limit": at_limit.get((str(station_id), int(tank_no)), 0),
             # Порог, по которому сейчас отбраковывается показание прибора.
             "fact_limit": round(limit, 1),
+            # Состояние на последнюю смену: остаток, уровень, температура, вода.
+            "state": last_state.get((str(station_id), int(tank_no))),
         })
     return {"rows": out, "sanity_ratio": FACT_SANITY_RATIO}
 

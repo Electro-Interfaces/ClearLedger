@@ -235,7 +235,7 @@ export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
       ) : (
         <>
           <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full min-w-[1000px] text-xs">
+            <table className="w-full min-w-[1400px] text-xs">
               <thead className="bg-muted/40 text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">АЗС</th>
@@ -243,6 +243,12 @@ export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
                   <th className="px-3 py-2 text-left font-medium">Топливо</th>
                   <th className="px-3 py-2 text-right font-medium">Вместимость, л</th>
                   <th className="px-3 py-2 text-left font-medium">Источник</th>
+                  <th className="px-3 py-2 text-right font-medium" title="Остаток по последней смене и заполненность резервуара">
+                    Остаток сейчас
+                  </th>
+                  <th className="px-3 py-2 text-left font-medium" title="Условия последнего замера: температура, плотность, подтоварная вода">
+                    Условия
+                  </th>
                   <th className="px-3 py-2 text-right font-medium" title="Наибольший книжный остаток за историю резервуара">
                     Максимум по книге
                   </th>
@@ -280,6 +286,38 @@ export function TankSpecsPanel({ companyId, stationCodes, standalone }: {
                         ) : src ? (
                           <Badge variant="outline" className={src.cls}>{src.label}</Badge>
                         ) : <span className="text-muted-foreground">нет паспорта</span>}
+                      </td>
+                      {/* Состояние резервуара: сколько в нём сейчас и в каких условиях
+                          мерили. Без этого «паспорт» — просто справочник ёмкостей. */}
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {r.state ? (
+                          <>
+                            <div>{nf0.format(r.state.fact_volume ?? r.state.book_end)} л</div>
+                            {r.usable_liters ? (
+                              <div className="text-[10px] text-muted-foreground">
+                                {Math.round(((r.state.fact_volume ?? r.state.book_end) / r.usable_liters) * 100)}%
+                                {' · '}свободно {nf0.format(Math.max(0, r.usable_liters - (r.state.fact_volume ?? r.state.book_end)))} л
+                              </div>
+                            ) : null}
+                          </>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                        {r.state ? (
+                          <div className="flex flex-wrap gap-x-2">
+                            {r.state.level_mm != null && <span>уровень {nf0.format(r.state.level_mm)} мм</span>}
+                            {r.state.temp_c != null && <span>{r.state.temp_c}°C</span>}
+                            {r.state.density != null && <span>ρ {r.state.density}</span>}
+                            <span className={cn(r.state.water_liters ? 'text-amber-500' : undefined)}>
+                              вода {r.state.water_liters ? `${nf0.format(r.state.water_liters)} л` : 'нет'}
+                            </span>
+                            {r.state.shift_date && (
+                              <span className="opacity-70">
+                                смена №{r.state.shift_number} · {new Date(r.state.shift_date).toLocaleDateString('ru-RU')}
+                              </span>
+                            )}
+                          </div>
+                        ) : '—'}
                       </td>
                       <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
                         {nf0.format(r.book_max)}

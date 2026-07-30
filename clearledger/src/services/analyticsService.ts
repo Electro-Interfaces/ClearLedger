@@ -1445,6 +1445,18 @@ export interface TankSpecRow {
   at_limit: number
   /** Действующая граница: выше неё показание считается невозможным. */
   fact_limit: number
+  /** Состояние на последнюю смену — то же, что «Монитор» показывает карточкой. */
+  state: {
+    shift_number: number | null
+    shift_date: string | null
+    book_end: number
+    fact_volume: number | null
+    level_mm: number | null
+    temp_c: number | null
+    density: number | null
+    water_liters: number | null
+    mass_kg: number | null
+  } | null
 }
 
 export const getTankSpecs = () =>
