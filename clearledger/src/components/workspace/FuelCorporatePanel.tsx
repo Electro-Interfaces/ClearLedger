@@ -137,7 +137,7 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
         <KpiCard label="Реализаций" value={nf0.format(k.fills)} />
         <KpiCard label="Доля от всех продаж" value={nf1.format(k.share_of_total_pct) + '%'} hint="выручка сегмента / вся выручка" />
         <KpiCard label="Активных карт" value={nf0.format(k.active_cards)} hint="уникальных за период" />
-        <KpiCard label="Ср. реализация" value={nf1.format(k.avg_fill) + ' л'} hint="крупные баки корп-парка" />
+        <KpiCard label="Ср. заправка" value={nf1.format(k.avg_fill) + ' л'} hint="крупные баки корп-парка" />
         <KpiCard label="Ср. цена" value={nf2.format(k.avg_price) + ' ₽/л'} />
         <KpiCard label="Станций" value={nf0.format(k.stations)} />
       </div>
@@ -274,7 +274,7 @@ function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
     )
   }
   const maxShare = Math.max(0.01, ...data.rows.map((r) => r.share_pct))
-  const exCols = ['Контрагент', 'Канал', 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. реализация, л', 'Ср. цена, ₽/л', 'Станций', 'Карт']
+  const exCols = ['Контрагент', 'Канал', 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. заправка, л', 'Ср. цена, ₽/л', 'Станций', 'Карт']
   const exData: (string | number | null)[][] = [
     ...rows.map((r) => [r.name, chanLabel(r.channel), r.fills, r.liters, r.amount, r.share_pct, r.avg_fill, r.avg_price, r.stations, r.cards]),
     ['Итого', '', t.fills, t.liters, t.amount, 100, null, null, null, null],
@@ -298,7 +298,7 @@ function CorpCounterparties({ companyId, dateFrom, dateTo }: TabProps) {
                 <H k="liters">Литры</H>
                 <H k="amount">Выручка</H>
                 <H k="share_pct">Доля</H>
-                <H k="avg_fill">Ср. реализация</H>
+                <H k="avg_fill">Ср. заправка</H>
                 <H k="avg_price">₽/л</H>
                 <H k="stations">Станций</H>
                 <H k="cards">Карт</H>
@@ -403,7 +403,7 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
   const pages = Math.max(1, Math.ceil(total / CARDS_PAGE))
   const from = total === 0 ? 0 : page * CARDS_PAGE + 1
   const to = Math.min(total, (page + 1) * CARDS_PAGE)
-  const exCols = ['Карта', 'Организация', 'Вид оплаты', 'Реализаций', 'Литры', 'Сумма, ₽', 'Ср. реализация, л', 'Станций', 'Топлив', 'Первая реализация', 'Последняя реализация']
+  const exCols = ['Карта', 'Организация', 'Вид оплаты', 'Реализаций', 'Литры', 'Сумма, ₽', 'Ср. заправка, л', 'Станций', 'Топлив', 'Первая заправка', 'Последняя заправка']
   const exData = data.rows.map((r) => [
     r.card, r.org ?? '—', r.pay_type ?? '—', r.fills, r.liters, r.amount, r.avg_fill, r.stations, r.fuels, r.first_dt, r.last_dt,
   ] as (string | number | null)[])
@@ -446,7 +446,7 @@ function CorpCards({ companyId, dateFrom, dateTo }: TabProps) {
                     <CardsSortHead label="Реализаций" k="fills" sort={sort} order={order} onSort={onSort} />
                     <CardsSortHead label="Литры" k="liters" sort={sort} order={order} onSort={onSort} />
                     <CardsSortHead label="Сумма" k="amount" sort={sort} order={order} onSort={onSort} />
-                    <CardsSortHead label="Ср. реализация" k="avg_fill" sort={sort} order={order} onSort={onSort} />
+                    <CardsSortHead label="Ср. заправка" k="avg_fill" sort={sort} order={order} onSort={onSort} />
                     <th className="p-2 text-right font-medium">Станций</th>
                     <th className="p-2 text-right font-medium">Топлив</th>
                     <CardsSortHead label="Первый" k="first_dt" sort={sort} order={order} onSort={onSort} />

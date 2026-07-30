@@ -87,7 +87,7 @@ function BreakdownTable({ rows, selected, onSelect, empty }: {
             <th className="p-2.5 text-right font-medium">Выручка</th>
             <th className="p-2.5 text-right font-medium">Доля</th>
             <th className="p-2.5 text-right font-medium">Средний чек</th>
-            <th className="p-2.5 text-right font-medium">Ср. реализация</th>
+            <th className="p-2.5 text-right font-medium">Ср. заправка</th>
             <th className="p-2.5 text-right font-medium">₽/л</th>
           </tr>
         </thead>
@@ -322,7 +322,7 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.by_payment.map((row) => ({
         'Способ оплаты': row.name, 'Реализации': row.count, 'Объём, л': row.liters,
         'Выручка, ₽': row.amount, 'Доля, %': row.share, 'Средний чек, ₽': row.avg_check,
-        'Ср. реализация, л': row.avg_fill, 'Цена, ₽/л': row.avg_price,
+        'Ср. заправка, л': row.avg_fill, 'Цена, ₽/л': row.avg_price,
       }))), 'Способы оплаты')
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data.by_station.map((row) => ({
         'АЗС': row.name, 'Код': row.code, 'Реализации': row.count, 'Объём, л': row.liters,
@@ -393,7 +393,7 @@ export function SalesChannelsPanel({ companyId, dateFrom, dateTo }: {
               <Metric label="Объём" value={fmtLiters(data.totals.liters)} hint={`${data.totals.stations} АЗС`} />
               <Metric label="Реализации" value={nf0.format(data.totals.count)} hint={`${data.by_payment.length} видов оплаты`} />
               <Metric label="Средний чек" value={`${fmtMoney(data.totals.avg_check)} ₽`} />
-              <Metric label="Ср. реализация" value={`${nf1.format(data.totals.avg_fill)} л`} />
+              <Metric label="Ср. заправка" value={`${nf1.format(data.totals.avg_fill)} л`} />
               <Metric label="Средняя цена" value={`${fmtMoney(data.totals.avg_price)} ₽/л`} />
             </CardContent>
           </Card>

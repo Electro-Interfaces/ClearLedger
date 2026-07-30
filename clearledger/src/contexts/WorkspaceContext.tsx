@@ -19,9 +19,9 @@ import { useSearchParams } from 'react-router-dom'
 // `sales_goods` — «Товародвижение» «Топлива» (fuel): топливо как товар — маржа,
 // приход, книга резервуаров. У ЭЗС такого раздела нет: там продают киловатт-часы,
 // склада и приёмки не бывает.
-export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_stock' | 'store_closing' | 'store_catalog' | 'store_marking' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_stock' | 'store_closing' | 'store_catalog' | 'store_marking' | 'store_help' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'tax' | 'export'
 
-const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'store_help', 'corporate', 'marketing', 'financial', 'accounting', 'tax', 'export']
 function readMode(sp: URLSearchParams): CoreMode {
   const m = sp.get('mode')
   return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'

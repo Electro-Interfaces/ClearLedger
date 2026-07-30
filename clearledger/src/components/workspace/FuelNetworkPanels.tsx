@@ -1,5 +1,5 @@
 /**
- * Сетевые экраны «Топлива»: оборудование, актив, клиенты, приезды.
+ * Сетевые экраны «Топлива»: оборудование, актив, клиенты, визиты.
  *
  * Обычные разрезы отвечают, СКОЛЬКО сеть продала. Эти четыре — где она не
  * работает и где на самом деле лежат деньги (перенос приёмов ЭЗС-контура:
@@ -12,6 +12,7 @@
 import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CircleCheckBig, Gauge, Info, Loader2, TrendingUp } from 'lucide-react'
+import { PumpUnitModal, type PumpUnitRef } from './PumpUnitModal'
 import {
   Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -42,7 +43,7 @@ const pct = (v: number | null | undefined) => (v == null ? '—' : `${nf1.format
  *
  * Вид топлива приходит отсюда, а не из локального селектора экрана: он выбран в
  * шапке рабочей области и обязан действовать одинаково на загрузку ТРК, ABC-XYZ,
- * когорты и приезды — иначе четыре экрана про одну сеть ответят по-разному.
+ * когорты и визиты — иначе четыре экрана про одну сеть ответят по-разному.
  */
 function useFuelScope(): { stationCodes?: number[]; fuelCodes?: number[]; key: string } {
   const { stationCode, locationIds, regionIds, fuelCodes } = useFilters()
@@ -68,6 +69,26 @@ function Loading() {
 }
 function Empty({ text = 'Нет данных за период' }: { text?: string }) {
   return <div className="p-8 text-center text-sm text-muted-foreground">{text}</div>
+}
+/**
+ * Сорванный запрос — не то же самое, что пустой период.
+ *
+ * Раньше оба случая давали «Нет данных за период», и упавший запрос выглядел как
+ * честно пустая сеть: экран когорт показывал пустоту при 20 тысячах карт в базе.
+ * Причину приходилось искать в логах сервера вместо того, чтобы прочитать на экране.
+ */
+function Failed({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const msg = error instanceof Error ? error.message : 'неизвестная ошибка'
+  return (
+    <div className="p-8 text-center text-sm">
+      <div className="text-red-400/90">Данные не загрузились</div>
+      <div className="mt-1 text-xs text-muted-foreground">{msg}</div>
+      <button onClick={onRetry}
+        className="mt-3 rounded-md border border-border/60 px-3 py-1.5 text-xs hover:bg-accent/20">
+        Повторить
+      </button>
+    </div>
+  )
 }
 
 function Metric({ label, value, hint, tone }: {
@@ -132,7 +153,7 @@ function Td({ children, right, className }: { children: ReactNode; right?: boole
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * Загрузка оборудования. Ключевая колонка — не выручка, а наливов в сутки:
+ * Загрузка оборудования. Ключевая колонка — не выручка, а реализаций в сутки:
  * абсолютные цифры зависят от размера АЗС, и без нормировки крупная станция
  * всегда выглядит эффективнее маленькой.
  */
@@ -140,6 +161,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
   companyId: string; dateFrom: string; dateTo: string
 }) {
   const [level, setLevel] = useState<PumpLevel>('nozzle')
+  const [unit, setUnit] = useState<PumpUnitRef | null>(null)
   const scope = useFuelScope()
   const ref = useRef<HTMLDivElement>(null)
   const q = useQuery({
@@ -154,6 +176,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
   })
 
   if (q.isLoading) return <Loading />
+  if (q.isError) return <Failed error={q.error} onRetry={() => void q.refetch()} />
   if (q.error) return <div className="p-6 text-sm text-destructive">Не удалось получить загрузку оборудования: {String(q.error)}</div>
   const data = q.data
   if (!data) return null
@@ -167,7 +190,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
   return (
     <div ref={ref} className="space-y-4 p-4">
       <Head title="Загрузка ТРК и пистолетов"
-        hint="Наливов в сутки на единицу оборудования · простой · молчащие рукава"
+        hint="Реализаций в сутки на единицу оборудования · простой · молчащие рукава"
         exportEl={() => ref.current}>
         <Toggle value={level} onChange={setLevel} title="Уровень детализации"
           opts={[{ v: 'nozzle', label: 'Пистолеты' }, { v: 'pos', label: 'ТРК' }]} />
@@ -180,14 +203,14 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
           <Metric label="Работали" value={nf0.format(t.active)} tone="success"
             hint={`${pct(t.units ? t.active / t.units * 100 : 0)} парка`} />
           <Metric label="Молчали" value={nf0.format(t.silent)} tone={t.silent ? 'danger' : undefined}
-            hint="ни одного налива за период" />
+            hint="ни одной реализации за период" />
           <Metric label="Медиана" value={`${nf2.format(t.median_fills_per_day)}/сут`}
-            hint="наливов в сутки на единицу" />
+            hint="реализаций в сутки на единицу" />
           <Metric label="Максимум" value={`${nf2.format(t.top_fills_per_day)}/сут`} tone="info"
             hint={t.median_fills_per_day
               ? `разброс ${nf1.format(t.top_fills_per_day / t.median_fills_per_day)}×` : undefined} />
           <Metric label="Выручка" value={`${fmtMoneyShort(t.amount)} ₽`}
-            hint={`${fmtLiters(t.liters)} · ${nf0.format(t.fills)} наливов`} />
+            hint={`${fmtLiters(t.liters)} · ${nf0.format(t.fills)} реализаций`} />
         </CardContent>
       </Card>
 
@@ -200,7 +223,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.2} vertical={false} />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-45} textAnchor="end" height={54} />
                 <YAxis tick={{ fontSize: 10 }} width={38} />
-                <Tooltip formatter={(v) => [`${nf2.format(Number(v ?? 0))} наливов/сут`, '']}
+                <Tooltip formatter={(v) => [`${nf2.format(Number(v ?? 0))} реализаций/сут`, '']}
                   contentStyle={{ fontSize: 12 }} />
                 <Bar dataKey="v" radius={[3, 3, 0, 0]}>
                   {chart.map((_, i) => <Cell key={i} fill="hsl(217 91% 60%)" />)}
@@ -227,15 +250,23 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
                 <thead>
                   <tr className="border-b bg-muted/35 text-muted-foreground">
                     <Th>АЗС</Th><Th>ТРК</Th>{level === 'nozzle' && <Th>Пистолет</Th>}<Th>Топливо</Th>
-                    <Th right>Наливов/сут</Th><Th right>Наливы</Th><Th right>Литры</Th>
-                    <Th right>Выручка</Th><Th right>Ср. налив</Th>
+                    <Th right>Реализаций/сут</Th><Th right>Реализации</Th><Th right>Литры</Th>
+                    <Th right>Выручка</Th><Th right>Ср. заправка</Th>
                     <Th right>Дней без работы</Th><Th right>Доля АЗС</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.lines.map((l, i) => (
+                    /* Клик по строке — расшифровка единицы: из чего сложились её цифры
+                       и откуда они взяты. Строка это физический рукав, а не агрегат
+                       разных сущностей, поэтому окно, а не смена фильтра. */
                     <tr key={`${l.station_code}-${l.pos}-${l.nozzle}-${i}`}
-                      className={cn('border-b border-border/50 hover:bg-muted/25', l.silent && 'opacity-60')}>
+                      onClick={() => setUnit({
+                        stationCode: l.station_code, station: l.station, pos: l.pos,
+                        nozzle: level === 'nozzle' ? l.nozzle : null, fuelName: l.fuel_name,
+                      })}
+                      title="Открыть расшифровку строки"
+                      className={cn('cursor-pointer border-b border-border/50 hover:bg-muted/25', l.silent && 'opacity-60')}>
                       <Td>{l.station}</Td>
                       <Td>{l.pos ?? '—'}</Td>
                       {level === 'nozzle' && <Td>{l.nozzle ?? '—'}</Td>}
@@ -268,7 +299,7 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
                   <thead>
                     <tr className="border-b bg-muted/35 text-muted-foreground">
                       <Th>Уровень</Th><Th>АЗС</Th><Th>ТРК</Th><Th>Пистолет</Th>
-                      <Th right>Последний налив</Th><Th right>Дней простоя</Th>
+                      <Th right>Последняя заправка</Th><Th right>Дней простоя</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -293,10 +324,15 @@ export function FuelPumpsPanel({ companyId, dateFrom, dateTo }: {
       </Tabs>
 
       <div className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
-        «Наливов в сутки» считается на все сутки периода, включая простой: делить на
+        «Реализаций в сутки» считается на все сутки периода, включая простой: делить на
         рабочие дни значило бы спрятать сам простой. Молчащие единицы — те, что
         отпускали топливо раньше, но за период не сделали ни одной операции.
+        Клик по строке открывает расшифровку: динамика по суткам, интервалы простоя,
+        профиль часов и источник цифр.
       </div>
+
+      <PumpUnitModal unit={unit} companyId={companyId} dateFrom={dateFrom} dateTo={dateTo}
+        onClose={() => setUnit(null)} />
     </div>
   )
 }
@@ -374,6 +410,7 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
   })
 
   if (q.isLoading) return <Loading />
+  if (q.isError) return <Failed error={q.error} onRetry={() => void q.refetch()} />
   const data = q.data
   if (!data) return <Empty />
 
@@ -562,7 +599,7 @@ export function FuelAbcXyzPanel({ companyId, dateFrom, dateTo }: {
                 {!cell && <Th>Класс</Th>}
                 <Th right>Выручка, ₽</Th>
                 <Th right>Доля</Th><Th right>Накопл.</Th><Th right>Литры</Th>
-                <Th right>Наливы</Th><Th right>Карт</Th>
+                <Th right>Реализации</Th><Th right>Карт</Th>
                 <Th right>Разброс</Th><Th right>Тренд</Th>
               </tr>
             </thead>
@@ -642,6 +679,7 @@ export function FuelClientsPanel({ companyId, dateFrom, dateTo }: {
   })
 
   if (q.isLoading) return <Loading />
+  if (q.isError) return <Failed error={q.error} onRetry={() => void q.refetch()} />
   const data = q.data
   if (!data) return <Empty />
   const m = data.movement
@@ -760,7 +798,7 @@ export function FuelClientsPanel({ companyId, dateFrom, dateTo }: {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 4. Визиты (приезды)
+// 4. Визиты (визиты)
 // ═══════════════════════════════════════════════════════════════════════
 
 export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
@@ -776,6 +814,7 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
   })
 
   if (q.isLoading) return <Loading />
+  if (q.isError) return <Failed error={q.error} onRetry={() => void q.refetch()} />
   const data = q.data
   if (!data) return <Empty />
   const t = data.totals
@@ -783,37 +822,37 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
 
   return (
     <div ref={ref} className="space-y-4 p-4">
-      <Head title="Приезды (визиты)"
-        hint="Соседние наливы одной карты на одной АЗС — это один приезд, а не несколько покупок"
+      <Head title="Визиты (визиты)"
+        hint="Соседние реализации одной карты на одной АЗС — это один визит, а не несколько покупок"
         exportEl={() => ref.current}>
-        <Toggle value={gap} onChange={setGap} title="Порог склейки наливов в один приезд"
+        <Toggle value={gap} onChange={setGap} title="Порог склейки реализаций в один визит"
           opts={[{ v: '5', label: '5 мин' }, { v: '10', label: '10 мин' }, { v: '20', label: '20 мин' }]} />
       </Head>
 
       <Card className="gap-0 py-0">
         <CardContent className="grid grid-cols-2 p-0 md:grid-cols-3 xl:grid-cols-6">
-          <Metric label="Приездов" value={nf0.format(t.visits)}
-            hint={`из ${nf0.format(t.fills)} наливов`} />
-          <Metric label="Наливов на приезд" value={nf2.format(t.fills_per_visit)}
-            hint={`составных приездов ${pct(t.multi_pct)}`} />
-          <Metric label="Чек приезда" value={fmtMoney(t.avg_visit_check)} tone="info"
-            hint={`по наливам ${fmtMoney(t.avg_fill_check)}`} />
+          <Metric label="Визитов" value={nf0.format(t.visits)}
+            hint={`из ${nf0.format(t.fills)} реализаций`} />
+          <Metric label="Реализаций на визит" value={nf2.format(t.fills_per_visit)}
+            hint={`составных визитов ${pct(t.multi_pct)}`} />
+          <Metric label="Чек визита" value={fmtMoney(t.avg_visit_check)} tone="info"
+            hint={`по реализациям ${fmtMoney(t.avg_fill_check)}`} />
           <Metric label="Разница" value={`+${nf1.format(lift)} %`} tone="success"
-            hint="насколько занижен чек по наливам" />
-          <Metric label="Объём приезда" value={`${nf1.format(t.avg_visit_liters)} л`}
+            hint="насколько занижен чек по реализациям" />
+          <Metric label="Объём визита" value={`${nf1.format(t.avg_visit_liters)} л`}
             hint={fmtLiters(t.liters)} />
-          <Metric label="Разных видов в приезде" value={nf0.format(t.multi_fuel_visits)}
-            hint={`${pct(t.multi_fuel_pct)} приездов · бак + канистра`} />
+          <Metric label="Разных видов в визите" value={nf0.format(t.multi_fuel_visits)}
+            hint={`${pct(t.multi_fuel_pct)} визитов · бак + канистра`} />
         </CardContent>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
-          <div className="border-b px-4 py-2.5 text-sm font-medium">Сколько наливов в приезде</div>
+          <div className="border-b px-4 py-2.5 text-sm font-medium">Сколько реализаций в визите</div>
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b bg-muted/35 text-muted-foreground">
-                <Th>Наливов</Th><Th right>Приездов</Th><Th right>Доля</Th><Th right>Выручка</Th>
+                <Th>Реализаций</Th><Th right>Визитов</Th><Th right>Доля</Th><Th right>Выручка</Th>
               </tr>
             </thead>
             <tbody>
@@ -830,12 +869,12 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
         </CardContent></Card>
 
         <Card className="gap-0 overflow-hidden py-0"><CardContent className="p-0">
-          <div className="border-b px-4 py-2.5 text-sm font-medium">Чек приезда по видам топлива</div>
+          <div className="border-b px-4 py-2.5 text-sm font-medium">Чек визита по видам топлива</div>
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b bg-muted/35 text-muted-foreground">
-                <Th>Топливо</Th><Th right>Приездов</Th><Th right>Чек приезда</Th>
-                <Th right>Литров за приезд</Th><Th right>Выручка</Th>
+                <Th>Топливо</Th><Th right>Визитов</Th><Th right>Чек визита</Th>
+                <Th right>Литров за визит</Th><Th right>Выручка</Th>
               </tr>
             </thead>
             <tbody>
@@ -851,7 +890,7 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
             </tbody>
           </table>
           <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">
-            Только приезды с одним видом топлива: смешанные ({pct(t.multi_fuel_pct)}) в разрез
+            Только визиты с одним видом топлива: смешанные ({pct(t.multi_fuel_pct)}) в разрез
             не входят — их чек принадлежит сразу двум продуктам.
           </div>
         </CardContent></Card>
@@ -862,8 +901,8 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-card">
                 <tr className="border-b bg-muted/35 text-muted-foreground">
-                  <Th>АЗС</Th><Th right>Приездов</Th><Th right>Составных</Th>
-                  <Th right>Чек приезда</Th><Th right>Выручка</Th>
+                  <Th>АЗС</Th><Th right>Визитов</Th><Th right>Составных</Th>
+                  <Th right>Чек визита</Th><Th right>Выручка</Th>
                 </tr>
               </thead>
               <tbody>
@@ -883,7 +922,7 @@ export function FuelVisitsPanel({ companyId, dateFrom, dateTo }: {
       </div>
 
       <div className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
-        Склейка идёт по карте и станции: наличные без карты остаются отдельными наливами —
+        Склейка идёт по карте и станции: наличные без карты остаются отдельными реализациями —
         связать их с одним автомобилем нечем. Порог по умолчанию 10 минут: дольше на
         колонке не стоят, это уже следующий заезд.
       </div>
@@ -911,7 +950,7 @@ export function FuelInsightsBar({ companyId, dateFrom, dateTo }: {
 }) {
   const { company } = useCompany()
   const { setCoreMode } = useWorkspace()
-  // Вывод ведёт на пункт в ЕГО разделе: «Загрузка ТРК» живёт в «Сети», «Приезды» —
+  // Вывод ведёт на пункт в ЕГО разделе: «Загрузка ТРК» живёт в «Сети», «Визиты» —
   // в «Аналитике», и без смены раздела ссылка открыла бы пустой экран.
   const open = (sub: string) => {
     const mode = workspaceModeForKey(sub)

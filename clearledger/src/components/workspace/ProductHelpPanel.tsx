@@ -1,16 +1,20 @@
 /**
- * Раздел «Помощь» внутри «Топлива» - свод знания по этому продукту.
+ * Раздел «Помощь» внутри продукта - свод знания по нему одному.
  *
  * Знание одно на пространство и живёт в приложении «Инфо». Но посреди работы туда
  * никто не уходит: человек стоит на «Контроле баланса» и хочет прочитать про
  * «Контроль баланса», а не листать инструкции по проектам и подключениям. Раздел
- * показывает те же статьи, суженные до продукта (`/api/info/tree?app_code=sales`),
+ * показывает те же статьи, суженные до продукта (`/api/info/tree?app_code=…`),
  * поэтому расходиться с подсказкой правой рельсы ему нечем: отбор идёт по одним и
  * тем же привязкам.
  *
- * Пункт раздела - пласт знания, а не экран. Экраны видны внутри пункта списком, и у
- * каждой статьи подписано, к какому месту продукта она относится: из помощи можно
- * уйти прямо на тот экран, о котором читаешь.
+ * Пункт раздела - пласт знания, а не экран. Экраны видны внутри пункта списком, и из
+ * открытой статьи можно уйти прямо на тот экран, о котором читаешь: кнопки строятся
+ * из её привязок.
+ *
+ * Компонент общий на все продукты: «Топливо», «Магазин» и те, что появятся. Разница
+ * только в данных - код приложения, меню продукта и раскладка пластов приходят
+ * пропсами, вторая копия этого экрана никому не нужна.
  */
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -23,50 +27,40 @@ import { Markdown } from '@/components/info/Markdown'
 import {
   getInfoArticle, getInfoTree, type InfoArticleRow, type InfoKind,
 } from '@/services/infoService'
-import { MGMT_MENU, fuelModeForKey } from '@/config/workspaceMenus'
-
-/** Пункт раздела → что из свода показывать. */
-const SLICES: Record<string, { title: string; hint: string; categories?: string[]; kinds?: InfoKind[] }> = {
-  'help-start': {
-    title: 'Как работать',
-    hint: 'Из чего состоит рабочее место и в каком порядке им пользуются',
-    categories: ['Работа в «Топливе»'],
-  },
-  'help-goods': {
-    title: 'Товародвижение',
-    hint: 'Резервуары, смены, книга остатков, расхождения и ведомость',
-    categories: ['Товародвижение и резервуары'],
-  },
-  'help-money': {
-    title: 'Цены и клиенты',
-    hint: 'Ценообразование, маржа, корпоратив и розница',
-    categories: ['Цены и клиенты', 'Магазин и общепит'],
-  },
-  'help-norms': {
-    title: 'Нормы и учёт',
-    hint: 'На чём стоят требования к учёту нефтепродуктов',
-    kinds: ['norm'],
-  },
-  'help-docs': {
-    title: 'Документы компании',
-    hint: 'Регламенты и приказы организации, привязанные к «Топливу»',
-    kinds: ['lnd'],
-  },
+/** Пласт знания: что из свода показывает пункт раздела. */
+export interface HelpSlice {
+  title: string
+  hint: string
+  /** Разделы «Инфо», из которых берутся статьи. Пусто - берём по виду. */
+  categories?: string[]
+  /** Виды знания (`norm`, `lnd`). Пусто - берём по разделам. */
+  kinds?: InfoKind[]
 }
 
 const KIND_ICON: Record<InfoKind, typeof BookOpen> = {
   guide: BookOpen, norm: Scale, lnd: FileText, faq: HelpCircle,
 }
 
-export function FuelHelpPanel({ companyId, section }: { companyId: string; section: string }) {
-  const slice = SLICES[section] ?? SLICES['help-start']
+export function ProductHelpPanel({ companyId, section, appCode, slices, menu, modeForKey }: {
+  companyId: string
+  /** Ключ пункта раздела «Помощь». */
+  section: string
+  /** Код продукта в реестре Ядра: по нему сужается свод и читаются привязки. */
+  appCode: string
+  slices: Record<string, HelpSlice>
+  /** Меню продукта: по ключу привязки находим подпись экрана и кнопку перехода. */
+  menu: { key: string; label: string }[]
+  /** Куда переключить рельсу, открывая экран по ключу. */
+  modeForKey: (key: string) => string
+}) {
+  const slice = slices[section] ?? Object.values(slices)[0]
   const [, setParams] = useSearchParams()
   const [q, setQ] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
 
   const tree = useQuery({
-    queryKey: ['info-tree', companyId, 'sales'],
-    queryFn: () => getInfoTree(companyId, 'sales'),
+    queryKey: ['info-tree', companyId, appCode],
+    queryFn: () => getInfoTree(companyId, appCode),
   })
   const article = useQuery({
     queryKey: ['info-article', companyId, openId],
@@ -95,16 +89,16 @@ export function FuelHelpPanel({ companyId, section }: { companyId: string; secti
   /** Уйти на экран, о котором читаешь: тот же продукт, другой раздел рельсы. */
   const goToScreen = (key: string) => setParams((prev) => {
     const next = new URLSearchParams(prev)
-    next.set('mode', fuelModeForKey(key))
+    next.set('mode', modeForKey(key))
     next.set('sub', key)
     return next
   }, { replace: false })
 
   const opened = article.data
   const openedKeys = (opened?.bindings ?? [])
-    .filter((b) => b.appCode === 'sales' && b.sectionKey)
+    .filter((b) => b.appCode === appCode && b.sectionKey)
     .map((b) => b.sectionKey!)
-    .filter((k) => MGMT_MENU.some((m) => m.key === k))
+    .filter((k) => menu.some((m) => m.key === k))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">
@@ -125,7 +119,7 @@ export function FuelHelpPanel({ companyId, section }: { companyId: string; secti
       ) : items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
           {section === 'help-docs'
-            ? 'Регламентов организации по «Топливу» пока нет. Их заводят в приложении «Инфо» и привязывают к нужному экрану — тогда они появятся здесь и подсказкой на самом экране.'
+            ? 'Регламентов организации по этому продукту пока нет. Их заводят в приложении «Инфо» и привязывают к нужному экрану — тогда они появятся здесь и подсказкой на самом экране.'
             : 'В этом пласте пока пусто.'}
         </div>
       ) : (
@@ -182,7 +176,7 @@ export function FuelHelpPanel({ companyId, section }: { companyId: string; secti
                     {Array.from(new Set(openedKeys)).map((k) => (
                       <Button key={k} size="sm" variant="outline" className="h-6 px-2 text-[11px]"
                         onClick={() => goToScreen(k)}>
-                        {MGMT_MENU.find((m) => m.key === k)?.label ?? k}
+                        {menu.find((m) => m.key === k)?.label ?? k}
                       </Button>
                     ))}
                   </div>

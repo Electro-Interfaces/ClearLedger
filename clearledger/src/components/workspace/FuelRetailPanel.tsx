@@ -191,14 +191,14 @@ function Overview({ companyId, dateFrom, dateTo }: TabProps) {
         <KpiCard label="Объём" value={nf0.format(k.liters) + ' л'} accent="info" />
         <KpiCard label="Реализаций" value={nf0.format(k.fills)} />
         <KpiCard label="Средний чек" value={fmtFuelMetric('avg_check', k.avg_check)} />
-        <KpiCard label="Ср. реализация" value={fmtFuelMetric('avg_fill', k.avg_fill)} />
+        <KpiCard label="Ср. заправка" value={fmtFuelMetric('avg_fill', k.avg_fill)} />
         <KpiCard label="Доля безнала" value={pct1(k.cashless_pct)} hint="банковские карты в выручке розницы" />
         <KpiCard label="Доля от всех продаж" value={pct1(k.share_of_total_pct)} hint="розница в общей выручке" />
         <KpiCard label="Медиана чека" value={fmtRub0(k.check_median)} hint={`p90: ${fmtRub0(k.check_p90)}`} />
       </div>
       <ExportOnlyTable name="KPI розницы" columns={['Показатель', 'Значение']} rows={[
         ['Выручка, ₽', k.amount], ['Литры', k.liters], ['Реализаций', k.fills],
-        ['Средний чек, ₽', k.avg_check], ['Ср. реализация, л', k.avg_fill],
+        ['Средний чек, ₽', k.avg_check], ['Ср. заправка, л', k.avg_fill],
         ['Доля безнала, %', k.cashless_pct], ['Доля от всех продаж, %', k.share_of_total_pct],
         ['Медиана чека, ₽', k.check_median], ['P90 чека, ₽', k.check_p90],
       ]} />

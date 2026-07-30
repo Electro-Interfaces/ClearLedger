@@ -1,7 +1,11 @@
 /**
- * «Тарифы» — ценовая политика сети АЗС (fuel, ГИГ).
- * Табы: Прайс-лист (станция × топливо) · Средние цены · Отклонения цен · Динамика цен.
- * Данные — /api/fuel/tariffs/* (сетка, отклонения, динамика) + /api/fuel/analytics/fills.
+ * «Цены» — что стоит на стелле сети АЗС (fuel, ГИГ). Как цену двигали — соседний
+ * пункт «Изменения цен», сколько на ней заработали — «Маржа и цены».
+ *
+ * Табы: Прайс-лист (станция × топливо) · Разброс по сети · Средние цены ·
+ * Отклонения цен · Динамика цен.
+ * Данные — /api/fuel/tariffs/* (сетка, отклонения, динамика),
+ * /api/fuel/pricing/spread (разброс) + /api/fuel/analytics/fills.
  *
  * Семантика: `price` в реализациях = номинальная цена стеллы ₽/л; факт-цена =
  * Σвыручка/Σлитры (realized); скидки на грейне реализации ≈ 0 — реальные скидки
@@ -24,8 +28,9 @@ import { HorizonControl } from './HorizonControl'
 import { useTabParams } from '@/hooks/useTabParams'
 import {
   getFuelTariffGrid, getFuelFills, getFuelPriceDeviations, getFuelPriceTimeseries,
-  fmtFuelMetricCompact, fuelChartFormat,
+  getFuelPriceSpread, fmtFuelMetricCompact, fuelChartFormat,
   type FuelGroupBy, type FuelTariffCell, type FuelFillsLine, type FuelPriceDeviationLine,
+  type FuelSpreadLine,
 } from '@/services/fuelSalesService'
 import { useFuelKindFilter } from '@/hooks/useFuelKindFilter'
 
@@ -183,6 +188,128 @@ function PriceGridTab({ companyId, dateFrom, dateTo }: TabProps) {
               s.name, s.code,
               ...data.fuels.map((f) => cellMap.get(`${s.code}|${f.code}`)?.price_avg ?? null),
             ])} />
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ────────────────────── Таб: Разброс по сети ────────────────────── */
+
+/**
+ * Где стоит каждая станция относительно сети НА КОНЕЦ ПЕРИОДА — и как давно.
+ *
+ * Отличие от «Отклонений»: там факт-цена усреднена по всему периоду и отвечает «где
+ * литр продавался дороже», здесь — действующая цена и её возраст, то есть «кого
+ * забыли пересмотреть». Станция с ценой месячной давности при недельном шаге сети
+ * торгует по чужому решению, и по средним за период это не видно.
+ */
+function SpreadTab({ companyId, dateFrom, dateTo }: TabProps) {
+  const fk = useFuelKindFilter()
+  const [p, patch] = useTabParams('fuel_tariffs/spread', { fuel: 'all' })
+  const { data, isLoading } = useQuery({
+    queryKey: ['fuel-price-spread', companyId, dateFrom, dateTo, fk.key],
+    queryFn: () => getFuelPriceSpread({ companyId, dateFrom, dateTo, fuelCodes: fk.fuelCodes }),
+  })
+  const fuels = data?.fuels ?? []
+  const lines = useMemo(
+    () => (data?.lines ?? []).filter((l) => p.fuel === 'all' || String(l.fuel_code) === p.fuel),
+    [data, p.fuel],
+  )
+  // Порог «залежавшейся» цены — вдвое дольше самого длинного шага сети по этому топливу.
+  const staleAfter = useMemo(() => {
+    const m = new Map<number, number>()
+    fuels.forEach((f) => m.set(f.fuel_code, Math.max(14, Math.round(f.age_max * 0.75))))
+    return m
+  }, [fuels])
+
+  const cols: Col<FuelSpreadLine>[] = [
+    { key: 'station', label: 'Станция', left: true, get: (r) => r.station, cell: (r) => r.station },
+    { key: 'fuel_name', label: 'Топливо', left: true, get: (r) => r.fuel_name, cell: (r) => r.fuel_name },
+    {
+      key: 'price', label: 'Цена ₽/л', get: (r) => r.price,
+      cell: (r) => <span className="font-medium text-foreground">{nf2.format(r.price)}</span>,
+    },
+    {
+      key: 'delta_median', label: 'Δ к медиане', get: (r) => r.delta_median,
+      cell: (r) => <span className={deltaCls(r.delta_median)}>{r.delta_median > 0 ? '+' : ''}{nf2.format(r.delta_median)}</span>,
+    },
+    { key: 'rank', label: 'Место в сети', get: (r) => r.rank, cell: (r) => `${r.rank}-е` },
+    {
+      key: 'age_days', label: 'Стоит, дней', get: (r) => r.age_days,
+      cell: (r) => {
+        const stale = r.age_days > (staleAfter.get(r.fuel_code) ?? 999)
+        return (
+          <span className={stale ? 'text-amber-600 dark:text-amber-400' : ''}
+            title={stale ? 'Цена не пересматривалась дольше остальных станций сети' : undefined}>
+            {nf0.format(r.age_days)}
+          </span>
+        )
+      },
+    },
+    { key: 'changes', label: 'Смен за период', get: (r) => r.changes, cell: (r) => nf0.format(r.changes) },
+    { key: 'liters', label: 'Литры', get: (r) => r.liters, cell: (r) => nf0.format(r.liters) },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <ViewParamsBar>
+        <Field label="Топливо">
+          <Select value={p.fuel} onValueChange={(v) => patch({ fuel: v })}>
+            <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">Все виды</SelectItem>
+              {fuels.map((f) => <SelectItem key={f.fuel_code} value={String(f.fuel_code)} className="text-xs">{f.fuel_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+      </ViewParamsBar>
+      {isLoading ? <Loading /> : !data || data.lines.length === 0 ? <Empty text="Нет реализаций за период" /> : (
+        <>
+          <div className="text-xs text-muted-foreground">
+            Действующая цена на {new Date(data.as_of).toLocaleDateString('ru-RU')} — последняя, по которой
+            была продажа. Размах — сколько сеть торгует по разным ценникам на один вид топлива.
+          </div>
+          <Card><CardContent className="p-0 overflow-x-auto">
+            <table className="w-full text-xs" {...exportRows('Разброс цен по сети',
+              ['Топливо', 'Станций', 'Мин ₽/л', 'Медиана ₽/л', 'Макс ₽/л', 'Размах ₽/л', 'Размах %', 'Средневзвеш. ₽/л', 'Макс. возраст цены, дней'],
+              fuels.map((f) => [f.fuel_name, f.stations, f.price_min, f.price_median, f.price_max,
+                f.spread, f.spread_pct, f.price_wavg, f.age_max]))}>
+              <thead><tr className="border-b bg-muted/40 text-muted-foreground">
+                <th className="p-2 text-left font-medium">Топливо</th>
+                <th className="p-2 text-right font-medium">Станций</th>
+                <th className="p-2 text-right font-medium whitespace-nowrap">Мин · медиана · макс</th>
+                <th className="p-2 text-right font-medium">Размах</th>
+                <th className="p-2 text-right font-medium whitespace-nowrap">Средневзвеш.</th>
+                <th className="p-2 text-right font-medium whitespace-nowrap">Старейшая цена</th>
+              </tr></thead>
+              <tbody>
+                {fuels.map((f) => (
+                  <tr key={f.fuel_code} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2 font-medium">{f.fuel_name}</td>
+                    <td className="p-2 text-right tabular-nums font-mono text-muted-foreground">{nf0.format(f.stations)}</td>
+                    <td className="p-2 text-right tabular-nums font-mono whitespace-nowrap">
+                      <span className="text-muted-foreground">{nf2.format(f.price_min)}</span>
+                      <span className="mx-1 font-medium text-foreground">{nf2.format(f.price_median)}</span>
+                      <span className="text-muted-foreground">{nf2.format(f.price_max)}</span>
+                    </td>
+                    <td className={`p-2 text-right tabular-nums font-mono ${f.spread > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                      {nf2.format(f.spread)}
+                      <span className="ml-1 text-[10px] opacity-70">{nf1.format(f.spread_pct)}%</span>
+                    </td>
+                    <td className="p-2 text-right tabular-nums font-mono text-muted-foreground">{nf2.format(f.price_wavg)}</td>
+                    <td className="p-2 text-right tabular-nums font-mono text-muted-foreground">{nf0.format(f.age_max)} дн.</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent></Card>
+          <SortTable rows={lines} cols={cols} initial="price" rowKey={(r) => `${r.station_code}|${r.fuel_code}`}
+            exp={{
+              name: 'Цены станций',
+              columns: ['Станция', 'Топливо', 'Цена ₽/л', 'Δ к медиане ₽/л', 'Место в сети', 'Стоит, дней', 'Смен за период', 'Литры'],
+              rows: lines.map((l) => [l.station, l.fuel_name, l.price, l.delta_median, l.rank, l.age_days, l.changes, l.liters]),
+            }} />
         </>
       )}
     </div>
@@ -420,27 +547,29 @@ function PriceDynamicsTab({ companyId, dateFrom, dateTo }: TabProps) {
 
 const FUEL_TARIFF_TABS: { k: string; label: string }[] = [
   { k: 'grid', label: 'Прайс-лист' },
+  { k: 'spread', label: 'Разброс по сети' },
   { k: 'avg', label: 'Средние цены' },
   { k: 'dev', label: 'Отклонения цен' },
   { k: 'dyn', label: 'Динамика цен' },
 ]
 
-/** Пункт «Тарифы» топливной сети — контейнер с внутренними табами. */
+/** Пункт «Цены» топливной сети — контейнер с внутренними табами. */
 export function FuelTariffsPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
   const [t, patch] = useTabParams('fuel_tariffs', { sub: 'grid' })
   const p: TabProps = { companyId, dateFrom, dateTo }
   const ref = useRef<HTMLDivElement>(null)
-  const curLabel = FUEL_TARIFF_TABS.find((x) => x.k === t.sub)?.label ?? 'Тарифы'
+  const curLabel = FUEL_TARIFF_TABS.find((x) => x.k === t.sub)?.label ?? 'Цены'
   const scopeSub = useScopeSubtitle({ scopeApplied: false })  // панель не сужает по сети: API не принимает станции
   return (
     <div>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
         <PanelViewTabs tabs={FUEL_TARIFF_TABS} value={t.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Цены»" />
-        <ExportButton title={`Тарифы АЗС · ${curLabel}`} subtitle={scopeSub} getEl={() => ref.current} />
+        <ExportButton title={`Цены АЗС · ${curLabel}`} subtitle={scopeSub} getEl={() => ref.current} />
       </div>
       {/* key={t.sub} — ремаунт под-вида при смене таба (чистое локальное состояние). */}
       <div ref={ref} className="p-4" key={t.sub}>
         {t.sub === 'grid' && <PriceGridTab {...p} />}
+        {t.sub === 'spread' && <SpreadTab {...p} />}
         {t.sub === 'avg' && <AvgPricesTab {...p} />}
         {t.sub === 'dev' && <DeviationsTab {...p} />}
         {t.sub === 'dyn' && <PriceDynamicsTab {...p} />}

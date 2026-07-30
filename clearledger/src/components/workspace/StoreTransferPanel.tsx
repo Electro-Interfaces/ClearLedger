@@ -92,6 +92,7 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
               <tr>
                 <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Дата</th>
                 <th className="px-3 py-2 font-medium text-left">Номер</th>
+                <th className="px-3 py-2 font-medium text-left">Смена</th>
                 <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Откуда → Куда</th>
                 <th className="px-3 py-2 font-medium text-right">Позиций</th>
                 <th className="px-3 py-2 font-medium text-right">Стоимость</th>
@@ -106,6 +107,7 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo }: { companyId:
                 >
                   <td className="px-3 py-1.5 whitespace-nowrap">{d.date ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums">{d.number ?? '—'}</td>
+                  <td className="px-3 py-1.5 tabular-nums text-muted-foreground" title={d.shift_reason ?? undefined}>{d.shift_number ?? '—'}</td>
                   <td className="px-3 py-1.5 whitespace-nowrap">
                     <span className="text-muted-foreground">{d.from_code}</span>
                     <span className="mx-1 opacity-50">→</span>

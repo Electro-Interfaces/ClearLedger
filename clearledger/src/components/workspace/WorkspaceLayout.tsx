@@ -15,7 +15,7 @@ import {
 import { NormalizationPanel } from './NormalizationPanel'
 import { ReconciliationPanel } from './ReconciliationPanel'
 import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
-import { StorePanel } from './StorePanel'
+import { StorePanel, StoreHelpPanel } from './StorePanel'
 import { STORE_MODES } from '@/config/storeCatalog'
 import { ExportLayerPanel } from './ExportLayerPanel'
 import { OnboardingScreen } from './OnboardingScreen'
@@ -106,6 +106,9 @@ function DesktopWorkspace() {
             {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
             {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
             {coreMode === 'sales_goods' && <ManagementPanel mode="sales_goods" />}
+            {/* «Помощь» — свод знания по продукту: у «Топлива» роутится общей панелью
+                разделов, у «Магазина» своей (у него свой набор пунктов). */}
+            {coreMode === 'sales_help' && <ManagementPanel mode="sales_help" />}
             {coreMode === 'operations' && <ManagementPanel mode="operations" />}
             {/* «Оборудование» и «Хозяйство» — разделы «Эксплуатации», та же панель. */}
             {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
@@ -115,6 +118,7 @@ function DesktopWorkspace() {
             {coreMode === 'projects' && <ManagementPanel mode="projects" />}
             {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
             {STORE_MODES.includes(coreMode) && <StorePanel />}
+            {coreMode === 'store_help' && <StoreHelpPanel />}
             {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
                 разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
             {coreMode === 'corporate' && <ProductStub code="corp" />}
@@ -199,11 +203,13 @@ function MobileWorkspace() {
         {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
         {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
         {coreMode === 'sales_goods' && <ManagementPanel mode="sales_goods" />}
+        {coreMode === 'sales_help' && <ManagementPanel mode="sales_help" />}
         {coreMode === 'operations' && <ManagementPanel mode="operations" />}
         {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
         {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
         {coreMode === 'projects' && <ManagementPanel mode="projects" />}
         {STORE_MODES.includes(coreMode) && <StorePanel />}
+        {coreMode === 'store_help' && <StoreHelpPanel />}
         {coreMode === 'corporate' && <ProductStub code="corp" />}
         {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
         {coreMode === 'financial' && <FinancialPanel />}

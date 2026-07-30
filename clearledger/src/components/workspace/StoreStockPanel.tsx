@@ -35,13 +35,16 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const items = useMemo(() => {
     if (!data) return [] as StoreStockItem[]
     const ql = q.toLowerCase().trim()
-    return data.items.filter((i) => {
+    const rows = data.items.filter((i) => {
       if (marked === 'marked' && !i.marked) return false
       if (marked === 'plain' && i.marked) return false
       if (onlyNegative && !i.negative) return false
       if (ql && !(i.name.toLowerCase().includes(ql) || (i.barcode ?? '').includes(q) || (i.article ?? '').includes(q))) return false
       return true
     })
+    // Список отсортирован по розничной стоимости убыв., поэтому в режиме «только в минусе»
+    // сверху оказывались нули, а сами глубокие минусы — в хвосте. Разворачиваем.
+    return onlyNegative ? [...rows].sort((a, b) => (a.retail_value ?? 0) - (b.retail_value ?? 0)) : rows
   }, [data, q, marked, onlyNegative])
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка остатков…</div>
@@ -52,7 +55,12 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const kpiRetailPos = items.reduce((s, i) => s + (i.qty > 0 ? (i.retail_value ?? 0) : 0), 0)
   const kpiPos = items.filter((i) => i.qty > 0).length
   const kpiNeg = items.filter((i) => i.negative).length
-  const costed = items.filter((i) => i.qty > 0 && i.cost_amount != null)
+  // Сомнительная себестоимость (партия выше цены или разошлась с закупкой) в сводку не
+  // идёт: иначе «потенц. маржа» считается по цифрам, которым сама панель не верит.
+  const onShelf = items.filter((i) => i.qty > 0)
+  const costed = onShelf.filter((i) => i.cost_amount != null && !i.cost_doubt)
+  const doubt = onShelf.filter((i) => i.cost_amount != null && i.cost_doubt)
+  const noCost = onShelf.length - costed.length - doubt.length
   const kpiCost = costed.reduce((s, i) => s + (i.cost_amount ?? 0), 0)
   const kpiRetailCosted = costed.reduce((s, i) => s + (i.retail_value ?? 0), 0)
   const kpiMarginPct = kpiRetailCosted ? ((kpiRetailCosted - kpiCost) / kpiRetailCosted) * 100 : null
@@ -61,10 +69,16 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
   const KPIS: { label: string; value: string; hint?: string; danger?: boolean }[] = [
     { label: 'Позиций (SKU)', value: nf(items.length) },
     { label: 'На полке (>0)', value: nf(kpiPos), hint: 'положительный остаток' },
-    { label: 'В минусе', value: nf(kpiNeg), danger: kpiNeg > 0, hint: 'продажи опередили приёмку' },
-    { label: 'Розн. стоимость', value: fmtMoney(kpiRetailPos), hint: 'товар на полке × цена' },
-    { label: 'Себест. остатка', value: fmtMoney(kpiCost), hint: `${nf(costed.length)} SKU с себест.` },
-    { label: 'Потенц. маржа', value: kpiMarginPct == null ? '—' : `${nf(kpiMarginPct, 1)}%`, hint: 'на полке (закуп.)' },
+    { label: 'В минусе', value: nf(kpiNeg), danger: kpiNeg > 0, hint: 'расход без прихода в контуре' },
+    { label: 'Розн. стоимость', value: fmtMoney(kpiRetailPos), hint: `${nf(kpiPos)} позиций на полке × цена` },
+    {
+      label: 'Себест. остатка', value: fmtMoney(kpiCost),
+      hint: `${nf(costed.length)} SKU из ${nf(onShelf.length)}${doubt.length ? ` · ${nf(doubt.length)} спорных не в счёт` : ''}${noCost ? ` · ${nf(noCost)} без партий` : ''}`,
+    },
+    {
+      label: 'Потенц. маржа', value: kpiMarginPct == null ? '—' : `${nf(kpiMarginPct, 1)}%`,
+      hint: `от розницы ${fmtMoney(kpiRetailCosted)} тех же ${nf(costed.length)} SKU`,
+    },
   ]
 
   return (
@@ -87,7 +101,7 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
             className="text-xs px-2 py-1.5 rounded-md border border-border/50 bg-background"
           >
             {data.warehouses.map((w) => (
-              <option key={w.code} value={w.code}>{w.name ?? w.code} ({w.sku})</option>
+              <option key={w.code} value={w.code}>{w.name ?? w.code} — на полке {w.positive} из {w.sku}</option>
             ))}
           </select>
           <select
@@ -120,10 +134,12 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
       </div>
 
       <p className="text-[11px] text-muted-foreground/70 -mt-1">
-        ⚠ Весовые считаются в базовых единицах (мл/г/л). Себестоимость — удельная из партий
-        (Стоимость/Количество, те же единицы, что и остаток). Маржа ориентировочна: у части SKU
-        цена/партия устаревшие → возможны выбросы (напр. &gt;80% или отрицательная). Отрицательные
-        остатки — норма для розницы по средней (флаг красным).
+        Остаток — в базовой единице регистра (молоко в мл, соусы в г), она указана рядом с числом.
+        Себестоимость — удельная из партий ЦБ (Стоимость/Количество). Где партия выше розничной цены
+        или расходится со средней закупкой более чем в 1,4 раза, цифра помечена «?» и в сводную маржу
+        не входит. <span className="text-muted-foreground">Минус по остатку</span> — расход прошёл, а
+        приход в этом контуре не оформлен: так ведут себя расходники общепита (стаканы, соусы,
+        упаковка) и товар, чьи накладные заводятся вне контура. Это не долг по приёмке.
       </p>
 
       <div className="overflow-x-auto rounded-lg border border-border/50">
@@ -152,10 +168,20 @@ export function StoreStockPanel({ companyId, dateFrom, dateTo }: { companyId: st
                 </td>
                 <td className="px-3 py-1.5 text-center">{i.marked && <ChzBadge />}</td>
                 <td className="px-3 py-1.5 text-muted-foreground tabular-nums">{i.barcode ?? '—'}</td>
-                <td className={`px-3 py-1.5 text-right tabular-nums ${i.negative ? 'text-red-400/80 font-medium' : ''}`}>{nf(i.qty, 3)}</td>
+                <td className={`px-3 py-1.5 text-right tabular-nums ${i.negative ? 'text-red-400/80 font-medium' : ''}`}>
+                  {nf(i.qty, 3)}
+                  {i.unit && <span className="ml-1 text-[10px] text-muted-foreground/60">{i.unit}</span>}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{i.retail_price != null ? fmtMoney(i.retail_price) : '—'}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{i.cost_unit != null ? nf(i.cost_unit, 2) : '—'}</td>
-                <td className={`px-3 py-1.5 text-right tabular-nums ${i.margin_pct == null ? '' : i.margin_pct < 0 ? 'text-red-400/80' : 'text-emerald-300/70'}`}>{i.margin_pct != null ? `${nf(i.margin_pct, 1)}%` : '—'}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                  {i.cost_unit != null ? nf(i.cost_unit, 2) : '—'}
+                  {i.cost_doubt && (
+                    <span className="ml-1 text-amber-400/80" title={`себестоимость партии ${i.cost_doubt} — в сводную маржу не входит`}>?</span>
+                  )}
+                </td>
+                <td className={`px-3 py-1.5 text-right tabular-nums ${i.cost_doubt ? 'text-muted-foreground/50' : i.margin_pct == null ? '' : i.margin_pct < 0 ? 'text-red-400/80' : 'text-emerald-300/70'}`}
+                  title={i.cost_doubt ? `цифра ненадёжна: ${i.cost_doubt}` : undefined}>
+                  {i.margin_pct != null ? `${nf(i.margin_pct, 1)}%` : '—'}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{i.retail_value != null ? fmtMoney(i.retail_value) : '—'}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">{i.vat ?? '—'}</td>
               </tr>

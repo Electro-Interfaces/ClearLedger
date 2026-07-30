@@ -1,5 +1,5 @@
 /**
- * Раздел «Операции» — реестр наливов по данным Ledger (`fuel_transactions`).
+ * Раздел «Операции» — реестр реализаций по данным Ledger (`fuel_transactions`).
  *
  * Форма раздела повторяет «Операции» «Монитора» (TradeFrame,
  * `src/pages/OperationsTransactionsPageSimple.tsx`) — решение МАГа 29.07.2026:
@@ -485,7 +485,7 @@ export function FuelTransactionsPanel({ companyId, dateFrom, dateTo }: {
 }
 
 /** Карточка операции. Состав полей — как в «Мониторе»: то, что оператор проверяет
- * по звонку клиента (чек, купон, заказ до налива, ТРК и резервуар). */
+ * по звонку клиента (чек, купон, заказ до отпуска, ТРК и резервуар). */
 function OperationDetailsDialog({ row, onClose }: { row: FuelTxRow | null; onClose: () => void }) {
   const isCoupon = (row?.payment_method ?? '') === 'Купон'
   const number = row?.card && row.card !== '-' ? row.card : ''

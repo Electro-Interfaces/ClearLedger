@@ -12,43 +12,9 @@ import {
 import { getStoreShiftDetail, type ShiftDocLine } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
 import { ChzBadge } from '@/components/common/ChzBadge'
+import { DocLines } from './DocsModal'   // строки документа рисует общий компонент
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
-const money = (n: number | null | undefined) => (n == null ? '—' : fmtMoney(n))
-
-/** Строки документа — рендер по наличию полей (приход/инвент/списание/переоценка). */
-function DocLines({ lines }: { lines: ShiftDocLine[] }) {
-  if (!lines?.length) return <div className="px-3 py-1.5 text-[11px] text-muted-foreground">Нет строк</div>
-  const isReval = lines.some((l) => l.old != null || l.new != null)
-  const isInv = lines.some((l) => l.fact != null || l.uchet != null)
-  return (
-    <table className="w-full text-[11px]">
-      <tbody>
-        {lines.map((l, i) => (
-          <tr key={i} className="border-t border-border/20">
-            <td className="px-3 py-1">{l.name ?? '—'}</td>
-            {isReval ? (
-              <td className="px-3 py-1 text-right tabular-nums whitespace-nowrap">
-                {money(l.old)} → {money(l.new)}
-                {l.pct != null && <span className={`ml-1 ${(l.pct ?? 0) < 0 ? 'text-emerald-300/80' : 'text-amber-300/80'}`}>{l.pct > 0 ? '+' : ''}{nf(l.pct, 1)}%</span>}
-              </td>
-            ) : isInv ? (
-              <td className="px-3 py-1 text-right tabular-nums whitespace-nowrap">
-                факт {nf(l.fact ?? 0, 2)} / учёт {nf(l.uchet ?? 0, 2)}
-                <span className={`ml-1 ${(l.dev ?? 0) < 0 ? 'text-red-400/80' : 'text-emerald-300/80'}`}>({(l.dev ?? 0) >= 0 ? '+' : ''}{nf(l.dev ?? 0, 2)})</span>
-                {l.amount != null && <span className="ml-1 text-muted-foreground">{money(l.amount)}</span>}
-              </td>
-            ) : (
-              <td className="px-3 py-1 text-right tabular-nums whitespace-nowrap">
-                {l.qty != null ? nf(l.qty, 3) : '—'}{l.price != null ? ` × ${money(l.price)}` : ''}{l.amount != null ? ` = ${money(l.amount)}` : ''}
-              </td>
-            )}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
 
 /** Группа документов одного типа: заголовок + раскрываемые документы. */
 function DocGroup<T extends { number: string | null; lines: ShiftDocLine[] }>({

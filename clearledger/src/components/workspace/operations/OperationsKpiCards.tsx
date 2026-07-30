@@ -77,7 +77,7 @@ export const KpiPaymentCard = memo(function KpiPaymentCard({
   )
 })
 
-/** Редкий способ оплаты — чипом: у него единицы наливов, плитка была бы пустой.
+/** Редкий способ оплаты — чипом: у него единицы реализаций, плитка была бы пустой.
  *  Цифры раскрываются при выборе, чтобы ряд чипов не превращался в вторую сетку. */
 export const KpiPaymentChip = memo(function KpiPaymentChip({
   payment, selected, volume, cost, count, onClick,

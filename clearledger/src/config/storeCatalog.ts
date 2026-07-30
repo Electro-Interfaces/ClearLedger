@@ -54,6 +54,22 @@ export const STORE_SECTIONS: {
 
 export const STORE_MODES: string[] = STORE_SECTIONS.map((s) => s.mode)
 
+/**
+ * Помощь по «Магазину» - шестой раздел рельсы, как в «Топливе».
+ *
+ * Пункты - пласты знания, а не экраны: у магазина их двадцать пять, списком они не
+ * читаются. Раскладка «пласт → разделы Инфо» живёт в `workspace/helpSlices.ts`.
+ */
+export const STORE_HELP_MENU = [
+  { key: 'help-start',   label: 'Торговля' },
+  { key: 'help-stock',   label: 'Склад и движение' },
+  { key: 'help-catalog', label: 'Каталог и рецептуры' },
+  { key: 'help-marking', label: 'Маркировка' },
+  { key: 'help-closing', label: 'Закрытие периода' },
+  { key: 'help-docs',    label: 'Документы компании' },
+]
+export const STORE_HELP_KEYS = STORE_HELP_MENU.map((m) => m.key)
+
 export interface StoreBlock {
   name: string
   desc: string

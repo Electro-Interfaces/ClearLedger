@@ -24,7 +24,9 @@ import {
   FuelAbcXyzPanel, FuelClientsPanel, FuelPumpsPanel, FuelVisitsPanel,
 } from './FuelNetworkPanels'
 import { TankSpecsPanel } from './TankSpecsPanel'
-import { FuelHelpPanel } from './FuelHelpPanel'
+import { ProductHelpPanel } from './ProductHelpPanel'
+import { FUEL_HELP_SLICES } from './helpSlices'
+import { MGMT_MENU, fuelModeForKey } from '@/config/workspaceMenus'
 import { ReceiptsSection } from '@/components/fuel/ReceiptsSection'
 
 export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode }: {
@@ -65,7 +67,10 @@ export function FuelSalesRouter({ tab, companyId, dateFrom, dateTo, stationCode 
     case 'inventory':      return <FuelBalancePanel {...p} view="inventory" />
     // Помощь — свод знания по продукту: те же статьи «Инфо», суженные до «Топлива».
     default:
-      if (tab.startsWith('help-')) return <FuelHelpPanel companyId={companyId} section={tab} />
+      if (tab.startsWith('help-')) return (
+        <ProductHelpPanel companyId={companyId} section={tab} appCode="sales"
+          slices={FUEL_HELP_SLICES} menu={MGMT_MENU} modeForKey={fuelModeForKey} />
+      )
       return null
   }
 }

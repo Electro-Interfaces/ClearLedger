@@ -11,6 +11,8 @@
  */
 
 import { useEffect, useMemo } from 'react'
+import { ProductHelpPanel } from './ProductHelpPanel'
+import { STORE_HELP_SLICES } from './helpSlices'
 import { useWorkspace, useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -34,7 +36,7 @@ import { StoreShiftsPanel } from './StoreShiftsPanel'
 import { BpExportPanel } from './BpExportPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
 import {
-  STORE_KEYS, STORE_MODES, getStoreView, storeDefaultKey, storeModeForKey,
+  STORE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView, storeDefaultKey, storeModeForKey,
   type StoreMode, type StoreStatus, type StoreView,
 } from '@/config/storeCatalog'
 
@@ -102,6 +104,21 @@ function ViewScaffold({ view }: { view: StoreView }) {
           <code className="mx-1">STORE_MOVEMENT_BLUEPRINT.md</code>.
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Помощь по «Магазину» - свод знания продукта в самом продукте (тот же приём, что в
+ * «Топливе»). Панель общая, отличаются данные: код приложения, меню и пласты.
+ */
+export function StoreHelpPanel() {
+  const { companyId } = useCompany()
+  const [tab] = useWorkspaceSubView(STORE_HELP_KEYS[0], STORE_HELP_KEYS)
+  return (
+    <div className="h-full overflow-y-auto">
+      <ProductHelpPanel companyId={companyId} section={tab} appCode="shop"
+        slices={STORE_HELP_SLICES} menu={STORE_MENU} modeForKey={storeModeForKey} />
     </div>
   )
 }

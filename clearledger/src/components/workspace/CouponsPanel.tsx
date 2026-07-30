@@ -8,7 +8,7 @@
  *
  * Форма — как в «Мониторе» (`prod.dataworker.ru/network/coupons`): сводка,
  * чипы-разрезы по состоянию и топливу, журнал строками. Своё: дата реализации
- * заполнена (взята из наливов Ledger по номеру купона — STS её не отдаёт).
+ * заполнена (взята из реализаций Ledger по номеру купона — STS её не отдаёт).
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -51,7 +51,7 @@ function stateClass(stateId: number | null) {
   return 'border-border bg-muted text-muted-foreground'
 }
 
-/** Остаток: положительный — долг перед клиентом, отрицательный — перебор налива. */
+/** Остаток: положительный — долг перед клиентом, отрицательный — перебор отпуска. */
 function restClass(value: number) {
   if (value < 0) return 'text-red-500'
   if (value === 0) return 'text-muted-foreground'

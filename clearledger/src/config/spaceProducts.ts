@@ -97,7 +97,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // день и что уехало в бухгалтерию), «Каталог» (карточка товара), «Маркировка»
     // (регуляторика). Состав — в config/storeCatalog.ts, второго источника нет.
     code: 'shop', route: '/shop', label: 'Магазин',
-    modes: ['store', 'store_stock', 'store_closing', 'store_catalog', 'store_marking'], paths: [],
+    modes: ['store', 'store_stock', 'store_closing', 'store_catalog', 'store_marking', 'store_help'], paths: [],
     objectTabs: ['passport', 'sales'],
   },
   {
@@ -339,6 +339,21 @@ const ROUTE_APPS: [string, string][] = [
   ['/admin', 'admin'], ['/data', 'data'], ['/messages', 'chat'],
   ['/info', 'info'], ['/workspace', 'ledger'],
 ]
+
+/**
+ * Имена приложений Ядра для шапки. Продукты разреза называет `productLabel`, а эти
+ * четыре — свои экраны Ядра, и шапка обязана называть их так же, как плитка на столе:
+ * человек в «Чатах» видел «ElsyPlus Учёт» и справедливо не понимал, где он.
+ */
+const CORE_APP_TITLES: Record<string, string> = {
+  chat: 'Чаты', admin: 'Управление', data: 'Данные', info: 'Инфо',
+}
+
+/** Имя приложения Ядра по адресу; null — адрес принадлежит Учёту или продукту. */
+export function coreAppTitle(pathname: string): string | null {
+  const code = appCodeForPath(pathname)
+  return CORE_APP_TITLES[code] ?? null
+}
 
 export function appCodeForPath(pathname: string): string {
   const product = productForPath(pathname)

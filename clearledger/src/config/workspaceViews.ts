@@ -18,6 +18,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   sales_commerce: 'Коммерция',
   sales_goods: 'Товародвижение',
   sales_help: 'Помощь',
+  store_help: 'Помощь',
   // Три раздела «Эксплуатации»; `operations` — код первого («Мониторинг» у energy,
   // «Управленческий» у топливного профиля).
   operations: 'Управленческий',
@@ -89,6 +90,11 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     shifts: 'Сменные отчёты',
     margin: 'Маржа и цены', purchases: 'Поступления', intake: 'Приёмка и сливы',
     tanks: 'Контроль баланса', variances: 'Расхождения', inventory: 'Инвентаризация',
+  },
+  store_help: {
+    'help-start': 'Торговля', 'help-stock': 'Склад и движение',
+    'help-catalog': 'Каталог и рецептуры', 'help-marking': 'Маркировка',
+    'help-closing': 'Закрытие периода', 'help-docs': 'Документы компании',
   },
   sales_help: {
     'help-start': 'Как работать', 'help-goods': 'Товародвижение',

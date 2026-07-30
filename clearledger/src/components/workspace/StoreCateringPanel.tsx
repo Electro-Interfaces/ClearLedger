@@ -21,10 +21,12 @@ const CLASS_META: Record<MenuClass, { label: string; short: string; emoji: strin
   plowhorse: { label: 'Рабочая лошадка', short: 'Лошадка', emoji: '🐎', text: 'text-amber-300', badge: 'border-amber-400/40 text-amber-300/90', desc: 'Популярное, но низкомаржинальное. Поднять цену аккуратно / снизить себестоимость порции.' },
   puzzle:    { label: 'Загадка', short: 'Загадка', emoji: '🧩', text: 'text-sky-300', badge: 'border-sky-400/40 text-sky-300/90', desc: 'Маржинальное, но мало продаётся. Продвигать, переставить в меню, попробовать промо.' },
   dog:       { label: 'Собака', short: 'Собака', emoji: '🐶', text: 'text-red-300', badge: 'border-red-400/40 text-red-300/80', desc: 'Непопулярное и немаржинальное — кандидат на вывод из меню.' },
-  unknown:   { label: 'Без себестоимости', short: '—', emoji: '❔', text: 'text-muted-foreground', badge: 'border-zinc-600 text-zinc-400', desc: 'Нет данных о себестоимости ингредиентов (нет закупки за период).' },
+  unknown:   { label: 'Без себестоимости', short: '—', emoji: '❔', text: 'text-muted-foreground', badge: 'border-zinc-600 text-zinc-400', desc: 'Нет ни выпуска 1С, ни закупок по составу ТТК — себестоимость не рассчитана.' },
 }
 
-const ORDER: MenuClass[] = ['star', 'plowhorse', 'puzzle', 'dog']
+// «Без себестоимости» — полноправная клетка матрицы: пока она скрывалась, блюда без
+// цифры выпадали из всех плиток и оборот сходился только в сумме. Рисуем, если есть.
+const ORDER: MenuClass[] = ['star', 'plowhorse', 'puzzle', 'dog', 'unknown']
 
 type SortKey = 'qty' | 'popularity_pct' | 'revenue' | 'share' | 'avg_price' | 'food_cost_pct' | 'margin_pct'
 
@@ -62,7 +64,7 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
   const KPIS = [
     { label: 'Выручка общепита', value: fmtMoney(s.revenue) },
     { label: 'Блюд в меню', value: nf(s.dishes_count), hint: `${nf(s.portions)} порций` },
-    { label: 'Фудкост', value: pctStr(s.food_cost_pct), hint: 'себест. ингр. / выручка' },
+    { label: 'Фудкост', value: pctStr(s.food_cost_pct), hint: `по ${nf(s.dishes_costed)} блюдам из ${nf(s.dishes_count)}` },
     { label: 'Валовая маржа', value: pctStr(s.margin_pct), cls: 'text-emerald-300/90' },
     { label: 'Валовая прибыль', value: fmtMoney(s.margin), cls: 'text-emerald-300/90' },
   ]
@@ -80,7 +82,8 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
           <h3 className="text-base font-semibold">Общепит</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {data.period.from} – {data.period.to}. Блюда по популярности × маржинальности; клик по строке —
-            свойства блюда (состав ТТК и динамика продаж). Фудкост — по ингредиентам × закупочной себестоимости.
+            свойства блюда (состав ТТК и динамика продаж). Себестоимость — из выпуска 1С (считается по
+            рецептуре в момент продажи); где выпуска нет — сборка по ТТК из средних закупок.
           </p>
         </div>
         <ExportButton title="Общепит — меню" subtitle={`${data.period.from} — ${data.period.to}`} getEl={() => ref.current} />
@@ -99,7 +102,7 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
 
       {/* Матрица инжиниринга меню */}
       <div className="grid gap-2.5 grid-cols-2 lg:grid-cols-4">
-        {ORDER.map((c) => {
+        {ORDER.filter((c) => c !== 'unknown' || (data.matrix.unknown?.count ?? 0) > 0).map((c) => {
           const m = data.matrix[c] ?? { count: 0, revenue: 0 }
           const meta = CLASS_META[c]
           const active = classFilter === c
@@ -155,8 +158,10 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
                   <td className="px-3 py-1.5 text-right tabular-nums">{fmtMoney(d.avg_price)}</td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${d.food_cost_pct != null && d.food_cost_pct > 40 ? 'text-amber-300/90' : ''}`}>
                     {pctStr(d.food_cost_pct)}
-                    {d.coverage < 100 && d.food_cost_pct != null && <span className="ml-1 text-[10px] text-muted-foreground/60" title={`себестоимость по ${d.coverage}% состава ТТК — часть ингредиентов без закупочной цены`}>({d.coverage}%)</span>}
-                    {d.food_cost_pct == null && d.menu_class === 'unknown' && <span className="ml-1 text-[10px] text-muted-foreground/50" title={`покрытие ТТК ${d.coverage}% (<60%) — себестоимость не рассчитана`}>❔{d.coverage}%</span>}
+                    {/* Покрытие ТТК помечаем ТОЛЬКО у сборки из закупок: у цифры из выпуска
+                        1С состав ни при чём, а «(80%)» рядом с ней читалось как «неполная». */}
+                    {d.cost_source === 'ttk' && d.coverage < 100 && d.food_cost_pct != null && <span className="ml-1 text-[10px] text-muted-foreground/60" title={`сборка по ТТК: цена известна у ${d.coverage}% состава — цифра неполная, это нижняя граница`}>({d.coverage}%)</span>}
+                    {d.food_cost_pct == null && <span className="ml-1 text-[10px] text-muted-foreground/50" title={`себестоимость не рассчитана: выпуска 1С нет, по ТТК цена известна у ${d.coverage}% состава`}>❔{d.coverage}%</span>}
                   </td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${d.margin_pct != null && d.margin_pct < 30 ? 'text-red-400/70' : 'text-emerald-300/70'}`}>{pctStr(d.margin_pct)}</td>
                 </tr>
@@ -165,7 +170,7 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
           </tbody>
         </table>
         {dishes.length === 0 && (
-          <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет блюд за период (поставьте апрель — локальная копия ЦБ до 29.04).</div>
+          <div className="px-3 py-6 text-sm text-muted-foreground text-center">За выбранный период продаж общепита нет — проверьте период и выбор АЗС.</div>
         )}
       </div>
 
@@ -174,8 +179,16 @@ export function StoreCateringPanel({ companyId, dateFrom, dateTo, stations }: { 
   )
 }
 
+/** Откуда взялся итог: 1С считает себестоимость по рецептуре в момент продажи. */
+const costSourceLabel = (src: CateringDish['cost_source']) =>
+  src === 'release' ? '· по выпуску 1С' : src === 'ttk' ? '· сборка по ТТК' : ''
+
 function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => void }) {
   const meta = CLASS_META[d.menu_class]
+  const ttk = d.ingredients.reduce(
+    (a, i) => (i.cost_per_portion != null ? { sum: a.sum + i.cost_per_portion, known: a.known + 1 } : a),
+    { sum: 0, known: 0 },
+  )
   const METRICS: { label: string; value: string; cls?: string }[] = [
     { label: 'Продано, порций', value: nf(d.qty) },
     { label: 'Выручка', value: fmtMoney(d.revenue) },
@@ -218,7 +231,7 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
             <div>
               <div className="text-xs font-medium mb-1.5">
                 Состав порции (ТТК) · {d.ing_count} ингр.
-                <span className={`ml-1 font-normal ${d.coverage < 60 ? 'text-amber-300/80' : 'text-muted-foreground/60'}`} title="доля ингредиентов с известной закупочной себестоимостью">· покрытие {d.coverage}%</span>
+                <span className="ml-1 font-normal text-muted-foreground/60" title="доля ингредиентов состава, у которых нашлась закупочная цена; на итог из выпуска 1С не влияет">· цена известна у {d.coverage}% состава</span>
               </div>
               <div className="rounded-md border border-border/40 overflow-hidden">
                 <table className="w-full text-xs">
@@ -237,17 +250,36 @@ function DishModal({ dish: d, onClose }: { dish: CateringDish; onClose: () => vo
                         <td className="px-2.5 py-1">{ing.name}</td>
                         <td className="px-2.5 py-1 text-center">{ing.marked && <ChzBadge />}</td>
                         <td className="px-2.5 py-1 text-right tabular-nums">{ing.qty_per_portion != null ? nf(ing.qty_per_portion, 3) : '—'}</td>
-                        <td className="px-2.5 py-1 text-right tabular-nums">{ing.cost_per_portion != null ? fmtMoney(ing.cost_per_portion) : '—'}</td>
+                        <td className="px-2.5 py-1 text-right tabular-nums">
+                          {ing.cost_per_portion != null
+                            ? fmtMoney(ing.cost_per_portion)
+                            : <span className="text-muted-foreground/60 text-[10px]">нет закупок</span>}
+                        </td>
                         <td className="px-2.5 py-1 text-right tabular-nums text-muted-foreground">{ing.cost_total != null ? fmtMoney(ing.cost_total) : '—'}</td>
                       </tr>
                     ))}
                     <tr className="border-t border-border/40 font-medium">
-                      <td className="px-2.5 py-1">Итого себестоимость порции</td>
+                      <td className="px-2.5 py-1">
+                        Итого себестоимость порции
+                        <span className="ml-1.5 font-normal text-[10px] text-muted-foreground/70">{costSourceLabel(d.cost_source)}</span>
+                      </td>
                       <td />
                       <td />
                       <td className="px-2.5 py-1 text-right tabular-nums">{d.cost_per_portion != null ? fmtMoney(d.cost_per_portion) : '—'}</td>
                       <td className="px-2.5 py-1 text-right tabular-nums">{d.cost != null ? fmtMoney(d.cost) : '—'}</td>
                     </tr>
+                    {/* Сумма колонки выше не сходится с итогом, когда итог пришёл из выпуска
+                        1С, а у части состава нет закупочной цены. Печатаем обе цифры, иначе
+                        человек считает столбик и не понимает, почему не бьётся. */}
+                    {d.cost_source === 'release' && ttk.known < d.ing_count && (
+                      <tr className="text-[10px] text-muted-foreground/70">
+                        <td className="px-2.5 pb-1.5" colSpan={3}>
+                          сборка по ТТК — {ttk.known} из {d.ing_count} ингр. (нижняя граница)
+                        </td>
+                        <td className="px-2.5 pb-1.5 text-right tabular-nums">{fmtMoney(ttk.sum)}</td>
+                        <td />
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>

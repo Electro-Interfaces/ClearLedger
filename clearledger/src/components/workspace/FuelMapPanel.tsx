@@ -4,9 +4,9 @@
  * (реализации/объём/выручка из транзакций) → раскраска/размер точек. Аналог ЭЗС «Карта».
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MapContainer, TileLayer, CircleMarker, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, CircleMarker, Marker, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, MapPin, Fuel, Wallet, Gauge, RefreshCw } from 'lucide-react'
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button'
 import { fmtMoneyShort, fmtLiters } from '@/services/analyticsService'
 import { getFuelStationsMap, syncFuelStationsGeo, type FuelMapStation } from '@/services/fuel/fuelMappingService'
+import { getFuelPriceSpread } from '@/services/fuelSalesService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -27,11 +28,20 @@ const nf2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
  * пять КАТЕГОРИЙ — «жёлтая станция» и «синяя станция» выглядят разными видами
  * объектов, а не большой и малой выручкой.
  */
-const RAMP = [
-  'hsl(217 35% 42%)', 'hsl(217 50% 50%)', 'hsl(217 68% 57%)',
-  'hsl(213 85% 64%)', 'hsl(205 96% 72%)',
-]
-const NODATA = 'hsl(215 14% 38%)'
+/**
+ * Ступени величины — одна hue, ordinal-рампа из пяти шагов. Для каждой темы СВОЙ
+ * набор, а не автоматический флип: «мало» обязано быть ближе к фону карты, и на
+ * тёмной это тёмно-синий, на светлой — светлый.
+ *
+ * Значения выверены валидатором палитр (skill dataviz, `--ordinal`) против фона
+ * карты: монотонность светлоты, шаг между соседями ΔL ≥ 0.06 и контраст крайнего
+ * шага к фону ≥ 2:1. Прежняя рампа проверку проходила, но занимала лишь треть
+ * доступной светлоты (42→72 %), поэтому пять ступеней читались как один синий.
+ */
+const RAMP_DARK = ['#184f95', '#256abf', '#3987e5', '#6da7ec', '#b7d3f6']   // фон #0b1220
+const RAMP_LIGHT = ['#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b']  // фон #e5e7eb
+const NODATA_DARK = 'hsl(215 14% 34%)'
+const NODATA_LIGHT = 'hsl(215 12% 62%)'
 
 /**
  * Что показывает карта. Раньше выбор был из трёх величин одного смысла —
@@ -53,6 +63,17 @@ const NODATA = 'hsl(215 14% 38%)'
  */
 type Metric = 'amount' | 'liters' | 'fills_per_day' | 'avg_check' | 'avg_price' | 'growth' | 'top_fuel'
 type ScaleKind = 'sequential' | 'diverging' | 'categorical'
+
+/**
+ * Вид карты — три разных вопроса, а не оформление одного:
+ *   value  — «где деньги сети»: размер и цвет по выбранному показателю, близкие АЗС в группах;
+ *   dots   — «где вообще стоят наши АЗС»: одинаковые точки, без групп и шкалы;
+ *   prices — «по какой цене торгует каждая»: у точки выноска с действующими ценами.
+ */
+type MapView = 'value' | 'dots' | 'prices'
+
+/** Действующая цена станции по виду топлива (из раздела «Цены»). */
+interface StationPrice { fuel: string; price: number; stale: boolean }
 
 interface MetricDef {
   label: string
@@ -133,21 +154,61 @@ function quantiles(values: number[]): number[] {
   if (v.length < 5) return []
   return [0.2, 0.4, 0.6, 0.8].map((q) => v[Math.floor(q * (v.length - 1))])
 }
-function rampColor(value: number, th: number[]): string {
-  if (value <= 0) return NODATA
-  if (th.length === 0) return RAMP[2]
+function rampColor(value: number, th: number[], dark: boolean): string {
+  const ramp = dark ? RAMP_DARK : RAMP_LIGHT
+  if (value <= 0) return dark ? NODATA_DARK : NODATA_LIGHT
+  if (th.length === 0) return ramp[2]
   let i = 0
   while (i < th.length && value > th[i]) i++
-  return RAMP[i]
+  return ramp[i]
+}
+
+/** Цвет по величине активной метрики и типу её шкалы (общий для станции и группы). */
+function valueColor(v: number | null, kind: ScaleKind, th: number[], dark: boolean): string {
+  if (v == null) return dark ? NODATA_DARK : NODATA_LIGHT
+  return kind === 'diverging' ? divergingColor(v) : rampColor(v, th, dark)
 }
 
 /** Цвет станции по активной метрике и её типу шкалы. */
-function markerColor(st: FuelMapStation, metric: Metric, th: number[]): string {
+function markerColor(st: FuelMapStation, metric: Metric, th: number[], dark: boolean): string {
   const def = METRICS[metric]
   if (def.kind === 'categorical') return fuelColor(st.top_fuel)
-  const v = def.get(st)
-  if (v == null) return NODATA
-  return def.kind === 'diverging' ? divergingColor(v) : rampColor(v, th)
+  return valueColor(def.get(st), def.kind, th, dark)
+}
+
+/**
+ * Величина метрики для ГРУППЫ станций.
+ *
+ * Без неё группа красилась одним цветом на все метрики — и переключение показателя
+ * на обзорном плане не меняло ничего, потому что почти все станции сети собраны в
+ * группы (МАГ 30.07.2026: «по некоторым переключениям вообще ничего не меняется»).
+ *
+ * Как складывать — зависит от смысла метрики, а не от типа шкалы:
+ *   деньги, литры, интенсивность — сумма (группа продаёт столько же, сколько её АЗС);
+ *   чек, цена, динамика — средневзвешенное ПО ВЫРУЧКЕ (среднее из средних врёт:
+ *     станция с двумя заправками в день утянула бы цену группы наравне с крупной).
+ */
+const SUMMED: Metric[] = ['amount', 'liters', 'fills_per_day']
+
+function clusterValue(items: FuelMapStation[], metric: Metric): number | null {
+  const def = METRICS[metric]
+  if (def.kind === 'categorical') return null
+  const vals = items.map((s) => ({ v: def.get(s), w: s.amount || 0 })).filter((x) => x.v != null)
+  if (vals.length === 0) return null
+  if (SUMMED.includes(metric)) return vals.reduce((s, x) => s + (x.v as number), 0)
+  const wsum = vals.reduce((s, x) => s + x.w, 0)
+  if (wsum <= 0) return vals.reduce((s, x) => s + (x.v as number), 0) / vals.length
+  return vals.reduce((s, x) => s + (x.v as number) * x.w, 0) / wsum
+}
+
+/** Ведущее топливо группы — по сумме выручки, а не по числу станций. */
+function clusterTopFuel(items: FuelMapStation[]): string | null {
+  const by = new Map<string, number>()
+  items.forEach((s) => s.by_fuel.forEach((f) => by.set(f.fuel_name, (by.get(f.fuel_name) ?? 0) + f.amount)))
+  let best: string | null = null
+  let max = -1
+  by.forEach((amount, name) => { if (amount > max) { max = amount; best = name } })
+  return best
 }
 
 /** Тёмная тема приложения (класс `dark` на <html>) — реактивно. */
@@ -239,9 +300,16 @@ function clusterize(map: L.Map, pts: FuelMapStation[], radiusPx: number): Cluste
   return out
 }
 
-function StationMarkers({ pts, metric, th, dark, total }: {
+function StationMarkers({ pts, metric, th: thPts, dark, total, view, prices, onScale }: {
   pts: FuelMapStation[]; metric: Metric; th: number[]; dark: boolean; total: number
+  view: MapView
+  /** Действующие цены станции по видам топлива — для вида «Цены». */
+  prices: Map<number, StationPrice[]>
+  /** Фактическая шкала текущего кадра — для легенды (см. ниже, почему не по станциям). */
+  onScale: (th: number[], max: number) => void
 }) {
+  // «Точки» и «Цены» — оба вида без склейки и без раскраски величиной.
+  const dots = view !== 'value'
   const map = useMap()
   const [zoom, setZoom] = useState(map.getZoom())
   const [, setMoved] = useState(0)
@@ -266,6 +334,8 @@ function StationMarkers({ pts, metric, th, dark, total }: {
     [pts, metric], // eslint-disable-line react-hooks/exhaustive-deps
   )
   const radiusOf = (st: FuelMapStation) => {
+    // Вид «точки»: размер ничего не значит — все станции одного калибра.
+    if (dots) return Math.max(3.5, 5 * zoomK)
     const v = sizeOf(st)
     if (!(v > 0) || maxSize <= 0) return 5 * zoomK
     return (6 + 14 * Math.sqrt(v / maxSize)) * zoomK
@@ -273,11 +343,34 @@ function StationMarkers({ pts, metric, th, dark, total }: {
 
   // Радиус склейки — от масштаба: чем дальше, тем крупнее «пятачок». Ниже 34 px
   // не опускаемся: столько занимает сам маркер с обводкой.
+  // В виде «точки» склейки нет вовсе: точка занимает единицы пикселей, наложение
+  // терпимо, а группа скрыла бы ровно то, зачем этот вид включают — где стоят ВСЕ
+  // станции сети.
   const clusterPx = Math.max(34, 74 - (zoom - 6) * 8)
   const clusters = useMemo(
-    () => clusterize(map, pts, zoom >= 12 ? 0 : clusterPx),
-    [map, pts, zoom, clusterPx], // eslint-disable-line react-hooks/exhaustive-deps
+    () => clusterize(map, pts, dots || zoom >= 12 ? 0 : clusterPx),
+    [map, pts, zoom, clusterPx, dots], // eslint-disable-line react-hooks/exhaustive-deps
   )
+
+  /**
+   * Пороги ступеней считаются по ТОМУ, ЧТО НАРИСОВАНО в текущем кадре — по группам
+   * и одиночным станциям, — а не по всем станциям сети.
+   *
+   * Иначе на обзорном плане каждая группа суммой перебивает максимум одиночной АЗС,
+   * все группы попадают в верхнюю ступень и карта снова выходит одноцветной: ровно
+   * та беда, из-за которой «переключения ничего не меняют». Пороги по кадру дают
+   * различие между группами; при приближении, когда группы распадаются, шкала сама
+   * возвращается к масштабу станций.
+   */
+  const shown = useMemo(
+    () => clusters.map((c) => (c.items.length > 1 ? clusterValue(c.items, metric) : def.get(c.items[0])))
+      .filter((v): v is number => v != null),
+    [clusters, metric], // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  const th = useMemo(() => (shown.length >= 5 ? quantiles(shown) : thPts), [shown, thPts])
+  const shownMax = useMemo(() => shown.reduce((m, v) => Math.max(m, v), 0), [shown])
+  useEffect(() => { onScale(th, shownMax) }, [th, shownMax]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const ranks = useMemo(() => {
     const m = new Map<number, number>()
     ;[...pts].sort((a, b) => (def.get(b) ?? -Infinity) - (def.get(a) ?? -Infinity))
@@ -294,22 +387,38 @@ function StationMarkers({ pts, metric, th, dark, total }: {
           const sum = c.items.reduce((s2, st) => s2 + (sizeOf(st) || 0), 0)
           const amount = c.items.reduce((s2, st) => s2 + st.amount, 0)
           const r = Math.min(26, (12 + 3 * c.items.length) * Math.max(0.8, zoomK))
+          /**
+           * Группа — иконка С ЧИСЛОМ станций внутри, а не круг с постоянным
+           * тултипом. Так делают все: Leaflet.markercluster (`iconCreateFunction` +
+           * `getChildCount()`), Яндекс и Google — число объектов внутри кружка.
+           *
+           * Причина замены техническая: у слоя Leaflet может быть ТОЛЬКО ОДИН
+           * tooltip — `bindTooltip` затирает предыдущий. Постоянный со счётчиком и
+           * подсказка при наведении висели на одном маркере, вторая перебивала
+           * первую, и группа выходила безымянным синим пятном: сколько станций
+           * внутри, карта не говорила вовсе.
+           */
+          const d = Math.round(r * 2)
+          // Цвет группы — по ЕЁ величине той же шкалой, что у одиночных станций:
+          // иначе переключение показателя не меняет карту, где почти всё в группах.
+          const cv = clusterValue(c.items, metric)
+          const fill = def.kind === 'categorical'
+            ? fuelColor(clusterTopFuel(c.items))
+            : valueColor(cv, def.kind, th, dark)
+          const icon = L.divIcon({
+            className: 'cl-map-cluster',
+            html: `<span style="width:${d}px;height:${d}px;border-color:${halo};background:${fill}">${c.items.length}</span>`,
+            iconSize: [d, d],
+            iconAnchor: [d / 2, d / 2],
+          })
           return (
-            <CircleMarker key={c.key} center={[c.lat, c.lng]} radius={r}
-              pathOptions={{
-                color: halo, weight: 2, fillColor: 'hsl(217 55% 52%)', fillOpacity: 0.92,
-                className: 'cl-map-cluster',
-              }}
+            <Marker key={c.key} position={[c.lat, c.lng]} icon={icon}
               eventHandlers={{
                 click: () => map.fitBounds(
                   L.latLngBounds(c.items.map((st) => [st.latitude!, st.longitude!] as [number, number])),
                   { padding: [70, 70], maxZoom: 13 },
                 ),
-                mouseover: (e) => e.target.bringToFront(),
               }}>
-              <Tooltip permanent direction="center" opacity={1} className="cl-map-count">
-                {c.items.length}
-              </Tooltip>
               <Tooltip direction="top" offset={[0, -r - 2]} opacity={1} className="cl-map-tip">
                 <div className="min-w-[200px]">
                   <div className="text-[12px] font-semibold">{c.items.length} АЗС рядом</div>
@@ -331,7 +440,7 @@ function StationMarkers({ pts, metric, th, dark, total }: {
                   </div>
                 </div>
               </Tooltip>
-            </CircleMarker>
+            </Marker>
           )
         }
 
@@ -342,11 +451,26 @@ function StationMarkers({ pts, metric, th, dark, total }: {
         const share = total > 0 ? ((METRICS.amount.get(p) ?? 0) / total) * 100 : 0
         const short = p.name.replace(/^АЗС\s*/i, '')
         const growth = p.growth_pct
+        const fill = dots ? 'hsl(217 60% 58%)' : markerColor(p, metric, th, dark)
         return (
-          <CircleMarker key={p.code} center={[p.latitude!, p.longitude!]} radius={radius}
+          <Fragment key={p.code}>
+          {/*
+            Подпись — ОТДЕЛЬНЫЙ неинтерактивный маркер, а не второй tooltip слоя.
+            Раньше номер станции висел на том же круге постоянным tooltip'ом рядом с
+            подсказкой при наведении, а `bindTooltip` держит только один: с зума 9
+            подпись затирала подсказку, и карточка станции не показывалась вовсе.
+            В виде «Цены» тем же маркером выводятся действующие цены по видам топлива.
+          */}
+          <PointLabel p={p} radius={radius} short={short} fill={fill}
+            mode={view === 'prices' ? 'prices' : withLabels ? 'name' : 'none'}
+            prices={prices.get(p.code) ?? []} />
+          <CircleMarker center={[p.latitude!, p.longitude!]} radius={radius}
             pathOptions={{
-              color: halo, weight: 2,
-              fillColor: markerColor(p, metric, th), fillOpacity: 0.92,
+              color: halo, weight: dots ? 1 : 2,
+              // В виде «точки» цвет тоже не несёт величины — иначе это была бы та же
+              // аналитическая карта, только мельче.
+              fillColor: fill,
+              fillOpacity: 0.92,
             }}
             eventHandlers={{
               mouseover: (e) => {
@@ -420,10 +544,6 @@ function StationMarkers({ pts, metric, th, dark, total }: {
                 )}
               </div>
             </Tooltip>
-            {withLabels && (
-              <Tooltip permanent direction="right" offset={[radius + 2, 0]} opacity={1}
-                className="cl-map-label">{short}</Tooltip>
-            )}
             <Popup className="cl-map-popup">
               <div className="w-[230px]">
                 <div className="px-3 pb-2 pr-6 pt-2.5">
@@ -445,15 +565,45 @@ function StationMarkers({ pts, metric, th, dark, total }: {
               </div>
             </Popup>
           </CircleMarker>
+          </Fragment>
         )
       })}
     </>
   )
 }
 
+/**
+ * Подпись у точки: номер станции либо действующие цены по видам топлива.
+ *
+ * Отдельный маркер, а не tooltip круга: у слоя Leaflet только один tooltip, и
+ * постоянная подпись затирала подсказку при наведении. `interactive: false` —
+ * подпись не должна перехватывать наведение и клик у самой станции.
+ */
+function PointLabel({ p, radius, short, fill, mode, prices }: {
+  p: FuelMapStation; radius: number; short: string; fill: string
+  mode: 'none' | 'name' | 'prices'; prices: StationPrice[]
+}) {
+  if (mode === 'none') return null
+  if (mode === 'prices' && prices.length === 0) return null
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+  const html = mode === 'prices'
+    ? `<i class="cl-dot" style="background:${fill}"></i><span class="cl-plate">${
+        prices.map((x) => `<b>${esc(x.fuel)}</b><span class="cl-num${x.stale ? ' cl-stale' : ''}">${
+          nf2.format(x.price)}</span>`).join('')}</span>`
+    : `<span class="cl-name">${esc(short)}</span>`
+  const icon = L.divIcon({
+    className: mode === 'prices' ? 'cl-map-priced' : 'cl-map-name',
+    html,
+    iconSize: [0, 0],
+    iconAnchor: [mode === 'prices' ? -radius : -(radius + 3), 0],
+  })
+  return <Marker position={[p.latitude!, p.longitude!]} icon={icon} interactive={false} />
+}
+
 /** Легенда: у каждого типа шкалы свой вид — иначе цвет читается наугад. */
-function MapLegend({ metric, th, maxVal, pts }: {
-  metric: Metric; th: number[]; maxVal: number; pts: FuelMapStation[]
+function MapLegend({ metric, th, maxVal, pts, dark }: {
+  metric: Metric; th: number[]; maxVal: number; pts: FuelMapStation[]; dark: boolean
 }) {
   const def = METRICS[metric]
   const fuels = useMemo(() => {
@@ -472,7 +622,7 @@ function MapLegend({ metric, th, maxVal, pts }: {
       {def.kind === 'sequential' && (
         <>
           <div className="flex items-center gap-1">
-            {RAMP.map((c: string) => <span key={c} className="h-3 w-7 rounded-sm" style={{ background: c }} />)}
+            {(dark ? RAMP_DARK : RAMP_LIGHT).map((c: string) => <span key={c} className="h-3 w-7 rounded-sm" style={{ background: c }} />)}
           </div>
           <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted-foreground">
             <span>{th.length ? def.fmt(th[0]) : 'меньше'}</span>
@@ -523,12 +673,44 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
   const dark = useIsDark()
   const qc = useQueryClient()
   const [metric, setMetric] = useState<Metric>('amount')
+  const [view, setView] = useState<MapView>('value')
+  // Шкала того, что видно в кадре: маркеры считают её по группам текущего зума и
+  // сообщают наверх — легенда обязана подписывать те же ступени, что нарисованы.
+  const [shownScale, setShownScale] = useState<{ th: number[]; max: number }>({ th: [], max: 0 })
   const [syncing, setSyncing] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['fuel-map', companyId, dateFrom, dateTo],
     queryFn: () => getFuelStationsMap(dateFrom, dateTo),
   })
+
+  /**
+   * Цены для выносок — из того же источника, что раздел «Цены» → «Разброс по сети»
+   * (`/api/fuel/pricing/spread`): действующая цена станции это последняя, по которой
+   * была продажа. Своего расчёта у карты нет намеренно — иначе на карте и в
+   * прайс-листе оказались бы два разных числа. Запрос идёт только в виде «Цены».
+   */
+  const { data: spread } = useQuery({
+    queryKey: ['fuel-map-prices', companyId, dateFrom, dateTo],
+    queryFn: () => getFuelPriceSpread({ companyId, dateFrom, dateTo }),
+    enabled: view === 'prices',
+  })
+  const prices = useMemo(() => {
+    const m = new Map<number, StationPrice[]>()
+    // Порог «залежавшейся» цены — тот же, что в «Разбросе»: втрое дольше типичного
+    // шага сети по этому топливу. Иначе янтарём горело бы пол-карты.
+    const staleAfter = new Map<number, number>()
+    ;(spread?.fuels ?? []).forEach((f) => staleAfter.set(f.fuel_code, Math.max(14, Math.round(f.age_max * 0.75))))
+    ;(spread?.lines ?? []).forEach((l) => {
+      const arr = m.get(l.station_code) ?? []
+      arr.push({ fuel: l.fuel_name, price: l.price, stale: l.age_days > (staleAfter.get(l.fuel_code) ?? 999) })
+      m.set(l.station_code, arr)
+    })
+    // Порядок топлив внутри выноски — по цене вниз: глаз ищет «сколько стоит 95-й»,
+    // а не строку номер три.
+    m.forEach((arr) => arr.sort((a, b) => b.price - a.price))
+    return m
+  }, [spread])
   const pts = useMemo(() => (data?.stations ?? []).filter((s) => s.latitude != null && s.longitude != null), [data])
   const values = useMemo(
     () => pts.map((p) => METRICS[metric].get(p)).filter((v): v is number => v != null),
@@ -560,7 +742,25 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
           {data && <span className="text-xs text-muted-foreground">{data.with_coords} из {data.total} с координатами</span>}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Раскраска:</span>
+          {/* Вид карты. «Величина» отвечает на вопрос «где деньги сети», «точки» — на
+              «где вообще стоят наши АЗС». Второй вопрос задают не реже первого, а
+              раскрашенные круги разного калибра на него отвечают плохо: крупная
+              станция перекрывает соседнюю, мелкая теряется. */}
+          <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5">
+            {([
+              { v: 'value', l: 'Величина', t: 'Размер и цвет по выбранному показателю' },
+              { v: 'dots', l: 'Точки', t: 'Все станции одинаковыми точками' },
+              { v: 'prices', l: 'Цены', t: 'Действующие цены по видам топлива у каждой станции' },
+            ] as { v: MapView; l: string; t: string }[]).map((o) => (
+              <button key={o.v} type="button" onClick={() => setView(o.v)} title={o.t}
+                aria-pressed={view === o.v}
+                className={`px-2.5 py-1 text-xs rounded-[5px] transition-colors ${
+                  view === o.v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+                {o.l}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-muted-foreground">{view === 'value' ? 'Раскраска:' : 'Показатель:'}</span>
           <Select value={metric} onValueChange={(v) => setMetric(v as Metric)}>
             <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent className="z-[1200]">
@@ -585,9 +785,17 @@ export function FuelMapPanel({ companyId, dateFrom, dateTo }: {
             <TileLayer url={tiles} attribution='&copy; OpenStreetMap, &copy; CARTO' subdomains="abcd" maxZoom={20} />
             <MapInvalidate />
             <FitBounds pts={pts} />
-            <StationMarkers pts={pts} metric={metric} th={th} dark={dark} total={totalVal} />
+            <StationMarkers pts={pts} metric={metric} th={th} dark={dark} total={totalVal}
+              view={view} prices={prices}
+              onScale={(t2, m2) => setShownScale((s) => (s.max === m2 && s.th.join() === t2.join() ? s : { th: t2, max: m2 }))} />
           </MapContainer>
-          <MapLegend metric={metric} th={th} maxVal={maxVal} pts={pts} />
+          {/* Легенда — про раскраску и размер; в видах «точки» и «цены» ни того, ни
+              другого нет, и шкала врала бы, что цвет что-то значит. */}
+          {view === 'value' && (
+            <MapLegend metric={metric} dark={dark} pts={pts}
+              th={shownScale.th.length ? shownScale.th : th}
+              maxVal={shownScale.max || maxVal} />
+          )}
         </div>
       )}
     </div>

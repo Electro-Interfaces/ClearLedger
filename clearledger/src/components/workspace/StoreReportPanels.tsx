@@ -14,6 +14,8 @@ import {
 import { fmtMoney } from '@/services/analyticsService'
 import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { NomenclatureCardModal } from './NomenclatureCardModal'
+import { DocsModal } from './DocsModal'
+import { rowDrill } from './rowDrill'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
@@ -38,7 +40,12 @@ function Shell({ title, sub, children }: { title: string; sub?: ReactNode; child
   )
 }
 
-function Table({ head, rows }: { head: { label: string; num?: boolean }[]; rows: ReactNode[][] }) {
+function Table({ head, rows, onRowClick, rowLabel }: {
+  head: { label: string; num?: boolean }[]; rows: ReactNode[][]
+  /** Расшифровка строки задаётся здесь, а не копией таблицы в каждой панели: одна
+   *  правка открывает Приёмку, Поставщиков, Категории и Штрихкоды сразу. */
+  onRowClick?: (i: number) => void; rowLabel?: (i: number) => string
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border/50">
       <table className="w-full text-xs">
@@ -47,13 +54,16 @@ function Table({ head, rows }: { head: { label: string; num?: boolean }[]; rows:
         </thead>
         <tbody>
           {rows.map((r, ri) => (
-            <tr key={ri} className="border-t border-border/30 hover:bg-accent/20">
+            <tr key={ri}
+              {...(onRowClick
+                ? rowDrill(() => onRowClick(ri), rowLabel?.(ri), 'border-t border-border/30')
+                : { className: 'border-t border-border/30 hover:bg-accent/20' })}>
               {r.map((cell, ci) => <td key={ci} className={`px-3 py-1.5 ${head[ci]?.num ? 'text-right tabular-nums' : ''}`}>{cell}</td>)}
             </tr>
           ))}
         </tbody>
       </table>
-      {rows.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет данных за период (поставьте апрель).</div>}
+      {rows.length === 0 && <div className="px-3 py-6 text-sm text-muted-foreground text-center">Нет данных за выбранный период.</div>}
     </div>
   )
 }
@@ -66,15 +76,29 @@ const wrap = (q: { isLoading: boolean; error: unknown }, render: () => ReactNode
 
 export function StoreReceiptsPanel(p: PanelProps) {
   const q = useReport<StoreReceiptsData>('receipts', p)
+  const [open, setOpen] = useState<number | null>(null)
+  const [sku, setSku] = useState<string | null>(null)
   return wrap(q, () => {
     const d = q.data!
+    const doc = open != null ? d.docs[open] : null
     return (
       <Shell title="Приёмка (поступления)"
-        sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} документов · закупки нетто ${fmtMoney(d.summary.amount_net)} · НДС ${fmtMoney(d.summary.vat)}`}>
+        sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} документов · закупки нетто ${fmtMoney(d.summary.amount_net)} · НДС ${fmtMoney(d.summary.vat)} · клик по строке — состав накладной`}>
         <Table
-          head={[{ label: 'Дата' }, { label: 'Номер' }, { label: 'Поставщик' }, { label: 'Позиций', num: true }, { label: 'Сумма (нетто)', num: true }, { label: 'НДС', num: true }]}
-          rows={d.docs.map((r) => [r.date, r.number, r.supplier, nf(r.positions), fmtMoney(r.amount_net), fmtMoney(r.vat)])}
+          head={[{ label: 'Дата' }, { label: 'Смена' }, { label: 'Номер' }, { label: 'Поставщик' }, { label: 'Позиций', num: true }, { label: 'Сумма (нетто)', num: true }, { label: 'НДС', num: true }]}
+          rows={d.docs.map((r) => [r.date, r.shift_number ?? '—', r.number, r.supplier, nf(r.positions), fmtMoney(r.amount_net), fmtMoney(r.vat)])}
+          onRowClick={(i) => setOpen(i)}
+          rowLabel={(i) => `накладная ${d.docs[i].number} от ${d.docs[i].supplier}`}
         />
+        {doc && (
+          <DocsModal
+            title={`Накладная ${doc.number ?? '—'}`}
+            subtitle={`${doc.date} · ${doc.supplier} · ${nf(doc.positions)} позиций · нетто ${fmtMoney(doc.amount_net)}`}
+            docs={[{ number: doc.number, lines: doc.lines ?? [], meta: doc.supplier }]}
+            onOpenSku={setSku} onClose={() => setOpen(null)}
+          />
+        )}
+        {sku && <NomenclatureCardModal guid={sku} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} onClose={() => setSku(null)} />}
       </Shell>
     )
   })
@@ -82,15 +106,35 @@ export function StoreReceiptsPanel(p: PanelProps) {
 
 export function StoreSuppliersPanel(p: PanelProps) {
   const q = useReport<StoreSuppliersData>('suppliers', p)
+  // Накладные поставщика — из того же реестра приёмки: своей ручки у контрагента нет,
+  // и заводить её ради расшифровки незачем.
+  const rq = useReport<StoreReceiptsData>('receipts', p)
+  const [open, setOpen] = useState<string | null>(null)
+  const [sku, setSku] = useState<string | null>(null)
   return wrap(q, () => {
     const d = q.data!
+    const docs = (rq.data?.docs ?? []).filter((r) => r.supplier === open)
     return (
       <Shell title="Поставщики"
-        sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} поставщиков · закупки нетто ${fmtMoney(d.summary.amount_net)}`}>
+        sub={`${d.period.from} – ${d.period.to} · ${d.summary.count} поставщиков · закупки нетто ${fmtMoney(d.summary.amount_net)} · клик по строке — его накладные`}>
         <Table
           head={[{ label: 'Поставщик' }, { label: 'Закупки (нетто)', num: true }, { label: 'Документов', num: true }, { label: 'SKU', num: true }]}
           rows={d.suppliers.map((r) => [r.name, fmtMoney(r.amount_net), nf(r.docs), nf(r.sku_count)])}
+          onRowClick={(i) => setOpen(d.suppliers[i].name)}
+          rowLabel={(i) => `накладные поставщика ${d.suppliers[i].name}`}
         />
+        {open && (
+          <DocsModal
+            title={open}
+            subtitle={`${docs.length} накладных за период · нетто ${fmtMoney(docs.reduce((a, r) => a + r.amount_net, 0))}`}
+            docs={docs.map((r) => ({
+              number: r.number, lines: r.lines ?? [],
+              meta: `${r.date} · ${nf(r.positions)} поз. · нетто ${fmtMoney(r.amount_net)}`,
+            }))}
+            onOpenSku={setSku} onClose={() => setOpen(null)}
+          />
+        )}
+        {sku && <NomenclatureCardModal guid={sku} companyId={p.companyId} dateFrom={p.dateFrom} dateTo={p.dateTo} onClose={() => setSku(null)} />}
       </Shell>
     )
   })

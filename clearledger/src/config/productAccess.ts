@@ -23,7 +23,7 @@ import {
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
 } from './workspaceMenus'
-import { storeMenu } from './storeCatalog'
+import { storeMenu, STORE_HELP_MENU } from './storeCatalog'
 import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
 
 export interface ProductModuleDef {
@@ -79,6 +79,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(storeMenu('store_closing'), 'Закрытие'),
     ...items(storeMenu('store_catalog'), 'Каталог'),
     ...items(storeMenu('store_marking'), 'Маркировка'),
+    ...items(STORE_HELP_MENU, 'Помощь'),
   ],
   marketing: items(MARKET_MENU, 'Рынок'),
   finance: [

@@ -19,7 +19,7 @@ import type { CentralMenuItem } from './CentralPanelLayout'
 import { getWorkspaceModule } from '@/config/workspaceModules'
 import { useModuleConnections, isModuleConnected, isComponentEnabled } from '@/services/moduleConnectionService'
 import { getModuleComponentDefs } from '@/config/moduleComponents'
-import { STORE_SECTIONS, storeMenu } from '@/config/storeCatalog'
+import { STORE_SECTIONS, STORE_HELP_MENU, storeMenu } from '@/config/storeCatalog'
 import {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
@@ -162,6 +162,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     mode: sec.mode, label: sec.label, icon: sec.icon,
     items: storeOn ? storeMenu(sec.mode) : [], connected: storeOn,
   }))
+  // Помощь по «Магазину» — тот же приём, что в «Топливе»: свод знания по продукту
+  // стоит в самом продукте, а не в соседнем приложении.
+  const storeHelp: WorkspaceSection = { mode: 'store_help', label: 'Помощь',
+    icon: BookOpen, items: storeOn ? STORE_HELP_MENU : [], connected: storeOn }
   // Процессинг и Маркетинг — продукты в подключении (решение МАГа
   // 28.07.2026): свои экраны ещё не сделаны, а коммерческие разделы вернулись в
   // «Продажи». Меню у них нет — рабочая область показывает заставку.
@@ -187,7 +191,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
        storeSections[0], acc, exp, normalize, reconcile]
-    : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, ops, acc, exp,
+    : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops, acc, exp,
        normalize, reconcile]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый

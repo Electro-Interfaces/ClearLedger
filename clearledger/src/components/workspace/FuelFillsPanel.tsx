@@ -211,7 +211,7 @@ function FillKpis({ t }: { t: FuelFillsLine }) {
       <KpiCard label="Реализаций" value={nf0.format(t.fills)} />
       <KpiCard label="Ср. цена" value={fmtFuelMetric('avg_price', t.avg_price)} />
       <KpiCard label="Средний чек" value={fmtFuelMetric('avg_check', t.avg_check)} />
-      <KpiCard label="Ср. реализация" value={fmtFuelMetric('avg_fill', t.avg_fill)} />
+      <KpiCard label="Ср. заправка" value={fmtFuelMetric('avg_fill', t.avg_fill)} />
       <KpiCard label="Станций" value={nf0.format(t.stations)} />
       <KpiCard label="Карт" value={nf0.format(t.cards)} hint="уникальных за период" />
     </div>
@@ -266,7 +266,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
   const t = data.totals
   const col = GROUP_LABELS[p.group] ?? 'Разрез'
   const showCards = ['channel', 'pay_type', 'segment', 'station'].includes(p.group)
-  const exCols = [col, 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. чек, ₽', 'Ср. реализация, л', 'Цена, ₽/л', ...(showCards ? ['Карт'] : [])]
+  const exCols = [col, 'Реализаций', 'Литры', 'Выручка, ₽', 'Доля, %', 'Ср. чек, ₽', 'Ср. заправка, л', 'Цена, ₽/л', ...(showCards ? ['Карт'] : [])]
   const exData: (string | number)[][] = [
     ...lines.map((l) => [l.label, l.fills, l.liters, l.amount, l.share_pct, l.avg_check, l.avg_fill, l.avg_price, ...(showCards ? [l.cards] : [])]),
     ['Итого', t.fills, t.liters, t.amount, 100, t.avg_check, t.avg_fill, t.avg_price, ...(showCards ? [t.cards] : [])],
@@ -330,7 +330,7 @@ function FillsBreakdown({ companyId, dateFrom, dateTo }: { companyId: string; da
                 <H k="amount">Выручка</H>
                 <H k="share_pct">Доля</H>
                 <H k="avg_check">Ср. чек</H>
-                <H k="avg_fill">Ср. реализация</H>
+                <H k="avg_fill">Ср. заправка</H>
                 <H k="avg_price">₽/л</H>
                 {showCards && <H k="cards">Карт</H>}
                 {withSpark && <th className="p-2 font-medium text-right whitespace-nowrap">Тренд ₽</th>}
@@ -934,7 +934,7 @@ function NewCardsListModal({ companyId, interval, narrow, onClose }: {
                 <tr className="border-b text-muted-foreground">
                   <th className="p-2 text-left font-medium">Карта</th>
                   <th className="p-2 text-left font-medium">Канал</th>
-                  <th className="p-2 text-left font-medium">Первая реализация</th>
+                  <th className="p-2 text-left font-medium">Первая заправка</th>
                   <th className="p-2 text-right font-medium">Реализаций</th>
                   <th className="p-2 text-right font-medium">Литры</th>
                   <th className="p-2 text-right font-medium">Выручка</th>
@@ -993,7 +993,7 @@ export function FuelFillsPanel({ companyId, dateFrom, dateTo }: {
   return (
     <FuelSegmentCtx.Provider value={segment}>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4">
-        <PanelViewTabs tabs={SUB_TABS} value={st.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Наливы»" />
+        <PanelViewTabs tabs={SUB_TABS} value={st.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Реализация»" />
         <div className="flex items-center gap-2 shrink-0">
           <SegmentToggle value={segment} onChange={setSegment} />
           <ExportButton title={`Реализация · ${v.title}`} subtitle={scopeSub} getEl={() => ref.current} />

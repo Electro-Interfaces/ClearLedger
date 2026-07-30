@@ -9,6 +9,8 @@ import { useQuery } from '@tanstack/react-query'
 import { getStoreWriteoffs, type StoreWriteoffDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { fmtMoney } from '@/services/analyticsService'
+import { rowDrill } from './rowDrill'
+import { NomenclatureCardModal } from './NomenclatureCardModal'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
@@ -17,6 +19,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
   const [reason, setReason] = useState<string | null>(null)
   const [openDoc, setOpenDoc] = useState<StoreWriteoffDoc | null>(null)
+  const [sku, setSku] = useState<string | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-writeoffs', companyId, warehouse ?? '', dateFrom, dateTo],
@@ -102,6 +105,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
               <tr>
                 <th className="px-3 py-2 font-medium text-left whitespace-nowrap">Дата</th>
                 <th className="px-3 py-2 font-medium text-left">Номер</th>
+                <th className="px-3 py-2 font-medium text-left">Смена</th>
                 <th className="px-3 py-2 font-medium text-left">Причина</th>
                 <th className="px-3 py-2 font-medium text-right">Позиций</th>
                 <th className="px-3 py-2 font-medium text-right">Сумма</th>
@@ -116,6 +120,7 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
                 >
                   <td className="px-3 py-1.5 whitespace-nowrap">{d.date ?? '—'}</td>
                   <td className="px-3 py-1.5 tabular-nums">{d.number ?? '—'}</td>
+                  <td className="px-3 py-1.5 tabular-nums text-muted-foreground" title={d.shift_reason ?? undefined}>{d.shift_number ?? '—'}</td>
                   <td className="px-3 py-1.5">
                     {d.reason}
                     {d.comment && <span className="text-muted-foreground/60 ml-1" title={d.comment}>· {d.comment.slice(0, 24)}</span>}
@@ -142,7 +147,9 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
           <div className="space-y-1.5">
             {data.top_sku.length === 0 && <div className="text-xs text-muted-foreground">Нет данных</div>}
             {data.top_sku.map((t) => (
-              <div key={t.name} className="flex items-center justify-between gap-2 text-xs">
+              <div key={t.name}
+                {...rowDrill(t.ref ? () => setSku(t.ref!) : null, `карточка товара ${t.name}`,
+                  'flex items-center justify-between gap-2 text-xs rounded px-1 -mx-1')}>
                 <span className="truncate" title={t.name}>{t.name}</span>
                 <span className="tabular-nums text-red-400/80 shrink-0">{fmtMoney(t.amount)}</span>
               </div>
@@ -191,6 +198,8 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo }: { companyId:
           </div>
         </div>
       )}
+
+      {sku && <NomenclatureCardModal guid={sku} companyId={companyId} dateFrom={dateFrom ?? ''} dateTo={dateTo ?? ''} onClose={() => setSku(null)} />}
     </div>
   )
 }
