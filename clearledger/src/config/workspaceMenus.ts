@@ -87,17 +87,39 @@ export const FUEL_GOODS_MENU: CentralMenuItem[] = [
   { key: 'inventory',      label: 'Инвентаризация' },
 ]
 
+/**
+ * Помощь по продукту - пятый раздел рельсы (решение МАГа 30.07.2026).
+ *
+ * Знание живёт в одном месте («Инфо»), но ходить за ним в чужое приложение посреди
+ * работы человек не будет. Здесь тот же свод, суженный до «Топлива»: отбор идёт по
+ * привязкам, из которых собирается и подсказка правой рельсы, поэтому раздел не
+ * расходится с ней ни на статью.
+ *
+ * Пункты - пласты знания, а не экраны: «как работать», «что с товаром», «сколько
+ * стоит», «что требует закон», «как принято у нас».
+ */
+export const FUEL_HELP_MENU: CentralMenuItem[] = [
+  { key: 'help-start',  label: 'Как работать' },
+  { key: 'help-goods',  label: 'Товародвижение' },
+  { key: 'help-money',  label: 'Цены и клиенты' },
+  { key: 'help-norms',  label: 'Нормы и учёт' },
+  { key: 'help-docs',   label: 'Документы компании' },
+]
+export const FUEL_HELP_KEYS = FUEL_HELP_MENU.map((m) => m.key)
+
 /** Все пункты «Топлива» — для роутера панелей и старых закладок (`?sub=`). */
 export const MGMT_MENU: CentralMenuItem[] = [
   ...FUEL_NETWORK_MENU, ...FUEL_ANALYTICS_MENU, ...FUEL_COMMERCE_MENU, ...FUEL_GOODS_MENU,
+  ...FUEL_HELP_MENU,
 ]
 export const MGMT_MENU_KEYS = MGMT_MENU.map((m) => m.key)
 
 /** Раздел «Топлива», которому принадлежит пункт (для старых ссылок и закладок). */
-export function fuelModeForKey(key: string): 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' {
+export function fuelModeForKey(key: string): 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' {
   if (FUEL_ANALYTICS_MENU.some((m) => m.key === key)) return 'sales_sessions'
   if (FUEL_COMMERCE_MENU.some((m) => m.key === key)) return 'sales_commerce'
   if (FUEL_GOODS_MENU.some((m) => m.key === key)) return 'sales_goods'
+  if (FUEL_HELP_MENU.some((m) => m.key === key)) return 'sales_help'
   return 'management'
 }
 

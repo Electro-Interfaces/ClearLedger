@@ -29,11 +29,12 @@ async def meta(user: User = Depends(get_current_user)):
 @router.get("/tree")
 async def tree(
     company_id: str = Query(...),
+    app_code: str | None = Query(None, description="только знание этого продукта"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Всё дерево: разделы и статьи по пластам."""
+    """Всё дерево: разделы и статьи по пластам. `app_code` — свод одного продукта."""
     cid = await assert_company_member(company_id, user, db)
-    return await info_center.tree(db, cid)
+    return await info_center.tree(db, cid, app_code=app_code)
 
 
 @router.get("/context")

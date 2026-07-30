@@ -80,7 +80,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // (`LABEL_BY_PROFILE`) и имеет четвёртый раздел «Товародвижение» (`sales_goods`):
     // топливо — товар, у него есть приход, книга остатков и инвентаризация.
     code: 'sales', route: '/sales', label: 'Продажи',
-    modes: ['management', 'sales_sessions', 'sales_commerce', 'sales_goods'], paths: ['/metrika'],
+    modes: ['management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help'], paths: ['/metrika'],
     objectTabs: ['passport', 'contracts', 'sales'],
   },
   {

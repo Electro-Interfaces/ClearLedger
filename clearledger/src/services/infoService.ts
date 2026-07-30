@@ -44,8 +44,9 @@ export interface InfoTree {
   total: number
 }
 
-export async function getInfoTree(companyId: string): Promise<InfoTree> {
-  return get<InfoTree>('/api/info/tree', { company_id: companyId })
+/** Всё дерево знания; `appCode` — свод одного продукта (раздел «Помощь» внутри него). */
+export async function getInfoTree(companyId: string, appCode?: string): Promise<InfoTree> {
+  return get<InfoTree>('/api/info/tree', { company_id: companyId, app_code: appCode || undefined })
 }
 
 export async function getInfoArticle(companyId: string, id: string): Promise<InfoArticleFull> {

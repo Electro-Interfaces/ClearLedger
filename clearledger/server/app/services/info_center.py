@@ -60,16 +60,25 @@ def _article_out(a: InfoArticle, *, body: bool = False) -> dict[str, Any]:
     return out
 
 
-async def tree(db: AsyncSession, company_id) -> dict[str, Any]:
-    """Дерево знания: разделы и статьи, сгруппированные по пластам."""
+async def tree(db: AsyncSession, company_id, *, app_code: str | None = None) -> dict[str, Any]:
+    """Дерево знания: разделы и статьи, сгруппированные по пластам.
+
+    `app_code` сужает выдачу до знания одного продукта - это раздел «Помощь»
+    внутри самого продукта: человек не уходит в общее приложение и не листает
+    чужие инструкции, ему нужен свод по тому месту, где он работает. Отбор идёт
+    по привязкам, тем же, из которых собирается подсказка правой рельсы.
+    """
     profile = await _profile(db, company_id)
     cats = (await db.execute(
         select(InfoCategory).where(_visible(InfoCategory, company_id, profile))
         .order_by(InfoCategory.sort_order, InfoCategory.title))).scalars().all()
+    q = select(InfoArticle).where(
+        _visible(InfoArticle, company_id, profile), InfoArticle.status == "published")
+    if app_code:
+        q = q.where(InfoArticle.id.in_(
+            select(InfoBinding.article_id).where(InfoBinding.app_code == app_code)))
     arts = (await db.execute(
-        select(InfoArticle).where(
-            _visible(InfoArticle, company_id, profile), InfoArticle.status == "published")
-        .order_by(InfoArticle.sort_order, InfoArticle.title))).scalars().all()
+        q.order_by(InfoArticle.sort_order, InfoArticle.title))).scalars().all()
 
     by_cat: dict[str, list[dict[str, Any]]] = {}
     for a in arts:

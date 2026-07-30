@@ -27,6 +27,7 @@ import {
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
+  FUEL_HELP_MENU,
   MARKET_MENU, MARKET_KEYS,
 } from '@/config/workspaceMenus'
 // CHARGE_SESSIONS_MENU здесь не используется — общий список нужен карте прав и роутеру
@@ -132,6 +133,12 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const salesGoodsItems = !isEnergy && fuelSales ? FUEL_GOODS_MENU : []
   const salesGoods: WorkspaceSection = { mode: 'sales_goods', label: 'Товародвижение',
     icon: Truck, items: salesGoodsItems, connected: salesGoodsItems.length > 0 }
+  // «Помощь» — свод знания по продукту прямо в продукте. Общее приложение «Инфо»
+  // никуда не делось, но посреди работы в него не уходят: раздел показывает те же
+  // статьи, суженные до «Топлива» (решение МАГа 30.07.2026).
+  const salesHelpItems = !isEnergy && fuelSales ? FUEL_HELP_MENU : []
+  const salesHelp: WorkspaceSection = { mode: 'sales_help', label: 'Помощь',
+    icon: BookOpen, items: salesHelpItems, connected: salesHelpItems.length > 0 }
   // «Проекты» — стройка сети: от подбора участка до ввода станции в эксплуатацию.
   // Только у energy: у топливного профиля своего девелоперского контура нет.
   // Два раздела на один продукт: «Работа» — где ведут дела, «Аналитика» — где
@@ -180,7 +187,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     ? [sales, salesSessions, salesCommerce, corporate, marketing,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
        storeSections[0], acc, exp, normalize, reconcile]
-    : [sales, salesSessions, salesCommerce, salesGoods, ...storeSections, ops, acc, exp,
+    : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, ops, acc, exp,
        normalize, reconcile]
   // Права на пункты продукта режутся ЗДЕСЬ, а не в меню: тот же массив читают панели
   // (`AccountingPanels`), и урезать его в одном месте — значит не показать закрытый

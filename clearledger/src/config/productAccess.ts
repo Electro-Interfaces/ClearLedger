@@ -21,7 +21,7 @@ import { navByPath } from './navigation'
 import {
   ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
-  FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
+  FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
 } from './workspaceMenus'
 import { storeMenu } from './storeCatalog'
 import { SPACE_PAGES, SPACE_PRODUCTS, pageCode } from './spaceProducts'
@@ -138,6 +138,7 @@ const PRODUCT_MODULES_BY_PROFILE: Record<string, Record<string, ProductModuleDef
       ...items(FUEL_ANALYTICS_MENU, 'Аналитика'),
       ...items(FUEL_COMMERCE_MENU, 'Коммерция'),
       ...items(FUEL_GOODS_MENU, 'Товародвижение'),
+      ...items(FUEL_HELP_MENU, 'Помощь'),
     ],
     // «Управленческий» топливного профиля — хозяйственные отношения компании.
     ops: [{ code: 'contracts', label: 'Договоры и аренда', group: 'Разделы' }],
