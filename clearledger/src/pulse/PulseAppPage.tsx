@@ -1,43 +1,32 @@
 /**
- * «Пульс» — экран дня руководителя (ecosystem-deploy/docs/PULSE.md, волна В1).
+ * «Пульс» → «Экран дня» (ecosystem-deploy/docs/PULSE.md, волна В1).
  *
- * Mobile-first: телефон — родная подача (одна колонка, крупные плитки), десктоп —
- * та же вёрстка шире. Два горизонта чтения: статус за 5 секунд (есть ли карточки),
- * весь экран за 60 без прокрутки. Каждая карточка ведёт к действию: обсудить,
- * заявка, открыть разрез, «принято». Пусто — так и сказано: вмешательства не
- * требуется, это нормальное состояние экрана.
+ * Два горизонта чтения: статус за 5 секунд (пилюля «N требуют внимания»), весь
+ * экран за 60 без прокрутки. Каждая цифра — вход в разрез (лестница §2), каждая
+ * карточка — к действию. Пусто — так и сказано: вмешательства не требуется.
+ *
+ * Подача — канон пространства: `Card`, `Badge`, альфа-шкала статусных цветов,
+ * общая плитка показателя (`parts.tsx`). Своих примитивов «Пульс» не заводит.
  */
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity, ArrowDownRight, ArrowUpRight, CheckCheck, ClipboardList,
-  Loader2, MessageCircle, ShieldCheck,
+  Activity, AlertTriangle, ArrowUpRight, CheckCheck, ClipboardList,
+  MessageCircle, MoreHorizontal, ShieldCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ackCard, getPulseDay, type PulseCard, type PulseKpi } from './pulseService'
+import { KpiTile, PulseError, PulseLoading, fmtNum, plural } from './parts'
 
-const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-// Крупные суммы — компактно («1,1 млн ₽»): на телефоне «1 147 344 ₽» переносится
-// на вторую строку, а руководителю нужен порядок величины, а не рубли до копейки.
-const nfShort = new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFractionDigits: 1 })
-
-/** «1 требует», «3 требуют» — счётчик на экране директора читает человек. */
-function plural(n: number, one: string, few: string, many: string): string {
-  const t = Math.abs(n) % 100
-  if (t >= 11 && t <= 14) return many
-  return { 1: one, 2: few, 3: few, 4: few }[t % 10] ?? many
-}
-
-function fmtValue(k: PulseKpi): string {
-  if (k.value == null) return '—'
-  const v = (k.value >= 100_000 ? nfShort : nf).format(k.value)
-  return k.unit ? `${v} ${k.unit}` : v
-}
-
-/** Дата данных словами: под каждой цифрой видно, чему можно верить (правило №0). */
+/** Дата данных словами: под цифрами видно, чему можно верить (правило №0). */
 function asOfLabel(asOf: string | null, staleDays: number | null): string {
   if (!asOf) return 'данных о сессиях ещё нет'
   const d = new Date(asOf).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
@@ -50,48 +39,42 @@ export function PulseAppPage() {
   const q = useQuery({
     queryKey: ['pulse-day', company.id],
     queryFn: () => getPulseDay(company.id),
-    // Обновление раз в 1–2 минуты — realtime «Пульсу» не нужен (PULSE.md §6).
+    // Обновление раз в полторы минуты — realtime «Пульсу» не нужен (PULSE.md §6).
     refetchInterval: 90_000,
   })
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-4">
+    <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-semibold">
             <Activity className="h-5 w-5 text-primary" />Экран дня
           </h1>
-          {/* Экран обязан объяснять себя сам: руководитель заходит сюда раз в день
-              и не должен вспоминать, что это за цифры и откуда. */}
+          {/* Экран объясняет себя сам: руководитель заходит раз в день и не должен
+              вспоминать, что это за цифры и откуда. */}
           <p className="mt-0.5 text-xs text-muted-foreground">
             Что требует вмешательства сегодня и как идут дела
           </p>
         </div>
-        {/* Статус за 5 секунд: одно слово раньше, чем прочитана первая карточка. */}
         {q.data && (
-          <span className={cn(
-            'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium',
+          <Badge variant="outline" className={cn('shrink-0',
             q.data.cards.length
-              ? 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'
-              : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
-          )}>
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+              : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400')}>
             {q.data.cards.length
               ? `${q.data.cards.length} ${plural(q.data.cards.length, 'требует', 'требуют', 'требуют')} внимания`
               : 'всё спокойно'}
-          </span>
+          </Badge>
         )}
       </div>
 
-      {q.isLoading && (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      )}
+      {q.isLoading && <PulseLoading what="пульса" />}
+      {q.isError && <PulseError what="пульс" onRetry={() => q.refetch()} />}
 
       {q.data && (
         <>
           <section className="space-y-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
               Требуют вмешательства
             </h2>
             <CardsBlock cards={q.data.cards} companyId={company.id} />
@@ -99,7 +82,7 @@ export function PulseAppPage() {
 
           <section className="space-y-2">
             <div className="flex items-baseline justify-between gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
                 Как идут дела
               </h2>
               {/* Дата данных — рядом с цифрами, а не в шапке: она относится к ним. */}
@@ -107,7 +90,7 @@ export function PulseAppPage() {
                 {asOfLabel(q.data.as_of, q.data.stale_days)}
               </span>
             </div>
-            <KpiGrid kpi={q.data.kpi} />
+            <KpiRow kpi={q.data.kpi} />
           </section>
         </>
       )}
@@ -126,110 +109,103 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
       qc.invalidateQueries({ queryKey: ['pulse-day', companyId] })
       toast.success('Принято — карточка снята до конца дня')
     },
+    onError: () => toast.error('Не удалось снять карточку — попробуйте ещё раз'),
   })
 
   if (!cards.length) {
     return (
-      <div className="flex items-center gap-3 rounded-lg border border-dashed p-4">
-        <ShieldCheck className="h-6 w-6 shrink-0 text-emerald-600 dark:text-emerald-400" />
-        <div>
-          <div className="text-sm font-medium">Вмешательства не требуется</div>
-          <div className="text-xs text-muted-foreground">
-            Ни одно правило не сработало — это нормальное состояние экрана.
+      <Card className="border-dashed py-0">
+        <CardContent className="flex items-center gap-3 p-4">
+          <ShieldCheck className="h-6 w-6 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <div>
+            <div className="text-sm font-medium">Вмешательства не требуется</div>
+            <div className="text-xs text-muted-foreground">
+              Ни одно правило не сработало — это нормальное состояние экрана.
+            </div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     )
   }
 
   return (
-    <div className="space-y-3">
-      {cards.map((c) => (
-        <div
-          key={c.key}
-          className={cn(
-            'rounded-lg border p-3',
-            c.level === 'alert'
-              ? 'border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/40'
-              : 'border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40',
-          )}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="text-sm font-semibold">{c.title}</div>
-            {c.count != null && <div className="text-lg font-bold tabular-nums">{nf.format(c.count)}</div>}
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{c.insight}</p>
-          {/* Действия в ОДНУ строку и на телефоне: перенос съедал пол-экрана,
-              а карточек на экране дня несколько. */}
-          {/* На телефоне подписи у навигационных кнопок скрыты — иначе «Принято»
-              выдавливается за край и превращается в безымянную галочку. */}
-          <div className="mt-2.5 flex gap-1.5">
-            {c.link && (
-              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]"
-                title="Открыть" onClick={() => navigate(c.link!)}>
-                <ArrowUpRight className="h-3 w-3 sm:mr-1" />
-                <span className="hidden sm:inline">Открыть</span>
-              </Button>
-            )}
-            <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]"
-              title="Обсудить в чате" onClick={() => navigate('/messages')}>
-              <MessageCircle className="h-3 w-3 sm:mr-1" />
-              <span className="hidden sm:inline">Обсудить</span>
-            </Button>
-            <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]"
-              title="Поставить заявку" onClick={() => navigate('/tickets')}>
-              <ClipboardList className="h-3 w-3 sm:mr-1" />
-              <span className="hidden sm:inline">Заявка</span>
-            </Button>
-            <Button
-              size="sm" variant="ghost" className="ml-auto h-7 px-2 text-[11px]"
-              disabled={ack.isPending}
-              onClick={() => ack.mutate(c.key)}
-            >
-              <CheckCheck className="mr-1 h-3 w-3" />Принято
-            </Button>
-          </div>
-        </div>
-      ))}
+    <div className="space-y-2">
+      {cards.map((c) => {
+        const alert = c.level === 'alert'
+        return (
+          <Card key={c.key} className={cn('py-0 border-l-2',
+            // Альфа-шкала пространства: один класс работает в обеих темах.
+            alert
+              ? 'border-red-500/40 border-l-red-500 bg-red-500/5'
+              : 'border-amber-500/40 border-l-amber-500 bg-amber-500/5')}>
+            <CardContent className="p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2">
+                  {/* Уровень несёт не только цвет: иконка обязательна (PRODUCT.md). */}
+                  <AlertTriangle className={cn('mt-0.5 h-4 w-4 shrink-0',
+                    alert ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')} />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">{c.title}</div>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      {c.insight}
+                    </p>
+                  </div>
+                </div>
+                {c.count != null && (
+                  <div className="shrink-0 text-base font-semibold tabular-nums">
+                    {fmtNum(c.count)}
+                  </div>
+                )}
+              </div>
+
+              {/* Одно первичное действие, «Принято» рядом, остальное — под «⋯»:
+                  до семи карточек × четыре кнопки давали 28 контролов в первом экране. */}
+              <div className="mt-2.5 flex items-center gap-1.5">
+                {c.link && (
+                  <Button size="sm" className="h-9 sm:h-8" onClick={() => navigate(c.link!)}>
+                    <ArrowUpRight className="mr-1 h-3.5 w-3.5" />Открыть
+                  </Button>
+                )}
+                {/* На телефоне цели крупнее: 32 px против 28 — промах по «Принято»
+                    стоит дорого, карточка уходит с экрана до конца дня. */}
+                <Button size="sm" variant="outline" className="h-9 sm:h-8"
+                  disabled={ack.isPending} onClick={() => ack.mutate(c.key)}>
+                  <CheckCheck className="mr-1 h-3.5 w-3.5" />Принято
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="ghost" className="ml-auto h-9 w-9 p-0 sm:h-8 sm:w-8"
+                      aria-label="Ещё действия">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => navigate('/messages')}>
+                      <MessageCircle className="mr-2 h-3.5 w-3.5" />Обсудить в чате
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tickets')}>
+                      <ClipboardList className="mr-2 h-3.5 w-3.5" />Поставить заявку
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      })}
     </div>
   )
 }
 
-/* ── Строка KPI по направлениям: сегодня против прошлой недели ────────── */
+/* ── Строка KPI: каждая плитка — вход в свой разрез ───────────────────── */
 
-function KpiGrid({ kpi }: { kpi: PulseKpi[] }) {
+function KpiRow({ kpi }: { kpi: PulseKpi[] }) {
+  const navigate = useNavigate()
   return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+    <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
       {kpi.map((k) => (
-        <div
-          key={k.key}
-          className={cn(
-            'rounded-lg border p-3',
-            k.state === 'warn' && 'border-amber-300 dark:border-amber-800',
-            // «Стухшие» данные видно раньше, чем прочитана дата (PULSE.md §6).
-            k.state === 'stale' && 'opacity-60',
-          )}
-        >
-          <div className="text-[11px] text-muted-foreground">{k.title}</div>
-          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5">
-            {/* nowrap: «1,1 млн ₽» на узкой плитке иначе рвётся, и «₽» уезжает вниз. */}
-            <span className="whitespace-nowrap text-xl font-bold tabular-nums">{fmtValue(k)}</span>
-            {k.delta_pct != null && (
-              <span className={cn(
-                'flex items-center text-[11px] font-medium tabular-nums',
-                k.delta_pct >= 0
-                  ? 'text-emerald-600 dark:text-emerald-400'
-                  : 'text-red-600 dark:text-red-400',
-              )}>
-                {k.delta_pct >= 0
-                  ? <ArrowUpRight className="h-3 w-3" />
-                  : <ArrowDownRight className="h-3 w-3" />}
-                {Math.abs(k.delta_pct)}%
-              </span>
-            )}
-          </div>
-          {k.note && <div className="mt-0.5 text-[11px] text-muted-foreground">{k.note}</div>}
-        </div>
+        <KpiTile key={k.key} k={k}
+          onOpen={k.link ? () => navigate(k.link!) : undefined} />
       ))}
     </div>
   )

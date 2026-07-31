@@ -117,9 +117,18 @@ def build_cards(
 
 def _kpi(key: str, title: str, value: float | int | None, *, unit: str | None = None,
          delta_pct: float | None = None, note: str | None = None,
-         state: str | None = None) -> dict[str, Any]:
+         state: str | None = None, link: str | None = None,
+         higher_is_better: bool = True) -> dict[str, Any]:
+    """Плитка показателя.
+
+    `link` — куда проваливаться (лестница погружения, PULSE.md §2): цифра без
+    входа в разрез оставляет руководителя с вопросом «и что теперь».
+    `higher_is_better=False` — рост это плохо (поток заявок, молчащие станции):
+    иначе «заявок поступило +30%» красится зелёным как достижение.
+    """
     return {"key": key, "title": title, "value": value, "unit": unit,
-            "delta_pct": delta_pct, "note": note, "state": state}
+            "delta_pct": delta_pct, "note": note, "state": state, "link": link,
+            "higher_is_better": higher_is_better}
 
 
 def _dpct(cur: float, prev: float) -> float | None:
@@ -232,25 +241,34 @@ async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
     kpi: list[dict[str, Any]] = []
     data_state = "stale" if (stale_days is None or stale_days > STALE_DAYS) else None
     if s is not None:
-        kpi.append(_kpi("revenue", "Выручка, 7 дн данных", float(s.r7), unit="₽",
-                        delta_pct=_dpct(float(s.r7), float(s.r7p)), state=data_state))
-        kpi.append(_kpi("sessions", "Сессии, 7 дн данных", s.s7,
-                        delta_pct=_dpct(s.s7, s.s7p), state=data_state))
+        kpi.append(_kpi("revenue", "Выручка за 7 дн, ₽", float(s.r7),
+                        delta_pct=_dpct(float(s.r7), float(s.r7p)), state=data_state,
+                        link="/pulse/business"))
+        kpi.append(_kpi("sessions", "Сессии за 7 дн", s.s7,
+                        delta_pct=_dpct(s.s7, s.s7p), state=data_state,
+                        link="/pulse/business"))
     if silent is not None and silent.park:
         share = silent.silent / silent.park
+        # Плитка желтеет раньше, чем срабатывает карточка-эскалация: треть сети без
+        # сессий — ещё не повод будить директора, но и не «норма», о которой молчат.
         kpi.append(_kpi("silent", "Молчат станции", silent.silent,
                         note=f"из {silent.park} за {SILENT_HOURS} ч данных",
-                        state="warn" if share > SILENT_SHARE else data_state))
+                        state="warn" if share > 0.3 else data_state,
+                        link="/sales", higher_is_better=False))
     kpi.append(_kpi("own_open", "Свои заявки", t.own_open,
                     note=f"SLA нарушен: {t.own_sla}",
-                    state="warn" if t.own_sla_stale else None))
+                    state="warn" if t.own_sla_stale else None,
+                    link="/tickets", higher_is_better=False))
     kpi.append(_kpi("ext_open", "Внешняя FSM", t.ext_open,
-                    note=f"старше месяца: {t.ext_old}"))
+                    note=f"старше месяца: {t.ext_old}",
+                    link="/tickets", higher_is_better=False))
     active_projects = sum(r.n for r in funnel)
     kpi.append(_kpi("funnel", "Проекты в работе", active_projects,
-                    note=f"введено за 30 дн: {commissioned_30d}"))
+                    note=f"введено за 30 дн: {commissioned_30d}",
+                    link="/pulse/business"))
     kpi.append(_kpi("people", "Сейчас в системе", p.online,
-                    note=f"за сегодня: {p.today} из {p.total}"))
+                    note=f"за сегодня: {p.today} из {p.total}",
+                    link="/pulse/team"))
 
     # ── Карточки-эскалации: аномалия или сводка, не запись (PULSE.md §7) ──
     acked = {r.card_key for r in (await db.execute(text(
@@ -306,10 +324,12 @@ async def pulse_business(
                    count(distinct location_id) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days') as live
             from charge_sessions where company_id = :cid
         """), {"cid": cid, "as_of": as_of})).one()
+        # Единица измерения — в заголовке, а не рядом с числом: «271,8 тыс. кВт·ч»
+        # не помещалось в плитку на телефоне и вылезало за рамку.
         net = [
-            _kpi("revenue", "Выручка за 30 дней", float(m.r30), unit="₽",
+            _kpi("revenue", "Выручка, ₽", float(m.r30),
                  delta_pct=_dpct(float(m.r30), float(m.r30p))),
-            _kpi("energy", "Отпущено", float(m.e30), unit="кВт·ч",
+            _kpi("energy", "Отпущено, кВт·ч", float(m.e30),
                  delta_pct=_dpct(float(m.e30), float(m.e30p))),
             _kpi("sessions", "Зарядных сессий", m.s30, delta_pct=_dpct(m.s30, m.s30p)),
             _kpi("live", "Работающих станций", m.live, note="давали сессии за 30 дней"),
@@ -325,11 +345,18 @@ async def pulse_business(
         """), {"cid": cid, "as_of": as_of})).all()]
 
     # Развитие сети: воронка от переговоров до ввода — то, чем растёт бизнес.
-    funnel = [{"stage": r.stage, "count": r.n} for r in (await db.execute(text("""
+    # Порядок — процессный (лид → … → эксплуатация), а не «по убыванию количества»:
+    # воронка, отсортированная по величине, перестаёт быть воронкой.
+    stage_order = {s: i for i, s in enumerate((
+        "lead", "screening", "negotiation", "dd", "decision", "contracting",
+        "construction", "commissioning", "live", "on_hold"))}
+    funnel_rows = (await db.execute(text("""
         select stage, count(*) as n from ezs_projects
         where company_id = :cid and stage <> 'archive'
-        group by stage order by n desc
-    """), {"cid": cid})).all()]
+        group by stage
+    """), {"cid": cid})).all()
+    funnel = [{"stage": r.stage, "count": r.n} for r in
+              sorted(funnel_rows, key=lambda r: stage_order.get(r.stage, 99))]
     dev = (await db.execute(text("""
         select count(*) filter (where nullif(commissioned_on,'')::date >= current_date - 90) as comm_90,
                count(*) filter (where nullif(commissioned_on,'') is not null) as comm_all,
@@ -444,8 +471,10 @@ async def pulse_week(
                                     and started_at > CAST(:as_of AS timestamp) - interval '14 days'), 0) as rp
             from charge_sessions where company_id = :cid
         """), {"cid": cid, "as_of": as_of})).one()
-        rows.append({"label": "Выручка", "value": float(w.r), "prev": float(w.rp), "unit": "₽"})
-        rows.append({"label": "Зарядных сессий", "value": w.s, "prev": w.sp, "unit": None})
+        rows.append({"label": "Выручка", "value": float(w.r), "prev": float(w.rp),
+                     "unit": "₽", "higher_is_better": True})
+        rows.append({"label": "Зарядных сессий", "value": w.s, "prev": w.sp,
+                     "unit": None, "higher_is_better": True})
 
     t = (await db.execute(text("""
         select count(*) filter (where created_at >= now() - interval '7 days') as created,
@@ -457,8 +486,11 @@ async def pulse_week(
         from public.tickets
         where coalesce(is_deleted,false)=false and coalesce(is_archived,false)=false
     """))).one()
-    rows.append({"label": "Заявок поступило", "value": t.created, "prev": t.created_prev, "unit": None})
-    rows.append({"label": "Заявок закрыто", "value": t.closed, "prev": t.closed_prev, "unit": None})
+    # Поток заявок вырос — это не победа: полярность у строк дайджеста разная.
+    rows.append({"label": "Заявок поступило", "value": t.created, "prev": t.created_prev,
+                 "unit": None, "higher_is_better": False})
+    rows.append({"label": "Заявок закрыто", "value": t.closed, "prev": t.closed_prev,
+                 "unit": None, "higher_is_better": True})
 
     # Движение проектов — смены стадий и гейты, а не правки полей карточки.
     moved = (await db.execute(text("""
@@ -466,7 +498,8 @@ async def pulse_week(
         where company_id = :cid and kind in ('stage','gate')
           and created_at >= now() - interval '7 days'
     """), {"cid": cid})).scalar_one()
-    rows.append({"label": "Движений по проектам", "value": moved, "prev": None, "unit": None})
+    rows.append({"label": "Движений по проектам", "value": moved, "prev": None,
+                 "unit": None, "higher_is_better": True})
 
     # Что именно сдвинулось — списком, а не одной цифрой: руководителю нужны имена.
     highlights = [{"at": r.at.isoformat() if r.at else None, "text": r.txt}

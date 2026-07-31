@@ -12,8 +12,12 @@ export interface PulseKpi {
   unit: string | null
   delta_pct: number | null
   note: string | null
-  /** null — норма; 'warn' — жёлтая плитка; 'stale' — данные стухли (PULSE.md §6). */
+  /** null — норма; 'warn' — плитка просит внимания; 'stale' — данные устарели. */
   state: string | null
+  /** Куда проваливаться с плитки: лестница погружения (PULSE.md §2). */
+  link: string | null
+  /** Рост — это хорошо? У потока заявок и молчащих станций — нет. */
+  higher_is_better: boolean
 }
 
 export interface PulseCard {
@@ -81,7 +85,11 @@ export const getPulseTeam = (companyId: string) =>
 
 export interface PulseWeek {
   as_of: string | null
-  rows: { label: string; value: number; prev: number | null; unit: string | null }[]
+  rows: {
+    label: string; value: number; prev: number | null; unit: string | null
+    /** Рост — это хорошо? У «Заявок поступило» — нет. */
+    higher_is_better: boolean
+  }[]
   highlights: { at: string | null; text: string }[]
 }
 
