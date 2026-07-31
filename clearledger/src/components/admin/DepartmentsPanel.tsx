@@ -6,9 +6,9 @@
  * людей и, дальше, права уровня подразделения. Людей в подразделение назначают
  * в карточке участника — здесь сами узлы структуры.
  */
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Network, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, Network, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -53,17 +53,18 @@ export function DepartmentsPanel({ companyId, canManage }: {
     queryKey: ['departments', companyId],
     queryFn: () => departmentsService.listDepartments(companyId),
   })
-  // Кандидаты в руководители — свои сотрудники организации.
+  // Люди организации: кандидаты в руководители и состав раскрытых подразделений.
   const membersQ = useQuery({
     queryKey: ['team-members', companyId],
     queryFn: () => userService.listUsers(companyId),
-    enabled: canManage,
   })
   const people = useMemo(
     () => (membersQ.data ?? []).filter((m) => (m.party_type ?? 'internal') === 'internal'),
     [membersQ.data])
 
   const [editing, setEditing] = useState<Department | 'new' | null>(null)
+  // Раскрытые подразделения: строка разворачивается в состав — кто здесь работает.
+  const [open, setOpen] = useState<Record<string, boolean>>({})
   const refresh = () => qc.invalidateQueries({ queryKey: ['departments', companyId] })
 
   const remove = useMutation({
@@ -109,33 +110,82 @@ export function DepartmentsPanel({ companyId, canManage }: {
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ d, depth }) => (
-                <tr key={d.id} className="border-t hover:bg-muted/40">
-                  <td className="p-2.5">
-                    <span style={{ paddingLeft: depth * 20 }} className="flex items-center gap-1.5">
-                      <Network className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <span className="font-medium text-foreground">{d.name}</span>
-                    </span>
-                  </td>
-                  <td className="p-2.5">
-                    {d.head_name ?? <span className="text-amber-500/90">не назначен — эскалировать некому</span>}
-                  </td>
-                  <td className="p-2.5 text-right tabular-nums">{d.people || '—'}</td>
-                  {canManage && (
-                    <td className="p-2.5 text-right">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" title="Изменить"
-                        onClick={() => setEditing(d)}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                        title="Убрать подразделение" disabled={remove.isPending}
-                        onClick={() => remove.mutate(d)}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </td>
-                  )}
-                </tr>
-              ))}
+              {rows.map(({ d, depth }) => {
+                const staff = people.filter((m) => m.department_id === d.id)
+                const isOpen = !!open[d.id]
+                return (
+                  <Fragment key={d.id}>
+                    {/* Строка раскрывается в состав: «кто здесь работает» — первый
+                        вопрос к подразделению, за ним не ходят в общий список. */}
+                    <tr
+                      tabIndex={0}
+                      onClick={() => setOpen((o) => ({ ...o, [d.id]: !o[d.id] }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          setOpen((o) => ({ ...o, [d.id]: !o[d.id] }))
+                        }
+                      }}
+                      className="cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                    >
+                      <td className="p-2.5">
+                        <span style={{ paddingLeft: depth * 20 }} className="flex items-center gap-1.5">
+                          {isOpen
+                            ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                          <Network className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="font-medium text-foreground">{d.name}</span>
+                        </span>
+                      </td>
+                      <td className="p-2.5">
+                        {d.head_name ?? <span className="text-amber-500/90">не назначен — эскалировать некому</span>}
+                      </td>
+                      <td className="p-2.5 text-right tabular-nums">{d.people || '—'}</td>
+                      {canManage && (
+                        <td className="p-2.5 text-right">
+                          <Button variant="ghost" size="icon" className="h-6 w-6" title="Изменить"
+                            onClick={(e) => { e.stopPropagation(); setEditing(d) }}>
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                            title="Убрать подразделение" disabled={remove.isPending}
+                            onClick={(e) => { e.stopPropagation(); remove.mutate(d) }}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-t border-dashed bg-muted/20">
+                        <td colSpan={canManage ? 4 : 3} className="px-2.5 py-2">
+                          <div style={{ paddingLeft: depth * 20 + 24 }} className="space-y-1">
+                            {staff.length === 0 && (
+                              <p className="text-[11px] text-muted-foreground">
+                                Людей пока нет — подразделение назначается в карточке сотрудника.
+                              </p>
+                            )}
+                            {staff.map((m) => (
+                              <div key={m.id} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                                <span className="font-medium text-foreground">{m.name || m.email}</span>
+                                {d.head_user_id === m.id && (
+                                  <span className="rounded border border-primary/40 px-1 text-[10px] text-primary">руководитель</span>
+                                )}
+                                <span className="text-muted-foreground">
+                                  {m.position || '— должность —'}
+                                  {m.last_seen_at
+                                    ? ` · вход: ${new Date(m.last_seen_at).toLocaleString('ru-RU',
+                                        { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+                                    : ' · не заходил(а)'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
