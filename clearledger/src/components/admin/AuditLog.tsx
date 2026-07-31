@@ -14,11 +14,10 @@
  * Охват «весь контейнер» доступен владельцу контейнера: `/api/core/audit` гейтится на
  * бэкенде, у админа организации переключателя нет.
  */
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, History, Loader2, X } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -47,8 +46,65 @@ export const ACTION_LABEL: Record<string, string> = {
 const GROUPS: { key: string; label: string; test: (action: string) => boolean }[] = [
   { key: 'all', label: 'Все события', test: () => true },
   { key: 'logins', label: 'Входы', test: (a) => /^(auth\.|sso\.)/.test(a) },
-  { key: 'people', label: 'Люди и доступы', test: (a) => /^(role\.|member\.|user\.)/.test(a) },
+  { key: 'people', label: 'Люди и доступы', test: (a) => /^(role\.|member\.|user\.|department\.)/.test(a) },
 ]
+
+/** Категория действия задаёт цвет бейджа: журнал читается по цветовым пятнам —
+ *  красное «вход отклонён» видно из скролла, не вчитываясь в каждую строку. */
+function actionTone(action: string): string {
+  if (action === 'auth.login_failed') return 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400'
+  if (/^(auth\.|sso\.)/.test(action)) return 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400'
+  if (/^(member\.|role\.)/.test(action)) return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+  if (/^(user\.|department\.)/.test(action)) return 'border-primary/40 bg-primary/10 text-primary'
+  if (/^space\./.test(action)) return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+  return 'border-border bg-muted/60 text-muted-foreground'
+}
+
+/** Ключи внутри details-JSON — по-русски и по делу. */
+const DETAIL_KEY: Record<string, string> = {
+  set: 'доступ', modules: 'доступ', objects: 'объекты', contracts: 'основание',
+  role: 'роль', partyType: 'принадлежность', roleId: 'роль',
+}
+
+/**
+ * Детали события — словами, а не сырым JSON. Формат в базе: «цель · {json}»
+ * (email человека и атрибуты). Длинные списки модулей сворачиваются в «N разделов»
+ * — полный список остаётся в подсказке строки.
+ */
+function humanDetails(details: string | null | undefined): { target: string; note: string; full: string } {
+  const raw = (details ?? '').trim()
+  if (!raw) return { target: '', note: '', full: '' }
+  const [head, ...rest] = raw.split(' · ')
+  const jsonPart = rest.join(' · ')
+  let target = head
+  let note = ''
+  const parse = (s: string) => {
+    try { return JSON.parse(s) as Record<string, unknown> } catch { return null }
+  }
+  const obj = jsonPart ? parse(jsonPart) : (head.startsWith('{') ? parse(head) : null)
+  if (obj && head.startsWith('{')) target = ''
+  if (obj) {
+    note = Object.entries(obj).map(([k, v]) => {
+      const label = DETAIL_KEY[k] ?? k
+      const val = String(v ?? '')
+      // «модули: a, b, c, …» — счётчиком: перечень в строке журнала нечитаем.
+      const m = val.match(/^модули:\s*(.+)$/)
+      if (m) {
+        const n = m[1].split(',').length
+        return `${label}: ${n} разделов`
+      }
+      return `${label}: ${val}`
+    }).join(' · ')
+  } else if (jsonPart) {
+    note = jsonPart
+  }
+  return { target, note, full: raw }
+}
+
+/** «31 июля, четверг» — заголовок дня в ленте. */
+const dayLabel = (iso: string) => new Date(iso).toLocaleDateString('ru-RU',
+  { day: 'numeric', month: 'long', weekday: 'long' })
+const dayKey = (iso: string) => iso.slice(0, 10)
 
 const PAGE = 200      // первый экран журнала
 const PAGE_MORE = 300 // шаг кнопки «Показать ещё»
@@ -172,6 +228,16 @@ export function AuditLog({ companyId, isSuperadmin = false }: {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-muted-foreground">Период:</span>
+                {/* Быстрые срезы — прежде календаря: «что было за неделю» спрашивают
+                    каждый день, конкретные даты — раз в месяц. */}
+                {([['1', 'Сегодня'], ['7', '7 дн'], ['30', '30 дн']] as const).map(([days, label]) => {
+                  const from = new Date(Date.now() - (Number(days) - 1) * 86400000).toISOString().slice(0, 10)
+                  const on = dateFrom === from && !dateTo
+                  return (
+                    <Toggle key={days} on={on}
+                      onClick={() => { setDateFrom(on ? '' : from); setDateTo('') }}>{label}</Toggle>
+                  )
+                })}
                 <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
                   className="h-7 rounded-md border border-input bg-background px-2 text-xs" />
                 <span className="text-xs text-muted-foreground">—</span>
@@ -219,25 +285,57 @@ export function AuditLog({ companyId, isSuperadmin = false }: {
                   {rows.length === 0 ? 'Событий нет' : 'В этом фильтре событий нет'}
                 </TableCell></TableRow>
               )}
-              {shown.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                    {e.at ? new Date(e.at).toLocaleString('ru-RU') : '—'}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="text-[10px] font-normal">
-                      {ACTION_LABEL[e.action] ?? e.action}
-                    </Badge>
-                  </TableCell>
-                  {container && (
-                    <TableCell className="text-xs text-muted-foreground">{e.company ?? '—'}</TableCell>
-                  )}
-                  <TableCell className="text-xs">{e.who ?? '—'}</TableCell>
-                  <TableCell className="max-w-0 truncate text-xs text-muted-foreground">
-                    {e.details ?? ''}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {shown.map((e, i) => {
+                const prev = shown[i - 1]
+                const newDay = e.at && (!prev?.at || dayKey(prev.at) !== dayKey(e.at))
+                const d = humanDetails(e.details)
+                const who = e.who ?? '—'
+                const memberId = !container
+                  ? (membersQ.data ?? []).find((m) => m.name === e.who || m.email === e.who)?.id
+                  : undefined
+                return (
+                  <Fragment key={e.id}>
+                    {/* Лента по дням: дата один раз заголовком, в строках — время. */}
+                    {newDay && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={container ? 5 : 4}
+                          className="bg-muted/30 py-1.5 text-xs font-medium">
+                          {dayLabel(e.at!)}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow title={d.full || undefined}>
+                      <TableCell className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                        {e.at ? new Date(e.at).toLocaleTimeString('ru-RU',
+                          { hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[10px] ${actionTone(e.action)}`}>
+                          {ACTION_LABEL[e.action] ?? e.action}
+                        </span>
+                      </TableCell>
+                      {container && (
+                        <TableCell className="text-xs text-muted-foreground">{e.company ?? '—'}</TableCell>
+                      )}
+                      <TableCell className="text-xs">
+                        {/* Имя — фильтр: активность сотрудника собирается одним кликом. */}
+                        {memberId ? (
+                          <button type="button" onClick={() => setUser(memberId)}
+                            title={`Показать всю активность: ${who}`}
+                            className="text-left hover:text-primary hover:underline">
+                            {who}
+                          </button>
+                        ) : who}
+                      </TableCell>
+                      <TableCell className="max-w-0 truncate text-xs">
+                        {d.target && <span className="text-foreground/90">{d.target}</span>}
+                        {d.target && d.note && <span className="text-muted-foreground"> · </span>}
+                        {d.note && <span className="text-muted-foreground">{d.note}</span>}
+                      </TableCell>
+                    </TableRow>
+                  </Fragment>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
