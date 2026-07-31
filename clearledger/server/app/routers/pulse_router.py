@@ -41,6 +41,15 @@ SILENT_HOURS = 48       # «молчит» = нет сессий столько 
 # от чего «Пульс» уходит. Лишнее отсекается по уровню (PULSE.md §7).
 MAX_CARDS = 7
 
+# Имена правил для журнала «Принятое»: ключ в базе технический, человеку нужен текст.
+CARD_TITLES = {
+    "data_stale": "Данные сессий не обновлялись",
+    "own_sla": "Свои заявки встали",
+    "ext_backlog": "Хвост внешней сервисной системы",
+    "silent_surge": "Молчит большая часть сети",
+    "own_reopen": "Заявки открываются повторно",
+}
+
 
 def plural(n: int, one: str, few: str, many: str) -> str:
     """«1 заявка», «3 заявки», «11 заявок» — карточку читает человек, а не парсер."""
@@ -514,6 +523,35 @@ async def pulse_week(
 
     return {"rows": rows, "highlights": highlights,
             "as_of": as_of.isoformat() if as_of else None}
+
+
+@router.get("/accepted")
+async def pulse_accepted(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Что уже снято с экрана дня и кем — за сегодня и предыдущие дни.
+
+    Директор должен видеть не только «что горит», но и «что мы сегодня уже
+    посмотрели»: иначе снятая карточка выглядит как пропавшая.
+    """
+    await assert_company_member(company_id, current_user, db)
+    rows = (await db.execute(text("""
+        select a.card_key, a.acked_on, a.acked_at, u.name as who
+        from pulse_acks a
+        left join users u on u.id = a.user_id
+        where a.company_id = :cid and a.acked_on >= current_date - 7
+        order by a.acked_at desc
+    """), {"cid": str(company_id)})).all()
+    return {"items": [{
+        "card_key": r.card_key,
+        "title": CARD_TITLES.get(r.card_key, r.card_key),
+        "on": r.acked_on.isoformat(),
+        "at": r.acked_at.isoformat() if r.acked_at else None,
+        "who": r.who,
+        "today": r.acked_on == date.today(),
+    } for r in rows]}
 
 
 class AckIn(BaseModel):

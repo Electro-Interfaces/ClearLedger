@@ -489,7 +489,12 @@ function ScheduleSection({ companyId }: { companyId: string }) {
 
 /* ── Раздел «Аналитика»: срез руководителя ───────────────────────────── */
 
-function AnalyticsSection({ companyId }: { companyId: string }) {
+/**
+ * Срез руководителя по заявкам. Экспортирован, потому что тот же разбор открывает
+ * «Пульс» в разделе «Бизнес → Поддержка»: показываем ЧУЖУЮ витрину как есть, а не
+ * пишем её вторую копию (ecosystem-deploy/docs/PULSE.md §6, единый словарь метрик).
+ */
+export function AnalyticsSection({ companyId }: { companyId: string }) {
   const q = useQuery({
     queryKey: ['space-tickets-summary', companyId],
     queryFn: () => ticketsService.ticketsSummary(companyId),

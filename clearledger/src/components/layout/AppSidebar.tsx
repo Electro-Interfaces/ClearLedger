@@ -21,10 +21,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCompany } from '@/contexts/CompanyContext'
-import { mainNavItems, dataItems, oneCItems, settingsItems } from '@/config/navigation'
+import { mainNavItems, dataItems, oneCItems, settingsItems, navByPath } from '@/config/navigation'
 import { routeAllowed } from '@/config/accessModules'
 import {
-  SPACE_LINKS, isCarvedProfile, productForPath, productNav, spaceNav,
+  SPACE_LINKS, SPACE_PAGES, isCarvedProfile, productForPath, productNav, spaceNav,
 } from '@/config/spaceProducts'
 import { productModuleAllowed, productHasModule } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
@@ -133,15 +133,44 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
   // раздела, разные вопросы одного дня. «Экран дня» — что требует вмешательства прямо
   // сейчас; «Бизнес» — как идут дела вообще; «Команда» — у кого затор; «Неделя» — итоги.
   if (pathname === '/pulse' || pathname.startsWith('/pulse/')) {
+    // Блок Ядра — как в любом рабочем месте (SPACE.md §4): функции пространства
+    // одинаковы везде, и руководителю они нужны не меньше (посмотреть объект,
+    // договор, людей и доступы). Ведут на общие адреса — «Пульс» их не присваивает.
+    const spaceItems = SPACE_PAGES
+      .filter((p) => navByPath[p])
+      .map((p) => navByPath[p])
     return (
-      <SidebarGroup className="py-0">
-        <SidebarMenu>
-          {PULSE_SECTIONS.map((s) => (
-            <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}
-              collapsed={collapsed} onNavigate={onNavigate} active={pathname === s.to} />
-          ))}
-        </SidebarMenu>
-      </SidebarGroup>
+      <>
+        <SidebarGroup className="py-0">
+          <SidebarMenu>
+            {PULSE_SECTIONS.map((s) => (
+              <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}
+                collapsed={collapsed} onNavigate={onNavigate}
+                active={pathname === s.to
+                  || (s.to === '/pulse' && pathname === '/pulse/')} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+
+        <SidebarSeparator className="my-2" />
+        <SidebarGroup className="py-0">
+          {!collapsed && (
+            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Пространство
+            </p>
+          )}
+          <SidebarMenu>
+            {spaceItems.map((item) => (
+              <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
+                collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+            {SPACE_LINKS.filter((l) => canApp(l.app)).map((l) => (
+              <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
+                collapsed={collapsed} onNavigate={onNavigate} />
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      </>
     )
   }
 

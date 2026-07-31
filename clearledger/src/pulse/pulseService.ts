@@ -95,3 +95,17 @@ export interface PulseWeek {
 
 export const getPulseWeek = (companyId: string) =>
   get<PulseWeek>('/api/pulse/week', { company_id: companyId })
+
+/* ── «Принятое сегодня»: что уже сняли с экрана дня ──────────────────── */
+
+export interface PulseAccepted {
+  card_key: string
+  title: string
+  on: string
+  at: string | null
+  who: string | null
+  today: boolean
+}
+
+export const getPulseAccepted = (companyId: string) =>
+  get<{ items: PulseAccepted[] }>('/api/pulse/accepted', { company_id: companyId })

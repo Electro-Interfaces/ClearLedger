@@ -43,6 +43,7 @@ const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ de
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
 const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseTeamPage })))
 const PulseWeekPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseWeekPage })))
+const PulseLayout = lazy(() => import('@/pulse/PulseLayout').then((m) => ({ default: m.PulseLayout })))
 const InfoPage = lazy(() => import('@/pages/InfoPage').then((m) => ({ default: m.InfoPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
@@ -224,11 +225,18 @@ const router = createBrowserRouter([
           // «Заявки» — трекер пространства на движке Поддержки (docs/TICKETS.md).
           { path: '/tickets', element: <LazyPage><TicketsAppPage /></LazyPage> },
           // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md):
-          // четыре раздела в рельсе, каждый отвечает на свой вопрос дня.
-          { path: '/pulse', element: <LazyPage><PulseAppPage /></LazyPage> },
-          { path: '/pulse/business', element: <LazyPage><PulseBusinessPage /></LazyPage> },
-          { path: '/pulse/team', element: <LazyPage><PulseTeamPage /></LazyPage> },
-          { path: '/pulse/week', element: <LazyPage><PulseWeekPage /></LazyPage> },
+          // разделы в рельсе приложения, их пункты — во второй колонке (PulseLayout),
+          // как в «Продажах» и «Проектах».
+          {
+            path: '/pulse',
+            element: <LazyPage><PulseLayout /></LazyPage>,
+            children: [
+              { index: true, element: <LazyPage><PulseAppPage /></LazyPage> },
+              { path: 'business', element: <LazyPage><PulseBusinessPage /></LazyPage> },
+              { path: 'team', element: <LazyPage><PulseTeamPage /></LazyPage> },
+              { path: 'week', element: <LazyPage><PulseWeekPage /></LazyPage> },
+            ],
+          },
           // «Инфо» — знание пространства: то же приложение, что открывается
           // подсказкой в рабочей области, только целиком (docs/INFO.md).
           { path: '/info', element: <LazyPage><InfoPage /></LazyPage> },

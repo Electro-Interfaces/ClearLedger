@@ -23,8 +23,11 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
-import { ackCard, getPulseDay, type PulseCard, type PulseKpi } from './pulseService'
+import {
+  ackCard, getPulseAccepted, getPulseDay, type PulseCard, type PulseKpi,
+} from './pulseService'
 import { KpiTile, PulseError, PulseLoading, fmtNum, plural } from './parts'
+import { usePulseView } from './PulseLayout'
 
 /** Дата данных словами: под цифрами видно, чему можно верить (правило №0). */
 function asOfLabel(asOf: string | null, staleDays: number | null): string {
@@ -35,6 +38,14 @@ function asOfLabel(asOf: string | null, staleDays: number | null): string {
 }
 
 export function PulseAppPage() {
+  const view = usePulseView('/pulse')
+  if (view === 'accepted') return <AcceptedView />
+  return <TodayView />
+}
+
+/* ── Пункт «Экран дня» ────────────────────────────────────────────────── */
+
+function TodayView() {
   const { company } = useCompany()
   const q = useQuery({
     queryKey: ['pulse-day', company.id],
@@ -207,6 +218,75 @@ function KpiRow({ kpi }: { kpi: PulseKpi[] }) {
         <KpiTile key={k.key} k={k}
           onOpen={k.link ? () => navigate(k.link!) : undefined} />
       ))}
+    </div>
+  )
+}
+
+/* ── Пункт «Принятое сегодня» ─────────────────────────────────────────── */
+
+/**
+ * Снятая карточка не должна выглядеть пропавшей: здесь видно, что уже посмотрели
+ * сегодня и кто именно — в том числе секретарь, разобравший экран до директора.
+ */
+function AcceptedView() {
+  const { company } = useCompany()
+  const q = useQuery({
+    queryKey: ['pulse-accepted', company.id],
+    queryFn: () => getPulseAccepted(company.id),
+  })
+  const items = q.data?.items ?? []
+  const today = items.filter((i) => i.today)
+  const before = items.filter((i) => !i.today)
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="flex items-center gap-2 text-lg font-semibold">
+          <CheckCheck className="h-5 w-5 text-primary" />Принятое сегодня
+        </h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Что уже сняли с экрана дня — и кто. Завтра правило проверится заново.
+        </p>
+      </div>
+
+      {q.isLoading && <PulseLoading what="принятого" />}
+      {q.isError && <PulseError what="принятые карточки" onRetry={() => q.refetch()} />}
+
+      {q.data && !items.length && (
+        <Card className="border-dashed py-0">
+          <CardContent className="p-4 text-xs text-muted-foreground">
+            За последнюю неделю карточки не снимали.
+          </CardContent>
+        </Card>
+      )}
+
+      {[{ label: 'Сегодня', rows: today }, { label: 'Раньше', rows: before }]
+        .filter((g) => g.rows.length)
+        .map((g) => (
+          <section key={g.label} className="space-y-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              {g.label}
+            </h2>
+            <Card className="py-0">
+              <CardContent className="divide-y p-0">
+                {g.rows.map((i, idx) => (
+                  <div key={`${i.card_key}-${idx}`}
+                    className="flex items-center justify-between gap-3 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-[13px]">{i.title}</div>
+                      <div className="truncate text-[11px] text-muted-foreground">
+                        {i.who ?? 'кто-то из руководства'}
+                        {i.at && ` · ${new Date(i.at).toLocaleString('ru-RU',
+                          { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+                      </div>
+                    </div>
+                    <CheckCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </section>
+        ))}
     </div>
   )
 }
