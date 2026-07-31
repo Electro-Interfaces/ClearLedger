@@ -11,7 +11,7 @@ import {
   Plug, BookOpen, CalendarClock, Link2, Package,
   Landmark, ScrollText, Tag, Layers, GitCompare,
   Library, ShieldCheck, Building2, Building, Boxes, Sparkles, Fuel, RefreshCw, LineChart,
-  Cable, Bell, Blocks,
+  Cable, Bell, Blocks, KeyRound,
 } from 'lucide-react'
 
 export interface NavItemDef {
@@ -50,7 +50,11 @@ export const dataItems: NavItemDef[] = [
 // всем разделам один ключ `connect`.
 export const connectItems: NavItemDef[] = [
   { to: '/connections', icon: Cable, label: 'Состояние' },
-  { to: '/connectors', icon: Plug, label: 'Источники и коннекторы' },
+  { to: '/connectors', icon: Plug, label: 'Коннекторы' },
+  // Источники (реквизиты доступа к внешним системам) были достижимы только
+  // глубокими ссылками из каталога и карточки коннектора — при том что меню
+  // обещало их пунктом «Источники и коннекторы».
+  { to: '/sources', icon: KeyRound, label: 'Источники' },
   { to: '/catalog', icon: Library, label: 'Каталог типов' },
   { to: '/notifications', icon: Bell, label: 'Оповещения' },
   { to: '/apps', icon: Blocks, label: 'Приложения и модули' },
@@ -72,10 +76,10 @@ export const oneCItems: NavItemDef[] = [
   { to: '/1c/export',             icon: Package,       label: 'Выгрузка' },
 ]
 
-// Раздел «Настройки»
+// Раздел «Настройки». «Каталоги» здесь не дублируем: каталог типов живёт в
+// «Подключениях» (/catalog), а дубль пути с другой подписью перетирал navByPath.
 export const settingsItems: NavItemDef[] = [
   { to: '/settings', icon: Settings, label: 'Параметры' },
-  { to: '/catalog', icon: Library, label: 'Каталоги' },
 ]
 
 /**

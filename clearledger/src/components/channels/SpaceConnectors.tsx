@@ -8,7 +8,7 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, CircleOff, Loader2, PauseCircle, Settings2 } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, CheckCircle2, CircleOff, Loader2, PauseCircle, Settings2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -73,11 +73,58 @@ export function SpaceConnectors() {
   const problems = q.data?.problems ?? []
   const live = items.filter((c) => c.enabled && !c.last_error).length
   const failing = items.filter((c) => c.last_error).length
+  // Две стороны обмена (docs/CONNECT.md): наши подключения — мы ходим во внешние
+  // системы; входящие — внешний мир стучится к нам. До В1 входящие не были видны
+  // нигде, и ответа «кто подключён к нам» у администратора не существовало.
+  const ours = items.filter((c) => (c.initiator ?? 'us') !== 'them')
+  const inbound = items.filter((c) => c.initiator === 'them')
 
   function openSettings(c: SpaceConnector) {
     if (c.settings_route) { navigate(c.settings_route); return }
     const app = (appsQ.data?.apps ?? []).find((a) => a.code === c.settings_app)
     if (app) openApp(app)
+  }
+
+  function rowsOf(list: SpaceConnector[]) {
+    return list.map((c) => {
+      const st = statusView(c)
+      return (
+        <TableRow key={c.key}>
+          <TableCell>
+            <Badge variant="secondary" className="font-normal">{c.app_name}</Badge>
+          </TableCell>
+          <TableCell className="max-w-[420px]">
+            <div className="truncate font-medium">{c.label}</div>
+            {c.brings && (
+              <div className="truncate text-xs text-muted-foreground" title={c.brings}>{c.brings}</div>
+            )}
+            {c.last_error && (
+              <div className="mt-0.5 text-xs text-destructive">{c.last_error}</div>
+            )}
+          </TableCell>
+          <TableCell className="text-sm text-muted-foreground">{c.kind}</TableCell>
+          <TableCell>
+            <span className={`inline-flex items-center gap-1.5 text-sm ${st.cls}`}>
+              <st.Icon className="h-4 w-4" /> {st.label}
+            </span>
+          </TableCell>
+          <TableCell className="text-sm text-muted-foreground">
+            {sinceLabel(c.last_sync_at)}
+            {c.records != null && c.records > 0 && (
+              <div className="text-xs">{c.records.toLocaleString('ru-RU')} записей</div>
+            )}
+          </TableCell>
+          <TableCell>
+            {(c.settings_route || c.settings_app) && (
+              <Button variant="ghost" size="icon" title="Настроить у владельца"
+                onClick={() => openSettings(c)}>
+                <Settings2 className="h-4 w-4" />
+              </Button>
+            )}
+          </TableCell>
+        </TableRow>
+      )
+    })
   }
 
   return (
@@ -120,43 +167,21 @@ export function SpaceConnectors() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((c) => {
-                const st = statusView(c)
-                return (
-                  <TableRow key={c.key}>
-                    <TableCell>
-                      <Badge variant="secondary" className="font-normal">{c.app_name}</Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[420px]">
-                      <div className="truncate font-medium">{c.label}</div>
-                      {c.brings && (
-                        <div className="truncate text-xs text-muted-foreground" title={c.brings}>{c.brings}</div>
-                      )}
-                      {c.last_error && (
-                        <div className="mt-0.5 text-xs text-destructive">{c.last_error}</div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{c.kind}</TableCell>
-                    <TableCell>
-                      <span className={`inline-flex items-center gap-1.5 text-sm ${st.cls}`}>
-                        <st.Icon className="h-4 w-4" /> {st.label}
+              {rowsOf(ours)}
+              {inbound.length > 0 && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={6} className="bg-muted/30 py-1.5 text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5">
+                      <ArrowDownToLine className="h-3.5 w-3.5 text-primary" />
+                      Входящие — кто подключён к нам
+                      <span className="font-normal text-muted-foreground">
+                        · внешние системы сами присылают данные в пространство
                       </span>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {sinceLabel(c.last_sync_at)}
-                      {c.records != null && c.records > 0 && (
-                        <div className="text-xs">{c.records.toLocaleString('ru-RU')} записей</div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon" title="Настроить у владельца"
-                        onClick={() => openSettings(c)}>
-                        <Settings2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              )}
+              {rowsOf(inbound)}
               {items.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">

@@ -25,11 +25,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import App, AppCompanyLink, Channel, Source, SourceSync
+from app.models import App, AppCompanyLink, Channel, Company, Source, SourceSync
 from app.services import sso
 from app.services.space_projection import _internal_base_url
 
 settings = get_settings()
+
+# Кто инициирует обмен: 'us' — мы ходим во внешнюю систему, 'them' — внешняя
+# система стучится к нам (вебхуки, входящие API-ключи). Это ДРУГАЯ ось, чем
+# direction (куда текут данные): STS мы опрашиваем сами (initiator=us, данные in),
+# а дедуп-нода сама толкает нам данные (initiator=them, данные тоже in).
+# Ответ «кто подключён к нам» — это initiator=them (docs/CONNECT.md, В1).
+_INITIATOR_BY_PROVIDER: dict[str, str] = {
+    "megafon": "them", "telegram": "them", "email": "them",
+    "hubex": "us", "msto": "us", "plane": "us", "tradelink": "us", "db": "us",
+}
 
 # Витрина не должна висеть из-за приложения, которое молчит: лучше показать остальные
 # источники и честную отметку «не ответило», чем крутить спиннер.
@@ -64,6 +74,7 @@ def _channel_entry(ch: Channel) -> dict[str, Any]:
         "last_error": None,
         "records": ch.docs_loaded or 0,
         "files": len(uploads) if isinstance(uploads, dict) else 0,
+        "initiator": "us",
         "settings_route": "/data/connectors",
     }
 
@@ -85,6 +96,7 @@ def _service_entry(code: str, name: str, brings: str, enabled: bool) -> dict[str
         "last_error": None,
         "records": None,
         "files": 0,
+        "initiator": "both",
         "settings_route": "/admin/eco/overview",
     }
 
@@ -132,6 +144,8 @@ async def _app_connectors(
             "last_error": it.get("last_error"),
             "records": it.get("records"),
             "files": 0,
+            "initiator": it.get("initiator")
+                or _INITIATOR_BY_PROVIDER.get(str(it.get("provider") or ""), "us"),
             # Настройка живёт в приложении: витрина только уводит туда.
             "settings_app": app_code,
         })
@@ -194,6 +208,7 @@ def _source_entry(src: Source, last_sync: datetime | None, records: int | None) 
         "last_error": src.error_message,
         "records": records,
         "files": 0,
+        "initiator": "us",
         # Настройка живёт в продукте «Данные» — там же, где заводят коннектор.
         "settings_route": "/connectors",
     }
@@ -212,6 +227,40 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
         "chat", "Чат (Matrix)", "Переписка и темы пространства", settings.chat_enabled))
     items.append(_service_entry(
         "mail", "Почта (SMTP)", "Письма приглашений и уведомлений", bool(settings.smtp_host)))
+
+    # ВХОДЯЩИЕ: кто подключён к нам. До В1 этот класс не показывался нигде —
+    # администратор не видел, что внешние системы толкают данные в пространство.
+    company = await db.get(Company, company_id)
+    if company is not None and getattr(company, "cloud_api_key", None):
+        items.append({
+            "key": "core:cloud-api-key",
+            "app": "core", "app_name": "Ядро",
+            "provider": "cloud_api_key",
+            "kind": "Входящий API-ключ",
+            "label": "Приём данных по ключу пространства",
+            "brings": "Внешние узлы толкают данные сами (дедуп-нода, аудитор Поддержки). "
+                      "Ключ один на всех потребителей — именные ключи с ротацией: В2",
+            "direction": "in", "status": "active", "enabled": True,
+            "last_sync_at": None, "last_error": None, "records": None, "files": 0,
+            "initiator": "them",
+            "settings_route": None,
+        })
+    # HubEx в Ядре подключён глобальным токеном мимо модели источников — до В2
+    # хотя бы показываем его как подключение, а не прячем.
+    if getattr(settings, "hubex_service_token", None):
+        items.append({
+            "key": "core:hubex",
+            "app": "core", "app_name": "Ядро",
+            "provider": "hubex",
+            "kind": "FSM подрядчика",
+            "label": "HubEx (общий токен стека)",
+            "brings": "Задачи и объекты FSM. Токен один на стек — перевод на "
+                      "подключение по компаниям: В2",
+            "direction": "in", "status": "active", "enabled": True,
+            "last_sync_at": None, "last_error": None, "records": None, "files": 0,
+            "initiator": "us",
+            "settings_route": None,
+        })
 
     # Настроенные подключения к внешним системам. Когда синхронизировались и сколько
     # принесли — из журнала синков, иначе витрина показывает подключение «мёртвым».

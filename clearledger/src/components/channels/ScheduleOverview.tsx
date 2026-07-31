@@ -94,7 +94,7 @@ function ChannelCard({
     setDirty(false)
     onUpdate()
     toast.success(`Расписание «${channel.name}» сохранено`, {
-      description: 'Автозапуск по расписанию ещё не активен — загрузка выполняется вручную.',
+      description: 'Планировщик стека подхватит его в течение минуты.',
     })
   }
 
@@ -310,7 +310,7 @@ function ChannelCard({
                   <span>Синхр: {format(new Date(channel.lastSync), 'dd.MM HH:mm')}</span>
                 )}
                 {schedule.mode !== 'manual' && (
-                  <span className="text-muted-foreground/70">Автозапуск не активен</span>
+                  <span className="text-emerald-600 dark:text-emerald-400">Автозапуск включён</span>
                 )}
               </div>
               {dirty && (
@@ -357,9 +357,12 @@ export function ScheduleOverview({ open, onOpenChange }: Props) {
           </p>
         </SheetHeader>
 
-        <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-          Автозапуск по расписанию ещё не реализован. Настройки ниже сохраняются на будущее,
-          но загрузка сейчас выполняется только вручную — кнопкой «Загрузить» в карточке обработки.
+        {/* Планировщик стека (тик 60 с) исполняет расписания каналов — ночные
+            автозагрузки идут именно так. Прежний янтарный баннер «не реализовано»
+            остался от старой версии и врал администратору. */}
+        <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          Расписание исполняет планировщик стека: изменения подхватываются в течение минуты.
+          Ручной запуск кнопкой «Загрузить» в карточке обработки работает в любом режиме.
         </div>
 
         <Separator className="my-4" />

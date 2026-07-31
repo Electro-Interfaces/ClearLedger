@@ -77,26 +77,39 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
 
 // ─── Расписание и Период загрузки ────────────────────────
 
-// Расписание: авто-запуск по расписанию в бэкенде НЕ реализован — планировщика нет,
-// единственный триггер прогона это ручной asyncio.create_task в channels_router.
-// Поэтому карточка информационная (помечена «скоро»), без декоративного селектора,
-// который сохранял бы интервал, но ничего бы не запускал.
-function ScheduleCard() {
+/** Человеческое описание расписания канала (Channel.schedule). */
+function scheduleLabel(schedule: Record<string, unknown> | null | undefined): string {
+  const mode = String(schedule?.mode ?? 'manual')
+  if (mode === 'daily') return `ежедневно в ${schedule?.time ?? '03:00'}`
+  if (mode === 'interval') return `каждые ${schedule?.minutes ?? '—'} мин`
+  if (mode === 'cron') return `по cron: ${schedule?.cron ?? '—'}`
+  return 'вручную'
+}
+
+// Расписание ИСПОЛНЯЕТСЯ: планировщик стека (channel_scheduler, тик 60 с)
+// читает Channel.schedule и запускает прогоны — ночные автозагрузки ГИГ идут
+// именно так. Прежняя пометка «скоро» была устаревшей и врала администратору.
+function ScheduleCard({ schedule }: { schedule?: Record<string, unknown> | null }) {
+  const active = String(schedule?.mode ?? 'manual') !== 'manual'
   return (
     <Card className="py-3 gap-2">
       <CardHeader className="pb-0">
         <CardTitle className="text-sm flex items-center gap-1.5">
           <History className="h-3.5 w-3.5" />
           Расписание
-          <Badge variant="outline" className="ml-auto h-4 px-1.5 text-[9px] font-normal text-muted-foreground border-border">
-            скоро
+          <Badge variant="outline" className={`ml-auto h-4 px-1.5 text-[9px] font-normal ${
+            active ? 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
+              : 'border-border text-muted-foreground'}`}>
+            {active ? 'включено' : 'вручную'}
           </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0 pb-3">
         <p className="text-[11px] text-muted-foreground leading-relaxed">
-          Запуск вручную — кнопкой «Запустить». Авто-запуск по интервалу/расписанию
-          в разработке.
+          {active
+            ? <>Автозапуск: <span className="text-foreground">{scheduleLabel(schedule)}</span> —
+                исполняет планировщик стека. Ручной запуск кнопкой тоже работает.</>
+            : 'Запуск вручную — кнопкой «Запустить». Автозапуск настраивается в разделе «Расписание».'}
         </p>
       </CardContent>
     </Card>
@@ -2123,7 +2136,7 @@ function SettingsTab({ channel, onUpdate }: { channel: Channel; onUpdate: (ch: C
         <h3 className="text-sm font-semibold mb-3">Станции и расписание</h3>
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <StationsCard channel={channel} />
-          <ScheduleCard />
+          <ScheduleCard schedule={(channel as unknown as { schedule?: Record<string, unknown> | null }).schedule} />
         </div>
       </div>
       <div className="border-t border-border/40" />

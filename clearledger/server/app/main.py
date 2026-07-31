@@ -20,6 +20,7 @@ from app.routers import (
     audit_router,
     auth_router,
     dedup_ingest_router,
+    edge_router,
     companies_router,
     connectors_router,
     roles_router,
@@ -211,7 +212,10 @@ app.include_router(invitations_router.router, prefix=API_PREFIX)
 app.include_router(companies_router.router, prefix=API_PREFIX)
 app.include_router(entries_router.router, prefix=API_PREFIX)
 app.include_router(audit_router.router, prefix=API_PREFIX)
-app.include_router(connectors_router.router, prefix=API_PREFIX)
+# connectors_router НЕ подключаем: рудимент третьей модели «подключений» рядом с
+# Source и Channel (poll отвечал 501, витрина пространства его не видела). Единая
+# модель — docs/CONNECT.md; файл остаётся до переноса полезных типов в В2.
+# app.include_router(connectors_router.router, prefix=API_PREFIX)
 app.include_router(document_links_router.router, prefix=API_PREFIX)
 app.include_router(export_router.router, prefix=API_PREFIX)
 app.include_router(reports_router.router, prefix=API_PREFIX)
@@ -224,6 +228,7 @@ app.include_router(reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_proxy_router.router, prefix=API_PREFIX)  # прокси «Сверки»: /api/tradecorp/*, /api/msto/*
 app.include_router(audit_data_router.router, prefix=API_PREFIX)
 app.include_router(dedup_ingest_router.router, prefix=API_PREFIX)  # приём среза дублей 208 по X-Cloud-API-Key
+app.include_router(edge_router.router, prefix=API_PREFIX)  # приём пакетов edge-агентов АЗС по X-Cloud-API-Key
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(fuel_mappings_router.router, prefix=API_PREFIX)

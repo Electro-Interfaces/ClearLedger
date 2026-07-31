@@ -19,6 +19,9 @@ export interface SpaceConnector {
   /** Что приносит в пространство. */
   brings: string
   direction: string
+  /** Кто инициирует обмен: 'us' — мы ходим во внешнюю систему, 'them' — она
+   *  стучится к нам (вебхуки, входящие ключи), 'both' — платформенный сервис. */
+  initiator?: 'us' | 'them' | 'both'
   status: string
   enabled: boolean
   last_sync_at: string | null
