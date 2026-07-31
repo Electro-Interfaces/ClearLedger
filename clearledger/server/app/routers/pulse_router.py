@@ -408,31 +408,77 @@ async def pulse_team(
     await assert_company_member(company_id, current_user, db)
     cid = str(company_id)
 
+    # Человек виден СРАЗУ во всех приложениях пространства (постановка МАГа
+    # 31.07.2026): штатное место, заявки, проекты, чаты, журнал. Иначе руководитель
+    # смотрит пять экранов, чтобы понять, чем занят один сотрудник.
     people = [{
+        "id": str(r.id),
         "name": r.name, "email": r.email, "department": r.dept,
-        "is_head": r.is_head, "party": r.party_type,
+        "is_head": r.is_head, "party": r.party_type, "position": r.position,
         "last_seen": r.last_seen_at.isoformat() if r.last_seen_at else None,
+        # Заявки: связь Ядра и Поддержки по email — та же, что в разрезе «Заявок».
         "open": r.open_tickets, "breached": r.breached,
+        "authored": r.authored_tickets, "closed_30d": r.closed_30d,
+        # Проекты: ведёт (ответственный) и сколько правок внёс за 30 дней.
+        "projects_owned": r.projects_owned, "project_edits_30d": r.project_edits,
+        # Чаты и общая активность в пространстве.
+        "chat_rooms": r.chat_rooms, "actions_30d": r.actions_30d,
     } for r in (await db.execute(text("""
-        select u.name, u.email, u.last_seen_at, uc.party_type,
+        select u.id, u.name, u.email, u.last_seen_at, uc.party_type, uc.position,
                od.name as dept,
                (od.head_user_id = u.id) as is_head,
                coalesce(t.open, 0) as open_tickets,
-               coalesce(t.breached, 0) as breached
+               coalesce(t.breached, 0) as breached,
+               coalesce(t.authored, 0) as authored_tickets,
+               coalesce(t.closed_30d, 0) as closed_30d,
+               coalesce(p.owned, 0) as projects_owned,
+               coalesce(p.edits, 0) as project_edits,
+               coalesce(c.rooms, 0) as chat_rooms,
+               coalesce(a.n, 0) as actions_30d
         from users u
         join user_companies uc on uc.user_id = u.id and uc.company_id = :cid
         left join org_departments od on od.id = uc.department_id
         left join lateral (
-            select count(*) as open,
-                   count(*) filter (where coalesce(tk.sla_breached,false)) as breached
+            select count(*) filter (where tk.status not in ('closed','cancelled')
+                                    and (au.id is not null)) as open,
+                   count(*) filter (where tk.status not in ('closed','cancelled')
+                                    and au.id is not null
+                                    and coalesce(tk.sla_breached,false)) as breached,
+                   -- Автором считаем только СВОИ заявки: зеркала внешней FSM
+                   -- повешены на одного человека (11 322 на пилоте) и утопили бы
+                   -- реальную картину, кто что заводит.
+                   count(*) filter (where cu.id is not null
+                                    and tk.external_system is null) as authored,
+                   count(*) filter (where au.id is not null
+                                    and tk.closed_at >= now() - interval '30 days') as closed_30d
             from public.tickets tk
-            join public.users au on au.id = coalesce(tk.current_assignee_id, tk.assigned_to)
-            where lower(au.email) = lower(u.email)
-              and tk.status not in ('closed','cancelled')
-              and coalesce(tk.is_deleted,false) = false
+            left join public.users au on au.id = coalesce(tk.current_assignee_id, tk.assigned_to)
+                 and lower(au.email) = lower(u.email)
+            left join public.users cu on cu.id = tk.customer_user_id
+                 and lower(cu.email) = lower(u.email)
+            where coalesce(tk.is_deleted,false) = false
               and coalesce(tk.is_archived,false) = false
+              and (au.id is not null or cu.id is not null)
         ) t on true
-        order by coalesce(t.open,0) desc, u.last_seen_at desc nulls last
+        left join lateral (
+            select (select count(*) from ezs_projects pr
+                     where pr.company_id = :cid and pr.owner_user_id = u.id) as owned,
+                   (select count(*) from ezs_site_events ev
+                     where ev.company_id = :cid and ev.author_user_id = u.id
+                       and ev.created_at >= now() - interval '30 days') as edits
+        ) p on true
+        left join lateral (
+            select count(*) as rooms from chat_participants cp where cp.user_id = u.id
+        ) c on true
+        left join lateral (
+            -- audit_events.user_id хранится строкой, а не uuid: сравниваем текстом,
+            -- иначе «operator does not exist: character varying = uuid».
+            select count(*) as n from audit_events ae
+             where ae.company_id = :cid and ae.user_id = u.id::text
+               and ae.timestamp >= now() - interval '30 days'
+        ) a on true
+        order by coalesce(t.breached,0) desc, coalesce(t.open,0) desc,
+                 u.last_seen_at desc nulls last
     """), {"cid": cid})).all()]
 
     departments = [{
@@ -448,6 +494,91 @@ async def pulse_team(
     """), {"cid": cid})).all()]
 
     return {"people": people, "departments": departments}
+
+
+@router.get("/team/{user_id}")
+async def pulse_person(
+    user_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Карточка человека: чем занят прямо сейчас и что делал в пространстве.
+
+    Открывается из «Команды» разворотом строки — руководителю нужен не только
+    счётчик, но и ответ «что именно у него в работе и куда он ходит».
+    """
+    await assert_company_member(company_id, current_user, db)
+    cid, uid = str(company_id), str(user_id)
+
+    who = (await db.execute(text("""
+        select u.name, u.email, u.last_seen_at, uc.position, uc.party_type,
+               od.name as dept, hu.name as head
+        from users u
+        join user_companies uc on uc.user_id = u.id and uc.company_id = :cid
+        left join org_departments od on od.id = uc.department_id
+        left join users hu on hu.id = od.head_user_id
+        where u.id = :uid
+    """), {"cid": cid, "uid": uid})).first()
+    if who is None:
+        return {"found": False}
+
+    tickets = [{
+        "number": r.display_number or r.number, "title": r.title, "status": r.status,
+        "breached": bool(r.sla_breached), "object": r.obj,
+        "created": r.created_at.isoformat() if r.created_at else None,
+    } for r in (await db.execute(text("""
+        select tk.display_number, tk.number, tk.title, tk.status, tk.sla_breached,
+               tk.created_at, so.name as obj
+        from public.tickets tk
+        join public.users au on au.id = coalesce(tk.current_assignee_id, tk.assigned_to)
+        left join public.service_objects so on so.id = tk.service_object_id
+        where lower(au.email) = lower(:email)
+          and tk.status not in ('closed','cancelled')
+          and coalesce(tk.is_deleted,false)=false and coalesce(tk.is_archived,false)=false
+        order by tk.sla_breached desc nulls last, tk.created_at
+        limit 20
+    """), {"email": who.email})).all()]
+
+    projects = [{"title": r.title, "stage": r.stage} for r in (await db.execute(text("""
+        select coalesce(nullif(title,''), project_no, 'без имени') as title, stage
+        from ezs_projects where company_id = :cid and owner_user_id = :uid
+        order by updated_at desc nulls last limit 20
+    """), {"cid": cid, "uid": uid})).all()]
+
+    rooms = [{"name": r.name, "kind": r.kind} for r in (await db.execute(text("""
+        select cr.name, cr.kind from chat_participants cp
+        join chat_rooms cr on cr.id = cp.room_id
+        where cp.user_id = :uid order by cr.name limit 30
+    """), {"uid": uid})).all()]
+
+    actions = [{
+        "action": r.action, "at": r.timestamp.isoformat() if r.timestamp else None,
+        "details": r.details,
+    } for r in (await db.execute(text("""
+        select action, timestamp, details from audit_events
+        where company_id = :cid and user_id = :uid
+        order by timestamp desc limit 15
+    """), {"cid": cid, "uid": uid})).all()]
+
+    # Правки в проектах — самый честный след работы: их 1030 на пилоте, и видно,
+    # кто действительно ведёт портфель, а кто только числится.
+    edits = (await db.execute(text("""
+        select count(*) filter (where created_at >= now() - interval '7 days') as w,
+               count(*) filter (where created_at >= now() - interval '30 days') as m,
+               max(created_at) as last_at
+        from ezs_site_events where company_id = :cid and author_user_id = :uid
+    """), {"cid": cid, "uid": uid})).one()
+
+    return {
+        "found": True,
+        "name": who.name, "email": who.email, "position": who.position,
+        "department": who.dept, "head": who.head, "party": who.party_type,
+        "last_seen": who.last_seen_at.isoformat() if who.last_seen_at else None,
+        "tickets": tickets, "projects": projects, "rooms": rooms, "actions": actions,
+        "edits": {"week": edits.w, "month": edits.m,
+                  "last": edits.last_at.isoformat() if edits.last_at else None},
+    }
 
 
 @router.get("/week")

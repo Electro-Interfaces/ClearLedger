@@ -7,11 +7,12 @@
  * (`services/sitesService.STAGE_META`), чтобы «Проработка» не стала «Проверкой
  * участка» только потому, что экран другой.
  */
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Gauge, HardHat, LifeBuoy,
-  MessageCircle, TrendingUp, Users,
+  ArrowDownRight, ArrowUpRight, Building2, CalendarDays, ChevronDown, ClipboardList,
+  Gauge, HardHat, LifeBuoy, MessageCircle, TrendingUp, Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,7 +27,7 @@ import { OpsOverviewVitrine } from '@/components/balance/OpsCockpit'
 import { AnalyticsSection as TicketsAnalyticsSection } from '@/pages/TicketsAppPage'
 import { useFilters } from '@/contexts/FilterContext'
 import {
-  getPulseBusiness, getPulseTeam, getPulseWeek, type PulsePerson,
+  getPulseBusiness, getPulsePerson, getPulseTeam, getPulseWeek, type PulsePerson,
 } from './pulseService'
 import { KpiTile, PulseError, PulseLoading, fmtNum, fmtDate, plural } from './parts'
 import { usePulseView } from './PulseLayout'
@@ -294,7 +295,7 @@ export function PulseTeamPage() {
             <SectionTitle>
               Люди · {d.people.length} {plural(d.people.length, 'человек', 'человека', 'человек')}
             </SectionTitle>
-            <PeopleList people={people} seen={seen} onWrite={() => navigate('/messages')} />
+            <PeopleList people={people} seen={seen} companyId={company.id} />
           </section>
         </>
       )}
@@ -421,50 +422,177 @@ export function PulseWeekPage() {
   )
 }
 
-/** Список людей с нагрузкой — вынесен, чтобы пункт «Люди» читался одним взглядом. */
-function PeopleList({ people, seen, onWrite }: {
-  people: PulsePerson[]; seen: (p: PulsePerson) => string; onWrite: () => void
+/**
+ * Люди с разрезом по ВСЕМ приложениям пространства (постановка МАГа 31.07.2026):
+ * штатное место, заявки, проекты, чаты, действия. Строка разворачивается в карточку —
+ * руководитель видит не только счётчики, но и что именно у человека в работе.
+ */
+function PeopleList({ people, seen, companyId }: {
+  people: PulsePerson[]; seen: (p: PulsePerson) => string; companyId: string
 }) {
+  const [openId, setOpenId] = useState<string | null>(null)
   return (
     <Card className="py-0">
       <CardContent className="divide-y p-0">
-        {people.map((p) => (
-          <div key={p.email} className="flex items-center gap-3 px-3 py-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 truncate text-[13px]">
-                {p.name}
-                {p.is_head && (
-                  <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
-                    руководитель
-                  </Badge>
-                )}
-                {p.party === 'partner' && (
-                  <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
-                    внешний
-                  </Badge>
-                )}
-              </div>
-              <div className="truncate text-[11px] text-muted-foreground">
-                {p.department ?? 'вне штатной структуры'} · {seen(p)}
-              </div>
+        {/* Шапка колонок — только на широком экране: на телефоне цифры подписаны. */}
+        <div className="hidden items-center gap-3 px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60 md:flex">
+          <span className="flex-1">Человек</span>
+          <span className="w-24 text-right">Заявки</span>
+          <span className="w-24 text-right">Проекты</span>
+          <span className="w-20 text-right">Активность</span>
+          <span className="w-8" />
+        </div>
+
+        {people.map((p) => {
+          const open = openId === p.id
+          return (
+            <div key={p.email}>
+              <button type="button"
+                onClick={() => setOpenId(open ? null : p.id)}
+                aria-expanded={open}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/40">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 truncate text-[13px]">
+                    {p.name}
+                    {p.is_head && (
+                      <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
+                        руководитель
+                      </Badge>
+                    )}
+                    {p.party === 'partner' && (
+                      <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-normal">
+                        внешний
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="truncate text-[11px] text-muted-foreground">
+                    {[p.position, p.department ?? 'вне штатной структуры', seen(p)]
+                      .filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+
+                {/* Заявки: сколько на человеке и сколько из них горит. */}
+                <div className="w-24 shrink-0 text-right">
+                  <span className={cn('text-sm font-semibold tabular-nums',
+                    p.breached && 'text-amber-600 dark:text-amber-400')}>{p.open}</span>
+                  <div className="text-[10px] text-muted-foreground">
+                    {p.breached ? `просрочено ${p.breached}` : 'в работе'}
+                  </div>
+                </div>
+
+                {/* Проекты: ведёт и сколько реально правил за месяц. */}
+                <div className="w-24 shrink-0 text-right">
+                  <span className="text-sm font-semibold tabular-nums">{p.projects_owned}</span>
+                  <div className="text-[10px] text-muted-foreground">
+                    {p.project_edits_30d ? `${fmtNum(p.project_edits_30d)} правок` : 'ведёт'}
+                  </div>
+                </div>
+
+                {/* Активность в пространстве: действия журнала и участие в чатах. */}
+                <div className="hidden w-20 shrink-0 text-right md:block">
+                  <span className="text-sm font-semibold tabular-nums">{p.actions_30d}</span>
+                  <div className="text-[10px] text-muted-foreground">
+                    {p.chat_rooms} чат{p.chat_rooms === 1 ? '' : 'ов'}
+                  </div>
+                </div>
+
+                <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform',
+                  open && 'rotate-180')} />
+              </button>
+
+              {open && <PersonCard companyId={companyId} userId={p.id} />}
             </div>
-            {/* Нагрузка: ради неё экран и открыт. Ноль не прячем — «свободен» тоже ответ. */}
-            <div className="shrink-0 text-right">
-              <div className={cn('text-sm font-semibold tabular-nums',
-                p.breached && 'text-amber-600 dark:text-amber-400')}>
-                {p.open}
-              </div>
-              <div className="text-[10px] text-muted-foreground">
-                {p.breached ? `просрочено ${p.breached}` : 'заявок'}
-              </div>
-            </div>
-            <Button size="sm" variant="ghost" className="h-8 w-8 p-0"
-              aria-label={`Написать: ${p.name}`} onClick={onWrite}>
-              <MessageCircle className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        ))}
+          )
+        })}
       </CardContent>
     </Card>
+  )
+}
+
+/** Карточка человека: что у него в работе и куда он ходит. */
+function PersonCard({ companyId, userId }: { companyId: string; userId: string }) {
+  const navigate = useNavigate()
+  const q = useQuery({
+    queryKey: ['pulse-person', companyId, userId],
+    queryFn: () => getPulsePerson(companyId, userId),
+  })
+  const d = q.data
+  if (q.isLoading) return <div className="px-3 pb-3 text-[11px] text-muted-foreground">Загружаем…</div>
+  if (!d?.found) return null
+
+  return (
+    <div className="space-y-3 border-t bg-muted/30 px-3 py-3">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
+        <span>{d.email}</span>
+        {d.head && <span>руководитель: {d.head}</span>}
+        {d.edits.month > 0 && (
+          <span>правок в проектах: {fmtNum(d.edits.week)} за неделю, {fmtNum(d.edits.month)} за месяц</span>
+        )}
+      </div>
+
+      {d.tickets.length > 0 && (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+            Заявки в работе
+          </div>
+          <div className="space-y-1">
+            {d.tickets.slice(0, 8).map((t, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                {t.breached && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />}
+                <span className="shrink-0 tabular-nums text-muted-foreground">{t.number ?? '—'}</span>
+                <span className="truncate" title={t.title}>{t.title}</span>
+                {t.object && <span className="shrink-0 text-muted-foreground">· {t.object}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {d.projects.length > 0 && (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+            Ведёт проекты
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {d.projects.slice(0, 10).map((pr, i) => (
+              <Badge key={i} variant="outline" className="font-normal">
+                {pr.title} · {stageLabel(pr.stage)}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {d.actions.length > 0 && (
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+            Последние действия
+          </div>
+          <div className="space-y-0.5">
+            {d.actions.slice(0, 6).map((a, i) => (
+              <div key={i} className="flex gap-2 text-[11px]">
+                <span className="shrink-0 tabular-nums text-muted-foreground">{fmtDate(a.at)}</span>
+                <span className="truncate">{a.action}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        <Button size="sm" variant="outline" className="h-7 text-[11px]"
+          onClick={() => navigate('/messages')}>
+          <MessageCircle className="mr-1 h-3 w-3" />Написать
+        </Button>
+        <Button size="sm" variant="outline" className="h-7 text-[11px]"
+          onClick={() => navigate('/tickets')}>
+          <ClipboardList className="mr-1 h-3 w-3" />Заявки
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 text-[11px]"
+          onClick={() => navigate(`/admin/company/map?user=${userId}`)}>
+          Журнал и доступы
+        </Button>
+      </div>
+    </div>
   )
 }

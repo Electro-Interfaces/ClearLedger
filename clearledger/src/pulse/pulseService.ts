@@ -63,15 +63,47 @@ export const getPulseBusiness = (companyId: string) =>
 /* ── «Команда»: у кого затор ─────────────────────────────────────────── */
 
 export interface PulsePerson {
+  id: string
   name: string
   email: string
   department: string | null
+  position: string | null
   is_head: boolean
   party: string | null
   last_seen: string | null
+  /** Заявки: назначено на него, из них просрочено; сколько завёл и закрыл. */
   open: number
   breached: number
+  authored: number
+  closed_30d: number
+  /** Проекты: сколько ведёт и сколько правок внёс за 30 дней. */
+  projects_owned: number
+  project_edits_30d: number
+  /** Присутствие в общих контурах пространства. */
+  chat_rooms: number
+  actions_30d: number
 }
+
+/** Карточка человека: чем занят и что делал (разворот строки в «Команде»). */
+export interface PulsePersonCard {
+  found: boolean
+  name: string
+  email: string
+  position: string | null
+  department: string | null
+  head: string | null
+  party: string | null
+  last_seen: string | null
+  tickets: { number: string | null; title: string; status: string; breached: boolean
+    object: string | null; created: string | null }[]
+  projects: { title: string; stage: string }[]
+  rooms: { name: string; kind: string | null }[]
+  actions: { action: string; at: string | null; details: unknown }[]
+  edits: { week: number; month: number; last: string | null }
+}
+
+export const getPulsePerson = (companyId: string, userId: string) =>
+  get<PulsePersonCard>(`/api/pulse/team/${userId}`, { company_id: companyId })
 
 export interface PulseTeam {
   people: PulsePerson[]
