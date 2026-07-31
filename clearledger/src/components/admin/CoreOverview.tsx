@@ -13,16 +13,24 @@
  * Своего эндпоинта у обзора нет — собирается из готовых `/api/core/status` и
  * `/api/registry/space-map`.
  */
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Loader2, Activity, Users, MapPin, Cpu, Building2, History, Blocks,
+  Loader2, Activity, Users, MapPin, Building2, History, Blocks,
   MessageSquare, Video, Mail, KeyRound, CheckCircle2, XCircle, MinusCircle, Circle,
-  AlertTriangle, UserX, Handshake, Wifi,
+  AlertTriangle, ClipboardList, UserX, Handshake, Wifi,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { useCompany } from '@/contexts/CompanyContext'
 import { getCoreStatus, type CoreServiceStatus } from '@/services/coreService'
 import { getSpaceMap, type SpaceMapCompany } from '@/services/spaceMapService'
+import * as ticketsService from '@/services/ticketsService'
+import { ACTION_LABEL } from './AuditLog'
+
+/** Голый IP в подписи события ничего не говорит человеку — уводим в title. */
+const looksLikeIp = (s: string | null | undefined) =>
+  !!s && /^\d{1,3}(\.\d{1,3}){3}$/.test(s.trim())
 
 const SERVICE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   chat: MessageSquare, conf: Video, mail: Mail,
@@ -48,14 +56,16 @@ function serviceBadge(s: CoreServiceStatus) {
   }
 }
 
-function Stat({ icon: Icon, label, value, hint }: {
+function Stat({ icon: Icon, label, value, hint, onClick }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   value: React.ReactNode
   hint?: string
+  /** Число без перехода — тупик: карточка ведёт в раздел, где эти люди/объекты живут. */
+  onClick?: () => void
 }) {
-  return (
-    <div className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5">
+  const body = (
+    <>
       <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
         <Icon className="h-4 w-4" />
       </div>
@@ -64,8 +74,13 @@ function Stat({ icon: Icon, label, value, hint }: {
         <div className="text-xs text-muted-foreground truncate">{label}</div>
         {hint && <div className="text-[11px] text-muted-foreground/70 truncate">{hint}</div>}
       </div>
-    </div>
+    </>
   )
+  const cls = 'flex items-center gap-3 rounded-lg border bg-card px-3 py-2.5'
+  return onClick
+    ? <button type="button" onClick={onClick}
+        className={`${cls} text-left transition-colors hover:border-primary/50 hover:bg-accent/40`}>{body}</button>
+    : <div className={cls}>{body}</div>
 }
 
 /** Счётчики по всем организациям контейнера (у одной организации — её же цифры). */
@@ -81,6 +96,8 @@ function totals(companies: SpaceMapCompany[]) {
 }
 
 export function CoreOverview() {
+  const navigate = useNavigate()
+  const { company } = useCompany()
   const st = useQuery({
     queryKey: ['core-status'], queryFn: getCoreStatus,
     staleTime: 30_000, refetchInterval: 60_000,
@@ -89,6 +106,13 @@ export function CoreOverview() {
   const map = useQuery({
     queryKey: ['space-map', 'overview'], queryFn: () => getSpaceMap(),
     staleTime: 30_000, refetchInterval: 60_000,
+  })
+  // Заявки — главный пульс работы пространства: обзор без них отвечал только
+  // «кто есть», но не «что происходит».
+  const tickets = useQuery({
+    queryKey: ['space-tickets-summary', company.id],
+    queryFn: () => ticketsService.ticketsSummary(company.id),
+    staleTime: 60_000,
   })
 
   if (st.isLoading || map.isLoading) {
@@ -113,29 +137,32 @@ export function CoreOverview() {
     .filter((p) => p.partyType === 'partner' && !p.orgName).length
 
   // Что требует внимания — по цене ошибки: сначала сломанное, потом забытое.
-  const alerts: { text: string; icon: React.ComponentType<{ className?: string }> }[] = []
+  // Каждый сигнал ведёт туда, где вопрос решается: сигнал без адреса — упрёк без дела.
+  const alerts: { text: string; icon: React.ComponentType<{ className?: string }>; to?: string }[] = []
   d.services.filter((s) => s.status === 'down')
-    .forEach((s) => alerts.push({ text: `Сервис «${s.name}» недоступен`, icon: XCircle }))
+    .forEach((s) => alerts.push({ text: `Сервис «${s.name}» недоступен`, icon: XCircle,
+                                  to: '/admin/eco/settings' }))
   if (!d.sso.enabled) {
-    alerts.push({ text: 'Единый вход не настроен — переход между приложениями не работает', icon: KeyRound })
+    alerts.push({ text: 'Единый вход не настроен — переход между приложениями не работает',
+                  icon: KeyRound, to: '/admin/eco/settings' })
+  }
+  const slaBreached = tickets.data?.sla_breached ?? 0
+  if (slaBreached > 0) {
+    alerts.push({ text: `Заявки нарушают SLA: ${slaBreached} — работа стоит дольше обещанного`,
+                  icon: ClipboardList, to: '/tickets' })
   }
   if (t.noAccess > 0) {
-    alerts.push({ text: `Без доступа к приложениям: ${t.noAccess} чел. — роль не назначена`, icon: UserX })
+    alerts.push({ text: `Без доступа к приложениям: ${t.noAccess} чел. — роль не назначена`,
+                  icon: UserX, to: '/admin/company/members' })
   }
   if (partnersNoOrg > 0) {
-    alerts.push({ text: `Внешних участников без компании: ${partnersNoOrg} — в чатах они без стороны`, icon: Handshake })
+    alerts.push({ text: `Внешних участников без компании: ${partnersNoOrg} — в чатах они без стороны`,
+                  icon: Handshake, to: '/admin/company/partners' })
   }
   if (t.neverSeen > 0) {
-    alerts.push({ text: `Ни разу не заходили: ${t.neverSeen} чел.`, icon: UserX })
+    alerts.push({ text: `Ни разу не заходили: ${t.neverSeen} чел. — приглашение не дошло или пароль забыт`,
+                  icon: UserX, to: '/admin/company/members' })
   }
-
-  // Топ действий контейнера: у каждой организации свой список, складываем по действию.
-  const topActions = Object.entries(
-    companies.flatMap((c) => c.topActions).reduce<Record<string, number>>((acc, a) => {
-      acc[a.action] = (acc[a.action] ?? 0) + a.count
-      return acc
-    }, {}),
-  ).sort(([, a], [, b]) => b - a).slice(0, 6)
 
   return (
     <div className="space-y-4">
@@ -153,7 +180,13 @@ export function CoreOverview() {
             <div className="flex items-center gap-2 text-sm text-emerald-400">
               <CheckCircle2 className="h-4 w-4" /> Всё в порядке: сервисы отвечают, доступы назначены
             </div>
-          ) : alerts.map((a, i) => (
+          ) : alerts.map((a, i) => a.to ? (
+            <button key={i} type="button" onClick={() => navigate(a.to!)}
+              className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm text-amber-300/90 transition-colors hover:bg-amber-500/10">
+              <a.icon className="h-3.5 w-3.5 shrink-0" /> {a.text}
+              <span className="ml-auto text-[11px] text-muted-foreground">разобрать →</span>
+            </button>
+          ) : (
             <div key={i} className="flex items-center gap-2 text-sm text-amber-300/90">
               <a.icon className="h-3.5 w-3.5 shrink-0" /> {a.text}
             </div>
@@ -161,15 +194,23 @@ export function CoreOverview() {
         </CardContent>
       </Card>
 
-      {/* 2. Живые показатели пространства. */}
+      {/* 2. Живые показатели пространства — каждый ведёт в свой раздел. */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
         <Stat icon={Users} label="Людей в пространстве" value={t.people}
-          hint={`своих ${t.internal} · внешних ${t.partners}`} />
-        <Stat icon={Wifi} label="Сейчас в системе" value={t.online} />
-        <Stat icon={MapPin} label="Объектов" value={t.objects} />
-        <Stat icon={Cpu} label="Оборудования" value={t.equipment} />
-        <Stat icon={Building2} label="Контрагентов" value={t.organizations} />
-        <Stat icon={History} label={`События за ${windowDays} дн.`} value={t.events} />
+          hint={`своих ${t.internal} · внешних ${t.partners}`}
+          onClick={() => navigate('/admin/company/members')} />
+        <Stat icon={Wifi} label="Сейчас в системе" value={t.online}
+          onClick={() => navigate('/admin/company/map')} />
+        <Stat icon={ClipboardList} label="Заявок в работе"
+          value={tickets.data ? tickets.data.open : '—'}
+          hint={slaBreached ? `${slaBreached} нарушают SLA` : undefined}
+          onClick={() => navigate('/tickets')} />
+        <Stat icon={MapPin} label="Объектов" value={t.objects}
+          onClick={() => navigate('/admin/company/objects')} />
+        <Stat icon={Building2} label="Контрагентов" value={t.organizations}
+          onClick={() => navigate('/admin/company/counterparties')} />
+        <Stat icon={History} label={`События за ${windowDays} дн.`} value={t.events}
+          onClick={() => navigate('/admin/company/audit')} />
       </div>
 
       {/* 3. Сервисы и единый вход — состояние строкой; реквизиты в «Настройках». */}
@@ -217,23 +258,49 @@ export function CoreOverview() {
         </Card>
       )}
 
-      {/* 5. Активность: чем в пространстве вообще занимаются. */}
+      {/* 5. Работа и жизнь пространства. Слева — заявки («что происходит»), справа —
+             последние события по-русски. Частоты сырых кодов аудита отсюда убраны:
+             «member.access 18» не отвечает ни на один вопрос руководителя. */}
       <div className="grid gap-4 lg:grid-cols-2 items-start">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Activity className="h-4 w-4 text-primary" /> Чаще всего за {windowDays} дн.
+              <ClipboardList className="h-4 w-4 text-primary" /> Заявки пространства
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1">
-            {topActions.length === 0
-              ? <p className="text-sm text-muted-foreground">Действий пока не было</p>
-              : topActions.map(([action, count]) => (
-                <div key={action} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="truncate text-muted-foreground">{action}</span>
-                  <span className="tabular-nums">{count}</span>
+          <CardContent className="space-y-2">
+            {!tickets.data ? (
+              <p className="text-sm text-muted-foreground">
+                {tickets.isLoading ? 'Загрузка…' : 'Не удалось загрузить заявки'}
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                  <span>в работе <b className="tabular-nums">{tickets.data.open}</b></span>
+                  <span className={slaBreached ? 'text-red-500' : ''}>
+                    нарушают SLA <b className="tabular-nums">{slaBreached}</b>
+                  </span>
+                  <span className="text-muted-foreground">
+                    за неделю +{tickets.data.created_7d} / −{tickets.data.closed_7d}
+                  </span>
                 </div>
-              ))}
+                {(tickets.data.by.responsibility ?? []).length > 0 && (
+                  <div className="space-y-1 border-t border-border/60 pt-2 text-xs">
+                    {(tickets.data.by.responsibility ?? []).slice(0, 4).map((r) => (
+                      <div key={r.key} className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          {({ internal: 'у нас', vendor: 'у внешних', external: 'у внешних',
+                              customer: 'у заявителя', client: 'у заявителя' } as Record<string, string>)[r.key] ?? r.key}
+                        </span>
+                        <span className="tabular-nums">{r.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button type="button" onClick={() => navigate('/tickets')}
+                  className="text-xs text-primary hover:underline">Открыть «Заявки» →</button>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -247,7 +314,8 @@ export function CoreOverview() {
             {(map.data?.recentEvents ?? []).length === 0
               ? <p className="text-sm text-muted-foreground">Событий нет</p>
               : (map.data?.recentEvents ?? []).slice(0, 8).map((e, i) => (
-                <div key={i} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <div key={i} className="flex flex-wrap items-baseline gap-x-2 text-sm"
+                  title={looksLikeIp(e.summary) ? `адрес: ${e.summary}` : undefined}>
                   <span className="text-[11px] text-muted-foreground tabular-nums">
                     {e.at
                       ? new Date(e.at).toLocaleString('ru-RU', {
@@ -255,11 +323,16 @@ export function CoreOverview() {
                         })
                       : '—'}
                   </span>
-                  <span className="font-medium">{e.action}</span>
-                  {e.summary && <span className="truncate text-muted-foreground">{e.summary}</span>}
+                  {/* По-русски из общего словаря журнала; IP из подписи убран в title. */}
+                  <span className="font-medium">{ACTION_LABEL[e.action] ?? e.action}</span>
+                  {e.summary && !looksLikeIp(e.summary) && (
+                    <span className="truncate text-muted-foreground">{e.summary}</span>
+                  )}
                   <span className="text-[11px] text-muted-foreground">· {e.userName}</span>
                 </div>
               ))}
+            <button type="button" onClick={() => navigate('/admin/company/audit')}
+              className="pt-1 text-xs text-primary hover:underline">Весь журнал →</button>
           </CardContent>
         </Card>
       </div>
