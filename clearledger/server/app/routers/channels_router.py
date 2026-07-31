@@ -381,10 +381,39 @@ async def _run_channel_background(
             }]
             log.finished_at = datetime.now(timezone.utc)
         ch2 = await db.get(Channel, channel_id)
+        cid = ch2.company_id if ch2 is not None else None
         if ch2 is not None:
             ch2.last_sync_at = datetime.now(timezone.utc)
             ch2.docs_loaded = (ch2.docs_loaded or 0) + _loaded_total(result)
+        # Итог прогона — событие журнала: на него навешаны подписки «Сбои загрузок» /
+        # «Загрузки данных» (notify_catalog), доставку делает dispatch_async внутри
+        # log_audit. Это минимальная шина событий загрузок (docs/CONNECT.md, В3).
+        if cid is not None:
+            final = log.status if log is not None else status
+            action = {"success": "channel.run.finished",
+                      "skipped": "channel.run.finished",
+                      "partial": "channel.run.partial"}.get(final, "channel.run.failed")
+            from app.audit import log_audit
+            await log_audit(db, actor=None, company_id=cid, action=action,
+                            target=ch2.name if ch2 is not None else None,
+                            details={"итог": _run_summary(result)})
         await db.commit()
+
+    # Доводка канала продаж топлива — вне сессии прогона, своим соединением.
+    # Приём дедуплицирует смену по натуральному ключу, поэтому смена, снятая
+    # ОТКРЫТОЙ (ночной прогон попадает ровно в неё), навсегда остаётся с нулевой
+    # выручкой; реализации же вообще не имели расписания. Без этого шага дырка в конце
+    # периода появляется снова каждую ночь — при живой сети и «успешных» прогонах.
+    if cid is not None and status != "error" and result.get("kind") == "fuel_shift" \
+            and date_from and date_to:
+        try:
+            from app.services.fuel_shift_refresh import followup_fuel_sales
+            fu = await followup_fuel_sales(cid, date_from, date_to)
+            logging.getLogger("clearledger.channel").info(
+                "Доводка продаж %s…%s: смен дописано %s, реализаций добавлено %s",
+                date_from, date_to, (fu.get("shifts") or {}).get("recovered"), fu.get("tx_created"))
+        except Exception:  # noqa: BLE001 — доводка не меняет статус прогона
+            logging.getLogger("clearledger.channel").exception("Доводка продаж не удалась")
 
 
 @router.post("/{channel_id}/run")

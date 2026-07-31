@@ -62,7 +62,7 @@ from app.models import (
     FuelStation, FuelShift, FuelTank, FuelPump, FuelCashMovement,
     FuelReceipt, FuelReceiptOverride, FuelReceiptCost, FuelOpeningBalance, FuelPurchaseBatch,
     FuelExportDoc, FuelShiftSale, FuelShiftSaleOverride, FuelShiftCorrectionNote,
-    FuelTransaction, ExportPacket, User, DataEntry,
+    FuelTransaction, ExportPacket, User, DataEntry, RawBatchRecord,
 )
 from app.services.analytics_cache import bump_version
 from app.services.fuel_documents import build_shift_documents, build_ttn_documents
@@ -621,6 +621,9 @@ async def ingest_fuel_shifts(
     db: AsyncSession,
     *,
     with_receipts: bool = True,
+    channel_id: uuid.UUID | None = None,
+    source_id: uuid.UUID | None = None,
+    sync_log_id: uuid.UUID | None = None,
 ) -> dict:
     """Ядро fuel-ingest продаж (STS shift_report → FuelShift + L1-маркеры смен).
 
@@ -629,6 +632,9 @@ async def ingest_fuel_shifts(
     отдельным каналом fuel_delivery через ingest_fuel_deliveries (как в расширении
     БП: ОбработатьСмену и ОбработатьТТН — раздельные ветки). По умолчанию True
     для обратной совместимости /fuel/normalize.
+    channel_id/source_id/sync_log_id передаёт оркестратор канала: трасса «какой
+    канал породил запись» + L1-батч сырого ответа STS (docs/CONNECT.md, В3).
+    При ручном /fuel/normalize их нет — записи остаются без трассы, как раньше.
     """
 
     # Получить или создать станцию
@@ -658,6 +664,19 @@ async def ingest_fuel_shifts(
             body.system_code, body.station_code,
             body.date_from, body.date_to,
         )
+        # L1: сырой ответ STS /shifts как пришёл — до клиентских фильтров.
+        # Тяжёлые отчёты смен НЕ дублируются: они и так лежат в FuelShift.raw_report,
+        # батч фиксирует «что источник отдал в этот прогон» (docs/CONNECT.md, В3).
+        if source_id is not None:
+            db.add(RawBatchRecord(
+                company_id=company_id, source_id=source_id,
+                channel_id=channel_id, sync_log_id=sync_log_id,
+                doc_type="fuel_shift",
+                since=_parse_dt(body.date_from), until=_parse_dt(body.date_to),
+                items=shifts_to_process, items_count=len(shifts_to_process),
+                meta={"station_code": body.station_code,
+                      "system_code": body.system_code},
+            ))
         # Клиентский фильтр периода: STS API не всегда фильтрует надёжно,
         # иначе загрузится вся история станции.
         if body.date_from:
@@ -738,6 +757,7 @@ async def ingest_fuel_shifts(
             sales_missing=(not psm_total and not report.get("sales")),
             # Сырой отчёт STS как есть — для эталонного просмотрщика «Детали смены».
             raw_report=report,
+            channel_id=channel_id,
         )
         db.add(shift)
         await db.flush()
@@ -874,6 +894,7 @@ async def ingest_fuel_shifts(
                 diff_mass=fact_mass - doc_mass,
                 received_at=_parse_dt(r.get("dt")),
                 status="new",
+                channel_id=channel_id,
             ))
 
         # Раскладка по видам топлива из psm.total (для UI и сверки по литрам).
@@ -916,6 +937,7 @@ async def ingest_fuel_shifts(
                 source="api",
                 source_label=shift_l1_marker,
                 layer="raw",
+                channel_id=channel_id,
                 meta={
                     "shift_id":     str(shift_num),
                     "shift_number": str(shift_num),
@@ -979,6 +1001,7 @@ async def ingest_fuel_shifts(
                 source="api",
                 source_label=ttn_marker,
                 layer="raw",
+                channel_id=channel_id,
                 meta={
                     "ttn_number":    ttn_no,
                     "docNumber":     ttn_no,
@@ -1015,6 +1038,10 @@ async def ingest_fuel_deliveries(
     body: NormalizeRequest,
     company_id: uuid.UUID,
     db: AsyncSession,
+    *,
+    channel_id: uuid.UUID | None = None,
+    source_id: uuid.UUID | None = None,
+    sync_log_id: uuid.UUID | None = None,
 ) -> dict:
     """Ядро fuel-ingest приёма (STS /v1/report/receipts → FuelReceipt + L1 ТТН).
 
@@ -1064,6 +1091,7 @@ async def ingest_fuel_deliveries(
     skipped = 0
     scanned = 0
     seen_keys: set[str] = set()
+    raw_items: list[dict] = []   # L1: сырые receipts STS по сменам прогона
 
     for shift_info in shifts:
         shift_num = shift_info.get("shift")
@@ -1074,6 +1102,8 @@ async def ingest_fuel_deliveries(
             body.base_url, body.login, body.password,
             body.system_code, body.station_code, shift_num,
         )
+        if source_id is not None and receipts:
+            raw_items.append({"shift": shift_num, "receipts": receipts})
         for r in receipts:
             ttn_no = str(r.get("ttn") or "").strip()
             if not ttn_no:
@@ -1133,6 +1163,7 @@ async def ingest_fuel_deliveries(
                 db.add(FuelReceipt(
                     company_id=company_id,
                     station_id=station.id,
+                    channel_id=channel_id,
                     shift_id=None,  # приём — событие поставки, не кассовая смена
                     shift_number=_int_or_none(r.get("shift")) or shift_num,
                     tank=_int_or_none(r.get("tank")),
@@ -1167,6 +1198,7 @@ async def ingest_fuel_deliveries(
                 source="api",
                 source_label=marker,
                 layer="raw",
+                channel_id=channel_id,
                 meta={
                     "ttn_number":    ttn_no,
                     "docNumber":     ttn_no,
@@ -1191,6 +1223,17 @@ async def ingest_fuel_deliveries(
                 },
             ))
             created += 1
+
+    # L1: сырой ответ STS /receipts за прогон одним батчем (docs/CONNECT.md, В3).
+    if source_id is not None and raw_items:
+        db.add(RawBatchRecord(
+            company_id=company_id, source_id=source_id,
+            channel_id=channel_id, sync_log_id=sync_log_id,
+            doc_type="fuel_delivery",
+            since=_parse_dt(body.date_from), until=_parse_dt(body.date_to),
+            items=raw_items, items_count=sum(len(x["receipts"]) for x in raw_items),
+            meta={"station_code": body.station_code, "system_code": body.system_code},
+        ))
 
     return {"created": created, "skipped": skipped,
             "shifts_scanned": scanned, "station": station.name}

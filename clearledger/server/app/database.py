@@ -1288,6 +1288,13 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # В3 (docs/CONNECT.md): трасса «какой канал породил запись» — channel_id
+        # у всех целевых таблиц загрузок. NULL = ручная загрузка / старые данные.
+        for tbl in ("fuel_shifts", "fuel_receipts", "online_orders", "data_entries"):
+            await conn.execute(_sa.text(
+                f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS channel_id UUID "
+                f"REFERENCES channels(id) ON DELETE SET NULL"))
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency — асинхронная сессия БД."""

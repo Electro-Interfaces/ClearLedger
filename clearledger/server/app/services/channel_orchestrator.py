@@ -9,8 +9,8 @@ run_channel(db, channel) диспетчеризует по типу источн
 не идёт мимо оркестратора через отдельный /fuel/normalize — тот стал тонкой
 обёрткой над общим ingest_fuel_shifts).
 
-⚠ Транспорт ЦБ: OneCComClient (subprocess com_worker, 32-бит COM) — Windows
-(COM-Agent/dev). В проде на Linux — через COM-Agent (http_agent).
+⚠ Транспорт ЦБ выбирает `make_onec_client`: на Windows — subprocess com_worker,
+в контейнере (задан COM_AGENT_URL) — HTTP к COM-агенту рядом с 1С.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Channel, ChannelStream, ChannelSyncLog, DataEntry, Source, SourceCredentials, SourceFile
 from app.services.cb_intake import ingest_packages
 from app.services.cb_vitrine_ingest import ingest_cb_vitrine
-from app.services.onec.com_client import OneCComClient
+from app.services.onec.client_factory import make_onec_client
 from app.services.onec.crypto import decrypt_password
 from app.services.sts_client import sts_get_points
 
@@ -164,7 +164,7 @@ async def _run_cb(db: AsyncSession, channel: Channel, src: Source,
     # практически невозможна, а при ней COM отбрасывает СТАРЕЙШИЕ, не новейшие —
     # см. op_fetch_cb_shifts УПОРЯДОЧИТЬ ПО Дата УБЫВ). truncated сигналим в UI.
     _LIMIT = 3000
-    async with OneCComClient(conn) as client:
+    async with make_onec_client(conn) as client:
         packages = await client.fetch_cb_shifts(pf, pt, station=station, limit=_LIMIT)
         result = await ingest_packages(db, channel.company_id, packages, channel_id=channel.id)
         # F2/OB-5/F3: типы вне пакета смены (production/gain/return) — штатно в канал.
@@ -320,7 +320,9 @@ async def _run_fuel(db: AsyncSession, channel: Channel, src: Source,
     from app.routers.fuel_router import ingest_fuel_shifts
 
     async def _ingest(body, cid, db):
-        return await ingest_fuel_shifts(body, cid, db, with_receipts=False)
+        return await ingest_fuel_shifts(body, cid, db, with_receipts=False,
+                                        channel_id=channel.id, source_id=src.id,
+                                        sync_log_id=log_id)
 
     return await _run_sts_stations(db, channel, src, _ingest, "fuel_shift",
                                    date_from, date_to, log_id, station_codes, all_period)
@@ -333,7 +335,12 @@ async def _run_fuel_delivery(db: AsyncSession, channel: Channel, src: Source,
     """Канал приёма (fuel_delivery): receipts → FuelReceipt + L1 ТТН."""
     from app.routers.fuel_router import ingest_fuel_deliveries
 
-    return await _run_sts_stations(db, channel, src, ingest_fuel_deliveries, "fuel_delivery",
+    async def _ingest(body, cid, db):
+        return await ingest_fuel_deliveries(body, cid, db,
+                                            channel_id=channel.id, source_id=src.id,
+                                            sync_log_id=log_id)
+
+    return await _run_sts_stations(db, channel, src, _ingest, "fuel_delivery",
                                    date_from, date_to, log_id, station_codes, all_period)
 
 
@@ -342,7 +349,7 @@ async def _run_fuel_delivery(db: AsyncSession, channel: Channel, src: Source,
 # ---------------------------------------------------------------------------
 async def _run_msto(db: AsyncSession, channel: Channel, src: Source,
                     date_from: str | None = None, date_to: str | None = None,
-                    all_period: bool = False) -> dict[str, Any]:
+                    all_period: bool = False, log_id=None) -> dict[str, Any]:
     """Канал онлайн-заказов MSTO: транзакции агрегаторов → OnlineOrder.
     Креды MSTO — в settings (через reconciliation_proxy). servicePointId станций
     берём из config.stations[].mstoServicePointId; пусто → вся сеть MSTO."""
@@ -357,7 +364,9 @@ async def _run_msto(db: AsyncSession, channel: Channel, src: Source,
                 spids.append(int(v))
         except (ValueError, TypeError):
             pass
-    r = await ingest_online_orders(db, channel.company_id, pf, pt, spids or None)
+    r = await ingest_online_orders(db, channel.company_id, pf, pt, spids or None,
+                                   channel_id=channel.id, source_id=src.id,
+                                   sync_log_id=log_id)
     return {"status": "success", "kind": "msto", "period": [pf, pt],
             "created": r.get("created", 0), "skipped": r.get("skipped", 0),
             "fetched": r.get("fetched", 0),
@@ -576,6 +585,6 @@ async def run_channel(
             return await _run_fuel_delivery(db, channel, src, date_from, date_to, log_id, station_codes, all_period)
         return await _run_fuel(db, channel, src, date_from, date_to, log_id, station_codes, all_period)
     if src.source_type == "msto":
-        return await _run_msto(db, channel, src, date_from, date_to, all_period)
+        return await _run_msto(db, channel, src, date_from, date_to, all_period, log_id=log_id)
     return {"status": "skipped",
             "message": f"тип источника '{src.source_type}' оркестратором пока не исполняется"}

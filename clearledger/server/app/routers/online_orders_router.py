@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import OnlineOrder, User, FuelStation, FuelMapping, ServiceLocation
+from app.models import OnlineOrder, RawBatchRecord, User, FuelStation, FuelMapping, ServiceLocation
 from app.services import reconciliation_proxy
 
 router = APIRouter(prefix="/online-orders", tags=["Онлайн-заказы"])
@@ -29,6 +29,15 @@ def _num(v: Any) -> float:
         return float(v)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _parse_iso(val: str | None) -> datetime | None:
+    if not val:
+        return None
+    try:
+        return datetime.fromisoformat(val)
+    except ValueError:
+        return None
 
 
 def _int(v: Any) -> int | None:
@@ -166,8 +175,15 @@ async def ingest_online_orders(
     db: AsyncSession, company_id: uuid.UUID,
     date_from: str | None, date_to: str | None,
     service_point_ids: list[int] | None = None,
+    *,
+    channel_id: uuid.UUID | None = None,
+    source_id: uuid.UUID | None = None,
+    sync_log_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
-    """Загрузить онлайн-заказы MSTO за период в online_orders (идемпотентно по external_id)."""
+    """Загрузить онлайн-заказы MSTO за период в online_orders (идемпотентно по external_id).
+
+    channel_id/source_id/sync_log_id передаёт оркестратор канала msto — трасса
+    записей и L1-батч сырых транзакций (docs/CONNECT.md, В3)."""
     if service_point_ids is None:
         service_point_ids = await _company_service_point_ids(db, company_id)
     if not service_point_ids:
@@ -222,9 +238,22 @@ async def ingest_online_orders(
         data = await reconciliation_proxy.msto_transactions(query, conn=conn, company_id=company_id)
         models = data.get("models") if isinstance(data, dict) else data
         models = models if isinstance(models, list) else []
+    # L1: сырые транзакции MSTO как пришли (docs/CONNECT.md, В3).
+    if source_id is not None and models:
+        db.add(RawBatchRecord(
+            company_id=company_id, source_id=source_id,
+            channel_id=channel_id, sync_log_id=sync_log_id,
+            doc_type="msto",
+            since=_parse_iso(date_from), until=_parse_iso(date_to),
+            items=models, items_count=len(models),
+            meta={"service_point_ids": [str(x) for x in (service_point_ids or [])]},
+        ))
     sp_to_station, fuel_to_code = await _build_resolvers(db, company_id)
     normalized = [r for r in (_normalize(tx, company_id, sp_to_station, fuel_to_code) for tx in models) if r]
     rows = list({r["external_id"]: r for r in normalized}.values())
+    if channel_id is not None:
+        for r in rows:
+            r["channel_id"] = channel_id
     if not rows:
         return {"created": 0, "skipped": 0, "fetched": 0}
 
@@ -256,6 +285,9 @@ async def ingest_online_orders(
                 "actual_volume": stmt.excluded.actual_volume,
                 "operation_result": stmt.excluded.operation_result,
                 "raw_data": stmt.excluded.raw_data,
+                # трасса обновляется свежим прогоном, но NULL канала (ручная
+                # загрузка) не затирает известный канал прежней записи
+                "channel_id": func.coalesce(stmt.excluded.channel_id, OnlineOrder.channel_id),
                 "updated_at": func.now(),
             },
         )

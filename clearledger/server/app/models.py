@@ -333,6 +333,12 @@ class DataEntry(Base):
 
     source_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # Какой канал загрузки породил документ (трасса, docs/CONNECT.md В3).
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
     # Слой данных (см. docs/sverka-spec.md §0):
     # 'raw' (L1) — сырьё из внешнего источника как пришло (status='new'|'recognized')
     # 'clean' (L2) — нормализовано бухгалтером/AI, готово к выгрузке (status='verified')
@@ -1681,6 +1687,13 @@ class FuelShift(Base):
         nullable=True
     )
 
+    # Какой канал загрузки породил смену (трасса, docs/CONNECT.md В3).
+    # NULL — ручной /fuel/normalize или данные до введения трассы.
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
     # Сырой сменный отчёт STS как есть ({psm, release, sales, receipt, money}) —
     # вход для эталонного просмотрщика TradeFrame (адаптер ShiftReportAdapterV2).
     # Хранится для побайтовой верности формы детали смены; продажи по pay_type
@@ -1876,6 +1889,12 @@ class FuelReceipt(Base):
         nullable=True
     )
 
+    # Какой канал загрузки породил поступление (трасса, docs/CONNECT.md В3).
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
     # Учётный период (Шаг 1) — определяется по received_at
     period_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("periods.id", ondelete="SET NULL"),
@@ -1935,6 +1954,12 @@ class OnlineOrder(Base):
     operation_result: Mapped[str | None] = mapped_column(String(20), nullable=True)  # success|wait|error|cancel
 
     raw_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Какой канал загрузки породил заказ (трасса, docs/CONNECT.md В3).
+    channel_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("channels.id", ondelete="SET NULL"),
+        nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

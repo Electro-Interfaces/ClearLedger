@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     AccountingDoc, Channel, ChargeSession, Contract, ContractLocation, CorporateClient,
     Counterparty, EzsEquipmentUnit, EzsSite, EzsSiteCost, EzsSiteDoc, EzsSiteEquipment,
-    EzsSiteEvent, EzsTechConnection, HubexAsset, HubexTask, LocationTypeDef, RawBatchRecord,
+    EzsSiteEvent, EzsTechConnection, ExportPacket, FuelExportDoc, FuelReceipt, FuelShift,
+    HubexAsset, HubexTask, LocationTypeDef, OnlineOrder, RawBatchRecord,
     Region, ServiceLocation, SourceFile, StationContractSettlement, StationDispensePeriod,
     StationEnergyPeriod, UserCompany,
 )
@@ -104,6 +105,27 @@ _ENTITIES: list[tuple[str, str, list[tuple]]] = [
          "телефон → сессии · карточка контрагента → договор",
          CorporateClient.counterparty_id.is_(None),
          "без карточки контрагента"),
+    ]),
+    ("fuel", "Топливная розница (L2)", [
+        ("fuel_shifts", "Смены АЗС", FuelShift,
+         "Канал продаж STS (shift_report)", "Учёт · Расхождения · Топливо",
+         "станция + № смены; канал → смена",
+         FuelShift.sales_missing.is_(True), "без детализации продаж"),
+        ("fuel_receipts", "Приём топлива (ТТН)", FuelReceipt,
+         "Канал приёма STS (receipts)", "Учёт · себестоимость",
+         "станция + ТТН + код топлива", None, None),
+        ("online_orders", "Онлайн-заказы", OnlineOrder,
+         "Канал MSTO (агрегаторы)", "Сверка онлайн-канала смены",
+         "sessionId MSTO; точка → объект",
+         OnlineOrder.station_id.is_(None), "без объекта"),
+    ]),
+    ("export", "Выгрузка в учёт (L3/L4)", [
+        ("export_docs", "Документы 1С", FuelExportDoc,
+         "Сборка по сменам и ТТН (L2 → документы)", "выгрузка в БП",
+         "смена/ТТН → документ", None, None),
+        ("export_packets", "Пакеты выгрузки", ExportPacket,
+         "Отбор документов в пакет смены", "1С БП (расширение TL)",
+         "пакет → документы; идемпотентность по хешу", None, None),
     ]),
     ("energy", "Хозяйство и деньги", [
         ("settlements", "Платёжная дисциплина", StationContractSettlement,

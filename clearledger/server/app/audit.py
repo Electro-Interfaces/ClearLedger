@@ -28,10 +28,12 @@ async def log_audit(
     if details:
         parts.append(json.dumps(details, ensure_ascii=False))
     text = " · ".join(parts) or None
+    # Системные события (прогоны каналов, фоновые службы) идут без актора,
+    # а user_id/user_name в таблице NOT NULL — пишем служебного «актора».
     db.add(AuditEvent(
         company_id=company_id,
-        user_id=str(actor.id) if actor else None,
-        user_name=actor.name if actor else None,
+        user_id=str(actor.id) if actor else "system",
+        user_name=actor.name if actor else "Платформа",
         action=action,
         details=text,
     ))
