@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Building2, Check, ChevronDown, ChevronRight, History, KeyRound, LifeBuoy, Loader2,
-  Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, X,
+  Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, Users2, X,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
