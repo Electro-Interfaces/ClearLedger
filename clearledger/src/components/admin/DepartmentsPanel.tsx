@@ -119,6 +119,7 @@ export function DepartmentsPanel({ companyId, canManage }: {
                         вопрос к подразделению, за ним не ходят в общий список. */}
                     <tr
                       tabIndex={0}
+                      aria-expanded={isOpen}
                       onClick={() => setOpen((o) => ({ ...o, [d.id]: !o[d.id] }))}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {

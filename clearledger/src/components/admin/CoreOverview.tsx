@@ -42,13 +42,13 @@ function serviceBadge(s: CoreServiceStatus) {
   const base = 'gap-1 bg-transparent text-[11px]'
   switch (s.status) {
     case 'up':
-      return <Badge variant="outline" className={`${base} border-emerald-400/50 text-emerald-300/90`}>
+      return <Badge variant="outline" className={`${base} border-emerald-400/50 text-emerald-700 dark:text-emerald-300/90`}>
         <Icon className="h-3 w-3" /> {s.name} <CheckCircle2 className="h-3 w-3" /></Badge>
     case 'down':
       return <Badge variant="destructive" className="gap-1 text-[11px]">
         <Icon className="h-3 w-3" /> {s.name} <XCircle className="h-3 w-3" /></Badge>
     case 'configured':
-      return <Badge variant="outline" className={`${base} border-amber-400/50 text-amber-300/90`}>
+      return <Badge variant="outline" className={`${base} border-amber-400/50 text-amber-700 dark:text-amber-300/90`}>
         <Icon className="h-3 w-3" /> {s.name}</Badge>
     default:
       return <Badge variant="outline" className={`${base} border-zinc-600 text-zinc-500`}>
@@ -170,24 +170,24 @@ export function CoreOverview() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-sm">
-            <AlertTriangle className={`h-4 w-4 ${alerts.length ? 'text-amber-400' : 'text-emerald-400'}`} />
+            <AlertTriangle className={`h-4 w-4 ${alerts.length ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`} />
             Требует внимания
             {alerts.length > 0 && <Badge variant="secondary" className="text-[10px]">{alerts.length}</Badge>}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-1.5">
           {alerts.length === 0 ? (
-            <div className="flex items-center gap-2 text-sm text-emerald-400">
+            <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="h-4 w-4" /> Всё в порядке: сервисы отвечают, доступы назначены
             </div>
           ) : alerts.map((a, i) => a.to ? (
             <button key={i} type="button" onClick={() => navigate(a.to!)}
-              className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm text-amber-300/90 transition-colors hover:bg-amber-500/10">
+              className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left text-sm text-amber-700 dark:text-amber-300/90 transition-colors hover:bg-amber-500/10">
               <a.icon className="h-3.5 w-3.5 shrink-0" /> {a.text}
               <span className="ml-auto text-[11px] text-muted-foreground">разобрать →</span>
             </button>
           ) : (
-            <div key={i} className="flex items-center gap-2 text-sm text-amber-300/90">
+            <div key={i} className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-300/90">
               <a.icon className="h-3.5 w-3.5 shrink-0" /> {a.text}
             </div>
           ))}
@@ -224,7 +224,7 @@ export function CoreOverview() {
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-1.5">
           <Badge variant="outline" className={`gap-1 bg-transparent text-[11px] ${
-            d.sso.enabled ? 'border-emerald-400/50 text-emerald-300/90' : 'border-zinc-600 text-zinc-500'}`}>
+            d.sso.enabled ? 'border-emerald-400/50 text-emerald-700 dark:text-emerald-300/90' : 'border-zinc-600 text-zinc-500'}`}>
             <KeyRound className="h-3 w-3" /> Единый вход{d.sso.enabled ? '' : ' · выкл'}
           </Badge>
           {d.services.map((s) => <span key={s.code}>{serviceBadge(s)}</span>)}

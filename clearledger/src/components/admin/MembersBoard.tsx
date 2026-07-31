@@ -359,6 +359,7 @@ export function MembersBoard({
                 <div key={`g-${g.key}`}
                   role={g.kind === 'vendor' && party === 'internal' ? 'button' : undefined}
                   tabIndex={g.kind === 'vendor' && party === 'internal' ? 0 : undefined}
+                  aria-expanded={g.kind === 'vendor' && party === 'internal' ? platformOpen : undefined}
                   onClick={g.kind === 'vendor' && party === 'internal'
                     ? () => setPlatformOpen((v) => !v) : undefined}
                   onKeyDown={g.kind === 'vendor' && party === 'internal'
