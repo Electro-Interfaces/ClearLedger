@@ -46,6 +46,7 @@ import { appState, toggleAccessKey, sameAccess, type AppAccess } from '@/lib/acc
 import { AccessTreeGrid } from './AccessTreeGrid'
 import { ACTION_LABEL } from './AuditLog'
 import { copyText } from './InviteLinkPanel'
+import * as departmentsService from '@/services/departmentsService'
 import { ObjectScopeDialog } from './ObjectScopeDialog'
 import { PartyBadge } from '@/components/chat/PartyBadge'
 
@@ -698,6 +699,12 @@ function MemberCard({
     enabled: canManage,
     retry: false,
   })
+  // Штатная структура: подразделение и его руководитель (первая эскалация).
+  const depsQ = useQuery({
+    queryKey: ['departments', companyId],
+    queryFn: () => departmentsService.listDepartments(companyId),
+  })
+  const myDep = (depsQ.data ?? []).find((d) => d.id === u.department_id) ?? null
   // Ссылка для входа: одноразовый сброс пароля, который передают мессенджером.
   // Единственный путь внутрь для человека, до которого не доходят письма.
   const [resetUrl, setResetUrl] = useState('')
@@ -737,6 +744,29 @@ function MemberCard({
             <Label className="text-xs">Должность</Label>
             <Input value={position} onChange={(e) => setPosition(e.target.value)} disabled={!editable}
               placeholder="напр. Инженер эксплуатации" className="h-8 text-sm" />
+          </div>
+          {/* Штатная структура: подразделение → руководитель → цепочка эскалации. */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Подразделение</Label>
+            <Select value={u.department_id ?? 'none'} disabled={!canManage}
+              onValueChange={(v) => update.mutate({ companyId, departmentId: v === 'none' ? '' : v })}>
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue placeholder="— вне структуры —" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— вне структуры —</SelectItem>
+                {(depsQ.data ?? []).map((d) => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {myDep && (
+              <p className="text-[11px] text-muted-foreground">
+                Руководитель: {myDep.head_user_id === u.id
+                  ? 'он(а) и есть — эскалация уровнем выше'
+                  : (myDep.head_name ?? <span className="text-amber-500/90">не назначен — эскалировать некому</span>)}
+              </p>
+            )}
           </div>
           {dirty && editable && (
             <Button size="sm" className="h-8" disabled={update.isPending}

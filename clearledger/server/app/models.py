@@ -161,9 +161,42 @@ class UserCompany(Base):
     # у подрядчика это его договор обслуживания. Список, потому что оснований бывает
     # несколько (рамочный плюс на объект); NULL или пусто — основание не указано.
     contract_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Подразделение по штатной структуре (departments). NULL — вне структуры.
+    # Через него — руководитель, цепочка эскалации и подача людей по отделам.
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+# ---------------------------------------------------------------------------
+# Department — подразделение компании: узел штатной структуры пространства
+# ---------------------------------------------------------------------------
+class Department(Base):
+    """Дерево подразделений с руководителями — «кто кому подчиняется».
+
+    По нему строится цепочка эскалации (сначала начальник подразделения, потом
+    выше — не сразу директору), подача людей по отделам и, дальше, права и
+    скоупы данных на уровне подразделения.
+    """
+    __tablename__ = "departments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Родительское подразделение: NULL — верхний уровень (дирекция).
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
+    )
+    # Руководитель: к нему идёт первая эскалация по людям этого подразделения.
+    head_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -830,6 +863,12 @@ class Contract(Base):
     # муниципальной земле по разрешению, а не по договору аренды. См.
     # SOURCE_CONTRACTS_PAYMENTS_RUSHYDRO.md §6.
     basis: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Вид договора по справочнику `contract_types` (rent, energy_supply, works…).
+    # Колонка живёт с v2.30 и заполняется разбором `type`, но в ORM её не было:
+    # запросы через модель падали с AttributeError, хотя в базе поле есть.
+    # Без ForeignKey: сам справочник заведён сырым DDL и в метаданных ORM его нет,
+    # а FK на неизвестную таблицу уронил бы create_all.
+    type_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     # СрокДействия (ISO-дата строкой) и ДоговорЗакрыт
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_closed: Mapped[bool] = mapped_column(
@@ -4423,6 +4462,19 @@ class ChatRoom(Base):
     # пространства. Правая рельса показывает чаты своего приложения плюс общие, верхняя
     # кнопка — всё подряд: один и тот же чат, разные предустановки.
     scope_product: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Объект пространства, при котором живёт чат («группа по станции»): карточка
+    # объекта показывает его чаты, привязка видна и в самом чате. Ортогонален
+    # scope_product: группа может быть и «по станции», и «в Эксплуатации».
+    scope_object_id: Mapped[str | None] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    # Чат ЗАЯВКИ (id из public.tickets, FK через схему не заводим): скрытая группа
+    # «быстро обсудить и записать следующий шаг» — в общий список чатов НЕ попадает,
+    # открывается только из карточки заявки (решение МАГа 31.07.2026).
+    scope_ticket_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True)
+    # Аватар чата: относительный путь файла пространства (/api/files/<id>), грузится
+    # владельцем/админом чата. NULL — иконка по типу комнаты.
+    avatar_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # updated_at = время последней активности (сортировка списка комнат)
     updated_at: Mapped[datetime] = mapped_column(
@@ -4453,6 +4505,9 @@ class ChatParticipant(Base):
     # Право писать в канал и менять состав определяется этой ролью, а не ролью в компании.
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")
     last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # «Без звука»: до этого момента чат не шлёт push и не красит общий счётчик.
+    # NULL — уведомления включены; 9999 год — навсегда.
+    muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -4483,6 +4538,9 @@ class ChatMessage(Base):
     reply_to: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True
     )
+    # Пересланное: имя автора ОРИГИНАЛА (денормализовано, как user_name). Цепочка
+    # пересылок оригинал не теряет: форвард форварда несёт то же имя.
+    forwarded_from: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -4491,6 +4549,49 @@ class ChatMessage(Base):
     __table_args__ = (
         Index("idx_chat_messages_room_created", "room_id", "created_at"),
     )
+
+
+class ChatTicketLink(Base):
+    """Связь «сообщение → заявка»: заявка родилась из обсуждения, след остаётся
+    с обеих сторон (в чате — системное сообщение, в заявке — origin по этой записи)."""
+    __tablename__ = "chat_ticket_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+    # id заявки в public.tickets — другая схема, FK не заводим.
+    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    ticket_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatPushKeys(Base):
+    """VAPID-ключи Web Push стека: генерируются при первом старте и НЕ меняются —
+    смена ключей протухает все подписки браузеров."""
+    __tablename__ = "chat_push_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    private_pem: Mapped[str] = mapped_column(Text, nullable=False)
+    # Публичный ключ в base64url (uncompressed point) — applicationServerKey для браузера.
+    public_key: Mapped[str] = mapped_column(String(200), nullable=False)
+
+
+class ChatPushSubscription(Base):
+    """Подписка браузера на Web Push: доставка чата при закрытой вкладке."""
+    __tablename__ = "chat_push_subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200), nullable=False)
+    auth: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ChatMessageReaction(Base):
@@ -5305,7 +5406,8 @@ class OpsPeriodCharge(Base):
     expected_qty: Mapped[float | None] = mapped_column(Numeric(16, 3), nullable=True)
     vat_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     # Откуда взялась сумма — показывается меткой рядом с цифрой:
-    # contract | prev_period | average | metered | manual | correction | none
+    # document | contract | metered | metered_prev | prev_period | average |
+    # manual | correction | none
     expected_basis: Mapped[str | None] = mapped_column(String(20), nullable=True)
     doc_due_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
 

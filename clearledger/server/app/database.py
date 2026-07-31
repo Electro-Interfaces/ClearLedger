@@ -58,6 +58,8 @@ async def create_all() -> None:
         # + period_status и discrepancy_* (см. docs/sverka-spec.md §7a):
         # обязательная отметка «закрытый период» и расхождений (включая копеечные).
         for stmt in (
+            # Штатная структура: подразделение в членстве (departments создаёт create_all).
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES departments(id) ON DELETE SET NULL",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS external_number VARCHAR(200)",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS external_date VARCHAR(20)",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS operation_type VARCHAR(100)",
@@ -755,6 +757,18 @@ async def create_all() -> None:
             # комнаты к приложению.
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_product VARCHAR(40)",
             "CREATE INDEX IF NOT EXISTS idx_chat_rooms_scope ON chat_rooms (company_id, scope_product)",
+            # v2.47: аватар чата — картинка из файлов пространства вместо иконки по типу.
+            "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(300)",
+            # v2.48: «без звука» на чат и пересылка сообщений (волна 1 фич Telegram).
+            "ALTER TABLE chat_participants ADD COLUMN IF NOT EXISTS muted_until TIMESTAMPTZ",
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS forwarded_from VARCHAR(255)",
+            # v2.49: привязка чата к объекту пространства («группа по станции»).
+            # На существующих таблицах — без FK (модель объявляет его для новых стеков);
+            # осиротевшую привязку роутер просто не резолвит в имя.
+            "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_object_id VARCHAR(40)",
+            # v2.50: чат заявки (скрытая группа при заявке Поддержки).
+            "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_ticket_id UUID",
+            "CREATE INDEX IF NOT EXISTS idx_chat_rooms_ticket ON chat_rooms (scope_ticket_id)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

@@ -18,7 +18,7 @@ from app.access_catalog import sanitize_modules
 from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
-from app.models import Contract, Counterparty, Company, CompanyRole, ServiceLocation, User, UserCompany
+from app.models import Contract, Counterparty, Company, CompanyRole, Department, ServiceLocation, User, UserCompany
 from app.services import email_service
 from app.utils import resolve_company_id, resolve_org_id
 from app.schemas import (
@@ -99,11 +99,18 @@ async def _resp(
     org_name: str | None = None
     object_scope: list[str] | None = None
     contract_ids: list[str] | None = None
+    department_id: str | None = None
+    department_name: str | None = None
     if scope_cid is not None:
         m = await db.get(UserCompany, (u.id, scope_cid))
         if m is not None:
             role = m.role
             position = m.position
+            if getattr(m, "department_id", None) is not None:
+                dep = await db.get(Department, m.department_id)
+                if dep is not None:
+                    department_id = str(dep.id)
+                    department_name = dep.name
             modules = await resolve_member_modules(m, db)
             # Скоуп отдаём как есть: на админа он не действует, но админом человек
             # может перестать быть — заранее заданный список тогда пригодится.
@@ -126,6 +133,7 @@ async def _resp(
         role=role, position=position, modules=modules,
         role_id=role_id_str, role_name=role_name, object_scope=object_scope,
         contract_ids=contract_ids,
+        department_id=department_id, department_name=department_name,
         party_type=party_type, organization_id=org_id, organization_name=org_name,
         is_superadmin=u.is_superadmin, last_seen_at=u.last_seen_at, companies=memberships,
     )
@@ -229,9 +237,10 @@ async def update_user(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нельзя менять суперадмина")
     if payload.name is not None:
         target.name = payload.name   # ФИО — глобально
-    # Роль/должность/принадлежность — per-company (нужен company_id).
+    # Роль/должность/принадлежность/подразделение — per-company (нужен company_id).
     if (payload.role is not None or payload.position is not None
-            or payload.party_type is not None or payload.organization_id is not None):
+            or payload.party_type is not None or payload.organization_id is not None
+            or payload.department_id is not None):
         if not payload.company_id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите company_id для роли/должности")
         membership = await db.get(UserCompany, (uid, cid))
@@ -253,6 +262,14 @@ async def update_user(
                             target=target.email, details={"partyType": payload.party_type})
         if payload.organization_id is not None:
             membership.organization_id = await resolve_org_id(payload.organization_id, cid, db)
+        if payload.department_id is not None:
+            if payload.department_id == "":
+                membership.department_id = None
+            else:
+                dep = await db.get(Department, uuid.UUID(payload.department_id))
+                if dep is None or dep.company_id != cid:
+                    raise HTTPException(status.HTTP_404_NOT_FOUND, "Подразделение не найдено")
+                membership.department_id = dep.id
     await db.flush()
     return await _resp(target, db, scope_cid=cid if payload.company_id else None)
 

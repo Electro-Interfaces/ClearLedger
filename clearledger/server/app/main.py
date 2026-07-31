@@ -40,6 +40,7 @@ from app.routers import (
     analytics_router,
     charge_sessions_router,
     corporate_router,
+    departments_router,
     retail_router,
     tariff_router,
     overview_router,
@@ -201,6 +202,7 @@ API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(tickets_router.router, prefix=API_PREFIX)
+app.include_router(departments_router.router, prefix=API_PREFIX)
 app.include_router(users_router.router, prefix=API_PREFIX)
 app.include_router(roles_router.router, prefix=API_PREFIX)
 app.include_router(invitations_router.router, prefix=API_PREFIX)

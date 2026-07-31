@@ -29,6 +29,7 @@ import type { CompanyRole } from '@/services/roleService'
 import { moduleLabels } from '@/config/accessModules'
 import { AccessMatrix, AccessSummary } from './AccessMatrix'
 import { AccessTreeGrid } from './AccessTreeGrid'
+import { DepartmentsPanel } from './DepartmentsPanel'
 import { MembersBoard } from './MembersBoard'
 import { projectSpaceUsers, listSpaceOrganizations } from '@/services/spaceObjectsService'
 import { PartyBadge } from '@/components/chat/PartyBadge'
@@ -106,6 +107,14 @@ export function MembersCard({
               <AddUserDialog companyId={companyId} party={party} orgs={orgsQ.data ?? []} />
             </>
           ) : null} />
+        {/* Штатная структура — в том же разделе: люди и их подразделения это один
+            вопрос «кто где работает и кто кому подчиняется» (решение МАГа 31.07.2026). */}
+        {party === 'internal' && (
+          <div className="mt-6 border-t pt-4">
+            <h3 className="mb-2 text-sm font-semibold">Подразделения</h3>
+            <DepartmentsPanel companyId={companyId} canManage={canManage} />
+          </div>
+        )}
       </CardContent>
     </Card>
   )

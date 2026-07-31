@@ -113,6 +113,8 @@ class UserAdminUpdate(BaseModel):
     party_type: Literal["internal", "partner", "vendor"] | None = None
     # Какую организацию представляет внешний участник (id карточки юрлица); "" → очистить.
     organization_id: str | None = None
+    # Подразделение по штатной структуре (departments.id); "" → вне структуры.
+    department_id: str | None = None
 
 
 class CompanyMembership(BaseModel):
@@ -194,6 +196,8 @@ class UserAdminResponse(BaseModel):
     role_name: str | None = None    # имя назначенной роли (для UI)
     object_scope: list[str] | None = None  # скоуп данных: объекты; null = вся сеть
     contract_ids: list[str] | None = None  # основание допуска: договоры (справка, не права)
+    department_id: str | None = None       # подразделение штатной структуры
+    department_name: str | None = None     # имя подразделения (для UI)
     is_superadmin: bool
     last_seen_at: datetime | None = None   # последний вход/активность — для состава и карточки
     companies: list[CompanyMembership] = []

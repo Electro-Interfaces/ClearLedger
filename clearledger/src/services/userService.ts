@@ -31,6 +31,9 @@ export interface AdminUser {
   // Основание допуска: договоры, по которым человек здесь работает. Не права и не
   // скоуп — справка «почему он в пространстве»; у своих сотрудников обычно пусто.
   contract_ids?: string[] | null
+  // Подразделение штатной структуры: через него — руководитель и цепочка эскалации.
+  department_id?: string | null
+  department_name?: string | null
   is_superadmin: boolean
   last_seen_at?: string | null // последний вход/активность — для состава и карточки
   companies: MembershipRef[]
@@ -87,6 +90,7 @@ export async function updateUser(
     position?: string
     partyType?: 'internal' | 'partner' | 'vendor'
     organizationId?: string          // '' → снять связь с организацией
+    departmentId?: string            // '' → вне штатной структуры
   },
 ): Promise<AdminUser> {
   return patch<AdminUser>(`/api/users/${id}`, {
@@ -96,6 +100,7 @@ export async function updateUser(
     position: data.position,
     party_type: data.partyType,
     organization_id: data.organizationId,
+    department_id: data.departmentId,
   })
 }
 
