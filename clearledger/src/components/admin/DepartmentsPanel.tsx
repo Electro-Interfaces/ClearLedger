@@ -170,11 +170,15 @@ function DepartmentDialog({ companyId, dep, all, people, onClose, onSaved }: {
   const parents = all.filter((d) => d.id !== dep?.id)
 
   const save = useMutation({
-    mutationFn: () => dep
-      ? departmentsService.updateDepartment(dep.id, companyId,
+    mutationFn: async () => {
+      if (dep) {
+        await departmentsService.updateDepartment(dep.id, companyId,
           { name: name.trim(), parentId, headUserId: headId })
-      : departmentsService.createDepartment(companyId,
-          { name: name.trim(), parentId: parentId || undefined, headUserId: headId || undefined }),
+      } else {
+        await departmentsService.createDepartment(companyId,
+          { name: name.trim(), parentId: parentId || undefined, headUserId: headId || undefined })
+      }
+    },
     onSuccess: () => { toast.success(dep ? 'Сохранено' : 'Подразделение добавлено'); onSaved() },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
