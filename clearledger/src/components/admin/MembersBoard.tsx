@@ -45,6 +45,7 @@ import { appIcon } from '@/config/appIcons'
 import { appState, toggleAccessKey, sameAccess, type AppAccess } from '@/lib/accessKeys'
 import { AccessTreeGrid } from './AccessTreeGrid'
 import { ACTION_LABEL } from './AuditLog'
+import { copyText } from './InviteLinkPanel'
 import { ObjectScopeDialog } from './ObjectScopeDialog'
 import { PartyBadge } from '@/components/chat/PartyBadge'
 
@@ -677,6 +678,18 @@ function MemberCard({
     enabled: canManage,
     retry: false,
   })
+  // Ссылка для входа: одноразовый сброс пароля, который передают мессенджером.
+  // Единственный путь внутрь для человека, до которого не доходят письма.
+  const [resetUrl, setResetUrl] = useState('')
+  const resetLink = useMutation({
+    mutationFn: () => userService.issueResetLink(u.id, companyId),
+    onSuccess: async (r) => {
+      setResetUrl(r.reset_url)
+      if (await copyText(r.reset_url)) toast.success('Ссылка скопирована — действует 24 часа')
+      else toast.error('Не удалось скопировать — выделите ссылку вручную')
+    },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
 
   const dirty = name !== u.name || position !== (u.position ?? '')
 
@@ -721,6 +734,26 @@ function MemberCard({
               {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString('ru-RU') : 'ещё не заходил(а)'}
             </span>
           </p>
+          {canManage && (
+            <div className="space-y-1.5">
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"
+                disabled={resetLink.isPending} onClick={() => resetLink.mutate()}>
+                {resetLink.isPending
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <KeyRound className="h-3 w-3" />}
+                Ссылка для входа
+              </Button>
+              {resetUrl && (
+                <div className="rounded-md border border-border bg-background px-2 py-1.5">
+                  <code className="block break-all font-mono text-[10px] leading-relaxed">{resetUrl}</code>
+                </div>
+              )}
+              <p className="text-[11px] text-muted-foreground">
+                Когда письма не доходят: одноразовая ссылка сброса пароля, действует 24 часа.
+                Передайте её человеку мессенджером — по ней он сам задаст новый пароль.
+              </p>
+            </div>
+          )}
           {canManage && (
             <>
               {(activityQ.data ?? []).length > 0 && (

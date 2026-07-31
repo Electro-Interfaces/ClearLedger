@@ -14,7 +14,7 @@ import type { Invitation } from '@/services/invitationService'
 
 /** Копирование с запасным вариантом: navigator.clipboard недоступен вне
  *  secure context (http-адрес во внутренней сети — обычный случай на проде). */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text)

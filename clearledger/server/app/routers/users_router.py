@@ -5,7 +5,10 @@
 с глобальной ролью 'admin'. Все операции скоупятся по company_id. is_superadmin
 через эти эндпоинты НЕ выдаётся (только через CLI grant_company_access.py).
 """
+import hashlib
+import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -16,6 +19,7 @@ from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.database import get_db
 from app.models import Contract, Counterparty, Company, CompanyRole, ServiceLocation, User, UserCompany
+from app.services import email_service
 from app.utils import resolve_company_id, resolve_org_id
 from app.schemas import (
     CompanyMembership,
@@ -123,7 +127,7 @@ async def _resp(
         role_id=role_id_str, role_name=role_name, object_scope=object_scope,
         contract_ids=contract_ids,
         party_type=party_type, organization_id=org_id, organization_name=org_name,
-        is_superadmin=u.is_superadmin, companies=memberships,
+        is_superadmin=u.is_superadmin, last_seen_at=u.last_seen_at, companies=memberships,
     )
 
 
@@ -399,6 +403,44 @@ async def set_member_contracts(
                     details={"contracts": len(ids) if ids else "не указано"})
     await db.commit()
     return await _resp(target, db, scope_cid=cid)
+
+
+@router.post("/{user_id}/reset-link")
+async def issue_reset_link(
+    user_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Ссылка сброса пароля — админу компании, для передачи мессенджером.
+
+    Восстановление живёт только письмом, и когда почта до человека не доходит
+    (спам-фильтры, перенесённые пользователи, не знающие пароля), вход закрыт
+    наглухо: пригласительная ссылка существующему говорит «войдите с паролем».
+    Пароль админ не видит и не задаёт — только одноразовая ссылка, по которой
+    человек сам поставит новый. Тот же механизм, что «Забыли пароль».
+    """
+    cid = await require_company_admin(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    user = await db.get(User, uid)
+    if user is None or not await _is_member(uid, cid, db):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    if user.is_superadmin and not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Ссылку для суперадмина выдаёт только суперадмин")
+    raw = secrets.token_urlsafe(32)
+    user.reset_token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    # Сутки, а не час письменного потока: ссылку передают мессенджером,
+    # и открывают её не сразу.
+    expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    user.reset_token_expires = expires
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="auth.reset_link_issued", target=user.email)
+    await db.flush()
+    return {"reset_url": email_service.reset_link(raw), "expires_at": expires}
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

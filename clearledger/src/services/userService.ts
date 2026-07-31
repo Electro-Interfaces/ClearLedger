@@ -32,6 +32,7 @@ export interface AdminUser {
   // скоуп — справка «почему он в пространстве»; у своих сотрудников обычно пусто.
   contract_ids?: string[] | null
   is_superadmin: boolean
+  last_seen_at?: string | null // последний вход/активность — для состава и карточки
   companies: MembershipRef[]
 }
 
@@ -106,6 +107,14 @@ export async function setMemberModules(
 }
 
 /** Назначить доступ члену: именованная роль или ad-hoc набор модулей. */
+/** Ссылка сброса пароля — для передачи мессенджером, когда почта не доходит.
+ *  Одноразовая, 24 часа; выдаётся админом компании, попадает в журнал. */
+export async function issueResetLink(
+  id: string, companyId: string,
+): Promise<{ reset_url: string; expires_at: string }> {
+  return post(`/api/users/${id}/reset-link?company_id=${encodeURIComponent(companyId)}`)
+}
+
 export async function setMemberAccess(
   id: string, companyId: string,
   access: { mode: 'role'; roleId: string } | { mode: 'custom'; modules: string[] | null },
