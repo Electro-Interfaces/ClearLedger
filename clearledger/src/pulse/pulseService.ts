@@ -97,7 +97,7 @@ export interface PulsePersonCard {
   tickets: { number: string | null; title: string; status: string; breached: boolean
     object: string | null; created: string | null }[]
   projects: { title: string; stage: string }[]
-  rooms: { name: string; kind: string | null }[]
+  rooms: { name: string; kind: string | null; count: number }[]
   actions: { action: string; at: string | null; details: unknown }[]
   edits: { week: number; month: number; last: string | null }
 }

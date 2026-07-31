@@ -11,12 +11,15 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowDownRight, ArrowUpRight, Building2, CalendarDays, ChevronDown, ClipboardList,
+  ArrowDownRight, ArrowUpRight, Building2, CalendarDays, ChevronRight, ClipboardList,
   Gauge, HardHat, LifeBuoy, MessageCircle, TrendingUp, Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
 import { STAGE_META, type SiteStage } from '@/services/sitesService'
@@ -430,7 +433,11 @@ export function PulseWeekPage() {
 function PeopleList({ people, seen, companyId }: {
   people: PulsePerson[]; seen: (p: PulsePerson) => string; companyId: string
 }) {
+  // Карточка открывается модальным окном поверх списка (решение МАГа 31.07.2026):
+  // разворот строки уводил список вниз, а руководителю нужно рассмотреть человека,
+  // не теряя строя остальных и не листая экран.
   const [openId, setOpenId] = useState<string | null>(null)
+  const selected = people.find((p) => p.id === openId) ?? null
   return (
     <Card className="py-0">
       <CardContent className="divide-y p-0">
@@ -444,12 +451,11 @@ function PeopleList({ people, seen, companyId }: {
         </div>
 
         {people.map((p) => {
-          const open = openId === p.id
           return (
             <div key={p.email}>
               <button type="button"
-                onClick={() => setOpenId(open ? null : p.id)}
-                aria-expanded={open}
+                onClick={() => setOpenId(p.id)}
+                title={`Открыть карточку: ${p.name}`}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/40">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 truncate text-[13px]">
@@ -496,103 +502,191 @@ function PeopleList({ people, seen, companyId }: {
                   </div>
                 </div>
 
-                <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform',
-                  open && 'rotate-180')} />
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </button>
-
-              {open && <PersonCard companyId={companyId} userId={p.id} />}
             </div>
           )
         })}
       </CardContent>
+
+      {/* Модальное окно карточки — поверх списка, с полной расшифровкой. */}
+      <Dialog open={!!selected} onOpenChange={(v) => !v && setOpenId(null)}>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+          {selected && (
+            <PersonCard companyId={companyId} person={selected} seen={seen}
+              onClose={() => setOpenId(null)} />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }
 
-/** Карточка человека: что у него в работе и куда он ходит. */
-function PersonCard({ companyId, userId }: { companyId: string; userId: string }) {
+/**
+ * Карточка человека в модальном окне: кто это, чем занят и куда перейти.
+ *
+ * Три слоя: характеристики (штатное место и присутствие), работа (заявки,
+ * проекты, чаты) и переходы. Счётчики строки здесь получают расшифровку —
+ * руководителю мало «1018 правок», ему нужно, ЧТО именно человек ведёт.
+ */
+function PersonCard({ companyId, person, seen, onClose }: {
+  companyId: string; person: PulsePerson
+  seen: (p: PulsePerson) => string; onClose: () => void
+}) {
   const navigate = useNavigate()
   const q = useQuery({
-    queryKey: ['pulse-person', companyId, userId],
-    queryFn: () => getPulsePerson(companyId, userId),
+    queryKey: ['pulse-person', companyId, person.id],
+    queryFn: () => getPulsePerson(companyId, person.id),
   })
   const d = q.data
-  if (q.isLoading) return <div className="px-3 pb-3 text-[11px] text-muted-foreground">Загружаем…</div>
-  if (!d?.found) return null
+  const go = (to: string) => { onClose(); navigate(to) }
 
   return (
-    <div className="space-y-3 border-t bg-muted/30 px-3 py-3">
-      <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground">
-        <span>{d.email}</span>
-        {d.head && <span>руководитель: {d.head}</span>}
-        {d.edits.month > 0 && (
-          <span>правок в проектах: {fmtNum(d.edits.week)} за неделю, {fmtNum(d.edits.month)} за месяц</span>
-        )}
-      </div>
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex flex-wrap items-center gap-2">
+          {person.name}
+          {person.is_head && (
+            <Badge variant="outline" className="font-normal">руководитель</Badge>
+          )}
+          {person.party === 'partner' && (
+            <Badge variant="outline" className="font-normal">внешний</Badge>
+          )}
+        </DialogTitle>
+        <DialogDescription>
+          {[person.position, person.department ?? 'вне штатной структуры', seen(person)]
+            .filter(Boolean).join(' · ')}
+        </DialogDescription>
+      </DialogHeader>
 
-      {d.tickets.length > 0 && (
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-            Заявки в работе
+      {q.isLoading && <PulseLoading what="карточки" />}
+      {q.isError && <PulseError what="карточку" onRetry={() => q.refetch()} />}
+
+      {d?.found && (
+        <div className="space-y-4">
+          {/* Характеристики: то, что отвечает «кто это» без листания. */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg border p-3 text-xs md:grid-cols-3">
+            <Field label="Почта" value={d.email} />
+            <Field label="Подразделение" value={d.department ?? 'не назначено'} />
+            <Field label="Руководитель"
+              value={d.head ?? (person.is_head ? 'сам руководитель' : 'не назначен')} />
+            <Field label="Заявок в работе"
+              value={person.breached
+                ? `${person.open} · просрочено ${person.breached}`
+                : String(person.open)}
+              tone={person.breached ? 'warn' : undefined} />
+            <Field label="Ведёт проектов" value={String(person.projects_owned)} />
+            <Field label="Правок в проектах"
+              value={d.edits.month
+                ? `${fmtNum(d.edits.week)} за неделю · ${fmtNum(d.edits.month)} за месяц`
+                : 'нет'} />
+            <Field label="Заявок завёл" value={String(person.authored)} />
+            <Field label="Закрыл за 30 дней" value={String(person.closed_30d)} />
+            <Field label="Действий в журнале" value={`${person.actions_30d} за месяц`} />
           </div>
-          <div className="space-y-1">
-            {d.tickets.slice(0, 8).map((t, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
-                {t.breached && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />}
-                <span className="shrink-0 tabular-nums text-muted-foreground">{t.number ?? '—'}</span>
-                <span className="truncate" title={t.title}>{t.title}</span>
-                {t.object && <span className="shrink-0 text-muted-foreground">· {t.object}</span>}
+
+          {d.tickets.length > 0 && (
+            <Block title={`Заявки в работе · ${d.tickets.length}`}>
+              {d.tickets.slice(0, 10).map((t, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  {t.breached && (
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+                      title="SLA нарушен" />
+                  )}
+                  <span className="shrink-0 tabular-nums text-muted-foreground">
+                    {t.number ?? '—'}
+                  </span>
+                  <span className="truncate" title={t.title}>{t.title}</span>
+                  {t.object && (
+                    <span className="shrink-0 text-muted-foreground">· {t.object}</span>
+                  )}
+                </div>
+              ))}
+            </Block>
+          )}
+
+          {d.projects.length > 0 && (
+            <Block title={`Ведёт проекты · ${d.projects.length}`}>
+              <div className="flex flex-wrap gap-1.5">
+                {d.projects.slice(0, 12).map((pr, i) => (
+                  <Badge key={i} variant="outline" className="font-normal">
+                    {pr.title} · {stageLabel(pr.stage)}
+                  </Badge>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </Block>
+          )}
 
-      {d.projects.length > 0 && (
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-            Ведёт проекты
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {d.projects.slice(0, 10).map((pr, i) => (
-              <Badge key={i} variant="outline" className="font-normal">
-                {pr.title} · {stageLabel(pr.stage)}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {d.actions.length > 0 && (
-        <div>
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-            Последние действия
-          </div>
-          <div className="space-y-0.5">
-            {d.actions.slice(0, 6).map((a, i) => (
-              <div key={i} className="flex gap-2 text-[11px]">
-                <span className="shrink-0 tabular-nums text-muted-foreground">{fmtDate(a.at)}</span>
-                <span className="truncate">{a.action}</span>
+          {d.rooms.length > 0 && (
+            <Block title={`Чаты пространства · ${d.rooms.length}`}>
+              <div className="flex flex-wrap gap-1.5">
+                {d.rooms.slice(0, 14).map((r, i) => (
+                  <Badge key={i} variant="secondary" className="font-normal">{r.name}</Badge>
+                ))}
+                {d.rooms.length > 14 && (
+                  <span className="self-center text-[11px] text-muted-foreground">
+                    и ещё {d.rooms.length - 14}
+                  </span>
+                )}
               </div>
-            ))}
+            </Block>
+          )}
+
+          {d.actions.length > 0 && (
+            <Block title="Последние действия">
+              {d.actions.slice(0, 8).map((a, i) => (
+                <div key={i} className="flex gap-2 text-[11px]">
+                  <span className="shrink-0 tabular-nums text-muted-foreground">
+                    {fmtDate(a.at)}
+                  </span>
+                  <span className="truncate">{a.action}</span>
+                </div>
+              ))}
+            </Block>
+          )}
+
+          {/* Переходы: из карточки видно не только «что», но и куда пойти дальше. */}
+          <div className="flex flex-wrap gap-2 border-t pt-3">
+            <Button size="sm" className="h-8" onClick={() => go('/messages')}>
+              <MessageCircle className="mr-1 h-3.5 w-3.5" />Написать
+            </Button>
+            <Button size="sm" variant="outline" className="h-8"
+              onClick={() => go('/tickets')}>
+              <ClipboardList className="mr-1 h-3.5 w-3.5" />Его заявки
+            </Button>
+            <Button size="sm" variant="outline" className="h-8"
+              onClick={() => go('/projects')}>
+              <HardHat className="mr-1 h-3.5 w-3.5" />Проекты
+            </Button>
+            <Button size="sm" variant="ghost" className="h-8"
+              onClick={() => go(`/admin/company/map?user=${person.id}`)}>
+              Журнал и доступы
+            </Button>
           </div>
         </div>
       )}
+    </>
+  )
+}
 
-      <div className="flex flex-wrap gap-1.5 pt-1">
-        <Button size="sm" variant="outline" className="h-7 text-[11px]"
-          onClick={() => navigate('/messages')}>
-          <MessageCircle className="mr-1 h-3 w-3" />Написать
-        </Button>
-        <Button size="sm" variant="outline" className="h-7 text-[11px]"
-          onClick={() => navigate('/tickets')}>
-          <ClipboardList className="mr-1 h-3 w-3" />Заявки
-        </Button>
-        <Button size="sm" variant="ghost" className="h-7 text-[11px]"
-          onClick={() => navigate(`/admin/company/map?user=${userId}`)}>
-          Журнал и доступы
-        </Button>
+/** Пара «подпись — значение» в характеристиках карточки. */
+function Field({ label, value, tone }: { label: string; value: string; tone?: 'warn' }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">{label}</div>
+      <div className={cn('truncate', tone === 'warn' && 'text-amber-600 dark:text-amber-400')}
+        title={value}>{value}</div>
+    </div>
+  )
+}
+
+function Block({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+        {title}
       </div>
+      <div className="space-y-1">{children}</div>
     </div>
   )
 }

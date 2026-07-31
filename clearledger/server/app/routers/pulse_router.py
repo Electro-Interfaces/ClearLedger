@@ -546,10 +546,14 @@ async def pulse_person(
         order by updated_at desc nulls last limit 20
     """), {"cid": cid, "uid": uid})).all()]
 
-    rooms = [{"name": r.name, "kind": r.kind} for r in (await db.execute(text("""
-        select cr.name, cr.kind from chat_participants cp
+    # Комнаты схлопываем по имени: у приложений их по нескольку с одинаковым
+    # названием («Бухгалтерия» ×3), и в карточке это читалось как ошибка.
+    rooms = [{"name": r.name, "kind": r.kind, "count": r.n} for r in (await db.execute(text("""
+        select cr.name, min(cr.kind) as kind, count(*) as n
+        from chat_participants cp
         join chat_rooms cr on cr.id = cp.room_id
-        where cp.user_id = :uid order by cr.name limit 30
+        where cp.user_id = :uid
+        group by cr.name order by cr.name limit 30
     """), {"uid": uid})).all()]
 
     actions = [{
