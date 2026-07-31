@@ -46,7 +46,7 @@ def test_ledger_replaced_by_products_when_carved():
 
 
 def test_space_management_and_services_always_on():
-    for code in ("admin", "chat", "plan", "conf", "info"):
+    for code in ("admin", "chat", "plan", "conf", "info", "pulse"):
         for profile in (*CARVED_PROFILES, "general", None):
             assert _default_app_on(code, profile) is True, f"{profile}: {code}"
 

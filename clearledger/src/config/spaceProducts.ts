@@ -175,6 +175,9 @@ export type Readiness = 'ready' | 'partial' | 'draft'
 
 export const PRODUCT_READINESS: Record<string, Readiness> = {
   admin: 'ready', data: 'partial', info: 'partial',
+  // pulse — В1 (31.07.2026): экран дня с правилами-сводками и KPI; «Бизнес»,
+  // «Команда» и «Неделя» — следующие волны (ecosystem-deploy/docs/PULSE.md §9).
+  pulse: 'partial',
   // conf — рабочий с 30.07.2026: пространство само подписывает организаторский токен
   // (ключ ledger/1 на meet.dataworker.ru), плитка создаёт комнату и кладёт ссылку для
   // участников в буфер. Ни паролей, ни ручного создания комнат больше не требуется.
@@ -337,7 +340,7 @@ export const pageCode = (path: string) => path.replace(/^\//, '').split('/')[0]
  */
 const ROUTE_APPS: [string, string][] = [
   ['/admin', 'admin'], ['/data', 'data'], ['/messages', 'chat'],
-  ['/info', 'info'], ['/workspace', 'ledger'],
+  ['/info', 'info'], ['/workspace', 'ledger'], ['/pulse', 'pulse'],
 ]
 
 /**
@@ -346,7 +349,7 @@ const ROUTE_APPS: [string, string][] = [
  * человек в «Чатах» видел «ElsyPlus Учёт» и справедливо не понимал, где он.
  */
 const CORE_APP_TITLES: Record<string, string> = {
-  chat: 'Чаты', admin: 'Управление', data: 'Данные', info: 'Инфо',
+  chat: 'Чаты', admin: 'Управление', data: 'Данные', info: 'Инфо', pulse: 'Пульс',
 }
 
 /** Имя приложения Ядра по адресу; null — адрес принадлежит Учёту или продукту. */

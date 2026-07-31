@@ -5517,3 +5517,25 @@ class OpsMeter(Base):
     __table_args__ = (
         Index("ix_ops_meter_company", "company_id", "number"),
     )
+
+
+# ---------------------------------------------------------------------------
+# PulseAck — «принято» на карточке «Пульса» (рабочее место руководителя)
+# ---------------------------------------------------------------------------
+class PulseAck(Base):
+    """Руководитель снял карточку с экрана дня — «сегодня видел».
+
+    Действует до конца суток: назавтра живое условие вернёт карточку само,
+    «принято» не означает «больше не показывать никогда» (ecosystem-deploy/
+    docs/PULSE.md §3). Ack общий на компанию: экран дня один у всего контура
+    руководства, секретарь гасит карточку и для директора.
+    """
+    __tablename__ = "pulse_acks"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    card_key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    acked_on: Mapped[date_type] = mapped_column(Date, primary_key=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    acked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

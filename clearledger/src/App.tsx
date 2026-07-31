@@ -39,6 +39,7 @@ const AdminSectionPage = lazy(() => import('@/pages/AdminSectionPage').then((m) 
 const AdminHomeRedirect = lazy(() => import('@/pages/AdminSectionPage').then((m) => ({ default: m.AdminHomeRedirect })))
 const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ default: m.MessagesPage })))
 const TicketsAppPage = lazy(() => import('@/pages/TicketsAppPage').then((m) => ({ default: m.TicketsAppPage })))
+const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
 const InfoPage = lazy(() => import('@/pages/InfoPage').then((m) => ({ default: m.InfoPage })))
 const ConnectionPage = lazy(() => import('@/pages/oneC/ConnectionPage').then((m) => ({ default: m.ConnectionPage })))
 const SyncPage = lazy(() => import('@/pages/oneC/SyncPage').then((m) => ({ default: m.SyncPage })))
@@ -219,6 +220,8 @@ const router = createBrowserRouter([
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },
           // «Заявки» — трекер пространства на движке Поддержки (docs/TICKETS.md).
           { path: '/tickets', element: <LazyPage><TicketsAppPage /></LazyPage> },
+          // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md).
+          { path: '/pulse', element: <LazyPage><PulseAppPage /></LazyPage> },
           // «Инфо» — знание пространства: то же приложение, что открывается
           // подсказкой в рабочей области, только целиком (docs/INFO.md).
           { path: '/info', element: <LazyPage><InfoPage /></LazyPage> },

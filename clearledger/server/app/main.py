@@ -73,6 +73,7 @@ from app.routers import (
     reports_router,
     settings_router,
     source_types_router,
+    pulse_router,
     tickets_router,
     users_router,
     sources_router,
@@ -202,6 +203,7 @@ API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
 app.include_router(tickets_router.router, prefix=API_PREFIX)
+app.include_router(pulse_router.router, prefix=API_PREFIX)
 app.include_router(departments_router.router, prefix=API_PREFIX)
 app.include_router(users_router.router, prefix=API_PREFIX)
 app.include_router(roles_router.router, prefix=API_PREFIX)

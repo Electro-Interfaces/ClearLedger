@@ -29,6 +29,8 @@ router = APIRouter(prefix="/sso", tags=["SSO ElsyPlus"])
 # а не handoff-токеном и не ссылкой на чужой домен. Манифеста у них нет — источник истины
 # реестр (`eco_apps`), здесь только соответствие «продукт → маршрут».
 INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages",
+                   # «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md).
+                   "pulse": "/pulse",
                    # Продукты разреза Учёта (см. app_registry._CARVED_PRODUCTS и
                    # фронтовую карту config/spaceProducts.ts — маршруты обязаны совпадать).
                    "projects": "/projects", "ops": "/operations", "sales": "/sales",
@@ -44,11 +46,12 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",
                    "chat": "service", "plan": "service",
+                   "pulse": "app",
                    "ledger": "app", "projects": "app", "ops": "app",
                    "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
                    "finance": "app", "netlink": "app", "accounting": "app", "diag": "admin"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
-INTERNAL_SORT = {"admin": 5, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
+INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
                  "finance": 25, "accounting": 26,
                  "chat": 30, "plan": 40, "conf": 50, "connect": 59, "data": 60, "diag": 61, "info": 62}
