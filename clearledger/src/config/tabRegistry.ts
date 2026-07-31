@@ -6,7 +6,7 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone } from 'lucide-react'
+import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity } from 'lucide-react'
 import { SPACE_PRODUCTS, SPACE_PAGES, productLabel } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
@@ -38,6 +38,13 @@ const STATIC: Record<string, NavItemDef> = {}
 for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]) {
   STATIC[it.to] = it
 }
+// «Пульс» — рабочее место руководителя: его разделы табуются как обычные экраны,
+// чтобы директор мог закрепить «Экран дня» и возвращаться к нему одним кликом.
+for (const [to, label] of [['/pulse', 'Пульс'], ['/pulse/business', 'Бизнес'],
+  ['/pulse/team', 'Команда'], ['/pulse/week', 'Неделя']] as const) {
+  STATIC[to] = { to, icon: Activity, label }
+}
+
 // Продукты пространства: в меню Учёта их нет (открываются плиткой со стола), но вкладка
 // и полноэкранная раскладка нужны такие же, как рабочей области.
 for (const p of SPACE_PRODUCTS) {

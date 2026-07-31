@@ -16,6 +16,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
   Archive, Megaphone, MessagesSquare, UserRound, Users2,
   BookOpen, Compass, Scale, FileSignature, HelpCircle,
+  Activity, TrendingUp, Users, CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -93,6 +94,14 @@ const INFO_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] 
   { key: 'faq', label: 'Частые вопросы', icon: HelpCircle },
 ]
 
+/** Разделы «Пульса»: у каждого свой вопрос, порядок — от срочного к обзорному. */
+const PULSE_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
+  { to: '/pulse', label: 'Экран дня', icon: Activity },
+  { to: '/pulse/business', label: 'Бизнес', icon: TrendingUp },
+  { to: '/pulse/team', label: 'Команда', icon: Users },
+  { to: '/pulse/week', label: 'Неделя', icon: CalendarDays },
+]
+
 const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] = [
   { key: 'all', label: 'Все чаты', icon: MessagesSquare },
   { key: 'channel', label: 'Каналы', icon: Megaphone },
@@ -120,6 +129,22 @@ export function SidebarNavContent({ collapsed = false, onNavigate }: {
   // разделами: у управления перепиской те же виды, что и в самом чате (канал, группа,
   // личный) плюс архив. Без этой ветки экран открывался без левого меню — как страница,
   // а не как приложение.
+  // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md §3): четыре
+  // раздела, разные вопросы одного дня. «Экран дня» — что требует вмешательства прямо
+  // сейчас; «Бизнес» — как идут дела вообще; «Команда» — у кого затор; «Неделя» — итоги.
+  if (pathname === '/pulse' || pathname.startsWith('/pulse/')) {
+    return (
+      <SidebarGroup className="py-0">
+        <SidebarMenu>
+          {PULSE_SECTIONS.map((s) => (
+            <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}
+              collapsed={collapsed} onNavigate={onNavigate} active={pathname === s.to} />
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+    )
+  }
+
   if (pathname === '/messages' || pathname.startsWith('/messages/')) {
     const view = new URLSearchParams(search).get('view') || 'all'
     return (

@@ -272,6 +272,217 @@ async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/business")
+async def pulse_business(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Бизнес» — картина для куратора: сеть и продажи + развитие сети.
+
+    Ни фамилий, ни заявок (PULSE.md §3): куратора интересует, в каком состоянии
+    дело и как оно движется, а операциями занят директор.
+    """
+    await assert_company_member(company_id, current_user, db)
+    cid = str(company_id)
+
+    as_of = (await db.execute(text(
+        "select max(started_at) from charge_sessions where company_id = :cid"
+    ), {"cid": cid})).scalar_one_or_none()
+
+    net: list[dict[str, Any]] = []
+    trend: list[dict[str, Any]] = []
+    if as_of is not None:
+        m = (await db.execute(text("""
+            select count(*) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days') as s30,
+                   coalesce(sum(amount) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days'), 0) as r30,
+                   coalesce(sum(energy_kwh) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days'), 0) as e30,
+                   count(*) filter (where started_at <= CAST(:as_of AS timestamp) - interval '30 days'
+                                    and started_at > CAST(:as_of AS timestamp) - interval '60 days') as s30p,
+                   coalesce(sum(amount) filter (where started_at <= CAST(:as_of AS timestamp) - interval '30 days'
+                                    and started_at > CAST(:as_of AS timestamp) - interval '60 days'), 0) as r30p,
+                   coalesce(sum(energy_kwh) filter (where started_at <= CAST(:as_of AS timestamp) - interval '30 days'
+                                    and started_at > CAST(:as_of AS timestamp) - interval '60 days'), 0) as e30p,
+                   count(distinct location_id) filter (where started_at > CAST(:as_of AS timestamp) - interval '30 days') as live
+            from charge_sessions where company_id = :cid
+        """), {"cid": cid, "as_of": as_of})).one()
+        net = [
+            _kpi("revenue", "Выручка за 30 дней", float(m.r30), unit="₽",
+                 delta_pct=_dpct(float(m.r30), float(m.r30p))),
+            _kpi("energy", "Отпущено", float(m.e30), unit="кВт·ч",
+                 delta_pct=_dpct(float(m.e30), float(m.e30p))),
+            _kpi("sessions", "Зарядных сессий", m.s30, delta_pct=_dpct(m.s30, m.s30p)),
+            _kpi("live", "Работающих станций", m.live, note="давали сессии за 30 дней"),
+        ]
+        # Помесячно за полгода — форма кривой важнее точных чисел.
+        trend = [{"month": r.m.strftime("%m.%Y"), "revenue": float(r.rev), "sessions": r.n}
+                 for r in (await db.execute(text("""
+            select date_trunc('month', started_at) as m, count(*) as n,
+                   coalesce(sum(amount), 0) as rev
+            from charge_sessions
+            where company_id = :cid and started_at > CAST(:as_of AS timestamp) - interval '6 months'
+            group by 1 order by 1
+        """), {"cid": cid, "as_of": as_of})).all()]
+
+    # Развитие сети: воронка от переговоров до ввода — то, чем растёт бизнес.
+    funnel = [{"stage": r.stage, "count": r.n} for r in (await db.execute(text("""
+        select stage, count(*) as n from ezs_projects
+        where company_id = :cid and stage <> 'archive'
+        group by stage order by n desc
+    """), {"cid": cid})).all()]
+    dev = (await db.execute(text("""
+        select count(*) filter (where nullif(commissioned_on,'')::date >= current_date - 90) as comm_90,
+               count(*) filter (where nullif(commissioned_on,'') is not null) as comm_all,
+               count(*) as total
+        from ezs_projects where company_id = :cid
+    """), {"cid": cid})).one()
+    # Вехи: только события, которые двигают дело, — смена стадии, гейт, документ,
+    # заметка. Правки полей (`edit`, тысяча записей на пилоте: «Area m2», «Адрес»)
+    # куратору не веха, а шум чужой работы.
+    events = [{"at": r.at.isoformat() if r.at else None, "text": r.txt}
+              for r in (await db.execute(text("""
+        select created_at as at,
+               coalesce(nullif("text",''), 'стадия: ' || coalesce(to_stage,'—')) as txt
+        from ezs_site_events
+        where company_id = :cid and kind in ('stage','gate','doc','note','import')
+        order by created_at desc limit 8
+    """), {"cid": cid})).all()]
+
+    return {
+        "as_of": as_of.isoformat() if as_of else None,
+        "net": net, "trend": trend, "funnel": funnel,
+        "development": {"commissioned_90d": dev.comm_90, "commissioned_total": dev.comm_all,
+                        "portfolio": dev.total},
+        "events": events,
+    }
+
+
+@router.get("/team")
+async def pulse_team(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Команда» — у кого затор: люди, их подразделения, нагрузка по заявкам.
+
+    Не слежка «кто во сколько пришёл» (PULSE.md §3), а ответ на вопрос, кому
+    помочь и у кого работа стоит. Заявки Поддержки соединяются с людьми Ядра по
+    email — той же связкой, что и разрез по подразделениям в «Заявках».
+    """
+    await assert_company_member(company_id, current_user, db)
+    cid = str(company_id)
+
+    people = [{
+        "name": r.name, "email": r.email, "department": r.dept,
+        "is_head": r.is_head, "party": r.party_type,
+        "last_seen": r.last_seen_at.isoformat() if r.last_seen_at else None,
+        "open": r.open_tickets, "breached": r.breached,
+    } for r in (await db.execute(text("""
+        select u.name, u.email, u.last_seen_at, uc.party_type,
+               od.name as dept,
+               (od.head_user_id = u.id) as is_head,
+               coalesce(t.open, 0) as open_tickets,
+               coalesce(t.breached, 0) as breached
+        from users u
+        join user_companies uc on uc.user_id = u.id and uc.company_id = :cid
+        left join org_departments od on od.id = uc.department_id
+        left join lateral (
+            select count(*) as open,
+                   count(*) filter (where coalesce(tk.sla_breached,false)) as breached
+            from public.tickets tk
+            join public.users au on au.id = coalesce(tk.current_assignee_id, tk.assigned_to)
+            where lower(au.email) = lower(u.email)
+              and tk.status not in ('closed','cancelled')
+              and coalesce(tk.is_deleted,false) = false
+              and coalesce(tk.is_archived,false) = false
+        ) t on true
+        order by coalesce(t.open,0) desc, u.last_seen_at desc nulls last
+    """), {"cid": cid})).all()]
+
+    departments = [{
+        "name": r.name, "head": r.head, "people": r.people,
+    } for r in (await db.execute(text("""
+        select d.name, hu.name as head,
+               (select count(*) from user_companies uc2
+                 where uc2.department_id = d.id and uc2.company_id = :cid) as people
+        from org_departments d
+        left join users hu on hu.id = d.head_user_id
+        where d.company_id = :cid
+        order by d.name
+    """), {"cid": cid})).all()]
+
+    return {"people": people, "departments": departments}
+
+
+@router.get("/week")
+async def pulse_week(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Неделя» — как прошла неделя: цифры против прошлой и что сдвинулось.
+
+    Пока считается на запрос; снимок с доставкой push/почта/чат — волна В2
+    (PULSE.md §3), поэтому формат ответа сразу такой, каким его будет удобно
+    складывать в снимок.
+    """
+    await assert_company_member(company_id, current_user, db)
+    cid = str(company_id)
+
+    as_of = (await db.execute(text(
+        "select max(started_at) from charge_sessions where company_id = :cid"
+    ), {"cid": cid})).scalar_one_or_none()
+
+    rows: list[dict[str, Any]] = []
+    if as_of is not None:
+        w = (await db.execute(text("""
+            select count(*) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days') as s,
+                   coalesce(sum(amount) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days'), 0) as r,
+                   count(*) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
+                                    and started_at > CAST(:as_of AS timestamp) - interval '14 days') as sp,
+                   coalesce(sum(amount) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
+                                    and started_at > CAST(:as_of AS timestamp) - interval '14 days'), 0) as rp
+            from charge_sessions where company_id = :cid
+        """), {"cid": cid, "as_of": as_of})).one()
+        rows.append({"label": "Выручка", "value": float(w.r), "prev": float(w.rp), "unit": "₽"})
+        rows.append({"label": "Зарядных сессий", "value": w.s, "prev": w.sp, "unit": None})
+
+    t = (await db.execute(text("""
+        select count(*) filter (where created_at >= now() - interval '7 days') as created,
+               count(*) filter (where closed_at >= now() - interval '7 days') as closed,
+               count(*) filter (where created_at >= now() - interval '14 days'
+                                and created_at < now() - interval '7 days') as created_prev,
+               count(*) filter (where closed_at >= now() - interval '14 days'
+                                and closed_at < now() - interval '7 days') as closed_prev
+        from public.tickets
+        where coalesce(is_deleted,false)=false and coalesce(is_archived,false)=false
+    """))).one()
+    rows.append({"label": "Заявок поступило", "value": t.created, "prev": t.created_prev, "unit": None})
+    rows.append({"label": "Заявок закрыто", "value": t.closed, "prev": t.closed_prev, "unit": None})
+
+    # Движение проектов — смены стадий и гейты, а не правки полей карточки.
+    moved = (await db.execute(text("""
+        select count(*) from ezs_site_events
+        where company_id = :cid and kind in ('stage','gate')
+          and created_at >= now() - interval '7 days'
+    """), {"cid": cid})).scalar_one()
+    rows.append({"label": "Движений по проектам", "value": moved, "prev": None, "unit": None})
+
+    # Что именно сдвинулось — списком, а не одной цифрой: руководителю нужны имена.
+    highlights = [{"at": r.at.isoformat() if r.at else None, "text": r.txt}
+                  for r in (await db.execute(text("""
+        select created_at as at,
+               coalesce(nullif("text",''), 'стадия: ' || coalesce(to_stage,'—')) as txt
+        from ezs_site_events
+        where company_id = :cid and kind in ('stage','gate','doc','note')
+          and created_at >= now() - interval '7 days'
+        order by created_at desc limit 10
+    """), {"cid": cid})).all()]
+
+    return {"rows": rows, "highlights": highlights,
+            "as_of": as_of.isoformat() if as_of else None}
+
+
 class AckIn(BaseModel):
     company_id: str
     card_key: str

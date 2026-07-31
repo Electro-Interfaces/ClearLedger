@@ -41,3 +41,49 @@ export const getPulseDay = (companyId: string) =>
 
 export const ackCard = (companyId: string, cardKey: string) =>
   post<{ ok: boolean }>('/api/pulse/ack', { company_id: companyId, card_key: cardKey })
+
+/* ── «Бизнес»: картина для куратора ──────────────────────────────────── */
+
+export interface PulseBusiness {
+  as_of: string | null
+  net: PulseKpi[]
+  trend: { month: string; revenue: number; sessions: number }[]
+  funnel: { stage: string; count: number }[]
+  development: { commissioned_90d: number; commissioned_total: number; portfolio: number }
+  events: { at: string | null; text: string }[]
+}
+
+export const getPulseBusiness = (companyId: string) =>
+  get<PulseBusiness>('/api/pulse/business', { company_id: companyId })
+
+/* ── «Команда»: у кого затор ─────────────────────────────────────────── */
+
+export interface PulsePerson {
+  name: string
+  email: string
+  department: string | null
+  is_head: boolean
+  party: string | null
+  last_seen: string | null
+  open: number
+  breached: number
+}
+
+export interface PulseTeam {
+  people: PulsePerson[]
+  departments: { name: string; head: string | null; people: number }[]
+}
+
+export const getPulseTeam = (companyId: string) =>
+  get<PulseTeam>('/api/pulse/team', { company_id: companyId })
+
+/* ── «Неделя»: дайджест ──────────────────────────────────────────────── */
+
+export interface PulseWeek {
+  as_of: string | null
+  rows: { label: string; value: number; prev: number | null; unit: string | null }[]
+  highlights: { at: string | null; text: string }[]
+}
+
+export const getPulseWeek = (companyId: string) =>
+  get<PulseWeek>('/api/pulse/week', { company_id: companyId })

@@ -96,10 +96,6 @@ export function MainLayout() {
   // рабочий стол, разрезы «Сверка данных», нормализация и хранилище «Документы».
   // На десктопе overflow решает per-tab KeepAliveOutlet; здесь — только для мобильной ветки.
   const isWorkspace = isWorkspacePath(location.pathname)
-  // «Пульс» — экран дня руководителя: цельный, без рельсы (ecosystem-deploy/docs/PULSE.md).
-  // Меню Учёта звало бы директора ровно туда, куда ему не надо, — вести данные руками.
-  // Свои разделы («Бизнес», «Команда», «Неделя») придут волнами В2–В3, тогда и рельса.
-  const isPulse = location.pathname === '/pulse' || location.pathname.startsWith('/pulse/')
 
   return (
     <SidebarProvider
@@ -116,7 +112,7 @@ export function MainLayout() {
       />
 
       <div className="flex flex-1 min-h-0">
-        {!isMobile && !isPulse && <AppSidebar />}
+        {!isMobile && <AppSidebar />}
 
         {isMobile && (
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>

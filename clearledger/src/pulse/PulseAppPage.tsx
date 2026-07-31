@@ -59,10 +59,12 @@ export function PulseAppPage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-semibold">
-            <Activity className="h-5 w-5 text-primary" />Пульс
+            <Activity className="h-5 w-5 text-primary" />Экран дня
           </h1>
+          {/* Экран обязан объяснять себя сам: руководитель заходит сюда раз в день
+              и не должен вспоминать, что это за цифры и откуда. */}
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {q.data ? asOfLabel(q.data.as_of, q.data.stale_days) : 'Экран дня руководителя'}
+            Что требует вмешательства сегодня и как идут дела
           </p>
         </div>
         {/* Статус за 5 секунд: одно слово раньше, чем прочитана первая карточка. */}
@@ -88,8 +90,25 @@ export function PulseAppPage() {
 
       {q.data && (
         <>
-          <CardsBlock cards={q.data.cards} companyId={company.id} />
-          <KpiGrid kpi={q.data.kpi} />
+          <section className="space-y-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Требуют вмешательства
+            </h2>
+            <CardsBlock cards={q.data.cards} companyId={company.id} />
+          </section>
+
+          <section className="space-y-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Как идут дела
+              </h2>
+              {/* Дата данных — рядом с цифрами, а не в шапке: она относится к ним. */}
+              <span className="text-[11px] text-muted-foreground">
+                {asOfLabel(q.data.as_of, q.data.stale_days)}
+              </span>
+            </div>
+            <KpiGrid kpi={q.data.kpi} />
+          </section>
         </>
       )}
     </div>
