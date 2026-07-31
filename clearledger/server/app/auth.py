@@ -207,12 +207,37 @@ async def resolve_member_modules(m: UserCompany, db: AsyncSession) -> list[str] 
     return m.modules
 
 
+# Продукты пространства, покрывающие серверный модуль. Права раздаются ключами
+# продуктов (`sales` — весь продукт, `sales:variances` — его пункт), а ручки
+# гейтятся модулями Учёта (`management`): без карты любой явный набор получал
+# в меню пункт, а от сервера — 403 «Доступ запрещён» на данные этого же пункта.
+# Гранулярность до пункта остаётся клиентским гейтом (см. productAccess.ts) —
+# сервер держит границу продукта, как и раньше держал границу модуля.
+_MODULE_PRODUCTS: dict[str, tuple[str, ...]] = {
+    "management": ("sales", "ops"),
+    "store": ("shop",),
+    "accounting": ("finance",),
+    "financial": ("finance",),
+    "tax": ("finance",),
+}
+
+
+def _module_allowed(module_key: str, mods: list[str]) -> bool:
+    if module_key in mods or f"ledger:{module_key}" in mods or "ledger" in mods:
+        return True
+    for product in _MODULE_PRODUCTS.get(module_key, ()):
+        if product in mods or any(k.startswith(product + ":") for k in mods):
+            return True
+    return False
+
+
 async def check_module_access(
     user: User, cid: uuid.UUID, db: AsyncSession, module_key: str
 ) -> None:
     """RBAC-проверка модуля для УЖЕ резолвнутой компании (когда cid получен из
     X-Company-Id через scope_company_id). Полный доступ: суперадмин, admin-член,
-    эффективные modules=NULL. Иначе 403, если module_key не в разрешённых.
+    эффективные modules=NULL. Иначе 403, если ни module_key, ни покрывающий его
+    продукт (или пункт продукта) не входят в разрешённые.
     Используется гейтом роутеров со скоупом «по юзеру» (store и т.п.)."""
     if user.is_superadmin:
         return
@@ -222,7 +247,7 @@ async def check_module_access(
     mods = await resolve_member_modules(m, db)
     if mods is None:
         return
-    if module_key not in mods:
+    if not _module_allowed(module_key, mods):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Нет доступа к модулю",
