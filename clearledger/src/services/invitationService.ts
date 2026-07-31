@@ -29,6 +29,10 @@ export interface AcceptPreview {
   company_name: string
   role: 'user' | 'admin'
   user_exists: boolean
+  /** Должность из приглашения — предзаполняет форму, приглашённый может поправить. */
+  position?: string | null
+  /** До какого момента действует ссылка — страница показывает срок явно. */
+  expires_at?: string | null
 }
 
 export async function listInvitations(companyId: string): Promise<Invitation[]> {
@@ -60,9 +64,9 @@ export async function getAcceptPreview(token: string): Promise<AcceptPreview> {
 }
 
 /** Принять приглашение. Новый пользователь (name+password) → TokenResponse
- *  (автологин); существующий → {joined:true}. */
+ *  (автологин); существующий → {joined:true}. position — уточнённая должность. */
 export async function acceptInvitation(
-  token: string, data: { name?: string; password?: string },
+  token: string, data: { name?: string; password?: string; position?: string },
 ): Promise<TokenResponse | { joined: true; user_exists: true }> {
   return post(`/api/invitations/accept/${encodeURIComponent(token)}`, data)
 }

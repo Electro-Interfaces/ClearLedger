@@ -61,9 +61,12 @@ function CopyButton({ text, label, icon, variant = 'outline' }: {
   )
 }
 
-/** Готовый текст для мессенджера — чтобы админ не сочинял его каждый раз. */
+/** Готовый текст для мессенджера — чтобы админ не сочинял его каждый раз.
+ *  Без бренда платформы: приглашают в пространство КОМПАНИИ (white-label). */
 function messageText(inv: Invitation, companyName?: string): string {
-  const where = companyName ? `в TradeLedger («${companyName}»)` : 'в TradeLedger'
+  const where = companyName
+    ? `в рабочее пространство компании «${companyName}»`
+    : 'в рабочее пространство компании'
   return (
     `Приглашаю вас ${where}. Перейдите по ссылке, укажите ФИО и задайте пароль:\n` +
     `${inv.invite_url}\n` +

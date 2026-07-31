@@ -195,6 +195,7 @@ class UserAdminResponse(BaseModel):
     object_scope: list[str] | None = None  # скоуп данных: объекты; null = вся сеть
     contract_ids: list[str] | None = None  # основание допуска: договоры (справка, не права)
     is_superadmin: bool
+    last_seen_at: datetime | None = None   # последний вход/активность — для состава и карточки
     companies: list[CompanyMembership] = []
 
 
@@ -242,11 +243,17 @@ class AcceptPreview(BaseModel):
     company_name: str
     role: str
     user_exists: bool
+    # Должность из приглашения — предзаполняет форму; приглашённый может поправить.
+    position: str | None = None
+    # Срок действия ссылки: страница обязана его показывать, а не молчать до истечения.
+    expires_at: datetime | None = None
 
 
 class AcceptInvite(BaseModel):
     name: str | None = Field(None, max_length=255)
     password: str | None = Field(None, min_length=6)
+    # Уточнённая приглашённым должность; пусто — остаётся из приглашения.
+    position: str | None = Field(None, max_length=150)
 
 
 # ===== Company =====

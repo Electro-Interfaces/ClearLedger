@@ -21,6 +21,7 @@ export function AcceptInvitePage() {
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
+  const [position, setPosition] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -29,7 +30,13 @@ export function AcceptInvitePage() {
   useEffect(() => {
     let alive = true
     invitationService.getAcceptPreview(token)
-      .then((p) => { if (alive) setPreview(p) })
+      .then((p) => {
+        if (!alive) return
+        setPreview(p)
+        // Должность из приглашения — заготовка: админ часто пишет её наугад,
+        // приглашённый поправляет на свою настоящую.
+        setPosition(p.position ?? '')
+      })
       .catch((e) => { if (alive) setLoadError(e?.message || 'Приглашение недействительно') })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
@@ -44,7 +51,7 @@ export function AcceptInvitePage() {
         await invitationService.acceptInvitation(token, {})
         setJoined(true)
       } else {
-        const res = await invitationService.acceptInvitation(token, { name, password })
+        const res = await invitationService.acceptInvitation(token, { name, password, position })
         if ('access_token' in res) {
           await applySession(res.access_token)
           navigate('/', { replace: true })
@@ -59,14 +66,20 @@ export function AcceptInvitePage() {
     }
   }
 
+  // До какого числа живёт ссылка — прямо на странице, а не сюрпризом при истечении.
+  const validUntil = preview?.expires_at
+    ? new Date(preview.expires_at).toLocaleDateString('ru-RU')
+    : null
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
       <div className="w-full max-w-sm space-y-6">
+        {/* Без бренда платформы: человек входит в пространство СВОЕЙ компании. */}
         <div className="flex flex-col items-center gap-2">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <FileText className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-bold">Ledger</h1>
+          <h1 className="text-2xl font-bold">{preview?.company_name ?? 'Рабочее пространство'}</h1>
         </div>
 
         {loading && (
@@ -94,6 +107,9 @@ export function AcceptInvitePage() {
             <div className="rounded-lg border border-border/50 p-3 text-sm">
               <p>Вас приглашают в компанию <b>«{preview.company_name}»</b></p>
               <p className="text-muted-foreground">Email: {preview.email} · Роль: {ROLE_LABEL[preview.role] ?? preview.role}</p>
+              {validUntil && (
+                <p className="mt-0.5 text-xs text-muted-foreground">Ссылка действует до {validUntil}.</p>
+              )}
             </div>
 
             {error && <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
@@ -104,9 +120,18 @@ export function AcceptInvitePage() {
               </p>
             ) : (
               <>
+                <p className="text-xs text-muted-foreground">
+                  Укажите ФИО и проверьте должность — впишите, как правильно у вас.
+                  Изменить нельзя только email: приглашение выписано на него.
+                </p>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">ФИО</label>
                   <input value={name} onChange={(e) => setName(e.target.value)} required placeholder="Фамилия Имя Отчество"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Должность</label>
+                  <input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="напр. Бухгалтер"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div className="space-y-2">

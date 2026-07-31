@@ -8,6 +8,7 @@ aiosmtplib (async). На проде Mailcow на том же хосте — SMTP
 """
 import logging
 import ssl
+from datetime import datetime
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr
 
@@ -26,31 +27,44 @@ def invite_link(token: str) -> str:
 
 async def send_invite(
     to_email: str, token: str, company_name: str,
-    inviter: str | None, role: str,
+    inviter: str | None, role: str, expires_at: datetime | None = None,
 ) -> bool:
     """Отправляет приглашение в компанию. Возвращает True при отправке,
     False — если SMTP не сконфигурирован (ссылка ушла в лог, dev-режим)."""
     link = invite_link(token)
     role_label = _ROLE_LABEL.get(role, role)
-    subject = f"Приглашение в TradeLedger — {company_name}"
+    # Срок — прямо в письме: человек открывает его через неделю, видит «ссылка
+    # недействительна» и решает, что она битая, хотя она просто истекла.
+    valid_until = f" Ссылка действует до {expires_at.strftime('%d.%m.%Y')}." if expires_at else ""
+    # Без брендов платформы в письме: человек получает приглашение в пространство
+    # СВОЕЙ компании, чужие имена (TradeLedger/ElsyPlus) в почте — white-label-дыра.
+    subject = f"Приглашение в рабочее пространство — {company_name}"
     who = f"{inviter} приглашает" if inviter else "Вас приглашают"
     text = (
-        f"{who} присоединиться к компании «{company_name}» в TradeLedger "
+        f"{who} присоединиться к рабочему пространству компании «{company_name}» "
         f"в роли «{role_label}».\n\n"
-        f"Чтобы принять приглашение и задать пароль, перейдите по ссылке:\n{link}\n\n"
+        f"Перейдите по ссылке, чтобы принять приглашение:\n{link}\n\n"
+        f"По ссылке вы укажете своё ФИО, при необходимости поправите должность "
+        f"и зададите пароль. Изменить нельзя только адрес почты — приглашение "
+        f"выписано на него.{valid_until}\n\n"
+        f"Если приглашение вышлют повторно, работать будет только новая ссылка.\n"
         f"Если вы не ожидали это письмо — просто проигнорируйте его."
     )
     html = f"""\
 <div style="font-family:system-ui,Arial,sans-serif;max-width:480px;margin:0 auto;color:#1f2937">
-  <h2 style="color:#2563eb;margin:0 0 8px">TradeLedger</h2>
-  <p>{who} присоединиться к компании <b>«{company_name}»</b> в роли <b>{role_label}</b>.</p>
+  <h2 style="color:#2563eb;margin:0 0 8px">Рабочее пространство</h2>
+  <p>{who} присоединиться к рабочему пространству компании <b>«{company_name}»</b> в роли <b>{role_label}</b>.</p>
   <p style="margin:24px 0">
     <a href="{link}" style="background:#2563eb;color:#fff;text-decoration:none;
        padding:12px 20px;border-radius:8px;display:inline-block">Принять приглашение</a>
   </p>
+  <p style="color:#6b7280;font-size:13px">По ссылке вы укажете своё ФИО, при необходимости
+    поправите должность и зададите пароль. Изменить нельзя только адрес почты —
+    приглашение выписано на него.{valid_until}</p>
   <p style="color:#6b7280;font-size:13px">Или скопируйте ссылку:<br>
     <a href="{link}" style="color:#2563eb">{link}</a></p>
   <p style="color:#9ca3af;font-size:12px;margin-top:24px">
+    Если приглашение вышлют повторно, работать будет только новая ссылка.
     Если вы не ожидали это письмо — просто проигнорируйте его.</p>
 </div>"""
 
@@ -146,16 +160,16 @@ async def send_password_reset(to_email: str, token: str) -> bool:
     """Письмо для восстановления пароля. True при отправке через SMTP,
     False — если SMTP не сконфигурирован (dev-режим: ссылка в лог)."""
     link = reset_link(token)
-    subject = "Восстановление пароля — TradeLedger"
+    subject = "Восстановление пароля — рабочее пространство"
     text = (
-        "Вы запросили восстановление пароля в TradeLedger.\n\n"
+        "Вы запросили восстановление пароля в рабочем пространстве.\n\n"
         f"Чтобы задать новый пароль, перейдите по ссылке:\n{link}\n\n"
         "Ссылка действует 1 час. Если вы не запрашивали восстановление — "
         "просто проигнорируйте это письмо."
     )
     html = f"""\
 <div style="font-family:system-ui,Arial,sans-serif;max-width:480px;margin:0 auto;color:#1f2937">
-  <h2 style="color:#2563eb;margin:0 0 8px">TradeLedger</h2>
+  <h2 style="color:#2563eb;margin:0 0 8px">Рабочее пространство</h2>
   <p>Вы запросили <b>восстановление пароля</b>. Чтобы задать новый пароль:</p>
   <p style="margin:24px 0">
     <a href="{link}" style="background:#2563eb;color:#fff;text-decoration:none;

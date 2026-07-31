@@ -87,7 +87,7 @@ async def _send(inv: Invitation, raw_token: str, company: Company, inviter: User
     try:
         return await email_service.send_invite(
             inv.email, raw_token, company.name,
-            inviter.name if inviter else None, inv.role,
+            inviter.name if inviter else None, inv.role, inv.expires_at,
         )
     except Exception as exc:  # не валим запрос, если SMTP недоступен
         import logging
@@ -219,13 +219,33 @@ async def resend_invitation(
 
 # ─── Принятие приглашения (публичное, без авторизации) ──────────────────────
 async def _valid_invite(token: str, db: AsyncSession) -> Invitation:
+    """Причина отказа — словами. «Приглашение недействительно» без объяснения
+    заставляло людей стучаться админу с «битой ссылкой», хотя чаще всего они
+    просто открыли ссылку из предыдущего письма после перевыпуска."""
     inv = (
         await db.execute(select(Invitation).where(Invitation.token_hash == _hash(token)))
     ).scalar_one_or_none()
-    if inv is None or inv.status != "pending":
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение недействительно")
+    if inv is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Ссылка недействительна. Если приглашение отправляли несколько раз, "
+            "работает только ссылка из последнего письма. Попросите администратора "
+            "выслать приглашение ещё раз.")
+    if inv.status == "accepted":
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            "Это приглашение уже принято. Войдите со своим email и паролем; "
+            "если пароль забыт — восстановите его на странице входа.")
+    if inv.status != "pending":
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            "Приглашение отозвано администратором компании. Если это ошибка — "
+            "попросите выслать новое.")
     if inv.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status.HTTP_410_GONE, "Срок приглашения истёк")
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            f"Срок действия ссылки истёк: она работает {INVITE_TTL.days} дней "
+            "с момента отправки. Попросите администратора выслать приглашение заново.")
     return inv
 
 
@@ -238,6 +258,7 @@ async def preview_invite(token: str, db: AsyncSession = Depends(get_db)):
     ).scalar_one_or_none() is not None
     return AcceptPreview(
         email=inv.email, company_name=company.name, role=inv.role, user_exists=user_exists,
+        position=inv.position, expires_at=inv.expires_at,
     )
 
 
@@ -249,6 +270,9 @@ async def accept_invite(
 ):
     inv = await _valid_invite(token, db)
     cid = inv.company_id
+    # Должность приглашённый может уточнить сам — админ при приглашении часто
+    # пишет её наугад. Зафиксирован только email: он и есть приглашение.
+    position = (payload.position or "").strip() or inv.position
 
     user = (
         await db.execute(select(User).where(User.email == inv.email))
@@ -258,7 +282,7 @@ async def accept_invite(
         # Существующий — добавляем членство с ролью/должностью, без автологина.
         if not await _is_member(user.id, cid, db):
             db.add(UserCompany(user_id=user.id, company_id=cid,
-                               role=inv.role, position=inv.position,
+                               role=inv.role, position=position,
                                party_type=getattr(inv, "party_type", None) or "internal",
                                organization_id=inv.organization_id))
         inv.status = "accepted"
@@ -276,7 +300,7 @@ async def accept_invite(
     db.add(user)
     await db.flush()
     db.add(UserCompany(user_id=user.id, company_id=cid,
-                       role=inv.role, position=inv.position,
+                       role=inv.role, position=position,
                        party_type=getattr(inv, "party_type", None) or "internal",
                        organization_id=inv.organization_id))
     inv.status = "accepted"
