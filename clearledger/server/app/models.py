@@ -161,10 +161,10 @@ class UserCompany(Base):
     # у подрядчика это его договор обслуживания. Список, потому что оснований бывает
     # несколько (рамочный плюс на объект); NULL или пусто — основание не указано.
     contract_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    # Подразделение по штатной структуре (departments). NULL — вне структуры.
+    # Подразделение по штатной структуре (org_departments). NULL — вне структуры.
     # Через него — руководитель, цепочка эскалации и подача людей по отделам.
     department_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("org_departments.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -180,8 +180,12 @@ class Department(Base):
     По нему строится цепочка эскалации (сначала начальник подразделения, потом
     выше — не сразу директору), подача людей по отделам и, дальше, права и
     скоупы данных на уровне подразделения.
+
+    Имя org_departments, а не departments: у Поддержки в той же базе (schema
+    public) есть своя departments, а create_all ищет по search_path — совпадающее
+    имя молча резолвится в чужую схему (та же грабля, что с core.users).
     """
-    __tablename__ = "departments"
+    __tablename__ = "org_departments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
@@ -190,7 +194,7 @@ class Department(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Родительское подразделение: NULL — верхний уровень (дирекция).
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("org_departments.id", ondelete="SET NULL"), nullable=True
     )
     # Руководитель: к нему идёт первая эскалация по людям этого подразделения.
     head_user_id: Mapped[uuid.UUID | None] = mapped_column(

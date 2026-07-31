@@ -58,8 +58,10 @@ async def create_all() -> None:
         # + period_status и discrepancy_* (см. docs/sverka-spec.md §7a):
         # обязательная отметка «закрытый период» и расхождений (включая копеечные).
         for stmt in (
-            # Штатная структура: подразделение в членстве (departments создаёт create_all).
-            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES departments(id) ON DELETE SET NULL",
+            # Штатная структура: подразделение в членстве (org_departments создаёт
+            # create_all; имя НЕ departments — коллизия с одноимённой таблицей
+            # Поддержки в public уводила REFERENCES в чужую схему без прав).
+            "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS department_id UUID REFERENCES org_departments(id) ON DELETE SET NULL",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS external_number VARCHAR(200)",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS external_date VARCHAR(20)",
             "ALTER TABLE accounting_docs ADD COLUMN IF NOT EXISTS operation_type VARCHAR(100)",
