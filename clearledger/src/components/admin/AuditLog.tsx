@@ -40,6 +40,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'department.create': 'Подразделение создано', 'department.update': 'Подразделение изменено',
   'department.delete': 'Подразделение убрано',
   'pulse.ack': 'Отметка в «Пульсе»',
+  'inbound_key.create': 'Выдан входящий ключ', 'inbound_key.revoke': 'Входящий ключ отозван',
 }
 
 /** Группы событий: клиентский срез уже загруженного списка. */

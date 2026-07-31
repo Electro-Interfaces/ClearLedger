@@ -33,6 +33,7 @@ from app.routers import (
     online_reconciliation_router,
     invitations_router,
     export_packets_router,
+    inbound_keys_router,
     intake_router,
     mappings_router,
     meetings_router,
@@ -212,6 +213,7 @@ app.include_router(invitations_router.router, prefix=API_PREFIX)
 app.include_router(companies_router.router, prefix=API_PREFIX)
 app.include_router(entries_router.router, prefix=API_PREFIX)
 app.include_router(audit_router.router, prefix=API_PREFIX)
+app.include_router(inbound_keys_router.router, prefix=API_PREFIX)
 # connectors_router НЕ подключаем: рудимент третьей модели «подключений» рядом с
 # Source и Channel (poll отвечал 501, витрина пространства его не видела). Единая
 # модель — docs/CONNECT.md; файл остаётся до переноса полезных типов в В2.

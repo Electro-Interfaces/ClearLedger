@@ -286,13 +286,34 @@ async def get_company_by_api_key(
 ) -> Company:
     """
     FastAPI dependency: аутентификация по X-Cloud-API-Key.
-    Используется внешними системами (TSupport) для доступа к audit-data.
+    Используется внешними системами (TSupport, дедуп-нода, edge-агенты).
+
+    Сначала именные ключи (space_inbound_keys, по SHA256-хешу: видно, КТО ходит,
+    и любого можно отозвать отдельно), затем легаси-ключ компании — он один на
+    всех и остаётся, пока настроенные внешние узлы не переведены на именные.
     """
     if not x_cloud_api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Требуется X-Cloud-API-Key",
         )
+
+    import hashlib
+    from datetime import datetime, timezone
+
+    from app.models import SpaceInboundKey
+    key_hash = hashlib.sha256(x_cloud_api_key.encode()).hexdigest()
+    named = (await db.execute(
+        select(SpaceInboundKey).where(
+            SpaceInboundKey.key_hash == key_hash,
+            SpaceInboundKey.revoked_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if named is not None:
+        named.last_used_at = datetime.now(timezone.utc)
+        company = await db.get(Company, named.company_id)
+        if company is not None:
+            return company
 
     result = await db.execute(
         select(Company).where(Company.cloud_api_key == x_cloud_api_key)

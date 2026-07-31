@@ -172,6 +172,36 @@ class UserCompany(Base):
 
 
 # ---------------------------------------------------------------------------
+# SpaceInboundKey — именной входящий ключ пространства (docs/CONNECT.md, В2)
+# ---------------------------------------------------------------------------
+class SpaceInboundKey(Base):
+    """Ключ, по которому внешняя система стучится К НАМ (X-Cloud-API-Key).
+
+    Раньше ключ был один на компанию (companies.cloud_api_key) и на всех
+    потребителей сразу: нельзя ни понять, кто именно ходит, ни отозвать одного,
+    не уронив остальных. Здесь — ключ на потребителя: в БД только SHA256-хеш
+    (доктрина «секрет не лежит в БД»), сам ключ показывается один раз при
+    выдаче; prefix — первые символы для узнавания в списке.
+
+    Имя таблицы с префиксом space_: у Поддержки в той же базе свои таблицы,
+    и совпадающее имя молча уводит create_all в чужую схему (грабля departments).
+    """
+    __tablename__ = "space_inbound_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Кто ходит по ключу: «Дедуп-нода АЗС 208», «Аудитор Поддержки», …
+    consumer: Mapped[str] = mapped_column(String(200), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ---------------------------------------------------------------------------
 # Department — подразделение компании: узел штатной структуры пространства
 # ---------------------------------------------------------------------------
 class Department(Base):
@@ -5539,3 +5569,38 @@ class PulseAck(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     acked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# EdgePacket — сырой пакет от edge-агента станции (проект Ledger Edge)
+# ---------------------------------------------------------------------------
+class EdgePacket(Base):
+    """Пакет смены, пришедший с агента станции, как он есть.
+
+    Хранится сырьём: разбор идёт отдельно и может быть переигран. Уникальность
+    по packet_uuid даёт идемпотентность — агент повторяет отправку при любой
+    неопределённости (обрыв на ответе), и повтор не создаёт дубль.
+
+    Этап v0 — теневой режим: пакеты складываются и сверяются с тем, что даёт
+    1С, документы из них НЕ создаются.
+    """
+    __tablename__ = "edge_packets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    packet_uuid: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    shift_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    shift_internal_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_edge_packets_station_shift", "company_id", "station_id", "shift_internal_no"),
+    )

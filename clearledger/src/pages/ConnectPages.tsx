@@ -13,6 +13,7 @@ import type { ReactNode } from 'react'
 import { Bell, Blocks, Cable } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Connections } from '@/components/admin/Connections'
+import { InboundKeysCard } from '@/components/channels/InboundKeysCard'
 import { Notifications } from '@/components/admin/Notifications'
 import { CompanyApps } from '@/components/admin/CompanyApps'
 import { useAuth } from '@/contexts/AuthContext'
@@ -54,12 +55,16 @@ function NoCompany() {
   return <Card><CardContent className="py-10 text-center text-muted-foreground">Нет доступных организаций</CardContent></Card>
 }
 
-/** Состояние: каналы связи платформы + витрина прикладных подключений. */
+/** Состояние: каналы связи платформы + витрина подключений + входящие ключи. */
 export function ConnectionsPage() {
+  const { canManage } = useCanManage()
   return (
     <Page icon={Cable} title="Состояние"
       hint="Каналы связи пространства и источники данных приложений: что живо и когда приносили данные">
       <Connections />
+      <div className="mt-6">
+        <InboundKeysCard canManage={canManage} />
+      </div>
     </Page>
   )
 }
