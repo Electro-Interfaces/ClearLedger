@@ -33,7 +33,8 @@ export interface TicketsSummary {
   closed_7d: number
   created_30d: number
   closed_30d: number
-  by: Record<'responsibility' | 'status' | 'category' | 'assignee', { key: string; count: number }[]>
+  by: Record<'responsibility' | 'status' | 'category' | 'assignee' | 'department',
+    { key: string; count: number }[]>
 }
 
 export interface MaintenanceSchedule {
@@ -51,9 +52,23 @@ export interface MaintenanceSchedule {
 
 export type TicketScope = 'open' | 'mine' | 'closed' | 'all'
 
-export async function listTickets(companyId: string, scope: TicketScope) {
+export interface TicketDetails extends SpaceTicket {
+  description: string | null
+  author: string | null
+  eco_object_id: string | null
+  /** Обсуждение, из которого заявка родилась (кнопка «В заявку» в чате). */
+  origin_room: { room_id: string; room_name: string } | null
+  /** Точка эскалации по штатной структуре: руководитель подразделения исполнителя. */
+  escalation: { department: string | null; to: string } | null
+}
+
+export async function listTickets(companyId: string, scope: TicketScope, objectId?: string) {
   return get<{ tickets: SpaceTicket[]; total: number }>(
-    '/api/tickets', { company_id: companyId, scope })
+    '/api/tickets', { company_id: companyId, scope, object_id: objectId || undefined })
+}
+
+export async function ticketDetails(id: string, companyId: string) {
+  return get<TicketDetails>(`/api/tickets/${id}`, { company_id: companyId })
 }
 
 export async function ticketsSummary(companyId: string) {

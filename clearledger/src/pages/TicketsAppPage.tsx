@@ -6,9 +6,11 @@
  * «у кого мяч»). Движок один — контур Поддержки; здесь витрина пространства.
  */
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  CalendarClock, ClipboardList, BarChart3, Loader2, Plus, RefreshCw,
+  ArrowUpRight, CalendarClock, ClipboardList, BarChart3, Loader2, MessageCircle,
+  Plus, RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -22,11 +24,14 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useSupportContext } from '@/contexts/SupportContext'
 import * as ticketsService from '@/services/ticketsService'
 import type { SpaceTicket, TicketScope } from '@/services/ticketsService'
+import { ensureTicketRoom } from '@/services/chatService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -84,12 +89,27 @@ export function TicketsAppPage() {
 
 function WorkSection({ companyId }: { companyId: string }) {
   const [scope, setScope] = useState<TicketScope>('open')
+  // Фильтр по объекту живёт в URL: карточка объекта и «Офис» ссылаются на
+  // /tickets?object=<id> — список открывается уже суженным.
+  const [params, setParams] = useSearchParams()
+  const objectId = params.get('object') ?? ''
+  const setObjectId = (v: string) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    if (v) n.set('object', v); else n.delete('object')
+    return n
+  }, { replace: true })
+  const objectsQ = useQuery({
+    queryKey: ['space-objects', companyId],
+    queryFn: () => listSpaceObjects(companyId),
+    staleTime: 5 * 60 * 1000,
+  })
   const q = useQuery({
-    queryKey: ['space-tickets', companyId, scope],
-    queryFn: () => ticketsService.listTickets(companyId, scope),
+    queryKey: ['space-tickets', companyId, scope, objectId],
+    queryFn: () => ticketsService.listTickets(companyId, scope, objectId || undefined),
     placeholderData: keepPreviousData,
   })
   const tickets = q.data?.tickets ?? []
+  const [openTicket, setOpenTicket] = useState<SpaceTicket | null>(null)
 
   return (
     <div className="space-y-3">
@@ -101,6 +121,15 @@ function WorkSection({ companyId }: { companyId: string }) {
             <SelectItem value="mine">Мои</SelectItem>
             <SelectItem value="closed">Завершённые</SelectItem>
             <SelectItem value="all">Все</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={objectId || 'all'} onValueChange={(v) => setObjectId(v === 'all' ? '' : v)}>
+          <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue placeholder="Объект" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все объекты</SelectItem>
+            {(objectsQ.data ?? []).map((o) => (
+              <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <span className="text-[11px] text-muted-foreground">заявок: {nf.format(tickets.length)}</span>
@@ -137,22 +166,36 @@ function WorkSection({ companyId }: { companyId: string }) {
               </tr>
             </thead>
             <tbody>
-              {tickets.map((t) => <TicketRow key={t.id} t={t} />)}
+              {tickets.map((t) => <TicketRow key={t.id} t={t} onOpen={() => setOpenTicket(t)} />)}
             </tbody>
           </table>
         </div>
       )}
       <p className="text-[11px] text-muted-foreground">
+        Строка открывает карточку заявки — там обсуждение и точка эскалации.
         Зеркальные заявки внешних систем (HubEx и др.) показываются наравне со своими —
         помечены значком системы. Их ведёт внешняя система, здесь виден ход.
       </p>
+
+      <Sheet open={!!openTicket} onOpenChange={(v) => { if (!v) setOpenTicket(null) }}>
+        <SheetContent side="right" className="w-full p-0 sm:max-w-lg">
+          <SheetTitle className="sr-only">Карточка заявки</SheetTitle>
+          <SheetDescription className="sr-only">Детали, обсуждение и эскалация</SheetDescription>
+          {openTicket && <TicketCard id={openTicket.id} companyId={companyId} />}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
 
-function TicketRow({ t }: { t: SpaceTicket }) {
+function TicketRow({ t, onOpen }: { t: SpaceTicket; onOpen: () => void }) {
   return (
-    <tr className="border-t hover:bg-muted/40">
+    <tr
+      tabIndex={0}
+      aria-haspopup="dialog"
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+      className="cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
       <Td className="whitespace-nowrap font-medium">{t.number ?? '—'}</Td>
       <Td>
         <div className="font-medium text-foreground">{t.title}</div>
@@ -189,6 +232,110 @@ function TicketRow({ t }: { t: SpaceTicket }) {
       </Td>
       <Td className="whitespace-nowrap text-muted-foreground">{dtT(t.updated_at)}</Td>
     </tr>
+  )
+}
+
+/** Карточка заявки: детали + «Обсудить» (скрытый чат заявки) + «Из обсуждения». */
+function TicketCard({ id, companyId }: { id: string; companyId: string }) {
+  const { openInteraction } = useSupportContext()
+  const q = useQuery({
+    queryKey: ['space-ticket', id, companyId],
+    queryFn: () => ticketsService.ticketDetails(id, companyId),
+  })
+  // Чат заявки создаётся при первом «Обсудить» и дальше просто открывается.
+  // В общем списке чатов его нет — вход только отсюда (решение МАГа).
+  const discuss = useMutation({
+    mutationFn: () => ensureTicketRoom(id),
+    onSuccess: (room) => openInteraction('chat', `room:${room.id}`),
+    onError: (e) => toast.error(`Не удалось открыть чат заявки: ${(e as Error).message}`),
+  })
+  const t = q.data
+
+  if (q.isLoading) {
+    return <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" />Загрузка заявки…</div>
+  }
+  if (!t) {
+    return <div className="p-6 text-sm text-destructive">Не удалось загрузить заявку</div>
+  }
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b px-5 py-4">
+        <div className="flex items-center gap-2">
+          <span className="text-base font-semibold">{t.number ?? 'Заявка'}</span>
+          {t.stage && (
+            <span className="rounded-md border px-1.5 py-0.5 text-[11px]"
+              style={t.stage_color ? { borderColor: t.stage_color, color: t.stage_color } : undefined}>
+              {t.stage}
+            </span>
+          )}
+          {t.external_system && (
+            <Badge variant="outline" className="h-4 px-1 text-[10px] uppercase">{t.external_system}</Badge>
+          )}
+        </div>
+        <div className="mt-1 text-sm">{t.title}</div>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
+        {/* Обсуждение — первым: заявка живёт разговором. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" className="h-8" disabled={discuss.isPending}
+            onClick={() => discuss.mutate()}>
+            {discuss.isPending
+              ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              : <MessageCircle className="mr-1.5 h-3.5 w-3.5" />}
+            Обсудить
+          </Button>
+          {t.origin_room && (
+            <button type="button"
+              onClick={() => openInteraction('chat', `room:${t.origin_room!.room_id}`)}
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+              <ArrowUpRight className="h-3 w-3" />
+              Создана из обсуждения «{t.origin_room.room_name}»
+            </button>
+          )}
+        </div>
+
+        {t.description && (
+          <p className="whitespace-pre-wrap text-sm text-foreground/90">{t.description}</p>
+        )}
+
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <Fact label="Статус" value={STATUS_LABEL[t.status] ?? t.status} />
+          <Fact label="Срочность"
+            value={({ low: 'низкая', medium: 'обычная', high: 'срочная', critical: 'критичная' } as Record<string, string>)[t.priority] ?? t.priority}
+            tone={PRIORITY_TONE[t.priority]} />
+          <Fact label="Объект" value={t.object ?? '—'} />
+          <Fact label="Категория" value={t.category ?? '—'} />
+          <Fact label="Исполнитель" value={t.assignee ?? 'не назначен'} />
+          <Fact label="У кого мяч" value={t.responsibility ? (RESP_LABEL[t.responsibility] ?? t.responsibility) : '—'} />
+          <Fact label="Автор" value={t.author ?? '—'} />
+          <Fact label="Срок SLA"
+            value={t.sla_breached ? `просрочен · ${dt(t.sla_deadline)}` : dt(t.sla_deadline)}
+            tone={t.sla_breached ? 'text-red-600 dark:text-red-400' : undefined} />
+          <Fact label="Создана" value={dtT(t.created_at)} />
+          <Fact label="Обновлена" value={dtT(t.updated_at)} />
+        </dl>
+
+        {/* Эскалация по штатной структуре: кому поднимать, если работа стоит —
+            сначала начальнику подразделения исполнителя, не сразу директору. */}
+        {t.escalation && (
+          <p className="rounded-lg border border-border/70 bg-card/60 px-3 py-2 text-xs text-muted-foreground">
+            Эскалация: <span className="text-foreground">{t.escalation.to}</span>
+            {t.escalation.department ? ` — руководитель «${t.escalation.department}»` : ''}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Fact({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn('mt-0.5 text-foreground', tone)}>{value}</dd>
+    </div>
   )
 }
 
@@ -373,9 +520,11 @@ function AnalyticsSection({ companyId }: { companyId: string }) {
           tone={s.created_30d > s.closed_30d ? 'text-amber-600 dark:text-amber-400' : undefined} />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Breakdown title="У кого мяч" hint="где стоит работа прямо сейчас"
           rows={(s.by.responsibility ?? []).map((r) => ({ ...r, key: RESP_LABEL[r.key] ?? r.key }))} />
+        <Breakdown title="По подразделениям" hint="нагрузка по штатной структуре"
+          rows={s.by.department ?? []} />
         <Breakdown title="По исполнителям" hint="активные заявки на человеке"
           rows={s.by.assignee ?? []} />
         <Breakdown title="По категориям" hint="активные, по видам работ"

@@ -27,6 +27,13 @@ router = APIRouter(prefix="/tickets", tags=["Заявки"])
 _LIST_LIMIT = 500
 
 
+def _uuid_or_400(v: str, what: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(v)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Невалидный {what}")
+
+
 def _row(r: Any) -> dict[str, Any]:
     return {
         "id": str(r.id),
@@ -53,11 +60,14 @@ def _row(r: Any) -> dict[str, Any]:
 async def list_tickets(
     company_id: str = Query(...),
     scope: str = Query("open", pattern="^(open|mine|closed|all)$"),
+    object_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Заявки пространства. scope: open — активные, mine — мои (автор или исполнитель),
-    closed — завершённые, all — всё."""
+    closed — завершённые, all — всё. object_id — объект ПРОСТРАНСТВА (core-id):
+    карточка объекта и «Офис» ссылаются на свои заявки; матчим через проекцию
+    (service_objects.eco_object_id), на всякий случай принимаем и public-id."""
     await assert_company_member(company_id, current_user, db)
     cond = "true"
     if scope == "open":
@@ -69,6 +79,9 @@ async def list_tickets(
         # public.users: id людей в двух схемах разные, email — общий ключ.
         cond = ("(t.customer_user_id = pu.id or t.assigned_to = pu.id "
                 "or t.current_assignee_id = pu.id)")
+    if object_id:
+        _uuid_or_400(object_id, "object_id")
+        cond += " and (so.eco_object_id::text = :oid or t.service_object_id::text = :oid)"
     rows = (await db.execute(text(f"""
         select t.id, t.number, t.display_number, t.title, t.status, t.priority,
                t.type, t.category, t.responsibility, t.external_system,
@@ -86,7 +99,8 @@ async def list_tickets(
           and {cond}
         order by t.created_at desc
         limit :lim
-    """), {"email": current_user.email, "lim": _LIST_LIMIT})).all()
+    """), {"email": current_user.email, "lim": _LIST_LIMIT,
+           **({"oid": object_id} if object_id else {})})).all()
     return {"tickets": [_row(r) for r in rows], "total": len(rows)}
 
 
@@ -129,6 +143,20 @@ async def tickets_summary(
         group by 1 order by 2 desc limit 10
     """))).all()
     by["assignee"] = [{"key": r.k, "count": r.n} for r in assignees]
+    # Разрез по подразделениям штатной структуры: исполнитель Поддержки → человек
+    # Ядра по email → его подразделение. Руководитель видит нагрузку своих отделов.
+    departments = (await db.execute(text("""
+        select coalesce(od.name, '— без подразделения') as k, count(*) as n
+        from public.tickets t
+        left join public.users au on au.id = coalesce(t.current_assignee_id, t.assigned_to)
+        left join core.users cu on lower(cu.email) = lower(au.email)
+        left join core.user_companies uc on uc.user_id = cu.id
+        left join core.org_departments od on od.id = uc.department_id
+        where coalesce(t.is_deleted,false)=false and coalesce(t.is_archived,false)=false
+          and t.status not in ('closed','cancelled')
+        group by 1 order by 2 desc limit 12
+    """))).all()
+    by["department"] = [{"key": r.k, "count": r.n} for r in departments]
     return {
         "open": totals.open, "sla_breached": totals.sla_breached,
         "created_7d": totals.created_7d, "closed_7d": totals.closed_7d,
@@ -162,6 +190,85 @@ async def list_schedules(
         "next_due_date": r.next_due_date.isoformat() if r.next_due_date else None,
         "is_active": bool(r.is_active), "object": r.object_name,
     } for r in rows]}
+
+
+@router.get("/{ticket_id}")
+async def ticket_details(
+    ticket_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Карточка заявки: детали + связь с обсуждением + точка эскалации.
+
+    «Из обсуждения» — комната, где заявку родили кнопкой «В заявку»
+    (core.chat_ticket_links); скрытый чат самой заявки открывается отдельной
+    ручкой чата (ensure), здесь его не трогаем. Эскалация — руководитель
+    подразделения исполнителя по штатной структуре; если исполнитель сам
+    руководитель — руководитель родительского подразделения.
+    """
+    await assert_company_member(company_id, current_user, db)
+    tid = _uuid_or_400(ticket_id, "ticket_id")
+    r = (await db.execute(text("""
+        select t.id, t.number, t.display_number, t.title, t.description, t.status,
+               t.priority, t.type, t.category, t.responsibility, t.external_system,
+               t.sla_deadline, t.sla_breached, t.created_at, t.updated_at,
+               st.name as stage_name, st.color as stage_color,
+               so.name as object_name, so.eco_object_id,
+               au.name as assignee_name, au.email as assignee_email,
+               cu.name as author_name
+        from public.tickets t
+        left join public.ticket_stages st on st.id = t.stage_id
+        left join public.service_objects so on so.id = t.service_object_id
+        left join public.users au on au.id = coalesce(t.current_assignee_id, t.assigned_to)
+        left join public.users cu on cu.id = t.customer_user_id
+        where t.id = :tid and coalesce(t.is_deleted, false) = false
+    """), {"tid": str(tid)})).one_or_none()
+    if r is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
+
+    # Родившее обсуждение (может не быть: заявка поставлена формой или каналом).
+    origin = (await db.execute(text("""
+        select l.room_id, cr.name as room_name
+        from core.chat_ticket_links l
+        join core.chat_rooms cr on cr.id = l.room_id
+        where l.ticket_id = :tid
+        order by l.created_at
+        limit 1
+    """), {"tid": str(tid)})).one_or_none()
+
+    # Точка эскалации по штатной структуре (от исполнителя вверх).
+    escalation = None
+    if r.assignee_email:
+        esc = (await db.execute(text("""
+            select od.name as dep_name, h.name as head_name, h.id as head_id,
+                   cu.id as person_id,
+                   pod.name as parent_dep, ph.name as parent_head
+            from core.users cu
+            join core.user_companies uc on uc.user_id = cu.id
+            join core.org_departments od on od.id = uc.department_id
+            left join core.users h on h.id = od.head_user_id
+            left join core.org_departments pod on pod.id = od.parent_id
+            left join core.users ph on ph.id = pod.head_user_id
+            where lower(cu.email) = lower(:email)
+            limit 1
+        """), {"email": r.assignee_email})).one_or_none()
+        if esc is not None:
+            if esc.head_name and esc.head_id != esc.person_id:
+                escalation = {"department": esc.dep_name, "to": esc.head_name}
+            elif esc.parent_head:
+                # Исполнитель сам руководитель — эскалация уровнем выше.
+                escalation = {"department": esc.parent_dep, "to": esc.parent_head}
+
+    return {
+        **_row(r),
+        "description": r.description,
+        "author": r.author_name,
+        "eco_object_id": str(r.eco_object_id) if r.eco_object_id else None,
+        "origin_room": ({"room_id": str(origin.room_id), "room_name": origin.room_name}
+                        if origin else None),
+        "escalation": escalation,
+    }
 
 
 class TicketCreate(BaseModel):

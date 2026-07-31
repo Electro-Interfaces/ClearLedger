@@ -75,6 +75,13 @@ export function MembersBoard({
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'name' | 'seen'>('name')
+  // Срез по подразделению штатной структуры ('all' | 'none' | id).
+  const [depFilter, setDepFilter] = useState('all')
+  const allDepsQ = useQuery({
+    queryKey: ['departments', companyId],
+    queryFn: () => departmentsService.listDepartments(companyId),
+    enabled: party === 'internal',
+  })
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [cardFor, setCardFor] = useState<string | null>(null)
   const [draft, setDraft] = useState<Record<string, string[] | null>>({})
@@ -121,10 +128,17 @@ export function MembersBoard({
   // кто ещё имеет доступ в его пространство. Отдельной группой, со статусом — не в общем
   // ряду сотрудников (решение МАГа 31.07.2026). На их статус лягут отдельные права.
   const platform = party === 'internal' ? (q.data ?? []).filter((m) => m.party_type === 'vendor') : []
-  const bySearch = (list: AdminUser[]) => search.trim()
-    ? list.filter((m) => `${m.name} ${m.email} ${m.position ?? ''} ${m.organization_name ?? ''}`
-        .toLowerCase().includes(search.trim().toLowerCase()))
-    : list
+  const bySearch = (list: AdminUser[]) => {
+    let out = search.trim()
+      ? list.filter((m) => `${m.name} ${m.email} ${m.position ?? ''} ${m.organization_name ?? ''} ${m.department_name ?? ''}`
+          .toLowerCase().includes(search.trim().toLowerCase()))
+      : list
+    if (depFilter !== 'all') {
+      out = out.filter((m) => depFilter === 'none'
+        ? !m.department_id : m.department_id === depFilter)
+    }
+    return out
+  }
   // «Недавно заходили» — админский вопрос «кто вообще пользуется»: не заходившие в конец.
   const bySort = (list: AdminUser[]) => sort === 'seen'
     ? [...list].sort((a, b) =>
@@ -247,6 +261,19 @@ export function MembersBoard({
               <SelectItem value="seen">Недавно заходили</SelectItem>
             </SelectContent>
           </Select>
+          {/* Срез по штатной структуре: «кто у нас в отделе эксплуатации». */}
+          {party === 'internal' && (allDepsQ.data ?? []).length > 0 && (
+            <Select value={depFilter} onValueChange={setDepFilter}>
+              <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все подразделения</SelectItem>
+                {(allDepsQ.data ?? []).map((d) => (
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))}
+                <SelectItem value="none">— вне структуры —</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {dirty.length > 0 && (
@@ -488,7 +515,11 @@ function MemberRow({
           </>
         ) : (
           <>
-            <span className="block truncate text-xs text-muted-foreground">{u.position || '— должность —'}</span>
+            <span className="block truncate text-xs text-muted-foreground"
+              title={u.department_name ?? undefined}>
+              {u.position || '— должность —'}
+              {u.department_name ? ` · ${u.department_name}` : ''}
+            </span>
             <span className="block truncate text-[11px] text-muted-foreground/80">
               {seenShort(u.last_seen_at) ? `вход: ${seenShort(u.last_seen_at)}` : 'не заходил(а)'}
             </span>
