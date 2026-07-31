@@ -116,19 +116,32 @@ export function MembersBoard({
   // перенесённые люди заказчика идут без явной пометки.
   const isExternal = (m: AdminUser) => m.party_type === 'partner' || m.party_type === 'vendor'
   const members = (q.data ?? []).filter((m) => (party === 'external' ? isExternal(m) : !isExternal(m)))
-  const found = search.trim()
-    ? members.filter((m) => `${m.name} ${m.email} ${m.position ?? ''} ${m.organization_name ?? ''}`
+  // Люди платформы (vendor) из списка сотрудников НЕ прячутся: заказчик должен видеть,
+  // кто ещё имеет доступ в его пространство. Отдельной группой, со статусом — не в общем
+  // ряду сотрудников (решение МАГа 31.07.2026). На их статус лягут отдельные права.
+  const platform = party === 'internal' ? (q.data ?? []).filter((m) => m.party_type === 'vendor') : []
+  const bySearch = (list: AdminUser[]) => search.trim()
+    ? list.filter((m) => `${m.name} ${m.email} ${m.position ?? ''} ${m.organization_name ?? ''}`
         .toLowerCase().includes(search.trim().toLowerCase()))
-    : members
+    : list
   // «Недавно заходили» — админский вопрос «кто вообще пользуется»: не заходившие в конец.
-  const filtered = sort === 'seen'
-    ? [...found].sort((a, b) =>
+  const bySort = (list: AdminUser[]) => sort === 'seen'
+    ? [...list].sort((a, b) =>
         (b.last_seen_at ? Date.parse(b.last_seen_at) : 0) - (a.last_seen_at ? Date.parse(a.last_seen_at) : 0))
-    : [...found].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email, 'ru'))
+    : [...list].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email, 'ru'))
+  const filtered = bySort(bySearch(members))
+  const filteredPlatform = bySort(bySearch(platform))
 
   /** Внешние — группами по компаниям: единица учёта здесь компания, а не человек. */
   const groups = useMemo(() => {
-    if (party !== 'external') return null
+    if (party !== 'external') {
+      // Сотрудники + люди платформы: группы появляются, только когда есть кого отделять.
+      if (filteredPlatform.length === 0) return null
+      return [
+        { key: 'staff', label: 'Сотрудники', kind: 'staff' as const, rows: filtered },
+        { key: 'vendor', label: 'Поддержка платформы', kind: 'vendor' as const, rows: filteredPlatform },
+      ]
+    }
     const byOrg = new Map<string, { label: string; kind: 'partner' | 'vendor' | 'none'; rows: AdminUser[] }>()
     for (const m of filtered) {
       const vendor = m.party_type === 'vendor'
@@ -139,7 +152,7 @@ export function MembersBoard({
       byOrg.get(key)!.rows.push(m)
     }
     return [...byOrg.entries()].sort(([a], [b]) => a.localeCompare(b, 'ru')).map(([key, g]) => ({ key, ...g }))
-  }, [party, filtered])
+  }, [party, filtered, filteredPlatform])
 
   /**
    * Столбцы группами по слою: приложения-разрезы, сервисы контейнера (чат, заявки,
@@ -289,9 +302,9 @@ export function MembersBoard({
               <Loader2 className="h-4 w-4 animate-spin" /> Загрузка…
             </div>
           )}
-          {!q.isLoading && filtered.length === 0 && (
+          {!q.isLoading && filtered.length === 0 && filteredPlatform.length === 0 && (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              {members.length > 0 ? 'Ничего не найдено'
+              {members.length + platform.length > 0 ? 'Ничего не найдено'
                 : party === 'external'
                   ? 'Внешних участников нет. Пригласите человека компании-партнёра — он появится здесь, а не в сотрудниках организации.'
                   : 'Нет сотрудников'}
@@ -307,9 +320,16 @@ export function MembersBoard({
                 <div key={`g-${g.key}`} className="flex items-center gap-2 bg-muted/40 px-3 py-1.5 text-sm font-medium">
                   {g.kind === 'vendor'
                     ? <LifeBuoy className="h-3.5 w-3.5 text-primary" />
-                    : <Building2 className="h-3.5 w-3.5 text-muted-foreground" />}
+                    : g.kind === 'staff'
+                      ? <Users2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      : <Building2 className="h-3.5 w-3.5 text-muted-foreground" />}
                   {g.label}
                   <span className="text-xs font-normal text-muted-foreground">· {g.rows.length} чел.</span>
+                  {g.kind === 'vendor' && party === 'internal' && (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      — не сотрудники компании: разработчик и сопровождение платформы с доступом в пространство
+                    </span>
+                  )}
                   {g.kind === 'none' && (
                     <span className="text-xs font-normal text-amber-500/90">
                       — укажите компанию, иначе в чатах и заявках человек без стороны
@@ -358,7 +378,7 @@ export function MembersBoard({
       <p className="text-xs text-muted-foreground">
         {party === 'external'
           ? `Внешних участников: ${members.length} из ${groups?.length ?? 0} компаний`
-          : `Сотрудников: ${members.length}`}
+          : `Сотрудников: ${members.length}${platform.length ? ` · поддержка платформы: ${platform.length}` : ''}`}
         {filtered.length !== members.length ? ` · показано ${filtered.length}` : ''}
         {' · администратор организации видит все продукты — ограничить его можно, переведя в «Сотрудники» в карточке'}
       </p>
@@ -448,7 +468,7 @@ function MemberRow({
       </button>
 
       <span className="hidden w-[150px] shrink-0 xl:block">
-        {party === 'external' ? (
+        {party === 'external' || u.party_type === 'vendor' ? (
           <>
             <PartyBadge party={{
               partyType: u.party_type ?? 'internal', role: u.role,
