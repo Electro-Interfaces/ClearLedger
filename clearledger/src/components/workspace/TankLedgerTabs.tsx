@@ -23,7 +23,8 @@ import { cn } from '@/lib/utils'
 import { TankShiftDialog } from './TankShiftDialog'
 import { TankCardDialog, type TankRef } from './TankCardDialog'
 import {
-  getTankLedger, type TankLedgerResponse, type TankLedgerRow, type TankLedgerTank,
+  getTankLedger, type TankLedgerIssue, type TankLedgerResponse, type TankLedgerRow,
+  type TankLedgerTank,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -153,7 +154,9 @@ async function exportLedgerXlsx(data: TankLedgerResponse, dateFrom: string, date
 
   // Лист 3 — замечания.
   const issues = data.issues.map((i) => ({
-    'Тип': i.type === 'arithmetic' ? 'арифметика отчёта' : i.type === 'fuel_change' ? 'смена топлива' : 'стык смен',
+    'Тип': i.type === 'arithmetic' ? 'арифметика отчёта' : i.type === 'fuel_change' ? 'смена топлива'
+      : i.type === 'fact_suspect' ? 'замер (прибор)' : 'стык смен',
+    'Причина': i.kind ? (BREAK_KINDS[i.kind]?.label ?? i.kind) : '',
     'АЗС': i.station_name,
     'Резервуар': i.tank_number,
     'Топливо': i.fuel_name,
@@ -161,6 +164,7 @@ async function exportLedgerXlsx(data: TankLedgerResponse, dateFrom: string, date
     'Дата': i.date ? new Date(i.date).toLocaleDateString('ru-RU') : '',
     'Расхождение, л': r1(i.gap_liters),
     'Что не сходится': i.detail,
+    'Пояснение': i.reason ?? '',
   }))
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(issues), 'Замечания')
 
@@ -190,6 +194,11 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
   const [fFuel, setFFuel] = useState('all')        // код топлива
   const [fIssue, setFIssue] = useState<IssueFilter>('all')
   const [fShift, setFShift] = useState('')         // поиск по номеру смены
+  // Фильтры экрана «Расхождения»: тип замечания и причина разрыва. Причину задаёт
+  // клик по чипу в строке «Стык смен — по причинам» — тип и причина не пересекаются
+  // (выбор одного сбрасывает другое), чтобы не получить пустое пересечение.
+  const [fIType, setFIType] = useState<'all' | TankLedgerIssue['type']>('all')
+  const [fIKind, setFIKind] = useState('all')
   const [picked, setPicked] = useState<TankLedgerRow | null>(null)  // строка в разборе
   // Резервуар в разборе: храним только ссылку (АЗС + номер) — карточка сама грузит.
   const [pickedTank, setPickedTank] = useState<TankRef | null>(null)
@@ -275,6 +284,18 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
     }
     return out
   }, [data, tankByKey, fStation, fTank, fFuel, fShift, passIssue])
+
+  // Замечания под фильтром — для таблицы экрана «Расхождения». «Стык смен»
+  // включает и смену топлива: это подвид разрыва, счётчик 760 считает их вместе —
+  // иначе карточка говорит одно число, а таблица показывает другое.
+  const shownIssues = useMemo(() => {
+    let list = data?.issues ?? []
+    if (fIType === 'continuity') list = list.filter((i) => i.type === 'continuity' || i.type === 'fuel_change')
+    else if (fIType !== 'all') list = list.filter((i) => i.type === fIType)
+    if (fIKind !== 'all') list = list.filter((i) => i.kind === fIKind)
+    return list
+  }, [data, fIType, fIKind])
+  const issuesFiltered = fIType !== 'all' || fIKind !== 'all'
 
   const shownRows = groups.reduce((n, g) => n + g.rows.length, 0)
   const filtered = fStation !== 'all' || fTank !== 'all' || fFuel !== 'all' || fIssue !== 'all' || fShift.trim() !== ''
@@ -596,43 +617,59 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
       {/* ── Замечания по типам ───────────────────────────────────────── */}
       {view === 'issues' && (
         <div className="mt-3">
+          {/* Счётчики-фильтры: цифра «760» обязана открывать свои смены, а не быть
+              тупиком. «Расхождение с замером» — не фильтр: такие смены не образуют
+              замечаний-строк, они разбираются в журнале по сменам. */}
           <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
             <Cell label="Арифметика отчёта" value={nf0.format(t.arithmetic_breaks)}
-                  hint="начало + приход − отпуск ≠ конец" tone={t.arithmetic_breaks ? 'text-red-600 dark:text-red-400' : undefined} />
+                  hint="начало + приход − отпуск ≠ конец · клик — показать в таблице"
+                  tone={t.arithmetic_breaks ? 'text-red-600 dark:text-red-400' : undefined}
+                  active={fIType === 'arithmetic'}
+                  onClick={() => { setFIType(fIType === 'arithmetic' ? 'all' : 'arithmetic'); setFIKind('all') }} />
             <Cell label="Стык смен" value={nf0.format(t.continuity_breaks)}
-                  hint="начало ≠ конец предыдущей смены" tone={t.continuity_breaks ? 'text-amber-600 dark:text-amber-400' : undefined} />
+                  hint="начало ≠ конец предыдущей смены · клик — показать в таблице"
+                  tone={t.continuity_breaks ? 'text-amber-600 dark:text-amber-400' : undefined}
+                  active={fIType === 'continuity'}
+                  onClick={() => { setFIType(fIType === 'continuity' ? 'all' : 'continuity'); setFIKind('all') }} />
             <Cell label="Расхождение с замером" value={nf0.format(t.fact_breaks)}
-                  hint={`свыше ${nf0.format(tol)} л за смену`} />
+                  hint={`свыше ${nf0.format(tol)} л за смену · смены — в журнале «Контроля баланса»`} />
           </div>
 
           {/* Разрывы по причинам. «760 разрывов» одной цифрой не говорят, что делать:
               перенумерация станции и молчаливое списание — разные адресаты и разные
               решения, а топлива касается только часть из них. */}
-          {t.continuity_kinds && Object.keys(t.continuity_kinds).length > 0 && (
-            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-card/60 px-3 py-2">
-              <span className="mr-1 text-[11px] uppercase tracking-wider text-muted-foreground">
-                Стык смен — по причинам
-              </span>
-              {Object.entries(t.continuity_kinds)
-                .sort((a, b) => b[1].count - a[1].count)
-                .map(([kind, agg]) => {
-                  const meta = BREAK_KINDS[kind]
-                  return (
-                    <span key={kind}
-                      title={`${nf0.format(agg.count)} разрывов на ${nf0.format(Math.abs(agg.liters))} л суммарно`}
-                      className={cn('rounded-md border px-2 py-0.5 text-[11px]',
-                        meta?.hard ? 'border-amber-500/40 text-amber-500' : 'border-border text-muted-foreground')}>
-                      {meta?.label ?? kind}{' '}
-                      <span className="tabular-nums">{nf0.format(agg.count)}</span>
-                      <span className="ml-1 opacity-70">· {nf0.format(Math.abs(agg.liters))} л</span>
-                    </span>
-                  )
-                })}
-              <span className="ml-auto text-[11px] text-muted-foreground">
-                подсвечено янтарным — требует решения; остальное объяснено событиями станции
-              </span>
-            </div>
+          {t.continuity_kinds && (
+            <ContinuityKindsStrip
+              kinds={t.continuity_kinds}
+              activeKind={fIKind === 'all' ? undefined : fIKind}
+              onKindClick={(kind) => { setFIKind(fIKind === kind ? 'all' : kind); setFIType('all') }}
+              note="подсвечено янтарным — требует решения; клик по причине отбирает её в таблице"
+            />
           )}
+
+          {/* Фильтр таблицы замечаний: тип — селектом, причина — чипами выше. */}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Select value={fIType} onValueChange={(v) => { setFIType(v as typeof fIType); setFIKind('all') }}>
+              <SelectTrigger className="h-8 w-[210px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все типы замечаний</SelectItem>
+                <SelectItem value="continuity">Стык смен</SelectItem>
+                <SelectItem value="arithmetic">Арифметика отчёта</SelectItem>
+                <SelectItem value="fact_suspect">Прибор неисправен</SelectItem>
+                <SelectItem value="fuel_change">Смена топлива</SelectItem>
+              </SelectContent>
+            </Select>
+            {issuesFiltered && (
+              <Button variant="ghost" size="sm" className="h-8 px-2 text-xs"
+                      onClick={() => { setFIType('all'); setFIKind('all') }}>
+                <X className="mr-1 h-3.5 w-3.5" />Сбросить
+              </Button>
+            )}
+            <span className="ml-auto text-[11px] text-muted-foreground">
+              замечаний: {nf0.format(shownIssues.length)}
+              {issuesFiltered ? ` из ${nf0.format(data.issues.length)}` : ''}
+            </span>
+          </div>
 
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[1000px] text-xs">
@@ -643,7 +680,7 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                 </tr>
               </thead>
               <tbody>
-                {data.issues.map((issue, i) => (
+                {shownIssues.map((issue, i) => (
                   // Замечание — это всегда конкретный резервуар: строка ведёт в его
                   // разбор, а не оставляет менеджера искать его в журнале руками.
                   <tr
@@ -702,9 +739,11 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
                     </Td>
                   </tr>
                 ))}
-                {data.issues.length === 0 && (
+                {shownIssues.length === 0 && (
                   <tr><td colSpan={8} className="p-6 text-center text-muted-foreground">
-                    Замечаний нет: книга сходится и стыкуется между сменами
+                    {issuesFiltered
+                      ? 'Под фильтр не попало ни одно замечание'
+                      : 'Замечаний нет: книга сходится и стыкуется между сменами'}
                   </td></tr>
                 )}
               </tbody>
@@ -731,6 +770,51 @@ export function TankLedgerTabs({ companyId, dateFrom, dateTo, stationCodes, fuel
         onClose={() => setPickedTank(null)}
         onPickShift={(r) => setPicked(r)}
       />
+    </div>
+  )
+}
+
+/** Строка «Стык смен — по причинам». Общая для вкладок «Замечания» и «Причины»:
+ *  это один экран «Расхождения», и словарь причин на обеих вкладках обязан
+ *  совпадать. С onKindClick чипы — фильтры, без него — просто сводка. */
+export function ContinuityKindsStrip({ kinds, activeKind, onKindClick, note }: {
+  kinds: Record<string, { count: number; liters: number }>
+  activeKind?: string
+  onKindClick?: (kind: string) => void
+  note: string
+}) {
+  const entries = Object.entries(kinds).sort((a, b) => b[1].count - a[1].count)
+  if (entries.length === 0) return null
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-border/70 bg-card/60 px-3 py-2">
+      <span className="mr-1 text-[11px] uppercase tracking-wider text-muted-foreground">
+        Стык смен — по причинам
+      </span>
+      {entries.map(([kind, agg]) => {
+        const meta = BREAK_KINDS[kind]
+        const title = `${nf0.format(agg.count)} разрывов на ${nf0.format(Math.abs(agg.liters))} л суммарно`
+        const cls = cn('rounded-md border px-2 py-0.5 text-[11px]',
+          meta?.hard ? 'border-amber-500/40 text-amber-500' : 'border-border text-muted-foreground')
+        const body = (
+          <>
+            {meta?.label ?? kind}{' '}
+            <span className="tabular-nums">{nf0.format(agg.count)}</span>
+            <span className="ml-1 opacity-70">· {nf0.format(Math.abs(agg.liters))} л</span>
+          </>
+        )
+        return onKindClick ? (
+          <button key={kind} type="button"
+            onClick={() => onKindClick(kind)}
+            title={`${title} — показать в таблице`}
+            className={cn(cls, 'transition-colors',
+              activeKind === kind ? 'bg-muted ring-1 ring-ring' : 'hover:bg-muted/60')}>
+            {body}
+          </button>
+        ) : (
+          <span key={kind} title={title} className={cls}>{body}</span>
+        )
+      })}
+      <span className="ml-auto text-[11px] text-muted-foreground">{note}</span>
     </div>
   )
 }
@@ -884,16 +968,24 @@ function GroupBlock({ group, tol, tols, onPick, sort }: {
   )
 }
 
-function Cell({ label, value, hint, tone }: {
+function Cell({ label, value, hint, tone, onClick, active }: {
   label: string; value: string; hint?: string; tone?: string
+  /** С onClick карточка становится фильтром: «760» без клика — цифра-тупик. */
+  onClick?: () => void; active?: boolean
 }) {
-  return (
-    <div className="rounded-lg border bg-card p-3">
+  const cls = cn('rounded-lg border bg-card p-3',
+    onClick && 'cursor-pointer text-left transition-colors hover:bg-muted/40',
+    active && 'border-primary bg-primary/5 ring-1 ring-primary')
+  const body = (
+    <>
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className={cn('mt-0.5 text-sm font-semibold', tone)}>{value}</div>
       {hint && <div className="mt-0.5 text-[10px] text-muted-foreground">{hint}</div>}
-    </div>
+    </>
   )
+  return onClick
+    ? <button type="button" onClick={onClick} className={cls}>{body}</button>
+    : <div className={cls}>{body}</div>
 }
 
 function Th({ children, right }: { children: React.ReactNode; right?: boolean }) {

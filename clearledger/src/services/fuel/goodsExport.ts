@@ -48,6 +48,9 @@ const BREAK_LABEL: Record<string, string> = {
   pulled_to_fact: 'списано на станции', manual: 'ручная правка',
   unexplained: 'требует разбора', fact_suspect: 'прибор неисправен',
 }
+/** Причины, требующие решения (правки мимо учёта) — в отличие от объяснённых
+ *  событиями станции (слив, перенумерация, пауза). Как на экране «Расхождения». */
+const BREAK_HARD = new Set(['book_reset', 'pulled_to_fact', 'manual', 'unexplained', 'fact_suspect'])
 
 const VIEW_TITLE: Record<GoodsView, string> = {
   balance: 'Контроль топливного баланса',
@@ -151,6 +154,20 @@ export async function exportGoodsXlsx(view: GoodsView, p: GoodsExportParams) {
       'Расхождение, л': i.gap_liters == null ? 'не измерено' : r1(i.gap_liters),
       'Что не сходится': i.detail, 'Пояснение': i.reason ?? '',
     })), 'Замечания', [14, 20, 14, 10, 10, 8, 11, 14, 46, 60])
+
+    // Стык смен — отдельным листом: в общем списке замечаний разрывы тонут среди
+    // арифметики, а разбирают их именно по причинам — «слив между сменами» смотрит
+    // приёмка, «списано на станции» и «ручная правка» — бухгалтерия.
+    sheet(d.issues
+      .filter((i) => i.type === 'continuity' || i.type === 'fuel_change')
+      .map((i) => ({
+        'Причина': i.kind ? (BREAK_LABEL[i.kind] ?? i.kind) : 'требует разбора',
+        'Требует решения': i.kind && BREAK_HARD.has(i.kind) ? 'да' : '',
+        'АЗС': i.station_name, 'Резервуар': i.tank_number, 'Топливо': i.fuel_name,
+        'Пред. смена': i.prev_shift_number ?? '', 'Смена': i.shift_number, 'Дата': dt(i.date),
+        'Разрыв, л': r1(i.gap_liters),
+        'Что не сходится': i.detail, 'Пояснение': i.reason ?? '',
+      })), 'Стык смен', [20, 13, 14, 10, 10, 10, 8, 11, 11, 52, 60])
 
     // Журнал по сменам — полная лента, по ней и разбирают.
     sheet(d.rows.map((r) => ({

@@ -17,8 +17,10 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { TankCardDialog, type TankRef } from './TankCardDialog'
 import { TankShiftDialog } from './TankShiftDialog'
+import { ContinuityKindsStrip } from './TankLedgerTabs'
 import {
-  getVarianceDiagnostics, type TankLedgerRow, type VarianceDiagnosticsResponse, type VarianceNature,
+  getTankLedger, getVarianceDiagnostics,
+  type TankLedgerRow, type VarianceDiagnosticsResponse, type VarianceNature,
 } from '@/services/analyticsService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -58,6 +60,15 @@ export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes,
     queryFn: () => getVarianceDiagnostics({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }),
     placeholderData: keepPreviousData,
   })
+  // Стыки смен — та же сводка, что на соседней вкладке «Замечания» (ключ совпадает —
+  // берётся из кеша). Без неё вкладка «Причины» молчала про 760 разрывов, о которых
+  // только что сказала плашка сверху, — две вкладки одного экрана расходились.
+  const ledgerQuery = useQuery({
+    queryKey: ['tank-ledger', companyId, dateFrom, dateTo, stationCodes.join(','), fuelCodes.join(',')],
+    queryFn: () => getTankLedger({ companyId, dateFrom, dateTo, stationCodes, fuelCodes }),
+    placeholderData: keepPreviousData,
+  })
+  const continuityKinds = ledgerQuery.data?.totals.continuity_kinds
 
   const data = query.data
   const rows = useMemo(() => {
@@ -83,6 +94,16 @@ export function VarianceCausesPanel({ companyId, dateFrom, dateTo, stationCodes,
 
   return (
     <div className="space-y-4">
+      {/* Первая ось причин — разрывы стыка смен; их разбор строка за строкой
+          лежит на вкладке «Замечания». Вторая ось — поведение расхождения с
+          замером во времени — ниже плитками. */}
+      {continuityKinds && (
+        <ContinuityKindsStrip
+          kinds={continuityKinds}
+          note="разбор каждого разрыва — на вкладке «Замечания»: клик по причине там отбирает её строки"
+        />
+      )}
+
       {/* Причины — плитки, кликаются как фильтр */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <CauseTile

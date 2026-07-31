@@ -718,7 +718,10 @@ async def build_tank_ledger(
         "rows": rows[:max_rows],
         "rows_total": len(rows),
         "rows_truncated": len(rows) > max_rows,
-        "issues": issues[:500],
+        # 2000, а не 500: экран «Расхождения» фильтрует замечания по типу и причине
+        # на клиенте — по обрезанному списку фильтр показывал бы не всё, что есть.
+        # За полный сетевой период набегает ~1200 замечаний; строки лёгкие.
+        "issues": issues[:2000],
         "issues_total": len(issues),
         "tolerances": {
             "arithmetic_liters": ARITHMETIC_TOLERANCE_L,
