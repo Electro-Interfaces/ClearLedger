@@ -576,6 +576,9 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
   const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
+  // «Разжать» продукт из грида: снять отметку целиком, оставить разделы кроме закрытого.
+  const carve = (app: string, keep: string[]) => setSel((s) =>
+    new Set([...[...s].filter((k) => k !== app && !k.startsWith(`${app}:`)), ...keep]))
   const tmpl = roles.find((r) => r.id === cloneId)
   const tmplSet = tmpl && tmpl.modules ? new Set(tmpl.modules) : null
   const cur = full ? null : sel
@@ -608,7 +611,7 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
             <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="h-4 w-4" />
             Полный доступ (все модули)
           </label>
-          <AccessTreeGrid companyId={companyId} sel={sel} onToggle={toggle} disabled={full} />
+          <AccessTreeGrid companyId={companyId} sel={sel} onToggle={toggle} onCarve={carve} disabled={full} />
           {tmpl && (added.length > 0 || removed.length > 0) && (
             <div className="text-[11px] rounded-md border bg-muted/30 p-2">
               <span className="text-muted-foreground">Отличия от «{tmpl.name}»: </span>

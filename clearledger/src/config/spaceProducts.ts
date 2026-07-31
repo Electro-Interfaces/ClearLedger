@@ -243,7 +243,7 @@ export const PRODUCT_SETUP_NOTE: Record<string, { icon: LucideIcon; title: strin
     icon: Network,
     title: 'Сеть передачи данных — в подключении',
     description: 'Связь объектов: узлы и каналы, VPN, удалённый доступ к оборудованию, '
-      + 'обновления на местах. Движок — ElsyPlus Link, подключается отдельно.',
+      + 'обновления на местах. Подключается отдельно.',
   },
   accounting: {
     icon: Calculator,
@@ -466,6 +466,12 @@ export function pathAllowed(
       const code = pageCode(tail)
       return !code || pageAllowed(product.code, code)
     }
+    // Путь вне карты продуктов у разрезанного профиля: legacy-гейт (fallback =
+    // routeAllowed по ключам Учёта) не применяем. В наборах разрезанного профиля
+    // legacy-ключей не бывает, поэтому fallback умел только ложно запрещать:
+    // у человека с явным набором прав «вдруг пропадали» пункты, которые видны
+    // админу с modules = NULL.
+    return true
   }
   return fallback(pathname)
 }

@@ -17,6 +17,7 @@
  * бы полсотни запросов и невозможность передумать.
  */
 import { Fragment, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -31,7 +32,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import {
-  Building2, Check, ChevronDown, ChevronRight, KeyRound, LifeBuoy, Loader2,
+  Building2, Check, ChevronDown, ChevronRight, History, KeyRound, LifeBuoy, Loader2,
   Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, X,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
@@ -43,8 +44,14 @@ import { useAccessTree, type AccessApp } from '@/hooks/useAccessTree'
 import { appIcon } from '@/config/appIcons'
 import { appState, toggleAccessKey, sameAccess, type AppAccess } from '@/lib/accessKeys'
 import { AccessTreeGrid } from './AccessTreeGrid'
+import { ACTION_LABEL } from './AuditLog'
 import { ObjectScopeDialog } from './ObjectScopeDialog'
 import { PartyBadge } from '@/components/chat/PartyBadge'
+
+/** «31.07, 14:02» — компактная отметка последнего входа для строки состава. */
+const seenShort = (iso?: string | null) => iso
+  ? new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  : null
 
 /** Столбцы одного слоя: значки продуктов, отделённые от соседнего слоя чертой. */
 interface ColumnGroup { key: string; label: string; apps: AccessApp[] }
@@ -65,6 +72,7 @@ export function MembersBoard({
 }) {
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<'name' | 'seen'>('name')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [cardFor, setCardFor] = useState<string | null>(null)
   const [draft, setDraft] = useState<Record<string, string[] | null>>({})
@@ -107,10 +115,15 @@ export function MembersBoard({
   // перенесённые люди заказчика идут без явной пометки.
   const isExternal = (m: AdminUser) => m.party_type === 'partner' || m.party_type === 'vendor'
   const members = (q.data ?? []).filter((m) => (party === 'external' ? isExternal(m) : !isExternal(m)))
-  const filtered = search.trim()
+  const found = search.trim()
     ? members.filter((m) => `${m.name} ${m.email} ${m.position ?? ''} ${m.organization_name ?? ''}`
         .toLowerCase().includes(search.trim().toLowerCase()))
     : members
+  // «Недавно заходили» — админский вопрос «кто вообще пользуется»: не заходившие в конец.
+  const filtered = sort === 'seen'
+    ? [...found].sort((a, b) =>
+        (b.last_seen_at ? Date.parse(b.last_seen_at) : 0) - (a.last_seen_at ? Date.parse(a.last_seen_at) : 0))
+    : [...found].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email, 'ru'))
 
   /** Внешние — группами по компаниям: единица учёта здесь компания, а не человек. */
   const groups = useMemo(() => {
@@ -162,6 +175,15 @@ export function MembersBoard({
     setKeys(u, toggleAccessKey(base, key, app))
   }
 
+  // «Разжать» продукт: снять отметку целиком, оставить все разделы кроме закрытого.
+  // Жест из грида: человеку с «весь продукт» закрывают один пункт одним кликом.
+  const carve = (u: AdminUser, app: string, keep: string[]) => {
+    if (locked(u) || isFullByRole(u)) return
+    const cur = effective(u)
+    const base = cur === null ? tree.map((a) => a.app) : cur
+    setKeys(u, [...base.filter((k) => k !== app && !k.startsWith(`${app}:`)), ...keep])
+  }
+
   // Роль назначается сразу, без черновика: это готовый набор целиком, а не правка
   // отдельных клеток — копить тут нечего.
   const setRole = useMutation({
@@ -196,11 +218,20 @@ export function MembersBoard({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="relative w-full max-w-xs">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder={party === 'external' ? 'Поиск: ФИО, email, компания…' : 'Поиск: ФИО, email, должность…'}
-            className="h-8 pl-8 text-sm" />
+        <div className="flex items-center gap-2">
+          <div className="relative w-full max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder={party === 'external' ? 'Поиск: ФИО, email, компания…' : 'Поиск: ФИО, email, должность…'}
+              className="h-8 pl-8 text-sm" />
+          </div>
+          <Select value={sort} onValueChange={(v) => setSort(v as 'name' | 'seen')}>
+            <SelectTrigger className="h-8 w-[168px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">По имени</SelectItem>
+              <SelectItem value="seen">Недавно заходили</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex items-center gap-2">
           {dirty.length > 0 && (
@@ -310,6 +341,7 @@ export function MembersBoard({
                     locked={locked(u)} apps={tree} roles={roles}
                     onRole={(roleId) => setRole.mutate({ id: u.id, roleId })}
                     onToggle={(key, app) => toggle(u, key, app)}
+                    onCarve={(app, keep) => carve(u, app, keep)}
                     onSetAll={() => setKeys(u, null)}
                     onSetNone={() => setKeys(u, [])}
                     onReset={() => setDraft((d) => { const n = { ...d }; delete n[u.id]; return n })}
@@ -433,7 +465,12 @@ function MemberRow({
             )}
           </>
         ) : (
-          <span className="truncate text-xs text-muted-foreground">{u.position || '— должность —'}</span>
+          <>
+            <span className="block truncate text-xs text-muted-foreground">{u.position || '— должность —'}</span>
+            <span className="block truncate text-[11px] text-muted-foreground/80">
+              {seenShort(u.last_seen_at) ? `вход: ${seenShort(u.last_seen_at)}` : 'не заходил(а)'}
+            </span>
+          </>
         )}
       </span>
 
@@ -533,12 +570,13 @@ function AppCell({ state, name, locked, implicit, onClick }: {
 
 /** Разворот строки: разделы внутри продуктов — то, чего не помещается в матрицу. */
 function MemberAccessPanel({
-  u, companyId, keys, full, locked, apps, roles, onRole, onToggle, onSetAll, onSetNone,
-  onReset, changed,
+  u, companyId, keys, full, locked, apps, roles, onRole, onToggle, onCarve, onSetAll,
+  onSetNone, onReset, changed,
 }: {
   u: AdminUser; companyId: string; keys: string[] | null; full: boolean; locked: boolean
   apps: AccessApp[]; roles: CompanyRole[]; onRole: (roleId: string) => void
   onToggle: (key: string, app: string) => void
+  onCarve: (app: string, keep: string[]) => void
   onSetAll: () => void; onSetNone: () => void; onReset: () => void; changed: boolean
 }) {
   const sel = useMemo(() => new Set(keys ?? apps.map((a) => a.app)), [keys, apps])
@@ -592,7 +630,8 @@ function MemberAccessPanel({
             </span>
           </div>
           <AccessTreeGrid companyId={companyId} sel={sel} disabled={locked} wide
-            onToggle={(k) => onToggle(k, k.includes(':') ? k.split(':')[0] : k)} />
+            onToggle={(k) => onToggle(k, k.includes(':') ? k.split(':')[0] : k)}
+            onCarve={onCarve} />
         </>
       )}
     </div>
@@ -631,6 +670,13 @@ function MemberCard({
     onSuccess: () => { toast.success('Участник убран из организации'); onSaved(); onClose() },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
+  // Последние события человека — входы и действия из журнала пространства.
+  const activityQ = useQuery({
+    queryKey: ['audit', companyId, 'member', u.id],
+    queryFn: () => roleService.listAudit(companyId, 10, { userId: u.id }),
+    enabled: canManage,
+    retry: false,
+  })
 
   const dirty = name !== u.name || position !== (u.position ?? '')
 
@@ -664,6 +710,43 @@ function MemberCard({
               onClick={() => update.mutate({ companyId, name, position })}>
               {update.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />} Сохранить
             </Button>
+          )}
+        </section>
+
+        <section className="space-y-2">
+          <SectionTitle>Активность</SectionTitle>
+          <p className="text-xs text-muted-foreground">
+            Последний вход:{' '}
+            <span className="text-foreground">
+              {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString('ru-RU') : 'ещё не заходил(а)'}
+            </span>
+          </p>
+          {canManage && (
+            <>
+              {(activityQ.data ?? []).length > 0 && (
+                <div className="space-y-1">
+                  {(activityQ.data ?? []).map((e) => (
+                    <div key={e.id} className="flex items-baseline gap-2 text-[11px]">
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {new Date(e.timestamp).toLocaleString('ru-RU',
+                          { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <span className="truncate" title={e.details ?? undefined}>
+                        {ACTION_LABEL[e.action] ?? e.action}{e.details ? ` — ${e.details}` : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {activityQ.data?.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">Событий в журнале пока нет.</p>
+              )}
+              {/* Десять строк — витрина; полная история с фильтрами живёт в «Журнале». */}
+              <Link to={`/admin/company/audit?user=${u.id}`} onClick={onClose}
+                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
+                <History className="h-3 w-3" /> Весь журнал человека
+              </Link>
+            </>
           )}
         </section>
 

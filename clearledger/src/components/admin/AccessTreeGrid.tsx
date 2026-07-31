@@ -13,10 +13,15 @@ import { Check, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { useAccessTree } from '@/hooks/useAccessTree'
 import { appIcon } from '@/config/appIcons'
 
-export function AccessTreeGrid({ companyId, sel, onToggle, disabled, wide }: {
+export function AccessTreeGrid({ companyId, sel, onToggle, onCarve, disabled, wide }: {
   companyId: string
   sel: Set<string>
   onToggle: (k: string) => void
+  /** Клик по разделу продукта, включённого целиком: продукт «разжимается» — остаются
+   *  все его разделы, кроме кликнутого. Раньше такие разделы были молча заблокированы,
+   *  и чтобы закрыть человеку один пункт, надо было снять продукт и накликать
+   *  остальные руками. Без колбэка — прежнее поведение (разделы недоступны). */
+  onCarve?: (app: string, keep: string[]) => void
   disabled?: boolean
   /** Широкая раскладка в две колонки — для разворота прямо в строке списка. */
   wide?: boolean
@@ -59,6 +64,15 @@ export function AccessTreeGrid({ companyId, sel, onToggle, disabled, wide }: {
                 {appOn && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
               </button>
             </div>
+            {/* Разделы продукта, включённого целиком, — не «полупрозрачный шум»,
+                а полноценные строки: включены все, и это сказано словами. */}
+            {expanded && appOn && (
+              <p className="ml-6 mt-1 px-1 text-[11px] text-muted-foreground">
+                {onCarve
+                  ? 'Продукт открыт целиком — включены все разделы. Клик по разделу закроет его, доступ станет по разделам.'
+                  : 'Продукт открыт целиком — включены все разделы. Чтобы выбирать по одному, снимите отметку с продукта.'}
+              </p>
+            )}
             {expanded && app.groups.map((g) => (
               <div key={g.name} className="ml-6 mt-1 border-l pl-2">
                 <div className="px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">{g.name}</div>
@@ -66,12 +80,19 @@ export function AccessTreeGrid({ companyId, sel, onToggle, disabled, wide }: {
                   {g.modules.map((m) => {
                     const on = appOn || sel.has(m.key)
                     return (
-                      <button key={m.key} type="button" disabled={appOn} onClick={() => onToggle(m.key)}
+                      <button key={m.key} type="button" disabled={appOn && !onCarve}
+                        onClick={() => appOn && onCarve
+                          ? onCarve(app.app, app.groups.flatMap((gr) => gr.modules)
+                              .map((x) => x.key).filter((k) => k !== m.key))
+                          : onToggle(m.key)}
+                        title={appOn && onCarve
+                          ? `${m.name} включён со всем продуктом. Нажмите, чтобы закрыть этот раздел`
+                          : undefined}
                         className={`flex items-center justify-between px-2.5 py-1 rounded-md text-[13px] text-left border transition-colors ${
                           on ? 'bg-primary/10 border-primary/40 text-foreground' : 'border-border text-muted-foreground hover:bg-accent/40'
-                        } ${appOn ? 'opacity-60' : ''}`}>
+                        }`}>
                         <span>{m.name}</span>
-                        {on && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
+                        {on && <Check className={`h-3.5 w-3.5 shrink-0 ${appOn ? 'text-primary/60' : 'text-primary'}`} />}
                       </button>
                     )
                   })}
