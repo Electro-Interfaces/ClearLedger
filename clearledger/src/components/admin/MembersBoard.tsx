@@ -35,6 +35,7 @@ import {
   Building2, Check, ChevronDown, ChevronRight, History, KeyRound, LifeBuoy, Loader2,
   Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, Users2, X,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
 import * as roleService from '@/services/roleService'
