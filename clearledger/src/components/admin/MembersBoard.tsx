@@ -85,6 +85,15 @@ export function MembersBoard({
   })
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [cardFor, setCardFor] = useState<string | null>(null)
+  // Процент активности (доля дней с действиями за 30 дн) — тот же расчёт, что в
+  // «Обзоре»: наглядно, кто живёт в пространстве, а кто заглянул один раз.
+  const activityQ = useQuery({
+    queryKey: ['activity-summary', companyId],
+    queryFn: () => roleService.activitySummary(companyId, 30),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const activityById = new Map((activityQ.data?.people ?? []).map((p) => [p.user_id, p]))
   // Группа «Поддержка платформы» по умолчанию свёрнута: организация видит своих
   // сотрудников, а нашу команду раскрывает по клику (решение МАГа 31.07.2026).
   // Факт доступа не скрывается — заголовок с числом людей виден всегда.
@@ -407,6 +416,7 @@ export function MembersBoard({
                   u={u} groups={columnGroups} keys={effective(u)} full={isFullByRole(u)}
                   locked={locked(u)} changed={dirty.includes(u.id)}
                   expanded={!!expanded[u.id]} party={party}
+                  activity={activityById.get(u.id)}
                   onExpand={() => setExpanded((e) => ({ ...e, [u.id]: !e[u.id] }))}
                   onToggleApp={(app) => toggle(u, app, app)}
                   onCard={() => setCardFor(u.id)}
@@ -491,11 +501,13 @@ function HeaderRow({ groups, loading }: { groups: ColumnGroup[]; loading: boolea
 }
 
 function MemberRow({
-  u, groups, keys, full, locked, changed, expanded, party, onExpand, onToggleApp, onCard,
+  u, groups, keys, full, locked, changed, expanded, party, activity, onExpand, onToggleApp, onCard,
   companyId, onSaved, contracts,
 }: {
   u: AdminUser; groups: ColumnGroup[]; keys: string[] | null; full: boolean; locked: boolean
   changed: boolean; expanded: boolean; party: 'internal' | 'external'
+  /** Активность за 30 дн (доля дней с действиями) — из общей сводки аудита. */
+  activity?: { share: number; active_days: number }
   onExpand: () => void; onToggleApp: (app: string) => void; onCard: () => void
   companyId: string; onSaved: () => void; contracts: SpaceContract[]
 }) {
@@ -549,8 +561,17 @@ function MemberRow({
               {u.position || '— должность —'}
               {u.department_name ? ` · ${u.department_name}` : ''}
             </span>
-            <span className="block truncate text-[11px] text-muted-foreground/80">
-              {seenShort(u.last_seen_at) ? `вход: ${seenShort(u.last_seen_at)}` : 'не заходил(а)'}
+            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
+              <span className="truncate">
+                {seenShort(u.last_seen_at) ? `вход: ${seenShort(u.last_seen_at)}` : 'не заходил(а)'}
+              </span>
+              {/* Полоска активности: доля дней с действиями за 30 дн. */}
+              {activity && (
+                <span title={`Активность: ${activity.share}% дней за месяц (${activity.active_days} дн.)`}
+                  className="flex h-1 w-10 shrink-0 overflow-hidden rounded bg-muted">
+                  <span className="block h-full rounded bg-primary/70" style={{ width: `${activity.share}%` }} />
+                </span>
+              )}
             </span>
           </>
         )}

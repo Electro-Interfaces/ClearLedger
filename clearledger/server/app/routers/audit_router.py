@@ -75,9 +75,11 @@ async def create_audit_event(
 async def list_audit_events(
     company_id: str | None = Query(None),
     action: str | None = Query(None),
+    user_id: str | None = Query(None, description="события конкретного человека"),
     entry_id: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
+    order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -98,6 +100,9 @@ async def list_audit_events(
     if action:
         query = query.where(AuditEvent.action == action)
 
+    if user_id:
+        query = query.where(AuditEvent.user_id == user_id)
+
     if entry_id:
         try:
             eid = uuid.UUID(entry_id)
@@ -111,11 +116,75 @@ async def list_audit_events(
     if date_to:
         query = query.where(AuditEvent.timestamp <= date_to)
 
-    query = query.order_by(AuditEvent.timestamp.desc()).offset(offset).limit(limit)
+    by_time = AuditEvent.timestamp.asc() if order == "asc" else AuditEvent.timestamp.desc()
+    query = query.order_by(by_time).offset(offset).limit(limit)
     result = await db.execute(query)
     events = result.scalars().all()
 
     return [_audit_response(e) for e in events]
+
+
+@router.get("/activity")
+async def activity_summary(
+    company_id: str = Query(...),
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Динамика доступа и активность людей — для «Обзора» и «Сотрудников».
+
+    Отвечает на вопросы МАГа 31.07: кто когда заходил, кого подключали и
+    отключали, ждут ли приглашения, и какой процент активности у каждого
+    человека (доля дней с действиями за окно)."""
+    from sqlalchemy import text as _sql
+    cid = await assert_company_member(company_id, current_user, db)
+    p = {"cid": str(cid), "days": days}
+    totals = (await db.execute(_sql("""
+        select count(*) filter (where action='auth.login') as logins,
+               count(*) filter (where action='auth.login'
+                                and timestamp >= now() - interval '7 days') as logins_7d,
+               count(*) filter (where action='auth.login_failed') as failed,
+               count(*) filter (where action='user.create') as connected,
+               count(*) filter (where action='user.remove') as removed,
+               count(distinct user_id) filter (where action='auth.login') as unique_people
+        from audit_events
+        where company_id = :cid and timestamp >= now() - make_interval(days => :days)
+    """), p)).one()
+    people = (await db.execute(_sql("""
+        select ae.user_id, max(ae.user_name) as name,
+               count(distinct date(ae.timestamp)) as active_days,
+               count(*) filter (where ae.action='auth.login') as logins,
+               max(ae.timestamp) as last_at
+        from audit_events ae
+        where ae.company_id = :cid and ae.timestamp >= now() - make_interval(days => :days)
+          and ae.user_id is not null
+        group by ae.user_id
+        order by active_days desc, logins desc
+        limit 30
+    """), p)).all()
+    inv = (await db.execute(_sql("""
+        select count(*) filter (where status='pending' and expires_at >= now()) as pending,
+               count(*) filter (where status='pending' and expires_at < now()) as expired,
+               count(*) filter (where status='accepted'
+                                and accepted_at >= now() - make_interval(days => :days)) as accepted
+        from invitations where company_id = :cid
+    """), p)).one()
+    return {
+        "days": days,
+        "totals": {
+            "logins": totals.logins, "logins_7d": totals.logins_7d,
+            "failed": totals.failed, "connected": totals.connected,
+            "removed": totals.removed, "unique_people": totals.unique_people,
+        },
+        "invitations": {"pending": inv.pending, "expired": inv.expired, "accepted": inv.accepted},
+        "people": [{
+            "user_id": r.user_id, "name": r.name,
+            "active_days": r.active_days, "logins": r.logins,
+            "last_at": r.last_at.isoformat() if r.last_at else None,
+            # Процент активности: доля дней окна, когда человек что-то делал.
+            "share": round(r.active_days / days * 100),
+        } for r in people],
+    }
 
 
 @router.get("/entry/{entry_id}", response_model=list[AuditEventResponse])

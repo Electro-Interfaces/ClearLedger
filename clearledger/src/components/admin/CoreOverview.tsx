@@ -26,6 +26,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { getCoreStatus, type CoreServiceStatus } from '@/services/coreService'
 import { getSpaceMap, type SpaceMapCompany } from '@/services/spaceMapService'
 import * as ticketsService from '@/services/ticketsService'
+import * as roleService from '@/services/roleService'
 import { ACTION_LABEL } from './AuditLog'
 
 /** Голый IP в подписи события ничего не говорит человеку — уводим в title. */
@@ -112,6 +113,12 @@ export function CoreOverview() {
   const tickets = useQuery({
     queryKey: ['space-tickets-summary', company.id],
     queryFn: () => ticketsService.ticketsSummary(company.id),
+    staleTime: 60_000,
+  })
+  // Динамика доступа: входы, подключения, приглашения, процент активности людей.
+  const activity = useQuery({
+    queryKey: ['activity-summary', company.id],
+    queryFn: () => roleService.activitySummary(company.id, 30),
     staleTime: 60_000,
   })
 
@@ -257,6 +264,66 @@ export function CoreOverview() {
           </CardContent>
         </Card>
       )}
+
+      {/* 4б. Люди и доступ — динамика процесса (запрос МАГа 31.07): авторизации,
+             подключения и отключения, приглашения, процент активности каждого. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Users className="h-4 w-4 text-primary" /> Люди и доступ · 30 дней
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!activity.data ? (
+            <p className="text-sm text-muted-foreground">
+              {activity.isLoading ? 'Загрузка…' : 'Нет данных'}
+            </p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                <span>входов <b className="tabular-nums">{activity.data.totals.logins}</b>
+                  <span className="text-muted-foreground"> (за 7 дн — {activity.data.totals.logins_7d})</span>
+                </span>
+                <span>входили <b className="tabular-nums">{activity.data.totals.unique_people}</b> чел.</span>
+                <span className={activity.data.totals.failed ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}>
+                  отклонено входов <b className="tabular-nums">{activity.data.totals.failed}</b>
+                </span>
+                <span className="text-muted-foreground">
+                  подключено +{activity.data.totals.connected} · убрано −{activity.data.totals.removed}
+                </span>
+                <button type="button" onClick={() => navigate('/admin/company/invites')}
+                  className={activity.data.invitations.expired
+                    ? 'text-amber-700 hover:underline dark:text-amber-400'
+                    : 'text-muted-foreground hover:underline'}>
+                  приглашения: ждут {activity.data.invitations.pending}
+                  {activity.data.invitations.expired ? ` · истекло ${activity.data.invitations.expired}` : ''}
+                  {' '}· принято {activity.data.invitations.accepted}
+                </button>
+              </div>
+              {/* Активность людей: доля дней с действиями. Полоса и процент — видно,
+                  кто живёт в пространстве, а кто заглянул один раз. */}
+              {activity.data.people.length > 0 && (
+                <div className="grid gap-x-6 gap-y-1 border-t border-border/60 pt-2 md:grid-cols-2">
+                  {activity.data.people.slice(0, 10).map((p) => (
+                    <button key={p.user_id} type="button"
+                      onClick={() => navigate(`/admin/company/audit?user=${p.user_id}`)}
+                      title={`Открыть журнал: ${p.name}`}
+                      className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left text-xs transition-colors hover:bg-muted/50">
+                      <span className="w-40 truncate">{p.name}</span>
+                      <span className="h-1.5 flex-1 overflow-hidden rounded bg-muted">
+                        <span className="block h-full rounded bg-primary/70" style={{ width: `${p.share}%` }} />
+                      </span>
+                      <span className="w-24 shrink-0 text-right tabular-nums text-muted-foreground">
+                        {p.share}% · {p.active_days} дн.
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* 5. Работа и жизнь пространства. Слева — заявки («что происходит»), справа —
              последние события по-русски. Частоты сырых кодов аудита отсюда убраны:

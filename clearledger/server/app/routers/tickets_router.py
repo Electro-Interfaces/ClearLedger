@@ -117,7 +117,11 @@ async def tickets_summary(
     totals = (await db.execute(text(f"""
         select count(*) filter (where t.status not in ('closed','cancelled')) as open,
                count(*) filter (where t.status not in ('closed','cancelled')
-                                and coalesce(t.sla_breached,false)) as sla_breached,
+                                and coalesce(t.sla_breached,false)
+                                -- SLA-сигнал — только по СВОИМ заявкам: у зеркал
+                                -- внешних систем (HubEx) свой SLA и своя история,
+                                -- их просрочка засоряла сигнал тысячами.
+                                and coalesce(t.external_system,'') = '') as sla_breached,
                count(*) filter (where t.created_at >= now() - interval '7 days') as created_7d,
                count(*) filter (where t.closed_at >= now() - interval '7 days') as closed_7d,
                count(*) filter (where t.created_at >= now() - interval '30 days') as created_30d,
