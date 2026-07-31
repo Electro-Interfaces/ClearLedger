@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import log_audit
 from app.auth import get_current_user
 from app.config import get_settings
 from app.database import get_db
@@ -34,12 +35,15 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    "corp": "/corporate", "shop": "/shop", "marketing": "/marketing",
                    "finance": "/finance", "data": "/data", "info": "/info",
                    "connect": "/connect",
+                   # «Заявки»: движок — трекер Поддержки, витрина в этом SPA
+                   # (решение МАГа 31.07.2026, docs/TICKETS.md; мост на Plane снят).
+                   "plan": "/tickets",
                    # Продукты в подключении: маршрут есть, за ним заставка.
                    "netlink": "/netlink", "accounting": "/accounting", "diag": "/diagnostics"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",
-                   "chat": "service",
+                   "chat": "service", "plan": "service",
                    "ledger": "app", "projects": "app", "ops": "app",
                    "sales": "app", "corp": "app", "shop": "app", "marketing": "app",
                    "finance": "app", "netlink": "app", "accounting": "app", "diag": "admin"}
@@ -95,6 +99,14 @@ async def list_apps(
             registry = {a["code"]: a["enabled"] for a in reg_apps}
             apps = [a for a in apps if registry.get(a["code"], True)]
             chat_enabled = chat_enabled and registry.get("chat", True)
+            # Описание из реестра — и мостам тоже. Раньше оно доезжало только до внутренних
+            # продуктов, поэтому плитки внешних объясняли лишь способ входа («Открывается
+            # по ссылке»), а что за продуктом стоит — нет. У «Конференций» так терялось
+            # главное: встреча идёт в браузере и участнику не нужна регистрация.
+            desc_by_code = {a["code"]: (a.get("description") or "") for a in reg_apps}
+            for a in apps:
+                if not a.get("description"):
+                    a["description"] = desc_by_code.get(a["code"], "")
             # Внутренние продукты пространства — из реестра: у них нет манифеста, потому
             # что жить им негде, кроме этого же SPA. Чат добавляем только если движок
             # поднят в стеке: плитка без Matrix вела бы в пустоту.
@@ -179,6 +191,12 @@ async def authorize(
 
     token = sso.sign_sso_token(user=user, company_id=cid, companies=companies, aud=app)
     url = f"{target['base_url']}{target['callback']}#token={token}"
+    # Переход в приложение — часть истории активности человека: без этой записи журнал
+    # знает только вход в Ядро, а «когда заходил в Координатор» ответить нечем.
+    if cid is not None:
+        await log_audit(db, actor=user, company_id=uuid.UUID(cid),
+                        action="sso.handoff", target=app)
+        await db.commit()
     return {"url": url, "app": app, "mode": "sso", "expires_in": settings.sso_token_ttl_seconds}
 
 
