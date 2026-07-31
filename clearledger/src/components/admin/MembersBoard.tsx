@@ -84,6 +84,10 @@ export function MembersBoard({
   })
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [cardFor, setCardFor] = useState<string | null>(null)
+  // Группа «Поддержка платформы» по умолчанию свёрнута: организация видит своих
+  // сотрудников, а нашу команду раскрывает по клику (решение МАГа 31.07.2026).
+  // Факт доступа не скрывается — заголовок с числом людей виден всегда.
+  const [platformOpen, setPlatformOpen] = useState(false)
   const [draft, setDraft] = useState<Record<string, string[] | null>>({})
   const [saving, setSaving] = useState(false)
 
@@ -339,13 +343,28 @@ export function MembersBoard({
             </div>
           )}
           {(groups
-            ? groups.flatMap((g) => [{ group: g }, ...g.rows.map((u) => ({ u }))] as Array<{ group?: typeof g; u?: AdminUser }>)
+            ? groups.flatMap((g) => [
+                { group: g },
+                // Свёрнутая «Поддержка платформы»: заголовок с числом людей остаётся,
+                // строки — по клику. Действует только на экране сотрудников.
+                ...(party === 'internal' && g.kind === 'vendor' && !platformOpen
+                  ? [] : g.rows.map((u) => ({ u }))),
+              ] as Array<{ group?: typeof g; u?: AdminUser }>)
             : filtered.map((u) => ({ u } as { group?: never; u?: AdminUser }))
           ).map((item) => {
             if (item.group) {
               const g = item.group
               return (
-                <div key={`g-${g.key}`} className="flex items-center gap-2 bg-muted/40 px-3 py-1.5 text-sm font-medium">
+                <div key={`g-${g.key}`}
+                  role={g.kind === 'vendor' && party === 'internal' ? 'button' : undefined}
+                  tabIndex={g.kind === 'vendor' && party === 'internal' ? 0 : undefined}
+                  onClick={g.kind === 'vendor' && party === 'internal'
+                    ? () => setPlatformOpen((v) => !v) : undefined}
+                  onKeyDown={g.kind === 'vendor' && party === 'internal'
+                    ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPlatformOpen((v) => !v) } }
+                    : undefined}
+                  className={cn('flex items-center gap-2 bg-muted/40 px-3 py-1.5 text-sm font-medium',
+                    g.kind === 'vendor' && party === 'internal' && 'cursor-pointer hover:bg-muted/60')}>
                   {g.kind === 'vendor'
                     ? <LifeBuoy className="h-3.5 w-3.5 text-primary" />
                     : g.kind === 'staff'
@@ -354,9 +373,17 @@ export function MembersBoard({
                   {g.label}
                   <span className="text-xs font-normal text-muted-foreground">· {g.rows.length} чел.</span>
                   {g.kind === 'vendor' && party === 'internal' && (
-                    <span className="text-xs font-normal text-muted-foreground">
-                      — не сотрудники компании: разработчик и сопровождение платформы с доступом в пространство
-                    </span>
+                    <>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        — выделенное подразделение разработчика платформы, не сотрудники компании
+                      </span>
+                      <span className="ml-auto flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                        {platformOpen ? 'свернуть' : 'показать'}
+                        {platformOpen
+                          ? <ChevronDown className="h-3.5 w-3.5" />
+                          : <ChevronRight className="h-3.5 w-3.5" />}
+                      </span>
+                    </>
                   )}
                   {g.kind === 'none' && (
                     <span className="text-xs font-normal text-amber-500/90">
