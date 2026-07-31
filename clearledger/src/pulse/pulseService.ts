@@ -34,8 +34,10 @@ export interface PulseDay {
   generated_at: string
 }
 
+// Путь передаётся ВМЕСТЕ с `/api`: BASE_URL в контейнере пуст (API на том же origin),
+// и без префикса запрос уходит в SPA и возвращает index.html вместо JSON.
 export const getPulseDay = (companyId: string) =>
-  get<PulseDay>('/pulse/day', { company_id: companyId })
+  get<PulseDay>('/api/pulse/day', { company_id: companyId })
 
 export const ackCard = (companyId: string, cardKey: string) =>
-  post<{ ok: boolean }>('/pulse/ack', { company_id: companyId, card_key: cardKey })
+  post<{ ok: boolean }>('/api/pulse/ack', { company_id: companyId, card_key: cardKey })

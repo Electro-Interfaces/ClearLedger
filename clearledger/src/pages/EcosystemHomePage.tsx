@@ -17,7 +17,7 @@ import {
   LayoutGrid, ExternalLink, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
-  Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope,
+  Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope, Activity,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -43,6 +43,7 @@ const ICONS: Record<string, typeof FileText> = {
   'message-circle': MessageCircle,
   'shield-check': ShieldCheck,
   'book-open': BookOpen,
+  'activity': Activity,
   // Продукты разреза Учёта (config/spaceProducts.ts).
   'hard-hat': HardHat,
   'gauge': Gauge,
@@ -83,6 +84,10 @@ const DOT_CLASS: Record<Readiness, string> = {
 // «Поддержка» — сервис экосистемы, а не коммерческое приложение (решение МАГа
 // 31.07.2026): заявки и обслуживание общие для всех продуктов, как чат.
 const COMMERCE_APPS = ['sales', 'shop', 'corp', 'marketing', 'monitor', 'processing']
+// «Пульс» — рабочее место руководителя над ВСЕМ пространством, поэтому своя строка
+// вверху стола, а не «чем владеем и как считаем» (ecosystem-deploy/docs/PULSE.md).
+// Круг узкий: у кого права нет, тот этой строки не увидит вовсе.
+const LEAD_APPS = ['pulse']
 
 /** Тон показателя: цветом выделяем только то, что требует внимания или радует. */
 const TONE_CLASS: Record<string, string> = {
@@ -215,8 +220,10 @@ export function EcosystemHomePage() {
   const apps = all.filter((a) => a.layer !== 'service' && a.layer !== 'admin')
   // Два контура приложений: обращённый к клиенту (продать, обслужить) и внутренний
   // (построить, содержать, посчитать). Порядок внутри — из реестра, как и был.
+  const lead = apps.filter((a) => LEAD_APPS.includes(a.code))
   const commerce = apps.filter((a) => COMMERCE_APPS.includes(a.code))
-  const internal = apps.filter((a) => !COMMERCE_APPS.includes(a.code))
+  const internal = apps.filter(
+    (a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code))
 
   /**
    * Открыть продукт. Рабочее место уходит в НОВУЮ вкладку (решение МАГа 27.07.2026):
@@ -301,8 +308,16 @@ export function EcosystemHomePage() {
         {/* Все три слоя — из ОДНОГО каталога продуктов пространства. Раньше Управление,
             Учёт и Чаты рисовались хардкодом, и в списке приложений их не было: состав
             стола расходился с реестром. Теперь источник один. */}
+        {/* Руководителю его рабочее место нужно первым — он заходит за состоянием
+            дел, а не за настройкой пространства. */}
+        {lead.length > 0 && (
+          <Section title="Руководство" hint="как идут дела и куда вмешаться">
+            {lead.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
+
         {management.length > 0 && (
-          <Section title="Ядро системы">
+          <Section title="Ядро системы" divider={lead.length > 0}>
             {management.map((a) => <ProductTile key={a.code} a={a} />)}
           </Section>
         )}

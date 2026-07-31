@@ -68,6 +68,7 @@ async def desk_summary(db: AsyncSession, company_id: uuid.UUID) -> dict[str, Any
         "marketing": await _marketing(db, company_id),
         "support": await _support(db, company_id),
         "finance": await _finance(db, company_id),
+        "pulse": await _pulse(db, company_id),
     }
     return {
         "windowDays": WINDOW_DAYS,
@@ -99,6 +100,28 @@ def _short_money(value: float | None) -> str:
 async def _count(db: AsyncSession, model, company_id: uuid.UUID, *where) -> int:
     q = select(func.count()).select_from(model).where(model.company_id == company_id, *where)
     return int((await db.execute(q)).scalar() or 0)
+
+
+async def _pulse(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
+    """«Пульс» на столе отвечает на свой же вопрос: нужно ли вмешательство сегодня.
+
+    Считает ТЕМ ЖЕ кодом, что и экран дня: второй набор правил разошёлся бы с
+    первым за неделю, и плитка начала бы врать про то, что за ней.
+    """
+    from app.routers.pulse_router import pulse_day_data
+
+    try:
+        data = await pulse_day_data(db, str(cid))
+    except Exception:  # noqa: BLE001 — одна плитка не должна ронять весь стол
+        return {"metrics": []}
+    n = len(data["cards"])
+    stale = data["stale_days"]
+    return {"metrics": [
+        _m("требуют внимания", _n(n), "warn" if n else "ok"),
+        _m("данные сети",
+           "нет" if stale is None else ("сегодня" if stale <= 0 else f"{stale} дн назад"),
+           "warn" if (stale is None or stale > 7) else "ok"),
+    ]}
 
 
 async def _admin(db: AsyncSession, cid: uuid.UUID, online_since: datetime) -> dict[str, Any]:

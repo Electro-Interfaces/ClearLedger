@@ -37,6 +37,84 @@ SILENT_SHARE = 0.6      # доля молчащих станций парка �
 SILENT_HOURS = 48       # «молчит» = нет сессий столько часов ДАННЫХ (от as_of)
 
 
+# Колпак экрана дня: больше семи карточек читаются как лента, а лента — это то,
+# от чего «Пульс» уходит. Лишнее отсекается по уровню (PULSE.md §7).
+MAX_CARDS = 7
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    """«1 заявка», «3 заявки», «11 заявок» — карточку читает человек, а не парсер."""
+    n = abs(n) % 100
+    if 11 <= n <= 14:
+        return many
+    return {1: one, 2: few, 3: few, 4: few}.get(n % 10, many)
+
+
+def build_cards(
+    *, as_of: datetime | None, stale_days: int | None,
+    own_sla_stale: int, own_reopen: int, ext_old: int,
+    silent: int, park: int, acked: set[str],
+) -> list[dict[str, Any]]:
+    """Правила экрана дня — чистая функция над уже посчитанными цифрами.
+
+    Отделена от запросов сознательно: правила — сердце «Пульса», и проверять их
+    надо без базы (`tests/test_pulse_rules.py`). Каждая карточка — сводка или
+    аномалия, ни одна не заводится на отдельную запись.
+    """
+    out: list[dict[str, Any]] = []
+
+    def card(key: str, title: str, insight: str, *, count: int | None = None,
+             level: str = "warn", link: str | None = None) -> None:
+        if key not in acked:
+            out.append({"key": key, "title": title, "insight": insight,
+                        "count": count, "level": level, "link": link})
+
+    # №0 — свежесть данных: без неё остальные цифры обсуждать нельзя.
+    if stale_days is None:
+        card("data_stale", "Данных о сессиях нет",
+             "Ни одной загрузки сессий: цифрам сети верить пока нечему.",
+             level="alert", link="/data")
+    elif stale_days > STALE_DAYS:
+        card("data_stale", "Данные сессий не обновлялись",
+             f"Последняя загрузка {as_of:%d.%m}: прошло {stale_days} дн. "
+             f"Цифрам сети можно верить только по эту дату."
+             if as_of else f"Загрузок нет {stale_days} дн.",
+             count=stale_days, level="alert", link="/data")
+
+    if own_sla_stale:
+        w = plural(own_sla_stale, "заявка", "заявки", "заявок")
+        v = plural(own_sla_stale, "висит", "висят", "висят")
+        card("own_sla", "Свои заявки встали",
+             f"{own_sla_stale} {w} с нарушенным SLA {v} дольше "
+             f"{OWN_SLA_DAYS} дней — работа стоит на нашей стороне.",
+             count=own_sla_stale, link="/tickets")
+
+    if ext_old > EXT_BACKLOG:
+        card("ext_backlog", "Хвост внешней сервисной системы",
+             f"{ext_old} {plural(ext_old, 'заявка', 'заявки', 'заявок')} HubEx "
+             f"старше месяца. Это зеркала чужой системы: "
+             f"разбирать не нам, но хвост такого размера — повод для разговора "
+             f"с подрядчиком.",
+             count=ext_old, link="/tickets")
+
+    if park and silent / park > SILENT_SHARE:
+        card("silent_surge", "Молчит большая часть сети",
+             f"{silent} из {park} станций без сессий за {SILENT_HOURS} часа "
+             f"данных — это уже не отдельные точки.",
+             count=silent, link="/sales")
+
+    if own_reopen:
+        card("own_reopen", "Заявки открываются повторно",
+             f"{own_reopen} {plural(own_reopen, 'своя заявка', 'своих заявки', 'своих заявок')} "
+             f"{plural(own_reopen, 'переоткрыта', 'переоткрыты', 'переоткрыты')} второй раз — "
+             f"решение не держится, стоит посмотреть, что там происходит.",
+             count=own_reopen, link="/tickets")
+
+    # Колпак: сначала тревожные, потом предупреждения; хвост отсекаем.
+    out.sort(key=lambda c: 0 if c["level"] == "alert" else 1)
+    return out[:MAX_CARDS]
+
+
 def _kpi(key: str, title: str, value: float | int | None, *, unit: str | None = None,
          delta_pct: float | None = None, note: str | None = None,
          state: str | None = None) -> dict[str, Any]:
@@ -58,6 +136,16 @@ async def pulse_day(
 ) -> dict[str, Any]:
     """Экран дня: строка KPI по направлениям + карточки-эскалации (сводки)."""
     await assert_company_member(company_id, current_user, db)
+    return await pulse_day_data(db, str(company_id))
+
+
+async def pulse_day_data(db: AsyncSession, company_id: str) -> dict[str, Any]:
+    """Данные экрана дня без проверки доступа — её делает вызывающий.
+
+    Отдельной функцией, потому что плитку «Пульса» на рабочем столе считает тот же
+    код (`services/space_desk._pulse`): второй набор правил разошёлся бы с первым,
+    и плитка начала бы врать про то, что внутри.
+    """
     cid = str(company_id)
 
     # ── Свежесть: правило №0. as_of — дата данных, под ним живут все окна ──
@@ -71,12 +159,12 @@ async def pulse_day(
 
     # ── Сеть и продажи: 7 дней данных против предыдущих 7 ──
     s = (await db.execute(text("""
-        select count(*) filter (where started_at > :as_of - interval '7 days') as s7,
-               coalesce(sum(amount) filter (where started_at > :as_of - interval '7 days'), 0) as r7,
-               count(*) filter (where started_at <= :as_of - interval '7 days'
-                                and started_at > :as_of - interval '14 days') as s7p,
-               coalesce(sum(amount) filter (where started_at <= :as_of - interval '7 days'
-                                and started_at > :as_of - interval '14 days'), 0) as r7p
+        select count(*) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days') as s7,
+               coalesce(sum(amount) filter (where started_at > CAST(:as_of AS timestamp) - interval '7 days'), 0) as r7,
+               count(*) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
+                                and started_at > CAST(:as_of AS timestamp) - interval '14 days') as s7p,
+               coalesce(sum(amount) filter (where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
+                                and started_at > CAST(:as_of AS timestamp) - interval '14 days'), 0) as r7p
         from charge_sessions where company_id = :cid
     """), {"cid": cid, "as_of": as_of})).one() if as_of else None
 
@@ -91,7 +179,7 @@ async def pulse_day(
              group by 1
         )
         select count(*) as park,
-               count(*) filter (where last_at <= :as_of - interval '{SILENT_HOURS} hours') as silent
+               count(*) filter (where last_at <= CAST(:as_of AS timestamp) - interval '{SILENT_HOURS} hours') as silent
         from ever
     """), {"cid": cid, "as_of": as_of})).one() if as_of else None
 
@@ -123,9 +211,12 @@ async def pulse_day(
         where company_id = :cid and stage <> 'archive'
         group by stage order by n desc
     """), {"cid": cid})).all()
+    # commissioned_on хранится строкой (как и stage_since) — каст обязателен,
+    # иначе «operator does not exist: character varying >= date».
     commissioned_30d = (await db.execute(text("""
         select count(*) from ezs_projects
-        where company_id = :cid and commissioned_on >= current_date - 30
+        where company_id = :cid
+          and nullif(commissioned_on, '')::date >= current_date - 30
     """), {"cid": cid})).scalar_one()
 
     # ── Люди: присутствие тем же окном, что карта пространства (6 минут) ──
@@ -157,7 +248,7 @@ async def pulse_day(
                     note=f"старше месяца: {t.ext_old}"))
     active_projects = sum(r.n for r in funnel)
     kpi.append(_kpi("funnel", "Проекты в работе", active_projects,
-                    note=", ".join(f"{r.stage} {r.n}" for r in funnel[:3]) or None))
+                    note=f"введено за 30 дн: {commissioned_30d}"))
     kpi.append(_kpi("people", "Сейчас в системе", p.online,
                     note=f"за сегодня: {p.today} из {p.total}"))
 
@@ -165,49 +256,12 @@ async def pulse_day(
     acked = {r.card_key for r in (await db.execute(text(
         "select card_key from pulse_acks where company_id = :cid and acked_on = current_date"
     ), {"cid": cid})).all()}
-
-    cards: list[dict[str, Any]] = []
-
-    def card(key: str, title: str, insight: str, *, count: int | None = None,
-             level: str = "warn", link: str | None = None) -> None:
-        if key not in acked:
-            cards.append({"key": key, "title": title, "insight": insight,
-                          "count": count, "level": level, "link": link})
-
-    if stale_days is None:
-        card("data_stale", "Данных о сессиях нет",
-             "Ни одной загрузки сессий: цифрам сети верить пока нечему.",
-             level="alert", link="/data")
-    elif stale_days > STALE_DAYS:
-        card("data_stale", "Данные сессий не обновлялись",
-             f"Последняя загрузка {as_of:%d.%m}: прошло {stale_days} дн. "
-             f"Цифрам сети можно верить только по эту дату.",
-             count=stale_days, level="alert", link="/data")
-
-    if t.own_sla_stale:
-        card("own_sla", "Свои заявки встали",
-             f"{t.own_sla_stale} заявок с нарушенным SLA висят дольше "
-             f"{OWN_SLA_DAYS} дней — работа стоит на нашей стороне.",
-             count=t.own_sla_stale, link="/tickets")
-
-    if t.ext_old > EXT_BACKLOG:
-        card("ext_backlog", "Хвост внешней сервисной системы",
-             f"{t.ext_old} заявок HubEx старше месяца. Это зеркала чужой "
-             f"системы: разбирать не нам, но хвост такого размера — повод "
-             f"для разговора с подрядчиком.",
-             count=t.ext_old, link="/tickets")
-
-    if silent is not None and silent.park and silent.silent / silent.park > SILENT_SHARE:
-        card("silent_surge", "Молчит большая часть сети",
-             f"{silent.silent} из {silent.park} станций без сессий за "
-             f"{SILENT_HOURS} часа данных — это уже не отдельные точки.",
-             count=silent.silent, link="/sales")
-
-    if t.own_reopen:
-        card("own_reopen", "Заявки открываются повторно",
-             f"{t.own_reopen} своих заявок переоткрыты второй раз — "
-             f"решение не держится, стоит посмотреть, что там происходит.",
-             count=t.own_reopen, link="/tickets")
+    cards = build_cards(
+        as_of=as_of, stale_days=stale_days,
+        own_sla_stale=t.own_sla_stale, own_reopen=t.own_reopen, ext_old=t.ext_old,
+        silent=(silent.silent if silent else 0), park=(silent.park if silent else 0),
+        acked=acked,
+    )
 
     return {
         "as_of": as_of.isoformat() if as_of else None,

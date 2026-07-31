@@ -20,10 +20,20 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { ackCard, getPulseDay, type PulseCard, type PulseKpi } from './pulseService'
 
 const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+// Крупные суммы — компактно («1,1 млн ₽»): на телефоне «1 147 344 ₽» переносится
+// на вторую строку, а руководителю нужен порядок величины, а не рубли до копейки.
+const nfShort = new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFractionDigits: 1 })
+
+/** «1 требует», «3 требуют» — счётчик на экране директора читает человек. */
+function plural(n: number, one: string, few: string, many: string): string {
+  const t = Math.abs(n) % 100
+  if (t >= 11 && t <= 14) return many
+  return { 1: one, 2: few, 3: few, 4: few }[t % 10] ?? many
+}
 
 function fmtValue(k: PulseKpi): string {
   if (k.value == null) return '—'
-  const v = nf.format(k.value)
+  const v = (k.value >= 100_000 ? nfShort : nf).format(k.value)
   return k.unit ? `${v} ${k.unit}` : v
 }
 
@@ -55,6 +65,19 @@ export function PulseAppPage() {
             {q.data ? asOfLabel(q.data.as_of, q.data.stale_days) : 'Экран дня руководителя'}
           </p>
         </div>
+        {/* Статус за 5 секунд: одно слово раньше, чем прочитана первая карточка. */}
+        {q.data && (
+          <span className={cn(
+            'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium',
+            q.data.cards.length
+              ? 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'
+              : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+          )}>
+            {q.data.cards.length
+              ? `${q.data.cards.length} ${plural(q.data.cards.length, 'требует', 'требуют', 'требуют')} внимания`
+              : 'всё спокойно'}
+          </span>
+        )}
       </div>
 
       {q.isLoading && (
@@ -106,7 +129,7 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
         <div
           key={c.key}
           className={cn(
-            'rounded-lg border p-4',
+            'rounded-lg border p-3',
             c.level === 'alert'
               ? 'border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/40'
               : 'border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40',
@@ -117,24 +140,34 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
             {c.count != null && <div className="text-lg font-bold tabular-nums">{nf.format(c.count)}</div>}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{c.insight}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
+          {/* Действия в ОДНУ строку и на телефоне: перенос съедал пол-экрана,
+              а карточек на экране дня несколько. */}
+          {/* На телефоне подписи у навигационных кнопок скрыты — иначе «Принято»
+              выдавливается за край и превращается в безымянную галочку. */}
+          <div className="mt-2.5 flex gap-1.5">
             {c.link && (
-              <Button size="sm" variant="outline" className="h-8" onClick={() => navigate(c.link!)}>
-                <ArrowUpRight className="mr-1 h-3.5 w-3.5" />Открыть
+              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]"
+                title="Открыть" onClick={() => navigate(c.link!)}>
+                <ArrowUpRight className="h-3 w-3 sm:mr-1" />
+                <span className="hidden sm:inline">Открыть</span>
               </Button>
             )}
-            <Button size="sm" variant="outline" className="h-8" onClick={() => navigate('/messages')}>
-              <MessageCircle className="mr-1 h-3.5 w-3.5" />Обсудить
+            <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]"
+              title="Обсудить в чате" onClick={() => navigate('/messages')}>
+              <MessageCircle className="h-3 w-3 sm:mr-1" />
+              <span className="hidden sm:inline">Обсудить</span>
             </Button>
-            <Button size="sm" variant="outline" className="h-8" onClick={() => navigate('/tickets')}>
-              <ClipboardList className="mr-1 h-3.5 w-3.5" />Заявка
+            <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]"
+              title="Поставить заявку" onClick={() => navigate('/tickets')}>
+              <ClipboardList className="h-3 w-3 sm:mr-1" />
+              <span className="hidden sm:inline">Заявка</span>
             </Button>
             <Button
-              size="sm" variant="ghost" className="h-8"
+              size="sm" variant="ghost" className="ml-auto h-7 px-2 text-[11px]"
               disabled={ack.isPending}
               onClick={() => ack.mutate(c.key)}
             >
-              <CheckCheck className="mr-1 h-3.5 w-3.5" />Принято
+              <CheckCheck className="mr-1 h-3 w-3" />Принято
             </Button>
           </div>
         </div>
@@ -159,8 +192,9 @@ function KpiGrid({ kpi }: { kpi: PulseKpi[] }) {
           )}
         >
           <div className="text-[11px] text-muted-foreground">{k.title}</div>
-          <div className="mt-0.5 flex items-baseline gap-1.5">
-            <span className="text-xl font-bold tabular-nums">{fmtValue(k)}</span>
+          <div className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5">
+            {/* nowrap: «1,1 млн ₽» на узкой плитке иначе рвётся, и «₽» уезжает вниз. */}
+            <span className="whitespace-nowrap text-xl font-bold tabular-nums">{fmtValue(k)}</span>
             {k.delta_pct != null && (
               <span className={cn(
                 'flex items-center text-[11px] font-medium tabular-nums',
