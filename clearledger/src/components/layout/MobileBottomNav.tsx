@@ -54,6 +54,19 @@ export function MobileBottomNav() {
   // разделы «Проектов» там, где никаких «Проектов» нет.
   const product = SPACE_PRODUCTS.find(
     (p) => pathname === p.route || pathname.startsWith(`${p.route}/`)) ?? null
+  /** Общие страницы пространства — запасной набор там, где приложения нет. */
+  const spaceItems = [
+    // У разрезанного профиля Учёта как места нет — его роль играет рабочий стол
+    // пространства, откуда открываются продукты.
+    { label: 'Рабочий стол', path: homePath(company.profileId), icon: LayoutDashboard },
+    { label: 'Документы', path: '/files', icon: FileText },
+    { label: 'Контрагенты', path: '/contractors', icon: Building2 },
+    { label: 'Объекты', path: '/objects', icon: Boxes },
+    { label: 'Настройки', path: '/settings', icon: Settings },
+  ].filter((i) => pathAllowed(i.path, company.profileId, canApp,
+    (p) => routeAllowed(p, companyModules),
+    (app, code) => productModuleAllowed(app, code, canModule, company.profileId)))
+
   let items: BottomNavItem[]
 
   if (pathname === '/pulse' || pathname.startsWith('/pulse/')) {
@@ -64,18 +77,12 @@ export function MobileBottomNav() {
     items = sections
       .filter((s) => product.modes.includes(s.mode))
       .map((s) => ({ label: s.label, path: `${product.route}?mode=${s.mode}`, icon: s.icon }))
+    // У продукта может не оказаться ни одного подключённого раздела (профиль fuel,
+    // «Проекты»): пустая полоса скрывалась целиком, и человек оставался в приложении
+    // вовсе без нижней навигации. Тогда возвращаем общие страницы.
+    if (items.length === 0) items = spaceItems
   } else {
-    items = [
-      // У разрезанного профиля Учёта как места нет — его роль играет рабочий стол
-      // пространства, откуда открываются продукты.
-      { label: 'Рабочий стол', path: homePath(company.profileId), icon: LayoutDashboard },
-      { label: 'Документы', path: '/files', icon: FileText },
-      { label: 'Контрагенты', path: '/contractors', icon: Building2 },
-      { label: 'Объекты', path: '/objects', icon: Boxes },
-      { label: 'Настройки', path: '/settings', icon: Settings },
-    ].filter((i) => pathAllowed(i.path, company.profileId, canApp,
-      (p) => routeAllowed(p, companyModules),
-      (app, code) => productModuleAllowed(app, code, canModule, company.profileId)))
+    items = spaceItems
   }
 
   // Больше пяти не помещается: подписи начинают обрезаться до неразличимых огрызков.
