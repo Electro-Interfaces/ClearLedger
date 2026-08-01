@@ -31,6 +31,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, hasSideButton, type SsoApp } from '@/services/ssoService'
 import { useOpenApp } from '@/hooks/useOpenApp'
+import { useMaxWidth } from '@/hooks/use-mobile'
 import { READINESS_LABEL, productReadiness, type Readiness } from '@/config/spaceProducts'
 import { getDeskSummary, type DeskMetric } from '@/services/spaceDeskService'
 
@@ -86,9 +87,14 @@ const DOT_CLASS: Record<Readiness, string> = {
  * внутренний контур (стройка сети, эксплуатация, связь, деньги). Деление по контуру,
  * а не по слою: слой говорит, ЧТО это (ядро/сервис/приложение), контур — про чей день.
  */
-// «Поддержка» — сервис экосистемы, а не коммерческое приложение (решение МАГа
-// 31.07.2026): заявки и обслуживание общие для всех продуктов, как чат.
-const COMMERCE_APPS = ['sales', 'shop', 'corp', 'marketing', 'monitor', 'processing']
+// Рабочая строка стола. Порядок — как к продуктам обращаются за день: сначала
+// поддержка (заявки клиентов), потом продажи, стройка новых объектов и содержание
+// существующих (решение МАГа 01.08.2026; отменяет вынос «Поддержки» в сервисы от
+// 31.07.2026 — заявки оказались началом дня, а не общей утилитой вроде чата).
+const COMMERCE_APPS = [
+  'support', 'sales', 'projects', 'ops',
+  'shop', 'corp', 'marketing', 'monitor', 'processing',
+]
 // «Пульс» — рабочее место руководителя над ВСЕМ пространством, поэтому своя строка
 // вверху стола, а не «чем владеем и как считаем» (ecosystem-deploy/docs/PULSE.md).
 // Круг узкий: у кого права нет, тот этой строки не увидит вовсе.
@@ -211,6 +217,8 @@ function Section({ title, hint, children, divider }: {
 
 export function EcosystemHomePage() {
   const navigate = useNavigate()
+  // Тот же порог, что у раскладок: ниже него интерфейс живёт в руке, а не под курсором.
+  const narrow = useMaxWidth(1024)
   const [menuOpen, setMenuOpen] = useState(false)
   const { user, logout } = useAuth()
   const { company, companyId, companies } = useCompany()
@@ -238,32 +246,46 @@ export function EcosystemHomePage() {
   const canOpen = (code: string) => allowed === null || allowed.includes(code)
   const all: SsoApp[] = (q.data?.apps ?? []).filter((a) => canOpen(a.code))
   const management = all.filter((a) => a.layer === 'admin')
-  const services = all.filter((a) => a.layer === 'service')
-  const apps = all.filter((a) => a.layer !== 'service' && a.layer !== 'admin')
+  // Поддержка живёт в сервисном слое каталога, но на столе стоит в рабочей строке
+  // (решение МАГа 01.08.2026): с неё начинается день у большинства.
+  const services = all.filter((a) => a.layer === 'service' && !COMMERCE_APPS.includes(a.code))
+  const apps = all.filter((a) => a.layer !== 'admin'
+    && (a.layer !== 'service' || COMMERCE_APPS.includes(a.code)))
   // Два контура приложений: обращённый к клиенту (продать, обслужить) и внутренний
-  // (построить, содержать, посчитать). Порядок внутри — из реестра, как и был.
+  // (построить, содержать, посчитать).
   const lead = apps.filter((a) => LEAD_APPS.includes(a.code))
-  const commerce = apps.filter((a) => COMMERCE_APPS.includes(a.code))
+  // Порядок рабочей строки задан явно, а не порядком реестра: он отражает,
+  // в каком порядке к продуктам обращаются в течение дня.
+  const commerce = COMMERCE_APPS
+    .map((code) => apps.find((a) => a.code === code))
+    .filter((a): a is SsoApp => !!a)
   const internal = apps.filter(
     (a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code))
 
   /**
-   * Открыть продукт. Рабочее место уходит в НОВУЮ вкладку (решение МАГа 27.07.2026):
-   * стол остаётся открытым, продукты копятся вкладками рядом. Сервисы с кнопкой в шапке
-   * (Чат) открываются здесь же — они часть текущего экрана, а не отдельное место.
+   * Открыть продукт. На десктопе рабочее место уходит в НОВУЮ вкладку (решение МАГа
+   * 27.07.2026): стол остаётся открытым, продукты копятся вкладками рядом. Сервисы с
+   * кнопкой в шапке (Чат) открываются здесь же — они часть текущего экрана.
+   *
+   * На телефоне — в ТЕКУЩЕЙ вкладке. Держать рабочие места параллельно там не выходит:
+   * переключение между вкладками стоит двух жестов через меню браузера, вкладки копятся
+   * и теряются, а «назад» перестаёт работать. Плюс новая вкладка открывается со своими
+   * настройками — в режиме эмуляции устройства она приходит уже в десктопном виде.
    */
   async function openProduct(app: SsoApp) {
     if (app.mode === 'internal' && app.route) {
-      if (hasSideButton(app.code)) navigate(app.route)
+      if (narrow || hasSideButton(app.code)) navigate(app.route)
       else window.open(`${window.location.origin}${BASE}${app.route}`, '_blank', 'noopener,noreferrer')
       return
     }
     await openExternal(app)
   }
 
-  /** Открыть внешнее приложение: SSO — по handoff-токену, мост — ссылкой. */
+  /** Открыть внешнее приложение: SSO — по handoff-токену, мост — ссылкой.
+   *  Новая вкладка только на десктопе (см. openProduct); чужой домен уходит в неё
+   *  всегда — там своя сессия и свой «назад», это решает сам хук. */
   async function openExternal(app: SsoApp) {
-    await openViaHook(app.code, true)
+    await openViaHook(app.code, !narrow)
   }
 
   /** Плитка любого продукта пространства: подпись говорит, ЧТО за ним стоит, а не как он
@@ -365,23 +387,11 @@ export function EcosystemHomePage() {
           </Section>
         )}
 
-        {management.length > 0 && (
-          <Section title="Ядро системы" divider={lead.length > 0}>
-            {management.map((a) => <ProductTile key={a.code} a={a} />)}
-          </Section>
-        )}
-
-        {services.length > 0 && (
-          <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
-            {services.map((a) => <ProductTile key={a.code} a={a} />)}
-          </Section>
-        )}
-
         {/* Приложения разведены по двум контурам (решение МАГа 28.07.2026): клиентская
             сторона и внутренняя. Один список из десяти плиток не читался — рядом
             стояли «Продажи» и «Бухгалтерия», между которыми нет ничего общего. */}
         {commerce.length > 0 && (
-          <Section title="Клиенты и продажи" hint="кому продаём и как обслуживаем" divider>
+          <Section title="Клиенты и продажи" hint="кому продаём и как обслуживаем" divider={lead.length > 0}>
             {commerce.map((a) => <ProductTile key={a.code} a={a} />)}
           </Section>
         )}
@@ -400,6 +410,21 @@ export function EcosystemHomePage() {
             </div>
           )}
         </Section>
+
+        {/* Внизу — то, к чему возвращаются реже рабочих приложений (решение МАГа
+            01.08.2026). Сервисы общие для всех продуктов и открываются по случаю,
+            ядро — настройка самого пространства: люди, подключения, загрузка. */}
+        {services.length > 0 && (
+          <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
+            {services.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
+
+        {management.length > 0 && (
+          <Section title="Ядро системы" divider>
+            {management.map((a) => <ProductTile key={a.code} a={a} />)}
+          </Section>
+        )}
       </main>
     </div>
   )
