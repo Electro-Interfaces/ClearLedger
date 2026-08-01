@@ -133,6 +133,48 @@ class NsiBarcodeIn(BaseModel):
     code: str
 
 
+async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int | None = None) -> int:
+    """Положить карточку в очередь заданий станции.
+
+    Правка в центре сама по себе ничего не меняет на АЗС: станция за CGNAT, и
+    достучаться до неё нельзя — она забирает задания своим тактом. Поэтому цена
+    и карточка едут вниз тем же каналом, что и заготовки приёмки.
+
+    Едет карточка ЦЕЛИКОМ, а не изменённое поле: станция могла пропустить
+    предыдущую правку (не было связи), и дельта «только новая цена» оставила бы
+    её со старым названием и старой ставкой. Полный снимок карточки
+    идемпотентен — применить его дважды безопасно.
+    """
+    card = (await db.execute(text("""
+        SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted
+        FROM edge.item i WHERE i.id = :id
+    """), {"id": item_id})).mappings().first()
+    if card is None:
+        return 0
+
+    targets = [station_id] if station_id else [
+        r[0] for r in (await db.execute(text("SELECT id FROM edge.station"))).all()]
+
+    codes = [r[0] for r in (await db.execute(text(
+        "SELECT code FROM edge.barcode WHERE item_id = :id AND status = 'active' ORDER BY code"
+    ), {"id": item_id})).all()]
+
+    for st in targets:
+        price = (await db.execute(text("""
+            SELECT price FROM edge.price
+            WHERE item_id = :id AND station_id = :s AND valid_to IS NULL
+        """), {"id": item_id, "s": st})).scalar_one_or_none()
+        db.add(EdgeDownlink(
+            company_id=cid, station_id=st, kind="nsi_delta",
+            payload={"uuid": str(card["external_uuid"]), "name": card["name"],
+                     "unit": card["unit"], "vat_rate": card["vat_rate"],
+                     "deleted": bool(card["deleted"]), "barcodes": codes,
+                     "price": float(price) if price is not None else None},
+            note="НСИ: %s" % card["name"][:60],
+        ))
+    return len(targets)
+
+
 VAT_CODES = ("НДС22", "НДС20", "НДС10", "НДС5", "НДС18_118", "БезНДС")
 
 
@@ -255,8 +297,9 @@ async def nsi_item_update(
     fields["id"] = item_id
     await db.execute(
         text(f"UPDATE edge.item SET {sets}, updated_at = now() WHERE id = :id"), fields)
+    sent = await _queue_nsi_delta(db, await scope_company_id(user, db), item_id)
     await db.commit()
-    return {"ok": True, "changed": [k for k in fields if k != "id"]}
+    return {"ok": True, "changed": [k for k in fields if k != "id"], "станций": sent}
 
 
 @router.post("/nsi/items/{item_id}/price")
@@ -284,11 +327,10 @@ async def nsi_set_price(
         VALUES (:id, :st, :p, :who)
     """), {"id": item_id, "st": body.station_id, "p": body.price,
             "who": getattr(user, "email", None) or "центр"})
+    await _queue_nsi_delta(db, await scope_company_id(user, db), item_id, body.station_id)
     await db.commit()
-    # Цена меняется в центре, но кассу кормит станция: пока пакет price_update
-    # вниз не реализован, на полке цена не изменится — и об этом надо сказать.
     return {"ok": True, "price": body.price, "station_id": body.station_id,
-            "note": "цена сохранена в мастер-НСИ; на кассу станции уйдёт с пакетом цен"}
+            "note": "цена ушла на станцию; агент применит её своим тактом"}
 
 
 @router.post("/nsi/items/{item_id}/barcode")
@@ -320,6 +362,7 @@ async def nsi_add_barcode(
     await db.execute(text("""
         INSERT INTO edge.barcode (item_id, code, status) VALUES (:id, :c, 'active')
     """), {"id": item_id, "c": code})
+    await _queue_nsi_delta(db, await scope_company_id(user, db), item_id)
     await db.commit()
     return {"ok": True}
 
@@ -337,6 +380,9 @@ async def nsi_retire_barcode(
     """), {"id": barcode_id})
     if res.rowcount == 0:
         raise HTTPException(404, "Активный штрихкод не найден")
+    owner = (await db.execute(text("SELECT item_id FROM edge.barcode WHERE id = :id"),
+                              {"id": barcode_id})).scalar_one()
+    await _queue_nsi_delta(db, await scope_company_id(user, db), int(owner))
     await db.commit()
     return {"ok": True}
 
