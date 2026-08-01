@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_company_by_api_key
 from app.database import get_db
 from app.models import Company, EdgeAgent, EdgeDownlink, EdgePacket, StoreReceipt
-from app.services import edge_service
+from app.services import edge_nsi, edge_service
 
 router = APIRouter(prefix="/edge", tags=["Edge (агенты АЗС)"])
 
@@ -314,6 +314,18 @@ async def receive_packet(
     # в «Магазине» его не увидел бы.
     await _ingest_receipts(db, company.id, int(station_id), payload, docs)
 
+    # Снимок наполняет мастер-НСИ: справочника штрихкодов в 1С не существует
+    # (ШК там — измерение регистра), поэтому поток снимков со станции остаётся
+    # единственным источником связи «карточка ↔ штрихкод ↔ код кассы».
+    # Сбой синхронизации не должен отвергать пакет: данные уже приняты, а НСИ
+    # догонит следующим снимком.
+    nsi_stats = None
+    if (request.headers.get("X-Packet-Kind") or "") == "stock":
+        try:
+            nsi_stats = await edge_nsi.sync_from_snapshot(db, int(station_id), payload)
+        except Exception as exc:  # noqa: BLE001
+            nsi_stats = {"error": str(exc)[:200]}
+
     return {
         "accepted": True,
         "packet_uuid": packet_uuid,
@@ -321,6 +333,7 @@ async def receive_packet(
         "shift": shift.get("НомерСмены"),
         "documents": len(docs),
         "size_bytes": len(raw),
+        "nsi": nsi_stats,
     }
 
 
