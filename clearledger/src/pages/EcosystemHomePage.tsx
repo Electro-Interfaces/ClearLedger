@@ -11,10 +11,11 @@
  *
  * Классификация слоя приходит с бэкенда (`layer` в /api/sso/apps), не хардкодится по коду.
  */
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  LayoutGrid, ExternalLink, Loader2, LogOut,
+  Menu, LayoutGrid, ExternalLink, Loader2, LogOut,
   LifeBuoy, ClipboardList, Video, FileText, MessagesSquare,
   ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
   Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope, Activity,
@@ -22,6 +23,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
+import { SidebarNavContent } from '@/components/layout/AppSidebar'
+import { SidebarProvider } from '@/components/ui/sidebar'
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
@@ -207,6 +211,7 @@ function Section({ title, hint, children, divider }: {
 
 export function EcosystemHomePage() {
   const navigate = useNavigate()
+  const [menuOpen, setMenuOpen] = useState(false)
   const { user, logout } = useAuth()
   const { company, companyId, companies } = useCompany()
   // Открытие продуктов — общей логикой с лаунчером: там же живёт особый случай
@@ -290,7 +295,29 @@ export function EcosystemHomePage() {
     <div className="flex h-dvh flex-col overflow-hidden bg-background">
       <header className="flex h-header shrink-0 items-center justify-between gap-4 border-b border-border px-4 sm:px-8">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="rounded-xl bg-primary/10 p-2 text-primary">
+          {/* Основное меню — в левом верхнем углу, как в любом приложении
+              пространства. Стол живёт вне общего каркаса, поэтому шторку он
+              держит свою, но содержимое то же самое (SidebarNavContent). */}
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="shrink-0 sm:hidden" title="Меню">
+                <Menu className="size-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="p-0 w-72 mobile-safe-left">
+              <SheetTitle className="sr-only">Меню навигации</SheetTitle>
+              <SheetDescription className="sr-only">Разделы пространства</SheetDescription>
+              {/* SidebarProvider обязателен: пункты меню строятся на SidebarMenuButton,
+                  а тот зовёт useSidebar. В приложениях провайдер даёт MainLayout, у
+                  стола его нет — без обёртки нажатие бургера роняло экран. */}
+              <SidebarProvider>
+                <div className="h-full w-full overflow-y-auto px-1.5 py-3">
+                  <SidebarNavContent onNavigate={() => setMenuOpen(false)} />
+                </div>
+              </SidebarProvider>
+            </SheetContent>
+          </Sheet>
+          <span className="hidden rounded-xl bg-primary/10 p-2 text-primary sm:inline-flex">
             <LayoutGrid className="size-5" />
           </span>
           {/* После входа человек внутри своего пространства: в шапке только имя
