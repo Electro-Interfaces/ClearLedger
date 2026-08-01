@@ -60,7 +60,10 @@ export function usePulseView(route: string): string {
 export function PulseLayout() {
   const { pathname } = useLocation()
   const [params, setParams] = useSearchParams()
-  const narrow = useMaxWidth(640)
+  // Порог тот же, что у рабочего места (`WorkspaceLayout`): боковая колонка
+  // оправдана только на настоящем десктопе. При 640 «Пульс» разворачивался в
+  // десктопный вид на планшете и на телефоне, повёрнутом в альбом (844 px).
+  const narrow = useMaxWidth(1024)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
 
