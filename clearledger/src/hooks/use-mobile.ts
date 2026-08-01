@@ -2,20 +2,33 @@ import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
 
-export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+/**
+ * Ширину читаем СРАЗУ при первом рендере, а не в эффекте.
+ *
+ * Раньше состояние стартовало с `undefined`, а `!!undefined` — это false, то есть
+ * «десктоп». Правильное значение приходило только после монтирования, поэтому каждый
+ * переход в приложение показывал один кадр десктопной раскладки и лишь затем
+ * перерисовывался в мобильную: на телефоне это читалось как «оно сначала открылось
+ * в десктопном виде». Ленивый инициализатор снимает лишний кадр целиком.
+ */
+function useMediaMatch(query: string) {
+  const [matches, setMatches] = React.useState(() => window.matchMedia(query).matches)
 
   React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    }
+    const mql = window.matchMedia(query)
+    const onChange = () => setMatches(mql.matches)
+    // Ширина могла измениться между первым рендером и подпиской (поворот экрана,
+    // раскрытие панели браузера) — сверяемся ещё раз.
+    onChange()
     mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
     return () => mql.removeEventListener("change", onChange)
-  }, [])
+  }, [query])
 
-  return !!isMobile
+  return matches
+}
+
+export function useIsMobile() {
+  return useMediaMatch(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
 }
 
 /**
@@ -24,15 +37,5 @@ export function useIsMobile() {
  * почти всё место под контент).
  */
 export function useMaxWidth(maxPx: number) {
-  const [below, setBelow] = React.useState<boolean | undefined>(undefined)
-
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${maxPx}px)`)
-    const onChange = () => setBelow(window.innerWidth <= maxPx)
-    mql.addEventListener("change", onChange)
-    setBelow(window.innerWidth <= maxPx)
-    return () => mql.removeEventListener("change", onChange)
-  }, [maxPx])
-
-  return !!below
+  return useMediaMatch(`(max-width: ${maxPx}px)`)
 }
