@@ -34,8 +34,11 @@ import {
   type ShareRow, type StationRow, type Accent, type OverviewCorporate,
   type HourPoint, type OverviewWeekday, type OverviewNetwork,
 } from '@/services/overviewService'
-import { formatPeriod } from '@/lib/formatDate'
+import { formatPeriod, formatBucket } from '@/lib/formatDate'
 import { useFilters } from '@/contexts/FilterContext'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { TrendSpark } from '@/components/ui/trend-spark'
+import { useChartAxis } from '@/lib/chartAxis'
 
 /** Сужение по сети из контура (регион/станции) для запросов обзора. */
 type ScopeArg = { stations?: string[]; regions?: string[]; key: string }
@@ -52,8 +55,8 @@ const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 
 const ACCENT_HSL: Record<Accent, string> = {
-  success: 'hsl(152, 69%, 45%)', warning: 'hsl(38, 92%, 50%)',
-  danger: 'hsl(0, 84%, 60%)', info: 'hsl(217, 91%, 60%)',
+  success: 'hsl(var(--chart-2))', warning: 'hsl(var(--warning))',
+  danger: 'hsl(var(--error))', info: 'hsl(var(--chart-1))',
 }
 
 function Loading() {
@@ -546,23 +549,6 @@ function RegionExtremes({ regions }: { regions: OverviewNetwork['regions'] }) {
   )
 }
 
-/** Мини-спарклайн (inline SVG, без recharts). Цвет — нейтральный currentColor,
- * семантику роста несёт Δ-бейдж. Пустые бакеты (null) — разрыв линии. */
-function Sparkline({ data }: { data: (number | null)[] }) {
-  const vals = data.filter((v): v is number => v != null)
-  if (vals.length < 2) return null
-  const min = Math.min(...vals), max = Math.max(...vals), rng = max - min || 1
-  const n = data.length
-  const pts = data
-    .map((v, i) => (v == null ? null : `${((i / (n - 1)) * 100).toFixed(1)},${(100 - ((v - min) / rng) * 100).toFixed(1)}`))
-    .filter(Boolean).join(' ')
-  return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="mt-2 h-7 w-full text-muted-foreground/60" aria-hidden>
-      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
-}
-
 /** KPI-плитка с Δ% к прошлому периоду (абс. в углу) + мини-спарклайн.
  * Контракт экспорта сохранён: первые три ребёнка — label/value/hint;
  * Δ-бейдж и спарклайн идут ПОСЛЕ (экспорт читает детей по индексу 0..2). */
@@ -582,7 +568,7 @@ function KpiCard({ k, hint, baseline }: { k: OverviewKpi; hint?: string; baselin
           {up ? '▲' : '▼'}{Math.abs(k.delta_pct!).toFixed(1)}%
         </span>
       )}
-      {k.spark && <Sparkline data={k.spark} />}
+      {k.spark && <TrendSpark values={k.spark} tone="muted" full />}
     </div>
   )
 }
@@ -603,7 +589,7 @@ function DonutCard({ title, rows }: { title: string; rows: ShareRow[] }) {
                 <Pie data={data} dataKey="value" nameKey="name" innerRadius={42} outerRadius={60} paddingAngle={1.5} stroke="none" isAnimationActive={false}>
                   {data.map((_, i) => <Cell key={i} fill={seriesColor(i, n)} />)}
                 </Pie>
-                <Tooltip formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
+                <Tooltip {...rechartsTooltipTheme} formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
               </PieChart>
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -627,9 +613,9 @@ function DonutCard({ title, rows }: { title: string; rows: ShareRow[] }) {
 }
 
 // ─── дневная ось: '2026-06-04' → '04.06' ─────────────────────────────
-const dayTick = (b: string) => (b.length === 10 ? `${b.slice(8, 10)}.${b.slice(5, 7)}` : b)
+const dayTick = formatBucket
 const WD_FULL: Record<number, string> = { 1: 'Понедельник', 2: 'Вторник', 3: 'Среда', 4: 'Четверг', 5: 'Пятница', 6: 'Суббота', 7: 'Воскресенье' }
-const chartAxis = { fontSize: 10, fill: 'hsl(var(--muted-foreground))' } as const
+// Оси графиков — общий пресет под ширину экрана (src/lib/chartAxis.ts).
 
 /** Компактный сегмент-переключатель (Все / Коннекторы / ФЛ·ЮЛ и т.п.). */
 function Segmented<T extends string>({ value, onChange, options }: {
@@ -658,6 +644,7 @@ const seriesLabel = (s: string) => (s === 'value' ? 'Выручка' : s)
 function DailyRevenueBar({ companyId, dateFrom, dateTo, scope }: {
   companyId: string; dateFrom: string; dateTo: string; scope: ScopeArg
 }) {
+  const ax = useChartAxis(fmtMoneyShort)
   const [mode, setMode] = useState<RevMode>('all')
   const { data, isLoading } = useQuery({
     // Сеть входит в ключ (scope.key) и в запрос (stations/regions) — иначе график
@@ -693,11 +680,11 @@ function DailyRevenueBar({ companyId, dateFrom, dateTo, scope }: {
         {isLoading ? <Loading /> : !data || data.data.length === 0 ? <Empty /> : (
           <div data-chart>
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={data.data} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
+              <BarChart data={data.data} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="bucket" tick={chartAxis} tickFormatter={dayTick} minTickGap={16} stroke="hsl(var(--muted-foreground))" />
-                <YAxis tick={chartAxis} tickFormatter={(v: number) => fmtMoneyShort(v)} width={56} stroke="hsl(var(--muted-foreground))" />
-                <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(label) => dayTick(String(label))} formatter={(value, name) => [`${fmtMoney(Number(value))} ₽`, seriesLabel(String(name))]} />
+                <XAxis dataKey="bucket" tick={ax.tick} tickFormatter={dayTick} minTickGap={ax.narrow ? 28 : 16} stroke="hsl(var(--muted-foreground))" />
+                <YAxis tick={ax.tick} tickFormatter={ax.fmt} width={ax.yWidth} stroke="hsl(var(--muted-foreground))" />
+                <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} labelFormatter={(label) => dayTick(String(label))} formatter={(value, name) => [`${fmtMoney(Number(value))} ₽`, seriesLabel(String(name))]} />
                 {series.map((s, i) => (
                   <Bar key={s} dataKey={s} stackId="rev" fill={barColor(i)} radius={i === series.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} isAnimationActive={false} />
                 ))}
@@ -729,6 +716,7 @@ function AvgCheckTip({ active, payload, label }: {
 function AvgCheckLine({ companyId, dateFrom, dateTo, bigValue, scope }: {
   companyId: string; dateFrom: string; dateTo: string; bigValue: number; scope: ScopeArg
 }) {
+  const ax = useChartAxis(fmtMoneyShort)
   const { data, isLoading } = useQuery({
     queryKey: ['overview-avgcheck-fl', companyId, dateFrom, dateTo, scope.key],
     queryFn: () => getChargeTimeseries({ companyId, dateFrom, dateTo, bucket: 'day', metric: 'avg_check',
@@ -766,10 +754,10 @@ function AvgCheckLine({ companyId, dateFrom, dateTo, bigValue, scope }: {
         {isLoading ? <Loading /> : rows.length === 0 ? <Empty /> : (
           <div data-chart>
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={rows} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
+              <LineChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                <XAxis dataKey="bucket" tick={chartAxis} tickFormatter={dayTick} minTickGap={16} stroke="hsl(var(--muted-foreground))" />
-                <YAxis tick={chartAxis} tickFormatter={(v: number) => fmtMoneyShort(v)} width={56} stroke="hsl(var(--muted-foreground))" />
+                <XAxis dataKey="bucket" tick={ax.tick} tickFormatter={dayTick} minTickGap={ax.narrow ? 28 : 16} stroke="hsl(var(--muted-foreground))" />
+                <YAxis tick={ax.tick} tickFormatter={ax.fmt} width={ax.yWidth} stroke="hsl(var(--muted-foreground))" />
                 <Tooltip content={<AvgCheckTip />} />
                 <Line type="monotone" dataKey="trend" stroke="hsl(var(--muted-foreground))" strokeDasharray="5 4" strokeWidth={1.2} dot={false} connectNulls isAnimationActive={false} />
                 <Line type="monotone" dataKey="value" stroke={SERIES[0]} strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
@@ -784,17 +772,20 @@ function AvgCheckLine({ companyId, dateFrom, dateTo, bigValue, scope }: {
 
 /** Суточная активность по часам (0–23) — число сессий. */
 function HourlyBar({ hourly }: { hourly: HourPoint[] }) {
+  const ax = useChartAxis((v) => nf0.format(v))
   return (
     <Card>
       <CardContent className="pt-4">
         <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Zap className="h-4 w-4 text-blue-600 dark:text-blue-400" />Суточная активность по часам</div>
         <div data-chart>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={hourly} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
+            <BarChart data={hourly} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-              <XAxis dataKey="label" tick={chartAxis} interval={1} stroke="hsl(var(--muted-foreground))" />
-              <YAxis tick={chartAxis} tickFormatter={(v: number) => nf0.format(v)} width={48} stroke="hsl(var(--muted-foreground))" />
-              <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(value) => [`${nf0.format(Number(value))} сессий`, 'Сессий']} />
+              {/* На широком экране подписан каждый второй час; на телефоне столько
+                  меток слипается в ленту, и прореживает их сам recharts. */}
+              <XAxis dataKey="label" tick={ax.tick} {...(ax.narrow ? ax.x : { interval: 1 })} stroke="hsl(var(--muted-foreground))" />
+              <YAxis tick={ax.tick} tickFormatter={ax.fmt} width={ax.yWidth} stroke="hsl(var(--muted-foreground))" />
+              <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(value) => [`${nf0.format(Number(value))} сессий`, 'Сессий']} />
               <Bar dataKey="sessions" fill={SERIES[0]} radius={[3, 3, 0, 0]} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
@@ -809,6 +800,7 @@ function WeekdayBar({ weekday }: { weekday: OverviewWeekday }) {
   const bestName = weekday.best ? WD_FULL[weekday.best] : '—'
   const worstName = weekday.worst ? WD_FULL[weekday.worst] : '—'
   const colorOf = (w: number) => (w === weekday.best ? ACCENT_HSL.success : w === weekday.worst ? ACCENT_HSL.danger : SERIES[0])
+  const ax = useChartAxis(fmtMoneyShort)
   return (
     <Card>
       <CardContent className="pt-4">
@@ -818,11 +810,13 @@ function WeekdayBar({ weekday }: { weekday: OverviewWeekday }) {
         </div>
         <div data-chart>
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={weekday.days} margin={{ top: 8, right: 12, left: 4, bottom: 4 }}>
+            <BarChart data={weekday.days} margin={{ top: 8, right: 8, left: 0, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-              <XAxis dataKey="label" tick={chartAxis} stroke="hsl(var(--muted-foreground))" />
-              <YAxis tick={chartAxis} tickFormatter={(v: number) => fmtMoneyShort(v)} width={56} stroke="hsl(var(--muted-foreground))" />
-              <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
+              <XAxis dataKey="label" tick={ax.tick} stroke="hsl(var(--muted-foreground))" />
+              {/* «800.0 тыс» на телефоне переносилось в две строки и съедало 56 px
+                  из 390 — короткий формат укладывается в 34. */}
+              <YAxis tick={ax.tick} tickFormatter={ax.fmt} width={ax.yWidth} stroke="hsl(var(--muted-foreground))" />
+              <Tooltip {...rechartsTooltipTheme} cursor={{ fill: 'hsl(var(--muted) / 0.3)' }} formatter={(value) => `${fmtMoney(Number(value))} ₽`} />
               <Bar dataKey="amount" radius={[3, 3, 0, 0]} isAnimationActive={false}>
                 {weekday.days.map((d) => <Cell key={d.weekday} fill={colorOf(d.weekday)} />)}
               </Bar>
