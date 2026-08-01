@@ -16,7 +16,7 @@ import {
   PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
   Archive, Megaphone, MessagesSquare, UserRound, Users2,
   BookOpen, Compass, Scale, FileSignature, HelpCircle,
-  Activity, TrendingUp, Users, CalendarDays,
+  Activity, TrendingUp, Users, CalendarDays, LayoutDashboard,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -110,7 +110,32 @@ const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] 
   { key: 'archive', label: 'Архив', icon: Archive },
 ]
 
-export function SidebarNavContent({ collapsed = false, onNavigate }: {
+/**
+ * Меню приложения. Первым пунктом — выход на рабочий стол пространства.
+ *
+ * На десктопе к столу ведут логотип и кнопка «Стол» в шапке; на телефоне их нет
+ * (шапка сведена к бургеру, имени экрана и связи), и без этого пункта из продукта
+ * не было выхода вообще — ни назад к столу, ни в соседнее приложение.
+ */
+export function SidebarNavContent(props: { collapsed?: boolean; onNavigate?: () => void }) {
+  const { pathname } = useLocation()
+  return (
+    <>
+      {/* На самом столе пункт не нужен — человек уже там. */}
+      {pathname !== '/' && (
+        <SidebarGroup className="py-0">
+          <SidebarMenu>
+            <NavItem to="/" icon={LayoutDashboard} label="Рабочий стол" end
+              collapsed={props.collapsed} onNavigate={props.onNavigate} />
+          </SidebarMenu>
+        </SidebarGroup>
+      )}
+      <SidebarNavBody {...props} />
+    </>
+  )
+}
+
+function SidebarNavBody({ collapsed = false, onNavigate }: {
   collapsed?: boolean; onNavigate?: () => void
 }) {
   const [dataOpen, setDataOpen] = useState(true)
