@@ -9,7 +9,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import * as XLSX from 'xlsx'
 import {
   CopyCheck, Search, Download, ChevronDown, ChevronRight, AlertTriangle,
   Tag, Store, Loader2, Check, FileSpreadsheet, RefreshCw, ShoppingCart,
@@ -573,6 +572,9 @@ export function StoreDedupPanel() {
 
   const exportExcel = async () => {
     try {
+      // Библиотека приезжает по нажатию, а не вместе с экраном: статический импорт
+      // добавлял 139 кБ к открытию «Магазина» всем, включая тех, кто не выгружает.
+      const XLSX = await import('xlsx')
       const rows = await getDedupExport()
       const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({
         'Группа': r.group, 'Статус': r.status, 'Рассинхрон цен': r.priceSpread,
@@ -606,6 +608,7 @@ export function StoreDedupPanel() {
     try {
       const rows = await getDedupDeactivationPlan()
       if (!rows.length) { toast.info('Нет архивных групп с активными кодами кассы 208'); return }
+      const XLSX = await import('xlsx')
       const ws = XLSX.utils.json_to_sheet(rows.map((r) => ({
         'Группа': r.group, 'Код карточки': r.cardCode, 'Наименование': r.cardName,
         'Код кассы (на вывод)': r.nsCode, 'Цена': r.price, 'Остаток 208': r.ostatok,

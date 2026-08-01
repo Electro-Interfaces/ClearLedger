@@ -8,10 +8,14 @@
  *
  * Пункт пишется в `?view=` — как `?sub=` в рабочей области: на экран можно дать
  * ссылку и закрепить его вкладкой.
+ *
+ * На узком экране колонка уступает место свайп-строке — тем же приёмом, что и
+ * рабочее место: боковое меню там съедает почти всю ширину телефона.
  */
 import { useState } from 'react'
 import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useMaxWidth } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 
 export interface PulseView { key: string; label: string; hint: string }
@@ -56,6 +60,7 @@ export function usePulseView(route: string): string {
 export function PulseLayout() {
   const { pathname } = useLocation()
   const [params, setParams] = useSearchParams()
+  const narrow = useMaxWidth(640)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
 
@@ -75,6 +80,33 @@ export function PulseLayout() {
     n.set('view', key)
     return n
   }, { replace: true })
+
+  // Узкий экран: боковое меню 224 px съедало почти весь телефон — на 320 px под
+  // содержимое оставалось 96, и карточки экрана дня схлопывались в вертикальную
+  // полоску. Пункты уходят в свайп-строку сверху, как в рабочем месте.
+  if (narrow) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {views.length > 0 && (
+          <div data-zone="Пункты раздела"
+            className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5 scrollbar-hide">
+            {views.map((v) => (
+              <button key={v.key} onClick={() => open(v.key)} title={v.hint}
+                className={cn('min-h-10 shrink-0 whitespace-nowrap rounded-md px-2.5 text-[13px] transition-colors',
+                  v.key === active
+                    ? 'bg-accent font-medium text-accent-foreground'
+                    : 'text-muted-foreground')}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="min-w-0 flex-1 overflow-y-auto px-3 py-3">
+          <Outlet />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-full min-h-0">
