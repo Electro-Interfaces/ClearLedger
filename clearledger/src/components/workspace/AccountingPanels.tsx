@@ -11,11 +11,29 @@ import { useWorkspaceSubView, useWorkspace, type CoreMode } from '@/contexts/Wor
 import { workspaceModeForKey } from '@/config/workspaceMenus'
 import { productForMode } from '@/config/productAccess'
 import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU_KEYS, EQUIPMENT_KEYS, SITES_KEYS, MARKET_KEYS } from './workspaceSections'
-import { MarketRouter } from '@/components/market/MarketRouter'
-import { EquipmentRouter } from '@/components/equipment/EquipmentRouter'
-import { SitesRouter } from '@/components/sites/SitesRouter'
-import { ChargeSalesRouter } from './ChargeSalesRouter'
-import { FuelSalesRouter } from './FuelSalesRouter'
+/**
+ * Роутеры продуктов — лениво: каждый тянет своё большое рабочее место
+ * («Сессии ЭЗС», карточка проекта, парк оборудования, карта рынка). Человек
+ * работает в одном продукте, а статические импорты приносили все пять сразу.
+ */
+const MarketRouter = lazy(() => import('@/components/market/MarketRouter').then((m) => ({ default: m.MarketRouter })))
+const EquipmentRouter = lazy(() => import('@/components/equipment/EquipmentRouter').then((m) => ({ default: m.EquipmentRouter })))
+const SitesRouter = lazy(() => import('@/components/sites/SitesRouter').then((m) => ({ default: m.SitesRouter })))
+const ChargeSalesRouter = lazy(() => import('./ChargeSalesRouter').then((m) => ({ default: m.ChargeSalesRouter })))
+const FuelSalesRouter = lazy(() => import('./FuelSalesRouter').then((m) => ({ default: m.FuelSalesRouter })))
+
+/** Обёртка ожидания для ленивого роутера: чанк приезжает за доли секунды. */
+function L({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      {children}
+    </Suspense>
+  )
+}
 import { BpExportPanel } from './BpExportPanel'
 import { AccountingStreamsPanel } from './AccountingStreamsPanel'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -46,7 +64,7 @@ import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
 // Бухгалтерский модуль ГИГ — смены/ТТН (корректировка перед 1С) + аналитика.
 // Нормализация и сверка НЕ дублируются здесь — они живут в разделах
 // «Нормализация» (/normalization) и «Разрезы учёта» (/reconciliation).
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
 import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
 import { AccountingCashPanel } from './AccountingCashPanel'
@@ -169,18 +187,18 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   }
   // Складской учёт оборудования ЭЗС (energy): парк/склады/движения/ЗИП.
   if (EQUIPMENT_KEYS.includes(activeTab)) {
-    return <div className="h-full overflow-y-auto"><EquipmentRouter tab={activeTab} companyId={companyId} /></div>
+    return <div className="h-full overflow-y-auto"><L><EquipmentRouter tab={activeTab} companyId={companyId} /></L></div>
   }
   // Банк ЗУ (energy): площадки под установку ЭЗС — девелоперский пайплайн.
   if (SITES_KEYS.includes(activeTab)) {
-    return <div className="h-full overflow-y-auto"><SitesRouter tab={activeTab} companyId={companyId} /></div>
+    return <div className="h-full overflow-y-auto"><L><SitesRouter tab={activeTab} companyId={companyId} /></L></div>
   }
   // Рынок вокруг сети (продукт «Маркетинг», docs/MARKET.md).
   if (MARKET_KEYS.includes(activeTab)) {
-    return <div className="h-full overflow-hidden"><MarketRouter tab={activeTab} /></div>
+    return <div className="h-full overflow-hidden"><L><MarketRouter tab={activeTab} /></L></div>
   }
   if (CHARGE_SESSIONS_KEYS.includes(activeTab)) {
-    return <div className="h-full overflow-y-auto"><ChargeSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} /></div>
+    return <div className="h-full overflow-y-auto"><L><ChargeSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} /></L></div>
   }
   if (ENERGY_MGMT_KEYS.includes(activeTab)) {
     return <div className="h-full overflow-y-auto"><EnergyMgmtVitrine tab={activeTab} /></div>
@@ -188,7 +206,7 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
   if (MGMT_MENU_KEYS.includes(activeTab)) {
     return (
       <div className="h-full overflow-y-auto">
-        <FuelSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} stationCode={stationCode} />
+        <L><FuelSalesRouter tab={activeTab} companyId={companyId} dateFrom={period.from} dateTo={period.to} stationCode={stationCode} /></L>
       </div>
     )
   }

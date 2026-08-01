@@ -3,25 +3,41 @@
  * Вертикальное меню разделов + единая рабочая область (core) на всю ширину.
  */
 
+import { lazy, Suspense } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Copy, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PRODUCT_SETUP_NOTE } from '@/config/spaceProducts'
+import { useAppEnabled } from '@/hooks/useCompanyRegistry'
+import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, WorkspaceProvider, type CoreMode } from '@/contexts/WorkspaceContext'
 import { getSettings } from '@/services/settingsService'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { NormalizationPanel } from './NormalizationPanel'
-import { ReconciliationPanel } from './ReconciliationPanel'
-import { ManagementPanel, FinancialPanel, AccountingPanel, TaxPanel } from './AccountingPanels'
-import { StorePanel, StoreHelpPanel } from './StorePanel'
 import { STORE_MODES } from '@/config/storeCatalog'
-import { ExportLayerPanel } from './ExportLayerPanel'
 import { OnboardingScreen } from './OnboardingScreen'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 import { WorkspaceModeSidebar } from './WorkspaceModeSidebar'
 import { useVisibleSections } from './workspaceSections'
+
+/**
+ * Панели разделов — лениво. Статические импорты складывали ВСЕ рабочие места
+ * (Учёт, Магазин с его 18 панелями, Топливо, Энергетику, Оборудование, Рынок)
+ * в один чанк: 3,3 МБ / 864 кБ gzip грузились ещё до экрана входа. Человек
+ * открывает один раздел за раз — остальные приезжают по мере переключения.
+ */
+const NormalizationPanel = lazy(() => import('./NormalizationPanel').then((m) => ({ default: m.NormalizationPanel })))
+const ReconciliationPanel = lazy(() => import('./ReconciliationPanel').then((m) => ({ default: m.ReconciliationPanel })))
+const ManagementPanel = lazy(() => import('./AccountingPanels').then((m) => ({ default: m.ManagementPanel })))
+const FinancialPanel = lazy(() => import('./AccountingPanels').then((m) => ({ default: m.FinancialPanel })))
+const AccountingPanel = lazy(() => import('./AccountingPanels').then((m) => ({ default: m.AccountingPanel })))
+const TaxPanel = lazy(() => import('./AccountingPanels').then((m) => ({ default: m.TaxPanel })))
+const StorePanel = lazy(() => import('./StorePanel').then((m) => ({ default: m.StorePanel })))
+const StoreHelpPanel = lazy(() => import('./StorePanel').then((m) => ({ default: m.StoreHelpPanel })))
+const ExportLayerPanel = lazy(() => import('./ExportLayerPanel').then((m) => ({ default: m.ExportLayerPanel })))
 
 /**
  * Продукт в подключении: рабочего места ещё нет, меню тоже — только заставка.
@@ -30,13 +46,117 @@ import { useVisibleSections } from './workspaceSections'
  * выдают права и его настраивают. Заставка честно говорит, что здесь пока пусто и
  * где эти функции сейчас, — вместо пустой рабочей области.
  */
+/** Значение демо-доступа: клик копирует — на показе их набирают руками с экрана. */
+function CopyValue({ value }: { value: string }) {
+  return (
+    <button type="button"
+      onClick={() => {
+        navigator.clipboard?.writeText(value)
+          .then(() => toast.success('Скопировано'))
+          .catch(() => toast.error('Не удалось скопировать'))
+      }}
+      title="Нажмите, чтобы скопировать"
+      className="inline-flex items-center gap-1 rounded border border-border/60 bg-background px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:border-primary/50 hover:text-primary">
+      {value}
+      <Copy className="size-3 shrink-0 opacity-60" />
+    </button>
+  )
+}
+
 export function ProductStub({ code }: { code: string }) {
   const note = PRODUCT_SETUP_NOTE[code]
+  const { company } = useCompany()
+  // Демо зовём только там, где боевого продукта нет: у ГИГ процессинг рабочий
+  // (мост `processing`), и демо-стенд там сбивал бы с толку (замечание МАГа).
+  const rivalEnabled = useAppEnabled(company?.id ?? '', note?.demo?.hideIfApp ?? '')
   if (!note) return null
+  const demo = note.demo && !(note.demo.hideIfApp && rivalEnabled) ? note.demo : undefined
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <EmptyState icon={note.icon} title={note.title} description={note.description} />
+      <div className="flex flex-col items-center">
+        <EmptyState icon={note.icon} title={note.title} description={note.description}
+          action={demo ? {
+            label: demo.label,
+            // Новая вкладка: демо — чужой стенд со своим входом, и возвращаться
+            // человеку надо в своё пространство, а не «назад» из чужой системы.
+            onClick: () => window.open(demo.url, '_blank', 'noopener,noreferrer'),
+          } : undefined} />
+        {demo && (
+          <p className="mt-3 max-w-sm text-center text-xs leading-relaxed text-muted-foreground">
+            {demo.note}
+          </p>
+        )}
+        {demo?.accounts?.length ? (
+          <div className="mt-3 w-full max-w-sm rounded-lg border border-dashed border-border/70 bg-muted/20 p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Вход в демо
+            </div>
+            <div className="space-y-2">
+              {demo.accounts.map((a) => (
+                <div key={a.login} className="text-xs">
+                  <div className="text-muted-foreground">{a.role}</div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <CopyValue value={a.login} />
+                    <CopyValue value={a.password} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Данные вымышленные — стенд для показа, не боевая система.
+            </p>
+          </div>
+        ) : null}
+      </div>
     </div>
+  )
+}
+
+/**
+ * Диспетчер разделов — один на обе раскладки (десктоп и телефон показывают
+ * одно и то же рабочее место, различаются только обрамлением). Раньше этот
+ * список был скопирован в оба компонента, и новый раздел приходилось заводить
+ * дважды — половина забывалась.
+ */
+function ModePanel() {
+  const { coreMode } = useWorkspace()
+  return (
+    <Suspense fallback={
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    }>
+      {coreMode === 'normalize' && <NormalizationPanel />}
+      {coreMode === 'reconcile' && <ReconciliationPanel />}
+      {coreMode === 'management' && <ManagementPanel />}
+      {/* Разделы того же продукта: панель одна, различаются составом пунктов
+          (см. workspaceSections). У ЭЗС это «Сессии» и «Коммерция», у «Топлива» —
+          «Аналитика», «Коммерция» и «Товародвижение». */}
+      {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
+      {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
+      {coreMode === 'sales_goods' && <ManagementPanel mode="sales_goods" />}
+      {/* «Помощь» — свод знания по продукту: у «Топлива» роутится общей панелью
+          разделов, у «Магазина» своей (у него свой набор пунктов). */}
+      {coreMode === 'sales_help' && <ManagementPanel mode="sales_help" />}
+      {coreMode === 'operations' && <ManagementPanel mode="operations" />}
+      {/* «Оборудование» и «Хозяйство» — разделы «Эксплуатации», та же панель. */}
+      {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
+      {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
+      {/* «Работа» и «Аналитика» — два раздела одного продукта: панель одна,
+          различаются составом пунктов (см. workspaceSections). */}
+      {coreMode === 'projects' && <ManagementPanel mode="projects" />}
+      {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
+      {STORE_MODES.includes(coreMode) && <StorePanel />}
+      {coreMode === 'store_help' && <StoreHelpPanel />}
+      {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
+          разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
+      {coreMode === 'corporate' && <ProductStub code="corp" />}
+      {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
+      {coreMode === 'financial' && <FinancialPanel />}
+      {coreMode === 'accounting' && <AccountingPanel />}
+      {coreMode === 'tax' && <TaxPanel />}
+      {coreMode === 'export' && <ExportLayerPanel />}
+    </Suspense>
   )
 }
 
@@ -97,36 +217,7 @@ function DesktopWorkspace() {
             </div>
           )}
           <div className="flex-1 overflow-hidden">
-            {coreMode === 'normalize' && <NormalizationPanel />}
-            {coreMode === 'reconcile' && <ReconciliationPanel />}
-            {coreMode === 'management' && <ManagementPanel />}
-            {/* Разделы того же продукта: панель одна, различаются составом пунктов
-                (см. workspaceSections). У ЭЗС это «Сессии» и «Коммерция», у «Топлива» —
-                «Аналитика», «Коммерция» и «Товародвижение». */}
-            {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
-            {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
-            {coreMode === 'sales_goods' && <ManagementPanel mode="sales_goods" />}
-            {/* «Помощь» — свод знания по продукту: у «Топлива» роутится общей панелью
-                разделов, у «Магазина» своей (у него свой набор пунктов). */}
-            {coreMode === 'sales_help' && <ManagementPanel mode="sales_help" />}
-            {coreMode === 'operations' && <ManagementPanel mode="operations" />}
-            {/* «Оборудование» и «Хозяйство» — разделы «Эксплуатации», та же панель. */}
-            {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
-            {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
-            {/* «Работа» и «Аналитика» — два раздела одного продукта: панель одна,
-                различаются составом пунктов (см. workspaceSections). */}
-            {coreMode === 'projects' && <ManagementPanel mode="projects" />}
-            {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
-            {STORE_MODES.includes(coreMode) && <StorePanel />}
-            {coreMode === 'store_help' && <StoreHelpPanel />}
-            {/* Корпоратив и маркетинг — продукты в подключении: их коммерческие
-                разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
-            {coreMode === 'corporate' && <ProductStub code="corp" />}
-            {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
-            {coreMode === 'financial' && <FinancialPanel />}
-            {coreMode === 'accounting' && <AccountingPanel />}
-            {coreMode === 'tax' && <TaxPanel />}
-            {coreMode === 'export' && <ExportLayerPanel />}
+            <ModePanel />
           </div>
         </div>
       </div>
@@ -197,26 +288,7 @@ function MobileWorkspace() {
 
       {/* Контент режима — тот же диспетчер, что на десктопе */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {coreMode === 'normalize' && <NormalizationPanel />}
-        {coreMode === 'reconcile' && <ReconciliationPanel />}
-        {coreMode === 'management' && <ManagementPanel />}
-        {coreMode === 'sales_sessions' && <ManagementPanel mode="sales_sessions" />}
-        {coreMode === 'sales_commerce' && <ManagementPanel mode="sales_commerce" />}
-        {coreMode === 'sales_goods' && <ManagementPanel mode="sales_goods" />}
-        {coreMode === 'sales_help' && <ManagementPanel mode="sales_help" />}
-        {coreMode === 'operations' && <ManagementPanel mode="operations" />}
-        {coreMode === 'ops_equipment' && <ManagementPanel mode="ops_equipment" />}
-        {coreMode === 'ops_economy' && <ManagementPanel mode="ops_economy" />}
-        {coreMode === 'projects' && <ManagementPanel mode="projects" />}
-        {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
-        {STORE_MODES.includes(coreMode) && <StorePanel />}
-        {coreMode === 'store_help' && <StoreHelpPanel />}
-        {coreMode === 'corporate' && <ProductStub code="corp" />}
-        {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
-        {coreMode === 'financial' && <FinancialPanel />}
-        {coreMode === 'accounting' && <AccountingPanel />}
-        {coreMode === 'tax' && <TaxPanel />}
-        {coreMode === 'export' && <ExportLayerPanel />}
+        <ModePanel />
       </div>
     </div>
   )

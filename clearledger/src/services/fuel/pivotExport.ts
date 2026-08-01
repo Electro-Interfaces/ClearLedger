@@ -19,7 +19,6 @@
  *  4. Ошибка не глотается: пробрасываем наверх, там уведомление и console.error.
  *  5. Имя файла латиницей.
  */
-import * as XLSX from 'xlsx'
 import type { PivotLabeler, PivotLeaf, PivotNode, PivotTotals } from './pivotTree'
 import { flattenAll } from './pivotTree'
 
@@ -51,6 +50,10 @@ const round = (v: number, d: number) => {
 }
 
 export async function exportPivotToExcel(o: PivotExportOptions): Promise<void> {
+  // Библиотека приезжает по нажатию «Выгрузить», а не вместе с экраном: статический
+  // импорт добавлял 139 кБ к открытию рабочего места всем, включая тех, кто никогда
+  // ничего не выгружает.
+  const XLSX = await import('xlsx')
   const wb = XLSX.utils.book_new()
   const sortLabel = o.metrics.find((m) => m.key === o.sortBy)?.label ?? o.sortBy
 
