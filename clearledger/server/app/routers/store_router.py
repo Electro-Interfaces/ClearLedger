@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
-from app.models import EdgeAgent, User
+from app.models import EdgeAgent, StoreReceipt, User
 from app.services.export_audit import log_export
 from app.services.goods_dashboard import GoodsDashboardService
 
@@ -105,6 +105,194 @@ async def store_stations(
         "version_mismatch": sum(1 for s in stations if s["version"] and not s["version_ok"]),
         "stations": stations,
     }
+
+
+# -- Приёмка ---------------------------------------------------------------
+# Первый документ, который Ledger порождает сам. Две точки ввода: центр заводит
+# накладную (в т.ч. из ЭДО), станция принимает товар физически. Ордерная схема
+# 1С:Розница: expected -- «к поступлению», accepted -- «принят». Пока документ
+# не принят, остатки не двигаются.
+
+
+class ReceiptLine(BaseModel):
+    nomenclature_ref: str | None = None
+    name: str
+    barcode: str | None = None
+    qty_expected: float = 0      # заявлено накладной
+    qty_fact: float = 0          # посчитано по факту
+    price: float = 0
+    vat_rate: str | None = None
+    amount: float = 0
+
+
+class ReceiptIn(BaseModel):
+    station_id: int
+    number: str | None = None
+    doc_date: str | None = None
+    supplier: str | None = None
+    contract: str | None = None
+    incoming_number: str | None = None
+    incoming_date: str | None = None
+    comment: str | None = None
+    lines: list[ReceiptLine] = []
+
+
+def _receipt_out(r: StoreReceipt) -> dict:
+    lines = r.lines or []
+    # Расхождение считаем на сервере: это главная колонка приёмки, и считать её
+    # в двух местах нельзя -- разъедется.
+    diff = sum(1 for l in lines
+               if abs(float(l.get("qty_fact") or 0) - float(l.get("qty_expected") or 0)) > 1e-6)
+    return {
+        "id": str(r.id), "station_id": r.station_id, "number": r.number,
+        "doc_date": r.doc_date, "supplier": r.supplier, "contract": r.contract,
+        "incoming_number": r.incoming_number, "incoming_date": r.incoming_date,
+        "status": r.status, "origin": r.origin, "comment": r.comment,
+        "lines": lines, "lines_count": len(lines), "diff_count": diff,
+        "total_amount": float(r.total_amount or 0), "vat_amount": float(r.vat_amount or 0),
+        "created_at": r.created_at, "updated_at": r.updated_at, "accepted_at": r.accepted_at,
+    }
+
+
+def _recalc(lines: list[dict]) -> float:
+    """Сумма документа по ФАКТУ: платим за принятое, а не за заявленное."""
+    total = 0.0
+    for l in lines:
+        amount = float(l.get("qty_fact") or 0) * float(l.get("price") or 0)
+        l["amount"] = round(amount, 2)
+        total += amount
+    return round(total, 2)
+
+
+@router.get("/receipts")
+async def list_receipts(
+    station_id: int | None = Query(None),
+    status: str | None = Query(None, description="draft|expected|accepted"),
+    limit: int = Query(100, le=500),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Журнал приёмок -- то же окно, что у товароведа в 1С."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    q = select(StoreReceipt).where(StoreReceipt.company_id == cid)
+    if station_id is not None:
+        q = q.where(StoreReceipt.station_id == station_id)
+    if status:
+        q = q.where(StoreReceipt.status == status)
+    rows = (await db.execute(
+        q.order_by(StoreReceipt.doc_date.desc(), StoreReceipt.created_at.desc()).limit(limit)
+    )).scalars().all()
+    return {"receipts": [_receipt_out(r) for r in rows], "total": len(rows)}
+
+
+@router.post("/receipts", status_code=201)
+async def create_receipt(
+    body: ReceiptIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завести приёмку в центре: накладная поставщика на конкретную станцию."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    lines = [l.model_dump() for l in body.lines]
+    total = _recalc(lines)
+    now = datetime.now(timezone.utc)
+    doc_date = datetime.fromisoformat(body.doc_date) if body.doc_date else now
+    if doc_date.tzinfo is None:
+        doc_date = doc_date.replace(tzinfo=timezone.utc)
+    # Номер по умолчанию -- дата и станция: различимый документ нужен сразу,
+    # сквозная нумерация появится вместе со справочником поставщиков.
+    number = body.number or ("П-%d-%s" % (body.station_id, now.strftime("%y%m%d-%H%M")))
+
+    row = StoreReceipt(
+        company_id=cid, station_id=body.station_id, number=number, doc_date=doc_date,
+        supplier=body.supplier, contract=body.contract,
+        incoming_number=body.incoming_number,
+        incoming_date=datetime.fromisoformat(body.incoming_date) if body.incoming_date else None,
+        status="draft", origin="center", lines=lines,
+        total_amount=total, vat_amount=0, comment=body.comment,
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _receipt_out(row)
+
+
+@router.get("/receipts/{receipt_id}")
+async def get_receipt(
+    receipt_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    return _receipt_out(row)
+
+
+@router.put("/receipts/{receipt_id}")
+async def update_receipt(
+    receipt_id: uuid.UUID,
+    body: ReceiptIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Правка документа. Принятый не редактируется: это уже движение остатков."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    if row.status == "accepted":
+        raise HTTPException(409, "Документ уже принят -- правка запрещена")
+
+    lines = [l.model_dump() for l in body.lines]
+    row.total_amount = _recalc(lines)
+    row.lines = lines
+    row.supplier = body.supplier
+    row.contract = body.contract
+    row.incoming_number = body.incoming_number
+    row.incoming_date = datetime.fromisoformat(body.incoming_date) if body.incoming_date else None
+    row.comment = body.comment
+    if body.number:
+        row.number = body.number
+    await db.commit()
+    await db.refresh(row)
+    return _receipt_out(row)
+
+
+@router.post("/receipts/{receipt_id}/status")
+async def set_receipt_status(
+    receipt_id: uuid.UUID,
+    status: str = Query(..., description="expected|accepted"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ордерная схема: «к поступлению» -> «принят».
+
+    Принять документ без единой посчитанной позиции нельзя: это верный признак,
+    что кнопку нажали раньше, чем пересчитали товар.
+    """
+    if status not in ("expected", "accepted"):
+        raise HTTPException(400, "Допустимы только expected и accepted")
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    if row.status == "accepted":
+        raise HTTPException(409, "Документ уже принят")
+    if status == "accepted":
+        if not row.lines:
+            raise HTTPException(400, "В документе нет позиций")
+        if not any(float(l.get("qty_fact") or 0) > 0 for l in row.lines):
+            raise HTTPException(400, "Ни одна позиция не посчитана по факту")
+        row.accepted_at = datetime.now(timezone.utc)
+    row.status = status
+    await db.commit()
+    await db.refresh(row)
+    return _receipt_out(row)
 
 
 @router.get("/overview")

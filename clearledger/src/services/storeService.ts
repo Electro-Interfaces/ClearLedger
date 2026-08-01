@@ -874,3 +874,68 @@ export interface StoreStationsData {
 }
 
 export const getStoreStations = () => get<StoreStationsData>('/api/store/stations')
+
+
+/** Строка приёмки: заявленное и фактическое ведутся раздельно — платим за факт. */
+export interface StoreReceiptLine {
+  nomenclature_ref: string | null
+  name: string
+  barcode: string | null
+  qty_expected: number
+  qty_fact: number
+  price: number
+  vat_rate: string | null
+  amount: number
+}
+
+/** Документ приёмки. Статусы — ордерная схема 1С:Розница. */
+export interface StoreReceipt {
+  id: string
+  station_id: number
+  number: string
+  doc_date: string
+  supplier: string | null
+  contract: string | null
+  incoming_number: string | null
+  incoming_date: string | null
+  /** draft — набирается; expected — к поступлению; accepted — принят. */
+  status: string
+  /** center | station | edo — кто завёл документ. */
+  origin: string
+  comment: string | null
+  lines: StoreReceiptLine[]
+  lines_count: number
+  diff_count: number
+  total_amount: number
+  vat_amount: number
+  created_at: string
+  updated_at: string
+  accepted_at: string | null
+}
+
+export interface StoreReceiptInput {
+  station_id: number
+  number?: string | null
+  doc_date?: string | null
+  supplier?: string | null
+  contract?: string | null
+  incoming_number?: string | null
+  incoming_date?: string | null
+  comment?: string | null
+  lines: StoreReceiptLine[]
+}
+
+export const getStoreReceipts = (opts?: { stationId?: number; status?: string }) =>
+  get<{ receipts: StoreReceipt[]; total: number }>('/api/store/receipts', {
+    ...(opts?.stationId ? { station_id: String(opts.stationId) } : {}),
+    ...(opts?.status ? { status: opts.status } : {}),
+  })
+
+export const createStoreReceipt = (body: StoreReceiptInput) =>
+  post<StoreReceipt>('/api/store/receipts', body)
+
+export const updateStoreReceipt = (id: string, body: StoreReceiptInput) =>
+  put<StoreReceipt>(`/api/store/receipts/${id}`, body)
+
+export const setStoreReceiptStatus = (id: string, status: 'expected' | 'accepted') =>
+  post<StoreReceipt>(`/api/store/receipts/${id}/status?status=${status}`, {})

@@ -36,6 +36,7 @@ import { StoreShiftsPanel } from './StoreShiftsPanel'
 import { BpExportPanel } from './BpExportPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
 import { StoreStationsPanel } from './StoreStationsPanel'
+import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
 import {
   STORE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView, storeDefaultKey, storeModeForKey,
   type StoreMode, type StoreStatus, type StoreView,
@@ -259,6 +260,21 @@ export function StorePanel() {
     return (
       <div className="h-full overflow-y-auto">
         <BpExportPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </div>
+    )
+  }
+  // «Приёмка» — два источника в одном пункте: сверху документы, которые ведём мы
+  // (центр и станция вводят один и тот же документ), снизу исторические
+  // поступления из ЦБ. Пока станция не перешла на Ledger, вторая часть остаётся
+  // единственной полной картиной закупок.
+  if (sub === 'receipts') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreReceiptDocsPanel stations={scopeStations} />
+        <div className="border-t border-border/60">
+          <StoreReceiptsPanel companyId={companyId} dateFrom={period.from} dateTo={period.to}
+                              stations={scopeStations} />
+        </div>
       </div>
     )
   }

@@ -5651,6 +5651,63 @@ class EdgePacket(Base):
     )
 
 
+class StoreReceipt(Base):
+    """Приёмка товара — документ Ledger, а не зеркало 1С.
+
+    Первый документ, который система не читает из ЦБ, а порождает сама. Точек
+    ввода две, и обе законны: центр заводит накладную от поставщика (в том
+    числе из ЭДО), станция принимает товар физически. Документ при этом ОДИН —
+    иначе фактическая приёмка и накладная разъедутся, а сверять их будет некому.
+
+    Модель следует ордерной схеме 1С:Розница, к которой привык товаровед:
+    `expected` — «к поступлению», товар заявлен, но на складе его ещё нет;
+    `accepted` — «принят», посчитан и оприходован. Пока документ не принят,
+    остатки не двигаются.
+
+    Строки держим в JSONB: документ читается и пишется целиком, приёмку ведёт
+    один человек, а состав строки будет расти (коды маркировки, партии, сроки).
+    """
+    __tablename__ = "store_receipts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    number: Mapped[str] = mapped_column(String(40), nullable=False)
+    doc_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # Поставщик: пока строкой — справочник контрагентов Ledger появится вместе
+    # с ЭДО, а до тех пор товаровед пишет имя, как в накладной.
+    supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    contract: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    incoming_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    incoming_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # draft — набирается; expected — заявлен к поступлению; accepted — принят.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # Откуда пришёл документ: center | station | edo. Нужно, чтобы понимать, кто
+    # владеет правкой, и не затирать фактическую приёмку заявкой из центра.
+    origin: Mapped[str] = mapped_column(String(20), nullable=False, default="center")
+
+    lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    total_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    vat_amount: Mapped[float] = mapped_column(Numeric(16, 2), nullable=False, default=0)
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # UUID пакета станции — идемпотентность при доставке снизу.
+    source_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+
+    __table_args__ = (
+        Index("ix_store_receipts_company_station", "company_id", "station_id", "doc_date"),
+    )
+
+
 class EdgeAgent(Base):
     """Состояние агента станции: кто на связи, какая версия, что в очереди.
 
