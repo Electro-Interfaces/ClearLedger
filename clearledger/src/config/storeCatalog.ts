@@ -24,6 +24,7 @@ import {
   Boxes, Barcode, FolderTree, ChefHat, Truck,
   PackagePlus, Warehouse, ArrowLeftRight, ClipboardList, Trash2, Undo2, RefreshCw,
   QrCode, ScanLine, PackageMinus, ShieldAlert, CalendarClock, CopyCheck, ShoppingCart,
+  RadioTower,
 } from 'lucide-react'
 
 export type StoreStatus = 'ready' | 'wip' | 'planned'
@@ -271,6 +272,18 @@ export const STORE_VIEWS: StoreView[] = [
       { name: 'Смены ОРП по станции 208', desc: 'ОтчётОРозничныхПродажах: строки, НДС, оплаты, классификация Сопутка/Общепит, ТТК.', source: 'op_fetch_cb_shifts(period, station="208")' },
       { name: 'Поступления и ТТК', desc: 'ПоступлениеТоваровУслугНаАЗК → закупочные цены; ЗначенияТТКНоменклатуры → рецептуры.', source: 'channel_orchestrator._run_cb' },
       { name: 'Прод-путь через COM-Agent', desc: 'Разрыв: чтение смен на проде пока только локальным subprocess — дописать fetch_cb_shifts.', source: 'com-agent (TODO)' },
+    ],
+  },
+  {
+    key: 'stations', label: 'Станции', section: 'store_closing', icon: RadioTower,
+    title: 'Станции',
+    subtitle: 'Парк агентов АЗС: связь, версия кода, очередь пакетов. Станция ведёт учёт локально и работает при мёртвой связи — здесь видно, какие данные ещё в пути и где код отстал.',
+    status: 'ready',
+    blocks: [
+      { name: 'Связь', desc: 'Онлайн = агент отвечал в последние 3 минуты (телеметрия раз в минуту). Это «канал есть и обмен возможен», а не «идёт передача». Молчание свыше часа — станция требует внимания.', source: 'edge_agents · /api/store/stations' },
+      { name: 'Версия кода', desc: 'Версия агента против той, что центр считает текущей (EDGE_DESIRED_AGENT_VERSION). Расхождение — не авария: обновление идёт по команде, а не автоматически.' },
+      { name: 'Очередь пакетов', desc: 'Сколько фактов станция накопила и ещё не отдала: при обрыве связи очередь растёт, после восстановления уходит сама.' },
+      { name: 'Последняя смена и снимок', desc: 'Номер последней собранной смены и время последнего снимка остатков 1С — видно, отстаёт ли станция по данным.' },
     ],
   },
   /* ───────────────────── КАТАЛОГ — товар как карточка ───────────────────── */

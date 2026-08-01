@@ -5649,3 +5649,39 @@ class EdgePacket(Base):
     __table_args__ = (
         Index("ix_edge_packets_station_shift", "company_id", "station_id", "shift_internal_no"),
     )
+
+
+class EdgeAgent(Base):
+    """Состояние агента станции: кто на связи, какая версия, что в очереди.
+
+    Заполняется телеметрией самого агента (heartbeat раз в минуту). Нужна,
+    чтобы центр видел парк станций так же, как станция видит себя: онлайн ли,
+    свежий ли код, разобрана ли очередь. Пока такой таблицы не было, станция
+    для «Магазина» оставалась чёрным ящиком — о проблеме узнавали из письма
+    оператора.
+
+    Наличие свежего `last_seen` НЕ означает, что идёт передача данных: это
+    значит, что канал есть и обмен возможен.
+    """
+    __tablename__ = "edge_agents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    queue_pending: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    queue_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_shift: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Полная телеметрия как прислал агент: состав растёт, ломать схему на
+    # каждое новое поле нельзя — станции обновляются не одновременно.
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "station_id", name="uq_edge_agents_station"),
+    )

@@ -6,18 +6,19 @@
 Далее: ABC, маржа/GMROI (FIFO с поступлениями), остатки, инвентаризация.
 """
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
-from app.models import User
+from app.models import EdgeAgent, User
 from app.services.export_audit import log_export
 from app.services.goods_dashboard import GoodsDashboardService
 
@@ -45,6 +46,65 @@ async def _require_store_module(
 router = APIRouter(prefix="/store", tags=["Магазин"],
                    dependencies=[Depends(capture_company_header),
                                  Depends(_require_store_module)])
+
+
+# Молчание свыше трёх минут при телеметрии раз в минуту — это уже не «сеть
+# моргнула», а обрыв. Час — станция требует внимания человека.
+STATION_OFFLINE_AFTER = 180
+STATION_STALE_AFTER = 3600
+
+
+@router.get("/stations")
+async def store_stations(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Станции компании: связь агента, версия кода, очередь пакетов.
+
+    Тот же разрез, что видит оператор на станции, только по всему парку: центр
+    должен понимать состояние каждой АЗС до того, как оттуда придёт письмо.
+    Онлайн здесь означает «канал есть и обмен возможен», а не «идёт передача».
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    rows = (await db.execute(
+        select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
+    )).scalars().all()
+
+    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.6.0")
+    now = datetime.now(timezone.utc)
+    stations = []
+    for r in rows:
+        silence = int((now - r.last_seen).total_seconds()) if r.last_seen else None
+        if silence is None or silence > STATION_STALE_AFTER:
+            state = "молчит"
+        elif silence > STATION_OFFLINE_AFTER:
+            state = "офлайн"
+        else:
+            state = "онлайн"
+        details = r.payload or {}
+        stations.append({
+            "station_id": r.station_id,
+            "state": state,
+            "silence_seconds": silence,
+            "version": r.version,
+            "version_ok": bool(r.version) and r.version == desired,
+            "queue_pending": r.queue_pending,
+            "queue_sent": r.queue_sent,
+            "last_shift": r.last_shift,
+            "snapshot_at": details.get("snapshot_at"),
+            "onec_ok": details.get("onec_ok"),
+            "last_seen": r.last_seen,
+            "first_seen": r.first_seen,
+        })
+
+    return {
+        "desired_version": desired,
+        "total": len(stations),
+        "online": sum(1 for s in stations if s["state"] == "онлайн"),
+        "queue_total": sum(s["queue_pending"] for s in stations),
+        "version_mismatch": sum(1 for s in stations if s["version"] and not s["version_ok"]),
+        "stations": stations,
+    }
 
 
 @router.get("/overview")

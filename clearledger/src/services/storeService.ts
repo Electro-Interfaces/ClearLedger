@@ -109,7 +109,13 @@ export const getStoreSkus = (
 // ── Отчёты: Приёмка / Поставщики / Общепит / Категории ──
 export interface StoreReceiptsData {
   period: { from: string; to: string }
-  docs: { date: string; number: string; supplier: string; positions: number; amount: number; vat: number; amount_net: number }[]
+  docs: {
+    date: string; number: string; supplier: string; positions: number
+    /** Номер смены: поступления приезжают из ЦБ вместе со сменным отчётом. */
+    shift_number?: string | null
+    amount: number; vat: number; amount_net: number
+    lines: ShiftDocLine[]   // состав накладной — расшифровка строки реестра и поставщика
+  }[]
   summary: { count: number; amount_net: number; vat: number }
 }
 export interface StoreSuppliersData {
@@ -194,8 +200,18 @@ export interface StoreStockItem {
   retail_price: number | null; retail_value: number | null
   cost_unit: number | null; cost_amount: number | null
   margin: number | null; margin_pct: number | null
+  /** Базовая единица регистра: остаток весового товара хранится в мл/г, не в упаковках. */
+  unit: string | null
+  /** Заполнено, если партийной себестоимости верить нельзя (причина словами). */
+  cost_doubt: string | null
+  /** Средняя закупка по накладным — то, с чем сверялась партия. */
+  buy_unit: number | null
 }
-export interface StoreStockWarehouse { code: string; name: string | null; sku: number; retail_value: number }
+export interface StoreStockWarehouse {
+  code: string; name: string | null; sku: number
+  positive: number   // сколько позиций реально на полке — остальное отрицательные хвосты
+  retail_value: number
+}
 export interface StoreStockData {
   warehouse: string | null
   warehouses: StoreStockWarehouse[]
@@ -227,6 +243,9 @@ export interface StoreInventoryLine {
 }
 export interface StoreInventoryDoc {
   ref: string; number: string | null; date: string | null
+  /** Смена(ы) дня, к которым относится документ (у витринных есть только дата). */
+  shift_number?: string | null; shift_key?: string | null
+  shift_count?: number; shift_reason?: string | null
   warehouse_code: string; warehouse_name: string | null; comment: string | null
   dev_positions: number
   shortage_qty: number; shortage_amount: number
@@ -239,7 +258,7 @@ export interface StoreInventoryData {
   warehouse: string | null
   warehouses: { code: string; name: string | null; count: number }[]
   docs: StoreInventoryDoc[]
-  top_shortage: { name: string; qty: number; amount: number; docs: number }[]
+  top_shortage: { ref?: string | null; name: string; qty: number; amount: number; docs: number }[]
   summary: {
     docs_count: number; docs_with_dev: number
     shortage_amount: number; surplus_amount: number; net_amount: number
@@ -258,6 +277,9 @@ export const getStoreInventory = (opts?: { warehouse?: string; onlyDev?: boolean
 export interface StoreWriteoffLine { ref: string; name: string; qty: number; amount: number; price: number }
 export interface StoreWriteoffDoc {
   ref: string; number: string | null; date: string | null
+  /** Смена(ы) дня, к которым относится документ (у витринных есть только дата). */
+  shift_number?: string | null; shift_key?: string | null
+  shift_count?: number; shift_reason?: string | null
   warehouse_code: string; warehouse_name: string | null
   reason: string | null; from_inventory: boolean; comment: string | null
   positions: number; total_qty: number; total_amount: number
@@ -270,7 +292,7 @@ export interface StoreWriteoffData {
   warehouses: { code: string; name: string | null; count: number }[]
   docs: StoreWriteoffDoc[]
   by_reason: { reason: string; count: number; amount: number }[]
-  top_sku: { name: string; qty: number; amount: number; docs: number }[]
+  top_sku: { ref?: string | null; name: string; qty: number; amount: number; docs: number }[]
   summary: {
     docs_count: number; total_amount: number
     from_inventory_amount: number; other_amount: number
@@ -289,6 +311,9 @@ export const getStoreWriteoffs = (opts?: { warehouse?: string; reason?: string; 
 export interface StoreTransferLine { ref: string; name: string; qty: number; price: number; amount: number }
 export interface StoreTransferDoc {
   ref: string; number: string | null; date: string | null
+  /** Смена(ы) дня, к которым относится документ (у витринных есть только дата). */
+  shift_number?: string | null; shift_key?: string | null
+  shift_count?: number; shift_reason?: string | null
   from_code: string; from_name: string | null; to_code: string | null; to_name: string | null
   direction: string | null; comment: string | null
   positions: number; total_qty: number; total_amount: number
@@ -300,7 +325,7 @@ export interface StoreTransferData {
   direction: string | null
   docs: StoreTransferDoc[]
   by_direction: { direction: string; count: number; amount: number }[]
-  top_sku: { name: string; qty: number; amount: number; docs: number }[]
+  top_sku: { ref?: string | null; name: string; qty: number; amount: number; docs: number }[]
   summary: {
     docs_count: number; total_amount: number
     inbound_amount: number; outbound_amount: number; internal_amount: number
@@ -368,6 +393,11 @@ export interface CateringDish {
   margin: number | null; food_cost_pct: number | null; margin_pct: number | null; cm_unit: number | null
   share: number; popularity_pct: number; menu_class: MenuClass
   coverage: number; ing_count: number; ingredients: CateringIngredient[]; daily: CateringDaily[]
+  /** Откуда себестоимость: 'release' — выпуск 1С (рецептура в момент продажи, готовая
+   *  цифра), 'ttk' — сборка из средних закупок по составу. Покрытие ТТК к release
+   *  отношения не имеет: 80% состава с ценой не делают цифру 1С неполной. */
+  cost_source: 'release' | 'ttk' | null
+  preliminary: boolean
 }
 export interface CateringMenuData {
   period: { from: string; to: string }
@@ -639,6 +669,8 @@ export const getBpPackageVerify = (shiftKey: string) =>
 export interface ShiftSaleLine { guid: string; name: string; category: string | null; marked: boolean; qty: number; revenue: number }
 export interface ShiftPayment { form: string; amount: number }
 export interface ShiftDocLine {
+  /** GUID товара — есть не у всех документов; по нему строка открывает карточку. */
+  ref?: string | null
   name: string | null; qty?: number | null; price?: number | null; amount?: number | null
   fact?: number | null; uchet?: number | null; dev?: number | null; old?: number | null; new?: number | null; pct?: number | null
 }
@@ -813,3 +845,32 @@ export interface DedupDeactivationRow {
 }
 export const getDedupDeactivationPlan = () =>
   get<DedupDeactivationRow[]>('/api/store/dedup/deactivation-plan')
+
+
+/** Станция глазами центра: связь агента, версия кода, очередь пакетов. */
+export interface StoreStation {
+  station_id: number
+  /** «онлайн» — отвечал в последние 3 минуты; «офлайн» — молчит; «молчит» — больше часа. */
+  state: string
+  silence_seconds: number | null
+  version: string | null
+  version_ok: boolean
+  queue_pending: number
+  queue_sent: number
+  last_shift: number | null
+  snapshot_at: string | null
+  onec_ok: boolean | null
+  last_seen: string
+  first_seen: string
+}
+
+export interface StoreStationsData {
+  desired_version: string
+  total: number
+  online: number
+  queue_total: number
+  version_mismatch: number
+  stations: StoreStation[]
+}
+
+export const getStoreStations = () => get<StoreStationsData>('/api/store/stations')
