@@ -939,3 +939,45 @@ export const updateStoreReceipt = (id: string, body: StoreReceiptInput) =>
 
 export const setStoreReceiptStatus = (id: string, status: 'expected' | 'accepted') =>
   post<StoreReceipt>(`/api/store/receipts/${id}/status?status=${status}`, {})
+
+/* ───────────────── Мастер-НСИ: правка карточки, цены, штрихкодов ─────────────────
+ * Собственный справочник Ledger (схема edge), а не зеркало 1С. Ключ — GUID
+ * карточки: карточку открывают из справочника, где ключ именно он.
+ */
+export interface NsiBarcode {
+  id: number; code: string; status: 'active' | 'historical' | 'rejected'
+  note: string | null; first_seen: string; ns_code: number | null; qty: number | null
+}
+export interface NsiPriceRow {
+  id: number; station_id: number; price: number
+  valid_from: string; valid_to: string | null; author: string | null
+}
+export interface NsiCard {
+  item: {
+    id: number; external_uuid: string; code_1c: string | null
+    name: string; name_full: string | null; unit: string; vat_rate: string
+    kind: string | null; sku_class: string | null; is_dish: boolean; deleted: boolean
+    created_at: string; updated_at: string
+  }
+  barcodes: NsiBarcode[]
+  prices: NsiPriceRow[]
+  station_id: number
+}
+
+export const NSI_VAT_CODES = ['НДС22', 'НДС10', 'НДС20', 'НДС18_118', 'НДС5', 'БезНДС'] as const
+
+export const getNsiCard = (ident: string, stationId = 208) =>
+  get<NsiCard>(`/api/store/nsi/items/${encodeURIComponent(ident)}`, { station_id: stationId })
+
+export const saveNsiCard = (ident: string, patch: Partial<NsiCard['item']>) =>
+  put<{ ok: boolean; changed: string[] }>(`/api/store/nsi/items/${encodeURIComponent(ident)}`, patch)
+
+export const setNsiPrice = (ident: string, stationId: number, price: number) =>
+  post<{ ok: boolean; note: string }>(`/api/store/nsi/items/${encodeURIComponent(ident)}/price`,
+    { station_id: stationId, price })
+
+export const addNsiBarcode = (ident: string, code: string) =>
+  post<{ ok: boolean; already?: boolean }>(`/api/store/nsi/items/${encodeURIComponent(ident)}/barcode`, { code })
+
+export const retireNsiBarcode = (barcodeId: number) =>
+  post<{ ok: boolean }>(`/api/store/nsi/barcodes/${barcodeId}/retire`, {})

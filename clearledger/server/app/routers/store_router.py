@@ -12,7 +12,7 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import check_module_access, get_current_user
@@ -106,6 +106,239 @@ async def store_stations(
         "version_mismatch": sum(1 for s in stations if s["version"] and not s["version_ok"]),
         "stations": stations,
     }
+
+
+# -- Мастер-НСИ ------------------------------------------------------------
+# Карточки, штрихкоды и цены Ledger — не зеркало 1С, а собственный справочник.
+# Он наполняется потоком снимков со станции (справочника ШК в 1С не существует)
+# и правится здесь: станция карточки не заводит, это правило владения данными.
+
+class NsiItemIn(BaseModel):
+    name: str | None = None
+    name_full: str | None = None
+    unit: str | None = None
+    vat_rate: str | None = None
+    kind: str | None = None
+    sku_class: str | None = None
+    is_dish: bool | None = None
+    deleted: bool | None = None
+
+
+class NsiPriceIn(BaseModel):
+    station_id: int
+    price: float
+
+
+class NsiBarcodeIn(BaseModel):
+    code: str
+
+
+VAT_CODES = ("НДС22", "НДС20", "НДС10", "НДС5", "НДС18_118", "БезНДС")
+
+
+async def _nsi_item_id(db: AsyncSession, ident: str) -> int:
+    """Резолв карточки по id мастера или по GUID 1С: карточку открывают из
+    справочника, где ключ — GUID, а внутри мастера ключ свой."""
+    if len(ident) == 36 and "-" in ident:
+        row = (await db.execute(text(
+            "SELECT id FROM edge.item WHERE external_uuid = CAST(:u AS uuid)"
+        ), {"u": ident})).scalar_one_or_none()
+    else:
+        row = (await db.execute(text("SELECT id FROM edge.item WHERE id = :i"),
+                                {"i": int(ident) if ident.isdigit() else -1})).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Карточка не найдена в мастер-НСИ")
+    return int(row)
+
+
+@router.get("/nsi/items")
+async def nsi_items(
+    q: str = Query("", description="часть наименования, штрихкода или кода 1С"),
+    station_id: int = Query(208),
+    only_problem: bool = Query(False, description="только с дефектами НСИ"),
+    limit: int = Query(100, le=500),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Реестр карточек мастер-НСИ с ценой, штрихкодами и остатком станции."""
+    sql = """
+        SELECT i.id, i.external_uuid, i.code_1c, i.name, i.unit, i.vat_rate,
+               i.kind, i.sku_class, i.is_dish, i.deleted,
+               (SELECT count(*) FROM edge.barcode b
+                 WHERE b.item_id = i.id AND b.status = 'active')      AS barcodes,
+               (SELECT count(*) FROM edge.barcode b
+                 WHERE b.item_id = i.id AND b.status = 'rejected')    AS collisions,
+               (SELECT p.price FROM edge.price p
+                 WHERE p.item_id = i.id AND p.station_id = :st
+                   AND p.valid_to IS NULL)                            AS price,
+               (SELECT coalesce(sum(s.qty), 0) FROM edge.stock s
+                  JOIN edge.barcode b2 ON b2.id = s.barcode_id
+                 WHERE b2.item_id = i.id AND s.station_id = :st)      AS qty
+        FROM edge.item i
+        WHERE (:q = '' OR i.name ILIKE :like OR coalesce(i.code_1c,'') ILIKE :like
+               OR EXISTS (SELECT 1 FROM edge.barcode b3
+                           WHERE b3.item_id = i.id AND b3.code ILIKE :like))
+    """
+    if only_problem:
+        # Дефект НСИ — то, из-за чего товар не пробьётся или уедет с неверным
+        # налогом: устаревшая ставка, коллизия ШК, остаток без цены.
+        sql += """
+          AND (i.vat_rate IN ('НДС18_118','НДС20','НДС5')
+               OR EXISTS (SELECT 1 FROM edge.barcode b4
+                           WHERE b4.item_id = i.id AND b4.status = 'rejected')
+               OR (EXISTS (SELECT 1 FROM edge.stock s2 JOIN edge.barcode b5 ON b5.id = s2.barcode_id
+                            WHERE b5.item_id = i.id AND s2.station_id = :st AND s2.qty > 0)
+                   AND NOT EXISTS (SELECT 1 FROM edge.price p2
+                                    WHERE p2.item_id = i.id AND p2.station_id = :st
+                                      AND p2.valid_to IS NULL)))
+        """
+    sql += " ORDER BY i.name LIMIT :lim"
+    rows = (await db.execute(text(sql), {
+        "q": q, "like": f"%{q}%", "st": station_id, "lim": limit})).mappings().all()
+    return {"items": [dict(r) for r in rows], "total": len(rows), "station_id": station_id}
+
+
+@router.get("/nsi/items/{item_id}")
+async def nsi_item(
+    item_id: str,
+    station_id: int = Query(208),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Карточка целиком: поля, штрихкоды, история цен, коды кассы, остаток."""
+    item_id = await _nsi_item_id(db, item_id)
+    item = (await db.execute(text("""
+        SELECT id, external_uuid, code_1c, name, name_full, unit, vat_rate,
+               kind, sku_class, is_dish, deleted, created_at, updated_at
+        FROM edge.item WHERE id = :id
+    """), {"id": item_id})).mappings().first()
+    if item is None:
+        raise HTTPException(404, "Карточка не найдена")
+
+    barcodes = (await db.execute(text("""
+        SELECT b.id, b.code, b.status, b.note, b.first_seen,
+               (SELECT n.ns_code FROM edge.ns_code n
+                 WHERE n.barcode_id = b.id AND n.station_id = :st
+                   AND n.status = 'active') AS ns_code,
+               (SELECT s.qty FROM edge.stock s
+                 WHERE s.barcode_id = b.id AND s.station_id = :st) AS qty
+        FROM edge.barcode b WHERE b.item_id = :id
+        ORDER BY b.status, b.code
+    """), {"id": item_id, "st": station_id})).mappings().all()
+
+    prices = (await db.execute(text("""
+        SELECT id, station_id, price, valid_from, valid_to, author
+        FROM edge.price WHERE item_id = :id AND station_id = :st
+        ORDER BY valid_from DESC LIMIT 20
+    """), {"id": item_id, "st": station_id})).mappings().all()
+
+    return {"item": dict(item), "barcodes": [dict(b) for b in barcodes],
+            "prices": [dict(p) for p in prices], "station_id": station_id}
+
+
+@router.put("/nsi/items/{item_id}")
+async def nsi_item_update(
+    item_id: str,
+    body: NsiItemIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Правка карточки. UUID и код 1С не меняются: по ним держится связь с БП."""
+    item_id = await _nsi_item_id(db, item_id)
+    if body.vat_rate is not None and body.vat_rate not in VAT_CODES:
+        raise HTTPException(400, f"Неизвестная ставка НДС: {body.vat_rate}")
+
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(400, "Нечего менять")
+    sets = ", ".join(f"{k} = :{k}" for k in fields)
+    fields["id"] = item_id
+    await db.execute(
+        text(f"UPDATE edge.item SET {sets}, updated_at = now() WHERE id = :id"), fields)
+    await db.commit()
+    return {"ok": True, "changed": [k for k in fields if k != "id"]}
+
+
+@router.post("/nsi/items/{item_id}/price")
+async def nsi_set_price(
+    item_id: str,
+    body: NsiPriceIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Установить цену на станции.
+
+    Прежняя запись закрывается, новая открывается — цена ведётся историей, а не
+    перезаписью: по какой цене продавали вчера, нужно знать для разбора продаж.
+    """
+    if body.price < 0:
+        raise HTTPException(400, "Цена не может быть отрицательной")
+    item_id = await _nsi_item_id(db, item_id)
+
+    await db.execute(text("""
+        UPDATE edge.price SET valid_to = now()
+        WHERE item_id = :id AND station_id = :st AND valid_to IS NULL
+    """), {"id": item_id, "st": body.station_id})
+    await db.execute(text("""
+        INSERT INTO edge.price (item_id, station_id, price, author)
+        VALUES (:id, :st, :p, :who)
+    """), {"id": item_id, "st": body.station_id, "p": body.price,
+            "who": getattr(user, "email", None) or "центр"})
+    await db.commit()
+    # Цена меняется в центре, но кассу кормит станция: пока пакет price_update
+    # вниз не реализован, на полке цена не изменится — и об этом надо сказать.
+    return {"ok": True, "price": body.price, "station_id": body.station_id,
+            "note": "цена сохранена в мастер-НСИ; на кассу станции уйдёт с пакетом цен"}
+
+
+@router.post("/nsi/items/{item_id}/barcode")
+async def nsi_add_barcode(
+    item_id: str,
+    body: NsiBarcodeIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Добавить штрихкод карточке.
+
+    Если код уже активен у другой карточки — отказ, а не молчаливый перевес:
+    перевесить значит сломать кассу тому товару, который сейчас по нему
+    пробивается.
+    """
+    item_id = await _nsi_item_id(db, item_id)
+    code = (body.code or "").strip()
+    if not code:
+        raise HTTPException(400, "Пустой штрихкод")
+    owner = (await db.execute(text("""
+        SELECT b.item_id, i.name FROM edge.barcode b
+        JOIN edge.item i ON i.id = b.item_id
+        WHERE b.code = :c AND b.status = 'active'
+    """), {"c": code})).first()
+    if owner is not None:
+        if owner.item_id == item_id:
+            return {"ok": True, "already": True}
+        raise HTTPException(409, f"Штрихкод уже активен у карточки «{owner.name}»")
+    await db.execute(text("""
+        INSERT INTO edge.barcode (item_id, code, status) VALUES (:id, :c, 'active')
+    """), {"id": item_id, "c": code})
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/nsi/barcodes/{barcode_id}/retire")
+async def nsi_retire_barcode(
+    barcode_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Перевести штрихкод в исторические: выпуск сменился, код больше не нужен."""
+    res = await db.execute(text("""
+        UPDATE edge.barcode SET status = 'historical'
+        WHERE id = :id AND status = 'active'
+    """), {"id": barcode_id})
+    if res.rowcount == 0:
+        raise HTTPException(404, "Активный штрихкод не найден")
+    await db.commit()
+    return {"ok": True}
 
 
 # -- Приёмка ---------------------------------------------------------------

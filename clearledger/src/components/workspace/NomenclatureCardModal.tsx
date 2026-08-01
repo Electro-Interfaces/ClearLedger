@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import { getStoreSkuCard, type SkuMovementRow } from '@/services/storeService'
 import { fmtMoney } from '@/services/analyticsService'
+import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
+import { NsiEditSection } from './NsiEditSection'
 
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number | null | undefined) => (n == null ? '—' : fmtMoney(n))
@@ -82,6 +84,8 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
           <div className="p-6 text-sm text-muted-foreground">Загрузка карточки…</div>
         ) : (
           <div className="overflow-auto p-4 space-y-3.5">
+            <NsiEditSection guid={guid} companyId={companyId} />
+
             {/* Паспорт + Штрихкоды */}
             <div className="grid gap-3.5 md:grid-cols-2">
               <Section icon={Package} title="Паспорт">
@@ -175,7 +179,7 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, onClo
                     <BarChart data={data.daily}>
                       <XAxis dataKey="date" tick={{ fontSize: 9 }} tickFormatter={(d: string) => d.slice(8)} />
                       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                      <Tooltip formatter={(v: any) => fmtMoney(Number(v))} labelFormatter={(l: any) => `${l}`} contentStyle={{ fontSize: 11 }} />
+                      <Tooltip {...rechartsTooltipTheme} formatter={(v: any) => fmtMoney(Number(v))} labelFormatter={(l: any) => `${l}`} contentStyle={{ fontSize: 11 }} />
                       <Bar dataKey="revenue" fill="currentColor" className="text-primary/60" radius={[2, 2, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
