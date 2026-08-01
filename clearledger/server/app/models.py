@@ -2752,6 +2752,8 @@ class ServiceLocation(Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Привязки к источникам: [{sourceId, config:{system_id,station}, label}]
+    # Читать через location_bindings() — в JSONB попадала и одиночная привязка
+    # объектом, а на ней падал весь справочник (см. функцию ниже).
     source_bindings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     # Произвольные метаданные (в API — поле metadata)
     extra_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -2808,6 +2810,24 @@ class ServiceLocation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+def location_bindings(loc: "ServiceLocation") -> list[dict]:
+    """Привязки объекта к источникам — всегда списком словарей.
+
+    В колонку писали не только список: сведение справочника 28.07.2026 положило
+    142 объектам одиночную привязку ОБЪЕКТОМ (`{"origin": "hubex_mirror", …}`).
+    Схема ждёт список, поэтому весь `GET /api/locations` отвечал 500 — вместе с
+    ним пустели селектор станций, карта, парк и все экраны, перечисляющие сеть.
+    Ошибка одной записи не должна ронять весь справочник: приводим тип на чтении
+    и молча пропускаем то, что привязкой быть не может.
+    """
+    raw = loc.source_bindings
+    if isinstance(raw, dict):
+        return [raw]
+    if not isinstance(raw, list):
+        return []
+    return [b for b in raw if isinstance(b, dict)]
 
 
 # ---------------------------------------------------------------------------

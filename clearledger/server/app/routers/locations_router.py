@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
-from app.models import AuditEvent, Company, ServiceLocation, User
+from app.models import AuditEvent, Company, ServiceLocation, User, location_bindings
 from app.scope import in_scope, scope_location_conds
 from app.services import hubex_service
 
@@ -109,7 +109,7 @@ def _out(l: ServiceLocation) -> LocationOut:
         id=l.id, code=l.code, name=l.name, type=l.type, status=l.status,
         operationalStatus=getattr(l, "operational_status", "unknown") or "unknown",
         address=l.address, description=l.description,
-        sourceBindings=l.source_bindings or [],
+        sourceBindings=location_bindings(l),
         metadata=l.extra_metadata,
         passport=_passport(l),
         createdAt=l.created_at.isoformat() if l.created_at else "",

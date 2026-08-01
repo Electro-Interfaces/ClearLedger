@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import OnlineOrder, RawBatchRecord, User, FuelStation, FuelMapping, ServiceLocation
+from app.models import OnlineOrder, RawBatchRecord, User, FuelStation, FuelMapping, ServiceLocation, location_bindings
 from app.services import reconciliation_proxy
 
 router = APIRouter(prefix="/online-orders", tags=["Онлайн-заказы"])
@@ -90,8 +90,8 @@ async def _build_resolvers(
         if st_id is None:
             continue
         spids: set[Any] = set()
-        for b in (loc.source_bindings or []):
-            cfg = (b or {}).get("config") or {}
+        for b in location_bindings(loc):
+            cfg = b.get("config") or {}
             for k in MSTO_SP_KEYS:
                 if cfg.get(k):
                     spids.add(cfg[k])
@@ -118,8 +118,8 @@ async def _build_resolvers(
 
 def _location_service_point_ids(location: ServiceLocation) -> set[int]:
     values: set[Any] = set()
-    for binding in location.source_bindings or []:
-        config = (binding or {}).get("config") or {}
+    for binding in location_bindings(location):
+        config = binding.get("config") or {}
         for key in MSTO_SP_KEYS:
             if config.get(key) is not None:
                 values.add(config[key])
