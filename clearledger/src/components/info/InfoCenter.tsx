@@ -223,7 +223,7 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4" style={{ fontSize: FONT_STEPS[fontStep] }}>
         {!selected ? (
-          <Start tree={tree.data} groups={groups} onPick={setSelected}
+          <Start groups={groups} onPick={setSelected}
             onAdd={modal ? undefined : () => setEditing('new')} />
         ) : article.isLoading || !article.data ? (
           <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -271,8 +271,8 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
 }
 
 /** Стартовый экран читалки: чем «Инфо» наполнено и с чего начать. */
-function Start({ tree, groups, onPick, onAdd }: {
-  tree?: InfoTree; groups: InfoTree['groups']; onPick: (id: string) => void; onAdd?: () => void
+function Start({ groups, onPick, onAdd }: {
+  groups: InfoTree['groups']; onPick: (id: string) => void; onAdd?: () => void
 }) {
   const first = groups.find((g) => g.key === 'guide') ?? groups[0]
   const starters = (first?.categories[0]?.articles ?? first?.loose ?? []).slice(0, 5)

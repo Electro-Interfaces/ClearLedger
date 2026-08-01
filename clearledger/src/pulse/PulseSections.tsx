@@ -243,7 +243,6 @@ export function PulseBusinessPage() {
 
 export function PulseTeamPage() {
   const { company } = useCompany()
-  const navigate = useNavigate()
   const view = usePulseView('/pulse/team')
   const q = useQuery({
     queryKey: ['pulse-team', company.id],
