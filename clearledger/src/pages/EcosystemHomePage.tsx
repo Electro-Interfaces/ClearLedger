@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CompanySelector } from '@/components/company/CompanySelector'
+import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
@@ -292,14 +293,19 @@ export function EcosystemHomePage() {
           <span className="rounded-xl bg-primary/10 p-2 text-primary">
             <LayoutGrid className="size-5" />
           </span>
-          <div className="min-w-0">
-            {/* После входа человек внутри своего пространства: в шапке только имя
-                компании, без имени платформы и слова «экосистема». */}
+          {/* После входа человек внутри своего пространства: в шапке только имя
+              компании, без имени платформы и слова «экосистема». На телефоне имя
+              скрыто — оно ничего не сообщает тому, кто и так внутри, а строка
+              нужнее под связь с пространством (решение МАГа 01.08.2026). */}
+          <div className="hidden min-w-0 sm:block">
             <div className="truncate font-semibold leading-tight">{company.name}</div>
             <div className="truncate text-xs text-muted-foreground">Рабочее пространство</div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
+          {/* Чат · Заявки · Конференция — тот же блок, что в шапке приложений:
+              связь с пространством лежит на одном месте, куда бы человек ни зашёл. */}
+          <HeaderInteractionButtons conference />
           {companies.length > 1 && <CompanySelector />}
           <Button variant="ghost" size="sm" onClick={logout} title="Выйти">
             <LogOut className="size-4" />

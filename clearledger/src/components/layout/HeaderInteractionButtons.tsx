@@ -51,8 +51,11 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   }
 
   return (
-    <div className="hidden items-center gap-2 pl-1 md:flex">
-      <div className="h-6 w-px bg-border/50" />
+    // Блок виден и на телефоне: чат, заявки и конференция — то, ради чего человек
+    // берёт трубку в руки. Прежде он прятался на md:, и в мобильной шапке от него
+    // оставалась одна кнопка чата.
+    <div className="flex items-center gap-1.5 pl-1 md:gap-2">
+      <div className="hidden h-6 w-px bg-border/50 md:block" />
       {conference && (
         <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy} className={btnCls(false)} title="Видеоконференция">
           <Video className="h-4 w-4" />
@@ -69,7 +72,9 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
         <span className="hidden lg:inline">Заявки</span>
         <Badge count={unreadCounts.tickets} />
       </Button>
-      <Button variant="outline" size="sm" onClick={() => toggleInteraction('help')} className={btnCls(interactionSection === 'help')} title="Инфо (Ctrl+K)">
+      {/* «Инфо» — четвёртая кнопка, на телефоне уже теснит имя экрана. Справка
+          доступна оттуда же, куда ведёт плитка «Инфо» на столе. */}
+      <Button variant="outline" size="sm" onClick={() => toggleInteraction('help')} className={`hidden sm:inline-flex ${btnCls(interactionSection === 'help')}`} title="Инфо (Ctrl+K)">
         <HelpCircle className="h-4 w-4" />
         <span className="hidden lg:inline">Инфо</span>
       </Button>

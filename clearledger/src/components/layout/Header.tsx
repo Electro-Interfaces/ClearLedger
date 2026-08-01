@@ -1,4 +1,4 @@
-import { Menu, BookText, MessageCircle, Lightbulb } from 'lucide-react'
+import { Menu, BookText, Lightbulb } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { useGuideMode } from '@/hooks/useGuideMode'
 import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
@@ -7,7 +7,6 @@ import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { APP_VERSION } from '@/config/version'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
-import { useSupportContext } from '@/contexts/SupportContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
 import { CompanySelector } from '@/components/company/CompanySelector'
@@ -21,7 +20,6 @@ interface HeaderProps {
 
 export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
   const guide = useGuideMode()
-  const { toggleInteraction, unreadCounts } = useSupportContext()
   const { company } = useCompany()
   const { pathname } = useLocation()
   const product = isCarvedProfile(company.profileId) ? productForPath(pathname) : null
@@ -76,41 +74,25 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
         {/* Центр: переключатель компании + кнопки взаимодействия.
             Фильтры (период/точки/регионы/типы) переехали в свёрнутый фильтр
             рабочей области — единый фильтр над разделами. */}
-        {/* На телефоне весь центральный блок скрыт: «Стол» и «Приложения» рисовались
-            двумя неотличимыми сетками, а оба маршрута и так есть — стол в нижней
-            навигации, продукты плитками на нём же. */}
-        <div className="hidden flex-1 items-center justify-center min-w-0 gap-2 px-2 sm:flex">
+        {/* Навигация пространства — только на десктопе: «Стол» и «Приложения»
+            рисовались двумя неотличимыми сетками, а оба маршрута на телефоне и так
+            есть — стол в нижней навигации, продукты плитками на нём же. */}
+        <div className="hidden flex-1 items-center justify-end min-w-0 gap-2 px-2 sm:flex sm:justify-center">
           <CompanySelector />
           {/* Стол пространства — перед лаунчером: сперва «вернуться», потом «перейти». */}
           <DeskButton />
           {/* Лаунчер приложений экосистемы (Ядро) — скрыт, если SSO не настроен */}
           <AppLauncher />
-
-          {/* Чат · Заявки · Инфо (+ Конференция) — общий блок продуктов контейнера. */}
-          <HeaderInteractionButtons conference />
         </div>
 
-        {/* Пустая распорка вместо центра — иначе бургер с именем и правый край
-            сойдутся посередине. */}
+        {/* Распорка: прижимает связь и профиль к правому краю. */}
         <div className="flex-1 sm:hidden" />
 
-        {/* Правый блок: чат (моб.) + переключатель темы + профиль */}
+        {/* Правый блок: связь с пространством + режим + профиль */}
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
-          {/* Мобильный вход в чат — на &lt;768px кнопки взаимодействия скрыты (md:flex) */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden relative h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground"
-            onClick={() => toggleInteraction('chat')}
-            title="Чат"
-          >
-            <MessageCircle className="h-[18px] w-[18px]" />
-            {unreadCounts.chat > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
-                {unreadCounts.chat}
-              </span>
-            )}
-          </Button>
+          {/* Чат · Заявки · Конференция (+ Инфо на десктопе) — общий блок продуктов
+              контейнера. Стоит справа и на телефоне: это то, ради чего берут трубку. */}
+          <HeaderInteractionButtons conference />
           {/* Режим работы: простой ⇄ расширенный. Стоит рядом с лампочкой —
               та объясняет, ГДЕ что находится, этот убирает лишнее с глаз.
               На телефоне иконки нет: угадать в безымянном спидометре «показать
