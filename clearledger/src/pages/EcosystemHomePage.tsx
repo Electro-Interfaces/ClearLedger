@@ -110,6 +110,11 @@ const TONE_CLASS: Record<string, string> = {
  *
  * Показателей нет (мост, пустой продукт) — карточка честно остаётся без цифр: место
  * держит подпись состояния, а не выдуманный ноль.
+ *
+ * На телефоне плитка складывается в ОДНУ строку: имя слева, показатели справа тем же
+ * рядом. Двухэтажная карточка занимала 99 px, и до нижних продуктов приходилось
+ * листать три экрана — на десктопе стол помещается целиком, а на телефоне терял это
+ * свойство. Цель нажатия остаётся во всю ширину строки.
  */
 function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, metrics, onClick }: TileProps) {
   const shown = (metrics ?? []).slice(0, 3)
@@ -120,40 +125,51 @@ function Tile({ title, subtitle, icon: Icon, badge, busy, readiness, metrics, on
       disabled={busy}
       title={[title, subtitle, badge, readiness && READINESS_LABEL[readiness]]
         .filter(Boolean).join(' · ')}
-      className="group relative flex flex-col gap-2 rounded-xl border border-border bg-card px-3 py-2.5 text-left
-                 transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60"
+      className="group relative flex min-h-12 items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2 text-left
+                 transition-colors duration-200 hover:border-primary/50 hover:bg-accent/40 disabled:opacity-60
+                 sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2 sm:py-2.5"
     >
       {/* Готовность продукта — точка в углу. Расшифровка в подсказке плитки: цвет
           читается с одного взгляда, слова нужны только при первом знакомстве. */}
       {readiness && (
         <span aria-hidden="true"
-          className={`absolute right-2 top-2 size-2 rounded-full ${DOT_CLASS[readiness]}`} />
+          className={`absolute right-2 top-1/2 size-2 -translate-y-1/2 rounded-full sm:top-2 sm:translate-y-0 ${DOT_CLASS[readiness]}`} />
       )}
-      <span className="flex items-center gap-2.5">
+      {/* Имя продукта — приоритет строки: место сначала ему, показатели ужимаются
+          вокруг. Иначе на трёх метриках «Пульс» превращался в «Г». */}
+      <span className="flex min-w-0 flex-1 items-center gap-2.5 sm:w-full sm:flex-none">
         <span className="shrink-0 rounded-lg bg-primary/10 p-1.5 text-primary transition-colors group-hover:bg-primary group-hover:text-white">
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
         </span>
-        <span className="min-w-0 flex-1 pr-3 text-sm font-medium leading-snug">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium leading-snug sm:pr-3 sm:whitespace-normal">{title}</span>
         {/* Свой вход — значком, а не подписью: важен при первом знакомстве, а места
             в строке занимает как буква. Расшифровка — в подсказке всей плитки. */}
         {badge && <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />}
       </span>
       {shown.length > 0 ? (
-        <span className="flex items-end gap-3 border-t border-border/60 pt-1.5">
-          {shown.map((m) => (
-            <span key={m.label} className="min-w-0 flex-1">
-              <span className={`block truncate text-[15px] sm:text-[13px] font-semibold leading-tight tabular-nums
+        <span className="flex shrink-0 items-baseline gap-2.5 pr-4
+                         sm:items-end sm:gap-3 sm:border-t sm:border-border/60 sm:pr-0 sm:pt-1.5">
+          {shown.map((m, i) => (
+            /* В строку телефона помещается один показатель — главный. Остальные
+               живут на десктопе, где у плитки своя строка под цифры. */
+            <span key={m.label}
+              className={`items-baseline gap-1 sm:flex sm:min-w-0 sm:flex-1 sm:gap-0 ${i === 0 ? 'flex' : 'hidden'}`}>
+              <span className={`whitespace-nowrap text-[13px] font-semibold leading-tight tabular-nums sm:block sm:truncate
                                 ${m.tone ? TONE_CLASS[m.tone] ?? '' : ''}`}>
                 {m.value}
               </span>
-              <span className="block truncate text-[12px] sm:text-[10px] leading-tight text-muted-foreground/70">
+              <span className="whitespace-nowrap text-[11px] leading-tight text-muted-foreground/70 sm:block sm:truncate sm:text-[10px]">
                 {m.label}
               </span>
             </span>
           ))}
         </span>
       ) : (
-        <span className="block border-t border-border/60 pt-1.5 text-[12px] sm:text-[10px] leading-tight text-muted-foreground/60">
+        /* Без показателей место держит описание — но только на десктопе. В строке
+           телефона оно вытесняло имя продукта, а обрезок «Чем пространство связано
+           с в…» не сообщает ничего: полный текст и так лежит в подсказке плитки. */
+        <span className="hidden text-[10px] leading-tight text-muted-foreground/60
+                         sm:block sm:border-t sm:border-border/60 sm:pt-1.5">
           {subtitle}
         </span>
       )}
