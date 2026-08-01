@@ -15,15 +15,16 @@ v0 — теневой режим: пакеты складываются сырь
 import gzip
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_company_by_api_key
 from app.database import get_db
-from app.models import Company, EdgeAgent, EdgePacket
+from app.models import Company, EdgeAgent, EdgeDownlink, EdgePacket, StoreReceipt
 from app.services import edge_service
 
 router = APIRouter(prefix="/edge", tags=["Edge (агенты АЗС)"])
@@ -45,6 +46,61 @@ async def health(company: Company = Depends(get_company_by_api_key)):
 # В переменной окружения, а не константой: номер версии меняется каждым
 # релизом агента, и пересобирать ради него образ backend — глупо.
 DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.6.0")
+
+
+async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
+                           payload: dict, docs: list) -> None:
+    """Развернуть документы `purchase` пакета в документы приёмки центра.
+
+    Идемпотентность по ИсточникUUID документа: станция повторяет отправку при
+    любой неопределённости, и повтор не должен плодить приёмки. Документ
+    приходит уже принятым — на станции его приняли физически, и переигрывать
+    это решение в центре нельзя.
+    """
+    for doc in docs:
+        if not isinstance(doc, dict) or doc.get("Тип") != "purchase":
+            continue
+        source_uuid = doc.get("ИсточникUUID") or payload.get("ИдентификаторПакета")
+        if not source_uuid:
+            continue
+        exists = (await db.execute(select(StoreReceipt.id).where(
+            StoreReceipt.source_uuid == source_uuid))).scalar_one_or_none()
+        if exists:
+            continue
+
+        lines = []
+        for item in doc.get("Товары") or []:
+            lines.append({
+                "nomenclature_ref": item.get("Номенклатура") or None,
+                "name": item.get("Наименование") or "",
+                "barcode": item.get("ШтрихКод") or None,
+                "qty_expected": float(item.get("КоличествоЗаявлено") or 0),
+                "qty_fact": float(item.get("Количество") or 0),
+                "price": float(item.get("Цена") or 0),
+                "vat_rate": item.get("СтавкаНДС"),
+                "amount": float(item.get("Сумма") or 0),
+                # Станция не опознала штрихкод — карточку заводит центр.
+                "no_card": bool(item.get("КарточкаНеОпознана")),
+            })
+
+        doc_date = doc.get("Дата")
+        try:
+            parsed = datetime.fromisoformat(doc_date) if doc_date else datetime.now(timezone.utc)
+        except ValueError:
+            parsed = datetime.now(timezone.utc)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+
+        db.add(StoreReceipt(
+            company_id=company_id, station_id=station_id,
+            number=str(doc.get("Номер") or "")[:40] or "б/н",
+            doc_date=parsed,
+            supplier=(doc.get("Контрагент") or None),
+            incoming_number=(doc.get("НомерВходящегоДокумента") or None),
+            status="accepted", origin="station", lines=lines,
+            total_amount=float(doc.get("СуммаДокумента") or 0), vat_amount=0,
+            accepted_at=datetime.now(timezone.utc), source_uuid=str(source_uuid)[:64],
+        ))
 
 
 @router.post("/heartbeat")
@@ -90,11 +146,75 @@ async def heartbeat(
     row.last_seen = now
     await db.commit()
 
+    pending = (await db.execute(
+        select(func.count()).select_from(EdgeDownlink).where(
+            EdgeDownlink.company_id == company.id,
+            EdgeDownlink.station_id == station_id,
+            EdgeDownlink.acked_at.is_(None)))).scalar() or 0
+
     return {
         "server_time": now.isoformat(),
         "desired_version": DESIRED_AGENT_VERSION,
+        # Сколько заданий ждёт станцию: агент пойдёт за ними только если есть
+        # что забирать — лишний запрос в минуту по LTE не нужен.
+        "downlink_pending": int(pending),
         "update_required": bool(row.version and row.version != DESIRED_AGENT_VERSION),
     }
+
+
+@router.get("/downlink")
+async def downlink(
+    request: Request,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Задания станции: то, что центр приготовил для неё.
+
+    Агент забирает очередь сам — постучаться к станции за CGNAT нельзя.
+    Отдаём неподтверждённые задания целиком: пакет, полученный, но не
+    применённый (агент потерял связь до подтверждения), придёт повторно, и это
+    нормально — приёмная сторона идемпотентна.
+    """
+    header = request.headers.get("X-Station-Id", "")
+    if not header.isdigit():
+        raise HTTPException(400, "Не определён код АЗС")
+    station_id = int(header)
+
+    rows = (await db.execute(
+        select(EdgeDownlink)
+        .where(EdgeDownlink.company_id == company.id,
+               EdgeDownlink.station_id == station_id,
+               EdgeDownlink.acked_at.is_(None))
+        .order_by(EdgeDownlink.created_at).limit(20)
+    )).scalars().all()
+
+    now = datetime.now(timezone.utc)
+    out = []
+    for r in rows:
+        if r.delivered_at is None:
+            r.delivered_at = now
+        out.append({"id": str(r.id), "kind": r.kind, "payload": r.payload,
+                    "created_at": r.created_at})
+    await db.commit()
+    return {"tasks": out, "count": len(out)}
+
+
+@router.post("/downlink/{task_id}/ack")
+async def downlink_ack(
+    task_id: uuid.UUID,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Станция применила задание. До этого момента оно будет приходить снова."""
+    row = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.id == task_id,
+        EdgeDownlink.company_id == company.id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Задание не найдено")
+    if row.acked_at is None:
+        row.acked_at = datetime.now(timezone.utc)
+        await db.commit()
+    return {"ok": True}
 
 
 @router.get("/agents")
@@ -188,6 +308,12 @@ async def receive_packet(
     await db.commit()
 
     docs = payload.get("Документы") or []
+
+    # Приёмка со станции — не сырьё, а документ: тот же самый, что ведут в
+    # центре. Иначе фактическое поступление осталось бы в пакетах, а товаровед
+    # в «Магазине» его не увидел бы.
+    await _ingest_receipts(db, company.id, int(station_id), payload, docs)
+
     return {
         "accepted": True,
         "packet_uuid": packet_uuid,

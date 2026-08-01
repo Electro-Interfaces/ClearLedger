@@ -18,8 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
-from app.models import EdgeAgent, StoreReceipt, User
+from app.models import EdgeAgent, EdgeDownlink, StoreReceipt, User
 from app.services.export_audit import log_export
+from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
 
 # Каталог выгрузки пакетов БП — ТОЛЬКО из окружения сервера (не из клиентского
@@ -162,6 +163,104 @@ def _recalc(lines: list[dict]) -> float:
         l["amount"] = round(amount, 2)
         total += amount
     return round(total, 2)
+
+
+@router.post("/receipts/from-upd", status_code=201)
+async def receipt_from_upd(
+    station_id: int = Query(..., description="код АЗС, куда идёт поставка"),
+    file: UploadFile = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завести приёмку из входящего УПД поставщика.
+
+    Смысл всей затеи: строки, цены и коды маркировки поставщик уже прислал —
+    набивать их заново некому и незачем. Приёмщик на станции только пересчитает
+    товар по факту, а документ и коды уже готовы.
+
+    Фактическое количество из УПД НЕ берём никогда: заявленное — это то, что
+    обещали привезти, а принимаем мы то, что реально стоит на полу.
+    """
+    if file is None:
+        raise HTTPException(400, "Файл УПД не передан")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Файл пуст")
+    try:
+        parsed = parse_upd(raw)
+    except Exception as exc:  # noqa: BLE001 — показываем человеку, что не так
+        raise HTTPException(400, f"УПД не разобран: {exc}") from exc
+    if not parsed["lines"]:
+        raise HTTPException(400, "В документе не найдено ни одной строки товара")
+
+    cid: uuid.UUID = await scope_company_id(user, db)
+    now = datetime.now(timezone.utc)
+    number = "УПД-%d-%s" % (station_id, now.strftime("%y%m%d-%H%M"))
+    lines = [{
+        "nomenclature_ref": None,
+        "name": l["name"], "barcode": l["barcode"] or None,
+        "qty_expected": l["qty_expected"], "qty_fact": 0,
+        "price": l["price"], "vat_rate": l["vat_rate"] or None,
+        "amount": 0,
+        "mark_codes": l["mark_codes"], "pack_codes": l["pack_codes"],
+    } for l in parsed["lines"]]
+
+    row = StoreReceipt(
+        company_id=cid, station_id=station_id, number=number, doc_date=now,
+        supplier=parsed["supplier"] or None,
+        incoming_number=parsed["incoming_number"] or None,
+        # «К поступлению»: товар заявлен, но на складе его ещё нет — ровно
+        # смысл ордерной схемы. Приёмщик переведёт в «принят», пересчитав.
+        status="expected", origin="edo", lines=lines,
+        total_amount=0, vat_amount=0,
+        comment="Загружен из УПД поставщика",
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+
+    out = _receipt_out(row)
+    out["parsed"] = {"marked_lines": parsed["marked_lines"],
+                     "total_codes": parsed["total_codes"]}
+    return out
+
+
+@router.post("/receipts/{receipt_id}/send-to-station")
+async def send_receipt_to_station(
+    receipt_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отправить заготовку приёмки на станцию.
+
+    Станция за CGNAT — постучаться к ней нельзя, поэтому кладём задание в
+    очередь: агент заберёт его своим тактом и создаст документ у себя. Пока не
+    заберёт, задание висит и будет предложено снова.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    row = (await db.execute(select(StoreReceipt).where(
+        StoreReceipt.id == receipt_id, StoreReceipt.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Документ не найден")
+    if row.status == "accepted":
+        raise HTTPException(409, "Документ уже принят — отправлять нечего")
+
+    db.add(EdgeDownlink(
+        company_id=cid, station_id=row.station_id,
+        kind="goods_receipt_expected",
+        payload={
+            "id": str(row.id), "number": row.number,
+            "supplier": row.supplier, "incoming_number": row.incoming_number,
+            "doc_date": row.doc_date.isoformat() if row.doc_date else None,
+            "lines": row.lines or [],
+        },
+        note="приёмка %s" % row.number,
+    ))
+    if row.status == "draft":
+        row.status = "expected"
+    await db.commit()
+    return {"ok": True, "station_id": row.station_id, "number": row.number,
+            "lines": len(row.lines or [])}
 
 
 @router.get("/receipts")

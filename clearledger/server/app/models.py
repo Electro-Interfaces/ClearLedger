@@ -5708,6 +5708,37 @@ class StoreReceipt(Base):
     )
 
 
+class EdgeDownlink(Base):
+    """Очередь заданий центра для станции.
+
+    Станция за CGNAT: постучаться к ней нельзя, поэтому «канал вниз» — это
+    очередь, которую агент забирает сам своим тактом. Отсюда два времени:
+    delivered_at — станция получила, acked_at — станция подтвердила, что
+    применила. Между ними может пройти сколько угодно: агент мог получить
+    пакет и потерять связь до подтверждения, и тогда пакет придёт повторно.
+    Приёмная сторона обязана быть идемпотентной — как и на пути наверх.
+    """
+    __tablename__ = "edge_downlink"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    station_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # goods_receipt_expected | nsi_delta | price_update | command
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        Index("ix_edge_downlink_pending", "company_id", "station_id", "acked_at"),
+    )
+
+
 class EdgeAgent(Base):
     """Состояние агента станции: кто на связи, какая версия, что в очереди.
 
