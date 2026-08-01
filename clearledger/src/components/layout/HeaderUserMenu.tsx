@@ -6,7 +6,7 @@
  * `settingsPath` — куда ведёт пункт «Настройки»; продукт без своих настроек его не
  * показывает (у Управления параметры ядра живут отдельным разделом).
  */
-import { LogOut, Moon, Settings, Sun, User } from 'lucide-react'
+import { Gauge, LogOut, Moon, Settings, Sparkles, Sun, User } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,12 +16,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useTheme } from '@/hooks/useTheme'
+import { useUiLevel } from '@/hooks/useUiLevel'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 
 export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
   const navigate = useNavigate()
   const { theme, toggle } = useTheme()
+  const { isAdvanced, toggle: toggleLevel } = useUiLevel()
   const { company } = useCompany()
   const { user, logout } = useAuth()
   const userName = user?.name ?? 'Пользователь'
@@ -74,6 +76,13 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
           <DropdownMenuItem onClick={toggle} className="gap-2.5 cursor-pointer">
             {theme === 'dark' ? <Sun className="h-4 w-4 text-muted-foreground" /> : <Moon className="h-4 w-4 text-muted-foreground" />}
             {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          </DropdownMenuItem>
+          {/* Режим экрана — пунктом со словами. В шапке он стоял безымянной
+              иконкой-спидометром: угадать по ней, что это «показать все функции»,
+              не мог никто. На телефоне из шапки убран совсем. */}
+          <DropdownMenuItem onClick={toggleLevel} className="gap-2.5 cursor-pointer">
+            {isAdvanced ? <Gauge className="h-4 w-4 text-muted-foreground" /> : <Sparkles className="h-4 w-4 text-muted-foreground" />}
+            {isAdvanced ? 'Простой режим' : 'Все функции'}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleLogout} className="gap-2.5 cursor-pointer text-red-600 focus:text-red-600 dark:text-red-400 dark:focus:text-red-400">
             <LogOut className="h-4 w-4" />

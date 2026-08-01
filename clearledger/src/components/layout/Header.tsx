@@ -43,14 +43,16 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
           )}
 
           {/* Логотип ведёт на рабочий стол ЭКОСИСТЕМЫ (`/`) — наружу, к списку
-              приложений. Рабочий стол самого Ledger — `/workspace`. */}
-          <Link to="/" title="К рабочему столу экосистемы" className="flex items-center gap-3 shrink-0">
+              приложений. Рабочий стол самого Ledger — `/workspace`.
+              На телефоне логотипа нет: он был третьим путём на стол (рядом стояли
+              кнопка «Стол» и нижняя навигация), а место занимал в первом ряду. */}
+          <Link to="/" title="К рабочему столу экосистемы" className="hidden items-center gap-3 shrink-0 sm:flex">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg">
               <BrandIcon className="h-5 w-5 text-white" />
             </div>
             {/* Шапка называет ТЕКУЩИЙ продукт: там, где Учёт разрезан на рабочие места
                 («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
-            <div className="hidden sm:flex flex-col leading-none">
+            <div className="flex flex-col leading-none">
               <h1 className="font-semibold tracking-tight text-foreground text-lg">
                 {product ? productLabel(product, company.profileId)
                   : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
@@ -61,12 +63,23 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             </div>
           </Link>
 
+          {/* Телефон: имя экрана словом вместо ряда пиктограмм. Раньше здесь стояли
+              семь безымянных иконок, две из них — одинаковые сетки («Стол» и
+              «Приложения»), а название текущего продукта пряталось на sm:. Человек
+              не видел главного — где он находится. */}
+          <span className="min-w-0 truncate text-base font-semibold tracking-tight text-foreground sm:hidden">
+            {product ? productLabel(product, company.profileId)
+              : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
+          </span>
         </div>
 
         {/* Центр: переключатель компании + кнопки взаимодействия.
             Фильтры (период/точки/регионы/типы) переехали в свёрнутый фильтр
             рабочей области — единый фильтр над разделами. */}
-        <div className="flex flex-1 items-center justify-center min-w-0 gap-2 px-2">
+        {/* На телефоне весь центральный блок скрыт: «Стол» и «Приложения» рисовались
+            двумя неотличимыми сетками, а оба маршрута и так есть — стол в нижней
+            навигации, продукты плитками на нём же. */}
+        <div className="hidden flex-1 items-center justify-center min-w-0 gap-2 px-2 sm:flex">
           <CompanySelector />
           {/* Стол пространства — перед лаунчером: сперва «вернуться», потом «перейти». */}
           <DeskButton />
@@ -76,6 +89,10 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
           {/* Чат · Заявки · Инфо (+ Конференция) — общий блок продуктов контейнера. */}
           <HeaderInteractionButtons conference />
         </div>
+
+        {/* Пустая распорка вместо центра — иначе бургер с именем и правый край
+            сойдутся посередине. */}
+        <div className="flex-1 sm:hidden" />
 
         {/* Правый блок: чат (моб.) + переключатель темы + профиль */}
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
@@ -95,8 +112,10 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
             )}
           </Button>
           {/* Режим работы: простой ⇄ расширенный. Стоит рядом с лампочкой —
-              та объясняет, ГДЕ что находится, этот убирает лишнее с глаз. */}
-          <UiLevelHeaderButton />
+              та объясняет, ГДЕ что находится, этот убирает лишнее с глаз.
+              На телефоне иконки нет: угадать в безымянном спидометре «показать
+              все функции» невозможно, и он переехал пунктом в меню профиля. */}
+          <span className="hidden sm:inline-flex"><UiLevelHeaderButton /></span>
           {/* Обучающая подсветка зон интерфейса — «что здесь есть и за что отвечает». */}
           <Button
             variant="ghost"
