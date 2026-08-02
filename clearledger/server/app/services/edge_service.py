@@ -583,6 +583,16 @@ def alerts_as_text(report: dict) -> str:
 # Это не сверка сумм (её делает reconcile по сменам), а сверка ОХВАТА: чего мы
 # ещё не делаем и где отстаём по количеству.
 
+# Виды документов, которые агент умеет собирать. Список ведётся вручную и
+# сверяется с контрактом пакета: без него измеритель путает «кода нет» с «такой
+# операции ещё не делали», а это разные вещи — первое требует разработки,
+# второе просто ждёт своего случая.
+LEDGER_SUPPORTED = {
+    "retail_sale_sidegoods", "purchase", "transfer", "inventory", "writeoff",
+    "gain", "return_sale", "return_purchase", "production_release", "recipe",
+    "stock_snapshot",
+}
+
 PARITY_TITLES = {
     "retail_sale_sidegoods": "продажи смены",
     "purchase": "приёмка от поставщика",
@@ -626,7 +636,11 @@ async def parity(db: AsyncSession, company_id, station_id: int, days: int = 30) 
         # Снимок остатков — наш собственный вид, у 1С аналога нет. В счёт
         # паритета он не идёт: это инструмент сверки, а не документ учёта.
         служебный = r["вид"] == "stock_snapshot"
-        умеем = r["ledger_all"] > 0
+        умеем = r["вид"] in LEDGER_SUPPORTED
+        # «Было хоть раз» и «умеем» — разные ответы. Документ может быть
+        # реализован и оттестирован, но на станции его ещё не заводили: так
+        # выглядит оприходование, которое случается 48 раз в квартал.
+        было = r["ledger_all"] > 0
         if not служебный and r["onec_all"] > 0:
             if умеем:
                 покрыто += 1
@@ -639,7 +653,7 @@ async def parity(db: AsyncSession, company_id, station_id: int, days: int = 30) 
             "onec_period": r["onec_period"], "ledger_period": r["ledger_period"],
             "onec_last": r["onec_last"].isoformat() if r["onec_last"] else None,
             "ledger_last": r["ledger_last"].isoformat() if r["ledger_last"] else None,
-            "covered": умеем, "own": r["onec_all"] == 0,
+            "covered": умеем, "used": было, "own": r["onec_all"] == 0,
         })
     return {
         "station_id": station_id, "days": days,
