@@ -45,7 +45,7 @@ async def health(company: Company = Depends(get_company_by_api_key)):
 #
 # В переменной окружения, а не константой: номер версии меняется каждым
 # релизом агента, и пересобирать ради него образ backend — глупо.
-DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.20.0")
+DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.22.0")
 
 
 async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
@@ -288,11 +288,27 @@ async def receive_packet(
         station_id = int(header_station)
 
     # Идемпотентность: повтор — не ошибка агента, а штатный исход обрыва связи.
+    #
+    # Но повтор бывает двух видов, и различает их хеш. Тот же UUID с тем же
+    # хешем — дубль доставки, отвечаем 409 и на этом всё. Тот же UUID с ДРУГИМ
+    # хешем — перевыгрузка: агент пересобрал смену после исправления (так было
+    # со ставкой НДС, которую он брал у чужого кода нефтесервера). Отвергать её
+    # значит навсегда оставить в мастере данные, о которых уже известно, что они
+    # неверны — и никакая починка агента не долетит до сверки.
     existing = (await db.execute(
-        select(EdgePacket.id).where(EdgePacket.packet_uuid == packet_uuid)
+        select(EdgePacket).where(EdgePacket.packet_uuid == packet_uuid)
     )).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
+    if existing is not None:
+        прежний = (existing.payload or {}).get("ХешПакета")
+        новый = payload.get("ХешПакета")
+        if not новый or новый == прежний:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
+        existing.payload = payload
+        existing.size_bytes = len(raw)
+        existing.source = str(payload.get("Источник") or "") or existing.source
+        existing.received_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"ok": True, "перевыгрузка": True, "packet_uuid": packet_uuid}
 
     db.add(EdgePacket(
         company_id=company.id,

@@ -175,6 +175,70 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
     return len(targets)
 
 
+@router.post("/nsi/push/{station_id}")
+async def nsi_push(
+    station_id: int,
+    only_known: bool = Query(False, description="только карточки, связанные со станцией"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Залить станции весь её справочник одним заданием.
+
+    Правки едут по одной, но первый раз реплика пуста, и рассылать 7 500
+    карточек поштучно бессмысленно. Одно задание с массивом — станция получает
+    справочник целиком и дальше живёт офлайн.
+
+    По умолчанию шлём справочник целиком. Сначала фильтровали по связи со
+    станцией (цена, остаток, код кассы), но это отсекало ровно те карточки,
+    из-за которых всё и затевалось: распроданный товар связей не имеет, а в
+    сменах прошлых дней встречается — и ставку по нему брать неоткуда. Семь
+    тысяч карточек это около мегабайта, для машины станции ничто.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    фильтр = """
+        AND (EXISTS (SELECT 1 FROM edge.price p
+                      WHERE p.item_id = i.id AND p.station_id = :s AND p.valid_to IS NULL)
+          OR EXISTS (SELECT 1 FROM edge.stock st JOIN edge.barcode b2 ON b2.id = st.barcode_id
+                      WHERE b2.item_id = i.id AND st.station_id = :s)
+          OR EXISTS (SELECT 1 FROM edge.ns_code n JOIN edge.barcode b3 ON b3.id = n.barcode_id
+                      WHERE b3.item_id = i.id AND n.station_id = :s AND n.status = 'active'))
+    """ if only_known else ""
+
+    rows = (await db.execute(text(f"""
+        SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
+               (SELECT price FROM edge.price p
+                 WHERE p.item_id = i.id AND p.station_id = :s AND p.valid_to IS NULL) AS price,
+               coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b
+                          WHERE b.item_id = i.id AND b.status = 'active'), '{{}}') AS codes
+        FROM edge.item i
+        WHERE NOT i.deleted {фильтр}
+        ORDER BY i.name
+    """), {"s": station_id})).mappings().all()
+
+    items = [{"uuid": str(r["external_uuid"]), "name": r["name"], "unit": r["unit"],
+              "vat_rate": r["vat_rate"], "deleted": bool(r["deleted"]),
+              "price": float(r["price"]) if r["price"] is not None else None,
+              "barcodes": list(r["codes"] or [])} for r in rows]
+    if not items:
+        raise HTTPException(404, "Для станции нет ни одной связанной карточки")
+
+    # Пачками: задание уходит по HTTP целиком, и пакет на 7 500 карточек по
+    # мобильному каналу станции — это отправка, которая не доедет.
+    ПАЧКА = 500
+    пачек = 0
+    for i in range(0, len(items), ПАЧКА):
+        часть = items[i:i + ПАЧКА]
+        пачек += 1
+        db.add(EdgeDownlink(
+            company_id=cid, station_id=station_id, kind="nsi_bulk",
+            payload={"items": часть, "часть": пачек,
+                     "всего_частей": (len(items) + ПАЧКА - 1) // ПАЧКА},
+            note="справочник: %d карточек (часть %d)" % (len(часть), пачек),
+        ))
+    await db.commit()
+    return {"ok": True, "station_id": station_id, "карточек": len(items), "заданий": пачек}
+
+
 VAT_CODES = ("НДС22", "НДС20", "НДС10", "НДС5", "НДС18_118", "БезНДС")
 
 
