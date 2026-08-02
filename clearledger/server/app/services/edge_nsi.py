@@ -22,10 +22,13 @@
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+log = logging.getLogger(__name__)
 
 
 def _stock_doc(payload: dict) -> dict | None:
@@ -223,6 +226,11 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
                 {"st": station_id, "pl": место})
         stats["stock_dropped"] += удалено.rowcount or 0
 
+    # Строка без карточки в справочнике не вставится: INSERT ... SELECT просто
+    # ничего не найдёт. Раньше это проходило молча — три позиции станции не
+    # доезжали до центра, и «остаток по данным центра» тихо отличался от
+    # остатка станции. Молча терять строки учёта нельзя: пусть лучше видно.
+    потеряно: list[str] = []
     for (место, code), qty in qty_by_key.items():
         res = await db.execute(text("""
             INSERT INTO edge.stock (station_id, place, barcode_id, qty)
@@ -231,7 +239,16 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
             ON CONFLICT (station_id, place, barcode_id)
             DO UPDATE SET qty = excluded.qty, updated_at = now()
         """), {"s": station_id, "pl": место, "c": code, "q": qty})
-        stats["stock_rows"] += res.rowcount or 0
+        строк = res.rowcount or 0
+        stats["stock_rows"] += строк
+        if строк == 0:
+            потеряно.append(f"{code} ({место}, {qty:g})")
+    if потеряно:
+        stats["stock_no_barcode"] = len(потеряно)
+        stats["stock_no_barcode_items"] = потеряно[:10]
+        log.warning(
+            "остатки станции %s: %d строк без карточки в справочнике — не приняты: %s",
+            station_id, len(потеряно), ", ".join(потеряно[:10]))
 
     await db.commit()
     return stats

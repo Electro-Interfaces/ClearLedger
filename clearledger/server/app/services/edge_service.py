@@ -618,16 +618,23 @@ async def parity(db: AsyncSession, company_id, station_id: int, days: int = 30) 
         WITH src AS (
             SELECT CASE WHEN p.source LIKE 'Edge%' THEN 'ledger' ELSE 'onec' END AS сторона,
                    d->>'Тип' AS вид,
+                   -- Считаем ДОКУМЕНТЫ, а не вхождения в пакеты. Техкарты едут
+                   -- вместе с каждым выпуском (так делает и 1С), поэтому 32
+                   -- карты давали 840 «документов», и паритет по общепиту
+                   -- выглядел трёхкратно полнее, чем есть. Ключ документа —
+                   -- ИсточникUUID: он детерминирован и переживает пересборку
+                   -- смены; для документов без него берём отпечаток содержимого.
+                   coalesce(d->>'ИсточникUUID', md5(d::text)) AS ид,
                    coalesce((p.payload->'Смена'->>'Закрытие')::timestamptz,
                             p.received_at) AS момент
             FROM edge_packets p, jsonb_array_elements(p.payload->'Документы') d
             WHERE p.company_id = :cid AND p.station_id = :st
         )
         SELECT вид,
-               count(*) FILTER (WHERE сторона = 'onec')   AS onec_all,
-               count(*) FILTER (WHERE сторона = 'ledger') AS ledger_all,
-               count(*) FILTER (WHERE сторона = 'onec'   AND момент > now() - make_interval(days => :d)) AS onec_period,
-               count(*) FILTER (WHERE сторона = 'ledger' AND момент > now() - make_interval(days => :d)) AS ledger_period,
+               count(DISTINCT ид) FILTER (WHERE сторона = 'onec')   AS onec_all,
+               count(DISTINCT ид) FILTER (WHERE сторона = 'ledger') AS ledger_all,
+               count(DISTINCT ид) FILTER (WHERE сторона = 'onec'   AND момент > now() - make_interval(days => :d)) AS onec_period,
+               count(DISTINCT ид) FILTER (WHERE сторона = 'ledger' AND момент > now() - make_interval(days => :d)) AS ledger_period,
                max(момент) FILTER (WHERE сторона = 'onec')   AS onec_last,
                max(момент) FILTER (WHERE сторона = 'ledger') AS ledger_last
         FROM src GROUP BY вид ORDER BY onec_all DESC, вид
