@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -252,3 +253,135 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
 
     await db.commit()
     return stats
+
+
+# ── Что станция решила сама ─────────────────────────────────────────────────
+#
+# Обратное направление НСИ: карточки и контрагенты, заведённые на станции, и
+# цены, право на которые ей отдано. Это очередь на признание, а не справочник:
+# каноном карточку делает человек в центре, сопоставляя её по штрихкоду с
+# сетевой. Дедуп возможен только там, где виден справочник всей сети — иначе
+# получается 208-я с её 95 группами дублей, наделанными «на местах».
+
+def _ts(value) -> datetime | None:
+    """Время из пакета — в объект.
+
+    asyncpg типизирует параметр по колонке и строку в timestamptz не приводит:
+    CAST в SQL тут не спасает, приведение нужно на стороне Python. Битую дату
+    молча превращаем в None — приёмник не должен падать из-за формата даты, а
+    «когда заведено» дополнит время получения.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
+                             docs: list[dict]) -> dict:
+    """Принять черновики справочников и изменения цен со станции."""
+    stats = {"item_drafts": 0, "partner_drafts": 0, "price_changes": 0}
+
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        вид = doc.get("Тип")
+        ключ = str(doc.get("ИсточникUUID") or "")
+        if not ключ:
+            # Без ключа нельзя ни отличить повтор, ни связать с решением центра:
+            # такой документ примем один раз и не сможем найти второй.
+            log.warning("станция %s: документ %s без ИсточникUUID — пропущен", station_id, вид)
+            continue
+
+        if вид == "item_draft":
+            await db.execute(text("""
+                INSERT INTO edge.item_draft
+                    (company_id, station_id, source_uuid, name, unit, vat_rate, barcodes, created_at)
+                VALUES (:cid, :st, :key, :name, :unit, :vat, :codes, coalesce(CAST(:at AS timestamptz), now()))
+                ON CONFLICT (company_id, station_id, source_uuid) DO UPDATE
+                   SET name = excluded.name, unit = excluded.unit,
+                       vat_rate = excluded.vat_rate, barcodes = excluded.barcodes
+                 WHERE edge.item_draft.resolved_at IS NULL
+            """), {"cid": company_id, "st": station_id, "key": ключ,
+                   "name": doc.get("Наименование") or "", "unit": doc.get("Единица") or "шт",
+                   "vat": doc.get("СтавкаНДС"), "codes": doc.get("Штрихкоды") or [],
+                   "at": _ts(doc.get("Заведена"))})
+            stats["item_drafts"] += 1
+
+        elif вид == "partner_draft":
+            await db.execute(text("""
+                INSERT INTO edge.partner_draft
+                    (company_id, station_id, source_uuid, name, inn, kpp, role, comment)
+                VALUES (:cid, :st, :key, :name, :inn, :kpp, :role, :comment)
+                ON CONFLICT (company_id, station_id, source_uuid) DO UPDATE
+                   SET name = excluded.name, inn = excluded.inn, kpp = excluded.kpp,
+                       role = excluded.role, comment = excluded.comment
+                 WHERE edge.partner_draft.resolved_at IS NULL
+            """), {"cid": company_id, "st": station_id, "key": ключ,
+                   "name": doc.get("Наименование") or "", "inn": doc.get("ИНН"),
+                   "kpp": doc.get("КПП"), "role": doc.get("Роль") or "supplier",
+                   "comment": doc.get("Комментарий")})
+            stats["partner_drafts"] += 1
+
+        elif вид == "price_change":
+            # Изменение цены неизменяемо: это запись о случившемся, а не
+            # состояние. Повтор пакета не должен переписывать автора и причину.
+            await db.execute(text("""
+                INSERT INTO edge.station_price_change
+                    (company_id, station_id, source_uuid, item_uuid, barcode,
+                     old_price, new_price, author, reason, changed_at)
+                VALUES (:cid, :st, :key, :item, :bc, :old, :new, :author, :reason,
+                        coalesce(CAST(:at AS timestamptz), now()))
+                ON CONFLICT (company_id, station_id, source_uuid) DO NOTHING
+            """), {"cid": company_id, "st": station_id, "key": ключ,
+                   "item": doc.get("НоменклатураUUID") or "", "bc": doc.get("Штрихкод"),
+                   "old": doc.get("ЦенаБыла"), "new": doc.get("ЦенаСтала") or 0,
+                   "author": doc.get("Автор") or "", "reason": doc.get("Причина"),
+                   "at": _ts(doc.get("Момент"))})
+            stats["price_changes"] += 1
+
+    await db.commit()
+    if any(stats.values()):
+        log.info("станция %s прислала справочники: %s", station_id, stats)
+    return stats
+
+
+async def station_drafts(db: AsyncSession, company_id, station_id: int | None = None) -> dict:
+    """Открытые черновики станций — то, что ждёт решения человека в центре."""
+    условие = "company_id = :cid AND resolved_at IS NULL"
+    args: dict = {"cid": company_id}
+    if station_id:
+        условие += " AND station_id = :st"
+        args["st"] = station_id
+
+    items = (await db.execute(text(f"""
+        SELECT station_id, source_uuid, name, unit, vat_rate, barcodes, created_at
+        FROM edge.item_draft WHERE {условие} ORDER BY created_at
+    """), args)).mappings().all()
+    partners = (await db.execute(text(f"""
+        SELECT station_id, source_uuid, name, inn, kpp, role, comment, created_at
+        FROM edge.partner_draft WHERE {условие} ORDER BY created_at
+    """), args)).mappings().all()
+    prices = (await db.execute(text("""
+        SELECT station_id, item_uuid, barcode, old_price, new_price, author, reason, changed_at
+        FROM edge.station_price_change
+        WHERE company_id = :cid AND (CAST(:st AS int) IS NULL OR station_id = CAST(:st AS int))
+        ORDER BY changed_at DESC LIMIT 100
+    """), {"cid": company_id, "st": station_id})).mappings().all()
+
+    def плоско(rows):
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k, v in d.items():
+                if hasattr(v, "isoformat"):
+                    d[k] = v.isoformat()
+                elif isinstance(v, Decimal):
+                    d[k] = float(v)
+            out.append(d)
+        return out
+
+    return {"items": плоско(items), "partners": плоско(partners),
+            "prices": плоско(prices)}

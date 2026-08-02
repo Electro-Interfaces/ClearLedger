@@ -19,6 +19,7 @@ from app.auth import check_module_access, get_current_user
 from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import EdgeAgent, EdgeDownlink, StoreReceipt, User
+from app.services import edge_nsi, edge_service
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
@@ -1429,3 +1430,21 @@ async def dedup_deactivation_plan(user: User = Depends(get_current_user), db: As
     """План «снять с продажи»: активные коды кассы 208 на карточках архивных групп
     (status=not_used) — на деактивацию. НЕ удаление (карточка/история остаются)."""
     return await dedup_service.deactivation_plan(db, await scope_company_id(user, db))
+
+
+@router.get("/station-drafts")
+async def store_station_drafts(
+    station_id: int | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Что станции решили сами и что ждёт признания центром.
+
+    Карточки и контрагенты, заведённые на местах, плюс цены, назначенные
+    станциями. Первые два — очередь на разбор: каноном карточку делает человек
+    здесь, сопоставляя её по штрихкоду с сетевой (дедуп возможен только там,
+    где виден справочник всей сети). Цены — журнал: их не подтверждают, но по
+    ним видно, кто и почему поменял цену на полке.
+    """
+    cid = await scope_company_id(user, db)
+    return await edge_nsi.station_drafts(db, cid, station_id)

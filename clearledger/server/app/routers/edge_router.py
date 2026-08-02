@@ -13,6 +13,7 @@ v0 — теневой режим: пакеты складываются сырь
 документы из них не создаются.
 """
 import gzip
+import logging
 import zlib
 import json
 import os
@@ -26,6 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_company_by_api_key
 from app.database import get_db
 from app.models import Company, EdgeAgent, EdgeDownlink, EdgePacket, StoreReceipt
+
+log = logging.getLogger(__name__)
 from app.services import edge_nsi, edge_service
 
 router = APIRouter(prefix="/edge", tags=["Edge (агенты АЗС)"])
@@ -359,6 +362,15 @@ async def receive_packet(
     # единственным источником связи «карточка ↔ штрихкод ↔ код кассы».
     # Сбой синхронизации не должен отвергать пакет: данные уже приняты, а НСИ
     # догонит следующим снимком.
+    # Черновики справочников и цены, назначенные станцией. Это не документы
+    # учёта — они ничего не проводят; это заявка на признание, и разбирает её
+    # человек в центре.
+    if (request.headers.get("X-Packet-Kind") or "") == "station-nsi":
+        try:
+            await edge_nsi.ingest_station_nsi(db, company.id, int(station_id), docs)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("станция %s: черновики не приняты: %s", station_id, exc)
+
     nsi_stats = None
     if (request.headers.get("X-Packet-Kind") or "") == "stock":
         try:
