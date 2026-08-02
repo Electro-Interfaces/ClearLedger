@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 """
 from collections import defaultdict
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EdgePacket
@@ -570,3 +570,79 @@ def alerts_as_text(report: dict) -> str:
         for it in a.get("items") or []:
             lines.append(f"      - {it}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Паритет с 1С
+#
+# Пока идёт параллельная работа, главный вопрос не «правильно ли мы считаем», а
+# «всё ли мы вообще умеем». 1С на станции продолжает вести учёт, её пакеты
+# приходят в мастер тем же каналом — и по ним видно, какие виды документов она
+# создаёт и сколько. Наш результат виден рядом.
+#
+# Это не сверка сумм (её делает reconcile по сменам), а сверка ОХВАТА: чего мы
+# ещё не делаем и где отстаём по количеству.
+
+PARITY_TITLES = {
+    "retail_sale_sidegoods": "продажи смены",
+    "purchase": "приёмка от поставщика",
+    "production_release": "выпуск продукции (общепит)",
+    "ingredients_writeoff": "списание ингредиентов",
+    "recipe": "техкарты блюд",
+    "transfer": "перемещение",
+    "inventory": "инвентаризация",
+    "writeoff": "списание",
+    "gain": "оприходование",
+    "return_sale": "возврат покупателя",
+    "return_purchase": "возврат поставщику",
+    "stock_snapshot": "снимок остатков",
+}
+
+
+async def parity(db: AsyncSession, company_id, station_id: int, days: int = 30) -> dict:
+    """Что 1С делает за период и что за тот же период делаем мы."""
+    rows = (await db.execute(text("""
+        WITH src AS (
+            SELECT CASE WHEN p.source LIKE 'Edge%' THEN 'ledger' ELSE 'onec' END AS сторона,
+                   d->>'Тип' AS вид,
+                   coalesce((p.payload->'Смена'->>'Закрытие')::timestamptz,
+                            p.received_at) AS момент
+            FROM edge_packets p, jsonb_array_elements(p.payload->'Документы') d
+            WHERE p.company_id = :cid AND p.station_id = :st
+        )
+        SELECT вид,
+               count(*) FILTER (WHERE сторона = 'onec')   AS onec_all,
+               count(*) FILTER (WHERE сторона = 'ledger') AS ledger_all,
+               count(*) FILTER (WHERE сторона = 'onec'   AND момент > now() - make_interval(days => :d)) AS onec_period,
+               count(*) FILTER (WHERE сторона = 'ledger' AND момент > now() - make_interval(days => :d)) AS ledger_period,
+               max(момент) FILTER (WHERE сторона = 'onec')   AS onec_last,
+               max(момент) FILTER (WHERE сторона = 'ledger') AS ledger_last
+        FROM src GROUP BY вид ORDER BY onec_all DESC, вид
+    """), {"cid": company_id, "st": station_id, "d": days})).mappings().all()
+
+    виды = []
+    покрыто = отсутствует = 0
+    for r in rows:
+        # Снимок остатков — наш собственный вид, у 1С аналога нет. В счёт
+        # паритета он не идёт: это инструмент сверки, а не документ учёта.
+        служебный = r["вид"] == "stock_snapshot"
+        умеем = r["ledger_all"] > 0
+        if not служебный and r["onec_all"] > 0:
+            if умеем:
+                покрыто += 1
+            else:
+                отсутствует += 1
+        виды.append({
+            "kind": r["вид"],
+            "title": PARITY_TITLES.get(r["вид"], r["вид"]),
+            "onec": r["onec_all"], "ledger": r["ledger_all"],
+            "onec_period": r["onec_period"], "ledger_period": r["ledger_period"],
+            "onec_last": r["onec_last"].isoformat() if r["onec_last"] else None,
+            "ledger_last": r["ledger_last"].isoformat() if r["ledger_last"] else None,
+            "covered": умеем, "own": r["onec_all"] == 0,
+        })
+    return {
+        "station_id": station_id, "days": days,
+        "covered": покрыто, "missing": отсутствует,
+        "kinds": виды,
+    }

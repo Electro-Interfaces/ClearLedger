@@ -175,6 +175,24 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
     return len(targets)
 
 
+@router.get("/parity")
+async def store_parity(
+    station_id: int = Query(208),
+    days: int = Query(30, ge=1, le=365),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Паритет с 1С: что она делает и что за то же время делаем мы.
+
+    Нужен на весь период параллельной работы. Пока 1С ведёт учёт станции, её
+    пакеты приходят тем же каналом — и по ним видно, каких видов документов мы
+    ещё не создаём. Это вопрос охвата, а не точности: сходимость сумм проверяет
+    сверка смен.
+    """
+    cid = await scope_company_id(user, db)
+    return await edge_service.parity(db, cid, station_id, days)
+
+
 @router.get("/places")
 async def store_places(
     station_id: int = Query(208),
