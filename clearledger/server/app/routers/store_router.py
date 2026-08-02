@@ -71,7 +71,7 @@ async def store_stations(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
     )).scalars().all()
 
-    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.28.0")
+    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.30.1")
     now = datetime.now(timezone.utc)
     stations = []
     for r in rows:
@@ -173,6 +173,54 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
             note="НСИ: %s" % card["name"][:60],
         ))
     return len(targets)
+
+
+@router.post("/nsi/push-recipes/{station_id}")
+async def nsi_push_recipes(
+    station_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отправить станции техкарты блюд.
+
+    Без них продажа кофе не списывает ни зерно, ни стакан: остаток сырья растёт
+    вечно, а каждая инвентаризация даёт недостачу, которую закрывают руками.
+    Карт немного (на 208 — 32), поэтому шлём одним заданием целиком: дельтами
+    управлять дороже, чем переслать всё.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    rows = (await db.execute(text("""
+        SELECT r.dish_uuid, r.output_qty,
+               coalesce(d.name, '')                         AS dish_name,
+               json_agg(json_build_object(
+                   'item', l.item_uuid, 'qty', l.qty, 'unit', l.unit,
+                   'name', coalesce(i.name, '')) ORDER BY l.item_uuid) AS lines
+        FROM edge.recipe r
+        JOIN edge.recipe_line l ON l.recipe_id = r.id
+        LEFT JOIN edge.item d ON d.external_uuid = r.dish_uuid
+        LEFT JOIN edge.item i ON i.external_uuid = l.item_uuid
+        GROUP BY r.dish_uuid, r.output_qty, d.name
+        ORDER BY d.name
+    """))).mappings().all()
+    if not rows:
+        raise HTTPException(404, "Техкарт нет — сначала импортируйте их из пакетов ЦБ")
+
+    карты = [{
+        "dish": str(r["dish_uuid"]), "name": r["dish_name"],
+        "output": float(r["output_qty"] or 1),
+        "lines": [{"item": str(l["item"]), "qty": float(l["qty"]),
+                   "unit": l["unit"] or "", "name": l["name"] or ""}
+                  for l in r["lines"]],
+    } for r in rows]
+
+    db.add(EdgeDownlink(
+        company_id=cid, station_id=station_id, kind="recipes",
+        payload={"recipes": карты},
+        note="техкарты: %d блюд" % len(карты),
+    ))
+    await db.commit()
+    return {"ok": True, "station_id": station_id, "блюд": len(карты),
+            "ингредиентов": sum(len(k["lines"]) for k in карты)}
 
 
 @router.get("/parity")
