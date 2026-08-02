@@ -1056,3 +1056,35 @@ export const resolveItemDraft = (
 export const resolvePartnerDraft = (
   draftId: number, body: { action: 'accept' | 'reject'; note?: string },
 ) => post<Record<string, unknown>>(`/api/store/station-drafts/partner/${draftId}`, body)
+
+
+/* ── Коллизии штрихкодов ──────────────────────────────────────────────────
+ *
+ * Один код не может быть активен у двух карточек: касса ищет товар по нему, и
+ * при двойной привязке продаётся та позиция, что выгрузилась последней, —
+ * вторая «исчезает с полки», хотя лежит.
+ */
+export interface BarcodeCollision {
+  claim_id: number
+  code: string
+  claim_note: string | null
+  claimed_at: string
+  claimant_id: number
+  claimant_name: string
+  claimant_unit: string
+  claimant_source: string
+  holder_barcode_id: number
+  holder_id: number
+  holder_name: string
+  holder_unit: string
+  holder_last_sold: string | null
+  holder_ns_codes: number
+  holder_stock: number
+}
+
+export const getBarcodeCollisions = () =>
+  get<{ collisions: BarcodeCollision[] }>('/api/store/barcode-collisions')
+
+export const resolveBarcodeCollision = (
+  claimId: number, body: { action: 'move' | 'drop'; note?: string },
+) => post<Record<string, unknown>>(`/api/store/barcode-collisions/${claimId}`, body)

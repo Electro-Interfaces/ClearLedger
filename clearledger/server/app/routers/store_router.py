@@ -1525,3 +1525,72 @@ async def store_draft_candidates(
     cid: uuid.UUID = await scope_company_id(user, db)
     codes = [c.strip() for c in barcodes.split(",") if c.strip()]
     return {"candidates": await edge_nsi.draft_candidates(db, cid, codes)}
+
+
+@router.get("/barcode-collisions")
+async def store_barcode_collisions(
+    limit: int = Query(200, ge=1, le=1000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Штрихкоды, на которые претендуют две карточки.
+
+    Один код не может быть активен у двух позиций: касса ищет товар по нему, и
+    при двойной привязке продаётся та карточка, что выгрузилась последней, —
+    вторая «исчезает с полки», хотя товар лежит. Претензии копятся из снимков
+    станций и из признания черновиков; решает человек.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    return {"collisions": await edge_nsi.barcode_collisions(db, cid, limit)}
+
+
+@router.post("/barcode-collisions/{claim_id}")
+async def store_resolve_collision(
+    claim_id: int,
+    body: dict = Body(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Решение по коллизии: передать код претенденту либо снять претензию.
+
+    После передачи обе карточки уезжают на станции заданием НСИ: то, чем товар
+    пробивается в кассе, изменилось, и станция обязана об этом узнать — иначе
+    на полке останется старая привязка до ближайшей полной выгрузки.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    try:
+        res = await edge_nsi.resolve_collision(
+            db, cid, claim_id, str(body.get("action") or ""), body.get("note"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if res["action"] == "move":
+        stations = (await db.execute(text(
+            "SELECT id FROM edge.station"))).scalars().all()
+        for item_id in (res["claimant_id"], res["holder_id"]):
+            for st in stations:
+                # Цена берётся ПО СТАНЦИИ, а не общая: они разные, и задание с
+                # пустой ценой стёрло бы её в реплике станции — товар остался бы
+                # на полке без цены. Право на цену едет вместе с карточкой.
+                row = (await db.execute(text("""
+                    SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.price_owner,
+                           coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b
+                                      WHERE b.item_id = i.id AND b.status = 'active'), '{}') AS codes,
+                           (SELECT p.price FROM edge.price p
+                             WHERE p.item_id = i.id AND p.station_id = :s
+                               AND p.valid_to IS NULL) AS price
+                    FROM edge.item i WHERE i.id = :id
+                """), {"id": item_id, "s": st})).mappings().first()
+                if row is None:
+                    continue
+                db.add(EdgeDownlink(
+                    company_id=cid, station_id=st, kind="nsi_delta",
+                    payload={"uuid": str(row["external_uuid"]), "name": row["name"],
+                             "unit": row["unit"], "vat_rate": row["vat_rate"],
+                             "barcodes": list(row["codes"] or []),
+                             "price": float(row["price"]) if row["price"] is not None else None,
+                             "price_owner": row["price_owner"], "deleted": False},
+                ))
+        await db.commit()
+        res["pushed_to_stations"] = len(stations)
+    return res

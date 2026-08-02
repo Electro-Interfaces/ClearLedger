@@ -474,6 +474,17 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
         """), {"c": code})).first()
         if занят is not None:
             if занят.item_id != item_id:
+                # Штрихкод уже работает у другой карточки. Перевесить молча
+                # нельзя: по нему сейчас пробивается товар, и касса той позиции
+                # сломается. Записываем претензию строкой rejected — это дефект
+                # справочника, и решать его человеку на отдельном экране.
+                await db.execute(text("""
+                    INSERT INTO edge.barcode (item_id, code, status, note)
+                    VALUES (:i, :c, 'rejected', :note)
+                    ON CONFLICT DO NOTHING
+                """), {"i": item_id, "c": code,
+                       "note": f"признание черновика АЗС {draft['station_id']}: "
+                               f"код активен у карточки {занят.item_id}"})
                 коллизий += 1
             continue
         await db.execute(text("""
@@ -509,3 +520,101 @@ async def resolve_partner_draft(db: AsyncSession, company_id, draft_id: int,
     await db.commit()
     return {"action": action, "draft_id": draft_id, "name": row["name"],
             "station_id": row["station_id"]}
+
+
+# ── Коллизии штрихкодов ─────────────────────────────────────────────────────
+#
+# Один штрихкод не может быть активен у двух карточек: это ловит уникальный
+# индекс, и это не формальность. Касса ищет товар по ШК, и если код принадлежит
+# двум позициям, продаётся та, которая выгрузилась последней, — а вторая
+# «исчезает с полки», хотя лежит.
+#
+# Претензия на чужой код записывается строкой rejected: молча перевешивать
+# нельзя (сломается касса тому, кто по нему сейчас пробивается), молча забыть
+# тоже — товар так и останется непродаваемым. Поэтому очередь на решение.
+
+async def barcode_collisions(db: AsyncSession, company_id, limit: int = 200) -> list[dict]:
+    """Коды, на которые претендуют две карточки."""
+    rows = (await db.execute(text("""
+        SELECT r.id            AS claim_id,
+               r.code,
+               r.note          AS claim_note,
+               r.created_at    AS claimed_at,
+               ci.id           AS claimant_id,
+               ci.name         AS claimant_name,
+               ci.unit         AS claimant_unit,
+               ci.source       AS claimant_source,
+               a.id            AS holder_barcode_id,
+               oi.id           AS holder_id,
+               oi.name         AS holder_name,
+               oi.unit         AS holder_unit,
+               a.last_sold     AS holder_last_sold,
+               (SELECT count(*) FROM edge.ns_code n
+                 WHERE n.barcode_id = a.id AND n.status = 'active') AS holder_ns_codes,
+               (SELECT coalesce(sum(st.qty), 0) FROM edge.stock st
+                 WHERE st.barcode_id = a.id)                        AS holder_stock
+        FROM edge.barcode r
+        JOIN edge.item ci ON ci.id = r.item_id
+        JOIN edge.barcode a ON a.code = r.code AND a.status = 'active'
+        JOIN edge.item oi ON oi.id = a.item_id
+        WHERE r.status = 'rejected'
+        ORDER BY r.created_at DESC
+        LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+
+    out = []
+    for r in rows:
+        d = dict(r)
+        for k, v in d.items():
+            if hasattr(v, "isoformat"):
+                d[k] = v.isoformat()
+            elif isinstance(v, Decimal):
+                d[k] = float(v)
+        out.append(d)
+    return out
+
+
+async def resolve_collision(db: AsyncSession, company_id, claim_id: int,
+                            action: str, note: str | None = None) -> dict:
+    """Решение по коллизии штрихкода.
+
+      · move — код действительно принадлежит претенденту. Прежний владелец
+               получает статус historical (не удаляем: по этому коду продавали,
+               и вчерашние чеки должны читаться), претендент — active.
+      · drop — претензия ошибочна, код остаётся у нынешнего владельца.
+
+    Перевешивание меняет то, чем товар пробивается в кассе, поэтому станции
+    после него нужна перевыгрузка — вызывающий ставит задания НСИ на обе
+    карточки.
+    """
+    row = (await db.execute(text("""
+        SELECT r.id, r.code, r.item_id AS claimant_id,
+               a.id AS holder_barcode_id, a.item_id AS holder_id
+        FROM edge.barcode r
+        JOIN edge.barcode a ON a.code = r.code AND a.status = 'active'
+        WHERE r.id = :id AND r.status = 'rejected'
+    """), {"id": claim_id})).mappings().first()
+    if row is None:
+        raise ValueError("претензия не найдена или уже разобрана")
+
+    if action == "drop":
+        await db.execute(text("DELETE FROM edge.barcode WHERE id = :id"), {"id": claim_id})
+        await db.commit()
+        return {"action": "drop", "code": row["code"], "holder_id": row["holder_id"]}
+
+    if action != "move":
+        raise ValueError(f"неизвестное решение: {action}")
+
+    # Порядок важен: сначала снимаем активность с прежнего владельца, иначе
+    # уникальный индекс не даст второму коду стать активным.
+    await db.execute(text("""
+        UPDATE edge.barcode SET status = 'historical', note = coalesce(note || ' · ', '') || :n
+        WHERE id = :id
+    """), {"id": row["holder_barcode_id"],
+           "n": note or "код передан другой карточке по решению центра"})
+    await db.execute(text("""
+        UPDATE edge.barcode SET status = 'active', note = :n WHERE id = :id
+    """), {"id": claim_id, "n": note})
+    await db.commit()
+    return {"action": "move", "code": row["code"],
+            "claimant_id": row["claimant_id"], "holder_id": row["holder_id"]}
