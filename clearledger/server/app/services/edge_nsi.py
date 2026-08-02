@@ -53,7 +53,7 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
     book_rows = doc.get("Учет") or []
 
     stats = {"barcodes_new": 0, "collisions": 0, "prices_changed": 0,
-             "ns_codes": 0, "stock_rows": 0}
+             "ns_codes": 0, "stock_rows": 0, "stock_dropped": 0}
 
     # ── Штрихкоды ────────────────────────────────────────────────────────
     # Источник — обе половины снимка: касса знает, чем товар пробивается,
@@ -69,6 +69,18 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
             pairs[(uuid, code)] = None
 
     for uuid, code in pairs:
+        # Штрихкод, снятый человеком (historical), заново не заводим: иначе
+        # решение товароведа откатывалось следующим же снимком — станция
+        # продолжает отдавать код, пока касса не перевыгружена, и в edge.barcode
+        # копилось по строке на каждый цикл «снял — воскресили».
+        снят = (await db.execute(text("""
+            SELECT 1 FROM edge.barcode b JOIN edge.item i ON i.id = b.item_id
+            WHERE b.code = :c AND b.status = 'historical'
+              AND i.external_uuid = CAST(:u AS uuid)
+        """), {"c": code, "u": uuid})).scalar_one_or_none()
+        if снят:
+            continue
+
         row = (await db.execute(text("""
             SELECT b.id, b.item_id, i.external_uuid
             FROM edge.barcode b JOIN edge.item i ON i.id = b.item_id
@@ -166,6 +178,23 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
         code = str(r.get("ШтрихКод") or "")
         if code:
             qty_by_code[code] = qty_by_code.get(code, 0.0) + float(r.get("Остаток") or 0)
+
+    # Снимок — ПОЛНАЯ картина остатков станции, а не список изменений. Значит
+    # строка, которой в снимке нет, означает ноль, и держать её дальше нельзя:
+    # к 02.08 в edge.stock накопилось 1159 строк-сирот, из них 1021 с
+    # отрицательным остатком, и 33 позиции на 27 142 ₽ протекли в витрину кассы
+    # как товар, которого на станции нет. Витрина — будущий источник artdesc:
+    # ровно так в июле и появлялись фантомы на полке.
+    живые = [c for c in qty_by_code if c]
+    if живые:
+        удалено = await db.execute(text("""
+            DELETE FROM edge.stock s
+            WHERE s.station_id = :st
+              AND s.barcode_id NOT IN (
+                  SELECT b.id FROM edge.barcode b
+                  WHERE b.code = ANY(:codes) AND b.status = 'active')
+        """), {"st": station_id, "codes": живые})
+        stats["stock_dropped"] = удалено.rowcount or 0
 
     for code, qty in qty_by_code.items():
         res = await db.execute(text("""

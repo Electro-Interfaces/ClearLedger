@@ -13,6 +13,7 @@ v0 — теневой режим: пакеты складываются сырь
 документы из них не создаются.
 """
 import gzip
+import zlib
 import json
 import os
 import uuid
@@ -29,6 +30,7 @@ from app.services import edge_nsi, edge_service
 
 router = APIRouter(prefix="/edge", tags=["Edge (агенты АЗС)"])
 
+MAX_UNPACKED = 64 * 1024 * 1024   # потолок распаковки: смена ~200 КБ
 MAX_BODY = 25 * 1024 * 1024  # смена ~200 КБ; запас на снимки остатков
 
 
@@ -45,7 +47,7 @@ async def health(company: Company = Depends(get_company_by_api_key)):
 #
 # В переменной окружения, а не константой: номер версии меняется каждым
 # релизом агента, и пересобирать ради него образ backend — глупо.
-DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.22.0")
+DESIRED_AGENT_VERSION = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.23.0")
 
 
 async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
@@ -264,9 +266,16 @@ async def receive_packet(
     if len(raw) > MAX_BODY:
         raise HTTPException(413, "Пакет слишком большой")
     if request.headers.get("content-encoding", "").lower() == "gzip":
+        # Распаковываем порциями с потолком. gzip.decompress() развернул бы
+        # 25 МБ нулей в десятки гигабайт прямо в память процесса — ключа агента
+        # (он лежит открытым текстом в config.json на машине в торговом зале)
+        # для этого достаточно.
         try:
-            raw = gzip.decompress(raw)
-        except OSError as exc:
+            d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            raw = d.decompress(raw, MAX_UNPACKED)
+            if d.unconsumed_tail:
+                raise HTTPException(413, "Распакованный пакет слишком большой")
+        except zlib.error as exc:
             raise HTTPException(400, f"Не удалось распаковать пакет: {exc}") from exc
     try:
         payload = json.loads(raw.decode("utf-8-sig"))
@@ -303,11 +312,26 @@ async def receive_packet(
         новый = payload.get("ХешПакета")
         if not новый or новый == прежний:
             raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
+        # Пакет мог прийти от другой компании или другой станции: UUID строится
+        # детерминированно из номера станции и смены, без тенанта, поэтому у
+        # двух сетей со станцией №208 он совпадает побайтно. Перезаписать чужой
+        # пакет — значит подменить компании учёт.
+        if existing.company_id != company.id or existing.station_id != int(station_id):
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Пакет с таким идентификатором принадлежит другой станции")
         existing.payload = payload
         existing.size_bytes = len(raw)
         existing.source = str(payload.get("Источник") or "") or existing.source
         existing.received_at = datetime.now(timezone.utc)
         await db.commit()
+        # Синхронизацию НСИ раньше пропускали: возврат стоял до неё, и повторно
+        # присланный снимок не обновлял справочник никогда.
+        if (request.headers.get("X-Packet-Kind") or "") == "stock":
+            try:
+                nsi = await edge_nsi.sync_from_snapshot(db, int(station_id), payload)
+            except Exception as exc:  # noqa: BLE001
+                nsi = {"error": str(exc)[:200]}
+            return {"ok": True, "перевыгрузка": True, "packet_uuid": packet_uuid, "nsi": nsi}
         return {"ok": True, "перевыгрузка": True, "packet_uuid": packet_uuid}
 
     db.add(EdgePacket(
@@ -383,7 +407,7 @@ async def list_packets(
 @router.get("/reconcile")
 async def reconcile(
     station_id: int | None = None,
-    limit: int = 60,
+    limit: int = 60,   # потолок ниже: см. min()
     company: Company = Depends(get_company_by_api_key),
     db: AsyncSession = Depends(get_db),
 ):
@@ -391,7 +415,8 @@ async def reconcile(
 
     Критерий этапа v0 — `clean: true` четырнадцать дней подряд.
     """
-    return await edge_service.reconcile(db, company.id, station_id, limit)
+    return await edge_service.reconcile(db, company.id, station_id,
+                                        max(1, min(limit, 500)))
 
 
 @router.get("/stock-report")

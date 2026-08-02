@@ -71,7 +71,7 @@ async def store_stations(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
     )).scalars().all()
 
-    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.6.0")
+    desired = os.environ.get("EDGE_DESIRED_AGENT_VERSION", "0.23.0")
     now = datetime.now(timezone.utc)
     stations = []
     for r in rows:
