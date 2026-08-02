@@ -1594,3 +1594,42 @@ async def store_resolve_collision(
         await db.commit()
         res["pushed_to_stations"] = len(stations)
     return res
+
+
+@router.post("/partners/push/{station_id}")
+async def store_push_partners(
+    station_id: int,
+    all_network: bool = Query(False, description="слать весь справочник сети, а не только своих"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отправить станции её справочник поставщиков.
+
+    По умолчанию — только тех, кто с этой станцией работал: товароведу 208-й
+    незачем сотня юрлиц с других АЗС, он будет искать своего среди чужих.
+    Флагом можно отдать весь справочник сети — например, когда станция новая и
+    истории поставок у неё ещё нет.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    фильтр = "" if all_network else """
+        AND EXISTS (SELECT 1 FROM edge.partner_station ps
+                     WHERE ps.partner_id = p.id AND ps.station_id = :s)
+    """
+    rows = (await db.execute(text(f"""
+        SELECT p.id, p.name, p.inn, p.kpp, p.role, p.comment, p.archived
+        FROM edge.partner p
+        WHERE p.company_id = :cid AND NOT p.archived {фильтр}
+        ORDER BY p.name
+    """), {"cid": cid, "s": station_id})).mappings().all()
+    if not rows:
+        raise HTTPException(404, "Для станции нет ни одного контрагента")
+
+    db.add(EdgeDownlink(
+        company_id=cid, station_id=station_id, kind="partners",
+        payload={"partners": [
+            {"id": f"m{r['id']}", "name": r["name"], "inn": r["inn"] or "",
+             "kpp": r["kpp"] or "", "role": r["role"], "comment": r["comment"] or "",
+             "archived": r["archived"]} for r in rows]},
+    ))
+    await db.commit()
+    return {"station_id": station_id, "partners": len(rows)}
