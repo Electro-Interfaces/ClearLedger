@@ -505,9 +505,12 @@ def build_alerts(stock: dict, recon: dict | None = None) -> list[dict]:
     if t["missing_in_cash"]:
         alerts.append({
             "level": "critical", "topic": "выгрузка",
-            "text": (f"{t['missing_in_cash']} ШК есть в учёте, но отсутствуют в кассе — "
-                     "вероятно, не нажата «Загрузить ККМ»"),
-            "items": [f"ШК {r['barcode']}, учёт {r['book_qty']}"
+            "text": (f"{t['missing_in_cash']} позиций есть в учёте, но отсутствуют в "
+                     "кассе — вероятно, не нажата «Загрузить ККМ»"),
+            # Ключи те же, что кладёт analyze_stock: список считается по
+            # карточке, а не по строке кассы. Здесь читались barcode и
+            # book_qty — письмо падало ровно тогда, когда было о чём сообщить.
+            "items": [f"{r.get('name') or r.get('item')}, учёт {r.get('qty')}"
                       for r in stock["missing_in_cash"][:10]],
         })
     if t["negative_book"]:
